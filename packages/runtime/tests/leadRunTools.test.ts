@@ -20,7 +20,7 @@ import { callTool, callToolWhole, items, listTools, repository, runtime, until }
  * What a lead does outside its sandbox through Althar, rather than around it:
  * its worktree's setup run again, as when the worktree was made (ADR-023);
  * the project run in its worktree and stopped, as the run the person sees in
- * the Running pill (ADR-044); and a screenshot of a page on this computer,
+ * Run's list (ADR-044, ADR-090); and a screenshot of a page on this computer,
  * which the coordinator takes too.
  */
 

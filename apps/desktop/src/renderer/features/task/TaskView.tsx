@@ -541,11 +541,10 @@ export function TaskView({
   const queue = queueShown(session, model.pending)
   const listening = listeningOf(snapshot)
   const wait = waitOf(snapshot.task, upNextWords)
-  // What its lead left running, and what Althar runs of it itself: one list, each stopped its own way.
-  const running = [...(session?.background ?? []), ...snapshot.task.launches]
-  const launched = new Set(snapshot.task.launches.map((launch) => launch.id))
+  // What its lead left running; what Althar runs of it itself is Run's to say (ADR-090).
+  const left = session?.background ?? []
   // Althar's own runs keep their output in their cards, not here.
-  const leftRunning = runningOf(running, now).map((one) => (launched.has(one.id) ? { ...one, output: false } : one))
+  const leftRunning = runningOf(left, now)
   const outputShown = leftRunning.find((one) => one.id === outputOf)
   const blocks = [
     // What the person asked for opens the thread, in their words, before anything the lead did.
@@ -687,15 +686,23 @@ export function TaskView({
   // Its newest pull request that merged: what a merged task's commits came after.
   const mergedChange = snapshot.task.changes.findLast((one) => one.state === 'merged')
   // A task that finished and isn't a change: Done and Keep for later, beside where it stands; a review only keeps, as it settles
-  // once posted. Anything else is said to its lead. Not while its lead is mid-turn: what it does may still change where it stands.
-  const settleable = !busy && isSettleable({ kind: snapshot.task.kind ?? 'change', phase: snapshot.task.phase ?? '' })
+  // once posted; a change that built nothing only takes Done. Anything else is said to its lead. Not while its lead is mid-turn: what it does may still change where it stands.
+  const settleable =
+    !busy &&
+    isSettleable({ kind: snapshot.task.kind ?? 'change', phase: snapshot.task.phase ?? '', nothingBuilt: snapshot.task.nothingBuilt })
   // Done for a plain task, or a review posted and answered since; one with a draft settles as it is posted.
-  const done = takesDone({ kind: snapshot.task.kind ?? 'change', reviewing: snapshot.task.review })
+  const done = takesDone({
+    kind: snapshot.task.kind ?? 'change',
+    reviewing: snapshot.task.review,
+    nothingBuilt: snapshot.task.nothingBuilt,
+  })
   const settle = settleable ? (
     <SettleWays
       place="header"
       {...(done ? { onDone: () => void model.markDone(), doneHint: boardText.doneHint } : {})}
-      {...(snapshot.task.phase === 'ready' ? { onKeep: () => void model.keep(), keepHint: boardText.keepHint } : {})}
+      {...(snapshot.task.phase === 'ready' && snapshot.task.kind !== 'change'
+        ? { onKeep: () => void model.keep(), keepHint: boardText.keepHint }
+        : {})}
       {...(model.doing === doing.markDone ? { busy: 'done' as const } : model.doing === doing.keep ? { busy: 'keep' as const } : {})}
     />
   ) : null
@@ -722,6 +729,7 @@ export function TaskView({
           now={now}
           onRun={(id) => void model.runProject(id)}
           onStop={(id) => void model.stopLaunch(id)}
+          onClear={(id) => void model.clearLaunch(id)}
         />
       )}
       <TaskMenu
@@ -845,12 +853,12 @@ export function TaskView({
             // Behind another in its project's line, it can go first in it from here; what continues keeps its order (ADR-065).
             {...(snapshot.task.front === true ? { onFront: () => void model.moveToFront() } : {})}
             processes={leftRunning}
-            onStop={(id) => void (launched.has(id) ? model.stopLaunch(id) : model.stopBackground(id))}
-            onDismiss={(id) => void (launched.has(id) ? model.clearLaunch(id) : model.clearBackground(id))}
+            onStop={(id) => void model.stopBackground(id)}
+            onDismiss={(id) => void model.clearBackground(id)}
             onOutput={setOutputOf}
             // Where it answers opens in the person's browser.
             onOpenUrl={(id) => {
-              const url = running.find((command) => command.id === id)?.url
+              const url = left.find((command) => command.id === id)?.url
               if (url != null) window.open(url, '_blank')
             }}
             sources={listening}

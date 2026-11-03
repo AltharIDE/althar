@@ -4,7 +4,7 @@ import type { HomeCall, HomeTask } from '@althar/contracts'
 import { Button, type EdgeWork, Fact, LinkButton, NeedLine, type ProjectRef } from '@althar/ui'
 
 import { commandOf, titleOf } from '../../shared/callCommand'
-import { callKindOf, isUnshipped, kindWords, readyKindOf, whereOf } from '../../shared/calls'
+import { askOf, callKindOf, isUnshipped, kindWords, readyKindOf, whereOf } from '../../shared/calls'
 import type { Reply } from '../../shared/permissions'
 import { briefOf as questionBrief } from '../../shared/questions'
 import {
@@ -119,7 +119,7 @@ const withAnswered = (calls: ReadonlyArray<HomeCall>, answered: ReadonlyArray<An
     }, calls)
 
 /** What a ready task's line says to accept it by: its change, where and how its checks went and how big, or what is on its branch. */
-export const briefOf = (task: HomeTask): string => {
+export const briefOf = (task: HomeTask): string | undefined => {
   // A review drafted: their pull request, whose, and what the draft found.
   const reviewing = task.reviewing
   if (reviewing != null)
@@ -133,6 +133,8 @@ export const briefOf = (task: HomeTask): string => {
     const said = task.summary?.split('\n').find((line) => line.trim() !== '')
     if (said !== undefined) return said
   }
+  // A change that built nothing: what its lead leaves to the person; its word says the rest.
+  if (task.nothingBuilt === true) return askOf(task.summary) ?? undefined
   const change = task.change
   // Commits after its last pull request merged or closed: a new one is the person's to open.
   const after = task.unshipped
@@ -233,6 +235,7 @@ export const needsOf = ({
     // `ready` is the tasks that wait on the person (`readyOf`): a task that finished and isn't a change among them.
     if (project === undefined) return []
     const next = nextOf(task)
+    const brief = task.checksBack ?? task.handedBack ?? briefOf(task)
     return [
       {
         id: task.taskId,
@@ -240,7 +243,7 @@ export const needsOf = ({
         kind: readyKindOf(task),
         project,
         title: task.title,
-        brief: task.checksBack ?? task.handedBack ?? briefOf(task),
+        ...(brief === undefined ? {} : { brief }),
         ...(next === null ? {} : { ready: { task, next } }),
       },
     ]

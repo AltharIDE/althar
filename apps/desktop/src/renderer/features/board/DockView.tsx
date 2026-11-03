@@ -250,18 +250,18 @@ export function DockView({
         </p>
       )}
       <div className={s.actions}>
-        {task.phase === 'ready' && (
+        {task.phase === 'ready' && task.nothingBuilt !== true && (
           <ActionButton icon="file" onClick={() => onChanges(task)}>
             {text.review}
           </ActionButton>
         )}
         {/* Work that ended on its branch merges here, or can still open its pull request, as the person says. */}
-        {task.phase === 'ready' && change === null && task.here.length > 0 && (
+        {task.phase === 'ready' && task.nothingBuilt !== true && change === null && task.here.length > 0 && (
           <ActionButton icon="branch" disabled={model.merging.has(task.taskId)} onClick={() => void model.mergeHere(task)}>
             {mergeHereLabel(task.here)}
           </ActionButton>
         )}
-        {task.phase === 'ready' && change === null && (
+        {task.phase === 'ready' && task.nothingBuilt !== true && change === null && (
           <ActionButton icon="pr" disabled={model.opening.has(task.taskId)} onClick={() => void model.openChange(task.taskId)}>
             {text.openChange}
           </ActionButton>

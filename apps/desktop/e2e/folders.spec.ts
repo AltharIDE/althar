@@ -143,7 +143,10 @@ test('a finished task’s folder goes from Settings, its work still reads, and i
 
     // Run brings it back: its header says so while it is set up again, and it runs once it is.
     rmSync(gate)
+    // Run opens its list; its first line runs it (ADR-090).
     await header.getByRole('button', { name: 'Run', exact: true }).click()
+    await page.getByRole('dialog', { name: 'What it runs' }).getByRole('button', { name: /^Run / }).first().click()
+    await page.keyboard.press('Escape')
     await expect(header.getByText('Bringing its folder back')).toBeVisible()
     await header.screenshot({ path: 'test-results/folders-5-coming-back.png', animations: 'disabled', scale: 'css' })
     writeFileSync(gate, '')

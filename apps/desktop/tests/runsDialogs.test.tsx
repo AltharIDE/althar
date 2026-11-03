@@ -8,7 +8,7 @@ import { useBoard } from '../src/renderer/features/board/useBoard'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
-import { targetsOf } from '../src/renderer/features/runs/Runs'
+import { placeOfLaunch, targetsOf } from '../src/renderer/features/runs/Runs'
 import { coordinatorSnapshot, fakeClient, repositories, runnables } from './fixtures'
 import { useSettingsOf, withServices } from './render'
 
@@ -41,14 +41,14 @@ const shown = async (more: Parameters<typeof fakeClient>[0] = {}) => {
   return client
 }
 
-/** A menu item under the Run button's chevron. */
+/** One of the ways at the foot of the list Run opens. */
 const pick = async (item: string) => {
-  await userEvent.click(screen.getByRole('button', { name: 'Everything to run' }))
-  await userEvent.click(within(await screen.findByRole('menu', { name: 'What it runs' })).getByRole('menuitem', { name: item }))
+  await userEvent.click(screen.getByRole('button', { name: /^Run/ }))
+  await userEvent.click(within(await screen.findByRole('dialog', { name: 'What it runs' })).getByRole('button', { name: item }))
 }
 
 describe('what the Run button says of one running in a task', () => {
-  it('says where, with no address where it says none', () => {
+  it('says it runs, with no address where it says none', () => {
     const inTask: Launch = {
       id: 'proc_1',
       taskId: 't1',
@@ -59,14 +59,17 @@ describe('what the Run button says of one running in a task', () => {
       startedAt: '2026-10-14T09:00:00.000Z',
       ended: null,
     }
-    expect(targetsOf(runnables, [inTask], null, '2026-10-14T09:10:00.000Z')[0]?.elsewhere).toEqual({ where: 'in Fix the login timeout' })
+    expect(targetsOf(runnables, [inTask], placeOfLaunch(inTask), '2026-10-14T09:10:00.000Z')[0]?.run).toEqual({
+      state: 'running',
+      since: '10m',
+    })
   })
 })
 
 describe('adding something to run', () => {
   it('names no repository of a script where the project has one', async () => {
     await shown({ getRepositories: vi.fn(async () => [repositories[0]!]) })
-    await pick('Add something to run…')
+    await pick('Add something to run')
     const add = within(await screen.findByRole('dialog', { name: 'Add something to run' }))
     await userEvent.click(add.getByRole('radio', { name: 'From package.json' }))
     const offered = await add.findAllByRole('checkbox')
@@ -75,7 +78,7 @@ describe('adding something to run', () => {
 
   it('keeps a command with no repository where none is read', async () => {
     const client = await shown({ getRepositories: vi.fn(async () => []) })
-    await pick('Add something to run…')
+    await pick('Add something to run')
     const add = within(await screen.findByRole('dialog', { name: 'Add something to run' }))
     await userEvent.type(add.getByRole('textbox', { name: /Command/ }), 'make docs')
     await userEvent.click(add.getByRole('button', { name: 'Add' }))
@@ -91,7 +94,7 @@ describe('adding something to run', () => {
         throw refused('The coordinator isn’t running.')
       }),
     })
-    await pick('Add something to run…')
+    await pick('Add something to run')
     const add = within(await screen.findByRole('dialog', { name: 'Add something to run' }))
     await userEvent.click(add.getByRole('radio', { name: 'From package.json' }))
     await userEvent.click((await add.findAllByRole('checkbox'))[0]!)
@@ -114,7 +117,7 @@ describe('changing one', () => {
         throw refused('Storybook is running; stop it first.')
       }),
     })
-    await pick('Edit the list…')
+    await pick('Edit the list')
     await userEvent.click(
       within(await screen.findByRole('dialog', { name: 'What meridian runs' })).getByRole('button', { name: 'Edit Storybook' }),
     )
@@ -129,7 +132,7 @@ describe('changing one', () => {
 
   it('keeps one in its own repository where the project’s aren’t read', async () => {
     const client = await shown({ getRepositories: vi.fn(async () => []) })
-    await pick('Edit the list…')
+    await pick('Edit the list')
     await userEvent.click(
       within(await screen.findByRole('dialog', { name: 'What meridian runs' })).getByRole('button', { name: 'Edit Storybook' }),
     )

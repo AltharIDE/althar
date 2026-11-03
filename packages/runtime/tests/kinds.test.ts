@@ -367,6 +367,17 @@ describe('settling a task that isn’t a change', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('settles a plain task that built nothing while its round is under way, as its lead does at the person’s word', () =>
+    Effect.gen(function* () {
+      const project = yield* open
+      const working = yield* plain(project.projectId, 'Which partners still call v1?', '[lead:wait]')
+      yield* cardOnce(working.taskId, (card) => card.phase === 'running')
+      assert.isTrue(yield* markDone(working.taskId))
+      assert.strictEqual((yield* row(working.taskId)).state, 'done')
+      yield* (yield* Sessions).stop(working.threadId)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('keeps each card settled with one press, and whether its task went unopened since it came in (DEV-173)', () =>
     Effect.gen(function* () {
       const tasks = yield* Tasks
