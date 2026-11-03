@@ -1827,6 +1827,41 @@ describe('GitHub opening a closed pull request again', () => {
   )
 })
 
+describe('GitHub’s open pull requests, for following them', () => {
+  const LIST = `${REPO}/pulls?state=open&sort=updated&direction=desc&per_page=100`
+  const quiet = (request: Sent) =>
+    request.headers['if-none-match'] === '"v1"'
+      ? { status: 304, headers: { 'x-ratelimit-limit': '5000', 'x-ratelimit-remaining': '4990' } }
+      : {
+          json: [
+            pull({
+              draft: false,
+              head: { ref: 'fix', sha: 'abc', repo: { full_name: 'stranger/api' } },
+              base: { ref: 'main', repo: { full_name: 'meridian/api' } },
+            }),
+          ],
+          headers: { etag: '"v1"', 'x-ratelimit-limit': '5000', 'x-ratelimit-remaining': '4991', 'x-ratelimit-reset': '1790000000' },
+        }
+
+  it.effect('lists them by ETag, with the fork each comes from, and a 304 is not counted', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([['GET', LIST, quiet]])
+      const first = yield* host.openChanges!(repository)
+      assert.deepStrictEqual(
+        first.map((one) => [one.number, one.headSha, one.forkOwner, one.checks]),
+        [[12, 'abc', 'stranger', null]],
+      )
+      assert.strictEqual(host.allowance!().counted, 1)
+      assert.deepStrictEqual([host.allowance!().limit, host.allowance!().remaining], [5000, 4991])
+      // Asked again, GitHub answers 304 for nothing: the list is the same, and nothing is counted.
+      assert.strictEqual((yield* host.openChanges!(repository)).length, 1)
+      assert.strictEqual(sent[1]?.headers['if-none-match'], '"v1"')
+      assert.strictEqual(host.allowance!().counted, 1)
+      assert.strictEqual(host.allowance!().remaining, 4990)
+    }),
+  )
+})
+
 describe('GitHub bringing a pull request’s branch up to date', () => {
   const COMPARE = `${REPO}/compare/main...abc`
   const UPDATE = `${REPO}/pulls/12/update-branch`
