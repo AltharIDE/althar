@@ -321,6 +321,7 @@ export type Sensitivity = typeof Sensitivity.Type
 /** The aggregates whose changes are recorded and fed to clients. */
 export const AggregateType = Schema.Literals([
   'errand',
+  'followed_pull',
   'project',
   'task',
   'task_plan',

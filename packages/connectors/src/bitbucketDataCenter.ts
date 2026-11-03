@@ -551,6 +551,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
           )
       }),
     listChanges,
+    allowance: () => raw.allowance(),
     change: (repository, number) => Effect.map(http.cached(PullAnswer, pull(repository, number)), (answer) => changeOf(repository, answer)),
     markReady: (repository, change) =>
       Effect.gen(function* () {
