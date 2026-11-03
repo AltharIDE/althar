@@ -20,7 +20,7 @@ export const PUBLISHED: Record<string, string> = {
 }
 
 /** The pictures the highlights are shown with (LogPictures.tsx). */
-export type Picture = 'automations' | 'plans' | 'windows' | 'reviewer' | 'report' | 'run' | 'evidence' | 'plan'
+export type Picture = 'findings' | 'automations' | 'plans' | 'windows' | 'reviewer' | 'report' | 'run' | 'evidence' | 'plan'
 
 export interface Highlight {
   /** The feature, named plainly. */
@@ -37,6 +37,14 @@ export interface Highlight {
  * opens the page, so its entry shows the rest and keeps the lead's lines.
  */
 export const HIGHLIGHTS: Record<string, readonly Highlight[]> = {
+  '0.7.0': [
+    {
+      title: 'Reviews, supercharged',
+      why: 'Every finding sits at the line it’s about, with what the lead did: fixed, with its commit, or kept, with why. And the pull request says who reviewed it, in how many passes, with screenshots of what was built.',
+      picture: 'findings',
+      covers: [0, 1, 2],
+    },
+  ],
   '0.6.0': [
     {
       title: 'Automations',

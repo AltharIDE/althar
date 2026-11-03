@@ -36,25 +36,25 @@ export const RELEASES: readonly Release[] = [
     version: '0.7.0',
     /** The day v0.7.0 is tagged: set it when it is. */
     date: '2026-11-04',
-    title: 'The coordinator merges and releases',
+    title: 'Reviewed before you see it',
     changes: [
-      {
-        kind: 'new',
-        text: 'Coordinator merges, queues and releases: ask it to merge a pull request once it’s green, bring a branch up to date, or tag and publish a release, using the host’s merge queue where there is one.',
-      },
-      {
-        kind: 'new',
-        text: 'Welcome and setup on first launch: a short tour, then your agents, a project, and your code host and tracker.',
-      },
-      { kind: 'new', text: 'Usage per task: how much of your plans, or how many dollars, its agents used.' },
       { kind: 'new', text: 'Review findings in the Changes view, at the lines they’re about, with what the lead did about each.' },
       {
         kind: 'new',
         text: 'Review section and seal on pull requests: who reviewed them, in how many passes, and what changed after review.',
       },
       { kind: 'new', text: 'Screenshots on pull requests, in one comment kept up to date.' },
+      {
+        kind: 'new',
+        text: 'Welcome and setup on first launch: a short tour, then your agents, a project, and your code host and tracker.',
+      },
+      { kind: 'new', text: 'Usage per task: how much of your plans, or how many dollars, its agents used.' },
       { kind: 'new', text: 'Tasks in your own checkout, instead of a worktree of their own.' },
       { kind: 'new', text: 'Mermaid diagrams in threads and documents.' },
+      {
+        kind: 'new',
+        text: 'Coordinator merges, queues and releases: ask it to merge a pull request once it’s green, bring a branch up to date, or tag and publish a release, using the host’s merge queue where there is one.',
+      },
       { kind: 'new', text: 'Coordinator stops, holds, restarts and settles tasks when you ask.' },
       { kind: 'new', text: 'Intel Mac build, beside the Apple silicon one.' },
       { kind: 'new', text: 'Quit confirmation: quitting while work runs says what it will stop.' },
