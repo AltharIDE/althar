@@ -68,3 +68,5 @@
     servers it gives: use that instead of switching servers off by name.
   - A host Althar has no connector for becomes common: a connector for it,
     or a way to open its pull requests without one.
+- **See also:** [ADR-085](085-a-fork-s-branches-go-upstream-by-a-per-project-choice.md),
+  for where a fork's branches go when a connection opens its pull requests.

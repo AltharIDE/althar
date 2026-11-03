@@ -90,6 +90,56 @@ export const ChangingTarget: Story = {
   },
 }
 
+const forkWith = (fork: { target: ChangeTarget; canPush?: boolean }) =>
+  MAP_HALYARD.map((one) => (one.fork === undefined ? one : { ...one, fork: { ...one.fork, ...fork } }))
+
+/** The host says the person can't push to the repository it forks: there's no such choice, and it says so. */
+export const ForkWithoutPushAccess: Story = {
+  args: { repositories: forkWith({ target: ChangeTarget.Upstream, canPush: false }), worktrees: '~/Althar/halyard' },
+  play: async ({ canvasElement }) => {
+    const map = within(canvasElement)
+    await expect(map.getByText('You can’t push to halyard/api yet. Its owners can give you access.')).toBeVisible()
+    await userEvent.click(map.getByRole('combobox', { name: 'Where halyard-api’s pull requests open' }))
+    const page = within(document.body)
+    await expect(await page.findByRole('option', { name: 'halyard/api' })).toBeInTheDocument()
+    await expect(page.queryByRole('option', { name: 'halyard/api, branches too' })).toBeNull()
+    await userEvent.keyboard('{Escape}')
+  },
+}
+
+/** The host says the person can push there: its branches can go there too. */
+export const ForkWithPushAccess: Story = {
+  args: { repositories: forkWith({ target: ChangeTarget.Upstream, canPush: true }), worktrees: '~/Althar/halyard' },
+  play: async ({ args, canvasElement }) => {
+    const map = within(canvasElement)
+    await expect(map.queryByText(/You can’t push/)).toBeNull()
+    await userEvent.click(map.getByRole('combobox', { name: 'Where halyard-api’s pull requests open' }))
+    await userEvent.click(await within(document.body).findByRole('option', { name: 'halyard/api, branches too' }))
+    await expect(args.onTargetChange).toHaveBeenCalledWith('halyard', ChangeTarget.UpstreamBranch)
+  },
+}
+
+/** Its branches chosen to go there: one wire, to the repository it forks, which takes both. */
+export const ForkPushingUpstream: Story = {
+  args: { repositories: forkWith({ target: ChangeTarget.UpstreamBranch, canPush: true }), worktrees: '~/Althar/halyard' },
+  play: async ({ canvasElement }) => {
+    const map = within(canvasElement)
+    await expect(await map.findByText('pushes, pull requests')).toBeInTheDocument()
+    await expect(canvasElement.querySelectorAll('svg g')).toHaveLength(1)
+    await expect(map.getByText('It pushes to halyard/api on GitHub, and its pull requests open on halyard/api.')).toBeInTheDocument()
+  },
+}
+
+/** Chosen, and its access since taken away: it says so, and the wires show its branches on the fork, where they go. */
+export const ForkPushingUpstreamAccessGone: Story = {
+  args: { repositories: forkWith({ target: ChangeTarget.UpstreamBranch, canPush: false }), worktrees: '~/Althar/halyard' },
+  play: async ({ canvasElement }) => {
+    const map = within(canvasElement)
+    await expect(map.getByText('You can’t push to halyard/api yet. Its owners can give you access.')).toBeVisible()
+    await expect(map.getByText('It pushes to balazs/halyard-api on GitHub, and its pull requests open on halyard/api.')).toBeInTheDocument()
+  },
+}
+
 /** A third folder being read, waiting under the others until its repositories are known. */
 export const Reading: Story = {
   args: {

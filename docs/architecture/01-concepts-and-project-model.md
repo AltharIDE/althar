@@ -236,11 +236,14 @@ project again.
 - **A role** is one of the roles its settings offer, suggested
   from the repository's name. Tasks and the coordinator are told it.
 - **A fork** is known from its clone's remotes, an `upstream` beside
-  `origin` on the same host. Its binding says where tasks open pull requests:
-  on the fork, as before, or on the repository it was forked from, from the
-  fork's branch. The branch is pushed to the fork either way. A task made
-  for the repository it came from starts from that repository's default
-  branch, and its pull request targets it.
+  `origin` on the same host. Its binding says where tasks' work goes: on the
+  fork, as before; pull requests on the repository it was forked from, from
+  the fork's branch; or, where the host says the person can push there, both
+  branches and pull requests on that repository, which Althar offers once
+  ([ADR-085](../decisions/085-a-fork-s-branches-go-upstream-by-a-per-project-choice.md)).
+  The remotes are never rewritten, and a pull request already open stays where
+  its branch is. A task made for the repository it came from starts from that
+  repository's default branch, and its pull request targets it.
 - **Removing** sets the project's `archived_at`. Its proposed plans are
   declined, its calls withdrawn and its runs cancelled, so no step reacts to
   its agents stopping; then every agent on it stops. Nothing starts in it

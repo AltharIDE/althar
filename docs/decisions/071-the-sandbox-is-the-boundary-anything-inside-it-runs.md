@@ -79,7 +79,12 @@
     is refused, saying to run it inside, where it runs without asking, or as
     plain commands (`decideLeaving`): outside, nothing would stop a script
     writing to the person's checkout. What the project runs outside from
-    the start, its tests and its build, goes as it said.
+    the start, its tests and its build, goes as it said, asked to or not:
+    on macOS Electron and Chromium can't start inside Claude Code's or
+    Codex's sandbox (neither profile allows `mach-register`, which
+    Chromium's `bootstrap_check_in` needs, and no setting adds it), so a
+    lead whose end-to-end run died inside and asked to run it outside was
+    refused for a `node` script it may run unasked (2026-11-03).
   - **What can't be undone is stopped where it happens, at git.** Every
     lead's git takes its hooks from a folder of Althar's (`core.hooksPath`
     by the environment, `pushGuard.ts`). Its `pre-push` stops a push to the

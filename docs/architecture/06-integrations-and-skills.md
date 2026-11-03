@@ -653,7 +653,7 @@ Leads and the coordinator change issues that already exist
   card is made (its statuses, members, labels, projects), and one it lacks
   is refused with what it has, so a card never holds what can't apply. A
   project's rule, Change issues without asking (`changeIssues`, off by
-  default), applies them at once instead, as a line. Whether a change
+  default; Settings → Rules, under "Agents may"), applies them at once instead, as a line. Whether a change
   waits is that one rule (`waitsOnThePerson`).
 - **Applying is per issue,** each a receipt in the outbound ledger: what
   applied stays applied, and a card where not all of it did says why for

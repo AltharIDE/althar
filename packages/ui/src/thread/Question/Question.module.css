@@ -180,28 +180,33 @@
   flex-direction: column;
   gap: 4px;
 }
-/* the question gives way to what was said, down to a part of the line */
+/* settled: the question, cut at its end, and under it what was said, or that it wasn't answered */
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-weight: 400;
+}
 .asked {
-  flex: 1 1 0;
-  min-width: 30%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--t-3);
-}
-.notAnswered {
   color: var(--t-2);
 }
-/* withdrawn, nothing was said: the question takes only its room, and why follows it */
-.unasked {
-  flex: 0 1 auto;
-  min-width: 0;
+.saidLine {
+  color: var(--t-1);
+  font-weight: 550;
+  overflow-wrap: break-word;
 }
-.why {
-  flex: none;
+.quiet {
   font-size: 11.5px;
   color: var(--t-3);
+  overflow-wrap: break-word;
+}
+.notAnswered {
   white-space: nowrap;
+  color: var(--t-2);
 }
 
 @media (prefers-reduced-motion: reduce) {

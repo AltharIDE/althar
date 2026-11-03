@@ -3,17 +3,24 @@
   flex-direction: column;
   gap: 8px;
 }
-/* a walk in, in place of the list, under the way back to it */
+/* a walk in, in place of the list, under the way back to it, from the same left edge and as wide as the list was */
 .here {
   display: grid;
   justify-items: start;
-  gap: 10px;
+  gap: 14px;
 }
-.card {
+.here > :last-child {
   justify-self: stretch;
-  max-width: 440px;
-  width: 100%;
-  margin: 0 auto;
+}
+/* a walk in, in a card of its own, from the card's left edge, over the way back to its rows */
+.inCard {
+  display: grid;
+  justify-items: start;
+  gap: 14px;
+  padding: 4px 0 6px;
+}
+.inCard > :first-child {
+  justify-self: stretch;
 }
 /* while the ways in are found: their shapes */
 .reading {
