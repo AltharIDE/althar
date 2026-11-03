@@ -2180,6 +2180,8 @@ export const AccountUse = Schema.Struct({
   took: Schema.NullOr(Schema.Number),
   /** Paid per use, the dollars spent: what the agent said, else its tokens at list prices; null where neither is known. */
   spent: Schema.NullOr(Schema.Number),
+  /** Whether the figure is an estimate: a plan's share always; dollars where a session was priced at list prices, not said by its agent. */
+  estimated: Schema.Boolean,
   /** The models that ran on it, by id, in the order they first did. */
   models: Schema.Array(Schema.String),
   tokens: Schema.Number,

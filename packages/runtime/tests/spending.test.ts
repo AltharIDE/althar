@@ -8,7 +8,7 @@ import { PlanUsage } from '../src/PlanUsage'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { atListPrices, boundingReadings, LONG_STRETCH, tookOf, type TurnSpan } from '../src/Spending'
+import { atListPrices, boundingReadings, LONG_STRETCH, spentOf, tookOf, type TurnSpan } from '../src/Spending'
 import { runtime, task, turns, until } from './support'
 
 /*
@@ -51,6 +51,12 @@ describe('a week’s share', () => {
     assert.closeTo(took ?? 0, 2, 1e-9)
   })
 
+  it('puts all of a rise on a task that ran after a quiet stretch, from the reading just before it', () => {
+    const quiet = 2 * 60 * MINUTE
+    const took = tookOf([week(0, 40), week(quiet, 40), week(quiet + 10 * MINUTE, 44)], [turn(quiet, quiet + 10 * MINUTE, 800)])
+    assert.closeTo(took ?? 0, 4, 1e-9)
+  })
+
   it('is unknown with no reading', () => {
     assert.isNull(tookOf([], [turn(0, MINUTE, 5)]))
   })
@@ -80,6 +86,43 @@ describe('dollars at list prices', () => {
     assert.isNull(atListPrices('{}', null))
     assert.strictEqual(atListPrices(null, price), 0)
     assert.strictEqual(atListPrices('not json', price), 0)
+  })
+})
+
+describe('an account’s dollars', () => {
+  it('adds what each session’s agent said, and is no estimate', () => {
+    assert.deepStrictEqual(
+      spentOf([
+        { said: 0.5, turns: [] },
+        { said: 0.25, turns: [] },
+      ]),
+      { spent: 0.75, estimated: false },
+    )
+  })
+
+  it('is an estimate where a session was priced at list prices', () => {
+    assert.deepStrictEqual(
+      spentOf([
+        { said: 0.5, turns: [] },
+        { said: null, turns: [0.25, 0] },
+      ]),
+      { spent: 0.75, estimated: true },
+    )
+  })
+
+  it('is unknown where a session nothing priced came before or after one its agent said', () => {
+    assert.isNull(
+      spentOf([
+        { said: null, turns: [null] },
+        { said: 0.5, turns: [] },
+      ]).spent,
+    )
+    assert.isNull(
+      spentOf([
+        { said: 0.5, turns: [] },
+        { said: null, turns: [null] },
+      ]).spent,
+    )
   })
 })
 
@@ -120,7 +163,7 @@ describe('a task’s usage', () => {
       const snapshot = yield* Effect.orDie(queries.thread(created.threadId))
       const [line] = snapshot.usage ?? []
       const tokens = done.reduce((sum, row) => sum + ((JSON.parse(row.usage ?? '{}') as { totalTokens?: number }).totalTokens ?? 0), 0)
-      assert.deepInclude(line, { agentId: 'codex', paidBy: 'key', took: null, spent: 0.02, tokens })
+      assert.deepInclude(line, { agentId: 'codex', paidBy: 'key', took: null, spent: 0.02, estimated: false, tokens })
       assert.strictEqual(snapshot.usage?.length, 1)
     }).pipe(Effect.provide(withQueries())),
   )
@@ -144,32 +187,36 @@ describe('a task’s usage', () => {
         { accountId: span!.accountId, usedPercent: 42.5, resetsAt: 'Thu', observedAt: at(span!.to, 1000) },
       ])}`
       const [line] = (yield* Effect.orDie(queries.thread(created.threadId))).usage ?? []
-      assert.deepInclude(line, { paidBy: 'plan', spent: null })
+      assert.deepInclude(line, { paidBy: 'plan', spent: null, estimated: true })
       assert.closeTo(line?.took ?? 0, 2.5, 1e-9)
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('keeps each move of an account’s week, and no reading that says the same', () =>
+  it.live('keeps each move of an account’s week, and of a quiet stretch where it began and its latest reading', () =>
     Effect.gen(function* () {
       const usage = yield* PlanUsage
       const sql = yield* SqlClient.SqlClient
       const [account] = yield* (yield* Accounts).of('claude-code')
       const accountId = account!.id
       const weekly = (usedPercent: number) => [{ kind: 'weekly' as const, usedPercent, resetsAt: '2026-11-05T00:00:00.000Z' }]
-      yield* usage.heard(accountId, 'claude-code', weekly(30))
-      yield* until(
-        sql<{ usedPercent: number }>`SELECT used_percent FROM plan_usage_weeks WHERE account_id = ${accountId}`,
-        (rows) => rows.length === 1,
-      )
-      yield* usage.heard(accountId, 'claude-code', weekly(30))
-      yield* usage.heard(accountId, 'claude-code', weekly(31))
-      const rows = yield* until(
-        sql<{ usedPercent: number }>`SELECT used_percent FROM plan_usage_weeks WHERE account_id = ${accountId} ORDER BY observed_at`,
-        (kept) => kept.length === 2,
-      )
+      const kept = sql<{ usedPercent: number; observedAt: string }>`
+        SELECT used_percent, observed_at FROM plan_usage_weeks WHERE account_id = ${accountId} ORDER BY observed_at`
+      const hear = (usedPercent: number, count: number) =>
+        Effect.gen(function* () {
+          yield* Effect.sleep('5 millis')
+          yield* usage.heard(accountId, 'claude-code', weekly(usedPercent))
+          return yield* until(kept, (rows) => rows.length === count)
+        })
+      yield* hear(30, 1)
+      yield* hear(30, 2)
+      const second = (yield* kept)[1]!.observedAt
+      // Still the same: the latest reading moves up, and no row is added for it.
+      const quiet = yield* hear(30, 2)
+      assert.isAbove(Date.parse(quiet[1]!.observedAt), Date.parse(second))
+      const rows = yield* hear(31, 3)
       assert.deepStrictEqual(
         rows.map((row) => row.usedPercent),
-        [30, 31],
+        [30, 30, 31],
       )
       assert.deepStrictEqual(yield* usage.paidBy(accountId), { paidBy: 'plan', plan: null })
     }).pipe(Effect.provide(runtime())),

@@ -147,6 +147,31 @@ export const atListPrices = (
   )
 }
 
+/** A session as its dollars read: what its agent said the turns asked about cost, else each turn at list prices, null unpriced. */
+export interface SessionSpend {
+  readonly said: number | null
+  readonly turns: ReadonlyArray<number | null>
+}
+
+/**
+ * The dollars of an account's sessions, and whether any was priced at list
+ * prices rather than said by its agent. One session nothing priced leaves the
+ * whole unknown, wherever it falls: a sum without it would read as all of it.
+ */
+export const spentOf = (sessions: ReadonlyArray<SessionSpend>): { readonly spent: number | null; readonly estimated: boolean } => {
+  let spent: number | null = 0
+  let estimated = false
+  for (const session of sessions) {
+    if (session.said !== null) {
+      if (spent !== null) spent += session.said
+      continue
+    }
+    estimated = true
+    for (const priced of session.turns) spent = priced === null || spent === null ? null : spent + priced
+  }
+  return { spent, estimated }
+}
+
 interface TurnRow {
   readonly id: string
   readonly sessionId: string
@@ -213,21 +238,23 @@ export const spendingOf = (
       const models = [...new Set(its.flatMap((turn) => (turn.model === null ? [] : [turn.model])))]
 
       // Paid per use: each session's own figure where its agent said one in dollars, else its turns at list prices.
-      let spent: number | null = 0
-      for (const sessionId of new Set(its.map((turn) => turn.sessionId))) {
-        const mine = its.filter((turn) => turn.sessionId === sessionId)
-        const { reportedCost, reportedCurrency } = mine[0]!
-        if (reportedCost !== null && (reportedCurrency === null || reportedCurrency.toUpperCase() === 'USD')) {
-          const all = sessionTokens.get(sessionId) ?? 0
-          const ours = mine.reduce((sum, turn) => sum + tokensIn(turn.usage), 0)
-          spent = (spent ?? 0) + (all > 0 ? (reportedCost * ours) / all : reportedCost)
-          continue
-        }
-        for (const turn of mine) {
-          const priced = atListPrices(turn.usage, facts.of(agent, { id: turn.model ?? '', name: turn.model ?? '' })?.price ?? null)
-          spent = priced === null || spent === null ? null : spent + priced
-        }
-      }
+      const { spent, estimated: listPriced } = spentOf(
+        [...new Set(its.map((turn) => turn.sessionId))].map((sessionId) => {
+          const mine = its.filter((turn) => turn.sessionId === sessionId)
+          const { reportedCost, reportedCurrency } = mine[0]!
+          if (reportedCost !== null && (reportedCurrency === null || reportedCurrency.toUpperCase() === 'USD')) {
+            const all = sessionTokens.get(sessionId) ?? 0
+            const ours = mine.reduce((sum, turn) => sum + tokensIn(turn.usage), 0)
+            return { said: all > 0 ? (reportedCost * ours) / all : reportedCost, turns: [] }
+          }
+          return {
+            said: null,
+            turns: mine.map((turn) =>
+              atListPrices(turn.usage, facts.of(agent, { id: turn.model ?? '', name: turn.model ?? '' })?.price ?? null),
+            ),
+          }
+        }),
+      )
 
       // On a plan: the share of its week, from the readings around these turns.
       const from = Math.min(...its.map((turn) => timeOf(turn.fromAt)))
@@ -277,6 +304,7 @@ export const spendingOf = (
         plan: held?.plan ?? null,
         took: paidBy === 'plan' ? took : null,
         spent: paidBy === 'key' ? spent : null,
+        estimated: paidBy === 'plan' || listPriced,
         models,
         tokens,
       })

@@ -229,10 +229,15 @@ export class PlanUsage extends Context.Service<
         })
 
         /* Each account's week as last kept in plan_usage_weeks, read from the store once. */
-        const weeks = new Map<string, { readonly usedPercent: number; readonly resetsAt: string | null } | null>()
+        const weeks = new Map<
+          string,
+          { readonly usedPercent: number; readonly resetsAt: string | null; readonly observedAt: string; readonly repeat: boolean } | null
+        >()
         /*
          * The account's week, kept as it moves (ADR-084): a task's share of it is the rise between two of these, put on the
-         * turns that ran on the account then. The plan's own week, every model's, before a model's own.
+         * turns that ran on the account then. The plan's own week, every model's, before a model's own. A week that hasn't
+         * moved keeps where it started standing still and its latest reading, so a task that runs after a quiet stretch
+         * has a reading from just before it.
          */
         const keepWeek = (accountId: string, windows: ReadonlyArray<Dated>) =>
           Effect.gen(function* () {
@@ -240,22 +245,37 @@ export class PlanUsage extends Context.Service<
             const week = weekly.find((window) => window.label === undefined && window.model === undefined) ?? weekly[0]
             if (week === undefined) return
             if (!weeks.has(accountId)) {
-              const [last] = yield* sql<{ usedPercent: number; resetsAt: string | null }>`
-                SELECT used_percent, resets_at FROM plan_usage_weeks WHERE account_id = ${accountId} ORDER BY observed_at DESC LIMIT 1`
-              weeks.set(accountId, last ?? null)
+              const [last, before] = yield* sql<{ usedPercent: number; resetsAt: string | null; observedAt: string }>`
+                SELECT used_percent, resets_at, observed_at FROM plan_usage_weeks WHERE account_id = ${accountId}
+                ORDER BY observed_at DESC LIMIT 2`
+              weeks.set(
+                accountId,
+                last === undefined
+                  ? null
+                  : {
+                      ...last,
+                      repeat: before !== undefined && before.usedPercent === last.usedPercent && before.resetsAt === last.resetsAt,
+                    },
+              )
             }
             const last = weeks.get(accountId)
             const resetsAt = week.resetsAt ?? null
-            if (last != null && last.usedPercent === week.usedPercent && last.resetsAt === resetsAt) return
             const observed = Date.parse(week.observedAt)
             if (!Number.isFinite(observed)) return
-            weeks.set(accountId, { usedPercent: week.usedPercent, resetsAt })
+            const observedAt = new Date(observed).toISOString()
+            if (last != null && observedAt <= last.observedAt) return
+            const same = last != null && last.usedPercent === week.usedPercent && last.resetsAt === resetsAt
+            weeks.set(accountId, { usedPercent: week.usedPercent, resetsAt, observedAt, repeat: same })
+            // Standing still since a reading that already repeats the one before: that one moves up to now.
+            if (same && last.repeat)
+              return yield* sql`
+              UPDATE plan_usage_weeks SET observed_at = ${observedAt} WHERE account_id = ${accountId} AND observed_at = ${last.observedAt}`
             yield* sql`
             INSERT INTO plan_usage_weeks ${sql.insert({
               accountId,
               usedPercent: week.usedPercent,
               resetsAt,
-              observedAt: new Date(observed).toISOString(),
+              observedAt,
             })}
             ON CONFLICT (account_id, observed_at) DO UPDATE SET used_percent = excluded.used_percent, resets_at = excluded.resets_at`
           })

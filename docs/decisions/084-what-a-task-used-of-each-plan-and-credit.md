@@ -36,11 +36,15 @@
     them, by their tokens, so a task's turns get their part beside other
     tasks'. Where two readings are more than 30 minutes apart, only the part
     of that time the turns ran in counts, because the rest may be use outside
-    Althar.
+    Althar. A week that stands still keeps the reading where it began and its
+    latest one, so a task after a quiet stretch has a reading from just
+    before it. The figure reads as an estimate: "~8% of week".
   - **Dollars are what the agent said,** kept on the session
     (`provider_sessions.reported_cost`). Where it said nothing, Althar prices
     the turns' tokens at the model's list prices, and prices a cache read
-    where the list says.
+    where the list says; those dollars read as an estimate too, "~$1.24".
+    One session that neither said nor has a price leaves the account's
+    dollars a dash, wherever it falls among the others.
 - **Consequences:** A reading that fails leaves the usage out of the
   snapshot, never the thread. Tasks that ran before migration 0055 have no
   readings of a week, so their share shows as a dash. A plan whose week Althar

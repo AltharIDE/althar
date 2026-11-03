@@ -32,6 +32,7 @@ export const usageLines = (usage: ReadonlyArray<AccountUse> | undefined, named: 
       name: accountWords(use),
       ...(mark === undefined ? {} : { mark }),
       ...(use.paidBy === 'plan' ? { took: use.took } : { spent: use.spent }),
+      estimated: use.estimated,
       models: use.models.map((model) => named(use.agentId, model).name),
       tokens: use.tokens,
     }

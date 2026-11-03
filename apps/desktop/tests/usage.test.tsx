@@ -26,6 +26,7 @@ const accountUse = (overrides: Partial<AccountUse>): AccountUse => ({
   plan: 'max',
   took: 8,
   spent: null,
+  estimated: true,
   models: ['claude-opus-4-1'],
   tokens: 2_400_000,
   ...overrides,
@@ -41,6 +42,7 @@ const USAGE: ReadonlyArray<AccountUse> = [
     plan: null,
     took: null,
     spent: 1.24,
+    estimated: false,
     models: ['deepseek-v3'],
     tokens: 380_000,
   }),
@@ -73,12 +75,12 @@ describe('what a task used of each account', () => {
     show(task({ usage: USAGE }))
     const toggle = screen.getByRole('button', { name: /Usage/ })
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
-    expect(within(toggle).getByText('8%')).toBeTruthy()
+    expect(within(toggle).getByText('~8%')).toBeTruthy()
     expect(within(toggle).getByText('$1.24')).toBeTruthy()
     await userEvent.click(toggle)
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
     expect(screen.getByText('Claude Code Max')).toBeTruthy()
-    expect(screen.getByText('8% of week')).toBeTruthy()
+    expect(screen.getByText('~8% of week')).toBeTruthy()
     expect(screen.getByText('OpenCode')).toBeTruthy()
   })
 
@@ -94,6 +96,15 @@ describe('what a task used of each account', () => {
     cleanup()
     show(task({ threadId: 'a third', usage: USAGE }))
     expect(screen.getByRole('button', { name: /Usage/ }).getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('says an estimate as one, and the dollars an agent said as they are', async () => {
+    show(task({ usage: [accountUse({}), accountUse({ ...USAGE[1]!, accountId: 'listed', spent: 0.5, estimated: true }), USAGE[1]!] }))
+    await userEvent.click(screen.getByRole('button', { name: /Usage/ }))
+    const lines = within(screen.getByRole('list'))
+    expect(lines.getByText('~8% of week').getAttribute('title')).toBe('An estimate')
+    expect(lines.getByText('~$0.50')).toBeTruthy()
+    expect(lines.getByText('$1.24').getAttribute('title')).toBeNull()
   })
 
   it('shows no card where nothing was used', () => {
@@ -121,7 +132,7 @@ describe('what a task used of each account', () => {
     )
     await userEvent.click(screen.getByRole('button', { name: /60%/ }))
     expect(screen.getByText('This task so far')).toBeTruthy()
-    expect(screen.getByText('8% of week')).toBeTruthy()
+    expect(screen.getByText('~8% of week')).toBeTruthy()
     expect(screen.getByText('$1.24')).toBeTruthy()
   })
 })

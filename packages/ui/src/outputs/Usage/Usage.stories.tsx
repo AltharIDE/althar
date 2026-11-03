@@ -8,7 +8,7 @@ import { type UsageLine, UsageCard, UsageLines } from './Usage'
 /** The lead on OpenCode's credit, the reviewer on ChatGPT Pro. */
 const CREDIT_AND_PLAN: ReadonlyArray<UsageLine> = [
   { id: 'zen', name: 'OpenCode', mark: Brand.OpenCode, spent: 21.59, models: ['Claude Opus 5'], tokens: 13_400_000 },
-  { id: 'pro', name: 'Codex Pro', mark: Brand.Codex, took: 1.9, models: ['GPT-5.2 Codex'], tokens: 2_400_000 },
+  { id: 'pro', name: 'Codex Pro', mark: Brand.Codex, took: 1.9, estimated: true, models: ['GPT-5.2 Codex'], tokens: 2_400_000 },
 ]
 /** Two plans. */
 const TWO_PLANS: ReadonlyArray<UsageLine> = [
@@ -17,14 +17,15 @@ const TWO_PLANS: ReadonlyArray<UsageLine> = [
     name: 'Claude Code Max',
     mark: Brand.ClaudeCode,
     took: 8.2,
+    estimated: true,
     models: ['Claude Opus 5', 'Claude Sonnet 5'],
     tokens: 13_400_000,
   },
-  { id: 'pro', name: 'Codex Pro', mark: Brand.Codex, took: 0.4, models: ['GPT-5.2 Codex'], tokens: 900_000 },
+  { id: 'pro', name: 'Codex Pro', mark: Brand.Codex, took: 0.4, estimated: true, models: ['GPT-5.2 Codex'], tokens: 900_000 },
 ]
-/** Paid per use only, one with no price anyone said. */
+/** Paid per use only: one priced at list prices, one with no price anyone said. */
 const PER_USE: ReadonlyArray<UsageLine> = [
-  { id: 'key', name: 'Claude Code', mark: Brand.ClaudeCode, spent: 21.59, models: ['Claude Opus 5'], tokens: 13_400_000 },
+  { id: 'key', name: 'Claude Code', mark: Brand.ClaudeCode, spent: 21.59, estimated: true, models: ['Claude Opus 5'], tokens: 13_400_000 },
   { id: 'router', name: 'OpenCode', mark: Brand.OpenCode, spent: null, models: ['Qwen3 Coder'], tokens: 2_400_000 },
 ]
 
@@ -49,21 +50,22 @@ export const Lines: Story = {
   play: async ({ canvasElement }) => {
     const lines = within(canvasElement).getAllByRole('listitem')
     await expect(lines[0]).toHaveTextContent('OpenCodeClaude Opus 5 · 13M tokens$21.59')
-    await expect(lines[1]).toHaveTextContent('Codex ProGPT-5.2 Codex · 2.4M tokens2% of week')
+    await expect(lines[1]).toHaveTextContent('Codex ProGPT-5.2 Codex · 2.4M tokens~2% of week')
   },
 }
 /** A small share says its tenth, and a model that shared a plan with another is on its line. */
 export const TwoPlans: Story = {
   args: { lines: TWO_PLANS, heading: 'Today' },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText('0.4% of week')).toBeInTheDocument()
+    await expect(within(canvasElement).getByText('~0.4% of week')).toBeInTheDocument()
     await expect(within(canvasElement).getByText('Claude Opus 5 · Claude Sonnet 5 · 13M tokens')).toBeInTheDocument()
   },
 }
-/** Paid per use with no price anyone said: a dash, never a guess. */
+/** Paid per use: dollars at list prices said as an estimate, and with no price anyone said, a dash, never a guess. */
 export const PerUse: Story = {
   args: { lines: PER_USE },
   play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('~$21.59')).toHaveAttribute('title', 'An estimate')
     await expect(within(canvasElement).getAllByRole('listitem')[1]).toHaveTextContent('—')
   },
 }
@@ -89,11 +91,11 @@ export const Card: StoryObj<typeof UsageCard> = {
   play: async ({ args, canvasElement }) => {
     const toggle = within(canvasElement).getByRole('button', { name: /Usage/ })
     await expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    await expect(toggle).toHaveTextContent('$21.592%')
+    await expect(toggle).toHaveTextContent('$21.59~2%')
     await userEvent.click(toggle)
     await expect(args.onOpenChange).toHaveBeenLastCalledWith(true)
     await expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    await expect(within(canvasElement).getByText('2% of week')).toBeVisible()
+    await expect(within(canvasElement).getByText('~2% of week')).toBeVisible()
     await userEvent.click(toggle)
     await expect(args.onOpenChange).toHaveBeenLastCalledWith(false)
   },

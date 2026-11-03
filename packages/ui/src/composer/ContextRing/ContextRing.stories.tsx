@@ -59,7 +59,15 @@ export const WithUsage: Story = {
       <UsageLines
         heading="This task so far"
         lines={[
-          { id: 'max', name: 'Claude Code Max', mark: Brand.ClaudeCode, took: 8.2, models: ['Claude Opus 5'], tokens: 13_400_000 },
+          {
+            id: 'max',
+            name: 'Claude Code Max',
+            mark: Brand.ClaudeCode,
+            took: 8.2,
+            estimated: true,
+            models: ['Claude Opus 5'],
+            tokens: 13_400_000,
+          },
           { id: 'zen', name: 'OpenCode', mark: Brand.OpenCode, spent: 1.24, models: ['DeepSeek V3.2'], tokens: 2_100_000 },
         ]}
       />
@@ -67,7 +75,7 @@ export const WithUsage: Story = {
   },
   play: async () => {
     const panel = within(document.body).getByRole('dialog', { name: 'Context' })
-    await expect(within(panel).getByText('8% of week')).toBeInTheDocument()
+    await expect(within(panel).getByText('~8% of week')).toBeInTheDocument()
     await expect(within(panel).getByText('$1.24')).toBeInTheDocument()
   },
 }

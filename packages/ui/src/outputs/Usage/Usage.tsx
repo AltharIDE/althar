@@ -21,6 +21,8 @@ export interface UsageLine {
   readonly took?: number | null
   /** Paid per use, the dollars spent; null where neither the agent nor a price said. */
   readonly spent?: number | null
+  /** Whether the figure is an estimate: a plan's share, or dollars at list prices. */
+  readonly estimated?: boolean
   /** The models that ran on it, by name. */
   readonly models: ReadonlyArray<string>
   readonly tokens: number
@@ -35,6 +37,10 @@ export interface UsageText {
   dollars: (amount: number) => string
   /** Where nothing was read to say it. */
   unknown: string
+  /** An estimated figure, said as one: ~8% of week. */
+  estimate: (figure: string) => string
+  /** On an estimated figure, as the pointer rests on it. */
+  estimateNote: string
   /** Under the name: the models, and their tokens. */
   what: (models: ReadonlyArray<string>, tokens: number) => string
 }
@@ -49,11 +55,19 @@ export const usageText: UsageText = {
   ofWeek: (points) => `${shareWord(points)} of week`,
   dollars: (amount) => (amount > 0 && amount < 0.01 ? '< $0.01' : `$${amount.toFixed(2)}`),
   unknown: '—',
+  estimate: (figure) => `~${figure}`,
+  estimateNote: 'An estimate',
   what: (models, tokens) => [...models, `${tokensWord(tokens)} tokens`].join(' · '),
 }
 
-/** A line's figure, said whole: 8% of week, or $21.59. */
-const figureOf = (line: UsageLine, t: UsageText) =>
+/** A known figure, said as an estimate where it is one. */
+const said = (line: UsageLine, figure: string, t: UsageText) =>
+  figure !== t.unknown && line.estimated === true ? t.estimate(figure) : figure
+
+/** A line's figure, said whole: ~8% of week, or $21.59. */
+const figureOf = (line: UsageLine, t: UsageText) => said(line, wholeOf(line, t), t)
+
+const wholeOf = (line: UsageLine, t: UsageText) =>
   line.took !== undefined
     ? line.took === null
       ? t.unknown
@@ -62,8 +76,10 @@ const figureOf = (line: UsageLine, t: UsageText) =>
       ? t.unknown
       : t.dollars(line.spent)
 
-/** The figure alone, for a glance: 8%, or $21.59. */
-const glanceOf = (line: UsageLine, t: UsageText) =>
+/** The figure alone, for a glance: ~8%, or $21.59. */
+const glanceOf = (line: UsageLine, t: UsageText) => said(line, briefOf(line, t), t)
+
+const briefOf = (line: UsageLine, t: UsageText) =>
   line.took !== undefined
     ? line.took === null
       ? t.unknown
@@ -95,7 +111,9 @@ export function UsageLines({ lines, heading, text }: UsageLinesProps) {
             <span className={s.what} data-marked={line.mark !== undefined || undefined}>
               {t.what(line.models, line.tokens)}
             </span>
-            <b className={s.figure}>{figureOf(line, t)}</b>
+            <b className={s.figure} title={line.estimated === true ? t.estimateNote : undefined}>
+              {figureOf(line, t)}
+            </b>
           </li>
         ))}
       </ul>
