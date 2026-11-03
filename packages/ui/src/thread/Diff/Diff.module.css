@@ -133,3 +133,16 @@
   border-radius: 8px 8px 0 0;
   box-shadow: inset 0 -1px 0 var(--line);
 }
+/* a note under the line it is about: in the code's column, held still as the lines scroll sideways */
+.under {
+  position: sticky;
+  left: 0;
+  box-sizing: border-box;
+  width: min(100%, 840px);
+  padding: 4px 16px 8px 60px;
+  font-family: var(--font);
+  white-space: normal;
+}
+.both .under {
+  padding-left: 102px;
+}
