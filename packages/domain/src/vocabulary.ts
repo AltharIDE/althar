@@ -110,6 +110,8 @@ export const ThreadItemKind = Schema.Literals([
   'automation',
   /** Pictures a lead showed the person, with their captions, at any time: Althar keeps them, and they stay when its worktree goes. */
   'pictures',
+  /** The coordinator asking the person to stop, hold, restart or settle a task, where no message of theirs asked it to: one button, pressed there. Althar posts it and keeps it current. */
+  'task_ask',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 

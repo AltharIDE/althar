@@ -244,6 +244,8 @@ export interface Client {
   readonly pauseAutomation: (automationId: string) => Promise<void>
   /** Runs an automation once now, with every limit a run has, whether it is on or not yet; `itemId`, from the coordinator's card asking it. */
   readonly runAutomationNow: (automationId: string, itemId?: string) => Promise<void>
+  /** Answers the coordinator's card asking to stop, hold, restart or settle a task: yes does it. */
+  readonly answerTaskAsk: (itemId: string, yes: boolean) => Promise<void>
   /** Deletes an automation: nothing of it starts again. The tasks its runs made stay. */
   readonly deleteAutomation: (automationId: string) => Promise<void>
   /** Puts back what the coordinator changed an automation from, as its card in the thread shows it. */
@@ -705,6 +707,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     runAutomationNow: (automationId, itemId) =>
       command((commandId) => api.RunAutomationNow({ commandId, automationId, ...(itemId === undefined ? {} : { itemId }) })),
     deleteAutomation: (automationId) => command((commandId) => api.DeleteAutomation({ commandId, automationId })),
+    answerTaskAsk: (itemId, yes) => command((commandId) => api.AnswerTaskAsk({ commandId, itemId, yes })),
     undoAutomationChange: (itemId) => command((commandId) => api.UndoAutomationChange({ commandId, itemId })),
     setAutomationPostsReviews: (automationId, on) => command((commandId) => api.SetAutomationPostsReviews({ commandId, automationId, on })),
     setAutomationsPaused: (paused) => command((commandId) => api.SetAutomationsPaused({ commandId, paused })),

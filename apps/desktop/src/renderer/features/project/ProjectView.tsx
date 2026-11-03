@@ -60,6 +60,7 @@ import { ForkOffer, useForkOffer } from '../repositories/ForkOffer'
 import type { ProjectSettingsModel } from '../projectSettings/useProjectSettings'
 import { kitInk } from '../../shared/inks'
 import { Card, type CardActions } from './Card'
+import { TaskAskOf } from './TaskAskOf'
 import { FirstConnectionsView } from './FirstConnectionsView'
 import { ChangesCard, type ChangesActions } from '../../shared/ChangesCard'
 import { DraftCard, type DraftActions } from '../../shared/DraftCard'
@@ -637,6 +638,7 @@ export function ProjectView({
                             onOpen={openAutomation}
                           />
                         )}
+                        taskAsk={(ask, itemId) => <TaskAskOf ask={ask} itemId={itemId} onOpen={onTask} />}
                         changes={(changes) => <ChangesCard changes={changes} actions={changesActions} />}
                         run={(run) => (
                           <RunOf
