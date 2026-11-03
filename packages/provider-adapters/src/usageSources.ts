@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 
 import type { PathStep, TokenLocation } from './credentialStore'
 import { childEnvironment } from './process'
+import { ASKED_AGAIN } from './signIn'
 import type { AgentDefinition, AgentId } from './registry'
 import { isoSeconds, record, Unrecognized, type UsageRead, type UsageWindow, windowKind } from './usage'
 
@@ -574,22 +575,25 @@ export const readOpenCodeCredentials = (
     const inherited = { ...childEnvironment(spec), ...options.home }
     const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env: inherited })
     const env = launched === spec ? inherited : { ...childEnvironment(launched), ...options.home }
-    execFile(launched.command, [...launched.args], { timeout: options.timeout ?? 15_000, env }, (error, stdout, stderr) => {
-      if (error !== null) {
-        // Why, in a few words, for the person to act on: a missing command, an unknown flag, a timeout.
-        const why = (String(stderr).trim().split('\n').pop() || error.message.split('\n')[0] || '').slice(0, 160)
-        return resolve({
-          kind: 'failed',
-          message: `${agent.name} would not list its sign-ins${why === '' ? '' : `: ${why}`}.`.replace(/\.+$/, '.'),
-        })
-      }
-      const found = openCodeCredentials(stdout)
-      resolve(
-        found === null
-          ? { kind: 'failed', message: `${agent.name} listed its sign-ins in a form Althar does not know.` }
-          : { kind: 'credentials', credentials: found },
-      )
-    })
+    const ask = (tries: number) =>
+      execFile(launched.command, [...launched.args], { timeout: options.timeout ?? 15_000, env }, (error, stdout, stderr) => {
+        if (error !== null && tries > 0 && agent.notStarted?.(`${stdout}\n${stderr}`) === true) return ask(tries - 1)
+        if (error !== null) {
+          // Why, in a few words, for the person to act on: a missing command, an unknown flag, a timeout.
+          const why = (String(stderr).trim().split('\n').pop() || error.message.split('\n')[0] || '').slice(0, 160)
+          return resolve({
+            kind: 'failed',
+            message: `${agent.name} would not list its sign-ins${why === '' ? '' : `: ${why}`}.`.replace(/\.+$/, '.'),
+          })
+        }
+        const found = openCodeCredentials(stdout)
+        resolve(
+          found === null
+            ? { kind: 'failed', message: `${agent.name} listed its sign-ins in a form Althar does not know.` }
+            : { kind: 'credentials', credentials: found },
+        )
+      })
+    ask(ASKED_AGAIN)
   })
 
 /* OpenCode Go: its limits, as OpenCode's own server reads them (`opencode api --standalone experimental.usage.limits`). */
@@ -664,14 +668,17 @@ export const readOpenCodeGoUsage = (
     const inherited = { ...childEnvironment(spec), ...options.home }
     const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env: inherited })
     const env = launched === spec ? inherited : { ...childEnvironment(launched), ...options.home }
-    execFile(launched.command, [...launched.args], { timeout: options.timeout ?? 20_000, env }, (error, stdout, stderr) => {
-      if (error !== null) {
-        const why = (String(stderr).trim().split('\n').pop() || error.message.split('\n')[0] || '').slice(0, 160)
-        return resolve({
-          kind: 'failed',
-          message: `OpenCode couldn’t read Go’s usage${why === '' ? '' : `: ${why}`}.`.replace(/\.+$/, '.'),
-        })
-      }
-      resolve(openCodeGoUsage(String(stdout), options.now()))
-    })
+    const ask = (tries: number) =>
+      execFile(launched.command, [...launched.args], { timeout: options.timeout ?? 20_000, env }, (error, stdout, stderr) => {
+        if (error !== null && tries > 0 && agent.notStarted?.(`${stdout}\n${stderr}`) === true) return ask(tries - 1)
+        if (error !== null) {
+          const why = (String(stderr).trim().split('\n').pop() || error.message.split('\n')[0] || '').slice(0, 160)
+          return resolve({
+            kind: 'failed',
+            message: `OpenCode couldn’t read Go’s usage${why === '' ? '' : `: ${why}`}.`.replace(/\.+$/, '.'),
+          })
+        }
+        resolve(openCodeGoUsage(String(stdout), options.now()))
+      })
+    ask(ASKED_AGAIN)
   })

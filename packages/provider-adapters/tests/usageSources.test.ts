@@ -889,6 +889,19 @@ describe('OpenCode Go’s usage, from OpenCode’s own server', () => {
 
   const limits = (script: string) => ({ ...agents.opencode, usageLimits: () => ({ command: 'bun', args: ['-e', script] }) })
 
+  it('asks again where OpenCode’s server didn’t start in time, as its listing of sign-ins does', async () => {
+    const tries = join(mkdtempSync(join(tmpdir(), 'althar-started-')), 'tries')
+    const once = (answer: string) =>
+      `const fs = require('fs'); if (!fs.existsSync(${JSON.stringify(tries)})) { fs.writeFileSync(${JSON.stringify(tries)}, 'x'); console.error('Location plugins did not finish activating'); process.exit(1) } console.log(${JSON.stringify(answer)})`
+    expect(await readOpenCodeGoUsage(limits(once('{"data":null}')), { now: () => now })).toEqual({ kind: 'none' })
+    rmSync(tries)
+    const listing = {
+      ...agents.opencode,
+      signIn: { ...agents.opencode.signIn, credentials: () => ({ command: 'bun', args: ['-e', once('[]')] }) },
+    }
+    expect(await readOpenCodeCredentials(listing)).toEqual({ kind: 'credentials', credentials: [] })
+  })
+
   it('asks OpenCode in the account’s home, and says why where it couldn’t', async () => {
     const script = `console.log(JSON.stringify({ data: process.env.XDG_DATA_HOME === '/accounts/a' ? { go: { weekly: { percent: 5, resetsAt: 1794182400000 } } } : null }))`
     expect(await readOpenCodeGoUsage(limits(script), { home: { XDG_DATA_HOME: '/accounts/a' }, now: () => now })).toMatchObject({

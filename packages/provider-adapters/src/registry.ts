@@ -214,6 +214,11 @@ export interface AgentDefinition {
    */
   readonly usageLimits?: (node: string) => LaunchSpec
   /**
+   * Whether a command that failed says the agent's own server didn't start in time, so the same command may answer when
+   * asked again (OpenCode 2's private server, while it loads the person's plugins).
+   */
+  readonly notStarted?: (output: string) => boolean
+  /**
    * Where it keeps a sign-in (ADR-012): the environment variable that points
    * it at a folder of its own, a home, and its usual folder when that isn't
    * set. `shared` picks, from what is in the usual folder, what isn't the
@@ -1120,6 +1125,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      * the answer, never the sign-in.
      */
     usageLimits: () => ({ command: 'opencode', args: ['api', '--standalone', 'experimental.usage.limits'] }),
+    // Its private server loads the person's plugins and MCP servers first, and gives up on some starts: about one in four on a Mac with several (2.2.5, 3 November 2026).
+    notStarted: (output) => /did not finish activating/i.test(output),
     /*
      * Its sign-ins and its history are under the data folder's `opencode`;
      * its config stays the person's, under XDG_CONFIG_HOME. The data folder

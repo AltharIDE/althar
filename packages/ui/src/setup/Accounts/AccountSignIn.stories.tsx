@@ -176,7 +176,7 @@ export const NotSignedInYet: Story = {
 
 /** Check again while it reads: the link says so and waits. */
 export const CheckingAgain: Story = {
-  args: { step: { kind: 'terminal', line: 'opencode auth login', opened: true, notYet: true, checking: true } },
+  args: { step: { kind: 'terminal', line: 'opencode auth login --standalone', opened: true, notYet: true, checking: true } },
   play: async ({ canvasElement }) => {
     await expect(within(canvasElement).getByRole('button', { name: 'Checking…' })).toBeDisabled()
   },
@@ -184,7 +184,7 @@ export const CheckingAgain: Story = {
 
 /** The agent answered something Althar couldn't read: it says so, not "not yet". */
 export const CouldntTell: Story = {
-  args: { step: { kind: 'terminal', line: 'opencode auth login', opened: true, notYet: true, unclear: true } },
+  args: { step: { kind: 'terminal', line: 'opencode auth login --standalone', opened: true, notYet: true, unclear: true } },
   play: async ({ canvasElement }) => {
     await expect(within(canvasElement).getByText(/Couldn’t tell if it signed in\./)).toBeInTheDocument()
   },
@@ -293,6 +293,38 @@ export const Naming: Story = {
     await expect(args.onDone).toHaveBeenCalledWith('Side project')
     await userEvent.click(c.getByRole('button', { name: 'Cancel' }))
     await expect(args.onCancel).toHaveBeenCalled()
+  },
+}
+
+/** OpenCode signed in from the terminal, picked up from the account's own home: named in its line, paid per use as its keys are. */
+export const OpenCodeSignedIn: Story = {
+  render: (args) => (
+    <Accounts
+      agent="OpenCode"
+      accounts={[
+        {
+          id: 'acc_usual',
+          name: 'Personal',
+          place: { kind: 'usual' },
+          state: { kind: 'ready', paid: 'key' },
+          providers: [
+            { name: 'OpenCode Go', paid: 'plan' },
+            { name: 'OpenCode Zen', paid: 'key' },
+          ],
+        },
+      ]}
+      signIn={{ account: null, at: 1, node: <AccountSignIn {...args} /> }}
+    />
+  ),
+  args: {
+    agent: 'OpenCode',
+    position: 2,
+    step: { kind: 'named', name: 'Account 2', paid: 'per use' },
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('textbox', { name: 'Name this account' })).toHaveValue('Account 2')
+    await expect(c.queryByText('Couldn’t tell if it signed in.')).toBeNull()
   },
 }
 

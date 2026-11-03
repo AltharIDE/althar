@@ -1,3 +1,5 @@
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
@@ -273,6 +275,36 @@ describe('signInStatus', () => {
       const bare: AgentDefinition = { ...old, signIn: withoutFallback }
       assert.strictEqual((yield* signInCheck(bare)).status, 'unknown')
       assert.deepStrictEqual(agents.opencode.signIn.statusFallback?.('node').args, ['auth', 'list'])
+    }),
+  )
+
+  it.live('asks OpenCode again where its private server didn’t start in time, rather than falling back to another home', () =>
+    Effect.gen(function* () {
+      // Fails the first time as 2.2.5 does while it loads the person's plugins, then lists a Go key.
+      const tries = join(mkdtempSync(join(tmpdir(), 'althar-started-')), 'tries')
+      const script = `const fs = require('fs'); const n = fs.existsSync(${JSON.stringify(tries)}) ? 1 : 0; fs.writeFileSync(${JSON.stringify(tries)}, 'x')
+if (n === 0) { console.error('Location plugins did not finish activating'); process.exit(1) }
+console.log(JSON.stringify([{ id: 'opencode-go', name: 'OpenCode Go', connections: [{ type: 'credential', id: 'c', method: 'key' }] }]))`
+      const starting: AgentDefinition = {
+        ...agents.opencode,
+        signIn: {
+          ...agents.opencode.signIn,
+          status: () => ({ command: 'bun', args: ['-e', script] }),
+          statusFallback: () => ({ command: 'bun', args: ['-e', "console.log('OpenCode Go  default  stored')"] }),
+        },
+      }
+      assert.strictEqual((yield* signInCheck(starting)).status, 'signed_in')
+      // One that never starts is asked no more than twice again, then falls back as before.
+      const never: AgentDefinition = {
+        ...starting,
+        signIn: {
+          ...starting.signIn,
+          status: () => ({ command: 'bun', args: ['-e', "console.error('Location plugins did not finish activating'); process.exit(1)"] }),
+        },
+      }
+      assert.strictEqual((yield* signInCheck(never)).status, 'unknown')
+      assert.isTrue(agents.opencode.notStarted?.('Location plugins did not finish activating\n'))
+      assert.isFalse(agents.opencode.notStarted?.('Unknown argument: standalone'))
     }),
   )
 
