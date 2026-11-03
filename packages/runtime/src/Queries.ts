@@ -531,11 +531,13 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           findings: (Array.isArray(findings) ? findings : []).map((finding) => {
             const severity = text(finding, 'severity')
             const line = field(finding, 'line')
+            const title = text(finding, 'title')
             return {
               severity: severity === 'blocking' || severity === 'major' || severity === 'nit' ? severity : 'minor',
               file: text(finding, 'file') || null,
               line: typeof line === 'number' ? line : null,
               claim: text(finding, 'claim'),
+              ...(title === '' ? {} : { title }),
             }
           }),
           built: builtIn(field(content, 'built')),

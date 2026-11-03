@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { AttentionRequest, GraphRound, GraphStep, ThreadItem, ThreadSnapshot } from '@althar/contracts'
+import type { AttentionRequest, GraphRound, GraphStep, TaskFinding, ThreadItem, ThreadSnapshot } from '@althar/contracts'
 import { GraphNodeState, type ModelInfo } from '@althar/ui'
 
 import { REQUEST, taskGraphOf } from '../src/renderer/features/task/graph'
@@ -292,17 +292,65 @@ describe('a task’s Graph face', () => {
 
   it('opens from its switch or g, and a card opens its report, which goes to it in the conversation', async () => {
     const user = userEvent.setup()
-    const { client } = fakeClient({ getThread: vi.fn(async () => graphSnapshot()) })
+    const passed = { ...report({ step: 'review', round: 0, verdict: 'pass', summary: 'It holds.', findings: [] }, 10), id: 'item_review' }
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => graphSnapshot({ items: [items.you('Add a retry'), passed], reports: [passed] })),
+    })
     withServices(<Task />, client)
     await screen.findByRole('radio', { name: /Graph/ })
     fireEvent.keyDown(document.body, { key: 'g' })
     const graph = await screen.findByRole('region', { name: 'The task’s steps' })
     await user.click(within(graph).getByRole('button', { name: /Review 1/ }))
-    const report = await screen.findByRole('dialog', { name: 'Review 1' })
-    expect(report.textContent).toContain('The retry never backs off.')
-    await user.click(within(report).getByRole('button', { name: 'Show in the conversation' }))
+    const popover = await screen.findByRole('dialog', { name: 'Review 1' })
+    expect(popover.textContent).toContain('Looks good to me.')
+    await user.click(within(popover).getByRole('button', { name: 'Show in the conversation' }))
     await waitFor(() => expect(screen.getByRole('radio', { name: /Conversation/ }).getAttribute('aria-checked')).toBe('true'))
     await waitFor(() => expect(document.activeElement).toBe(document.querySelector('[data-item="item_review"]')))
+  })
+
+  it('opens a review that found something in the code, at its worst finding, under its line', async () => {
+    const user = userEvent.setup()
+    const placed = (id: string, severity: TaskFinding['severity'], path: string | null, title: string): TaskFinding => ({
+      id,
+      round: 0,
+      severity,
+      title,
+      claim: `${title}, at length.`,
+      file: path,
+      line: path === null ? null : 12,
+      at: path === null ? null : { path, line: 14, changed: false, untouched: path === 'src/caller.ts' },
+      state: 'open',
+      reason: null,
+      commit: null,
+    })
+    const getTaskFindings = vi.fn(async () => ({
+      findings: [
+        placed('find_1', 'minor', null, 'No picture of the retry'),
+        placed('find_2', 'blocking', 'src/caller.ts', 'The caller still retries forever'),
+      ],
+    }))
+    const getFileDiff = vi.fn(async (_taskId: string, path: string) => ({
+      file: { path, from: null, status: 'modified' as const, add: 0, del: 0, binary: false, uncommitted: false },
+      lines: Array.from({ length: 20 }, (_, i) => ({ kind: 'context' as const, old: i + 1, new: i + 1, text: `line ${i + 1}` })),
+      truncated: false,
+    }))
+    const { client } = fakeClient({ getThread: vi.fn(async () => graphSnapshot()), getTaskFindings, getFileDiff })
+    withServices(<Task />, client)
+    await user.click(await screen.findByRole('radio', { name: /Graph/ }))
+    const graph = await screen.findByRole('region', { name: 'The task’s steps' })
+    await user.click(within(graph).getByRole('button', { name: /Review 1/ }))
+    const view = await screen.findByRole('dialog', { name: 'Changes' })
+    expect(screen.queryByRole('dialog', { name: 'Review 1' })).toBeNull()
+    // The worst first: in a file the change left alone, read whole, the note under the line it is about now.
+    const note = await within(view).findByRole('article', { current: true })
+    expect(note.textContent).toContain('The caller still retries forever')
+    expect(getFileDiff).toHaveBeenLastCalledWith('t1', 'src/caller.ts', true)
+    expect(note.parentElement?.previousElementSibling?.textContent).toContain('line 14')
+    expect(within(view).getByText('2 open')).toBeTruthy()
+    // ] goes to the next, about no file.
+    await user.keyboard(']')
+    expect(await within(view).findByRole('region', { name: 'Not in the code' })).toBeTruthy()
+    expect(within(view).getByRole('article', { current: true }).textContent).toContain('No picture of the retry')
   })
 
   it('takes the person from a round’s marker to what started it', async () => {

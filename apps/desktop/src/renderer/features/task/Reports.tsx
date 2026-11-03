@@ -1,4 +1,5 @@
 import { AltharLine, Issue, Markdown, Reviewer, Verdict } from '@althar/ui'
+import { createContext, useContext } from 'react'
 
 import { productBrand, productName } from '../../shared/products'
 import type { StepResult } from '../../shared/thread'
@@ -16,8 +17,15 @@ export const reportText = {
   pushed: 'Pushed the branch.',
 }
 
-/** A review's report: its verdict and findings, each where it points, then what the reviewer said. */
+/**
+ * Opens the task's Changes view on a review's finding, by the review's round
+ * and where the finding is in its list: where a task's change can be shown.
+ */
+export const OpenFinding = createContext<((round: number, index?: number) => void) | null>(null)
+
+/** A review's report: its verdict and each finding in a line, opening it in the code; then what the reviewer said. */
 export function ReviewReport({ id, result }: { id: string; result: StepResult }) {
+  const open = useContext(OpenFinding)
   return (
     <>
       <Reviewer
@@ -26,8 +34,10 @@ export function ReviewReport({ id, result }: { id: string; result: StepResult })
           id: `${id}-${index}`,
           weight: finding.severity,
           ...(finding.file === null ? {} : { at: finding.line === null ? finding.file : `${finding.file}:${finding.line}` }),
+          ...(finding.title === undefined ? {} : { title: finding.title }),
           claim: finding.claim,
         }))}
+        {...(open === null ? {} : { onOpen: (index: number) => open(result.round, index) })}
       />
       {result.summary !== '' && <Markdown source={result.summary} />}
     </>

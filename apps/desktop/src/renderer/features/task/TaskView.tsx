@@ -84,6 +84,7 @@ import { BackgroundOutput } from './BackgroundOutput'
 import { NoOutputsView } from './NoOutputsView'
 import { conflictsOf, hasOutputs, hasOutputsToShow, latestOf, Outputs } from './Outputs'
 import s from './Task.module.css'
+import { OpenFinding } from './Reports'
 import { useChanges } from './useChanges'
 import type { TaskModel } from './useTask'
 import { chooseFace, chosenFaces } from './chosenFaces'
@@ -413,7 +414,12 @@ export function TaskView({
   const { reportProblem } = useServices().host
   const files = model.snapshot?.task.files ?? []
   // What it changed opens on the first file someone wrote, not a lockfile.
-  const changes = useChanges(model.snapshot?.task.id ?? null, (files.find((file) => !isGenerated(file.path)) ?? files[0])?.path ?? null)
+  const changes = useChanges(
+    model.snapshot?.task.id ?? null,
+    (files.find((file) => !isGenerated(file.path)) ?? files[0])?.path ?? null,
+    // What the reviews found is placed again as the change moves.
+    files.map((file) => `${file.path}:${file.add}:${file.del}`).join('\n'),
+  )
   // ⌘D opens what the task changed, when it changed something. With its modifier, never set off by typing or by voice.
   const { show } = changes
   useEffect(() => {
@@ -914,350 +920,368 @@ export function TaskView({
     />
   )
 
+  // The finding you're on, where it is in the file you're on: an editor opens there.
+  const onFinding = changes.findings.find((one) => one.id === changes.finding && one.path === changes.selected)
+  const editorLine = onFinding?.line ?? firstChange(changes.view)
   return (
-    <div className={s.window}>
-      {/* The bar is the header: the way back and which task, then where it stands, its faces and what it opens. */}
-      <TitleBar
-        lights="none"
-        end={
-          <TaskHeader
-            title={snapshot.task.title}
-            status={status}
-            state={state}
-            {...(why === undefined ? {} : { why })}
-            // Who does each step: while its plan runs, where it stands says so on hover, the reviewer not being the lead.
-            steps={stepsOf(snapshot, lead.name, (agentId, model) => named(agentId, model).name)}
-            {...(took === null ? {} : { took })}
-            {...(elapsed === null ? {} : { elapsed })}
-            faces={(graph === null ? (['talk', 'out'] as const) : (['talk', 'out', 'graph'] as const)).map((value) => ({
-              value,
-              label: text.faces[value],
-              kbd: text.facesKbd[value],
-            }))}
-            face={shown}
-            onFace={setFace}
-            // Finished and the person's to settle: Done and Keep for later, inside where it stands.
-            {...(settle === null ? {} : { beside: settle })}
-            actions={actions}
-          />
-        }
-      >
-        <BackCrumb
-          to={snapshot.project.name}
-          kbd="esc"
-          title={snapshot.task.title}
-          titleLevel={1}
-          maxLength={TITLE_LENGTH}
-          editing={renaming}
-          onEditingChange={setRenaming}
-          onRename={(title) => void model.rename(title)}
-          onBack={onBack}
-        />
-      </TitleBar>
-      {/* What a review's lead can reach, in a sentence under the header. */}
-      {snapshot.task.review != null && (
-        <ReachLine className={s.reach} phrases={reachOf(snapshot.task.review, postsTeamReviews)} aria-label={text.reach} />
-      )}
-      {shown === 'graph' && graph !== null ? (
-        <GraphFace
-          className={s.graphFace}
-          graph={graph}
-          stuck={stuckCall}
-          permissions={(requests) => permissionCalls(requests, true)}
-          onShow={showInThread}
-          // The composer that says what went wrong is the conversation's: here, the face says it.
-          error={model.error}
-          onDismissError={model.dismissError}
-        />
-      ) : shown === 'out' && !hasOutputsToShow(snapshot) ? (
-        <NoOutputsView snapshot={snapshot} lead={lead.name} />
-      ) : shown === 'out' ? (
-        <div
-          className={connecting || host.code !== null ? s.withPanel : s.outputsFace}
-          style={host.code !== null && !connecting ? ({ '--panel-width': `${host.bench.width}px` } as CSSProperties) : undefined}
-        >
-          {/* Its evidence's screenshots open in the lightbox, as the thread's pictures do. */}
-          <ThreadShellProvider value={host.shell}>
-            <Outputs
-              snapshot={snapshot}
-              pending={model.pending}
-              doing={model.doing}
-              error={model.error}
-              errorMore={model.errorMore}
-              onAccept={(changes) => void model.accept(changes)}
-              onMergeHere={() => void model.mergeHere()}
-              onOpenChange={() => void model.openChange()}
-              onPush={(head, url) => void model.push(head, url)}
-              refused={model.refused}
-              onReplace={(head, replaces, url) => void model.replace(head, replaces, url)}
-              // Bringing a pull request's commits in is the lead's: Althar fetches them, and the note says how to merge them.
-              onBringIn={(url) =>
-                void model.mergeNote(url).then((note) => {
-                  if (note !== null) void send(note, false)
-                })
-              }
-              onMarkReady={(url) => void model.markReady(url)}
-              onPostScreenshots={model.postScreenshots}
-              onOpenFile={changes.show}
-              conflict={model.conflict}
-              onPushHere={() => void model.pushHere()}
-              onPushBranch={() => void model.pushBranch()}
-              onConnect={() => setConnecting(true)}
-              // So is a conflict to settle, in words the lead acts on.
-              onResolve={() => {
-                model.dismissConflict()
-                void send(text.resolve(conflictsOf(model.conflict ?? '', snapshot.task.here)), false)
-              }}
+    <OpenFinding.Provider value={changes.showFindings}>
+      <div className={s.window}>
+        {/* The bar is the header: the way back and which task, then where it stands, its faces and what it opens. */}
+        <TitleBar
+          lights="none"
+          end={
+            <TaskHeader
+              title={snapshot.task.title}
+              status={status}
+              state={state}
+              {...(why === undefined ? {} : { why })}
+              // Who does each step: while its plan runs, where it stands says so on hover, the reviewer not being the lead.
+              steps={stepsOf(snapshot, lead.name, (agentId, model) => named(agentId, model).name)}
+              {...(took === null ? {} : { took })}
+              {...(elapsed === null ? {} : { elapsed })}
+              faces={(graph === null ? (['talk', 'out'] as const) : (['talk', 'out', 'graph'] as const)).map((value) => ({
+                value,
+                label: text.faces[value],
+                kbd: text.facesKbd[value],
+              }))}
+              face={shown}
+              onFace={setFace}
+              // Finished and the person's to settle: Done and Keep for later, inside where it stands.
+              {...(settle === null ? {} : { beside: settle })}
+              actions={actions}
             />
-          </ThreadShellProvider>
-          {connecting && snapshot.host !== null ? (
-            <ConnectPanel service={serviceOfProduct(snapshot.host.product)} onClose={() => setConnecting(false)} />
-          ) : (
-            // A file a lead's report names, beside it, as beside the thread.
-            host.workbench(null)
-          )}
-        </div>
-      ) : (
-        <TaskFace
-          className={s.face}
-          composer={composer}
-          // A document the lead wrote, or a file it names, opens beside the thread on its workbench; a document follows its edits.
-          panel={host.workbench(
-            host.doc && (
-              <DocumentPanel
-                key={host.doc.source ?? host.doc.path ?? host.doc.title}
-                threadId={snapshot.threadId}
-                doc={host.doc}
-                version={versionOf(wholePath(host.doc.source ?? host.doc.path ?? '', snapshot.task.worktree))}
-                onClose={host.closeDoc}
-                {...(openFile === undefined || docInEditor === null ? {} : { onOpen: () => openFile(docInEditor) })}
-              />
-            ),
-          )}
-          panelWidth={host.bench.width}
+          }
         >
-          <Thread label={text.thread} busy={busy}>
-            {issue !== null && !snapshot.earlier && (
-              <div className={s.issue}>
-                <Issue
-                  mark={productBrand(issue.product)}
-                  source={productName(issue.product)}
-                  id={issue.key}
-                  tone={issue.product === 'linear' ? 'linear' : 'plain'}
-                  title={issue.title}
-                  href={issue.url}
-                  status={{ state: issueStatus(issue.status.category), label: issue.status.name }}
-                  {...(issue.priority === null || issue.priority.level === 'none'
-                    ? {}
-                    : { priority: { level: issuePriority(issue.priority.level), label: issue.priority.name } })}
-                  {...(issue.container === null ? {} : { meta: issue.container })}
-                />
-              </div>
-            )}
-            {snapshot.earlier && (
-              <ThreadDivider
-                icon="up"
-                action={model.loadingEarlier ? text.loadingEarlier : text.showEarlier}
-                onAction={() => void model.loadEarlier()}
-              >
-                {text.earlier}
-              </ThreadDivider>
-            )}
+          <BackCrumb
+            to={snapshot.project.name}
+            kbd="esc"
+            title={snapshot.task.title}
+            titleLevel={1}
+            maxLength={TITLE_LENGTH}
+            editing={renaming}
+            onEditingChange={setRenaming}
+            onRename={(title) => void model.rename(title)}
+            onBack={onBack}
+          />
+        </TitleBar>
+        {/* What a review's lead can reach, in a sentence under the header. */}
+        {snapshot.task.review != null && (
+          <ReachLine className={s.reach} phrases={reachOf(snapshot.task.review, postsTeamReviews)} aria-label={text.reach} />
+        )}
+        {shown === 'graph' && graph !== null ? (
+          <GraphFace
+            className={s.graphFace}
+            graph={graph}
+            stuck={stuckCall}
+            permissions={(requests) => permissionCalls(requests, true)}
+            onShow={showInThread}
+            onReview={changes.showFindings}
+            // The composer that says what went wrong is the conversation's: here, the face says it.
+            error={model.error}
+            onDismissError={model.dismissError}
+          />
+        ) : shown === 'out' && !hasOutputsToShow(snapshot) ? (
+          <NoOutputsView snapshot={snapshot} lead={lead.name} />
+        ) : shown === 'out' ? (
+          <div
+            className={connecting || host.code !== null ? s.withPanel : s.outputsFace}
+            style={host.code !== null && !connecting ? ({ '--panel-width': `${host.bench.width}px` } as CSSProperties) : undefined}
+          >
+            {/* Its evidence's screenshots open in the lightbox, as the thread's pictures do. */}
             <ThreadShellProvider value={host.shell}>
-              <TaskThread
-                rounds={blocks}
-                versionOf={versionOf}
-                threadId={snapshot.threadId}
-                worktree={snapshot.task.worktree}
-                {...(openFile === undefined ? {} : { openFile })}
-                session={session}
-                project={snapshot.project.name}
-                // A failed turn is tried again here, unless its step waits on the person, whose call has its ways on.
-                {...(busy || stuckOpen ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
-                {...(onSignIn === undefined || stuckOpen ? {} : { onSignIn })}
-                onPassOn={(words) => void model.send(words)}
-                onAnswerQuestion={model.answerQuestion}
-                {...(asking == null ? {} : { focusQuestion: asking })}
-                run={(run) => (
-                  <RunOf
-                    run={run}
-                    now={now}
-                    onStop={(id) => void model.stopLaunch(id)}
-                    onRunAgain={(_taskId, runnableId) => void model.runProject(runnableId)}
-                  />
-                )}
-                // An issue the lead drafted is filed from its card, only when the person says.
-                draft={(draft) => (
-                  <DraftCard
-                    draft={draft}
-                    actions={{
-                      onFile: (draftId) => void model.fileIssueDraft(draftId),
-                      onChange: model.changeIssueDraft,
-                      onDiscard: (draftId) => void model.discardIssueDraft(draftId),
-                    }}
-                  />
-                )}
-                // Changes to its issue its lead or Althar proposed apply from their card, only when the person says.
-                changes={(changes) => (
-                  <ChangesCard
-                    changes={changes}
-                    actions={{
-                      onApply: (changesId) => void model.applyIssueChanges(changesId),
-                      onDiscard: (changesId) => void model.discardIssueChanges(changesId),
-                    }}
-                  />
-                )}
-                // A review the lead drafted is posted from its card, only when the person says.
-                review={(draft) => (
-                  <ReviewCard
-                    draft={draft}
-                    actions={{
-                      onChange: model.changeReview,
-                      onPost: (draftId) => void model.postReview(draftId),
-                      onPostFromNow: (draftId, automationId) => void model.postReviewsFromNow(draftId, automationId),
-                      onDiscard: (draftId) => void model.discardReview(draftId),
-                    }}
-                  />
-                )}
-                // A push the lead asked for is pushed as the outputs push: up to the head it shows.
-                push={(request, at) => (
-                  <PushRequestOf
-                    request={request}
-                    at={at}
-                    {...(lead.name === '' ? {} : { by: lead.name })}
-                    pushing={model.pending}
-                    onPush={(head, url) => void model.push(head, url)}
-                  />
-                )}
+              <Outputs
+                snapshot={snapshot}
+                pending={model.pending}
+                doing={model.doing}
+                error={model.error}
+                errorMore={model.errorMore}
+                onAccept={(changes) => void model.accept(changes)}
+                onMergeHere={() => void model.mergeHere()}
+                onOpenChange={() => void model.openChange()}
+                onPush={(head, url) => void model.push(head, url)}
+                refused={model.refused}
+                onReplace={(head, replaces, url) => void model.replace(head, replaces, url)}
+                // Bringing a pull request's commits in is the lead's: Althar fetches them, and the note says how to merge them.
+                onBringIn={(url) =>
+                  void model.mergeNote(url).then((note) => {
+                    if (note !== null) void send(note, false)
+                  })
+                }
+                onMarkReady={(url) => void model.markReady(url)}
+                onPostScreenshots={model.postScreenshots}
+                onOpenFile={changes.show}
+                conflict={model.conflict}
+                onPushHere={() => void model.pushHere()}
+                onPushBranch={() => void model.pushBranch()}
+                onConnect={() => setConnecting(true)}
+                // So is a conflict to settle, in words the lead acts on.
+                onResolve={() => {
+                  model.dismissConflict()
+                  void send(text.resolve(conflictsOf(model.conflict ?? '', snapshot.task.here)), false)
+                }}
               />
             </ThreadShellProvider>
-            {waitingIssues.length > 1 && (
-              <div className={s.fileAll}>
-                <Button
-                  variant="signal"
-                  size="small"
-                  busy={model.pending}
-                  onClick={() =>
-                    void (async () => {
-                      for (const draftId of waitingIssues) await model.fileIssueDraft(draftId)
-                    })()
-                  }
+            {connecting && snapshot.host !== null ? (
+              <ConnectPanel service={serviceOfProduct(snapshot.host.product)} onClose={() => setConnecting(false)} />
+            ) : (
+              // A file a lead's report names, beside it, as beside the thread.
+              host.workbench(null)
+            )}
+          </div>
+        ) : (
+          <TaskFace
+            className={s.face}
+            composer={composer}
+            // A document the lead wrote, or a file it names, opens beside the thread on its workbench; a document follows its edits.
+            panel={host.workbench(
+              host.doc && (
+                <DocumentPanel
+                  key={host.doc.source ?? host.doc.path ?? host.doc.title}
+                  threadId={snapshot.threadId}
+                  doc={host.doc}
+                  version={versionOf(wholePath(host.doc.source ?? host.doc.path ?? '', snapshot.task.worktree))}
+                  onClose={host.closeDoc}
+                  {...(openFile === undefined || docInEditor === null ? {} : { onOpen: () => openFile(docInEditor) })}
+                />
+              ),
+            )}
+            panelWidth={host.bench.width}
+          >
+            <Thread label={text.thread} busy={busy}>
+              {issue !== null && !snapshot.earlier && (
+                <div className={s.issue}>
+                  <Issue
+                    mark={productBrand(issue.product)}
+                    source={productName(issue.product)}
+                    id={issue.key}
+                    tone={issue.product === 'linear' ? 'linear' : 'plain'}
+                    title={issue.title}
+                    href={issue.url}
+                    status={{ state: issueStatus(issue.status.category), label: issue.status.name }}
+                    {...(issue.priority === null || issue.priority.level === 'none'
+                      ? {}
+                      : { priority: { level: issuePriority(issue.priority.level), label: issue.priority.name } })}
+                    {...(issue.container === null ? {} : { meta: issue.container })}
+                  />
+                </div>
+              )}
+              {snapshot.earlier && (
+                <ThreadDivider
+                  icon="up"
+                  action={model.loadingEarlier ? text.loadingEarlier : text.showEarlier}
+                  onAction={() => void model.loadEarlier()}
                 >
-                  {text.fileAll(waitingIssues.length)}
-                </Button>
-              </div>
-            )}
-            {snapshot.attention.map((request) => (request.kind === 'stuck' && request.stuck !== null ? stuckCall(request) : null))}
-            {/* Held for a usage limit with nothing asked of the person: another model can carry it on now, or it keeps waiting. */}
-            {snapshot.task.waits !== null && snapshot.attention.length === 0 && (
-              <HeldLimit
-                key={`${snapshot.task.waits.agentId}:${snapshot.task.waits.until}`}
-                waits={snapshot.task.waits}
-                step={snapshot.task.step === 'review' || snapshot.task.step === 'settle' ? snapshot.task.step : 'implement'}
-                agents={model.agents}
-                agentName={agentName}
-                onHandOver={(to) => void model.handOverHeld(to)}
-                {...(snapshot.task.step === 'review' ? { onSkip: () => void model.skipReview() } : {})}
-              />
-            )}
-            {permissionCalls(snapshot.attention.filter((request) => request.kind === 'permission'))}
-          </Thread>
-        </TaskFace>
-      )}
-      {host.lightbox}
-      {abandoning && (
-        <AbandonTask
-          worktree={snapshot.task.worktree === null ? null : shortFolder(snapshot.task.worktree)}
-          branch={snapshot.task.branch}
-          changes={offered.map((one) => ({ id: one.url, name: `${one.noun} ${one.prefix}${one.number}`, host: productName(one.product) }))}
-          abandoned={leftOpen !== null}
-          {...(mergedChange === undefined || !can('leaveOut')
-            ? {}
-            : {
-                merged: {
-                  name: `${mergedChange.short} ${mergedChange.prefix}${mergedChange.number}`,
-                  commits: snapshot.task.unshipped?.commits ?? 0,
-                },
-              })}
-          busy={model.pending}
-          {...(model.error === null ? {} : { error: model.error })}
-          onAbandon={(choices) =>
-            void model
-              .abandon(
-                offered
-                  .filter((one) => choices.close.includes(one.url))
-                  .map((one) => ({
-                    url: one.url,
-                    name: `${one.short} ${one.prefix}${one.number}`,
-                    deleteBranch: choices.deleteBranch.includes(one.url),
-                  })),
-              )
-              .then(({ abandoned, open }) => {
-                // Abandoned, with each it was to close closed: done. One its host wouldn't close stays offered, with why.
-                if (!abandoned) return
-                if (open.length === 0) endAbandoning()
-                else setLeftOpen(open)
+                  {text.earlier}
+                </ThreadDivider>
+              )}
+              <ThreadShellProvider value={host.shell}>
+                <TaskThread
+                  rounds={blocks}
+                  versionOf={versionOf}
+                  threadId={snapshot.threadId}
+                  worktree={snapshot.task.worktree}
+                  {...(openFile === undefined ? {} : { openFile })}
+                  session={session}
+                  project={snapshot.project.name}
+                  // A failed turn is tried again here, unless its step waits on the person, whose call has its ways on.
+                  {...(busy || stuckOpen ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
+                  {...(onSignIn === undefined || stuckOpen ? {} : { onSignIn })}
+                  onPassOn={(words) => void model.send(words)}
+                  onAnswerQuestion={model.answerQuestion}
+                  {...(asking == null ? {} : { focusQuestion: asking })}
+                  run={(run) => (
+                    <RunOf
+                      run={run}
+                      now={now}
+                      onStop={(id) => void model.stopLaunch(id)}
+                      onRunAgain={(_taskId, runnableId) => void model.runProject(runnableId)}
+                    />
+                  )}
+                  // An issue the lead drafted is filed from its card, only when the person says.
+                  draft={(draft) => (
+                    <DraftCard
+                      draft={draft}
+                      actions={{
+                        onFile: (draftId) => void model.fileIssueDraft(draftId),
+                        onChange: model.changeIssueDraft,
+                        onDiscard: (draftId) => void model.discardIssueDraft(draftId),
+                      }}
+                    />
+                  )}
+                  // Changes to its issue its lead or Althar proposed apply from their card, only when the person says.
+                  changes={(changes) => (
+                    <ChangesCard
+                      changes={changes}
+                      actions={{
+                        onApply: (changesId) => void model.applyIssueChanges(changesId),
+                        onDiscard: (changesId) => void model.discardIssueChanges(changesId),
+                      }}
+                    />
+                  )}
+                  // A review the lead drafted is posted from its card, only when the person says.
+                  review={(draft) => (
+                    <ReviewCard
+                      draft={draft}
+                      actions={{
+                        onChange: model.changeReview,
+                        onPost: (draftId) => void model.postReview(draftId),
+                        onPostFromNow: (draftId, automationId) => void model.postReviewsFromNow(draftId, automationId),
+                        onDiscard: (draftId) => void model.discardReview(draftId),
+                      }}
+                    />
+                  )}
+                  // A push the lead asked for is pushed as the outputs push: up to the head it shows.
+                  push={(request, at) => (
+                    <PushRequestOf
+                      request={request}
+                      at={at}
+                      {...(lead.name === '' ? {} : { by: lead.name })}
+                      pushing={model.pending}
+                      onPush={(head, url) => void model.push(head, url)}
+                    />
+                  )}
+                />
+              </ThreadShellProvider>
+              {waitingIssues.length > 1 && (
+                <div className={s.fileAll}>
+                  <Button
+                    variant="signal"
+                    size="small"
+                    busy={model.pending}
+                    onClick={() =>
+                      void (async () => {
+                        for (const draftId of waitingIssues) await model.fileIssueDraft(draftId)
+                      })()
+                    }
+                  >
+                    {text.fileAll(waitingIssues.length)}
+                  </Button>
+                </div>
+              )}
+              {snapshot.attention.map((request) => (request.kind === 'stuck' && request.stuck !== null ? stuckCall(request) : null))}
+              {/* Held for a usage limit with nothing asked of the person: another model can carry it on now, or it keeps waiting. */}
+              {snapshot.task.waits !== null && snapshot.attention.length === 0 && (
+                <HeldLimit
+                  key={`${snapshot.task.waits.agentId}:${snapshot.task.waits.until}`}
+                  waits={snapshot.task.waits}
+                  step={snapshot.task.step === 'review' || snapshot.task.step === 'settle' ? snapshot.task.step : 'implement'}
+                  agents={model.agents}
+                  agentName={agentName}
+                  onHandOver={(to) => void model.handOverHeld(to)}
+                  {...(snapshot.task.step === 'review' ? { onSkip: () => void model.skipReview() } : {})}
+                />
+              )}
+              {permissionCalls(snapshot.attention.filter((request) => request.kind === 'permission'))}
+            </Thread>
+          </TaskFace>
+        )}
+        {host.lightbox}
+        {abandoning && (
+          <AbandonTask
+            worktree={snapshot.task.worktree === null ? null : shortFolder(snapshot.task.worktree)}
+            branch={snapshot.task.branch}
+            changes={offered.map((one) => ({
+              id: one.url,
+              name: `${one.noun} ${one.prefix}${one.number}`,
+              host: productName(one.product),
+            }))}
+            abandoned={leftOpen !== null}
+            {...(mergedChange === undefined || !can('leaveOut')
+              ? {}
+              : {
+                  merged: {
+                    name: `${mergedChange.short} ${mergedChange.prefix}${mergedChange.number}`,
+                    commits: snapshot.task.unshipped?.commits ?? 0,
+                  },
+                })}
+            busy={model.pending}
+            {...(model.error === null ? {} : { error: model.error })}
+            onAbandon={(choices) =>
+              void model
+                .abandon(
+                  offered
+                    .filter((one) => choices.close.includes(one.url))
+                    .map((one) => ({
+                      url: one.url,
+                      name: `${one.short} ${one.prefix}${one.number}`,
+                      deleteBranch: choices.deleteBranch.includes(one.url),
+                    })),
+                )
+                .then(({ abandoned, open }) => {
+                  // Abandoned, with each it was to close closed: done. One its host wouldn't close stays offered, with why.
+                  if (!abandoned) return
+                  if (open.length === 0) endAbandoning()
+                  else setLeftOpen(open)
+                })
+            }
+            onClose={endAbandoning}
+          />
+        )}
+        {attaching !== null && (
+          <AttachPullRequest
+            key={attaching.start === undefined ? 'ask' : 'start'}
+            defaultValue={attaching.value}
+            {...(attaching.start === undefined
+              ? {}
+              : {
+                  start: attaching.start,
+                  onBack: () => {
+                    model.dismissError()
+                    setAttaching({ value: attaching.value })
+                  },
+                })}
+            busy={model.pending}
+            {...(model.error === null ? {} : { error: model.error })}
+            onAttach={(pullRequest, start) =>
+              void model.attach(pullRequest, start).then((done) => {
+                if (done === null) return
+                setAttaching(
+                  done.kind === 'start' ? { value: pullRequest, start: { name: done.name, source: done.source, own: done.own } } : null,
+                )
               })
-          }
-          onClose={endAbandoning}
-        />
-      )}
-      {attaching !== null && (
-        <AttachPullRequest
-          key={attaching.start === undefined ? 'ask' : 'start'}
-          defaultValue={attaching.value}
-          {...(attaching.start === undefined
-            ? {}
-            : {
-                start: attaching.start,
-                onBack: () => {
-                  model.dismissError()
-                  setAttaching({ value: attaching.value })
-                },
-              })}
-          busy={model.pending}
-          {...(model.error === null ? {} : { error: model.error })}
-          onAttach={(pullRequest, start) =>
-            void model.attach(pullRequest, start).then((done) => {
-              if (done === null) return
-              setAttaching(
-                done.kind === 'start' ? { value: pullRequest, start: { name: done.name, source: done.source, own: done.own } } : null,
-              )
-            })
-          }
-          onClose={() => setAttaching(null)}
-        />
-      )}
-      {outputShown !== undefined && threadId !== null && (
-        <BackgroundOutput
-          threadId={threadId}
-          id={outputShown.id}
-          name={outputShown.name ?? outputShown.label ?? outputShown.command}
-          command={outputShown.command}
-          onClose={() => setOutputOf(null)}
-        />
-      )}
-      {changes.open && (
-        <ChangeView
-          lights="space"
-          branch={snapshot.task.branch ?? ''}
-          {...(snapshot.task.baseRef === null ? {} : { base: snapshot.task.baseRef.replace(/^origin\//, '') })}
-          files={files.map((file) => ({ ...file, generated: isGenerated(file.path) }))}
-          selected={changes.selected}
-          onSelect={changes.select}
-          view={changes.view}
-          onRetry={changes.retry}
-          onClose={changes.close}
-          // An editor opens the task's folder there, at the file and its first change.
-          actions={
-            <OpenIn
-              taskId={snapshot.task.id}
-              {...(changes.selected === null ? {} : { path: changes.selected })}
-              {...(firstChange(changes.view) === undefined ? {} : { line: firstChange(changes.view) })}
-            />
-          }
-        />
-      )}
-    </div>
+            }
+            onClose={() => setAttaching(null)}
+          />
+        )}
+        {outputShown !== undefined && threadId !== null && (
+          <BackgroundOutput
+            threadId={threadId}
+            id={outputShown.id}
+            name={outputShown.name ?? outputShown.label ?? outputShown.command}
+            command={outputShown.command}
+            onClose={() => setOutputOf(null)}
+          />
+        )}
+        {changes.open && (
+          <ChangeView
+            lights="space"
+            branch={snapshot.task.branch ?? ''}
+            {...(snapshot.task.baseRef === null ? {} : { base: snapshot.task.baseRef.replace(/^origin\//, '') })}
+            files={[
+              ...files.map((file) => ({ ...file, generated: isGenerated(file.path) })),
+              ...changes.untouched
+                .filter((path) => !files.some((file) => file.path === path))
+                .map((path) => ({ path, status: 'modified' as const, add: 0, del: 0, untouched: true })),
+            ]}
+            selected={changes.selected}
+            onSelect={changes.select}
+            findings={changes.findings}
+            finding={changes.finding}
+            onFinding={changes.goToFinding}
+            view={changes.view}
+            onRetry={changes.retry}
+            onClose={changes.close}
+            // An editor opens the task's folder there, at the file and its first change.
+            actions={
+              <OpenIn
+                taskId={snapshot.task.id}
+                {...(changes.selected === null ? {} : { path: changes.selected })}
+                {...(editorLine === undefined ? {} : { line: editorLine })}
+              />
+            }
+          />
+        )}
+      </div>
+    </OpenFinding.Provider>
   )
 }
