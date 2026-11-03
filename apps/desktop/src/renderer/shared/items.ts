@@ -154,7 +154,7 @@ export const waiting = (items: ReadonlyArray<ThreadItem>): ReadonlyArray<string>
  * flashing in the queue.
  */
 export const queueShown = (session: { readonly turnRunning: boolean } | null, sending: boolean): boolean =>
-  session === null ? !sending : session.turnRunning
+  !sending && (session === null || session.turnRunning)
 
 /**
  * Whether what waits after the agent's last reply is being read now, with
@@ -190,7 +190,7 @@ export const queuedOf = (
   !shown
     ? []
     : items.flatMap((item) =>
-        item.kind === 'user_message' && item.input?.state === 'queued' && !item.input.interrupting
+        item.kind === 'user_message' && item.input?.state === 'queued' && !item.input.interrupting && !isSending(item.id)
           ? [
               {
                 id: item.id,

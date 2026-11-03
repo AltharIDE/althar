@@ -98,6 +98,8 @@ export const text = {
   queued: 'Queued',
   queue: (n: number) => (n === 1 ? 'Queued' : `${n} queued`),
   placeholderBusy: 'Add to the queue, or interrupt the coordinator',
+  /** Whose usage the composer's ring says, under the context. */
+  usageHeading: 'Today',
   signedOut: (agent: string, instead: string) => `${agent} isn't signed in. Using ${instead}.`,
   signIn: 'Sign in again',
   needsAgent: 'No agent is signed in.',
@@ -435,7 +437,7 @@ export function ProjectView({
         onUnqueue={(id) => void model.takeBack(id)}
         text={{ queued: text.queue, sendNowKey: modKey(keys.return) }}
         placeholder={busy ? text.placeholderBusy : text.placeholder}
-        meter={contextMeter(session, named, model.compact)}
+        meter={contextMeter(session, named, model.compact, { usage: coordinator?.usage, heading: text.usageHeading })}
         picker={
           model.agents.length > 0 &&
           chosen !== null && (
