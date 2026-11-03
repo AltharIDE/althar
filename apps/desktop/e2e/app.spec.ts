@@ -65,9 +65,9 @@ test('makes the first project of a repository it found, starts a task, and talks
     // Its card shows in the Talk room, and opens the task.
     await page.getByRole('button', { name: /Open task/ }).click()
 
-    // Ready to accept, as its card says; it built nothing, and its Outputs say so, over Althar's light.
+    // Nothing built, as its card says: there is nothing to accept, and its Outputs say so, over Althar's light.
     await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call', level: 1 })).toBeVisible()
-    await expect(shown(page, 'Ready to accept', { exact: true })).toBeVisible()
+    await expect(shown(page, 'Nothing built', { exact: true })).toBeVisible()
     await page.keyboard.press('o')
     await expect(page.getByRole('heading', { name: 'Nothing changed', level: 2 })).toBeVisible()
     await page.keyboard.press('c')

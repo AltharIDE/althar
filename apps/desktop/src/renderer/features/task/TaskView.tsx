@@ -680,14 +680,22 @@ export function TaskView({
   const mergedChange = snapshot.task.changes.findLast((one) => one.state === 'merged')
   // A task that finished and isn't a change: Done and Keep for later, beside where it stands; a review only keeps, as it settles
   // once posted. Anything else is said to its lead. Not while its lead is mid-turn: what it does may still change where it stands.
-  const settleable = !busy && isSettleable({ kind: snapshot.task.kind ?? 'change', phase: snapshot.task.phase ?? '' })
+  const settleable =
+    !busy &&
+    isSettleable({ kind: snapshot.task.kind ?? 'change', phase: snapshot.task.phase ?? '', nothingBuilt: snapshot.task.nothingBuilt })
   // Done for a plain task, or a review posted and answered since; one with a draft settles as it is posted.
-  const done = takesDone({ kind: snapshot.task.kind ?? 'change', reviewing: snapshot.task.review })
+  const done = takesDone({
+    kind: snapshot.task.kind ?? 'change',
+    reviewing: snapshot.task.review,
+    nothingBuilt: snapshot.task.nothingBuilt,
+  })
   const settle = settleable ? (
     <SettleWays
       place="header"
       {...(done ? { onDone: () => void model.markDone(), doneHint: boardText.doneHint } : {})}
-      {...(snapshot.task.phase === 'ready' ? { onKeep: () => void model.keep(), keepHint: boardText.keepHint } : {})}
+      {...(snapshot.task.phase === 'ready' && snapshot.task.kind !== 'change'
+        ? { onKeep: () => void model.keep(), keepHint: boardText.keepHint }
+        : {})}
       {...(model.doing === doing.markDone ? { busy: 'done' as const } : model.doing === doing.keep ? { busy: 'keep' as const } : {})}
     />
   ) : null

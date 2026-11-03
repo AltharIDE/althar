@@ -525,6 +525,8 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
         // Handed back (a conflict its lead couldn't resolve) says so first; else commits in no pull request yet; as its header says.
         word: readyWordOf(work, work.change),
         ...(object === null ? {} : { object }),
+        // Nothing built: no accept to press; Done settles it where it is, in its corner.
+        ...(work.nothingBuilt === true ? { corner: settleWaysOf(work, actions) } : {}),
         // Its conflict the person's: not asked of its lead, why, and Resolve now, which asks it anyway; handed back by its lead,
         // why alone, as asking it again asks what it couldn't do, and the task, which the card opens, is where it is settled (DEV-173).
         ...(work.handedBack != null
@@ -593,7 +595,7 @@ const settleWaysOf = (work: BoardTask, actions: CardActions | undefined): ReactN
   return (
     <SettleWays
       {...(takesDone(work) ? { onDone: () => void markDone(work.taskId), doneHint: text.doneHint } : {})}
-      {...(work.phase === 'ready' ? { onKeep: () => void keep(work.taskId), keepHint: text.keepHint } : {})}
+      {...(work.phase === 'ready' && work.kind !== 'change' ? { onKeep: () => void keep(work.taskId), keepHint: text.keepHint } : {})}
       {...(actions?.settling?.has(work.taskId) === true ? { busy: 'done' as const } : {})}
     />
   )

@@ -129,7 +129,7 @@ export const briefOf = (task: HomeTask): string => {
       needText.findings(reviewing.findings),
     ].join(' · ')
   // A task that isn't a change, finished: what its lead said, in its first line; else where it wrote.
-  if (task.kind === 'plain') {
+  if (task.kind === 'plain' || task.nothingBuilt === true) {
     const said = task.summary?.split('\n').find((line) => line.trim() !== '')
     if (said !== undefined) return said
   }
@@ -149,7 +149,12 @@ export const briefOf = (task: HomeTask): string => {
 
 /** The one next thing a ready task's open pull request needs, where it has one: none for a review, a plain task, a conflict handed back, or checks its lead brought to the person. */
 export const nextOf = (task: HomeTask): Next | null =>
-  task.kind !== 'change' || task.handedBack != null || task.checksBack != null || task.change === null || task.change.state !== 'open'
+  task.kind !== 'change' ||
+  task.nothingBuilt === true ||
+  task.handedBack != null ||
+  task.checksBack != null ||
+  task.change === null ||
+  task.change.state !== 'open'
     ? null
     : standingOf(task.change).next
 
