@@ -73,10 +73,18 @@ export const AccountStatus = Schema.Struct({
   adoptedFrom: Schema.NullOr(Schema.String),
   /**
    * For an agent that reaches several providers with sign-ins of their own (OpenCode): each one it lists as signed in, and, where
-   * a turn on it was refused since, when. Not given where the agent has one sign-in for everything.
+   * a turn on it was refused since, when; how it is paid for where that is known (OpenCode Go a plan, Zen per use). Not given
+   * where the agent has one sign-in for everything.
    */
   providers: Schema.optional(
-    Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String, refusedAt: Schema.NullOr(Schema.String) })),
+    Schema.Array(
+      Schema.Struct({
+        id: Schema.String,
+        name: Schema.String,
+        refusedAt: Schema.NullOr(Schema.String),
+        pays: Schema.optional(Schema.Literals(['plan', 'key'])),
+      }),
+    ),
   ),
 })
 export type AccountStatus = typeof AccountStatus.Type
@@ -293,12 +301,57 @@ export type AgentsAtOnce = typeof AgentsAtOnce.Type
 export const FolderWait = Schema.Literals(['smart', 'day', 'week', 'month', 'never'])
 export type FolderWait = typeof FolderWait.Type
 
+/**
+ * How plans start and how long review goes on. Each is a choice from a few, today's value kept until the person changes it;
+ * it applies from the next plan proposed or round of review.
+ */
+export const COUNTDOWNS = [0, 10, 25, 60] as const
+export const REVIEW_ROUNDS = [1, 2, 3, 5] as const
+
+export const PlansAndReviews = Schema.Struct({
+  /** Seconds a proposed plan waits before it starts on its own; 0 starts it at once. */
+  countdown: Schema.Literals(COUNTDOWNS),
+  /** Review rounds before a task is left to the person with findings open. */
+  rounds: Schema.Literals(REVIEW_ROUNDS),
+})
+export type PlansAndReviews = typeof PlansAndReviews.Type
+
+/** What of them is changed: the rest stays. */
+export type PlansAndReviewsChange = { readonly [Key in keyof PlansAndReviews]?: PlansAndReviews[Key] | undefined }
+
+/** Today's values, which a setting keeps until the person changes it. */
+export const PLANS_AND_REVIEWS: PlansAndReviews = { countdown: 25, rounds: 3 }
+
+/**
+ * What a project's rules start from when it is made. A project made earlier keeps its own rules, and each is changed in a
+ * project afterwards on its rules screen.
+ */
+export const NewProjectDefaults = Schema.Struct({
+  /** What no rule keeps: allowed, judged by the coordinator, or asked about. */
+  permissions: Schema.Literals(['rules', 'coordinator', 'ask']),
+  /** What happens to the work when an agent's account runs out. */
+  usageLimit: Schema.Literals(['move', 'wait', 'ask']),
+  /** Whether work goes on with an agent's next account before the limit applies. */
+  rotateAccounts: Schema.Boolean,
+  /** How a task ends when its plan doesn't say. */
+  end: Schema.Literals(['draft', 'ready', 'none']),
+})
+export type NewProjectDefaults = typeof NewProjectDefaults.Type
+
+/** What of them is changed: the rest stays. */
+export type NewProjectDefaultsChange = { readonly [Key in keyof NewProjectDefaults]?: NewProjectDefaults[Key] | undefined }
+
+/** What a project's rules are made with when the person has chosen nothing. */
+export const NEW_PROJECT_DEFAULTS: NewProjectDefaults = { permissions: 'rules', usageLimit: 'move', rotateAccounts: false, end: 'draft' }
+
 /** How the review seal on a pull request looks: a round engraved stamp, a pressed wax seal, or a printer's colophon. */
 export const SealStyle = Schema.Literals(['ring', 'wax', 'colophon'])
 export type SealStyle = typeof SealStyle.Type
 
 /** The person's settings for the app as a whole. */
 export const AppSettings = Schema.Struct({
+  plansAndReviews: PlansAndReviews,
+  newProjects: NewProjectDefaults,
   /** Althar as co-author of what it sends to a code host, on unless turned off; `line` is the trailer each commit gets. */
   coAuthor: Schema.Struct({ on: Schema.Boolean, line: Schema.String }),
   /** A pull request Althar opens says how its change was reviewed, on unless turned off: a seal in its corner, in `style`, and what the review changed and kept. */
@@ -1411,6 +1464,8 @@ export const Finding = Schema.Struct({
   file: Schema.NullOr(Schema.String),
   line: Schema.NullOr(Schema.Number),
   claim: Schema.String,
+  /** The finding in a line, as its reviewer titled it; absent from a review before reviewers gave one. */
+  title: Schema.optional(Schema.NullOr(Schema.String)),
 })
 export type Finding = typeof Finding.Type
 
@@ -1759,6 +1814,8 @@ export const TaskCard = Schema.Struct({
       steps: Schema.Array(PlanStep),
       /** When it starts on its own; null once held or started. */
       startsAt: Schema.NullOr(Schema.String),
+      /** How many seconds it waited from being proposed to starting on its own: the whole countdown, as the person's setting had it then. */
+      startsAfter: Schema.optional(Schema.Number),
       /** Why the coordinator chose the lead. */
       reason: Schema.NullOr(Schema.String),
       /** What happens when the work is done; null where nothing reaches the repository's host. */
@@ -1787,6 +1844,8 @@ export const TaskCard = Schema.Struct({
   earlier: Schema.optional(Schema.Array(ChangeSummary)),
   /** Commits after its last pull request merged or closed, in none yet; null or absent where there are none. */
   unshipped: Schema.optional(Schema.NullOr(Unshipped)),
+  /** A change ready that built nothing: no commits on its branch and no pull request open or merged. Absent otherwise. */
+  nothingBuilt: Schema.optional(Schema.Boolean),
   /** The step it is on, by key, while it runs. */
   step: Schema.NullOr(Schema.String),
   /** It runs a round of work after its plan, as the person asked its lead for more (ADR-034). */
@@ -2199,6 +2258,33 @@ export const AutomationItem = Schema.Struct({
   content: AutomationCard,
 })
 
+/**
+ * The coordinator asking the person to stop, hold, restart or settle a task,
+ * in its thread, where no message of theirs in that turn asked it to
+ * (ADR-086): one button, which does it as the person's own press, and Not
+ * now. Answered, it says what became of it: done, declined, or nothing to do
+ * any more and why. Althar posts it and keeps it current.
+ */
+export const TaskAskItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('task_ask'),
+  content: Schema.Struct({
+    taskId: Schema.String,
+    /** The task's own thread, where its title opens it. */
+    threadId: Schema.String,
+    slug: Schema.String,
+    /** The task's title when it was asked. */
+    title: Schema.String,
+    /** What it asks: to stop the task, or only its lead's turn; hold its plan; restart it; or settle it done, kept for later, or discarded. */
+    move: Schema.Literals(['stop', 'stop_turn', 'hold', 'restart', 'done', 'keep', 'discard']),
+    /** Why the coordinator asks, in a line. */
+    why: Schema.NullOr(Schema.String),
+    state: Schema.Literals(['open', 'done', 'declined', 'moot']),
+    /** What was done, or why there was nothing to do; null while open, and when declined. */
+    said: Schema.NullOr(Schema.String),
+  }),
+})
+
 export const ThreadItem = Schema.Union([
   UserMessageItem,
   AgentTextItem,
@@ -2217,6 +2303,7 @@ export const ThreadItem = Schema.Union([
   IssueChangesItem,
   AutomationItem,
   PicturesItem,
+  TaskAskItem,
 ])
 export type ThreadItem = typeof ThreadItem.Type
 
@@ -2227,7 +2314,9 @@ export type ContextUse = typeof ContextUse.Type
 /**
  * What a task, or the coordinator's day, used of one account its agents ran
  * on (ADR-084): on a plan, the share of its week; paid per use, the dollars.
- * No total across accounts: a share of a week and dollars don't add up.
+ * No total across accounts: a share of a week and dollars don't add up. An
+ * agent that reaches several providers, each paid its own way (OpenCode), has
+ * one for each provider its turns ran on.
  */
 export const AccountUse = Schema.Struct({
   accountId: Schema.String,
@@ -2248,6 +2337,10 @@ export const AccountUse = Schema.Struct({
   /** The models that ran on it, by id, in the order they first did. */
   models: Schema.Array(Schema.String),
   tokens: Schema.Number,
+  /** The provider within the agent these turns ran on, by id (OpenCode's `opencode`, Zen); absent for an agent with one. */
+  provider: Schema.optional(Schema.String),
+  /** Why there is no figure, where it can't be known: said on the figure, as its place stays quiet. */
+  why: Schema.optional(Schema.String),
 })
 export type AccountUse = typeof AccountUse.Type
 
@@ -2509,6 +2602,54 @@ export const DiffLine = Schema.Union([
 ])
 export type DiffLine = typeof DiffLine.Type
 
+/**
+ * Something a review of a task found, as it stands: what the reviewer said,
+ * in which review, and what the lead did about it. `at` is where it points
+ * in the task's change as it is now, its line carried past what changed
+ * since the review read it; null where it points at no file of the change's
+ * repositories (a picture, a check), or at one gone since.
+ */
+export const TaskFinding = Schema.Struct({
+  id: Schema.String,
+  /** The review that found it, by its attempt: what a review's report names. */
+  review: Schema.String,
+  /** The review round that found it, from 0. */
+  round: Schema.Number,
+  severity: Finding.fields.severity,
+  /** The finding in a line, as its reviewer titled it; null from a reviewer that gave none. */
+  title: Schema.NullOr(Schema.String),
+  claim: Schema.String,
+  /** Where the reviewer said, as it read the change. */
+  file: Schema.NullOr(Schema.String),
+  line: Schema.NullOr(Schema.Number),
+  at: Schema.NullOr(
+    Schema.Struct({
+      /** As the task's Changes view names it: with its repository's slug first, for a task of several. */
+      path: Schema.String,
+      /** Its line in the file now, from 1; null where the reviewer named the file alone. */
+      line: Schema.NullOr(Schema.Number),
+      /** The task changed the file since the review read it, the line it points at among what changed. */
+      changed: Schema.Boolean,
+      /** The task's change leaves the file as it was: it is in the change only because the finding names it. */
+      untouched: Schema.Boolean,
+    }),
+  ),
+  state: Schema.Literals(['open', 'fixed', 'set_aside']),
+  /** The lead's words on it: what changed, for one fixed; why it stays, for one set aside. */
+  reason: Schema.NullOr(Schema.String),
+  /** The commit the lead said fixed it. */
+  commit: Schema.NullOr(Schema.String),
+})
+export type TaskFinding = typeof TaskFinding.Type
+
+/**
+ * What the reviews of one of a task's runs found, oldest review first, each
+ * review's in the reviewer's order; read from the store and git when asked
+ * for. `review` is the review asked about, where one was and is known.
+ */
+export const TaskFindings = Schema.Struct({ findings: Schema.Array(TaskFinding), review: Schema.NullOr(Schema.String) })
+export type TaskFindings = typeof TaskFindings.Type
+
 /** One file's diff, read from git when asked for, never kept: its lines, cut short past a limit and saying so. */
 export const FileDiff = Schema.Struct({
   file: ChangedFile,
@@ -2690,6 +2831,8 @@ export const ThreadSnapshot = Schema.Struct({
     changes: Schema.Array(ChangeSummary),
     /** Commits after its last pull request merged or closed, in none yet: what Open a new pull request opens one with. */
     unshipped: Schema.optional(Schema.NullOr(Unshipped)),
+    /** A change ready that built nothing: no commits on its branch, no pull request open or merged. Absent otherwise. */
+    nothingBuilt: Schema.optional(Schema.Boolean),
     /** The review of its run under way can still be skipped, as the person may (ADR-034). */
     skipReview: Schema.optional(Schema.Boolean),
     /** It runs a round of work after its plan. */
@@ -3232,6 +3375,7 @@ const socketCalls = new Set<string>([
   'FindCode',
   'ReadCode',
   'GetFileDiff',
+  'GetTaskFindings',
   'GetBoard',
   'GetOlderSettled',
   'GetHome',
@@ -3387,7 +3531,18 @@ export const Api = RpcGroup.make(
     ThreadSnapshot,
   ),
   /** One file a task changed, as a diff from its base to its worktree. */
-  call('GetFileDiff', { taskId: Schema.String, path: Schema.String }, FileDiff),
+  /**
+   * One file a task changed, as a diff from its base to its worktree; with
+   * `untouched`, a file it left as it was, every line of it unchanged, as a
+   * review's finding may name one.
+   */
+  call('GetFileDiff', { taskId: Schema.String, path: Schema.String, untouched: Schema.optional(Schema.Boolean) }, FileDiff),
+  /**
+   * What the reviews of a task's run found, each where it is in the change
+   * now and what became of it: the run of the review whose report is
+   * `review`, a thread item; without it, the latest run that found anything.
+   */
+  call('GetTaskFindings', { taskId: Schema.String, review: Schema.optional(Schema.String) }, TaskFindings),
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
   call('GetBoard', { projectId: Schema.String }, BoardSnapshot),
   /** The next page of a project's settled tasks, as cards, older than the one settled at `before` (`taskId` breaking a tie), most recent first. */
@@ -3596,6 +3751,8 @@ export const Api = RpcGroup.make(
   command('RunAutomationNow', { automationId: Schema.String, itemId: Schema.optional(Schema.String) }, Schema.Void),
   /** Deletes an automation: nothing of it starts again. The tasks its runs made stay. */
   command('DeleteAutomation', { automationId: Schema.String }, Schema.Void),
+  /** The person answers the coordinator's card asking to stop, hold, restart or settle a task: yes does it, as their own press would. */
+  command('AnswerTaskAsk', { itemId: Schema.String, yes: Schema.Boolean }, Schema.Void),
   /** Puts back what the coordinator changed an automation from, as the card in its thread shows it. */
   command('UndoAutomationChange', { itemId: Schema.String }, Schema.Void),
   /** Whether an automation's reviews post themselves once drafted, as the person said on its first; an outside pull request's still waits. */
@@ -3610,6 +3767,26 @@ export const Api = RpcGroup.make(
   command('SetAgentsAtOnce', { count: Schema.NullOr(AtOnceCount) }, Schema.Void),
   /** When finished tasks' folders go from now on; a sweep runs at once by it. */
   command('SetFolderWait', { wait: FolderWait }, Schema.Void),
+  /** Changes how plans start and how long review goes on, from the next plan or round; what isn't given stays. */
+  command(
+    'SetPlansAndReviews',
+    {
+      countdown: Schema.optional(PlansAndReviews.fields.countdown),
+      rounds: Schema.optional(PlansAndReviews.fields.rounds),
+    },
+    Schema.Void,
+  ),
+  /** Changes what the rules of projects made from now on start with; a project made earlier keeps its own. What isn't given stays. */
+  command(
+    'SetNewProjectDefaults',
+    {
+      permissions: Schema.optional(NewProjectDefaults.fields.permissions),
+      usageLimit: Schema.optional(NewProjectDefaults.fields.usageLimit),
+      rotateAccounts: Schema.optional(NewProjectDefaults.fields.rotateAccounts),
+      end: Schema.optional(NewProjectDefaults.fields.end),
+    },
+    Schema.Void,
+  ),
   /** Finished tasks' folders on this computer, with the disk they are on: sizes not yet measured start being measured. */
   call('GetTaskFolders', {}, TaskFolders),
   /** Removes every finished task's folder nothing holds, whatever its wait; their branches stay, and each comes back when its task needs it. */

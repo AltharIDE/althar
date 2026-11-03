@@ -82,19 +82,25 @@ describe('accounts in settings', () => {
     expect(accountEntry({ ...usual('acc_4', 'unknown') }, now).state).toEqual({ kind: 'ready' })
   })
 
-  it('names the provider that refused work lately, though the account is signed in, and no other', () => {
+  it('says Go and Zen each in its own state, the one that refused work lately as its button, and no provider it can’t place', () => {
     const providers = [
-      { id: 'opencode-go', name: 'OpenCode Go', refusedAt: '2026-11-02T20:43:44.187Z' },
+      { id: 'opencode-go', name: 'OpenCode Go', refusedAt: '2026-11-02T20:43:44.187Z', pays: 'plan' as const },
       { id: 'anthropic', name: 'Anthropic', refusedAt: null },
+      { id: 'opencode', name: 'OpenCode Zen', refusedAt: null, pays: 'key' as const },
     ]
     expect(accountEntry({ ...usual('acc_5', 'signed_in'), providers })).toMatchObject({
-      refused: 'OpenCode Go',
+      providers: [
+        { name: 'OpenCode Go', paid: 'plan', refused: true },
+        { name: 'OpenCode Zen', paid: 'key' },
+      ],
       state: { kind: 'ready' },
     })
     expect(accountEntry({ ...usual('acc_5', 'signed_in'), providers })).not.toHaveProperty('who')
-    expect(accountEntry({ ...usual('acc_5', 'signed_in'), providers: [{ ...providers[0]!, refusedAt: null }] })).not.toHaveProperty(
-      'refused',
-    )
+    // A fresh Go key puts it right: Go is on its plan again, nothing to sign in to.
+    expect(accountEntry({ ...usual('acc_5', 'signed_in'), providers: [{ ...providers[0]!, refusedAt: null }] }).providers).toEqual([
+      { name: 'OpenCode Go', paid: 'plan' },
+    ])
+    expect(accountEntry({ ...usual('acc_5', 'signed_in'), providers: [providers[1]!] })).not.toHaveProperty('providers')
   })
 
   it('offers no second account for an agent whose sign-in every folder shares', async () => {

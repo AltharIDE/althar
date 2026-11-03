@@ -15,6 +15,8 @@ export const kindWords = {
   limit: 'Out of usage',
   /** Work done, waiting to be accepted. */
   ready: 'Ready to accept',
+  /** A change its lead finished with nothing on its branch and no pull request: nothing to accept; the person settles it, answers, or discards it. */
+  nothingBuilt: 'Nothing built',
   /** Work done with commits after its last pull request, in none yet: a new pull request is the person's to open. */
   unshipped: 'Ready for a new pull request',
   /** A review of someone else's pull request, drafted, waiting to be posted. */
@@ -35,6 +37,7 @@ export const readyKindOf = (task: {
   readonly checksBack?: string | null | undefined
   readonly kind?: string | undefined
   readonly unshipped?: unknown
+  readonly nothingBuilt?: boolean | undefined
   readonly change?: { readonly state: string } | null | undefined
   readonly reviewing?: Reviewing
 }): string =>
@@ -44,9 +47,11 @@ export const readyKindOf = (task: {
       ? kindWords.finished
       : task.handedBack != null || task.checksBack != null
         ? kindWords.stuck
-        : isUnshipped(task)
-          ? kindWords.unshipped
-          : kindWords.ready
+        : task.nothingBuilt === true
+          ? kindWords.nothingBuilt
+          : isUnshipped(task)
+            ? kindWords.unshipped
+            : kindWords.ready
 
 /** Whether a task has commits after its last pull request merged or closed (or with none), and no pull request open to accept. */
 export const isUnshipped = (task: {
@@ -86,15 +91,35 @@ export const isFinished = (task: { readonly kind: string; readonly phase: string
 
 /**
  * Whether a task is the person's to settle with Done or Keep for later: a
- * finished task that isn't a change, waiting in Needs you or kept for later.
- * A review with a draft only keeps: it settles as its draft is posted.
+ * finished task that isn't a change, or a change that built nothing (Done
+ * only), waiting in Needs you or kept for later. A review with a draft only
+ * keeps: it settles as its draft is posted.
  */
-export const isSettleable = (task: { readonly kind: string; readonly phase: string }): boolean =>
-  task.kind !== 'change' && (task.phase === 'ready' || task.phase === 'kept')
+export const isSettleable = (task: {
+  readonly kind: string
+  readonly phase: string
+  readonly nothingBuilt?: boolean | undefined
+}): boolean =>
+  (task.kind !== 'change' || (task.nothingBuilt === true && task.phase === 'ready')) && (task.phase === 'ready' || task.phase === 'kept')
 
-/** Whether a settleable task takes Done: a plain one, or a review answered; a review with a draft settles as it is posted. */
-export const takesDone = (task: { readonly kind: string; readonly reviewing?: Reviewing }): boolean =>
-  task.kind === 'plain' || (task.kind === 'review' && isAnswered(task.reviewing))
+/**
+ * What a finished lead's report leaves to the person, in a line: the last line of it that asks, else its last line. Null where
+ * it said nothing. Bullets and numbers its options come in are dropped.
+ */
+export const askOf = (summary: string | null | undefined): string | null => {
+  const lines = (summary ?? '')
+    .split('\n')
+    .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, '').trim())
+    .filter((line) => line !== '')
+  return lines.findLast((line) => line.endsWith('?')) ?? lines.at(-1) ?? null
+}
+
+/** Whether a settleable task takes Done: a plain one, a change that built nothing, or a review answered; a review with a draft settles as it is posted. */
+export const takesDone = (task: {
+  readonly kind: string
+  readonly reviewing?: Reviewing
+  readonly nothingBuilt?: boolean | undefined
+}): boolean => task.kind === 'plain' || task.nothingBuilt === true || (task.kind === 'review' && isAnswered(task.reviewing))
 
 /**
  * Whether a task waits on the person as work ready for them: a change to

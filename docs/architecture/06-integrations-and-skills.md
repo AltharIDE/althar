@@ -196,7 +196,7 @@ What isn't alike, as read on 31 October 2026:
 | Reviewing a pull request Althar didn't open (`reviews`) | GitLab, Bitbucket Cloud and Data Center | Not built: each takes comments on lines | ADR-082, task 1 |
 | Running a failed check again | Bitbucket Cloud | Not built: its pipeline can run again, whole | ADR-081, task 1 |
 | Running a failed check again, and its log (`checkLogs`) | Bitbucket Data Center | Can't: its builds are another service's | Said, with the build's link |
-| A merge queue, or merging once green | GitLab, Bitbucket Cloud and Data Center | Not built: GitLab's merge trains and auto-merge, Data Center's auto-merge. Bitbucket Cloud's queue can't be entered through its API | ADR-081, task 5, with an errand standing in, one merge at a time into each branch |
+| A merge queue | GitHub without one on the branch, GitLab without merge trains, Bitbucket Cloud without one, and Data Center | GitHub's and GitLab's are the project's settings, and Data Center has none | Althar's merge line stands in, one merge at a time into each branch (ADR-081, task 5), with auto-merge as its merge on GitLab and on Data Center from 8.15 |
 | Reopening a closed one | Bitbucket Cloud | Can't: declining is final | Closing is asked-for there |
 | A draft release | GitLab, Bitbucket Cloud and Data Center | Can't: GitLab's releases have no draft, and Bitbucket has no releases | ADR-081, task 8, publishing as each host does |
 | Approving a run | Bitbucket Cloud and Data Center | Can't: a manual step on Cloud has no API, and Data Center's builds are another service's | The person's press, linked |
@@ -378,11 +378,28 @@ request that names the issue links it.
   request merged, or, where it has none, its branch in its default branch
   here. A pull request closed without merging keeps the task open. Until
   then, the thread says which is still open.
-- **Merging is the person's.** The model has `merge`, and Althar calls it
-  only when the person accepts the change (from the board, or the task),
-  never on an agent's word: the rules refuse agents' merges. A draft is
-  marked ready first, and only the head Althar last read is merged, in the
-  first way the repository allows.
+- **Merging waits for the person's word.** The model has `merge`, and
+  Althar calls it when the person accepts the change (from the board, or the
+  task), or when they ask the coordinator ([04](04-coordinator.md#merging-on-the-persons-word)):
+  never on an agent's own initiative, and the rules still refuse agents'
+  `gh pr merge`. A draft is marked ready first on accepting, and only the
+  head Althar last read is merged, in the way asked or the first the
+  repository allows.
+- **How a branch merges** is the host's to say (`mergeWays`): GitHub's merge
+  queue on the branch, Bitbucket Cloud's (one of its `merge-queues`
+  not `INACTIVE`, `DRAINING` or `SUSPENDED`, entered by its merge call,
+  which on such a branch queues it; a workspace that won't say has none), GitLab's merge trains
+  (Premium's `merge_trains_enabled`), and auto-merge: GitLab's on every tier (both
+  `auto_merge` and the older `merge_when_pipeline_succeeds` are sent), Data
+  Center's from 8.15 by its `application-properties`. `enqueue` and
+  `leaveQueue` enter and leave the queue or train at the head read, and
+  `leaveQueue` turns auto-merge off. `branchHead` and `contains` say whether a
+  branch has its target's head: GitHub's compare, GitLab's and Bitbucket
+  Cloud's merge base, Data Center's commits between. GitHub's update-branch
+  lands in the background, so the head it says may be null, or someone
+  else's push: `madeFrom` says whether a head is the merge it made, one whose
+  first parent is the head it had, so the merge line takes no one else's
+  push for Althar's, and asks again later for one that hadn't landed.
 - **A repository's host** is found from its remote URL, matched against
   known hosts and the instances the person has connected.
 
@@ -1050,9 +1067,9 @@ external observation, not Althar's run authority.
 
 What is built so far is narrower than this section: one store on the
 computer, a curated default catalog and each lead's set fixed and recorded
-for its session ([ADR-088](../decisions/088-skills-one-store-a-curated-catalog.md)),
+for its session ([ADR-090](../decisions/090-skills-one-store-a-curated-catalog.md)),
 and skill and OpenSpec files held off the repository unless the project says
-so ([ADR-089](../decisions/089-skill-and-openspec-files-stay-off-the-repository.md)).
+so ([ADR-091](../decisions/091-skill-and-openspec-files-stay-off-the-repository.md)).
 Bindings by scope, precedence and conflicts are not built; every lead gets
 the same active set, and the catalog's skills are off until the person turns
 them on. [The plan](../plans/skills-across-harnesses.md#implementation-status)

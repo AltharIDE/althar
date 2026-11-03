@@ -90,6 +90,8 @@ export interface RuntimeOptions {
   readonly countdown?: Duration.Duration
   /** How often a task's pull requests are asked for news while it listens: 30 seconds unless a test says otherwise. */
   readonly listenEvery?: Duration.Duration
+  /** How often the merge line is swept, and whether at all (not with an infinite one): 30 seconds unless a test says otherwise (MergeLine.ts). */
+  readonly mergeLineEvery?: Duration.Duration
   /** When finished tasks' folders are first swept after Althar starts, and how often after: 2 minutes and an hour unless a test says otherwise (ADR-056). */
   readonly foldersFirst?: Duration.Duration
   readonly foldersEvery?: Duration.Duration

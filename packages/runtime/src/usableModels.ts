@@ -1,4 +1,5 @@
 import { isAgentDefault, knownModelName } from '@althar/contracts'
+import type { AgentDefinition } from '@althar/provider-adapters'
 import { Effect, Option } from 'effect'
 
 import { Agents } from './Config'
@@ -104,11 +105,11 @@ export const usableModels = (projectId?: string) =>
         if (Option.isNone(starts)) continue
         const account = yield* signIns.account(starts.value)
         if (account.status === 'signed_out') continue
-        // A plan pays where that account is on one, not just any signed in.
-        const plan = account.paidBy === 'plan'
-        const room = plan ? Option.getOrNull(yield* limits.room(starts.value.id, named)) : null
         // An agent with a sign-in for each provider it reaches (OpenCode): this model may go through one that refused it lately.
         const through = entry.definition.signIn.providers?.of(model.id)
+        // A plan pays where that account is on one, not just any signed in, or where the model goes through a provider that is one (OpenCode Go).
+        const plan = account.paidBy === 'plan' || onPlanProvider(entry.definition, through)
+        const room = plan ? Option.getOrNull(yield* limits.room(starts.value.id, named)) : null
         if (through !== undefined && !refusing.has(starts.value.id)) {
           const rows = (yield* signIns.providers(starts.value, account)) ?? []
           refusing.set(starts.value.id, new Map(rows.flatMap((row) => (row.refusedAt === null ? [] : [[row.id, row.name] as const]))))
@@ -143,6 +144,10 @@ export const usableModels = (projectId?: string) =>
         a.name.localeCompare(b.name),
     )
   })
+
+/** Whether a model goes through a provider of the agent's that is a plan with limits of its own (OpenCode Go), whatever pays for the rest. */
+export const onPlanProvider = (definition: AgentDefinition, through: string | undefined): boolean =>
+  through !== undefined && (definition.signIn.providers?.plans ?? []).includes(through)
 
 /** The ways to a model, the best first: a provider that refused its sign-in last, then a plan with room before one nearly out, a plan before a key; else in the agents' order. */
 export const bestFirst = (routes: ReadonlyArray<Route>): ReadonlyArray<Route> =>

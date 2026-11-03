@@ -620,24 +620,38 @@ export class Tasks extends Context.Service<
 
       /**
        * Whether it can be settled as Done now: open, finished or its lead at work on it as the person told it, nothing waiting on
-       * the person, and not a change. A quick task, or a review whose review was posted and that its lead answered since.
+       * the person, and not a change that built something. A quick task, a review whose review was posted and that its lead
+       * answered since, or a change whose lead built nothing.
        */
       const doneable = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [task] = yield* sql<{ projectId: ProjectId; state: string; run: string | null; answered: number; open: number }>`
+          // A change whose lead built nothing has nothing to merge: Done settles it as it is, opening and merging nothing.
+          // Only a change: a quick task or a review has its own way to settle.
+          const built = yield* changes.nothingBuilt(taskId).pipe(Effect.orElseSucceed(() => false))
+          const empty = `(${built ? 1 : 0} = 1 AND NOT ${quickIn('k')} AND NOT ${answeredIn('k')})`
+          const [task] = yield* sql<{
+            projectId: ProjectId
+            state: string
+            run: string | null
+            answered: number
+            empty: number
+            open: number
+          }>`
             SELECT k.project_id, k.state,
               (SELECT state FROM runs WHERE task_id = k.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS run,
               ${sql.unsafe(answeredIn('k'))} AS answered,
+              ${sql.unsafe(empty)} AS empty,
               (SELECT count(*) FROM attention_requests a WHERE a.task_id = k.id AND a.state = 'open')
               + ${sql.unsafe(issueCardsWaiting('k'))}
               + (SELECT count(*) FROM task_plans p WHERE p.task_id = k.id AND p.state = 'proposed')
-              + (SELECT count(*) FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change')
+              + (CASE WHEN ${sql.unsafe(empty)} THEN 0 ELSE (SELECT count(*) FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change') END)
               -- A change, or made one since, or a review with a draft to post: not one to settle as Done.
-              + (CASE WHEN ${sql.unsafe(quickIn('k'))} OR ${sql.unsafe(answeredIn('k'))} THEN 0 ELSE 1 END) AS open
+              + (CASE WHEN ${sql.unsafe(empty)} OR ${sql.unsafe(quickIn('k'))} OR ${sql.unsafe(answeredIn('k'))} THEN 0 ELSE 1 END) AS open
             FROM tasks k WHERE k.id = ${taskId}`
           // Its round under way is its lead's, told by the person: it ends where it settled. A review has no round.
-          const finished = task?.run === 'succeeded' || task?.run === 'running' || task?.answered === 1
+          // A change that built nothing is settled once its lead is done, not while its round runs: it may yet build something.
+          const finished = task?.run === 'succeeded' || (task?.run === 'running' && task.empty === 0) || task?.answered === 1
           return task !== undefined && task.state === 'open' && finished && task.open === 0 ? task : undefined
         })
 

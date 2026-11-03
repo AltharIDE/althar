@@ -271,6 +271,8 @@ describe('the Settings tab', () => {
         'Skills',
         'Code hosts and trackers',
         'Work on this Mac',
+        'Plans and reviews',
+        'New projects',
         'Reviews and pull requests',
         'Notifications',
         'Appearance',
@@ -301,7 +303,19 @@ describe('the Settings tab', () => {
   })
 
   it('names its sections as the address does, and takes nothing else for one', () => {
-    expect(SECTIONS).toEqual(['agents', 'skills', 'code-hosts', 'this-mac', 'reviews', 'notifications', 'appearance', 'editor', 'about'])
+    expect(SECTIONS).toEqual([
+      'agents',
+      'skills',
+      'code-hosts',
+      'this-mac',
+      'plans-and-reviews',
+      'new-projects',
+      'reviews',
+      'notifications',
+      'appearance',
+      'editor',
+      'about',
+    ])
     expect(isSection('this-mac')).toBe(true)
     expect(isSection('mac')).toBe(false)
     expect(isSection(undefined)).toBe(false)

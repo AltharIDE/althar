@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import { DiffLineKind } from '../src/foundations/vocabulary'
-import { Diff, type DiffLine, diffText } from '../src/thread/Diff/Diff'
+import { Diff, type DiffLine, diffText, noteAt } from '../src/thread/Diff/Diff'
 
 const context = (n: number): DiffLine => ({ kind: DiffLineKind.Context, old: n, new: n, text: `line ${n}` })
 const rows = (container: HTMLElement) =>
@@ -64,5 +64,49 @@ describe('a whole file’s diff, folded', () => {
   it('says a single unchanged line in the singular', () => {
     expect(diffText.unchanged(1)).toBe('Show 1 unchanged line')
     expect(diffText.unchanged(2)).toBe('Show 2 unchanged lines')
+  })
+})
+
+describe('notes under their lines', () => {
+  const file: DiffLine[] = [
+    { kind: DiffLineKind.Hunk, text: '@@ -1,20 +1,20 @@' },
+    ...Array.from({ length: 9 }, (_, i) => context(i + 1)),
+    { kind: DiffLineKind.Removed, old: 10, text: 'gone ten' },
+    ...Array.from({ length: 10 }, (_, i): DiffLine => ({ kind: DiffLineKind.Context, old: i + 11, new: i + 10, text: `line ${i + 10}` })),
+  ]
+
+  it('keep the line a note is about out of the folds, with the lines beside it, the note under it', () => {
+    const { container } = render(<Diff lines={file} fold={1} notes={[{ key: 'a', line: 4, node: 'Note on four' }]} />)
+    expect(rows(container)).toEqual([
+      '[Show 2 unchanged lines]',
+      '3line 3',
+      '4line 4',
+      'Note on four',
+      '5line 5',
+      '[Show 3 unchanged lines]',
+      '9line 9',
+      '10- removedgone ten',
+      '10line 10',
+      '[Show 9 unchanged lines]',
+    ])
+  })
+
+  it('go under the line before, where the line isn’t in the new file, and in the order given', () => {
+    expect(noteAt(file, 19)).toBe(20)
+    expect(noteAt(file, 40)).toBe(20)
+    expect(noteAt(file, 10)).toBe(11)
+    expect(noteAt([{ kind: DiffLineKind.Removed, old: 1, text: 'x' }], 1)).toBe(0)
+    const { container } = render(
+      <Diff
+        lines={file}
+        notes={[
+          { key: 'b', line: 2, node: 'Second' },
+          { key: 'a', line: 2, node: 'First' },
+        ]}
+      />,
+    )
+    const shown = rows(container)
+    expect(shown.indexOf('Second')).toBe(shown.indexOf('2line 2') + 1)
+    expect(shown.indexOf('First')).toBe(shown.indexOf('Second') + 1)
   })
 })

@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, within } from 'storybook/test'
+import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { CODEX } from '../../fixtures/models'
+import { REVIEW_FINDINGS } from '../../fixtures/reviewFindings'
 import { Verdict } from '../../foundations/vocabulary'
 import { States } from '../../storybook/States'
 import { threadDecorator } from '../../storybook/ThreadFrame'
@@ -66,4 +67,33 @@ export const AllStates: Story = {
       ]}
     />
   ),
+}
+
+/** A real review's six, where the code can show them: a line each, worst marked, opening the finding there. */
+const SIX: ReviewerFinding[] = REVIEW_FINDINGS.map((finding) => ({
+  id: finding.id,
+  weight: finding.weight,
+  title: finding.title,
+  claim: finding.claim,
+  ...(finding.path === null ? {} : { at: `${finding.path}:${finding.line ?? ''}` }),
+}))
+
+export const Lines: Story = {
+  args: { findings: SIX, onOpen: fn() },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Needs changes: 6 findings.')).toBeInTheDocument()
+    await expect(c.getByTitle('apps/desktop/src/renderer/shared/ModelChoice.tsx:143')).toHaveTextContent('ModelChoice.tsx:143')
+    await userEvent.click(c.getByRole('button', { name: /Long names are still cut at 860px/ }))
+    await expect(args.onOpen).toHaveBeenCalledWith(2)
+  },
+}
+
+/** A review from before reviewers gave titles: each line its claim's first sentence. */
+export const LinesWithoutTitles: Story = {
+  args: { findings: FINDINGS, onOpen: fn() },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('The days are rounded down, so 30.5 days reads as 30 and the refund looks allowed.')).toBeInTheDocument()
+  },
 }

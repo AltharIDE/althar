@@ -6,7 +6,7 @@ export { authorizationOf, type AdapterOptions, type Credential } from './credent
 export * from './errors'
 export { makeGitHub } from './github'
 export { makeGitLab } from './gitlab'
-export { type Fetch, makeHttp } from './http'
+export { type Allowance, type Fetch, makeHttp } from './http'
 export { jiraLabelOf, makeJiraCloud, makeJiraDataCenter, siteOf } from './jira'
 export { makeLinear } from './linear'
 export {
