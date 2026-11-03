@@ -37,6 +37,7 @@ import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
 import { coAuthorLine, coAuthorOn, setCoAuthor } from './credit'
+import { plansAndReviewsOf, newProjectDefaultsOf, setPlansAndReviews, setNewProjectDefaults } from './plansAndReviews'
 import { reviewSeal, setReviewSeal, setReviewSealStyle } from './pullRequestReview'
 import { bringBackThen } from './bringBack'
 import { FolderCleanup } from './FolderCleanup'
@@ -83,6 +84,7 @@ import * as Runtime from './Runtime'
 import { withEdits, workedOutReach } from './sandboxReach'
 import { tallyOf } from './tally'
 import { Coordinator } from './Coordinator'
+import { TaskActions } from './TaskActions'
 import { IssueChanges } from './IssueChanges'
 import { IssueDrafts } from './IssueDrafts'
 import { postTeamReviews, Reviews, setPostTeamReviews } from './Reviews'
@@ -232,6 +234,7 @@ export const handlers = Api.toLayer(
     const screenshots = yield* PullRequestScreenshots
     const busy = yield* Busy
     const automations = yield* Automations
+    const taskActions = yield* TaskActions
     /** Where the change feed stands, read before what a snapshot shows, so a client watching from it misses nothing. */
     const cursorNow = Effect.map(
       sql<{ cursor: number }>`SELECT coalesce(max(cursor), 0) AS cursor FROM change_log`,
@@ -921,6 +924,8 @@ export const handlers = Api.toLayer(
             const on = yield* coAuthorOn
             const atOnce = yield* busy.atOnce
             return {
+              plansAndReviews: yield* plansAndReviewsOf,
+              newProjects: yield* newProjectDefaultsOf,
               coAuthor: { on, line: coAuthorLine },
               reviewSeal: yield* reviewSeal,
               postTeamReviews: yield* postTeamReviews,
@@ -940,6 +945,10 @@ export const handlers = Api.toLayer(
         once(commandId, api(setReviewSealStyle(style)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetAgentsAtOnce: ({ commandId, count }) => once(commandId, api(busy.set(count))),
       SetFolderWait: ({ commandId, wait }) => once(commandId, api(cleanup.setWait(wait))),
+      SetPlansAndReviews: ({ commandId, ...change }) =>
+        once(commandId, api(setPlansAndReviews(change)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetNewProjectDefaults: ({ commandId, ...change }) =>
+        once(commandId, api(setNewProjectDefaults(change)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       GetTaskFolders: () => api(cleanup.list),
       CleanUpFolders: ({ commandId }) => once(commandId, api(cleanup.cleanUp(instance.personId))),
       RemoveTaskFolder: ({ commandId, taskId, seen }) => once(commandId, api(cleanup.remove(taskId, seen, instance.personId))),
@@ -979,6 +988,7 @@ export const handlers = Api.toLayer(
       RunAutomationNow: ({ commandId, automationId, itemId }) =>
         once(commandId, api(automations.runNow(automationId, instance.personId, itemId))),
       DeleteAutomation: ({ commandId, automationId }) => once(commandId, api(automations.remove(automationId, instance.personId))),
+      AnswerTaskAsk: ({ commandId, itemId, yes }) => once(commandId, api(taskActions.answer(itemId, yes, instance.personId))),
       UndoAutomationChange: ({ commandId, itemId }) => once(commandId, api(automations.undo(itemId, instance.personId))),
       SetAutomationPostsReviews: ({ commandId, automationId, on }) =>
         once(commandId, api(automations.setPostsReviews(automationId, on, instance.personId))),

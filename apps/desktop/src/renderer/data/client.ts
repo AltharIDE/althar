@@ -42,6 +42,8 @@ import {
   type PlacedRepository,
   type FoldersFreed,
   type FolderWait,
+  type PlansAndReviewsChange,
+  type NewProjectDefaultsChange,
   type IssueList,
   type Load,
   type ModelRoom,
@@ -202,6 +204,10 @@ export interface Client {
   readonly setAgentsAtOnce: (count: number | null) => Promise<void>
   /** When finished tasks' folders go from now on (ADR-056). */
   readonly setFolderWait: (wait: FolderWait) => Promise<void>
+  /** How long work goes on alone, from the next plan, round or look at a running turn; what isn't given stays. */
+  readonly setPlansAndReviews: (change: PlansAndReviewsChange) => Promise<void>
+  /** What the rules of projects made from now on start with; what isn't given stays. */
+  readonly setNewProjectDefaults: (change: NewProjectDefaultsChange) => Promise<void>
   /** Finished tasks' folders on this computer, with the disk they are on. */
   readonly getTaskFolders: () => Promise<TaskFolders>
   /** Removes every finished task's folder nothing holds; what it freed, measured after. */
@@ -236,6 +242,8 @@ export interface Client {
   readonly pauseAutomation: (automationId: string) => Promise<void>
   /** Runs an automation once now, with every limit a run has, whether it is on or not yet; `itemId`, from the coordinator's card asking it. */
   readonly runAutomationNow: (automationId: string, itemId?: string) => Promise<void>
+  /** Answers the coordinator's card asking to stop, hold, restart or settle a task: yes does it. */
+  readonly answerTaskAsk: (itemId: string, yes: boolean) => Promise<void>
   /** Deletes an automation: nothing of it starts again. The tasks its runs made stay. */
   readonly deleteAutomation: (automationId: string) => Promise<void>
   /** Puts back what the coordinator changed an automation from, as its card in the thread shows it. */
@@ -686,11 +694,14 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     runAutomationNow: (automationId, itemId) =>
       command((commandId) => api.RunAutomationNow({ commandId, automationId, ...(itemId === undefined ? {} : { itemId }) })),
     deleteAutomation: (automationId) => command((commandId) => api.DeleteAutomation({ commandId, automationId })),
+    answerTaskAsk: (itemId, yes) => command((commandId) => api.AnswerTaskAsk({ commandId, itemId, yes })),
     undoAutomationChange: (itemId) => command((commandId) => api.UndoAutomationChange({ commandId, itemId })),
     setAutomationPostsReviews: (automationId, on) => command((commandId) => api.SetAutomationPostsReviews({ commandId, automationId, on })),
     setAutomationsPaused: (paused) => command((commandId) => api.SetAutomationsPaused({ commandId, paused })),
     setAgentsAtOnce: (count) => command((commandId) => api.SetAgentsAtOnce({ commandId, count })),
     setFolderWait: (wait) => command((commandId) => api.SetFolderWait({ commandId, wait })),
+    setPlansAndReviews: (change) => command((commandId) => api.SetPlansAndReviews({ commandId, ...change })),
+    setNewProjectDefaults: (change) => command((commandId) => api.SetNewProjectDefaults({ commandId, ...change })),
     getTaskFolders: () => settle(api.GetTaskFolders({})),
     cleanUpFolders: () => command((commandId) => api.CleanUpFolders({ commandId })),
     removeTaskFolder: (taskId, seen) => command((commandId) => api.RemoveTaskFolder({ commandId, taskId, seen })),

@@ -293,12 +293,57 @@ export type AgentsAtOnce = typeof AgentsAtOnce.Type
 export const FolderWait = Schema.Literals(['smart', 'day', 'week', 'month', 'never'])
 export type FolderWait = typeof FolderWait.Type
 
+/**
+ * How plans start and how long review goes on. Each is a choice from a few, today's value kept until the person changes it;
+ * it applies from the next plan proposed or round of review.
+ */
+export const COUNTDOWNS = [0, 10, 25, 60] as const
+export const REVIEW_ROUNDS = [1, 2, 3, 5] as const
+
+export const PlansAndReviews = Schema.Struct({
+  /** Seconds a proposed plan waits before it starts on its own; 0 starts it at once. */
+  countdown: Schema.Literals(COUNTDOWNS),
+  /** Review rounds before a task is left to the person with findings open. */
+  rounds: Schema.Literals(REVIEW_ROUNDS),
+})
+export type PlansAndReviews = typeof PlansAndReviews.Type
+
+/** What of them is changed: the rest stays. */
+export type PlansAndReviewsChange = { readonly [Key in keyof PlansAndReviews]?: PlansAndReviews[Key] | undefined }
+
+/** Today's values, which a setting keeps until the person changes it. */
+export const PLANS_AND_REVIEWS: PlansAndReviews = { countdown: 25, rounds: 3 }
+
+/**
+ * What a project's rules start from when it is made. A project made earlier keeps its own rules, and each is changed in a
+ * project afterwards on its rules screen.
+ */
+export const NewProjectDefaults = Schema.Struct({
+  /** What no rule keeps: allowed, judged by the coordinator, or asked about. */
+  permissions: Schema.Literals(['rules', 'coordinator', 'ask']),
+  /** What happens to the work when an agent's account runs out. */
+  usageLimit: Schema.Literals(['move', 'wait', 'ask']),
+  /** Whether work goes on with an agent's next account before the limit applies. */
+  rotateAccounts: Schema.Boolean,
+  /** How a task ends when its plan doesn't say. */
+  end: Schema.Literals(['draft', 'ready', 'none']),
+})
+export type NewProjectDefaults = typeof NewProjectDefaults.Type
+
+/** What of them is changed: the rest stays. */
+export type NewProjectDefaultsChange = { readonly [Key in keyof NewProjectDefaults]?: NewProjectDefaults[Key] | undefined }
+
+/** What a project's rules are made with when the person has chosen nothing. */
+export const NEW_PROJECT_DEFAULTS: NewProjectDefaults = { permissions: 'rules', usageLimit: 'move', rotateAccounts: false, end: 'draft' }
+
 /** How the review seal on a pull request looks: a round engraved stamp, a pressed wax seal, or a printer's colophon. */
 export const SealStyle = Schema.Literals(['ring', 'wax', 'colophon'])
 export type SealStyle = typeof SealStyle.Type
 
 /** The person's settings for the app as a whole. */
 export const AppSettings = Schema.Struct({
+  plansAndReviews: PlansAndReviews,
+  newProjects: NewProjectDefaults,
   /** Althar as co-author of what it sends to a code host, on unless turned off; `line` is the trailer each commit gets. */
   coAuthor: Schema.Struct({ on: Schema.Boolean, line: Schema.String }),
   /** A pull request Althar opens says how its change was reviewed, on unless turned off: a seal in its corner, in `style`, and what the review changed and kept. */
@@ -1748,6 +1793,8 @@ export const TaskCard = Schema.Struct({
       steps: Schema.Array(PlanStep),
       /** When it starts on its own; null once held or started. */
       startsAt: Schema.NullOr(Schema.String),
+      /** How many seconds it waited from being proposed to starting on its own: the whole countdown, as the person's setting had it then. */
+      startsAfter: Schema.optional(Schema.Number),
       /** Why the coordinator chose the lead. */
       reason: Schema.NullOr(Schema.String),
       /** What happens when the work is done; null where nothing reaches the repository's host. */
@@ -2188,6 +2235,33 @@ export const AutomationItem = Schema.Struct({
   content: AutomationCard,
 })
 
+/**
+ * The coordinator asking the person to stop, hold, restart or settle a task,
+ * in its thread, where no message of theirs in that turn asked it to
+ * (ADR-086): one button, which does it as the person's own press, and Not
+ * now. Answered, it says what became of it: done, declined, or nothing to do
+ * any more and why. Althar posts it and keeps it current.
+ */
+export const TaskAskItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('task_ask'),
+  content: Schema.Struct({
+    taskId: Schema.String,
+    /** The task's own thread, where its title opens it. */
+    threadId: Schema.String,
+    slug: Schema.String,
+    /** The task's title when it was asked. */
+    title: Schema.String,
+    /** What it asks: to stop the task, or only its lead's turn; hold its plan; restart it; or settle it done, kept for later, or discarded. */
+    move: Schema.Literals(['stop', 'stop_turn', 'hold', 'restart', 'done', 'keep', 'discard']),
+    /** Why the coordinator asks, in a line. */
+    why: Schema.NullOr(Schema.String),
+    state: Schema.Literals(['open', 'done', 'declined', 'moot']),
+    /** What was done, or why there was nothing to do; null while open, and when declined. */
+    said: Schema.NullOr(Schema.String),
+  }),
+})
+
 export const ThreadItem = Schema.Union([
   UserMessageItem,
   AgentTextItem,
@@ -2206,6 +2280,7 @@ export const ThreadItem = Schema.Union([
   IssueChangesItem,
   AutomationItem,
   PicturesItem,
+  TaskAskItem,
 ])
 export type ThreadItem = typeof ThreadItem.Type
 
@@ -3544,6 +3619,8 @@ export const Api = RpcGroup.make(
   command('RunAutomationNow', { automationId: Schema.String, itemId: Schema.optional(Schema.String) }, Schema.Void),
   /** Deletes an automation: nothing of it starts again. The tasks its runs made stay. */
   command('DeleteAutomation', { automationId: Schema.String }, Schema.Void),
+  /** The person answers the coordinator's card asking to stop, hold, restart or settle a task: yes does it, as their own press would. */
+  command('AnswerTaskAsk', { itemId: Schema.String, yes: Schema.Boolean }, Schema.Void),
   /** Puts back what the coordinator changed an automation from, as the card in its thread shows it. */
   command('UndoAutomationChange', { itemId: Schema.String }, Schema.Void),
   /** Whether an automation's reviews post themselves once drafted, as the person said on its first; an outside pull request's still waits. */
@@ -3558,6 +3635,26 @@ export const Api = RpcGroup.make(
   command('SetAgentsAtOnce', { count: Schema.NullOr(AtOnceCount) }, Schema.Void),
   /** When finished tasks' folders go from now on; a sweep runs at once by it. */
   command('SetFolderWait', { wait: FolderWait }, Schema.Void),
+  /** Changes how plans start and how long review goes on, from the next plan or round; what isn't given stays. */
+  command(
+    'SetPlansAndReviews',
+    {
+      countdown: Schema.optional(PlansAndReviews.fields.countdown),
+      rounds: Schema.optional(PlansAndReviews.fields.rounds),
+    },
+    Schema.Void,
+  ),
+  /** Changes what the rules of projects made from now on start with; a project made earlier keeps its own. What isn't given stays. */
+  command(
+    'SetNewProjectDefaults',
+    {
+      permissions: Schema.optional(NewProjectDefaults.fields.permissions),
+      usageLimit: Schema.optional(NewProjectDefaults.fields.usageLimit),
+      rotateAccounts: Schema.optional(NewProjectDefaults.fields.rotateAccounts),
+      end: Schema.optional(NewProjectDefaults.fields.end),
+    },
+    Schema.Void,
+  ),
   /** Finished tasks' folders on this computer, with the disk they are on: sizes not yet measured start being measured. */
   call('GetTaskFolders', {}, TaskFolders),
   /** Removes every finished task's folder nothing holds, whatever its wait; their branches stay, and each comes back when its task needs it. */
