@@ -42,7 +42,10 @@ const PLAN_PROVIDERS: Readonly<Record<string, ReadonlyArray<string>>> = { openco
 const nameOf = (account: AccountUsage) =>
   account.plan !== null && account.plan.startsWith(`${account.agentName} `) ? account.plan : account.agentName
 
-/** A plan Althar names but reads nothing of (OpenCode Go with its key alone): shown connected, or as needing its sign-in. */
+/**
+ * A plan Althar names but reads nothing of (OpenCode Go with its key alone, or a first read that failed): shown connected,
+ * or as needing its sign-in.
+ */
 const namedUnread = (account: AccountUsage) =>
   account.paidBy === 'plan' &&
   account.plan !== null &&
@@ -150,9 +153,29 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
       })
       continue
     }
-    const each = read.toSorted((a, b) => leftOf(a.window) - leftOf(b.window)).map(({ account }) => accountOf(account, several, now))
+    // Another account on the plan, connected but unread (a fresh OpenCode Go key in a new account), is in the detail too.
+    const named = accounts.filter((account) => !wasRead.has(account.accountId) && namedUnread(account))
+    const each = [
+      ...read.toSorted((a, b) => leftOf(a.window) - leftOf(b.window)).map(({ account }) => accountOf(account, several, now)),
+      ...named.map((account) => ({ ...accountOf(account, several, now), fault: account.fault?.message ?? account.noReading ?? null })),
+    ]
     // The figure is of the account new work would start on: one signed out keeps its last numbers in the peek, but runs nothing, as the runtime skips it.
     const usable = read.filter(({ account }) => account.fault?.kind !== 'sign_in_again')
+    // None read can run, but one unread can: the runtime starts work there, so the plan is connected, with no figure.
+    if (usable.length === 0 && named.some((account) => account.fault?.kind !== 'sign_in_again')) {
+      agents.push({
+        id: agentId,
+        name: nameOf(first),
+        ...(brand === undefined ? {} : { brand }),
+        left: 0,
+        limit: '',
+        until: null,
+        account: null,
+        accounts: each,
+        connected: text.connected,
+      })
+      continue
+    }
     if (usable.length === 0) {
       // None signed in: no room to give it, only why, with its saved numbers in the detail.
       agents.push({
@@ -201,7 +224,8 @@ export const roomOf = (
   const { agentId, model } = choiceOf(info.id)
   // A model through a provider that isn't the agent's plan (OpenCode Zen beside Go) is paid per use: nothing to say.
   const plans = PLAN_PROVIDERS[agentId]
-  if (plans !== undefined && model !== null && !plans.some((provider) => model.startsWith(`${provider}/`))) return undefined
+  // Its own default may be any provider's, Zen's as well as Go's: nothing to say of it either.
+  if (plans !== undefined && (model === null || !plans.some((provider) => model.startsWith(`${provider}/`)))) return undefined
   // The runtime's, unless its window has reset since: what's known of the agent's accounts then, until the rooms are read again.
   const found = rooms.find((room) => room.agentId === agentId && room.model === model && !past(room.resetsAt, now))
   if (found !== undefined)

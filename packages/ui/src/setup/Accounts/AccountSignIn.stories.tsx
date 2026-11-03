@@ -296,7 +296,7 @@ export const Naming: Story = {
   },
 }
 
-/** OpenCode signed in from the terminal, picked up from the account's own home: named in its line, paid per use as its keys are. */
+/** OpenCode signed in from the terminal, picked up from the account's own home: named in its line, with the provider it signed in to. */
 export const OpenCodeSignedIn: Story = {
   render: (args) => (
     <Accounts
@@ -319,7 +319,7 @@ export const OpenCodeSignedIn: Story = {
   args: {
     agent: 'OpenCode',
     position: 2,
-    step: { kind: 'named', name: 'Account 2', paid: 'per use' },
+    step: { kind: 'named', name: 'Account 2', paid: 'OpenCode Go on a plan' },
   },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)

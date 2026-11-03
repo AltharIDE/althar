@@ -180,6 +180,53 @@ describe('what the window says of a plan', () => {
     expect(planOf(planUsage([copilot]), NOW).agents).toEqual([])
   })
 
+  it('shows OpenCode Go connected where an old account’s key was refused and a new account’s works, and where its first read failed', () => {
+    const goWindows = [{ kind: 'weekly' as const, label: null, usedPercent: 42, resetsAt: WEEK }]
+    const again = { kind: 'sign_in_again' as const, message: 'OpenCode Go needs signing in again.' }
+    // Personal: Go read through its Console sign-in, its expired key refused. Account 2: a fresh Go key, nothing reads it.
+    const personal = usageAccount({
+      agentId: 'opencode',
+      agentName: 'OpenCode',
+      accountId: 'acc_personal',
+      accountName: 'Personal',
+      plan: 'OpenCode Go',
+      source: 'agent',
+      windows: goWindows,
+      fault: again,
+    })
+    const why = 'OpenCode reads Go’s usage only through an OpenCode Console sign-in, and this account has none.'
+    const fresh = usageAccount({
+      agentId: 'opencode',
+      agentName: 'OpenCode',
+      accountId: 'acc_fresh',
+      accountName: 'Account 2',
+      plan: 'OpenCode Go',
+      source: null,
+      observedAt: null,
+      windows: [],
+      noReading: why,
+    })
+    const [both] = planOf(planUsage([personal, fresh]), NOW).agents
+    expect(both).toMatchObject({ name: 'OpenCode Go', connected: 'Connected' })
+    expect(both?.stopped).toBeUndefined()
+    expect(both?.signIn).toBeUndefined()
+    // Each account says how it stands in the detail.
+    expect(both?.accounts.map((account) => [account.name, account.fault])).toEqual([
+      ['Personal', 'OpenCode Go needs signing in again.'],
+      ['Account 2', why],
+    ])
+    // Account 2 refused too: nothing runs, so the row signs Go in again.
+    expect(planOf(planUsage([personal, { ...fresh, fault: again }]), NOW).agents[0]).toMatchObject({ stopped: 'Signed out', signIn: true })
+    // A first read that failed, with Go's key there: connected, and why it has no numbers.
+    const timedOut = 'OpenCode couldn’t read Go’s usage: timed out.'
+    const failed = { ...fresh, fault: { kind: 'unreachable' as const, message: timedOut }, noReading: timedOut }
+    expect(planOf(planUsage([failed]), NOW).agents[0]).toMatchObject({
+      name: 'OpenCode Go',
+      connected: 'Connected',
+      accounts: [{ fault: timedOut }],
+    })
+  })
+
   it('gives OpenCode Go’s models Go’s room in the pickers, and says nothing for OpenCode’s per-use ones', () => {
     const connected = usageAccount({
       agentId: 'opencode',
@@ -193,6 +240,15 @@ describe('what the window says of a plan', () => {
     })
     expect(roomOf({ id: 'opencode:opencode-go/glm-5.3' }, [], planUsage([connected]), NOW)).toBeNull()
     expect(roomOf({ id: 'opencode:opencode/deepseek-v4.1-flash' }, [], planUsage([connected]), NOW)).toBeUndefined()
+    // OpenCode's own default may be Zen's as well as Go's: nothing said of it, though Go is read.
+    const read = {
+      ...connected,
+      source: 'agent' as const,
+      observedAt: NOW.toISOString(),
+      noReading: null,
+      windows: [{ kind: 'weekly' as const, label: null, usedPercent: 42, resetsAt: WEEK }],
+    }
+    expect(roomOf({ id: 'opencode:' }, [], planUsage([read]), NOW)).toBeUndefined()
   })
 
   it('signs OpenCode Go in again from its row, in Settings, with its sign-in started', async () => {

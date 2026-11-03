@@ -631,7 +631,7 @@ const goWindow = (raw: unknown, kind: UsageWindow['kind'], minutes?: number): Us
 
 /**
  * OpenCode Go's windows from its server's usage limits: `{data: {go?: {rolling, weekly, monthly}}}` (2.2.5, 3 November
- * 2026), the rolling one five hours. `data: null` is no OpenCode Console sign-in, and no `go` a workspace without Go: no
+ * 2026), the rolling one five hours, as OpenCode's docs for Go name it (opencode.ai/docs/go). `data: null` is no OpenCode Console sign-in, and no `go` a workspace without Go: no
  * reading either way, said `none`. Anything else is not an answer Althar knows.
  */
 export const openCodeGoUsage = (output: string, now: Date): UsageRead => {
