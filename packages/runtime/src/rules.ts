@@ -3182,9 +3182,14 @@ const runsCode = (name: string, after: ReadonlyArray<string>): boolean => {
 const unreadOf = (command: string, kinds: ReadonlyArray<Kept>, known: ReadonlyArray<string> = []): string | undefined => {
   const parsed = parseCommandLine(command)
   if (parsed.opaque) return "Althar can't read what this runs: part of it is worked out only as it runs (`$(…)`, backticks, `eval`)."
+  // Word by word, as the shell splits them: `node 'scripts/e2e.ts other.js'` runs another file than `node scripts/e2e.ts`.
+  const starts = known.flatMap((start) => {
+    const { opaque, commands } = parseCommandLine(start)
+    return !opaque && commands.length === 1 && commands[0]!.length > 0 ? [commands[0]!] : []
+  })
   const isKnown = (words: ReadonlyArray<string>) => {
-    const own = words.filter((word, at) => !words.slice(0, at + 1).every((each) => assignment.test(each))).join(' ')
-    return known.some((start) => own === start || own.startsWith(`${start} `))
+    const own = words.slice(words.findIndex((word) => !assignment.test(word)))
+    return starts.some((start) => start.every((word, at) => own[at] === word))
   }
   if (parsed.commands.length > 0 && parsed.commands.every(isKnown)) return undefined
   for (const words of parsed.commands) {

@@ -214,8 +214,13 @@ describe('what crosses a lead’s sandbox', () => {
         'allow',
         line,
       )
-    // Only by how it starts: another script, or one beside it, is still unread.
-    for (const line of ['node scripts/fix.ts', 'node scripts/e2e.tsx', 'node scripts/e2e.ts && python3 tools/fix.py'])
+    // Only by how it starts, word by word: another script, one named to look like it, or one beside it, is still unread.
+    for (const line of [
+      'node scripts/fix.ts',
+      'node scripts/e2e.tsx',
+      "node 'scripts/e2e.ts other.js'",
+      'node "scripts/e2e.ts" && python3 tools/fix.py',
+    ])
       assert.strictEqual(decideLeaving(command(line, { dangerouslyDisableSandbox: true }), context('allow'), outside).verdict, 'deny', line)
     // And it still meets the project's rules: a push to main asks.
     assert.strictEqual(
@@ -396,6 +401,25 @@ describe('a lead whose sandbox Althar holds', () => {
           { kind: 'force-push', asked: 0, allowed: 0, refused: 1, workedAround: 0 },
         ],
       )
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('runs the project’s end-to-end tests outside when it asks again, after Electron died inside on a piped run', () =>
+    Effect.gen(function* () {
+      // Claude Code's hold lists what the project runs outside from the start, as it lists its excluded commands.
+      const { requestContext } = yield* held({ ...lead, outside: [...lead.outside, 'node scripts/e2e.ts'] })
+      const permissions = yield* Permissions
+      const piped = 'node scripts/e2e.ts e2e/evidence.spec.ts 2>&1 | tail -15'
+      // Piped, it stays in the sandbox and runs unread, where Electron can't register its Mach service.
+      assert.strictEqual((yield* permissions.decide(requestContext, command(piped))).decision, 'allow')
+      // Asked again outside, it goes: it is what the project runs outside anyway.
+      const retry = command(piped, { dangerouslyDisableSandbox: true })
+      assert.strictEqual((yield* permissions.decide(requestContext, retry)).decision, 'allow')
+      // A file named to look like it is another script, still refused.
+      const lookalike = command("node 'scripts/e2e.ts other.js'", { dangerouslyDisableSandbox: true })
+      assert.strictEqual((yield* permissions.decide(requestContext, lookalike)).decision, 'reject')
+      // Where the project doesn't run it outside, the hold doesn't let it go either.
+      assert.strictEqual((yield* permissions.decide({ ...requestContext, sandbox: lead }, retry)).decision, 'reject')
     }).pipe(Effect.provide(runtime())),
   )
 
