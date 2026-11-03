@@ -260,7 +260,15 @@ describe('an OpenCode account’s usage, by the provider each turn ran on', () =
     return { url: 'https://models.test', cache, fetch: () => Promise.reject(new Error('No network in tests')) }
   }
   /** OpenCode signed in to Zen, Go and ChatGPT; Codex on a ChatGPT plan unless the test says it's paid per use. */
-  const withMixed = (perUse: ReadonlyArray<string> = []) =>
+  const MIXED = [
+    { provider: 'opencode', pays: 'key' },
+    { provider: 'opencode-go', pays: 'key' },
+    { provider: 'openai', pays: 'plan' },
+  ] as const
+  const withMixed = (
+    perUse: ReadonlyArray<string> = [],
+    credentials: ReadonlyArray<{ readonly provider: string; readonly pays: 'plan' | 'key' | 'unknown' }> = MIXED,
+  ) =>
     Queries.layer.pipe(
       Layer.provideMerge(
         runtime(
@@ -274,14 +282,7 @@ describe('an OpenCode account’s usage, by the provider each turn ran on', () =
               every: Duration.zero,
               kept: Duration.zero,
               readVersion: async () => '2.2.5',
-              readCredentials: async () => ({
-                kind: 'credentials',
-                credentials: [
-                  { provider: 'opencode', pays: 'key' },
-                  { provider: 'opencode-go', pays: 'key' },
-                  { provider: 'openai', pays: 'plan' },
-                ],
-              }),
+              readCredentials: async () => ({ kind: 'credentials', credentials }),
               readAgent: async () => ({
                 kind: 'usage',
                 usage: {
@@ -343,17 +344,18 @@ describe('an OpenCode account’s usage, by the provider each turn ran on', () =
       )}`
     })
   /** A task with turns on Zen, Go and ChatGPT through OpenCode, and the two accounts. */
-  const mixedTask = Effect.gen(function* () {
-    yield* (yield* PlanUsage).now(true)
-    const openCode = (yield* (yield* Accounts).of('opencode'))[0]!.id
-    const codex = (yield* (yield* Accounts).of('codex'))[0]!.id
-    const { project, task: created } = yield* task()
-    const here = { projectId: project.projectId, threadId: created.threadId }
-    yield* ran(here, 'opencode', openCode, 'opencode/gpt-6-astra', 0, 1, { inputTokens: 100_000, outputTokens: 10_000 })
-    yield* ran(here, 'opencode', openCode, 'opencode-go/glm-5.3', 2, 3, { inputTokens: 40_000, outputTokens: 10_000 })
-    yield* ran(here, 'opencode', openCode, 'openai/gpt-6-sol', 4, 6, { inputTokens: 25_000, outputTokens: 5_000 })
-    return { openCode, codex, created }
-  })
+  const mixedTask = (read = true) =>
+    Effect.gen(function* () {
+      if (read) yield* (yield* PlanUsage).now(true)
+      const openCode = (yield* (yield* Accounts).of('opencode'))[0]!.id
+      const codex = (yield* (yield* Accounts).of('codex'))[0]!.id
+      const { project, task: created } = yield* task()
+      const here = { projectId: project.projectId, threadId: created.threadId }
+      yield* ran(here, 'opencode', openCode, 'opencode/gpt-6-astra', 0, 1, { inputTokens: 100_000, outputTokens: 10_000 })
+      yield* ran(here, 'opencode', openCode, 'opencode-go/glm-5.3', 2, 3, { inputTokens: 40_000, outputTokens: 10_000 })
+      yield* ran(here, 'opencode', openCode, 'openai/gpt-6-sol', 4, 6, { inputTokens: 25_000, outputTokens: 5_000 })
+      return { openCode, codex, created, here }
+    })
   const usageOf = (threadId: string) =>
     Effect.gen(function* () {
       const queries = yield* Queries
@@ -362,7 +364,7 @@ describe('an OpenCode account’s usage, by the provider each turn ran on', () =
 
   it.live('prices each part as its provider is paid: Zen in dollars, Go and ChatGPT a share of their weeks', () =>
     Effect.gen(function* () {
-      const { openCode, codex, created } = yield* mixedTask
+      const { openCode, codex, created } = yield* mixedTask()
       // Codex ran as much on the same ChatGPT plan meanwhile, in another task: the week's rise is shared with it.
       const { project: elsewhere, task: other } = yield* task('Another')
       yield* ran({ projectId: elsewhere.projectId, threadId: other.threadId }, 'codex', codex, 'gpt-6-sol', 4, 6, {
@@ -398,7 +400,7 @@ describe('an OpenCode account’s usage, by the provider each turn ran on', () =
 
   it.live('gives Go its share of the account’s own week, which a Zen turn then doesn’t draw on', () =>
     Effect.gen(function* () {
-      const { openCode, created } = yield* mixedTask
+      const { openCode, created } = yield* mixedTask()
       // A Zen turn in another task while Go's ran: paid per use, it takes none of Go's week.
       const { project: elsewhere, task: other } = yield* task('Another')
       yield* ran({ projectId: elsewhere.projectId, threadId: other.threadId }, 'opencode', openCode, 'opencode/gpt-6-astra', 2, 3, {
@@ -414,10 +416,53 @@ describe('an OpenCode account’s usage, by the provider each turn ran on', () =
 
   it.live('has no ChatGPT figure where Codex isn’t on a ChatGPT plan here, and says why', () =>
     Effect.gen(function* () {
-      const { created } = yield* mixedTask
+      const { created } = yield* mixedTask()
       const chatGpt = (yield* usageOf(created.threadId)).find((line) => line.provider === 'openai')
       assert.deepInclude(chatGpt, { paidBy: 'plan', took: null, spent: null })
       assert.include(chatGpt?.why ?? '', 'through Codex')
     }).pipe(Effect.provide(withMixed(['codex']))),
+  )
+
+  it.live('shares the ChatGPT week between Codex’s line and OpenCode’s where both ran in the task, never counting it twice', () =>
+    Effect.gen(function* () {
+      const { codex, created, here } = yield* mixedTask()
+      yield* ran(here, 'codex', codex, 'gpt-6-sol', 4, 6, {
+        inputTokens: 25_000,
+        outputTokens: 5_000,
+      })
+      yield* weekOf(codex, [3.5, 20], [6.5, 23])
+      const lines = yield* usageOf(created.threadId)
+      const codexLine = lines.find((line) => line.agentId === 'codex')
+      const chatGpt = lines.find((line) => line.provider === 'openai')
+      // As many tokens each: the three points split between them.
+      assert.closeTo(codexLine?.took ?? 0, 1.5, 1e-9)
+      assert.closeTo(chatGpt?.took ?? 0, 1.5, 1e-9)
+    }).pipe(Effect.provide(withMixed())),
+  )
+
+  it.live('never prices a sign-in it can’t classify as a key: a declared plan says why it has no figure, the rest that it can’t tell', () =>
+    Effect.gen(function* () {
+      const { openCode, created, here } = yield* mixedTask()
+      yield* ran(here, 'opencode', openCode, 'google/gemini-4-pro', 7, 8, { inputTokens: 10_000, outputTokens: 1_000 })
+      yield* ran(here, 'opencode', openCode, 'anthropic/claude-sonnet-5-5', 9, 10, { inputTokens: 10_000, outputTokens: 1_000 })
+      const lines = yield* usageOf(created.threadId)
+      const google = lines.find((line) => line.provider === 'google')
+      const anthropic = lines.find((line) => line.provider === 'anthropic')
+      assert.deepInclude(google, { paidBy: 'plan', took: null, spent: null })
+      assert.include(google?.why ?? '', 'Gemini')
+      assert.deepInclude(anthropic, { paidBy: 'plan', took: null, spent: null })
+      assert.include(anthropic?.why ?? '', 'can’t tell')
+    }).pipe(Effect.provide(withMixed([], [...MIXED, { provider: 'google', pays: 'unknown' }, { provider: 'anthropic', pays: 'unknown' }]))),
+  )
+
+  it.live('has no dollars for a provider before OpenCode’s sign-ins are read, but Zen’s are as they always are', () =>
+    Effect.gen(function* () {
+      const { created } = yield* mixedTask(false)
+      const lines = yield* usageOf(created.threadId)
+      const chatGpt = lines.find((line) => line.provider === 'openai')
+      assert.deepInclude(chatGpt, { paidBy: 'plan', took: null, spent: null })
+      assert.include(chatGpt?.why ?? '', 'openai sign-in is paid yet')
+      assert.closeTo(lines.find((line) => line.provider === 'opencode')?.spent ?? 0, 1.5, 1e-9)
+    }).pipe(Effect.provide(withMixed())),
   )
 })

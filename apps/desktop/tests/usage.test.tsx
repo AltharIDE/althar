@@ -128,7 +128,7 @@ describe('what a task used of each account', () => {
     const lines = within(screen.getByRole('list'))
     expect(lines.getByText('OpenCode Zen')).toBeTruthy()
     expect(lines.getByText('OpenCode Go')).toBeTruthy()
-    expect(lines.getByText('OpenCode · openai')).toBeTruthy()
+    expect(lines.getByText('OpenCode · OpenAI')).toBeTruthy()
     expect(lines.getByText('~$1.20')).toBeTruthy()
     expect(lines.getByText('~2% of week')).toBeTruthy()
     // Focused, as from the keyboard, its "—" says why.

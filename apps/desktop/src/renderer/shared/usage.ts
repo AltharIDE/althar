@@ -25,8 +25,21 @@ export const accountWords = (use: Pick<AccountUse, 'agentName' | 'accountName' |
   return use.several ? `${agent} · ${use.accountName}` : agent
 }
 
-/** OpenCode's own providers, as it names them, where none of its models listed says: Zen, and Go. */
-const PROVIDERS: Readonly<Record<string, string>> = { opencode: 'OpenCode Zen', 'opencode-go': 'OpenCode Go' }
+/** Providers as they are named, where none of the agent's models listed says: a model dropped from its list still reads as a name. */
+const PROVIDERS: Readonly<Record<string, string>> = {
+  opencode: 'OpenCode Zen',
+  'opencode-go': 'OpenCode Go',
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  google: 'Google',
+  'github-copilot': 'GitHub Copilot',
+  openrouter: 'OpenRouter',
+  xai: 'xAI',
+  deepseek: 'DeepSeek',
+  moonshotai: 'Moonshot AI',
+  mistral: 'Mistral',
+  zai: 'Z.ai',
+}
 
 /**
  * A provider's line as it is named: OpenCode Zen, a provider of the agent's own; OpenCode · OpenAI, another's; with the

@@ -22,6 +22,19 @@
     of its week (8% of week). Paid per use, it is dollars. There is no total,
     nothing per step or round, and no figure for what is left: the plan gauge
     already says that.
+  - **An agent that reaches several providers has a line for each its turns
+    ran on** (OpenCode: `provider/model`), named as the agent names the
+    provider (OpenCode Zen, OpenCode Go), because each is paid its own way.
+    Zen and providers on a key are dollars. Go is its share of the OpenCode
+    account's own week, which only its Go turns draw on. ChatGPT through
+    OpenCode is the plan Codex reads: its share of Codex's week, where Codex
+    is signed in to the one ChatGPT plan on that computer, and Codex's own
+    line shares that week's rise with those turns, so it's never counted
+    twice. A provider whose sign-in Althar can't classify, or hasn't read yet,
+    is never priced as a key.
+  - **A dash says why on hover or focus** where the figure can't be known
+    ("OpenCode Go doesn't report its usage to Althar"), and stays quiet
+    otherwise.
   - **A task's line covers every thread of the task,** its reviews' included,
     across handovers. The coordinator's covers its own conversation since
     this computer's midnight.
@@ -48,4 +61,5 @@
 - **Consequences:** A reading that fails leaves the usage out of the
   snapshot, never the thread. Tasks that ran before migration 0056 have no
   readings of a week, so their share shows as a dash. A plan whose week Althar
-  can't read shows a dash the same way.
+  can't read shows a dash the same way. Until OpenCode's sign-ins are read
+  after Althar starts, its providers other than Zen and Go show a dash too.

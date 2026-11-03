@@ -188,10 +188,23 @@ const CHATGPT = 'openai'
 /**
  * How a provider an agent reaches is paid (OpenCode's `provider/model`): Zen
  * and Go always as they are, the rest as the account's listing says, and per
- * use where it didn't say: a provider OpenCode has no sign-in for runs on a key.
+ * use where it doesn't list it: a provider OpenCode has no sign-in for runs
+ * on a key. A sign-in Althar can't classify is a plan where one is declared
+ * for its provider (Google, GitHub Copilot), else unknown; before the listing
+ * is read, unread. Neither is ever taken for a key.
  */
-export const providerPays = (provider: string, listed: Readonly<Record<string, 'plan' | 'key'>> | undefined): 'plan' | 'key' =>
-  OPENCODE_PAYS[provider] ?? listed?.[provider] ?? 'key'
+export const providerPays = (
+  agentId: string,
+  provider: string,
+  listed: Readonly<Record<string, 'plan' | 'key' | 'unknown'>> | undefined,
+): 'plan' | 'key' | 'unknown' | 'unread' => {
+  const own = OPENCODE_PAYS[provider]
+  if (own !== undefined) return own
+  if (listed === undefined) return 'unread'
+  const pays = listed[provider] ?? 'key'
+  if (pays !== 'unknown') return pays
+  return usagePairs.some((one) => one.agent === agentId && one.provider === provider && one.pays === 'plan') ? 'plan' : 'unknown'
+}
 
 /** Why a plan's share can't be known, said on its "—". */
 export const why = {
@@ -201,6 +214,12 @@ export const why = {
   go: 'OpenCode Go doesn’t report its usage to Althar.',
   /** ChatGPT through OpenCode, with no Codex on a ChatGPT plan here. */
   noCodex: 'Althar reads ChatGPT’s week through Codex, which isn’t signed in to a ChatGPT plan here.',
+  /** ChatGPT through OpenCode, with a Codex sign-in here whose plan hasn't been read. */
+  codexUnread: 'Althar reads ChatGPT’s week through Codex, and hasn’t read Codex’s plan yet.',
+  /** A provider before the agent's sign-ins were read: how it is paid isn't known yet. */
+  listingUnread: (agent: string, provider: string) => `Althar hasn’t read how ${agent}’s ${provider} sign-in is paid yet.`,
+  /** A sign-in Althar can't classify. */
+  unknownPays: (agent: string, provider: string) => `Althar can’t tell how ${agent}’s ${provider} sign-in is paid.`,
   /** ChatGPT through OpenCode, with Codex on several. */
   severalCodex: 'Codex is signed in to several ChatGPT plans here, and Althar can’t tell which one OpenCode used.',
   /** Another plan a provider bills by. */
@@ -333,16 +352,34 @@ export const spendingOf = (
         )
       })
 
-    /** The Codex accounts on a ChatGPT plan on the device an account is on: whose week a ChatGPT plan elsewhere draws on. */
-    const codexOnPlan = (accountId: string) =>
+    /**
+     * The ChatGPT week an account draws on, by the device it's on: Codex's, where Codex is on the one ChatGPT plan here,
+     * with the OpenCode accounts here whose ChatGPT sign-in is a plan, which draw on it too. Else why there's none.
+     */
+    const chatGptWeek = (accountId: string) =>
       Effect.gen(function* () {
-        const codex = yield* sql<{ id: string }>`
-          SELECT c.id FROM agent_accounts c JOIN agent_accounts o ON o.device_id = c.device_id
-          WHERE o.id = ${accountId} AND c.agent_id = 'codex' AND c.removed_at IS NULL ORDER BY c.position`
+        const here = yield* sql<{ id: string; agentId: string }>`
+          SELECT c.id, c.agent_id FROM agent_accounts c JOIN agent_accounts o ON o.device_id = c.device_id
+          WHERE o.id = ${accountId} AND c.agent_id IN ('codex', 'opencode') AND c.removed_at IS NULL ORDER BY c.position`
         const onPlan: string[] = []
-        for (const { id } of codex) if ((yield* planUsage.paidBy(id))?.paidBy === 'plan') onPlan.push(id)
-        return onPlan
+        let unread = false
+        const openCode: string[] = []
+        for (const { id, agentId } of here) {
+          const held = yield* planUsage.paidBy(id)
+          if (agentId === 'opencode') {
+            if (held?.providers?.[CHATGPT] === 'plan') openCode.push(id)
+          } else if (held === null) unread = true
+          else if (held.paidBy === 'plan') onPlan.push(id)
+        }
+        // A Codex sign-in not yet read may be on a plan too: until it is, which week isn't known.
+        if (onPlan.length > 1) return { why: why.severalCodex } as const
+        if (unread) return { why: why.codexUnread } as const
+        if (onPlan.length === 0) return { why: why.noCodex } as const
+        return { codex: onPlan[0]!, openCode } as const
       })
+    /** A turn that draws on the ChatGPT week: Codex's own, or OpenCode's through its ChatGPT sign-in. */
+    const onChatGpt = (turn: { readonly agentId: string; readonly model: string | null; readonly sessionModel: string | null }) =>
+      turn.agentId === 'codex' || (turn.agentId === 'opencode' && providerOf(turn) === CHATGPT)
 
     // Each account's turns, and an agent's that reaches several providers by the provider each ran on, in the order first used.
     const parts = new Map<string, { readonly accountId: string; readonly provider: string | undefined; readonly its: TurnRow[] }>()
@@ -406,8 +443,13 @@ export const spendingOf = (
         })
 
       if (provider === undefined) {
-        // On a plan: the share of its week, from the readings around these turns, among every turn on the account then.
-        const took = yield* shareOf(accountId, [], () => true, its)
+        // On a plan: the share of its week, from the readings around these turns, among every turn on the account then;
+        // and, Codex's, every OpenCode turn here through the same ChatGPT plan.
+        const week = agentId === 'codex' && held?.paidBy === 'plan' ? yield* chatGptWeek(accountId) : undefined
+        const took =
+          week !== undefined && 'codex' in week && week.codex === accountId
+            ? yield* shareOf(accountId, week.openCode, onChatGpt, its)
+            : yield* shareOf(accountId, [], () => true, its)
         // Where nothing was read of how it is paid, a week kept for it says a plan.
         const paidBy = held?.paidBy ?? (took !== null ? 'plan' : 'key')
         if (paidBy === 'plan') {
@@ -429,7 +471,8 @@ export const spendingOf = (
       // A provider of its own: priced by how it is paid, whatever pays for the agent's others.
       const sameProvider = (turn: { readonly agentId: string; readonly model: string | null; readonly sessionModel: string | null }) =>
         turn.agentId === agentId && providerOf(turn) === provider
-      if (providerPays(provider, held?.providers) === 'key') {
+      const pays = providerPays(agentId, provider, held?.providers)
+      if (pays === 'key') {
         used.push({
           ...line,
           paidBy: 'key',
@@ -441,6 +484,10 @@ export const spendingOf = (
         })
         continue
       }
+      if (pays === 'unread' || pays === 'unknown') {
+        onPlan(null, (pays === 'unread' ? why.listingUnread : why.unknownPays)(agent.name, provider))
+        continue
+      }
       const pair = usagePairs.find((one) => one.agent === agentId && one.provider === provider && one.pays === 'plan')
       if (provider === GO) {
         // Go's week is the account's own, which only its turns on Go draw on.
@@ -449,12 +496,12 @@ export const spendingOf = (
       }
       if (provider === CHATGPT) {
         // The ChatGPT plan Codex reads: its week, which Codex's turns and these draw on alike, where Codex is on the one plan here.
-        const codex = yield* codexOnPlan(accountId)
-        if (codex.length !== 1) {
-          onPlan(null, codex.length === 0 ? why.noCodex : why.severalCodex)
+        const week = yield* chatGptWeek(accountId)
+        if ('why' in week) {
+          onPlan(null, week.why)
           continue
         }
-        onPlan(yield* shareOf(codex[0]!, [accountId], (turn) => turn.agentId === 'codex' || sameProvider(turn), its), why.unread)
+        onPlan(yield* shareOf(week.codex, [accountId, ...week.openCode], onChatGpt, its), why.unread)
         continue
       }
       onPlan(null, (pair === undefined ? null : noReadingOf(pair)) ?? why.plan(provider))
