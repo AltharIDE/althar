@@ -31,7 +31,7 @@ import { ToolRefused } from './ToolServer'
 const refused = (message: string) => new ToolRefused({ message })
 
 /** A host's failure said to the coordinator, in the host's words. */
-const hostSays = (error: ConnectorFailed) =>
+export const hostSays = (error: ConnectorFailed) =>
   refused(
     error.reason === 'not_found'
       ? 'That is not there, or Althar’s sign-in can’t see it.'
@@ -45,7 +45,7 @@ const viaHost = <A, R>(effect: Effect.Effect<A, ConnectorFailed, R>) => Effect.m
 const decodeRemotes = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))
 
 /** The project's repositories that are on a code host Althar is connected to, and all its repositories' names. */
-const hostedOf = (projectId: string) =>
+export const hostedOf = (projectId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const connections = yield* Connections
@@ -65,7 +65,7 @@ const hostedOf = (projectId: string) =>
  * repository whose remotes name it; by its number, the project's one
  * repository on a connected host.
  */
-const placeOf = (projectId: string, asked: string) =>
+export const placeOf = (projectId: string, asked: string) =>
   Effect.gen(function* () {
     const connections = yield* Connections
     const { bindings, hosted } = yield* hostedOf(projectId)
