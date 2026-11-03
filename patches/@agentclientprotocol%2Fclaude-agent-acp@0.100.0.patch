@@ -1,8 +1,8 @@
 diff --git a/dist/acp-agent.js b/dist/acp-agent.js
-index a86e0a1f3fec00bd1d021f84ba5c50a0fb02ba77..fbe9f379d81bc8301de2ca0178b680cfd29c1390 100644
+index d58262b5f2c1a58744691974d3935b11be82eaac..000ac8aed2c30446d865fcd9e321e47d992affc2 100644
 --- a/dist/acp-agent.js
 +++ b/dist/acp-agent.js
-@@ -6208,17 +6208,16 @@ export class ClaudeAcpAgent {
+@@ -6269,17 +6269,16 @@ export class ClaudeAcpAgent {
                          break;
                      }
                      case "rate_limit_event": {
@@ -31,9 +31,10 @@ index a86e0a1f3fec00bd1d021f84ba5c50a0fb02ba77..fbe9f379d81bc8301de2ca0178b680cf
                      }
                      case "conversation_reset": {
 diff --git a/dist/permissions/response.js b/dist/permissions/response.js
+index 2b763db8700c12b859490858b1026373fcf84b6f..4871dc8f6657f6a3271f367a4c0ac537e701c919 100644
 --- a/dist/permissions/response.js
 +++ b/dist/permissions/response.js
-@@ -12,8 +12,12 @@
+@@ -12,8 +12,12 @@ export function decodeClaudePermissionResponse(response, toolName, input, toolUs
          toolUseID,
          durableChangeSet,
      });
