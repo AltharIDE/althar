@@ -666,6 +666,24 @@ export const items = {
       ...content,
     },
   }),
+  /** The coordinator asking to stop a task, from a turn the person didn't start. */
+  taskAsk: (content: Partial<Extract<ThreadItem, { kind: 'task_ask' }>['content']> = {}, id?: string): ThreadItem => ({
+    ...next(),
+    ...(id === undefined ? {} : { id }),
+    agentId: null,
+    kind: 'task_ask',
+    content: {
+      taskId: 'task1',
+      threadId: 'th-task1',
+      slug: 'review-the-importer',
+      title: 'Review the importer',
+      move: 'stop',
+      why: 'Its pull request was closed.',
+      state: 'open',
+      said: null,
+      ...content,
+    },
+  }),
 }
 
 /** What an automation is: the morning review, of each new pull request, every weekday at 9:00, led by Claude Code. */
@@ -1062,6 +1080,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     turnOnAutomation: vi.fn(async () => {}),
     pauseAutomation: vi.fn(async () => {}),
     runAutomationNow: vi.fn(async () => {}),
+    answerTaskAsk: vi.fn(async () => {}),
     deleteAutomation: vi.fn(async () => {}),
     undoAutomationChange: vi.fn(async () => {}),
     setAutomationPostsReviews: vi.fn(async () => {}),

@@ -111,6 +111,7 @@ export const settled = (item: ThreadItem): boolean => {
     case 'review_draft':
       return item.content.state === 'posted' || item.content.state === 'discarded'
     case 'push_request':
+    case 'task_ask':
       return item.content.state !== 'open'
     case 'automation':
       return item.content.state === 'deleted' || item.content.ask?.done === true

@@ -37,6 +37,8 @@ export type TaskMove = typeof TaskMove.Type
 /** A card asking the person to do one, as the coordinator's thread keeps it: open, done, declined, or no longer applying. */
 export interface TaskAskContent {
   readonly taskId: string
+  /** The task's own thread, where the card opens it. */
+  readonly threadId: string
   readonly slug: string
   readonly title: string
   readonly move: TaskMove
@@ -301,6 +303,7 @@ export class TaskActions extends Context.Service<
           if (open !== undefined) return `The person has a card asking this already. Nothing happens until they press it.`
           const card: TaskAskContent = {
             taskId: task.id,
+            threadId: task.threadId,
             slug: task.slug,
             title: task.title,
             move,

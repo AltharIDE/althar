@@ -2175,6 +2175,8 @@ export const TaskAskItem = Schema.Struct({
   kind: Schema.Literal('task_ask'),
   content: Schema.Struct({
     taskId: Schema.String,
+    /** The task's own thread, where its title opens it. */
+    threadId: Schema.String,
     slug: Schema.String,
     /** The task's title when it was asked. */
     title: Schema.String,
