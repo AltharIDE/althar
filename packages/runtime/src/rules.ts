@@ -3292,12 +3292,26 @@ const runsCode = (name: string, after: ReadonlyArray<string>): boolean => {
  * language (`python3 - <<'EOF'`, `node fix.js`, `bun -e '…'`, `bunx tsx
  * fix.ts`), a shell given a file or its input, a program run from a file
  * (`./fix.sh`, `/tmp/fix.sh`) rather than one installed, or what the rules
- * themselves can't tell.
+ * themselves can't tell. What the project runs outside from the start
+ * (`known`, by how it starts: `node scripts/e2e.ts`, `env -i`) isn't among
+ * them: it runs outside unread whether the agent asks or not, and a line of
+ * nothing else has nothing left to read.
  */
-const unreadOf = (command: string, kinds: ReadonlyArray<Kept>): string | undefined => {
+const unreadOf = (command: string, kinds: ReadonlyArray<Kept>, known: ReadonlyArray<string> = []): string | undefined => {
   const parsed = parseCommandLine(command)
   if (parsed.opaque) return "Althar can't read what this runs: part of it is worked out only as it runs (`$(…)`, backticks, `eval`)."
+  // Word by word, as the shell splits them: `node 'scripts/e2e.ts other.js'` runs another file than `node scripts/e2e.ts`.
+  const starts = known.flatMap((start) => {
+    const { opaque, commands } = parseCommandLine(start)
+    return !opaque && commands.length === 1 && commands[0]!.length > 0 ? [commands[0]!] : []
+  })
+  const isKnown = (words: ReadonlyArray<string>) => {
+    const own = words.slice(words.findIndex((word) => !assignment.test(word)))
+    return starts.some((start) => start.every((word, at) => own[at] === word))
+  }
+  if (parsed.commands.length > 0 && parsed.commands.every(isKnown)) return undefined
   for (const words of parsed.commands) {
+    if (isKnown(words)) continue
     const start = words.findIndex((word) => !assignment.test(word))
     const wrapped = PACKAGE_RUNNERS.test((words[start] ?? '').slice((words[start] ?? '').lastIndexOf('/') + 1))
     const at = wrapped ? words.findIndex((word, index) => index > start && !word.startsWith('-')) : start
@@ -3333,14 +3347,18 @@ const HELD_INSIDE: ReadonlyArray<RuleId> = ['outside', 'default-branch', 'force-
  * as the rules decide any request, but with everything allowed, what they
  * can't read is refused, with how to run it, rather than let through. Outside
  * the sandbox nothing would stop a script changing the person's checkout or
- * another branch, and inside it, it runs without asking.
+ * another branch, and inside it, it runs without asking. What the project
+ * runs outside from the start (`outside`, the hold's), its tests and its
+ * build, goes as it said, asked to or not: inside, Electron or a browser it
+ * starts can't (Chromium registers a Mach service, which Claude Code's macOS
+ * sandbox never allows).
  */
-export const decideLeaving = (request: PermissionRequest, context: RuleContext): Verdict => {
+export const decideLeaving = (request: PermissionRequest, context: RuleContext, outside: ReadonlyArray<string> = []): Verdict => {
   const verdict = decide(request, context)
   if (verdict.verdict !== 'allow' || (context.project ?? MVP_RULES).mode !== 'allow') return verdict
   // Only what the agent asked to run outside: what the project runs outside from the start (its tests, its build) goes as it said.
   if (request.kind !== 'execute' || field(request.rawInput, 'dangerouslyDisableSandbox') !== true) return verdict
-  const unread = unreadOf(commandOf(request), keptOf(request, context))
+  const unread = unreadOf(commandOf(request), keptOf(request, context), outside)
   if (unread === undefined) return verdict
   return {
     verdict: 'deny',

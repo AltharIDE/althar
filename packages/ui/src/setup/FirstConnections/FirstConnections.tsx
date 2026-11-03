@@ -4,6 +4,7 @@ import type { Brand } from '../../foundations/brands/brands'
 import { Icon } from '../../foundations/Icon/Icon'
 import { BrandMark } from '../../foundations/Marks/Marks'
 import { cx } from '../../lib/cx'
+import { SizeMotion } from '../../lib/SizeMotion'
 import type { RootProps } from '../../lib/props'
 import { Button } from '../../primitives/Button/Button'
 import { IconButton } from '../../primitives/IconButton/IconButton'
@@ -20,7 +21,9 @@ import s from './FirstConnections.module.css'
  * host waits behind one Connect, in a menu with their marks; the trackers
  * always do, however many there are, so the card stays two rows. With a
  * host connected, it asks only for a tracker. A walk in opens in the card,
- * in place of its rows, and × puts the card away.
+ * in place of its rows, from the same left edge as its head, and × puts the
+ * card away. As it goes from its rows to a walk, and from one step of the
+ * walk to the next, the card's height glides to what it holds (SizeMotion).
  */
 
 /** A code host or a tracker, as the card offers it. */
@@ -76,7 +79,7 @@ export type FirstConnectionsProps = RootProps<
     onConnect: (service: string) => void
     /** Puts the card away. */
     onHide: () => void
-    /** A walk in, open: it takes the rows' place. */
+    /** A walk in, open: it takes the rows' place, from the card's left edge (ConnectCard's `align="start"`). */
     walk?: ReactNode
     text?: Partial<FirstConnectionsText>
   }
@@ -106,34 +109,36 @@ export function FirstConnections({
         </div>
         <IconButton icon="close" label={t.hide} size="small" onClick={onHide} />
       </div>
-      {walk ?? (
-        <ul className={s.rows}>
-          {host !== undefined && (
-            <li className={s.row}>
-              <span className={s.marks}>
-                <Mark service={host.service} />
-              </span>
-              <span className={s.name}>{host.service.name}</span>
-              {host.where !== undefined && (
-                <span className={s.note} title={host.where}>
-                  {host.where}
+      <SizeMotion step={walk === undefined ? 'rows' : 'walk'}>
+        {walk ?? (
+          <ul className={s.rows}>
+            {host !== undefined && (
+              <li className={s.row}>
+                <span className={s.marks}>
+                  <Mark service={host.service} />
                 </span>
-              )}
-              <span className={s.end}>
-                <Button size="small" onClick={() => onConnect(host.service.id)}>
-                  {t.connect}
-                </Button>
-              </span>
-            </li>
-          )}
-          {host === undefined && hosts.length > 0 && (
-            <Behind label={t.hostsLabel} name={t.code} services={hosts} t={t} onConnect={onConnect} />
-          )}
-          {trackers.length > 0 && (
-            <Behind label={t.trackersLabel} name={t.issues} services={trackers} t={t} onConnect={onConnect} quiet={code} />
-          )}
-        </ul>
-      )}
+                <span className={s.name}>{host.service.name}</span>
+                {host.where !== undefined && (
+                  <span className={s.note} title={host.where}>
+                    {host.where}
+                  </span>
+                )}
+                <span className={s.end}>
+                  <Button size="small" onClick={() => onConnect(host.service.id)}>
+                    {t.connect}
+                  </Button>
+                </span>
+              </li>
+            )}
+            {host === undefined && hosts.length > 0 && (
+              <Behind label={t.hostsLabel} name={t.code} services={hosts} t={t} onConnect={onConnect} />
+            )}
+            {trackers.length > 0 && (
+              <Behind label={t.trackersLabel} name={t.issues} services={trackers} t={t} onConnect={onConnect} quiet={code} />
+            )}
+          </ul>
+        )}
+      </SizeMotion>
     </section>
   )
 }

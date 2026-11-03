@@ -1,11 +1,12 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { fn } from 'storybook/test'
+import { useState } from 'react'
+import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { MER_231 } from '../../fixtures/coordinator'
 import { Brand } from '../../foundations/brands/brands'
 import { IssuePriority, IssueStatus } from '../../foundations/vocabulary'
 import { States, statesOn } from '../../storybook/States'
-import { IssueRef, Issue, IssueUnread } from './Issue'
+import { IssuePart, IssueRef, Issue, IssueUnread } from './Issue'
 import { PriorityGlyph, StatusGlyph } from './glyphs'
 
 const meta = {
@@ -98,4 +99,26 @@ export const AllStates: Story = {
       ]}
     />
   ),
+}
+
+/** Under a task's issue: the task does all of it, so its merge closes it; or, switched on, only part, and its merge leaves it open. */
+export const PartOfIt: Story = {
+  render: function Render(args) {
+    const [partOf, setPartOf] = useState(false)
+    return (
+      <div>
+        <Issue {...args} />
+        <IssuePart id={args.id} partOf={partOf} onChange={setPartOf} />
+      </div>
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const part = c.getByRole('switch', { name: 'Only part of MER-231' })
+    await expect(part).toHaveAttribute('aria-checked', 'false')
+    await expect(part).toHaveAccessibleDescription(/merge closes the issue/)
+    await userEvent.click(part)
+    await expect(part).toHaveAttribute('aria-checked', 'true')
+    await expect(part).toHaveAccessibleDescription(/says on the issue what landed and leaves it open/)
+  },
 }

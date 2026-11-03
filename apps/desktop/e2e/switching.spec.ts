@@ -53,9 +53,10 @@ test('going back to an open project shows the screen it kept, where the person l
     const said = 16
     for (let n = 1; n <= said; n += 1)
       await say(page, `Message ${n}: ${'what the person says about the checkout and its retries, at some length. '.repeat(6)}`)
-    // Every message answered: nothing queued, and no turn running.
-    await expect(page.getByText(/queued/i)).toHaveCount(0)
-    await expect(page.locator('section[aria-label="Conversation"][aria-busy]')).toHaveCount(0)
+    // Every message answered: nothing queued, and no turn running. The composer's queue is the one that says so: a kept
+    // screen's board, hidden or beside the conversation, says "Nothing queued" of its own whether a message waits or not.
+    await expect(page.getByRole('region', { name: /^(Queued|\d+ queued)$/ })).toHaveCount(0)
+    await expect(page.locator('section[aria-label="Conversation"][aria-busy]:visible')).toHaveCount(0)
     await expect(conversation(page)).toContainText(`Message ${said}:`)
 
     // Another project, in a tab of its own, with a conversation of its own.
@@ -66,7 +67,7 @@ test('going back to an open project shows the screen it kept, where the person l
     await page.getByRole('button', { name: /^Create halyard/ }).click()
     await expect(page.getByRole('heading', { name: 'halyard', level: 1 })).toBeVisible()
     await say(page, 'Halyard first words')
-    await expect(page.locator('section[aria-label="Conversation"][aria-busy]')).toHaveCount(0)
+    await expect(page.locator('section[aria-label="Conversation"][aria-busy]:visible')).toHaveCount(0)
 
     // Back on meridian: said one more thing, then scrolled up, with something half written, as the person leaves it.
     await tabs.getByRole('button', { name: /^meridian/ }).click()
@@ -96,7 +97,7 @@ test('going back to an open project shows the screen it kept, where the person l
     expect(await scroller(page).evaluate((element) => element.scrollTop)).toBe(400)
     // The runtime answers again, and the kept screen catches up from there: still the one the person left, and never the outline.
     await release()
-    await expect(page.locator('section[aria-label="Conversation"][aria-busy]')).toHaveCount(0)
+    await expect(page.locator('section[aria-label="Conversation"][aria-busy]:visible')).toHaveCount(0)
     expect(await left.evaluate((element) => element.isConnected && element.checkVisibility())).toBe(true)
     expect(await outlined(page)).toBe(false)
 

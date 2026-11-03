@@ -42,10 +42,12 @@ const answered = (threadId: string, count: number) =>
     yield* until(
       prompts(threadId),
       (rows) => rows.length === count && rows.every((row) => row.state !== 'pending' && row.state !== 'delivered'),
+      `${count} turns, each over`,
     )
     yield* until(
       Effect.map(sessions.running(threadId), (running) => (Option.isSome(running) && !running.value.turnRunning ? [true] : [])),
       (rows) => rows.length === 1,
+      `its session to wait for turn ${count + 1}`,
     )
   })
 
@@ -127,9 +129,17 @@ describe('a lead handed to a fresh session', () => {
       yield* say('Look again. [context:25/1000000]')
       yield* answered(created.threadId, 2)
       yield* say('And now?')
-      const [, , first] = yield* until(prompts(created.threadId), (all) => all.length === 3 && all[2]?.state === 'completed')
+      const [, , first] = yield* until(
+        prompts(created.threadId),
+        (all) => all.length === 3 && all[2]?.state === 'completed',
+        'the third turn, in the fresh session, completed',
+      )
       assert.match(first?.prompt ?? '', /^You are carrying on a task an earlier session of yours worked on, in the same worktrees:/)
       assert.lengthOf(yield* sessionsOn(created.threadId), 2)
+      // Its report there is the round's: the end of the turn before it, still being looked at as it starts, doesn't take the
+      // round from it (#430).
+      const reports = (yield* items(created.threadId)).filter((item) => item.kind === 'step_result')
+      assert.lengthOf(reports, 2)
     }).pipe(Effect.provide(runtime())),
   )
 })

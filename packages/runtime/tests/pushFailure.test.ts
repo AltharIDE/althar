@@ -86,6 +86,21 @@ describe('a push that failed', () => {
     )
   })
 
+  it('names a push address that isn’t a repository, not the end of git’s advice', () => {
+    const stderr = [
+      "fatal: 'DISABLED' does not appear to be a git repository",
+      'fatal: Could not read from remote repository.',
+      '',
+      'Please make sure you have the correct access rights',
+      'and the repository exists.',
+    ].join('\n')
+    assert.deepStrictEqual(pushFailureOf({ stderr }), { why: 'no_push_address', said: 'DISABLED' })
+    assert.strictEqual(
+      words(new GitFailed({ args: ['fetch'], cwd: '/here', stderr }), String).message,
+      "git fetch didn't work: fatal: 'DISABLED' does not appear to be a git repository.",
+    )
+  })
+
   it('says a host it couldn’t reach, to try again', () => {
     const { why, message } = pushed(
       failed("fatal: unable to access 'https://gitlab.com/acme/engine.git/': Could not resolve host: gitlab.com"),

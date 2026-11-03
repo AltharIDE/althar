@@ -39,6 +39,8 @@ const FROM_THE_EXECUTOR = [
   'CLAUDE_CONFIG_DIR',
   // Claude Code's launch: Node's fetch takes the proxy its sandbox names.
   'NODE_USE_ENV_PROXY',
+  // Claude Code writes no auto memory into the person's own folder.
+  'CLAUDE_CODE_DISABLE_AUTO_MEMORY',
   'XDG_DATA_HOME',
   'XDG_CONFIG_HOME',
   'OPENCODE_CONFIG_DIR',

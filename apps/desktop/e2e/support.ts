@@ -165,7 +165,7 @@ export const openMadeProject = async (page: Page) => {
 export const openFirstProject = async (electronApp: ElectronApplication, page: Page, path: string) => {
   await toFirstProject(page)
   await chooseFolder(electronApp, path)
-  await page.getByRole('button', { name: /Add a folder/ }).click()
+  await page.getByRole('button', { name: /Choose a folder/ }).click()
   // Ticked once found: one repository, or each of a folder of several.
   await expect(
     page.getByRole('list', { name: 'Repositories for the project' }).getByRole('checkbox', { checked: true }).first(),
@@ -255,6 +255,10 @@ export const planTask = (page: Page, title: string, lead = '[lead:finish]') => s
 /** Starts a task: asks the coordinator for it, and starts its plan at once rather than waiting out the countdown. */
 export const startTask = async (page: Page, title: string, lead = '[lead:finish]') => {
   await planTask(page, title, lead)
+  // Wait for this task's plan to be on show before pressing its Start now: before it is, the last one is another plan's,
+  // and pressing that starts nothing of this task's while leaving it to count down. Its title is exactly the task's; what
+  // the person said carries the markers too, so isn't.
+  await expect(shown(page, title, { exact: true }).last()).toBeVisible()
   // The newest plan is the last in the conversation; any before it have started.
   await page.getByRole('button', { name: 'Start now' }).last().click()
 }

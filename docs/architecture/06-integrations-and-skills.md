@@ -573,9 +573,19 @@ The coordinator can draft an issue on any connected tracker with
 now. Nothing reaches the tracker on its word:
 
 - **A draft is a card** in the coordinator's thread: the tracker, where it
-  goes there (a container), its title, body and labels. The person files it,
+  goes there (a container), its title, body and labels, and every other
+  field its tracker has that it is filed with (below). The person files it,
   changes it first, or discards it. There is no countdown: a draft left
   alone files nothing.
+- **Or it is filed at once** (`draft_issue`'s `file_now`), where the
+  project's notes say issues are filed at once, or the person just said so
+  ("just file it"): whether to is the agent's call by what the person said,
+  not a switch (DEV-182). Its card, filed, is the receipt in the thread,
+  with its key and link. Each card offers **Always file at once** while it
+  waits (filing it too) and, once filed at once, **Always ask first**: each
+  says so to the coordinator as the person, which keeps it as a project
+  note, and to the task's lead where it was pressed. Leads read the
+  project's notes in their brief.
 - **A task's lead can draft too**, with `draft_issue`, and look for what is
   tracked already with `find_issues`: a bug or follow-up it comes across, or
   several the person asks it to file. The card is in the task's thread, and
@@ -585,9 +595,20 @@ now. Nothing reaches the tracker on its word:
   then where the project's issues come from. Once the person files or
   discards one, the lead is told in its thread, with the key and link, as
   the coordinator hears it as news (a lead's drafts aren't the
-  coordinator's news). Leads never file on their own: that is the one flag
-  `leadsNeedTheCard` in `IssueDrafts.ts`. A review's lead has no such tool,
-  and a reviewer only reads.
+  coordinator's news). A lead files at once only where the person said so,
+  as the coordinator does. A review's lead has no such tool, and a
+  reviewer only reads.
+- **Every field its tracker has** goes in the one call: its project,
+  milestone, cycle, parent, assignee, status, estimate, type, components
+  and due date, each by the tracker's name for it, read against where it
+  goes before it is filed (`Tracker.choicesIn`), so a card never holds a
+  name the tracker hasn't; what can't be read is left off and said to the
+  agent with what the tracker has. A label a tracker makes none of (Linear,
+  Trello) is left off and said as it is drafted. Filing sets what the
+  tracker's `create` takes (`capabilities.creates`), then the rest with
+  `update` right after, as a Jira status by its workflow; what the tracker
+  then left off, a label or a field it refused, is said on the filed card
+  and to the agent, and the issue stays filed.
 - **Where it goes** is what the coordinator names, a tracker by its name and
   a container by its id, key or name; or, without them, the tracker and
   container the project is bound to in its settings
@@ -640,23 +661,31 @@ needs Issues: Read and write, which is set on the app itself.
 Leads and the coordinator change issues that already exist
 (`IssueChanges.ts`), through each tracker's `update`, `comment` and `link`:
 
-- **A lead** changes only the issue its task came from: `comment_on_issue`
-  and `link_pull_request` apply at once, and show in its thread as a line;
-  `change_issue` proposes its status (any of its tracker's), closing it, its
-  priority, assignee, labels or title. For any other issue it tells the
+- **A lead** changes the issue its task came from, the issues its task
+  filed, and any the person named to it (in its thread, or in what they
+  asked the coordinator for it), by key or link: `comment_on_issue` and
+  `link_pull_request` apply at once, and show in its thread as a line;
+  `change_issue` proposes any field below. For any other issue it tells the
   person, and the coordinator changes it.
 - **The coordinator** changes any issue on the person's trackers, by key or
-  link: `change_issues` proposes the same fields and a project or milestone,
-  several issues on one card ("move DEV-67 to Done, set DEV-142 to Low");
-  `comment_on_issue` comments at once.
-- **Status, priority, assignee, labels, project, title and closing wait on a
-  card** the person applies with one press, or discards, in the thread of
-  whoever proposed them. Each name is read against the tracker before the
-  card is made (its statuses, members, labels, projects), and one it lacks
-  is refused with what it has, so a card never holds what can't apply. A
-  project's rule, Change issues without asking (`changeIssues`, off by
-  default), applies them at once instead, as a line. Whether a change
-  waits is that one rule (`waitsOnThePerson`).
+  link: `change_issues` proposes the same, several issues on one card
+  ("move DEV-67 to Done, set DEV-142 to Low"); `comment_on_issue` comments
+  at once.
+- **Every field waits on a card** the person applies with one press, or
+  discards, in the thread of whoever proposed it, unless its agent made it
+  at once (`at_once`), where the project's notes say so or the person just
+  did, as a line; a card's **Always change at once** and **Always ask
+  first** are kept as a note, as a draft's are. "Change issues without
+  asking" was a switch until DEV-182; a project that had it on keeps it as
+  such a note (migration 0057).
+- **Read field by field, never all or nothing** (`issueFields.ts`): each
+  name is read against the tracker before the card is made (its statuses,
+  members, labels, projects, milestones, cycles), a parent by reading that
+  issue. What it lacks, a field it hasn't, and what is so already are left
+  off and said to the agent; what reads right goes ahead, on each issue of
+  a batch. People are added and taken off (`assignee`, `unassign`), never
+  put in place of the others where an issue takes several; where it takes
+  one (Linear, Jira) the one added is in place of whoever had it.
 - **Applying is per issue,** each a receipt in the outbound ledger: what
   applied stays applied, and a card where not all of it did says why for
   each and applies again only the rest. A card being applied as Althar
@@ -679,14 +708,48 @@ What each tracker changes:
 |---|---|---|---|---|---|
 | Status | The team's states | A transition offered now; one that needs fields fails in Jira's words | The board's lists | Open, closed as done or not planned | Open or closed |
 | Priority | Yes | Yes | No priorities | No priorities | No priorities |
-| Assignee, labels, title | Yes | Yes | Members, labels, name | Yes | Yes |
-| Project | Its project | No | No | Its milestone | Its milestone |
+| Assignees | One | One | Members, several | Several | Several |
+| Labels, title, description | Yes | Yes | Labels, name, description | Yes | Yes |
+| Project | Its project | No: Jira's own Move | No: its board | A Projects board | No: where it lives |
+| Milestone | Its project's milestone (of the project it goes in) | A fix version, added beside its others | No | Its milestone | Its milestone |
+| Cycle | Its cycle | No: sprints are a board's | No | No | No: iterations are a paid group's |
+| Parent | Its parent | Its parent | No | Its parent issue (set, not read or taken out) | No: epics are a paid group's |
+| Estimate | Points | No: story points are a site's own field | No | No | Its weight |
+| Type | No: a label says | Its issue type | No | Its issue type (an organisation's) | Issue, incident, test case, task |
+| Components | No | Yes | No | No | No |
+| Due date | Yes | Yes | Yes | No | Yes |
+| Set as it is filed | All but labels' names it hasn't | Assignee, fix version, parent, type, components, due | Members, due | Assignees, milestone, type | Assignees, milestone, weight, type, due |
 | Comment | Yes | Yes | Yes | Yes | Yes |
 | Link a pull request | An attachment | A remote link | An attachment | No: a PR that names the issue links it | No: as GitHub |
 
-Not covered yet: Jira's epic, sprint and transition screens with fields,
-Linear's cycles and estimates, GitHub Projects' fields, and GitLab's
-work-item statuses beyond open and closed.
+Where a tracker hasn't a field, its tool says so in its words ([ADR-082](../decisions/082-a-feature-for-one-host-tracker-or-agent-ships-for-all.md)).
+Not covered yet: Jira's sprints, story points and transition screens with
+fields, GitHub Projects' own fields, and GitLab's work-item statuses beyond
+open and closed.
+
+### A task that does part of an issue
+
+A task linked to an issue does all of it unless said: as its pull request
+merges, its issue closes, where issues move along with their tasks. Drafted
+with `part_of`, or switched under its issue in its thread ("Only part of
+MER-231"), it does only part (`external_links.part_of`): its pull request
+says "Part of MER-231" rather than "Issue:", the words trackers read as not
+closing it, and as it merges Althar comments on the issue with what landed
+(what the task built) and leaves it open, whatever the move rule says. A
+tracker's own integration may still close an issue whose key a merged
+branch carries (Linear's, by its team's settings).
+
+### Finding and reading issues
+
+`find_issues` takes words in the title or description, a tracker by name,
+where on it (a team, project, repository or list), open, closed or all,
+whether only the person's, and a run of keys (`DEV-170..DEV-185`, read one
+by one, at most fifty), through each tracker's `find`. With nothing given it
+lists the person's open issues, as the issue picker does. `read_issue` says
+who has an issue, its labels, project, milestone, cycle, parent, type,
+estimate and due date, its description, and its ten latest comments. A
+tracker that couldn't be searched or read is said as such, with its words,
+never taken for none found.
 
 ### Reviewing someone else's pull request
 
@@ -987,9 +1050,9 @@ external observation, not Althar's run authority.
 
 What is built so far is narrower than this section: one store on the
 computer, a curated default catalog and each lead's set fixed and recorded
-for its session ([ADR-084](../decisions/084-skills-one-store-a-curated-catalog.md)),
+for its session ([ADR-088](../decisions/088-skills-one-store-a-curated-catalog.md)),
 and skill and OpenSpec files held off the repository unless the project says
-so ([ADR-085](../decisions/085-skill-and-openspec-files-stay-off-the-repository.md)).
+so ([ADR-089](../decisions/089-skill-and-openspec-files-stay-off-the-repository.md)).
 Bindings by scope, precedence and conflicts are not built; every lead gets
 the same active set, and the catalog's skills are off until the person turns
 them on. [The plan](../plans/skills-across-harnesses.md#implementation-status)

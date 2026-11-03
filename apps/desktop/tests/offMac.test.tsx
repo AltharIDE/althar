@@ -63,7 +63,7 @@ describe('the first screen off a Mac', () => {
     seenTheTour()
     withServices(<Start onProject={onProject} />, client, host)
     await toTheProject()
-    const add = await screen.findByRole('button', { name: /Add a folder/ })
+    const add = await screen.findByRole('button', { name: /Choose a folder/ })
     expect(add.textContent).toContain('Ctrl+N')
     fireEvent.keyDown(window, { key: 'n', metaKey: true })
     expect(host.pickFolder).not.toHaveBeenCalled()

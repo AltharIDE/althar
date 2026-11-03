@@ -48,6 +48,9 @@ export const pushFailureOf = (
   const rejected = /\[remote rejected\][^(]*\(([^)]*)\)/i.exec(stderr)
   if (rejected !== null) return { why: 'refused', said: said ?? rejected[1] ?? '' }
   if (UNREACHABLE.test(stderr)) return { why: 'unreachable' }
+  // A push address that is no path or URL at all, as one set to DISABLED so nothing goes there.
+  const address = /'([^'/\\:]*)' does not appear to be a git repository/i.exec(stderr)?.[1]
+  if (address !== undefined) return { why: 'no_push_address', said: address }
   // Stopped with no answer: git was likely waiting on a sign-in it had no way to ask for.
   if (failed.timedOut === true) return { why: 'unanswered' }
   return null

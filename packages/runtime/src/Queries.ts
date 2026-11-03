@@ -47,6 +47,8 @@ import { Clock, Context, Deferred, Duration, Effect, Layer, Option, Schema } fro
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Busy, type Line } from './Busy'
+import { ModelFacts } from './ModelFacts'
+import { PlanUsage } from './PlanUsage'
 import { PlanParameters, planWaits } from './Runs'
 import { Agents, RuntimeConfig } from './Config'
 import { backgroundOf, questionTitle } from './Questions'
@@ -67,10 +69,12 @@ import { type DocumentRefused, GitFailed, NotFound } from './errors'
 import { folderOf, KEPT } from './bringBack'
 import { Instance } from './Instance'
 import { Launches } from './Launches'
-import { commitOf, commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRemotes, PUSHED, remoteOf } from './git'
+import type { ChangeTarget } from '@althar/domain'
+import { commitOf, commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRemotes, PUSHED, branchRemoteIn } from './git'
 import { commandIn, shortCommand } from './rules'
 import { reviewBriefOf } from './Reviews'
 import { Sessions } from './Sessions'
+import { spendingOf } from './Spending'
 import { actionsOf, standingOf } from './Tasks'
 
 /*
@@ -265,6 +269,8 @@ export const stuckOf = (payload: unknown): StuckStep => {
   const tried = field(payload, 'tried')
   const limit = Option.getOrUndefined(decodeLimit(field(payload, 'limit')))
   const service = field(payload, 'service')
+  const model = field(payload, 'model')
+  const provider = field(payload, 'provider')
   return {
     step: step === 'review' || step === 'settle' || step === 'publish' ? step : 'implement',
     why:
@@ -296,6 +302,8 @@ export const stuckOf = (payload: unknown): StuckStep => {
       : {}),
     ...(limit === undefined ? {} : { limit }),
     ...(typeof service === 'string' ? { service } : {}),
+    ...(typeof model === 'string' ? { model } : {}),
+    ...(typeof provider === 'string' ? { provider } : {}),
   }
 }
 
@@ -606,6 +614,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           launchId: text(content, 'launchId'),
           taskId: text(content, 'taskId') || null,
           runnableId: text(content, 'runnableId') || null,
+          name: text(content, 'name') || null,
           where: text(content, 'where'),
           // A branch's or a pull request's run (ADR-066): what it is at a glance, and what was asked for, to run it again.
           branch: text(content, 'branch') || null,
@@ -697,6 +706,8 @@ type Store =
   | SqlClient.SqlClient
   | Instance
   | Agents
+  | ModelFacts
+  | PlanUsage
   | Sessions
   | Coordinator
   | Changes
@@ -1050,8 +1061,9 @@ export class Queries extends Context.Service<
             projectId: string
             workspaceId: string
             state: string
+            changeTarget: ChangeTarget | null
           }>`
-            SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.path, w.branch, w.base_ref, w.base_commit,
+            SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS default_branch, b.change_target, w.path, w.branch, w.base_ref, w.base_commit,
               w.branched_at IS NOT NULL AS branched, l.path AS root, w.task_id, w.project_id, w.id AS workspace_id, w.state,
               EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL) AS opened
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
@@ -1146,9 +1158,17 @@ export class Queries extends Context.Service<
        * asked, only what git or Althar's own push noted here, which can miss
        * a push made elsewhere: so then a count above none isn't known.
        */
-      const branchRemoteOf = (root: string, worktree: string, branch: string, base: string, head: string, baseCommit: string | null) =>
+      const branchRemoteOf = (
+        root: string,
+        worktree: string,
+        branch: string,
+        base: string,
+        head: string,
+        baseCommit: string | null,
+        target: ChangeTarget | null,
+      ) =>
         Effect.gen(function* () {
-          const remote = yield* remoteOf(root, base)
+          const remote = yield* branchRemoteIn(root, base, target)
           if (remote === null) return null
           const asked = (yield* (yield* Changes).askedAt(worktree, branch)) === head
           const [there = null, pushed = null] = yield* commitsOf(root, [
@@ -1259,6 +1279,7 @@ export class Queries extends Context.Service<
                                     worktree.defaultBranch,
                                     head,
                                     worktree.baseCommit,
+                                    worktree.changeTarget,
                                   ),
                           },
                         ]
@@ -1540,8 +1561,9 @@ export class Queries extends Context.Service<
             snapshot: string
             listening: number
             connectionId: string | null
+            partOf: number
           }>`
-            SELECT kind, product, ref, key, url, snapshot, listening, connection_id FROM external_links WHERE task_id = ${taskId}
+            SELECT kind, product, ref, key, url, snapshot, listening, connection_id, part_of FROM external_links WHERE task_id = ${taskId}
             ORDER BY created_at`
           const issueRow = links.find((link) => link.kind === 'issue')
           const issue = ((): IssueSummary | null => {
@@ -1627,7 +1649,13 @@ export class Queries extends Context.Service<
               ),
             { concurrency: 'unbounded' },
           )
-          return { issue, issueConnection: issueRow?.connectionId ?? null, changes }
+          return {
+            issue,
+            issueConnection: issueRow?.connectionId ?? null,
+            // It does only part of its issue: its merge comments rather than closing it.
+            ...(issueRow?.partOf === 1 ? { issuePartOf: true } : {}),
+            changes,
+          }
         })
 
       /** A task's pull requests as its card reads them, and the repositories it merged here: what the coordinator is told of them. */
@@ -2779,9 +2807,12 @@ export class Queries extends Context.Service<
               concurrency: 'unbounded',
             },
           )
+          // What it used of each account its agents ran on: a reading that fails leaves it out, never the thread (ADR-084).
+          const usage = yield* spendingOf({ taskId: head.taskId }).pipe(Effect.orElseSucceed(() => []))
           return {
             threadId,
             cursor: at,
+            usage,
             project: { id: head.projectId, name: head.projectName },
             host,
             task: {
@@ -2883,9 +2914,14 @@ export class Queries extends Context.Service<
             [pageOf(threadId, page), sessionOf(threadId), coordinators.suggested(projectId), hostOf(projectId)],
             { concurrency: 'unbounded' },
           )
+          // What it used today, since this computer's midnight, of each account it ran on (ADR-084).
+          const midnight = new Date(yield* Clock.currentTimeMillis)
+          midnight.setHours(0, 0, 0, 0)
+          const usage = yield* spendingOf({ threadId, since: midnight.toISOString() }).pipe(Effect.orElseSucceed(() => []))
           return {
             threadId,
             cursor: at,
+            usage,
             project: { id: projectId, name: project.name },
             session,
             suggested,

@@ -495,26 +495,19 @@ describe('the CPU an agent uses', () => {
       const runner = start('while kill -0 $PPID 2>/dev/null; do sleep 0.05; done')
       try {
         const pids = [idle, busy, runner].map((child) => child.pid ?? 0)
-        let before = yield* treeMembers(pids)
-        let beforeAt = Date.now()
-        const worked = pids.map(() => false)
-        // Keep sampling at an interval that isn't a multiple of the worker's 50 ms sleep. Two reads 1.5 seconds apart
-        // can land on the same phase of its loop and miss every short-lived worker when the machine is busy.
-        yield* until(
-          Effect.gen(function* () {
-            yield* Effect.sleep('137 millis')
-            const after = yield* treeMembers(pids)
-            const afterAt = Date.now()
-            pids.forEach((pid, index) => {
-              const was = before.get(pid)
-              const now = after.get(pid)
-              if (was != null && now != null && workedBetween(was, now, afterAt - beforeAt, 0.05)) worked[index] = true
-            })
-            before = after
-            beforeAt = afterAt
-            return worked
+        yield* Effect.sleep('300 millis')
+        // Readings a moment apart rather than one pair: a runner's short-lived worker is caught only by a reading that
+        // finds it alive, so the watch looks often, and one pair a good while apart can miss every worker it started.
+        // 430ms isn't a multiple of the runner's 50ms sleep, so the readings don't land in the same gap between workers.
+        const readings = yield* Effect.forEach([0, 1, 2, 3, 4, 5], (n) =>
+          Effect.tap(treeMembers(pids), () => (n === 5 ? Effect.void : Effect.sleep('430 millis'))),
+        )
+        const worked = pids.map((pid) =>
+          readings.some((after, index) => {
+            const before = readings[index - 1]?.get(pid)
+            const now = after.get(pid)
+            return before != null && now != null && workedBetween(before, now, 430, 0.05)
           }),
-          (seen) => seen[1] === true && seen[2] === true,
         )
         assert.deepStrictEqual(worked, [false, true, true])
       } finally {

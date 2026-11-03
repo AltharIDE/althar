@@ -286,6 +286,32 @@ export const TheWaysIn: Story = {
 
 const chose = fn()
 
+/** Set in a card, from its left edge: a small mark beside the heading, the ways and the foot from the same edge as what is over them. */
+export const SetInACard: Story = {
+  decorators: [(Story) => <div style={{ width: 640, padding: '18px 20px', borderRadius: 14, background: 'var(--paper)' }}>{Story()}</div>],
+  render: () => (
+    <ConnectCard brand={Brand.GitHub} title="Connect GitHub" line={FOR} foot={FOOT} align="start">
+      <ConnectWays label="Ways to connect GitHub" ways={WAYS} onChoose={fn()} />
+      <ConnectActions align="start">
+        <LinkButton>On a company’s own server</LinkButton>
+      </ConnectActions>
+    </ConnectCard>
+  ),
+}
+
+/** A step of the way, set in a card: how far along at the head's end. */
+export const SetInACardStepped: Story = {
+  decorators: SetInACard.decorators,
+  render: () => (
+    <ConnectCard brand={Brand.GitHub} title="Make a token on GitHub" pager={{ steps: 3, at: 0 }} align="start">
+      <ConnectActions primary>
+        <Button trailingIcon="external">Open GitHub’s token page</Button>
+      </ConnectActions>
+      <ConnectText tone="note">It opens with the name, northwind as the owner, 90 days and the permissions set.</ConnectText>
+    </ConnectCard>
+  ),
+}
+
 /** Choosing a way, by pointer or keyboard, says which. */
 export const ChoosingAWay: Story = {
   render: () => <Ways onChoose={chose} />,
