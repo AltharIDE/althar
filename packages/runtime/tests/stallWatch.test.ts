@@ -495,14 +495,19 @@ describe('the CPU an agent uses', () => {
       try {
         const pids = [idle, busy, runner].map((child) => child.pid ?? 0)
         yield* Effect.sleep('300 millis')
-        const first = yield* treeMembers(pids)
-        yield* Effect.sleep('1500 millis')
-        const second = yield* treeMembers(pids)
-        const worked = pids.map((pid) => {
-          const was = first.get(pid)
-          const now = second.get(pid)
-          return was != null && now != null && workedBetween(was, now, 1_500, 0.05)
-        })
+        // Readings a moment apart rather than one pair: a runner's short-lived worker is caught only by a reading that
+        // finds it alive, so the watch looks often, and one pair a good while apart can miss every worker it started.
+        // 430ms isn't a multiple of the runner's 50ms sleep, so the readings don't land in the same gap between workers.
+        const readings = yield* Effect.forEach([0, 1, 2, 3, 4, 5], (n) =>
+          Effect.tap(treeMembers(pids), () => (n === 5 ? Effect.void : Effect.sleep('430 millis'))),
+        )
+        const worked = pids.map((pid) =>
+          readings.some((after, index) => {
+            const before = readings[index - 1]?.get(pid)
+            const now = after.get(pid)
+            return before != null && now != null && workedBetween(before, now, 430, 0.05)
+          }),
+        )
         assert.deepStrictEqual(worked, [false, true, true])
       } finally {
         for (const child of [idle, busy, runner]) child.kill('SIGKILL')

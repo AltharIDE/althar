@@ -311,6 +311,11 @@ interface Running {
   /** What its permission requests are decided by: its thread, task and rules. */
   readonly requestContext: RequestContext
   turnRunning: boolean
+  /**
+   * Told once the prompt of the turn running has reached the agent, which may stop it: between `turnRunning` and that
+   * moment there is nothing for an interrupt to stop.
+   */
+  promptSent: Deferred.Deferred<void> | null
   stopping: boolean
   /** How full the agent's context is, in tokens, as it last said; null until it says (ACP's usage updates). */
   context: { readonly used: number; readonly size: number } | null
@@ -820,16 +825,40 @@ export class Sessions extends Context.Service<
       const accounts = yield* Accounts
       const limits = yield* Limits
       const planUsage = yield* PlanUsage
+      const sessionsSql = yield* SqlClient.SqlClient
       /*
        * Claude Code's adapter says the plan's windows with the usage it streams:
        * kept for the account the session runs on, in a fiber of its own, so
        * the stream never waits on the store or the view.
        */
+      /* The cost each session's agent last said, so the store is written only when it moves. */
+      const costs = new Map<string, number>()
+      /*
+       * And the cost it says, a running total for the session (ACP's usage_update): kept on the session, as what was paid
+       * per use (ADR-084).
+       */
+      const heardCost = (running: Running, event: SessionEvent) => {
+        if (event._tag !== 'ContextUsage' || event.cost === undefined) return Effect.void
+        const { amount, currency } = event.cost
+        if (!Number.isFinite(amount) || amount < 0 || costs.get(running.sessionId) === amount) return Effect.void
+        costs.set(running.sessionId, amount)
+        return Effect.asVoid(
+          Effect.forkIn(
+            sessionsSql`UPDATE provider_sessions SET reported_cost = ${amount}, reported_currency = ${currency} WHERE id = ${running.sessionId}`.pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not keep what a session cost', cause)),
+            ),
+            sessionsScope,
+          ),
+        )
+      }
       const heardPlan = (running: Running, event: SessionEvent) => {
         const windows = event._tag === 'PlanWindows' ? event.windows : event._tag === 'ContextUsage' ? event.planWindows : undefined
-        return windows === undefined
-          ? Effect.void
-          : Effect.asVoid(Effect.forkIn(planUsage.heard(running.account.id, running.entry.definition.id, windows), sessionsScope))
+        return Effect.andThen(
+          heardCost(running, event),
+          windows === undefined
+            ? Effect.void
+            : Effect.asVoid(Effect.forkIn(planUsage.heard(running.account.id, running.entry.definition.id, windows), sessionsScope)),
+        )
       }
       const toolServer = yield* ToolServer
       const setups = yield* Setups
@@ -1508,16 +1537,22 @@ export class Sessions extends Context.Service<
           // opened for the person's words (ADR-034), before this, says it isn't.
           if (thread.role !== 'coordinator') yield* touchTask(thread.taskId)
           // Said once the agent has the prompt and its turn can be stopped: what hears it may stop it at once, as a spent budget of turns does.
-          const started = live.publish({
-            _tag: 'TurnStarted',
-            threadId: thread.threadId,
-            turnId,
-            // Keep the stall watch's shown-message signal separate from asked-for authorization.
-            byPerson: inputs.some(
-              (input) =>
-                input.shown === 1 || (input.author === 'person' && (input.senderKind === 'window' || input.senderKind === 'paired_device')),
-            ),
-          })
+          const promptSent = yield* Deferred.make<void>()
+          running.promptSent = promptSent
+          const started = Effect.andThen(
+            live.publish({
+              _tag: 'TurnStarted',
+              threadId: thread.threadId,
+              turnId,
+              // Keep the stall watch's shown-message signal separate from asked-for authorization.
+              byPerson: inputs.some(
+                (input) =>
+                  input.shown === 1 ||
+                  (input.author === 'person' && (input.senderKind === 'window' || input.senderKind === 'paired_device')),
+              ),
+            }),
+            Effect.asVoid(Deferred.succeed(promptSent, undefined)),
+          )
           // The app's log has each turn's start and end by its ids, never what was said (DEV-61).
           const turnLog = {
             turn: turnId,
@@ -1599,6 +1634,8 @@ export class Sessions extends Context.Service<
             ...inputs.flatMap((input) => [...(sent.images.get(input.id) ?? []), ...(linked.files.get(input.id) ?? [])]),
           ]
           yield* notingListening(running)
+          // A turn that fails before its prompt reaches the agent never has one to stop: told either way, so an interrupt
+          // waiting for it doesn't wait forever.
           const streamed = yield* Stream.runForEach(running.agent.prompt(prompt, parts, started), (event) =>
             Effect.gen(function* () {
               if (event._tag === 'TurnEnded') ended = event
@@ -1611,10 +1648,11 @@ export class Sessions extends Context.Service<
               yield* live.publish({ _tag: 'Agent', threadId: thread.threadId, event })
               if (event._tag === 'AgentMessage' || event._tag === 'AgentThought' || event._tag === 'ToolCallUpdate') yield* stream
             }),
-          ).pipe(Effect.exit)
+          ).pipe(Effect.ensuring(Deferred.succeed(promptSent, undefined)), Effect.exit)
           // What the turn left open is kept as far as it came: the message being written, and any command's output.
           yield* items.end.pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record the end of a message', cause)))
           running.turnRunning = false
+          running.promptSent = null
           running.turnEndedAt = yield* Clock.currentTimeMillis
 
           const failure = Exit.isFailure(streamed) ? Cause.findErrorOption(streamed.cause) : Option.none()
@@ -2364,6 +2402,7 @@ export class Sessions extends Context.Service<
             revokeTools,
             requestContext,
             turnRunning: false,
+            promptSent: null,
             stopping: false,
             context: null,
             recording: undefined,
@@ -3397,7 +3436,15 @@ export class Sessions extends Context.Service<
         interrupt: (threadId) =>
           Effect.suspend(() => {
             const running = threads.get(threadId)
-            return running === undefined ? Effect.fail(new NoSession({ threadId })) : Effect.ignore(running.agent.interrupt)
+            if (running === undefined) return Effect.fail(new NoSession({ threadId }))
+            // Asked to stop before the prompt has reached the agent, there is nothing to cancel yet: the agent would take
+            // the stop for the turn before this one, or lose it, while its prompt goes on. Wait until it has the prompt.
+            const sent = running.promptSent
+            return (sent === null ? Effect.void : Deferred.await(sent)).pipe(
+              // A stop never waits longer than a turn's start would: a prompt that never went out has nothing to cancel.
+              Effect.timeoutOption(Duration.seconds(5)),
+              Effect.andThen(Effect.ignore(running.agent.interrupt)),
+            )
           }),
         stop: (threadId) =>
           exclusive(
