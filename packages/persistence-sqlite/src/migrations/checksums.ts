@@ -59,5 +59,6 @@ export const checksums: Readonly<Record<string, string>> = {
   '0053_recorded_setups': 'b3b271687cc75403921fcd7c8d48c1621a3b363781d119f0cbd3f220dc74311c',
   '0054_persons_word': '97e84a565631b998712050df450676b81bff004c51be3fd1faa038f33c0a5c26',
   '0055_upstream_branches': 'ede8ade67eae4a8ca2ae3cc18ac4042982236eef140dcdcfbb5e01153d20d206',
-  '0056_finding_titles': 'e205614f007c5232164f727e6084a2b5210d2f473145cb1f62282dc8ee7930b1',
+  '0056_usage': '57710c832956b08dc50d7b2f4745b1be15e5ab9ec3f5b1b14a324899fe18ed9f',
+  '0057_finding_titles': 'e205614f007c5232164f727e6084a2b5210d2f473145cb1f62282dc8ee7930b1',
 }
