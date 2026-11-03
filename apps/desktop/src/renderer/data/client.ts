@@ -386,6 +386,8 @@ export interface Client {
     readonly repositoryId: string
     readonly role?: RepositoryRole
     readonly changeTarget?: ChangeTarget
+    /** Answers the offer to push a fork's branches upstream with no. */
+    readonly notNow?: boolean
     readonly setup?: RepositorySetup
   }) => Promise<void>
   readonly getProjectRules: (projectId: string) => Promise<ProjectRulesView>
@@ -540,13 +542,13 @@ export interface Start {
 }
 
 /**
- * Tell a step's agent what to do, hand the step to an agent (on an account
- * and model, where one was picked), wait for a usage limit's reset, or
+ * Tell a step's agent what to do, hand the step to an agent (on an account,
+ * model and effort, where one was picked), wait for a usage limit's reset, or
  * abandon it.
  */
 export type StuckAnswer =
   | { readonly kind: 'tell'; readonly note: string }
-  | { readonly kind: 'retry'; readonly agentId: string; readonly accountId?: string; readonly model?: string }
+  | { readonly kind: 'retry'; readonly agentId: string; readonly accountId?: string; readonly model?: string; readonly effort?: string }
   | { readonly kind: 'wait' }
   | { readonly kind: 'abandon' }
 

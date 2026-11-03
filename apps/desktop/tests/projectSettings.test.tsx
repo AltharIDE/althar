@@ -397,9 +397,12 @@ describe('a project’s settings', () => {
 
   it('lets changes to issues apply without a card once switched on, off until then', async () => {
     const { client } = windowAt('/projects/p1')
-    await openSettings()
-    const change = within(screen.getByRole('region', { name: 'Tasks' })).getByRole('switch', { name: 'Change issues without asking' })
+    await openSettings('Rules')
+    const change = within(await screen.findByRole('region', { name: 'Agents may' })).getByRole('switch', {
+      name: 'Change issues without asking',
+    })
     expect(change.getAttribute('aria-checked')).toBe('false')
+    expect(descriptionOf(change)).toContain('with no card to apply first. New issues still come as a draft for you to file.')
     await userEvent.click(change)
     expect(change.getAttribute('aria-checked')).toBe('true')
     await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', changeIssues: true }))
@@ -1288,7 +1291,7 @@ describe('a project’s repositories, in its settings', () => {
 })
 
 it('keeps the project web switch, default on, with the privacy trade-off visible', async () => {
-  const { client } = windowAt('/projects/p1?room=settings&section=general')
+  const { client } = windowAt('/projects/p1?room=settings&section=rules')
   const toggle = await screen.findByRole('switch', { name: 'Leads can reach the web' })
   expect(toggle.getAttribute('aria-checked')).toBe('true')
   expect(descriptionOf(toggle)).toContain('Pages could steer a lead into sending private code in a URL')

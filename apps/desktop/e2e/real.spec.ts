@@ -53,7 +53,7 @@ test('a real agent plans a task, leads it and answers', async () => {
     }, repo)
     const page = await mainWindow(app)
     await toFirstProject(page)
-    await page.getByRole('button', { name: /Add a folder/ }).click()
+    await page.getByRole('button', { name: /Choose a folder/ }).click()
     await page.getByRole('button', { name: /Make the project/ }).click()
     await openMadeProject(page)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()

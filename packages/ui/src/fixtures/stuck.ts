@@ -1,4 +1,4 @@
-import { CODEX, GEMINI_PRO, OPUS, QWEN } from './models'
+import { OPUS } from './models'
 
 /* Task 419's Verify, stuck on one assertion after Althar tried three ways round it. */
 export const STUCK = {
@@ -24,9 +24,4 @@ export const STUCK = {
     ],
     exit: 1,
   },
-  agents: [
-    { model: GEMINI_PRO, note: 'Gemini CLI · API key, billed per token' },
-    { model: QWEN, note: 'Ollama · this Mac, slower' },
-    { model: CODEX, note: 'Tried already, on this step' },
-  ],
 }
