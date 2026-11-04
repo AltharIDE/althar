@@ -258,7 +258,7 @@ export const coordinatorFolder = (projectId: string) =>
     const [project] = yield* sql<{ slug: string }>`SELECT slug FROM projects WHERE id = ${projectId}`
     if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
     const bindings = yield* sql<{ slug: string; name: string; base: string | null; within: string | null; repository: string }>`
-      SELECT b.slug, b.display_name AS name, b.default_base_ref AS base, b.folder AS within, l.path AS repository
+      SELECT b.slug, b.display_name AS name, coalesce(b.work_toward, b.default_base_ref) AS base, b.folder AS within, l.path AS repository
       FROM repository_bindings b
       JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
       WHERE b.project_id = ${projectId} AND b.detached_at IS NULL

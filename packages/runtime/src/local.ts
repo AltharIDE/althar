@@ -13,7 +13,7 @@ import { makeScratch } from './firstWrite'
 import { makeKeyedLock } from './keyedLock'
 import { branchExists, commitOf, git } from './git'
 import { Instance } from './Instance'
-import { prepareWorktree, startCommitOf, startOf } from './Projects'
+import { branchName, prepareWorktree, startCommitOf, startOf, towardHere } from './Projects'
 import { change, fact, timestamp } from './records'
 import { addItem } from './threads'
 
@@ -69,12 +69,16 @@ export interface Spot {
   readonly repository: string
   readonly base: string | null
   readonly changeTarget: string | null
+  /** Where it started from, as git names it: origin/main, upstream/release/0.8.0. */
+  readonly baseRef: string
+  /** The branch its work goes into (ADR-093); null for the default branch. */
+  readonly toward: string | null
 }
 
 const SPOT = `
   SELECT w.id, w.project_id, w.task_id, h.id AS thread_id, w.binding_id, b.display_name AS name, b.slug AS binding_slug,
     p.slug AS project_slug, k.slug AS task_slug, k.title, k.state AS task_state, p.archived_at IS NOT NULL AS removed, w.kind, w.state, w.path, w.branch, w.branched_at IS NOT NULL AS branched,
-    w.base_commit, w.returns_to, w.returned_at, l.path AS repository, b.default_base_ref AS base, b.change_target
+    w.base_commit, w.returns_to, w.returned_at, l.path AS repository, b.default_base_ref AS base, b.change_target, w.base_ref, w.toward
   FROM workspaces w
   JOIN repository_bindings b ON b.id = w.binding_id
   JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = w.device_id
@@ -231,6 +235,7 @@ export const toWorktree = (spot: Spot) =>
     const { remote, base } = yield* startOf(spot)
     const worktree = join(config.worktreeRoot, spot.projectSlug, spot.taskSlug, spot.bindingSlug)
     const made = yield* prepareWorktree(spot.repository, base, { worktree, branch: spot.branch }, remote, spot.branched === 0)
+    if (spot.toward !== null) yield* towardHere(spot.repository, spot.toward, remote)
     yield* record(
       spot,
       {
@@ -268,6 +273,21 @@ export const toCheckout = (spot: Spot) =>
     yield* record(spot, { kind: 'checkout', state: 'preparing', path: spot.repository, setup: null }, 'workspace.planned', {
       worksIn: 'checkout',
     })
+  })
+
+/**
+ * A worktree made with a draft whose branch to work toward changed on its
+ * plan card (ADR-093): unused, it moves to where the task starts now, the
+ * branch with it, keeping the files its setup made, which git ignores.
+ */
+export const retarget = (spot: Spot) =>
+  Effect.gen(function* () {
+    const { remote, base } = yield* startOf(spot)
+    if (branchName(spot.baseRef) === base) return
+    const { baseRef, baseCommit } = yield* startCommitOf(spot.repository, base, remote)
+    yield* git(spot.path, 'reset', '-q', '--keep', baseCommit)
+    if (spot.toward !== null) yield* towardHere(spot.repository, spot.toward, remote)
+    yield* record(spot, { baseRef, baseCommit }, 'workspace.retargeted', { baseRef, baseCommit, toward: spot.toward })
   })
 
 /* ---- Taking a checkout, and giving it back ---- */
@@ -388,7 +408,9 @@ const placing = (
   Effect.gen(function* () {
     const spots = yield* spotsOf(taskId)
     if (worksIn === 'worktree') {
-      for (const spot of spots) if (spot.kind === 'checkout' && spot.state === 'preparing') yield* toWorktree(spot)
+      for (const spot of spots)
+        if (spot.kind === 'checkout' && spot.state === 'preparing') yield* toWorktree(spot)
+        else if (spot.kind === null && spot.state === 'ready' && !(yield* begun(spot))) yield* retarget(spot)
       return { kind: 'ready' } as Placed
     }
     for (const spot of spots)
@@ -410,7 +432,7 @@ const placing = (
       }
       const { remote, base } = yield* startOf(spot)
       const { baseRef, baseCommit } = yield* startCommitOf(spot.repository, base, remote)
-      const holdup = holdupOf(was, base, baseCommit)
+      const holdup = holdupOf(was, base, baseCommit, spot.base === null ? [] : [spot.base])
       const seen: CheckoutSeen = { spotId: spot.id, branch: was.branch, head: was.head }
       // What the person answered about this checkout, while it is as it was when they were asked.
       const agreed = (about: CheckoutConsent['holdup']) =>
@@ -434,6 +456,7 @@ const placing = (
     // Then each is taken: its branch made where the task starts, and checked out.
     for (const { spot, start, baseRef, was } of taking) {
       const taken = yield* takeCheckout(spot.repository, spot.branch, start)
+      if (spot.toward !== null) yield* towardHere(spot.repository, spot.toward, baseRef.startsWith('upstream/') ? 'upstream' : 'origin')
       yield* record(
         spot,
         { state: 'ready', branch: taken.branch, baseRef, baseCommit: start, returnsTo: taken.returnsTo, branchedAt: yield* timestamp },

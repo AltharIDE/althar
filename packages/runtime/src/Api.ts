@@ -782,14 +782,14 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      SetRepository: ({ commandId, projectId, repositoryId, role, changeTarget, notNow, setup }) =>
+      SetRepository: ({ commandId, projectId, repositoryId, role, changeTarget, notNow, setup, workToward }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
               const said = yield* envelope(
                 'project.set_repository',
-                { projectId, repositoryId, role, changeTarget, notNow, setup },
+                { projectId, repositoryId, role, changeTarget, notNow, setup, workToward },
                 commandId,
               )
               // Its branches go upstream only where its host says now that the person can push there.
@@ -805,6 +805,7 @@ export const handlers = Api.toLayer(
                 ...(changeTarget === undefined ? {} : { changeTarget }),
                 ...(notNow === undefined ? {} : { notNow }),
                 ...(setup === undefined ? {} : { setup }),
+                ...(workToward === undefined ? {} : { workToward }),
                 commandId: said.commandId,
               })
             }),
@@ -1179,8 +1180,8 @@ export const handlers = Api.toLayer(
         ),
       StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, instance.personId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
-      ChangePlan: ({ commandId, planId, steps, end, worksIn }) =>
-        once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn))),
+      ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
+        once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn, toward))),
       ChangeIssueDraft: ({ commandId, draftId, title, body, labels, priority }) =>
         once(
           commandId,

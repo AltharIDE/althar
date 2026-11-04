@@ -133,6 +133,7 @@ interface Binding {
   readonly id: string
   readonly slug: string
   readonly name: string
+  /** The branch the project works toward there (ADR-093), its default branch unless it says: what a run with no task runs a copy of. */
   readonly base: string | null
   readonly within: string | null
   readonly repository: string
@@ -282,7 +283,7 @@ export class Launches extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           return yield* sql<Binding>`
-            SELECT b.id, b.slug, b.display_name AS name, b.default_base_ref AS base, b.folder AS within,
+            SELECT b.id, b.slug, b.display_name AS name, coalesce(b.work_toward, b.default_base_ref) AS base, b.folder AS within,
               l.path AS repository, b.run_command, b.run_setup
             FROM repository_bindings b
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
@@ -1269,7 +1270,7 @@ export class Launches extends Context.Service<
       const runTool: Tool = {
         name: 'run_project',
         description:
-          "Runs the project for the person, with no agent: Althar starts its default run command itself, or with run the one of its runnables by that name, after its setup, and shows it over the composer, with where it answers once it says. Without task, branch or pull_request, in a fresh copy of the default branch. With task, in that task's worktree, to see what it built. With branch (its name on the remote) or pull_request (its number or link), in a throwaway copy of it that Althar fetches from the code host itself, with its own sign-in, so it needs nothing pulled or checked out: when the person asks to start, run, try or see a branch or a pull request, even one not pulled yet, use this rather than starting a task. An unknown branch is refused, with the names like it. It stays running until the person stops it; a branch's copy goes when it stops. In a project of several repositories, say which, as repository.",
+          "Runs the project for the person, with no agent: Althar starts its default run command itself, or with run the one of its runnables by that name, after its setup, and shows it over the composer, with where it answers once it says. Without task, branch or pull_request, in a fresh copy of the branch the project works toward: its default branch, unless its Work toward says another. With task, in that task's worktree, to see what it built. With branch (its name on the remote) or pull_request (its number or link), in a throwaway copy of it that Althar fetches from the code host itself, with its own sign-in, so it needs nothing pulled or checked out: when the person asks to start, run, try or see a branch or a pull request, even one not pulled yet, use this rather than starting a task. An unknown branch is refused, with the names like it. It stays running until the person stops it; a branch's copy goes when it stops. In a project of several repositories, say which, as repository.",
         input: {
           type: 'object',
           properties: {
@@ -1308,7 +1309,7 @@ export class Launches extends Context.Service<
                   access,
                   task,
                   { ...asked, ...(ref === undefined ? {} : { ref }) },
-                  task === undefined ? 'a fresh copy of the default branch' : `${task.slug}'s worktree`,
+                  task === undefined ? 'a fresh copy of the branch the project works toward' : `${task.slug}'s worktree`,
                   {
                     answering:
                       "Give the person that address as a link, with the page on it they'd want, if one; they can open and stop it from Run’s list too.",

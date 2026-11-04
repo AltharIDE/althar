@@ -36,6 +36,12 @@ export class RepositoriesNeeded extends Schema.TaggedError<RepositoriesNeeded>()
   choices: Schema.Array(Schema.String),
 }) {}
 
+/** A branch to work toward (ADR-093) that a repository's remote doesn't have, nor its clone here. */
+export class BranchNotFound extends Schema.TaggedError<BranchNotFound>()('BranchNotFound', {
+  branch: Schema.String,
+  repository: Schema.String,
+}) {}
+
 /**
  * A change to a project that can't be made: a name that is empty, the
  * project's last repository left out (a task needs one to work in), a role

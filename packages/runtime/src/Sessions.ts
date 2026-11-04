@@ -158,6 +158,8 @@ interface TaskRepository {
   readonly baseRef: string
   readonly baseCommit: string | null
   readonly defaultBranch: string
+  /** The branch its work goes into, where it isn't the default (ADR-093): kept current with, and never pushed onto, as the default is. */
+  readonly toward: string | null
   /** The folder inside it the project is about, such as one package of a monorepo; null for all of it. */
   readonly within: string | null
   /** 1 where it is the repository's own checkout, where the person works, as a Local task's is (ADR-091); 0 for a worktree. */
@@ -1143,7 +1145,7 @@ export class Sessions extends Context.Service<
           // The task's repositories, each in its worktree here, the first first.
           const repositories = yield* sql<TaskRepository>`
             SELECT b.display_name AS name, b.role, w.path AS worktree, w.branch, w.branched_at IS NOT NULL AS branched, w.base_ref,
-              w.base_commit, coalesce(b.default_base_ref, w.base_ref) AS default_branch, b.folder AS within,
+              w.base_commit, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.toward, b.folder AS within,
               w.kind IS NOT NULL AS local
             FROM threads t
             JOIN workspaces w ON w.task_id = t.task_id AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
@@ -2138,7 +2140,14 @@ export class Sessions extends Context.Service<
               ? guardEnv({
                   sessionId,
                   taskBranch: thread.branch,
-                  defaultBranches: [thread.defaultBranch, ...thread.repositories.map((repository) => repository.defaultBranch)],
+                  // The branches its work goes into too (ADR-093): a task never pushes straight onto those either.
+                  defaultBranches: [
+                    thread.defaultBranch,
+                    ...thread.repositories.flatMap((repository) => [
+                      repository.defaultBranch,
+                      ...(repository.toward === null ? [] : [repository.toward]),
+                    ]),
+                  ],
                   // Only the task's own repositories: a scratch one in its temp folder is the lead's to do with as it likes.
                   repositories: [thread.cwd, ...thread.repositories.map((repository) => repository.worktree)],
                   count: SIGNED_OUT_GIT_CONFIG,
@@ -2189,6 +2198,7 @@ export class Sessions extends Context.Service<
                       defaultBranches: thread.repositories.flatMap((repository) => [
                         repository.defaultBranch,
                         ...(repository.baseRef.startsWith('upstream/') ? [repository.baseRef.slice('upstream/'.length)] : []),
+                        ...(repository.toward === null ? [] : [repository.toward]),
                       ]),
                       taskBranch: thread.branch,
                       // Its git stops what can't be undone whatever runs it, so a Never of only that needn't read the rest (rules.ts).
@@ -2988,7 +2998,10 @@ export class Sessions extends Context.Service<
           const changed = states.flatMap((state) => (state.changed === '' ? [] : [state.changed])).join('\n')
           const status = states.flatMap((state) => (state.status === '' ? [] : [state.status])).join('\n')
           const where = (repository: TaskRepository) =>
-            `${repository.worktree}, ${repository.branched === 0 ? 'with no branch yet, at' : `on the branch ${repository.branch}, which started from`} ${repository.baseRef}${repository.baseCommit === null ? '' : ` at ${repository.baseCommit.slice(0, 12)}`}${repository.within === null ? '' : `. The project is its folder ${repository.within}: start there, and change the rest of the repository where the task needs it`}`
+            `${repository.worktree}, ${repository.branched === 0 ? 'with no branch yet, at' : `on the branch ${repository.branch}, which started from`} ${repository.baseRef}${repository.baseCommit === null ? '' : ` at ${repository.baseCommit.slice(0, 12)}`}${repository.toward === null ? '' : `. Its work goes into ${repository.toward}, not ${repository.defaultBranch}: its pull request goes there, and ${repository.toward} is what you bring in to keep it current`}${repository.within === null ? '' : `. The project is its folder ${repository.within}: start there, and change the rest of the repository where the task needs it`}`
+          // The branch its work goes into, in words: the default branch, or the one it works toward (ADR-093).
+          const towards = [...new Set(thread.repositories.flatMap((repository) => (repository.toward === null ? [] : [repository.toward])))]
+          const into = towards.length === 0 ? 'the default branch' : towards.length === 1 ? (towards[0] ?? '') : 'the branch it goes into'
           // A quick task is for trying something out, and nothing of it leaves this Mac until the person has it made a change; its
           // worktrees have no branch until its lead changes the repository (DEV-96).
           const [quick] = yield* sql<{
@@ -3082,11 +3095,11 @@ export class Sessions extends Context.Service<
             // Rewriting what was pushed leaves the pull request unable to take a plain push: Althar says whether it was, so the lead doesn't guess.
             [
               ...published.filter((said) => said !== ''),
-              "Bring the default branch in by merging it, never by rebasing, and never amend or squash commits that were or may have been pushed: a pull request would no longer take your commits. Where Althar says a branch is published, go by that, not by git status or a remote you can't fetch.",
+              `Bring ${into} in by merging it, never by rebasing, and never amend or squash commits that were or may have been pushed: a pull request would no longer take your commits. Where Althar says a branch is published, go by that, not by git status or a remote you can't fetch.`,
             ].join(' '),
             ...(resolves?.resolves === 1
               ? [
-                  "This project has you resolve a conflict with the default branch on your own: Althar tells you when it finds one, and what to merge. Commit the merge as soon as the conflicts are settled and the quick checks pass, and don't end your turn with it uncommitted or while you wait on something running in the background: Althar looks at the branch when your turn ends. If the full test suites then find something, fix it in one follow-up commit on top of the merge. On a pull request, Althar pushes that merge itself once you commit it, with that one fix if you made it, and then a fix you commit on top when Althar tells you its checks failed, as one commit. Nothing else you commit is pushed for you, and you still never push.",
+                  `This project has you resolve a conflict with ${into} on your own: Althar tells you when it finds one, and what to merge. Commit the merge as soon as the conflicts are settled and the quick checks pass, and don't end your turn with it uncommitted or while you wait on something running in the background: Althar looks at the branch when your turn ends. If the full test suites then find something, fix it in one follow-up commit on top of the merge. On a pull request, Althar pushes that merge itself once you commit it, with that one fix if you made it, and then a fix you commit on top when Althar tells you its checks failed, as one commit. Nothing else you commit is pushed for you, and you still never push.`,
                 ]
               : []),
             STANDING_DICTATED,

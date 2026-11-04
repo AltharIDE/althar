@@ -56,10 +56,12 @@ export type Holdup =
 /**
  * What stands between a task and the checkout: its changes not committed (and a step of git's under way, which counts as them),
  * else a branch other than the one tasks start from, which is the person's to give up; nothing, clean on it or detached at it.
+ * A task working toward a branch other than the default (ADR-093) starts from it, and the default branch, or any of `also`,
+ * isn't the person's own either.
  */
-export const holdupOf = (checkout: Checkout, base: string, baseCommit: string): Holdup | null => {
+export const holdupOf = (checkout: Checkout, base: string, baseCommit: string, also: ReadonlyArray<string> = []): Holdup | null => {
   if (!isClean(checkout)) return { kind: 'changes', files: checkout.uncommitted }
-  if (checkout.branch === base) return null
+  if (checkout.branch === base || (checkout.branch !== null && also.includes(checkout.branch))) return null
   if (checkout.branch === null) return checkout.head === baseCommit ? null : { kind: 'branch', branch: checkout.head.slice(0, 7) }
   return { kind: 'branch', branch: checkout.branch }
 }
