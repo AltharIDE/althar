@@ -284,6 +284,38 @@ describe('files sent with a message', () => {
   )
 })
 
+describe('files sent with a message, at their edges', () => {
+  it.live('are named apart where several share a name, and refused for a thread that isn’t there', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const setup = yield* connected()
+        const { client, grant } = setup
+        const { task, worktree } = yield* taskWithLead(setup)
+        const logs = yield* Effect.forEach([downloads(), downloads(), downloads()], (folder) =>
+          Effect.map(grant(join(folder, 'build.log')), (one) => ({ grant: one })),
+        )
+        const send = (threadId: string, files: ReadonlyArray<{ readonly grant: string }>) =>
+          client.Send({ commandId: commandId(), threadId, body: 'Look', disposition: 'after_current', files })
+        assert.strictEqual((yield* Effect.flip(send('thr_gone', logs.slice(0, 1)))).message, "That task isn't there any more.")
+        yield* send(task.threadId, logs)
+        const [message] = messages((yield* client.GetThread({ threadId: task.threadId })).items).slice(-1)
+        const files =
+          (message?.content as { readonly files?: ReadonlyArray<{ readonly name: string; readonly path?: string }> }).files ?? []
+        assert.deepStrictEqual(
+          files.map((file) => file.name),
+          ['build.log', 'build.log', 'build.log'],
+        )
+        const copied = yield* setup.sql<{ path: string }>`SELECT path FROM user_input_files ORDER BY position`
+        assert.deepStrictEqual(
+          copied.map((row) => row.path.slice(row.path.lastIndexOf('/') + 1)),
+          ['build.log', 'build 2.log', 'build 3.log'],
+        )
+        for (const row of copied) assert.isTrue(row.path.startsWith(join(worktree, '.althar', 'attachments')), row.path)
+      }),
+    ),
+  )
+})
+
 describe('measure', () => {
   it('stops walking a folder as soon as it holds too many files', () => {
     const folder = mkdtempSync(join(tmpdir(), 'althar-many-'))

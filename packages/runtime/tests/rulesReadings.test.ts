@@ -368,3 +368,51 @@ describe('what a reader may run', () => {
     assert.strictEqual(said("bash -c 'cat f > out'"), 'It would write to out, and this role only reads.')
   })
 })
+
+describe('a cmd or PowerShell command on Windows', () => {
+  const home = 'C:\\Users\\alice'
+  const windows: RuleContext = {
+    ...context,
+    worktree: `${home}\\Althar\\meridian\\retry\\app`,
+    platform: 'win32',
+    home,
+    realPath: (path) => {
+      if (/[/\\]\.git$/.test(path)) throw new Error('ENOENT')
+      return path
+    },
+    scratch: [],
+    project: { mode: 'rules', ask: ['outside'], never: [], allow: [], commands: [] },
+  }
+  const reasonOf = (line: string) => {
+    const decided = decide(command(line), windows)
+    return decided.verdict === 'allow' ? 'allowed' : (decided as { readonly reason: string }).reason
+  }
+  const writes = (path: string) => `Writing outside the task's worktree always asks: ${path}`
+  const movesAway = (path: string) =>
+    `Deleting or moving away what's outside the task's worktree always asks: it could be someone's only copy: ${path}`
+
+  it('reads a move or a rename by its parameters or their places, and asks where it takes from or goes outside', () => {
+    for (const line of ['move a.txt b.txt', 'mi a.txt', 'Rename-Item -Path a.txt -NewName b.txt', 'ren a.txt b.txt'])
+      assert.strictEqual(reasonOf(line), 'allowed', line)
+    assert.strictEqual(reasonOf('Move-Item -Path a.txt -Destination D:\\elsewhere'), writes('D:/elsewhere'))
+    assert.strictEqual(reasonOf('mv a.txt D:\\elsewhere'), writes('D:/elsewhere'))
+    assert.strictEqual(reasonOf('Rename-Item D:\\elsewhere\\a.txt b.txt'), movesAway('D:/elsewhere/a.txt'))
+    assert.strictEqual(reasonOf('rni -LiteralPath D:\\x\\a.txt -NewName b.txt'), movesAway('D:/x/a.txt'))
+    assert.strictEqual(reasonOf('rename D:\\x\\a.txt'), movesAway('D:/x/a.txt'))
+  })
+
+  it('reads robocopy’s mirror as deleting where it copies to, and its move as taking from where it copies from', () => {
+    assert.strictEqual(reasonOf('robocopy src D:\\backup /MIR'), movesAway('D:/backup'))
+    assert.strictEqual(reasonOf('robocopy D:\\x src /MOVE'), movesAway('D:/x'))
+  })
+
+  it('reads what writes a file, by its path given or its first place', () => {
+    for (const [line, path] of [
+      ['Set-Content -Path D:\\x\\a.txt -Value hi', 'D:/x/a.txt'],
+      ['Out-File D:\\x\\log.txt -Append', 'D:/x/log.txt'],
+      ['New-Item -Force D:\\x\\n.txt', 'D:/x/n.txt'],
+      ['ni D:\\x\\n.txt', 'D:/x/n.txt'],
+    ] as const)
+      assert.strictEqual(reasonOf(line), writes(path), line)
+  })
+})
