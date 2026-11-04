@@ -11,6 +11,7 @@ import { SqlClient } from 'effect/sql'
 import { Changes } from '../src/Changes'
 import { coAuthorLine, setCoAuthor } from '../src/credit'
 import { setPlansAndReviews } from '../src/plansAndReviews'
+import { setReviewSeal } from '../src/pullRequestReview'
 import { ChangedSinceSeen } from '../src/errors'
 import { words } from '../src/words'
 import { Instance } from '../src/Instance'
@@ -164,7 +165,7 @@ describe('a task that ends in a pull request', () => {
   })
 
   it.live(
-    'opens its draft after the last round of review with the fixes it never re-reviewed, and says so in the description and not in the seal',
+    'opens its draft after the last round of review with fixes no review read, and says so in the description and not in the seal',
     () => {
       const { working, bare } = hosted()
       const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
@@ -182,13 +183,33 @@ describe('a task that ends in a pull request', () => {
         const body = github.changes[0]?.body ?? ''
         // Said at the head, plainly, with what was left open; no seal claims a pass read the change; the fold says it too.
         assert.notInclude(body, '<picture>')
-        assert.match(body, /^> \*\*Reviewed once; the last fixes weren’t re-reviewed\.\*\*/)
+        assert.match(body, /^> \*\*Reviewed once; the last fixes weren’t reviewed\.\*\*/)
         assert.match(body, /> Findings left open:\n> - /)
-        assert.include(body, '<summary>Reviewed by Small in 1 pass; the last fixes weren’t re-reviewed</summary>')
+        assert.include(body, '<summary>Reviewed by Small in 1 pass; the last fixes weren’t reviewed</summary>')
         assert.include(body, '**Left open**')
       }).pipe(Effect.provide(runtimeWith({ github })))
     },
   )
+
+  it.live('says the last fixes were not reviewed in its description even with the review left out of it', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    git(working, 'config', 'user.name', 'Fake')
+    git(working, 'config', 'user.email', 'fake@althar.test')
+    return Effect.gen(function* () {
+      yield* setPlansAndReviews({ rounds: 1, roundsOut: 'always' })
+      yield* setReviewSeal(false)
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [lead:leave-open] [review:always]')
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+      const body = github.changes[0]?.body ?? ''
+      assert.match(body, /^> \*\*The last fixes weren’t reviewed\.\*\*/)
+      assert.match(body, /> Findings left open:\n> - /)
+      assert.notInclude(body, '<details>')
+      assert.notInclude(body, '<picture>')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
 
   it.live('follows the team’s conventions: a branch named as its guide says, and a description in its template, no box ticked', () => {
     const { working, bare } = hosted()

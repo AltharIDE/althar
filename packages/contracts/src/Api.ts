@@ -362,7 +362,7 @@ export const ROUNDS_OUT = ['settled', 'always', 'ask'] as const
 export const PlansAndReviews = Schema.Struct({
   /** Seconds a proposed plan waits before it starts on its own; 0 starts it at once. */
   countdown: Schema.Literals(COUNTDOWNS),
-  /** Review rounds before a task is left to the person with findings open. */
+  /** Review rounds before the task goes on or is left to the person, as `roundsOut` says. */
   rounds: Schema.Literals(REVIEW_ROUNDS),
   /** What a task does when its rounds run out and the lead's last fixes were never reviewed. */
   roundsOut: Schema.Literals(ROUNDS_OUT),

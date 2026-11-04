@@ -1090,7 +1090,12 @@ export class Changes extends Context.Service<
           const setting = yield* reviewSeal
           // A task that went on with fixes no review read says so, whatever the person chose to show of the review.
           const unreviewed = yield* unreviewedOf(input.runId)
-          const record = setting.on ? yield* reviewRecordOf({ ...input, named: yield* sessionNamer, sent: memory.recall }) : null
+          // The fold and seal are optional: a failure to read them leaves the note, which is not.
+          const record = !setting.on
+            ? null
+            : yield* reviewRecordOf({ ...input, named: yield* sessionNamer, sent: memory.recall }).pipe(
+                Effect.catchCause((cause) => Effect.as(Effect.logWarning('The pull request opens without its review record', cause), null)),
+              )
           const note = unreviewed === null ? null : unreviewedNote(unreviewed, record?.passes ?? null)
           if (record === null) return note === null ? null : { seal: null, details: null, note }
           return { seal: input.github ? sealOf(setting.style, record) : null, details: detailsOf(record), note }

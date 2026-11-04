@@ -35,7 +35,7 @@ export interface PlansAndReviewsText {
   countdown: { title: string; note: (seconds: Countdown) => string; label: (seconds: Countdown) => string }
   rounds: { title: string; note: string; label: (rounds: ReviewRounds) => string }
   roundsOut: { title: string; note: (choice: RoundsOut) => string; label: (choice: RoundsOut) => string }
-  /** Goes back to today's value, named. */
+  /** Offers the default, named. */
   reset: (label: string) => string
 }
 
@@ -61,7 +61,7 @@ export const plansAndReviewsText: PlansAndReviewsText = {
     label: (choice) =>
       choice === 'settled' ? 'Carry on when every finding is settled' : choice === 'always' ? 'Always carry on' : 'Ask me',
   },
-  reset: (label) => `Use ${label}`,
+  reset: (label) => `Default: ${label}`,
 }
 
 const COUNTDOWNS: readonly Countdown[] = [0, 10, 25, 60]

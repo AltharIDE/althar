@@ -1429,6 +1429,16 @@ export class Runs extends Context.Service<
             JOIN nodes n ON n.id = a.node_id WHERE n.execution_id = ${run.executionId} AND f.state = 'open' ORDER BY f.created_at`
         })
 
+      /** The run's findings that one settle set aside without giving a reason. */
+      const unexplained = (run: RunRow, attemptId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          return yield* sql<{ id: string; severity: Finding['severity']; location: string; claim: string; title: string | null }>`
+            SELECT f.id, f.severity, f.location, f.claim, f.title FROM findings f JOIN node_attempts a ON a.id = f.review_attempt_id
+            JOIN nodes n ON n.id = a.node_id WHERE n.execution_id = ${run.executionId} AND f.state = 'set_aside'
+            AND f.settled_in_attempt_id = ${attemptId} AND (f.response IS NULL OR trim(f.response) = '') ORDER BY f.created_at`
+        })
+
       /** The run's open findings, as the lead is told to settle them. */
       const openToSettle = (run: RunRow) =>
         Effect.map(openFindings(run), (open) =>
@@ -3634,7 +3644,8 @@ export class Runs extends Context.Service<
           // Out of rounds, with changes no review has seen: that isn't ready. It goes on to its ending where the person's setting says
           // it may, once every finding is settled or whatever is left open; else it's their call (05: Stuck, findings open).
           if (workAfter !== workBefore) {
-            const left = yield* openFindings(current)
+            // Unsettled: still open, or set aside by this settle with no word why (a decline is deliberate only when explained).
+            const left = [...(yield* openFindings(current)), ...(yield* unexplained(current, attempt.id))]
             const carry = yield* roundsOutNow
             if (carry === 'always' || (carry === 'settled' && left.length === 0)) {
               yield* carriedOn(current, attempt.id, attempt.iteration + 1, summary, left)

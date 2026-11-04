@@ -63,7 +63,7 @@ export const timesOf = (passes: number) => (passes <= 1 ? 'once' : passes === 2 
 
 /** What the task and its pull request say when it went on with fixes no review read, in one line. */
 export const unreviewedLine = (passes: number | null) =>
-  passes === null ? 'The last fixes weren’t re-reviewed.' : `Reviewed ${timesOf(passes)}; the last fixes weren’t re-reviewed.`
+  passes === null ? 'The last fixes weren’t reviewed.' : `Reviewed ${timesOf(passes)}; the last fixes weren’t reviewed.`
 
 /**
  * What the head of the description says when the task went on with fixes no review read, and what it left open: plain, outside
@@ -131,7 +131,7 @@ export const sealOf = (style: SealStyle, record: ReviewRecord, origin = SEAL_ORI
 /** The review, folded at the description's end: what changed after it, what was kept, and who built and reviewed the change. */
 export const detailsOf = (record: ReviewRecord) => {
   const at = record.sha === null || record.unreviewed != null ? '' : `, at <code>${short(record.sha)}</code>`
-  const summary = record.unreviewed == null ? reviewedLine(record) : `${reviewedLine(record)}; the last fixes weren’t re-reviewed`
+  const summary = record.unreviewed == null ? reviewedLine(record) : `${reviewedLine(record)}; the last fixes weren’t reviewed`
   const parts = [`<details>\n<summary>${lineOf(summary)}${at}</summary>`]
   if (record.changed.length > 0)
     parts.push(
@@ -316,7 +316,9 @@ export const unreviewedOf = (runId: string) =>
     if (carried === undefined) return null
     const open = yield* sql<{ claim: string; title: string | null }>`
       SELECT f.claim, f.title FROM findings f JOIN node_attempts a ON a.id = f.review_attempt_id JOIN nodes n ON n.id = a.node_id
-      JOIN workflow_executions e ON e.id = n.execution_id WHERE e.run_id = ${runId} AND f.state = 'open' ORDER BY f.created_at`
+      JOIN workflow_executions e ON e.id = n.execution_id WHERE e.run_id = ${runId}
+      AND (f.state = 'open' OR (f.state = 'set_aside' AND f.settled_in_attempt_id = ${carried.id} AND (f.response IS NULL OR trim(f.response) = '')))
+      ORDER BY f.created_at`
     return { open: open.map((finding) => finding.title ?? finding.claim) } satisfies Unreviewed
   })
 

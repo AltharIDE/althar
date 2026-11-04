@@ -313,8 +313,8 @@ describe('the coordinator loop', () => {
         SELECT json_extract(content, '$.title') AS title, json_extract(content, '$.description') AS description
         FROM thread_items WHERE thread_id = ${card?.threadId ?? ''} AND kind = 'notice'`
       assert.deepStrictEqual(
-        notices.map((notice) => [notice.title, notice.description]).filter(([title]) => /re-reviewed/.test(title ?? '')),
-        [['Reviewed once; the last fixes weren’t re-reviewed.', null]],
+        notices.map((notice) => [notice.title, notice.description]).filter(([title]) => /weren’t reviewed/.test(title ?? '')),
+        [['Reviewed once; the last fixes weren’t reviewed.', null]],
       )
     }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.millis(50) }))),
   )
@@ -338,6 +338,21 @@ describe('the coordinator loop', () => {
     }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.millis(50) }))),
   )
 
+  it.live('stops at its last round when the lead set a finding aside with no reason, which is no settling', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* setPlansAndReviews({ rounds: 1 })
+      const { projectId, threadId } = yield* opened
+      yield* say(threadId, 'Tighten the types. [coordinator:plan] [lead:finish] [lead:decline-quietly] [review:always]')
+      yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'waiting')
+      const [call] = yield* sql<{ payload: string }>`SELECT payload FROM attention_requests WHERE kind = 'stuck'`
+      assert.deepStrictEqual(pick(JSON.parse(call?.payload ?? '{}') as Record<string, unknown>, ['why', 'open']), {
+        why: 'round_limit',
+        open: 2,
+      })
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.millis(50) }))),
+  )
+
   it.live('goes on with a finding left open when the person has it always carry on, and lists it on the task', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -348,7 +363,7 @@ describe('the coordinator loop', () => {
       assert.lengthOf(yield* sql`SELECT id FROM attention_requests WHERE kind = 'stuck'`, 0)
       const [notice] = yield* sql<{ description: string | null }>`
         SELECT json_extract(content, '$.description') AS description FROM thread_items
-        WHERE thread_id = ${card?.threadId ?? ''} AND kind = 'notice' AND json_extract(content, '$.title') LIKE '%re-reviewed%'`
+        WHERE thread_id = ${card?.threadId ?? ''} AND kind = 'notice' AND json_extract(content, '$.title') LIKE '%weren’t reviewed%'`
       assert.match(notice?.description ?? '', /^Findings left open:\n- /)
     }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.millis(50) }))),
   )

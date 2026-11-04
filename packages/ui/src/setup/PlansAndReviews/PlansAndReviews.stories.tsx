@@ -81,7 +81,7 @@ export const AlwaysCarryOn: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByRole('combobox', { name: 'When rounds run out' })).toHaveTextContent('Always carry on')
-    await userEvent.click(c.getByRole('button', { name: 'Use Carry on when every finding is settled' }))
+    await userEvent.click(c.getByRole('button', { name: 'Default: Carry on when every finding is settled' }))
     await expect(onChange).toHaveBeenLastCalledWith({ roundsOut: 'settled' })
     await expect(c.getByRole('combobox', { name: 'When rounds run out' })).toHaveTextContent('Carry on when every finding is settled')
   },
