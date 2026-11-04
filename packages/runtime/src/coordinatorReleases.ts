@@ -12,7 +12,7 @@ import { coordinatorFolderAt } from './coordinatorFolder'
 import { repositoryOf, viaHost } from './coordinatorPullRequests'
 import type { AskedAction, AskedResult, FreshAction } from './Errands'
 import { Instance } from './Instance'
-import { commitsOf, fetchBranch, fetchSpecs, git, PUSHED, pushTo } from './git'
+import { branchOn, commitsOf, fetchBranch, fetchInto, fetchSpecs, git, PUSHED, pushTo } from './git'
 import { bounded } from './readChecks'
 import { ActionNotPerformed, ToolRefused } from './toolErrors'
 import type { Tool, ToolAccess } from './ToolServer'
@@ -614,13 +614,26 @@ const createBranch = (projectId: string, input: unknown) =>
     const { host, repository } = yield* repositoryOf(projectId, asked.repository)
     const clone = yield* cloneOf(projectId, asked.repository, repository.path)
     const from = asked.from?.trim() || repository.defaultBranch
+    if (from.startsWith('-')) return yield* refused(`\`${from}\` isn't a branch, a tag or a commit.`)
     const where = repository.path.join('/')
+    const start = `refs/althar/start/${branch}`
+    // As git reaches the repository, signed in as Althar: what a push goes by.
+    const target = yield* viaHost(host.pushTarget(repository))
+    /** Where `from` is, fetched here: a commit, else a branch, else a tag. */
+    const startOf = Effect.gen(function* () {
+      if (/^[0-9a-f]{7,64}$/i.test(from)) {
+        const [here = null] = yield* commitsOf(clone, [from])
+        if (here !== null) return here
+        yield* fetchSpecs(clone, target, [`+${from}:${start}`])
+      } else if ((yield* fetchInto(clone, target, from, start)) === null) yield* fetchSpecs(clone, target, [`+refs/tags/${from}:${start}`])
+      const [commit = null] = yield* commitsOf(clone, [start])
+      return commit
+    })
     const read: Effect.Effect<FreshAction, ToolRefused> = Effect.gen(function* () {
-      const commit = yield* viaHost(host.commitOf(repository, from))
-      const there = yield* host.branchHead(repository, branch).pipe(
-        Effect.map((head): string | null => head),
-        Effect.catch((error) => (error.reason === 'not_found' ? Effect.succeed(null) : Effect.fail(refused(error.message)))),
-      )
+      const commit = yield* startOf
+      if (commit === null) return yield* refused(`${where} has no branch, tag or commit ${from}.`)
+      const there = yield* branchOn(clone, target, branch)
+      if (there === undefined) return yield* refused(`Althar couldn't reach ${where} to read its branches. Try again.`)
       if (there === null) return { state: 'absent', head: commit }
       if (there === commit) return { state: 'done', head: commit, answer: `${where} has ${branch} on ${sha(commit)} already.` }
       return yield* refused(
@@ -630,12 +643,7 @@ const createBranch = (projectId: string, input: unknown) =>
     const act = (fresh: FreshAction): Effect.Effect<AskedResult, ToolRefused | ActionNotPerformed> =>
       Effect.gen(function* () {
         const commit = fresh.head ?? ''
-        const target = yield* host.pushTarget(repository).pipe(Effect.mapError(definite))
-        const start = `refs/althar/start/${branch}`
-        // The commit, where the clone hasn't it yet: fetched by Althar, as nothing of the person's moves.
-        if ((yield* commitsOf(clone, [commit]))[0] == null) yield* fetchSpecs(clone, target, [`+${commit}:${start}`])
-        if ((yield* commitsOf(clone, [commit]))[0] == null)
-          return yield* new ActionNotPerformed({ message: `Althar couldn't fetch ${sha(commit)} from ${where}.` })
+        // Never forced: a branch made there meanwhile stays as it is, and this push is refused.
         yield* pushTo(clone, target, branch, commit).pipe(Effect.mapError((error) => refused(error.stderr || error.message)))
         yield* Effect.ignore(git(clone, 'update-ref', '-d', start))
         yield* Effect.ignore(git(clone, 'update-ref', '-d', `${PUSHED}${branch}`))
@@ -690,9 +698,10 @@ const openPullRequest = (projectId: string, input: unknown) =>
         return {
           state: 'done',
           head,
+          branch: into,
           answer: `${named(open)} is open from ${from} already, into ${open.target}.`,
         }
-      return { state: 'absent', head }
+      return { state: 'absent', head, branch: into }
     })
     const act = (): Effect.Effect<AskedResult, ToolRefused | ActionNotPerformed> =>
       host.openChange(repository, { title, body: asked.body?.trim() ?? '', source: from, target: into, draft }).pipe(

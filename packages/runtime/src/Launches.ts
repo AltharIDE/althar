@@ -1305,11 +1305,17 @@ export class Launches extends Context.Service<
                         SELECT id, slug FROM tasks WHERE project_id = ${access.projectId} AND (id = ${asked.task} OR slug = ${asked.task})`
                 if (asked.task !== undefined && task === undefined)
                   return yield* new ToolRefused({ message: `This project has no task ${asked.task}. list_tasks shows them.` })
+                // A copy of the branch the project works toward, where it says one (ADR-093); its default branch's otherwise.
+                const [toward] = yield* sql<{ branch: string }>`
+                  SELECT work_toward AS branch FROM repository_bindings
+                  WHERE project_id = ${access.projectId} AND detached_at IS NULL AND work_toward IS NOT NULL ORDER BY created_at, rowid`
                 return yield* runFor(
                   access,
                   task,
                   { ...asked, ...(ref === undefined ? {} : { ref }) },
-                  task === undefined ? 'a fresh copy of the branch the project works toward' : `${task.slug}'s worktree`,
+                  task === undefined
+                    ? `a fresh copy of ${toward === undefined ? 'the default branch' : toward.branch}`
+                    : `${task.slug}'s worktree`,
                   {
                     answering:
                       "Give the person that address as a link, with the page on it they'd want, if one; they can open and stop it from Run’s list too.",

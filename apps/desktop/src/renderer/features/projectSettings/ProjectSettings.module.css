@@ -25,3 +25,10 @@
   font-size: 12px;
   line-height: 18px;
 }
+
+/* The branch new tasks work toward, in mono as a branch is, cut short with its whole in the list (ADR-093). */
+.branch {
+  max-width: 240px;
+  font-family: var(--mono);
+  font-size: 12px;
+}

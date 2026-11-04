@@ -310,6 +310,8 @@ interface PublishRow {
   readonly bindingId: string
   readonly remotes: string
   readonly defaultBase: string | null
+  /** The branch its work goes into, where it isn't the default (ADR-093): on the repository it opens on, a fork's upstream too. */
+  readonly toward: string | null
   /** For a fork: where its pull requests open, the repository it was forked from or the fork itself. */
   readonly changeTarget: ChangeTarget | null
 }
@@ -1146,7 +1148,8 @@ export class Changes extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const tasks = yield* sql<PublishRow>`
             SELECT k.title, b.display_name AS name, b.slug, t.id AS thread_id, w.id AS workspace_id, w.path, w.branch, w.base_commit, w.base_ref, b.id AS binding_id,
-              w.branched_at IS NOT NULL AS branched, b.remote_fingerprints AS remotes, coalesce(w.toward, b.default_base_ref) AS default_base, b.change_target
+              w.branched_at IS NOT NULL AS branched, b.remote_fingerprints AS remotes, coalesce(w.toward, b.default_base_ref) AS default_base, b.change_target,
+              w.toward
             FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
             JOIN workspaces w ON w.task_id = k.id AND w.device_id = ${instance.deviceId} AND w.access = 'write'
             JOIN repository_bindings b ON b.id = w.binding_id
@@ -1362,16 +1365,17 @@ export class Changes extends Context.Service<
           // The repository as its host names it, not as the remote spells it: Bitbucket Data Center's has `scm/` in front.
           const path = repository.path
           const pushTarget = yield* host.pushTarget(own)
-          // The branch it started from, on the repository it opens on; into the one a fork came from, from a task made before it
-          // was chosen, that repository's default.
+          // The branch it works toward (ADR-093), else the branch it started from, on the repository it opens on; into the one a
+          // fork came from, from a task made before it was chosen, that repository's default.
           const target =
-            fork === null || !samePath(repository.path, fork.upstream.path)
+            task.toward ??
+            (fork === null || !samePath(repository.path, fork.upstream.path)
               ? baseBranch(task.baseRef ?? '', task.baseRef != null && (yield* branchExists(task.path, task.baseRef))) ||
                 task.defaultBase ||
                 repository.defaultBranch
               : task.baseRef?.startsWith('upstream/') === true
                 ? task.baseRef.slice('upstream/'.length)
-                : repository.defaultBranch
+                : repository.defaultBranch)
           // Never onto a default branch, wherever the branch goes (ADR-071): a task's branch is its own.
           if (task.branch === own.defaultBranch || (from === undefined && task.branch === target))
             return yield* new PushRefused({ taskId: input.taskId, why: 'protected', remote: `${own.path.join('/')}/${task.branch}` })

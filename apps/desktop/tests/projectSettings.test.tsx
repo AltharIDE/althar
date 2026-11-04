@@ -8,6 +8,7 @@ import {
   ApiError,
   type BoardTask,
   type ConnectionSummary,
+  type ProjectRepository,
   type ProjectSummary,
   type ProjectTracker,
   type RepositorySetup,
@@ -197,6 +198,42 @@ describe('a project’s settings', () => {
     expect(screen.getByRole('textbox', { name: 'meridian-web: commands' })).toHaveProperty(
       'placeholder',
       'The first task’s lead fills this in.',
+    )
+  })
+
+  it('sets the branch new tasks work toward in each repository, its default marked, and says why one didn’t hold', async () => {
+    let kept: ReadonlyArray<ProjectRepository> = repositories.map((each) => ({
+      ...each,
+      defaultBranch: 'main',
+      workToward: null,
+      branches: ['main', 'release/0.8.0'],
+    }))
+    const setRepository = vi.fn(async (input: { repositoryId: string; workToward?: string | null }) => {
+      if (input.workToward === 'release/0.8.0' && input.repositoryId === 'repo_web')
+        throw new ApiError({ reason: 'BranchNotFound', message: 'meridian-web has no branch release/0.8.0, on its remote or here.' })
+      kept = kept.map((each) => (each.id === input.repositoryId ? { ...each, workToward: input.workToward ?? null } : each))
+    })
+    windowAt('/projects/p1?room=settings&section=general', { setRepository, getRepositories: vi.fn(async () => kept) })
+    const api = await screen.findByRole('combobox', { name: 'Work toward in meridian-api' })
+    expect(api.textContent).toContain('main (default)')
+    await userEvent.click(api)
+    await userEvent.click(await screen.findByRole('option', { name: 'release/0.8.0' }))
+    await waitFor(() =>
+      expect(setRepository).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: 'repo_api', workToward: 'release/0.8.0' }),
+    )
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: 'Work toward in meridian-api' }).textContent).toContain('release/0.8.0'),
+    )
+    // Back to the default is null: the default branch, as before.
+    await userEvent.click(screen.getByRole('combobox', { name: 'Work toward in meridian-api' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'main (default)' }))
+    await waitFor(() => expect(setRepository).toHaveBeenLastCalledWith({ projectId: 'p1', repositoryId: 'repo_api', workToward: null }))
+    // One that didn't hold goes back, and says why at its row.
+    await userEvent.click(screen.getByRole('combobox', { name: 'Work toward in meridian-web' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'release/0.8.0' }))
+    expect(await screen.findByText('meridian-web has no branch release/0.8.0, on its remote or here.')).toBeTruthy()
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: 'Work toward in meridian-web' }).textContent).toContain('main (default)'),
     )
   })
 

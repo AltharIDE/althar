@@ -14,6 +14,7 @@ import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { Menu, MenuRadioGroup, MenuRadioItem } from '../../primitives/Menu/Menu'
 import { Segmented } from '../../primitives/Segmented/Segmented'
+import { Select } from '../../primitives/Select/Select'
 import { IssueRef, type IssueRefProps } from '../Issue/Issue'
 import s from './TaskLaunch.module.css'
 import { Rhythm } from '../../lib/rhythm'
@@ -90,6 +91,9 @@ export interface TaskLaunchText {
   worktreeNote: string
   /** Planned in a worktree while another task works Local: why, where the coordinator didn't say. */
   localTaken: (taken: string) => string
+  /** The branch its work goes into (ADR-093): the picker's name, and the default branch in its list. */
+  toward: string
+  defaultBranch: (branch: string) => string
 }
 
 export const taskLaunchText: TaskLaunchText = {
@@ -124,9 +128,13 @@ export const taskLaunchText: TaskLaunchText = {
   localNote: (taken) => (taken === null ? 'One task at a time; your own edits share it.' : `Waits for ${taken}.`),
   worktreeNote: 'Side by side with other tasks. Builds from cold.',
   localTaken: (taken) => `Local is taken by ${taken}.`,
+  toward: 'Works toward',
+  defaultBranch: (branch) => `${branch} (default)`,
 }
 
 const ENDS = [TaskEnd.DraftPr, TaskEnd.ReadyPr, TaskEnd.PushOnly] as const
+/** A list of branches longer than this opens with a field to find one by name. */
+const SEARCHED = 8
 
 /** Why a step is in the plan, or why it is not running as planned. */
 function Why({ step, limited, t }: { step: LaunchStep; limited?: { name: string; until: string }; t: TaskLaunchText }) {
@@ -206,6 +214,17 @@ export interface TaskLaunchProps {
   worksInWhy?: string
   /** The task working Local now, by its title, which it would wait for there. */
   localTaken?: string
+  /**
+   * The branch its work goes into (ADR-093): it starts from it, and its pull
+   * request goes into it. Beside where it works, a picker of the remote's
+   * `branches`, changeable until its first step starts; none with only one.
+   */
+  toward?: string
+  /** The repository's default branch, which the list says so of. */
+  defaultBranch?: string
+  /** The remote's branches, the default first. */
+  branches?: readonly string[]
+  onTowardChange?: (branch: string) => void
   /** Start it: now, or when the time runs out. With what it will do when done. */
   onStart: (steps: readonly LaunchStep[], end: TaskEnd) => void
   text?: Partial<TaskLaunchText>
@@ -237,6 +256,10 @@ export function TaskLaunch({
   onWorksInChange,
   worksInWhy,
   localTaken,
+  toward,
+  defaultBranch,
+  branches = [],
+  onTowardChange,
   onStart,
   text,
 }: TaskLaunchProps) {
@@ -281,6 +304,8 @@ export function TaskLaunch({
   })()
   const share = Math.min(1, left / wait)
 
+  // A choice of branch where the remote has more than one, or where it already goes elsewhere.
+  const picks = onTowardChange !== undefined && (branches.length > 1 || (toward !== undefined && toward !== defaultBranch))
   const set = (id: string, patch: Partial<LaunchStep>) => setSteps(steps.map((st) => (st.id === id ? { ...st, ...patch } : st)))
   const waiting = steps.filter((st) => st.waits && !st.skipped)
 
@@ -297,9 +322,27 @@ export function TaskLaunch({
           )}
         </span>
         <p className={s.title}>{title}</p>
-        {worksIn !== undefined && (
-          <>
-            <div className={s.where}>
+        {(worksIn !== undefined || picks) && (
+          <div className={s.where}>
+            {picks && (
+              <span className={s.toward}>
+                <span className={s.arrow} aria-hidden="true">
+                  →
+                </span>
+                <Select<string>
+                  label={t.toward}
+                  value={toward ?? defaultBranch ?? branches[0] ?? null}
+                  onChange={(next) => onTowardChange?.(next)}
+                  options={branches.map((branch) => ({
+                    value: branch,
+                    label: branch === defaultBranch ? t.defaultBranch(branch) : branch,
+                  }))}
+                  searchable={branches.length > SEARCHED}
+                  className={s.branch}
+                />
+              </span>
+            )}
+            {worksIn !== undefined && (
               <Segmented<WorksIn>
                 label={t.worksIn}
                 value={worksIn}
@@ -309,10 +352,10 @@ export function TaskLaunch({
                   { value: WorksIn.Worktree, label: t.worktree },
                 ]}
               />
-            </div>
-            <p className={s.whereLine}>{whereLine(worksIn, worksInWhy, localTaken ?? null, t)}</p>
-          </>
+            )}
+          </div>
         )}
+        {worksIn !== undefined && <p className={s.whereLine}>{whereLine(worksIn, worksInWhy, localTaken ?? null, t)}</p>}
       </div>
       <ol className={s.steps}>
         {steps.map((st, i) => (

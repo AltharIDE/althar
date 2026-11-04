@@ -95,6 +95,14 @@ export const ChangeRunningLocal: Story = {
   },
 }
 export const ChangeRunningLocalDark: Story = { ...ChangeRunningLocal, globals: { theme: 'dark' } }
+/** Working toward a release branch rather than the default (ADR-093): the branch, quietly, at its foot. */
+export const ChangeTowardARelease: Story = {
+  args: { ...CHANGE_RUNNING, toward: 'release/0.8.0' },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('Toward release/0.8.0')).toBeInTheDocument()
+  },
+}
+export const ChangeTowardAReleaseDark: Story = { ...ChangeTowardARelease, globals: { theme: 'dark' } }
 export const ReadyToAccept: Story = {
   args: CHANGE_READY,
   play: async ({ canvasElement }) => {

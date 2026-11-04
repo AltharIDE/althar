@@ -7,6 +7,7 @@ import { HoverCard, Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { Segmented, type SegmentedOption } from '../../primitives/Segmented/Segmented'
 import { StepTrack, type TrackItem } from '../../primitives/StepTrack/StepTrack'
 import { TaskGlyph } from '../../primitives/TaskGlyph/TaskGlyph'
+import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import s from './TaskHeader.module.css'
 
 /*
@@ -31,12 +32,15 @@ import s from './TaskHeader.module.css'
 
 export interface TaskHeaderText {
   faces: string
+  /** What its work goes into, where it isn't the default branch (ADR-093), for a screen reader: the bar shows an arrow. */
+  toward: (branch: string) => string
   /** How long it has run in all, under its steps. */
   inAll: (took: string) => string
 }
 
 export const taskHeaderText: TaskHeaderText = {
   faces: 'Face',
+  toward: (branch) => `Toward ${branch}`,
   inAll: (took) => `${took} in all`,
 }
 
@@ -64,6 +68,8 @@ export interface TaskHeaderProps<F extends string> {
   faces?: readonly SegmentedOption<F>[]
   face?: F
   onFace?: (face: F) => void
+  /** The branch its work goes into, where it isn't the default (ADR-093): release/0.8.0, quietly after where it stands. */
+  toward?: string
   /** What the person does to it next, inside where it stands: a finished task's Done and Keep for later (SettleWays, place="header"). */
   beside?: ReactNode
   /** What else it opens, at the end: ChromeButtons. */
@@ -84,6 +90,7 @@ export function TaskHeader<F extends string>({
   face,
   onFace,
   beside,
+  toward,
   actions,
   className,
   text,
@@ -116,6 +123,13 @@ export function TaskHeader<F extends string>({
           )}
           {plan !== null && <StepTrack steps={plan} status={status} className={s.track} />}
           {beside}
+        </span>
+      )}
+      {toward !== undefined && toward !== '' && (
+        <span className={s.toward} title={t.toward(toward)}>
+          <span aria-hidden="true">→</span>
+          <VisuallyHidden>{t.toward(toward)}</VisuallyHidden>
+          <code aria-hidden="true">{toward}</code>
         </span>
       )}
       {faces && faces.length > 1 && face !== undefined && onFace && (

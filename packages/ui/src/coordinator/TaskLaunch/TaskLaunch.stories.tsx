@@ -255,6 +255,43 @@ export const LocalTaken: Story = {
   },
 }
 
+const BRANCHES = ['main', 'release/0.8.0', 'release/0.7.x', 'feature/onboarding'] as const
+
+/** What it works toward (ADR-093), beside where it works: the remote's branches, changeable until it starts. */
+function Toward({ toward: start, ...rest }: Partial<Parameters<typeof TaskLaunch>[0]>) {
+  const [toward, setToward] = useState(start)
+  const [worksIn, setWorksIn] = useState(WorksIn.Worktree)
+  return (
+    <Launch
+      worksIn={worksIn}
+      onWorksInChange={setWorksIn}
+      defaultBranch="main"
+      branches={BRANCHES}
+      {...(toward === undefined ? {} : { toward })}
+      onTowardChange={setToward}
+      {...rest}
+    />
+  )
+}
+
+/** Toward the default branch, as most tasks are: the picker says main. */
+export const TowardMain: Story = {
+  render: () => <Toward />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('combobox', { name: 'Works toward' })).toHaveTextContent('main (default)')
+  },
+}
+
+/** Pointed at a release branch, from the coordinator or the person: it starts there and its pull request goes there. */
+export const TowardARelease: Story = {
+  render: () => <Toward toward="release/0.8.0" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('combobox', { name: 'Works toward' })).toHaveTextContent('release/0.8.0')
+  },
+}
+
 /** Started Local, it waits for the checkout: said where the clock was. */
 export const WaitingForLocal: Story = {
   render: () => <Placed localTaken="Dark mode for Settings" queued="Waits for Local: Dark mode for Settings is there" />,

@@ -464,9 +464,9 @@ export class Coordinator extends Context.Service<
           const task = yield* taskOf(access, reference)
           const results = yield* sql<{ content: string }>`
             SELECT content FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'step_result' ORDER BY sequence`
-          const workspaces = yield* sql<{ branch: string; path: string; name: string; branched: number; into: string }>`
+          const workspaces = yield* sql<{ branch: string; path: string; name: string; branched: number; goesInto: string | null }>`
             SELECT w.branch, w.path, b.display_name AS name, w.branched_at IS NOT NULL AS branched,
-              coalesce(w.toward, b.default_base_ref, 'main') AS into
+              w.toward AS goes_into
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             WHERE w.task_id = ${task.id} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
           const seen = yield* pullRequests(task.id)
@@ -480,8 +480,10 @@ export class Coordinator extends Context.Service<
             unverified.length === 0 ? '' : `What its lead couldn't show working:\n${unverified.map((line) => `- ${line}`).join('\n')}`,
             yield* issueWords(task.id),
             workspaces.length === 1
-              ? `${upper(branchWords(workspaces[0]))}, in ${workspaces[0]?.path ?? ''}.`
-              : workspaces.map((workspace) => `${workspace.name}: ${branchWords(workspace)}, in ${workspace.path}.`).join('\n'),
+              ? `${upper(branchWords(workspaces[0]))}, in ${workspaces[0]?.path ?? ''}.${towardWords(workspaces[0])}`
+              : workspaces
+                  .map((workspace) => `${workspace.name}: ${branchWords(workspace)}, in ${workspace.path}.${towardWords(workspace)}`)
+                  .join('\n'),
             ...results.map((row) => {
               const result = JSON.parse(row.content) as { step?: string; verdict?: string; summary?: string }
               return `${result.step ?? 'step'}${result.verdict === undefined ? '' : ` (${result.verdict})`}: ${result.summary ?? ''}`
@@ -496,10 +498,13 @@ export class Coordinator extends Context.Service<
        * A task's branch in a repository, and the branch its work goes into (ADR-093), or that it has none yet: a plain task whose
        * lead hasn't changed the repository.
        */
-      const branchWords = (workspace: { readonly branch: string; readonly branched: number; readonly into: string } | undefined) =>
+      const branchWords = (workspace: { readonly branch: string; readonly branched: number } | undefined) =>
         workspace === undefined || workspace.branched === 1
-          ? `branch ${workspace?.branch ?? ''}, toward ${workspace?.into ?? 'main'}`
-          : `no branch yet: its lead has changed nothing in the repository; it works toward ${workspace.into}`
+          ? `branch ${workspace?.branch ?? ''}`
+          : 'no branch yet: its lead has changed nothing in the repository'
+      /** What a repository's work goes into, where it isn't the default branch (ADR-093). */
+      const towardWords = (workspace: { readonly goesInto: string | null } | undefined) =>
+        workspace?.goesInto == null ? '' : ` It works toward ${workspace.goesInto}, not the default branch.`
       const upper = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`
 
       /** The issue a task came from, where it stands as last seen, and whether Althar moved it to In Progress as the task started. */

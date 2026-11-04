@@ -970,6 +970,8 @@ export function TaskView({
               onFace={setFace}
               // Finished and the person's to settle: Done and Keep for later, inside where it stands.
               {...(settle === null ? {} : { beside: settle })}
+              // What its work goes into, where it isn't the default branch (ADR-093).
+              {...(snapshot.task.toward === undefined ? {} : { toward: snapshot.task.toward })}
               actions={actions}
             />
           }

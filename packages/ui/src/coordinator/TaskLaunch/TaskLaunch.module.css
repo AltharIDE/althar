@@ -22,11 +22,35 @@
   font-weight: 600;
   color: var(--t-1);
 }
-/* Where it works, at the head's end beside the kicker and title (ADR-091). */
+/* Where it works, at the head's end beside the kicker and title (ADR-091), after the branch it goes into (ADR-093). */
 .where {
   grid-column: 2;
   grid-row: 1 / span 2;
   align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+/* The branch, quiet, in mono as a branch is, after an arrow: what it goes into. */
+.toward {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 220px;
+}
+.arrow {
+  flex: none;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.branch {
+  min-width: 0;
+  max-width: 100%;
+  margin-left: 0;
+  font-family: var(--mono);
+  font-size: 12px;
 }
 /* What the choice gives up, a line across the head under both. */
 .whereLine {

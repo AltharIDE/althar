@@ -330,7 +330,14 @@ export interface Client {
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
   /** Changes a plan before its first step starts: who does its steps, how it ends, and where it works (ADR-091). */
-  readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null, worksIn?: WorksIn) => Promise<void>
+  readonly changePlan: (
+    planId: string,
+    steps: ReadonlyArray<PlanStep>,
+    end?: TaskEnd | null,
+    worksIn?: WorksIn,
+    /** The branch it works toward (ADR-093), until it starts; null for the default branch. */
+    toward?: string | null,
+  ) => Promise<void>
   /** Changes what an issue the coordinator drafted says, before it is filed. */
   readonly changeIssueDraft: (
     draftId: string,
@@ -407,6 +414,8 @@ export interface Client {
     /** Answers the offer to push a fork's branches upstream with no. */
     readonly notNow?: boolean
     readonly setup?: RepositorySetup
+    /** The branch new tasks work toward there (ADR-093); null for its default branch. */
+    readonly workToward?: string | null
   }) => Promise<void>
   readonly getProjectRules: (projectId: string) => Promise<ProjectRulesView>
   /** A project's notes, oldest first: the decisions its coordinator keeps. */
@@ -735,9 +744,16 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     startTask: (input) => command((commandId) => api.StartTask({ commandId, ...input })),
     startPlan: (planId) => command((commandId) => api.StartPlan({ commandId, planId })),
     holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
-    changePlan: (planId, steps, end, worksIn) =>
+    changePlan: (planId, steps, end, worksIn, toward) =>
       command((commandId) =>
-        api.ChangePlan({ commandId, planId, steps, ...(end === undefined ? {} : { end }), ...(worksIn === undefined ? {} : { worksIn }) }),
+        api.ChangePlan({
+          commandId,
+          planId,
+          steps,
+          ...(end === undefined ? {} : { end }),
+          ...(worksIn === undefined ? {} : { worksIn }),
+          ...(toward === undefined ? {} : { toward }),
+        }),
       ),
     changeIssueDraft: (draftId, edit) => command((commandId) => api.ChangeIssueDraft({ commandId, draftId, ...edit })),
     fileIssueDraft: (draftId) => command((commandId) => api.FileIssueDraft({ commandId, draftId })),
