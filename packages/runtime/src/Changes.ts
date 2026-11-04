@@ -961,6 +961,11 @@ export class Changes extends Context.Service<
       const baseEvery = Duration.toMillis(every) * BASE_TURNS
       /* Pull requests whose host hasn't worked out yet whether they conflict, by how many turns running: asked again next turn. */
       const unknownFor = new Map<string, number>()
+      /*
+       * Conflicts the sweep found, by their pull request's link: what it would merge, and from what. Handed to a poll of the pull
+       * request first, which hears its checks with it; still there at the next sweep, the sweep asks the lead itself.
+       */
+      const sweptConflicts = new Map<string, string>()
       /* Wakes the look for conflicts before its time: a default branch moved, as Althar saw. */
       const sweepWake = yield* Queue.sliding<boolean>(1)
       /** A default branch moved, as Althar saw: each is fetched again, and every open task looked at for a conflict with it now. */
@@ -5016,7 +5021,7 @@ export class Changes extends Context.Service<
         now: { readonly target: string; readonly conflicts?: boolean | null | undefined; readonly headSha: string | null },
         host: CodeHost,
         repository: Repository,
-        how: { readonly force: boolean; readonly fresh: boolean },
+        how: { readonly force: boolean; readonly fresh: boolean; readonly sweep?: boolean },
         failed: FailedChecks | null = null,
       ): Effect.Effect<boolean, unknown, Store> =>
         Effect.gen(function* () {
@@ -5075,12 +5080,22 @@ export class Changes extends Context.Service<
           cleanHere.delete(link.id)
           // 1 is git's word for a merge that conflicts; anything else, one it couldn't work out.
           if (merged.code !== 1) return yield* Effect.as(couldnt(`Git couldn’t merge ${now.target} with the branch here.`), false)
+          // Found by the sweep, which doesn't ask the host, it goes to a poll of the pull request first: that hears its checks too,
+          // so checks that failed meanwhile are asked of the lead with it, once, not after it as the round's. Not taken up there by
+          // the next sweep, the poll couldn't ask, and it is asked from here; it is forgotten once a round begins.
+          const found = `${target}:${from}`
+          if (how.sweep === true && sweptConflicts.get(link.id) !== found) {
+            sweptConflicts.set(link.id, found)
+            wakeNow(link.taskId)
+            return false
+          }
           if (!(yield* sayingWhy(link.taskId, yield* askable(link.taskId, seen.url, { force: how.force, targets: [target] })))) return false
           // The round that waited on the checks of its merge is overtaken: what it merged moved on, and its checks are no longer
           // what counts.
           if (first === 'checking') yield* overtaken(link.taskId, seen.url)
           const [sent] = yield* sql<{ head: string | null }>`
             SELECT head_commit AS head FROM repository_changes WHERE pull_request_url = ${seen.url} AND project_id = ${link.projectId} LIMIT 1`
+          sweptConflicts.delete(link.id)
           yield* beginRound(
             { projectId: link.projectId, taskId: link.taskId, threadId: workspace.threadId },
             seen.url,
@@ -5945,6 +5960,7 @@ export class Changes extends Context.Service<
             const tasks = new Set(due.map((link) => link.taskId))
             for (const id of polledAt.keys()) if (!links.has(id)) polledAt.delete(id)
             for (const id of waitUntil.keys()) if (!links.has(id)) waitUntil.delete(id)
+            for (const id of sweptConflicts.keys()) if (!links.has(id)) sweptConflicts.delete(id)
             for (const id of newsAt.keys()) if (!tasks.has(id)) newsAt.delete(id)
             yield* following.tick.pipe(contained('Changes.follow', () => undefined))
           }
@@ -6085,10 +6101,7 @@ export class Changes extends Context.Service<
                 { target: before.target, conflicts: before.conflicts, headSha: before.headSha },
                 adapters.host,
                 repository,
-                {
-                  force: false,
-                  fresh: false,
-                },
+                { force: false, fresh: false, sweep: true },
               )
             }),
           ).pipe(contained('Changes.sweep', () => undefined))
