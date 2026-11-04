@@ -643,8 +643,17 @@ const createBranch = (projectId: string, input: unknown) =>
     const act = (fresh: FreshAction): Effect.Effect<AskedResult, ToolRefused | ActionNotPerformed> =>
       Effect.gen(function* () {
         const commit = fresh.head ?? ''
-        // Never forced: a branch made there meanwhile stays as it is, and this push is refused.
-        yield* pushTo(clone, target, branch, commit).pipe(Effect.mapError((error) => refused(error.stderr || error.message)))
+        // Only where there is no such branch, checked by the host as it takes the push (an empty lease): one made there
+        // meanwhile, even behind this commit, stays as it is, and this push is refused.
+        yield* pushTo(clone, target, branch, commit, '').pipe(
+          Effect.mapError((error) =>
+            refused(
+              /stale info|rejected|already exists/i.test(error.stderr)
+                ? `${where} has a branch ${branch} now, made while Althar was making it. Althar never moves a branch that is there: tell the person.`
+                : error.stderr || error.message,
+            ),
+          ),
+        )
         yield* Effect.ignore(git(clone, 'update-ref', '-d', start))
         yield* Effect.ignore(git(clone, 'update-ref', '-d', `${PUSHED}${branch}`))
         yield* fetchBranch(clone, branch)

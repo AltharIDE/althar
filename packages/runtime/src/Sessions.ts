@@ -2147,14 +2147,9 @@ export class Sessions extends Context.Service<
               ? guardEnv({
                   sessionId,
                   taskBranch: thread.branch,
+                  defaultBranches: [thread.defaultBranch, ...thread.repositories.map((repository) => repository.defaultBranch)],
                   // The branches its work goes into too (ADR-093): a task never pushes straight onto those either.
-                  defaultBranches: [
-                    thread.defaultBranch,
-                    ...thread.repositories.flatMap((repository) => [
-                      repository.defaultBranch,
-                      ...(repository.toward === null ? [] : [repository.toward]),
-                    ]),
-                  ],
+                  towards: thread.repositories.flatMap((repository) => (repository.toward === null ? [] : [repository.toward])),
                   // Only the task's own repositories: a scratch one in its temp folder is the lead's to do with as it likes.
                   repositories: [thread.cwd, ...thread.repositories.map((repository) => repository.worktree)],
                   count: SIGNED_OUT_GIT_CONFIG,

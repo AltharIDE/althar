@@ -21,9 +21,11 @@
     something says otherwise.
   - **The project has a default for new tasks, "Work toward",** in its
     General settings, one per repository (`repository_bindings.work_toward`,
-    null for the default branch). It must be a branch the remote has. Tasks
-    already made keep theirs. The coordinator's brief names it, so it plans
-    toward it; its copies of the repositories and Run's copy follow it too.
+    null for the default branch). It must be a branch of the remote tasks
+    start from: a fork's upstream, where its work goes there, whose branches
+    and default are what the setting lists. Tasks already made keep theirs.
+    The coordinator's brief names it, so it plans toward it; its copies of
+    the repositories and Run's copy follow it too, from that same remote.
   - **A single task can be pointed elsewhere.** `draft_task`, `propose_plan`
     and `start_task` take `toward`; the plan card has a branch picker beside
     Local and Worktree, listing the remote's branches as last fetched, its
@@ -43,8 +45,9 @@
     task with no pull request; the diff, Changes and Outputs' base; and the
     push of a local merge.
   - **A task's target is protected as the default branch is** (ADR-071):
-    the lead's git guard and the rules refuse a push straight onto it, and
-    publishing never pushes a task's branch onto it.
+    the lead's git guard and the rules refuse a push straight onto it,
+    saying it is the branch the task's work goes into, and publishing never
+    pushes a task's branch onto it.
   - **What stays on the default branch:** Run's copy and the coordinator's
     copies follow the project's Work toward, not a single task's; a task's
     own Run runs its worktree, as ever. The coordinator's
@@ -60,8 +63,9 @@
     it; nothing is checked out for that.
   - **Release chores are the coordinator's on the person's word only,** as
     merging is (ADR-081): `create_branch` makes a branch on the host from a
-    branch, a tag or a commit, pushed by Althar and never forced, a branch
-    there already left as it is; `open_pull_request` opens one from a
+    branch, a tag or a commit, pushed by Althar only where the host has no
+    such branch as it takes the push (an empty lease), so a branch there
+    already, even one made a moment before and behind it, is left as it is; `open_pull_request` opens one from a
     release branch back into the default branch. Both are asked-for tools,
     run only in a turn the person's message started or as an errand's step.
     Putting a merged fix on another branch is a task toward that branch, its

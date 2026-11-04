@@ -1,5 +1,5 @@
-import { execFileSync } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -11,8 +11,10 @@ import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
+import { coordinatorFolder, freshCopy } from '../src/coordinatorFolder'
 import { place, spotsOf } from '../src/local'
 import { Projects } from '../src/Projects'
+import { guardHolds, guardStopIn } from '../src/pushGuard'
 import { Queries } from '../src/Queries'
 import { timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
@@ -20,7 +22,8 @@ import { Sessions } from '../src/Sessions'
 import type { ToolAccess } from '../src/ToolServer'
 import { setToward } from '../src/towards'
 import { ask, cards, connect, git, runtimeWith, tipOf } from './changesSupport'
-import { callTool, fakeConnectors, HOST, hosted, repository, runtime, until } from './support'
+import { conflictsIn, given, hostOf, moveMainOn, runtimeWith as conflictsRuntime, taskBranch, titled } from './conflictsSupport'
+import { callTool, fakeConnectors, HOST, hosted, launches, repository, runtime, until } from './support'
 
 /*
  * A task working toward a branch other than the default (ADR-093): the
@@ -101,6 +104,20 @@ describe('a project working toward a release branch', () => {
       assert.deepInclude(workspace, { toward: RELEASE, baseCommit: release })
       // Its pull request goes into the release branch, not main.
       assert.strictEqual(github.changes[0]?.target, RELEASE)
+      // Its lead's git never pushes straight onto the branch its work goes into, as it never does onto main (ADR-071).
+      if (guardHolds) {
+        const started = launches.findLast((one) => one.cwd === workspace?.path)
+        assert.include(started?.env.ALTHAR_TOWARD_BRANCHES?.split(' ') ?? [], RELEASE)
+        const pushed = spawnSync('git', ['push', bare, `HEAD:refs/heads/${RELEASE}`], {
+          cwd: workspace?.path ?? '',
+          env: { ...process.env, ...started?.env },
+          encoding: 'utf8',
+        })
+        assert.notStrictEqual(pushed.status, 0)
+        assert.strictEqual(guardStopIn(`${pushed.stdout}${pushed.stderr}`), 'default-branch')
+        assert.include(pushed.stderr, `a push to ${RELEASE}, the branch the task's work goes into`)
+        assert.strictEqual(git(bare, 'rev-parse', RELEASE), release)
+      }
       // What its lead reads to tell a failure of its own from one already on the branch it goes into.
       const lead = { role: 'lead' as const, projectId, threadId: ready?.threadId ?? '', sessionId: 'none', taskId }
       const base = yield* callTool(lead, 'read_default_branch_checks', {})
@@ -215,6 +232,36 @@ describe('keeping a pull request into a release branch current', () => {
   })
 })
 
+describe('a task whose pull request conflicts with the release branch it goes into', () => {
+  it.live('goes back to work to merge that branch, not main, which it merges cleanly', () => {
+    const { working, bare } = hosted()
+    branchOff(working)
+    git(working, 'push', '-q', bare, RELEASE)
+    const github = hostOf(bare, () => undefined, undefined, { into: RELEASE })
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const { projectId, repositoryId } = yield* opened(working)
+      yield* (yield* Projects).setRepository({ projectId, repositoryId, workToward: RELEASE })
+      yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null)
+      const threadId = ready?.threadId ?? ''
+      // The release branch moves on, conflicting with what the task changed; main stays as it was.
+      git(working, 'switch', '-q', RELEASE)
+      moveMainOn(working)
+      git(working, 'push', '-q', bare, RELEASE)
+      git(working, 'switch', '-q', 'main')
+      assert.isFalse(conflictsIn(bare, 'main', taskBranch(bare) ?? ''))
+      yield* titled(threadId, `The lead resolved the conflict with ${RELEASE}`)
+      const [brought] = (yield* given(threadId)).filter((body) => body.includes('Bring the branch up to date'))
+      assert.include(brought, `${RELEASE} has moved on`)
+      assert.match(brought ?? '', new RegExp(`merge \\S*${RELEASE.replace(/\./g, '\\.')} into it`))
+      // What it pushed holds the release branch's change: it merged that, and its pull request merges cleanly into it.
+      assert.isFalse(conflictsIn(bare, RELEASE, taskBranch(bare) ?? ''))
+      assert.include(git(bare, 'show', `${taskBranch(bare)}:change.txt`), 'rate limits')
+    }).pipe(Effect.provide(conflictsRuntime({ github })))
+  })
+})
+
 describe('a fork whose work goes upstream, toward a release branch there', () => {
   it.live('starts from it and opens its pull request into it on the repository it came from', () => {
     const { working, bare: fork } = hosted(['you', 'api'])
@@ -248,6 +295,81 @@ describe('a fork whose work goes upstream, toward a release branch there', () =>
       assert.strictEqual(github.changes[0]?.target, RELEASE)
       assert.strictEqual(github.forkOf(1), 'you/api')
     }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+})
+
+describe('a fork whose work goes upstream, offline', () => {
+  it.live('offers the branches of the repository it came from, not the fork’s, and copies its own for the coordinator', () => {
+    const { working } = hosted(['you', 'api'])
+    git(working, 'remote', 'add', 'upstream', `${HOST}/meridian/api.git`)
+    const main = git(working, 'rev-parse', 'main')
+    const theirs = git(
+      working,
+      '-c',
+      'user.name=T',
+      '-c',
+      'user.email=t@t.test',
+      'commit-tree',
+      '-p',
+      main,
+      '-m',
+      'Start it upstream',
+      `${main}^{tree}`,
+    )
+    // As last fetched: upstream's release branch, and the fork's own of the same name elsewhere, with one upstream hasn't.
+    git(working, 'update-ref', 'refs/remotes/upstream/main', main)
+    git(working, 'symbolic-ref', 'refs/remotes/upstream/HEAD', 'refs/remotes/upstream/main')
+    git(working, 'update-ref', `refs/remotes/upstream/${RELEASE}`, theirs)
+    git(working, 'update-ref', `refs/remotes/origin/${RELEASE}`, main)
+    git(working, 'update-ref', 'refs/remotes/origin/fork-only', main)
+    const github = makeFakeService({})
+    github.addRepository(['you', 'api'])
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const { projectId, repositoryId } = yield* opened(working)
+      const projects = yield* Projects
+      yield* projects.setRepository({ projectId, repositoryId, changeTarget: 'upstream' })
+      const [shown] = yield* projects.repositories(projectId)
+      assert.strictEqual(shown?.defaultBranch, 'main')
+      assert.include(shown?.branches ?? [], RELEASE)
+      assert.notInclude(shown?.branches ?? [], 'fork-only')
+      // Only upstream has it, with no branch of it here: still a branch to work toward, and the coordinator's copy is upstream's.
+      yield* projects.setRepository({ projectId, repositoryId, workToward: RELEASE })
+      const copied = yield* coordinatorFolder(projectId)
+      assert.strictEqual(git(copied.repositories[0]?.root ?? '', 'rev-parse', 'HEAD'), theirs)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('copies the release branch as the remote it starts from has it, where the fork’s of that name differs', () => {
+    const { working, bare: fork } = hosted(['you', 'api'])
+    const upstream = mkdtempSync(join(tmpdir(), 'althar-remote-'))
+    git(upstream, 'init', '-q', '--bare', '-b', 'main')
+    const main = git(working, 'rev-parse', 'main')
+    const theirs = git(
+      working,
+      '-c',
+      'user.name=T',
+      '-c',
+      'user.email=t@t.test',
+      'commit-tree',
+      '-p',
+      main,
+      '-m',
+      'Start it upstream',
+      `${main}^{tree}`,
+    )
+    git(working, 'push', '-q', upstream, 'main', `${theirs}:refs/heads/${RELEASE}`)
+    git(working, 'push', '-q', fork, `main:refs/heads/${RELEASE}`)
+    git(working, 'remote', 'set-url', 'origin', fork)
+    git(working, 'remote', 'add', 'upstream', upstream)
+    return Effect.gen(function* () {
+      const into = mkdtempSync(join(tmpdir(), 'althar-copy-'))
+      yield* freshCopy(working, join(into, 'upstream'), RELEASE, working, 'upstream')
+      assert.strictEqual(git(join(into, 'upstream'), 'rev-parse', 'HEAD'), theirs)
+      yield* freshCopy(working, join(into, 'fork'), RELEASE, working, 'origin')
+      assert.strictEqual(git(join(into, 'fork'), 'rev-parse', 'HEAD'), main)
+    })
   })
 })
 
@@ -325,6 +447,33 @@ describe('the coordinator’s release branches', () => {
         `${RELEASE} into main`,
       )
       assert.deepInclude(github.changes[0], { source: RELEASE, target: 'main', title: 'Release 0.8.0 back into main' })
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('never moves a release branch made there while it was making it, even one behind where it was going', () => {
+    const { working, bare } = hosted()
+    git(working, '-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-q', '--allow-empty', '-m', 'On')
+    git(working, 'push', '-q', bare, 'main')
+    const behind = git(bare, 'rev-parse', 'main^')
+    // Between Althar's look and its push, someone makes the branch at main's parent: the host has it once the push connects.
+    const script = join(mkdtempSync(join(tmpdir(), 'althar-race-')), 'race.sh')
+    writeFileSync(
+      script,
+      `if [ "$1" = git-receive-pack ]; then git --git-dir="${bare}" update-ref refs/heads/${RELEASE} ${behind} '' 2>/dev/null || true; fi\nexec git "\${1#git-}" "${bare}"\n`,
+    )
+    git(working, 'config', 'protocol.ext.allow', 'always')
+    const github = makeFakeService({ pushUrl: () => `ext::sh ${script} %S` })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const { projectId } = yield* opened(working)
+      const coordinator = yield* coordinatorOf(projectId)
+      const word = yield* turn(coordinator, 'Make release/0.8.0 from main')
+      assert.include(
+        yield* callTool(coordinator, 'create_branch', { branch: RELEASE, from: 'main', message: word }),
+        'made while Althar was making it',
+      )
+      assert.strictEqual(git(bare, 'rev-parse', RELEASE), behind)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 })

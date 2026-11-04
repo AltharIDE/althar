@@ -5,7 +5,7 @@ import { BranchNotFound } from './errors'
 import { remoteBranches } from './git'
 import { Instance } from './Instance'
 import { spotsOf } from './local'
-import { hasBranch, startOf, towardOf } from './Projects'
+import { hasBranch, startOf, towardIn } from './Projects'
 import { change, fact } from './records'
 
 /*
@@ -33,7 +33,9 @@ export const setToward = (taskId: string, toward: string | null) =>
     const sql = yield* SqlClient.SqlClient
     const instance = yield* Instance
     const spots = yield* spotsOf(taskId)
-    const next = spots.map((spot) => ({ spot, toward: towardOf({ base: spot.base, workToward: null }, toward) }))
+    const next = yield* Effect.forEach(spots, (spot) =>
+      Effect.map(towardIn({ ...spot, workToward: null }, toward), (branch) => ({ spot, toward: branch })),
+    )
     for (const { spot, toward: branch } of next) {
       if (branch === null || branch === spot.toward) continue
       const { remote } = yield* startOf({ ...spot, toward: branch })

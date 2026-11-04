@@ -9,6 +9,7 @@ import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
 import { copyAt, freshCopy } from './coordinatorFolder'
+import { startOf } from './Projects'
 import { bringBackThen } from './bringBack'
 import { thisDevice } from './device'
 import { Fetches, type Wanted } from './Fetches'
@@ -135,6 +136,10 @@ interface Binding {
   readonly name: string
   /** The branch the project works toward there (ADR-093), its default branch unless it says: what a run with no task runs a copy of. */
   readonly base: string | null
+  /** Its default branch, where its work goes, and the branch it works toward: where a run with no task starts, as its tasks do. */
+  readonly defaultBase: string | null
+  readonly changeTarget: string | null
+  readonly workToward: string | null
   readonly within: string | null
   readonly repository: string
   readonly runCommand: string | null
@@ -283,7 +288,8 @@ export class Launches extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           return yield* sql<Binding>`
-            SELECT b.id, b.slug, b.display_name AS name, coalesce(b.work_toward, b.default_base_ref) AS base, b.folder AS within,
+            SELECT b.id, b.slug, b.display_name AS name, coalesce(b.work_toward, b.default_base_ref) AS base,
+              b.default_base_ref AS default_base, b.change_target, b.work_toward, b.folder AS within,
               l.path AS repository, b.run_command, b.run_setup
             FROM repository_bindings b
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
@@ -399,7 +405,13 @@ export class Launches extends Context.Service<
             (launch) => launch.taskId === null && launch.branch === null && launch.bindingId === binding.id && launch.ended === null,
           )
           if (!busy || !existsSync(path)) {
-            yield* freshCopy(binding.repository, path, binding.base ?? 'main')
+            const { remote, base } = yield* startOf({
+              repository: binding.repository,
+              base: binding.defaultBase,
+              changeTarget: binding.changeTarget,
+              toward: binding.workToward,
+            })
+            yield* freshCopy(binding.repository, path, base, binding.repository, remote)
             yield* installedAsLocked(path)
           }
           return path

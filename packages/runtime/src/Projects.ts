@@ -254,16 +254,6 @@ export const freeSlug = (slug: string, taken: ReadonlyArray<string>) => {
   for (let n = 2; ; n += 1) if (!taken.includes(`${slug}-${n}`)) return `${slug}-${n}`
 }
 
-/**
- * The branch a task's work goes into in a repository (ADR-093): the one asked
- * for, else, where none was, the project's Work toward there; null for its
- * default branch, as every task made before is.
- */
-export const towardOf = (binding: { readonly base: string | null; readonly workToward: string | null }, asked?: string | null) => {
-  const branch = branchName((asked === undefined ? binding.workToward : asked) ?? '')
-  return branch === '' || branch === (binding.base ?? 'main') ? null : branch
-}
-
 /** A branch as it is named, without `refs/heads/` or the remote it was spelled with. */
 export const branchName = (named: string) =>
   named
@@ -293,8 +283,32 @@ export const startOf = (binding: {
   })
 
 /**
+ * The branch a task's work goes into in a repository (ADR-093): the one asked
+ * for, else, where none was, the project's Work toward there; null for the
+ * default branch of the remote its work starts from (a fork's upstream's,
+ * where its work goes there, needn't be the fork's own), as every task made
+ * before is.
+ */
+export const towardIn = (
+  binding: {
+    readonly repository: string
+    readonly base: string | null
+    readonly changeTarget: string | null
+    readonly workToward: string | null
+  },
+  asked?: string | null,
+) =>
+  Effect.gen(function* () {
+    const branch = branchName((asked === undefined ? binding.workToward : asked) ?? '')
+    if (branch === '') return null
+    const { base } = yield* startOf({ ...binding, toward: null }).pipe(Effect.orElseSucceed(() => ({ base: binding.base ?? 'main' })))
+    return branch === base ? null : branch
+  })
+
+/**
  * Whether a repository has a branch to work toward: on the remote a task
- * there starts from, fetched now, else here.
+ * there starts from, fetched now, else here, else on that remote as last
+ * fetched, as when it can't be reached.
  */
 export const hasBranch = (repository: string, branch: string, remote = 'origin') =>
   Effect.gen(function* () {
@@ -302,8 +316,10 @@ export const hasBranch = (repository: string, branch: string, remote = 'origin')
     if (yield* fetchBranch(repository, branch, remote)) {
       const there = yield* commitOf(repository, `refs/remotes/${remote}/${branch}`).pipe(Effect.option)
       if (Option.isSome(there)) return true
+      return yield* branchExists(repository, branch)
     }
-    return yield* branchExists(repository, branch)
+    if (yield* branchExists(repository, branch)) return true
+    return Option.isSome(yield* commitOf(repository, `refs/remotes/${remote}/${branch}`).pipe(Effect.option))
   }).pipe(Effect.orElseSucceed(() => false))
 
 /**
@@ -727,7 +743,11 @@ export class Projects extends Context.Service<
           const chosen = bindings.length === 1 ? bindings : bindings.filter((binding) => named.some((name) => matches(binding, name)))
           if (chosen.length === 0) return yield* new RepositoriesNeeded({ unknown: [], choices })
           // The branch each works toward (ADR-093): one asked for is on the remote it starts from, else the task isn't made.
-          const towards = new Map(chosen.map((binding) => [binding.id, towardOf(binding, input.toward)]))
+          const towards = new Map(
+            yield* Effect.forEach(chosen, (binding) =>
+              Effect.map(towardIn(binding, input.toward), (toward) => [binding.id, toward] as const),
+            ),
+          )
           if (input.toward != null)
             for (const binding of chosen) {
               const toward = towards.get(binding.id) ?? null
@@ -972,6 +992,13 @@ export class Projects extends Context.Service<
                 () => [],
               )
               const fork = forkOf(named)
+              // What Work toward offers: the branches of the remote its tasks start from, a fork's upstream where its work goes there, with that remote's default.
+              const start =
+                row.path === null
+                  ? { remote: 'origin', base: row.base ?? 'main' }
+                  : yield* startOf({ repository: row.path, base: row.base, changeTarget: row.changeTarget, toward: null }).pipe(
+                      Effect.orElseSucceed(() => ({ remote: 'origin', base: row.base ?? 'main' })),
+                    )
               return {
                 id: row.id,
                 name: row.name,
@@ -993,9 +1020,9 @@ export class Projects extends Context.Service<
                       },
                 tasks: row.tasks,
                 setup: setupShown(row.recordedSetup),
-                defaultBranch: row.base ?? 'main',
+                defaultBranch: start.base,
                 workToward: row.workToward,
-                branches: row.path === null ? [row.base ?? 'main'] : yield* remoteBranches(row.path, 'origin', row.base ?? 'main'),
+                branches: row.path === null ? [start.base] : yield* remoteBranches(row.path, start.remote, start.base),
               } satisfies ProjectRepository
             }),
           )
@@ -1188,7 +1215,10 @@ export class Projects extends Context.Service<
           if (input.workToward !== undefined) {
             const [bound] = yield* sql<{ base: string | null; changeTarget: string | null; workToward: string | null }>`
               SELECT default_base_ref AS base, change_target, work_toward FROM repository_bindings WHERE id = ${binding.id}`
-            const workToward = towardOf({ base: bound?.base ?? null, workToward: null }, input.workToward)
+            const workToward = yield* towardIn(
+              { repository: binding.path ?? '', base: bound?.base ?? null, changeTarget: bound?.changeTarget ?? null, workToward: null },
+              input.workToward,
+            )
             if (workToward !== (bound?.workToward ?? null)) {
               // A branch its remote has, where new tasks start: else nothing changes.
               if (workToward !== null) {
