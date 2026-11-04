@@ -691,9 +691,16 @@ export type IssueComment = typeof IssueComment.Type
 export const IssueState = Schema.Literals(['open', 'closed', 'all'])
 export type IssueState = typeof IssueState.Type
 
-/** What a search for issues is narrowed to. Each left out narrows nothing. */
+/**
+ * What a search for issues is narrowed to. Each left out narrows nothing;
+ * each given narrows further (and). Every filter means the same on every
+ * tracker, as `issueMatches` reads it against an issue; each tracker says in
+ * `capabilities.finds` which it can narrow by, and how. A filter it can't is
+ * never sent to it: whoever asks says so instead (docs/architecture/06,
+ * "Finding issues").
+ */
 export interface IssueQuery {
-  /** Words in its title or description. */
+  /** Every word of it in its title or description, in any case. */
   readonly text?: string
   /**
    * Where it lives, by its `Container.id`. Without one, a code host (GitHub,
@@ -704,9 +711,156 @@ export interface IssueQuery {
   readonly state: IssueState
   /** Only those assigned to the account. */
   readonly mine?: boolean
+  /** Only those with every one of these labels, by name in any case. */
+  readonly labels?: ReadonlyArray<string>
+  /** Only those in one of these statuses, by the tracker's own name (In Review), or in a status of one of these categories. */
+  readonly status?: { readonly names: ReadonlyArray<string>; readonly categories: ReadonlyArray<StatusCategory> }
+  /** Only those in the project of this name: Linear's project, a GitHub project board. */
+  readonly project?: string
+  /** Only those in the milestone of this name: Linear's project milestone, GitHub's and GitLab's milestone, Jira's fix version. */
+  readonly milestone?: string
+  /** Only those in this cycle, by its name or number, or `current` for the one under way: Linear's cycle, Jira's sprint. */
+  readonly cycle?: string
+  /** Only those assigned to someone, by their name, login or email; null for those assigned to no one. */
+  readonly assignee?: string | null
+  /** Only those of one of these priorities; `none` is those without one. */
+  readonly priority?: ReadonlyArray<Priority>
+  /** Only those part of this issue, by its key or ref. */
+  readonly parent?: string
+  /** Only those changed at or after this moment or day, ISO 8601 (2026-11-01, or with a time). */
+  readonly updatedSince?: string
+  /** Only these, by key or ref as typed: DEV-12, `#12` (in the container) or `owner/repo#12`, a Trello card's short link. */
+  readonly keys?: ReadonlyArray<string>
+  /** Where the page before stopped, as its `next` said: the same query, read on from there. */
+  readonly cursor?: string
   /** How many at most, newest change first. */
   readonly limit: number
 }
+
+/** What a search can be narrowed by beyond where issues live, whether they are open, and whether they are the account's. */
+export const IssueFilter = Schema.Literals([
+  'text',
+  'labels',
+  'status',
+  'project',
+  'milestone',
+  'cycle',
+  'assignee',
+  'priority',
+  'parent',
+  'updatedSince',
+  'keys',
+])
+export type IssueFilter = typeof IssueFilter.Type
+
+/**
+ * How a tracker narrows a search by a filter: by its own search (`search`),
+ * or by Althar, reading what its search gives (`after`): a page can then
+ * hold fewer than its limit, and the search reaches only as far as the
+ * tracker's own does. A filter left out of `finds` it can't narrow by.
+ */
+export type FindBy = 'search' | 'after'
+
+/** The filters a query narrows by, in the model's order. */
+export const filtersOf = (query: IssueQuery): ReadonlyArray<IssueFilter> =>
+  IssueFilter.literals.filter((filter) => {
+    const given = query[filter]
+    if (given === undefined) return false
+    if (filter === 'text') return typeof given === 'string' && given.trim() !== ''
+    if (filter === 'status') return query.status !== undefined && query.status.names.length + query.status.categories.length > 0
+    return !Array.isArray(given) || given.length > 0
+  })
+
+/** A page of a search: its issues, newest change first, and the cursor to read on from, while there are more. */
+export interface IssuePage {
+  readonly issues: ReadonlyArray<Issue>
+  readonly next: string | null
+}
+
+/** Two names alike, in any case, their spaces trimmed. */
+const alike = (a: string | null | undefined, b: string) => a != null && a.trim().toLowerCase() === b.trim().toLowerCase()
+
+/** Whether an issue is in the state a search asks for: open is neither done nor cancelled. */
+export const inIssueState = (state: IssueState, category: StatusCategory): boolean =>
+  state === 'all' || (state === 'closed') === (category === 'done' || category === 'cancelled')
+
+/** Whether a key or ref names an issue: its key or ref, in any case; `#12` an `owner/repo#12`. */
+export const namesIssue = (typed: string, issue: Pick<Issue, 'key' | 'ref'>): boolean =>
+  alike(issue.key, typed) || alike(issue.ref, typed) || (typed.startsWith('#') && issue.ref.toLowerCase().endsWith(typed.toLowerCase()))
+
+/**
+ * Whether an issue is one a query finds, as every tracker's search means it:
+ * what a tracker narrows by after its search (`after`), and what a fake
+ * narrows by. `account` is who `mine` is. A cycle of `current` can't be
+ * told here, and passes; a filter on a field the issue wasn't read with
+ * (absent) doesn't. Where it lives (`container`) is the search's own to
+ * narrow.
+ */
+export const issueMatches = (issue: Issue, query: Omit<IssueQuery, 'limit'>, account?: { readonly id: string }): boolean => {
+  if (!inIssueState(query.state, issue.status.category)) return false
+  if (query.mine === true && account !== undefined && !issue.assignees.some((person) => person.id === account.id)) return false
+  const said = `${issue.title}\n${issue.body}`.toLowerCase()
+  const words = (query.text ?? '')
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((word) => word !== '')
+  if (!words.every((word) => said.includes(word))) return false
+  if (query.labels !== undefined && !query.labels.every((label) => issue.labels.some((had) => alike(had, label)))) return false
+  const status = query.status
+  if (
+    status !== undefined &&
+    status.names.length + status.categories.length > 0 &&
+    !status.names.some((name) => alike(issue.status.name, name)) &&
+    !status.categories.includes(issue.status.category)
+  )
+    return false
+  // A field the issue wasn't read with can't be said to match.
+  if (query.project !== undefined && !alike(issue.project?.name, query.project)) return false
+  if (query.milestone !== undefined && !alike(issue.milestone?.name, query.milestone)) return false
+  if (
+    query.cycle !== undefined &&
+    !alike(query.cycle, 'current') &&
+    !(alike(issue.cycle, query.cycle) || alike(issue.cycle, `Cycle ${query.cycle}`))
+  )
+    return false
+  if (query.assignee === null && issue.assignees.length > 0) return false
+  if (typeof query.assignee === 'string') {
+    const typed = query.assignee.trim().replace(/^@/, '').toLowerCase()
+    if (
+      !issue.assignees.some(
+        (person) => alike(person.login, typed) || alike(person.id, typed) || (person.name ?? '').toLowerCase().includes(typed),
+      )
+    )
+      return false
+  }
+  if (query.priority !== undefined && query.priority.length > 0 && !query.priority.includes(issue.priority?.level ?? 'none')) return false
+  if (query.parent !== undefined) {
+    const parent = issue.parent
+    if (parent == null || !(alike(parent.key, query.parent) || query.parent.toLowerCase().endsWith(parent.key.toLowerCase()))) return false
+  }
+  if (query.updatedSince !== undefined) {
+    const since = Date.parse(query.updatedSince)
+    if (!Number.isNaN(since) && Date.parse(issue.updatedAt) < since) return false
+  }
+  if (query.keys !== undefined && query.keys.length > 0 && !query.keys.some((key) => namesIssue(key, issue))) return false
+  return true
+}
+
+/**
+ * A page of issues a tracker found and narrowed itself, all at once: newest
+ * change first, from the cursor's offset, to the limit. The cursor is the
+ * offset of the next page.
+ */
+export const pageAt = (issues: ReadonlyArray<Issue>, query: Pick<IssueQuery, 'cursor' | 'limit'>): IssuePage => {
+  const from = query.cursor === undefined ? 0 : Math.max(0, Number.parseInt(query.cursor, 10) || 0)
+  const to = from + Math.max(1, query.limit)
+  const sorted = issues.toSorted((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0))
+  return { issues: sorted.slice(from, to), next: sorted.length > to ? String(to) : null }
+}
+
+/** A tracker's refusal of a search it can't make as asked: said in words an agent can pass on. */
+export const cantFind = (product: Product, why: string): ConnectorFailed =>
+  new ConnectorFailed({ product, reason: 'rejected', message: why })
 
 /**
  * Where an issue can be filed, by the tracker's name for it: a Linear team,
@@ -834,6 +988,8 @@ export interface TrackerCapabilities {
   readonly creates: ReadonlyArray<IssueField>
   /** How many people an issue is assigned to: one (Linear, Jira), or several (GitHub, GitLab, Trello). */
   readonly assignees: 'one' | 'many'
+  /** What `find` can narrow a search by, and how (`FindBy`); a filter left out it can't, and is never asked to. */
+  readonly finds: Readonly<Partial<Record<IssueFilter, FindBy>>>
 }
 
 /** A tracker's refusal of a change it can't make: said for the field, in words an agent can pass on. */
@@ -876,8 +1032,13 @@ export interface Tracker {
   issue(ref: string): Effect.Effect<Issue, ConnectorFailed>
   /** Open issues assigned to the account, newest change first; within a container (a repository) when given. */
   mine(options?: { readonly container?: string; readonly limit?: number }): Effect.Effect<ReadonlyArray<Issue>, ConnectorFailed>
-  /** Issues found as a query narrows them, whoever they are assigned to unless it says, newest change first, to its limit. */
-  find(query: IssueQuery): Effect.Effect<ReadonlyArray<Issue>, ConnectorFailed>
+  /**
+   * A page of the issues a query finds, whoever they are assigned to unless
+   * it says, newest change first, to its limit; and the cursor to read on
+   * from, while there are more. Only filters in `capabilities.finds` are
+   * asked of it: one it can't take is refused, as `rejected`.
+   */
+  find(query: IssueQuery): Effect.Effect<IssuePage, ConnectorFailed>
   /** An issue's comments, oldest first: its latest, to a limit. */
   comments(issue: Issue, limit: number): Effect.Effect<ReadonlyArray<IssueComment>, ConnectorFailed>
   comment(issue: Issue, body: string): Effect.Effect<void, ConnectorFailed>
@@ -935,3 +1096,7 @@ export const fieldsOf = (change: IssueChange): ReadonlyArray<IssueField> =>
 /** A change's first field the tracker can't change, if any. */
 export const unchangeable = (capabilities: TrackerCapabilities, change: IssueChange): IssueField | undefined =>
   fieldsOf(change).find((field) => !capabilities.changes.includes(field))
+
+/** The filters a query narrows by that a tracker can't: never sent to it. */
+export const unfindable = (capabilities: TrackerCapabilities, query: IssueQuery): ReadonlyArray<IssueFilter> =>
+  filtersOf(query).filter((filter) => capabilities.finds[filter] === undefined)
