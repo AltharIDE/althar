@@ -79,8 +79,9 @@ export function RoomNote({
 
 /**
  * Beside a picker's chip, once its model is nearly out: 3% left · until 14:00,
- * Out · until 14:00. One run at the chip's size, in the chip's ink, a step
- * deeper as it runs down. Nothing before.
+ * Out · until 14:00. One quiet run a step smaller than the chip, with a gap
+ * of its own from it, in ink only, a step deeper as it runs down; cut with an
+ * ellipsis on a narrow row, its whole words on hover. Nothing before.
  */
 export function RoomSaid({ room, text }: { room: ModelRoom | null | undefined; text?: Partial<ModelRoomText> }) {
   const t = { ...modelRoomText, ...text }

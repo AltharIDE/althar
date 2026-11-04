@@ -14,22 +14,22 @@
   color: var(--t-1);
   font-weight: 600;
 }
-/* one run, the chip's size and baseline; cut with an ellipsis, so the chip and the actions keep their room */
+/* a quiet aside to the chip: a gap of its own, a step smaller, ink only; cut with an ellipsis, so the chip and the actions keep their room */
 .said {
   flex: 0 1000 auto;
   align-self: center;
   min-width: 0;
+  margin-left: 6px;
   padding-right: 4px;
   overflow: hidden;
-  font-size: 12px;
+  font-size: 11.5px;
+  font-weight: 400;
   font-variant-numeric: tabular-nums;
   color: var(--t-3);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.said[data-tone='critical'] {
-  color: var(--t-2);
-}
+.said[data-tone='critical'],
 .said[data-tone='last'] {
-  color: var(--t-1);
+  color: var(--t-2);
 }
