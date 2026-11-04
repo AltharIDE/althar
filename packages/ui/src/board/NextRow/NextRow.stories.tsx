@@ -1,6 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
+import { Menu, MenuItem } from '../../primitives/Menu/Menu'
+import { IconButton } from '../../primitives/IconButton/IconButton'
 import { NEXT } from '../../fixtures/board'
 import { States, statesOn } from '../../storybook/States'
 import { BoardList } from '../Board/Board'
@@ -32,6 +34,39 @@ export const Continuing: Story = {
   },
 }
 export const Current: Story = { args: { current: true } }
+
+/** A plan held for you: its line turns into Start, and its menu shows, as you point at it or tab to it. */
+export const Startable: Story = {
+  args: {
+    ...HELD,
+    place: 3,
+    kind: 'Change',
+    reason: 'Held. Starts when you say',
+    onStart: fn(),
+    menu: (
+      <Menu
+        trigger={<IconButton icon="more" size="small" label="More for this task" />}
+        label="This task"
+        align="end"
+        note="Opus 5.5 · High, GPT-6.1 Sol reviews"
+      >
+        <MenuItem icon="play" onSelect={fn()}>
+          Start
+        </MenuItem>
+        <MenuItem icon="agents" onSelect={fn()}>
+          Change the team…
+        </MenuItem>
+      </Menu>
+    ),
+  },
+  play: async ({ args, canvasElement }) => {
+    const row = within(canvasElement)
+    await userEvent.tab()
+    await userEvent.tab()
+    await userEvent.click(row.getByRole('button', { name: 'Start' }))
+    await expect(args.onStart).toHaveBeenCalledOnce()
+  },
+}
 
 /** The queue as it stands, in order. */
 export const Queue: Story = {

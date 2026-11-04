@@ -28,6 +28,8 @@ export interface ModelPickText {
   all: string
   /** The row that takes this model off what it was picked for. */
   remove: string
+  /** The row that opens everyone on the work, where the pick is one of several: the lead's, of a plan with a review. */
+  team: string
   /** Going ahead with a pick that asked first, and not. */
   proceed: string
   cancel: string
@@ -44,6 +46,7 @@ export const modelPickText: ModelPickText = {
   makeDefault: 'Make this default',
   all: 'All models',
   remove: 'Remove from this step',
+  team: 'Change the team…',
   proceed: 'Switch',
   cancel: 'Cancel',
 }
@@ -65,6 +68,8 @@ export interface ModelPickProps {
   onBrowse?: () => void
   /** Take this model off what it was picked for, like one of a step's two reviewers. Without it, there is no such row. */
   onRemove?: () => void
+  /** Open everyone on the work, in a dialog the consumer shows: the lead's pick of a plan that hasn't begun. Without it, there is no such row. */
+  onTeam?: () => void
   /** How many models there are in all, on the browse row. */
   count?: number
   /** Whose model this is: Lead, Coordinator, Review. */
@@ -103,6 +108,7 @@ export function ModelPick({
   onMakeDefault,
   onBrowse,
   onRemove,
+  onTeam,
   count,
   owner,
   variant = 'quiet',
@@ -248,6 +254,19 @@ export function ModelPick({
           >
             {t.all}
             {count !== undefined && <span className={s.count}>{count}</span>}
+            <Icon name="chevron" size={10} />
+          </button>
+        )}
+        {onTeam && (
+          <button
+            type="button"
+            className={cx(s.all, s.remove)}
+            onClick={() => {
+              setOpen(false)
+              onTeam()
+            }}
+          >
+            {t.team}
             <Icon name="chevron" size={10} />
           </button>
         )}

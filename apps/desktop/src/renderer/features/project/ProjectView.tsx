@@ -46,6 +46,7 @@ import { AutomationInThread } from '../automations/AutomationInThread'
 import { AutomationsView } from '../automations/AutomationsView'
 import { useAutomationActions, useAutomations } from '../automations/useAutomations'
 import { BoardView } from '../board/BoardView'
+import { ChangeTeam, teamChangeOf } from '../team/Team'
 import type { SettingsWays } from '../settings/open'
 import { useFolds } from '../board/folds'
 import { useClosePullRequests } from '../board/useClosePullRequests'
@@ -458,6 +459,9 @@ export function ProjectView({
     if (room === Room.Board) setRoom(Room.Both)
     requestAnimationFrame(() => voice.inputRef.current?.focus())
   }
+  // The team of a plan up next, open from its row, while it can still change.
+  const [teamFor, setTeamFor] = useState<string | null>(null)
+  const teamTask = teamFor === null || lanes === null ? null : (lanes.next.find((one) => one.taskId === teamFor) ?? null)
   /** The first thing that waits on you, in its task. */
   const openYours = () => {
     const first = lanes === null ? null : firstNeedOf(lanes)
@@ -695,8 +699,18 @@ export function ProjectView({
                     folds={folds}
                     onFoldsChange={setFolds}
                     onTalk={talkToCoordinator}
+                    team={{ start: (planId) => void model.startPlan(planId), change: setTeamFor }}
                     {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                   />
+                  {teamTask !== null && teamChangeOf(teamTask) !== null && (
+                    <ChangeTeam
+                      key={teamTask.taskId}
+                      projectId={projectId}
+                      task={teamTask}
+                      agents={model.agents}
+                      onClose={() => setTeamFor(null)}
+                    />
+                  )}
                 </>
               ) : board.error === null ? (
                 <PartPending label={text.boardReading} />

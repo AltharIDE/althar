@@ -45,6 +45,8 @@ export interface ModelChoiceProps {
   onChange: (choice: Choice) => void
   /** Take the pick off what it was for, like a step's review. */
   onRemove?: () => void
+  /** Open everyone on the work: the lead's pick of a plan that hasn't begun. */
+  onTeam?: () => void
   /** The project the pick is for, whose rule for moving work through an agent's accounts says which account each model's room is of. */
   projectId?: string
   /** A conversation under way, which another agent's model hands over. */
@@ -54,7 +56,19 @@ export interface ModelChoiceProps {
   text?: Partial<ModelPickText>
 }
 
-export function ModelChoice({ owner, agents, value, onChange, onRemove, projectId, handover, variant, placement, text }: ModelChoiceProps) {
+export function ModelChoice({
+  owner,
+  agents,
+  value,
+  onChange,
+  onRemove,
+  onTeam,
+  projectId,
+  handover,
+  variant,
+  placement,
+  text,
+}: ModelChoiceProps) {
   const known = useModels()
   const room = useModelRooms(projectId)
   const setDefault = useSetDefaultEffort()
@@ -102,6 +116,7 @@ export function ModelChoice({ owner, agents, value, onChange, onRemove, projectI
         {...(choiceOf(current.id).model === null ? {} : { onMakeDefault: (name: string) => makeDefault(current.id, name) })}
         onBrowse={() => setBrowsing(true)}
         {...(onRemove === undefined ? {} : { onRemove })}
+        {...(onTeam === undefined ? {} : { onTeam })}
         {...(confirm === undefined ? {} : { confirm })}
         room={room}
         asking={asking}
