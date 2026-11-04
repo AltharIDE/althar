@@ -1,4 +1,4 @@
-import type { Launch, OfferedRefs, RepositoryScript, Runnable } from '@althar/contracts'
+import type { Launch, OfferedRefs, ProjectRepository, RepositoryScript, Runnable } from '@althar/contracts'
 import {
   AddRunnable,
   type AddWay,
@@ -51,6 +51,16 @@ const runOf = (launch: Launch, now: string): RunTargetRun =>
 
 /** The default branch, where the project's Run runs until another place is picked. */
 export const MAIN: RunPlace = { key: 'main', kind: 'main', label: 'main' }
+
+/**
+ * Where a run with no task runs, by name: the branch the project works
+ * toward (ADR-093), as Run runs a copy of it, else its default branch; with
+ * repositories that go different ways, the default branch's word.
+ */
+export const mainOf = (repositories: ReadonlyArray<Pick<ProjectRepository, 'defaultBranch' | 'workToward'>> | undefined): RunPlace => {
+  const names = [...new Set((repositories ?? []).map((one) => one.workToward ?? one.defaultBranch ?? MAIN.label))]
+  return names.length === 1 && names[0] !== undefined ? { ...MAIN, label: names[0] } : MAIN
+}
 
 /** A pull request's number in what a run of it was fetched as: PR #12 · feature/x, MR !12. */
 const pullNumber = (label: string) => {
@@ -446,7 +456,11 @@ export function Runs({
   readonly onRunRef?: (runnableId: string, ref: RunRef) => Promise<void>
 }) {
   const dialogs = useRunDialogs(projectId)
-  const [picked, setPicked] = useState(() => (taskId === null ? readPlace(projectId) : MAIN))
+  const { client } = useServices()
+  const main = mainOf(useQuery(reads(client).repositories(projectId)).data)
+  const [kept, setPicked] = useState(() => (taskId === null ? readPlace(projectId) : MAIN))
+  // The default branch's place says the branch it runs now, whatever it was called when it was kept.
+  const picked = kept.kind === 'main' ? main : kept
   const [attempts, setAttempts] = useState<ReadonlyMap<string, Attempt>>(new Map())
   const attempt = (key: string, next: Attempt | null) =>
     setAttempts((was) => {
@@ -463,7 +477,7 @@ export function Runs({
       !tasks.some((task) => `task:${task.id}` === picked.key) &&
       !launches.some((launch) => runsAt(launch, picked))) ||
     ((picked.kind === 'pull' || picked.kind === 'branch') && onRunRef === undefined)
-  const place: RunPlace = taskId !== null ? { key: `task:${taskId}`, kind: 'task', label: project } : gone ? MAIN : picked
+  const place: RunPlace = taskId !== null ? { key: `task:${taskId}`, kind: 'task', label: project } : gone ? main : picked
   const pick = (next: RunPlace) => {
     setPicked(next)
     keepPlace(projectId, next)
@@ -491,7 +505,7 @@ export function Runs({
   // On the project: the default branch, the tasks, the place picked, and every pull request or branch something runs or failed on.
   const places = (() => {
     if (taskId !== null) return []
-    const all: RunPlace[] = [MAIN, ...(tasks ?? []).map((task): RunPlace => ({ key: `task:${task.id}`, kind: 'task', label: task.title }))]
+    const all: RunPlace[] = [main, ...(tasks ?? []).map((task): RunPlace => ({ key: `task:${task.id}`, kind: 'task', label: task.title }))]
     const add = (one: RunPlace) => {
       if (!all.some((known) => known.key === one.key || sameRef(known, one))) all.push(one)
     }
