@@ -416,19 +416,24 @@ export const useTask = (threadId: string): TaskModel => {
     timer.current ??= setTimeout(readChanged, GATHER)
   })
 
-  const loadEarlier = useCallback(async () => {
+  const earlierRequest = useRef<Promise<void> | null>(null)
+  const loadEarlier = useCallback(() => {
+    if (earlierRequest.current) return earlierRequest.current
     const first = snapshot?.items[0]
-    if (first === undefined) return
+    if (first === undefined || !snapshot?.earlier) return Promise.resolve()
     setLoadingEarlier(true)
-    try {
-      const page = await client.getThread(threadId, { before: first.sequence, limit: PAGE })
-      setSnapshot((current) => ({ ...current, items: mergeItems(current.items, page.items), earlier: page.earlier }))
-    } catch (failure) {
-      fail(failure)
-    } finally {
-      setLoadingEarlier(false)
-    }
-  }, [client, threadId, snapshot, setSnapshot, fail])
+    const request = client
+      .getThread(threadId, { before: first.sequence, limit: PAGE })
+      .then((page) => {
+        setSnapshot((current) => ({ ...current, items: mergeItems(current.items, page.items), earlier: page.earlier }))
+      })
+      .finally(() => {
+        earlierRequest.current = null
+        setLoadingEarlier(false)
+      })
+    earlierRequest.current = request
+    return request
+  }, [client, threadId, snapshot, setSnapshot])
 
   /**
    * Runs an action, says what went wrong if it did, and reads the thread's

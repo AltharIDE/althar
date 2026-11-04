@@ -1,3 +1,4 @@
+import { EarlierTurns } from '../../shared/EarlierTurns'
 import { useQuery } from '@tanstack/react-query'
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
 
@@ -11,7 +12,6 @@ import {
   Room,
   TaskFace,
   Thread,
-  ThreadDivider,
   ThreadMeasure,
   ThreadShellProvider,
   ThreadSkeleton,
@@ -102,9 +102,6 @@ export const text = {
   signIn: 'Sign in again',
   needsAgent: 'No agent is signed in.',
   signOneIn: 'Sign one in',
-  earlier: 'Earlier',
-  showEarlier: 'Show',
-  loadingEarlier: 'Showing…',
   dismiss: 'Dismiss',
   boardFailed: 'Althar couldn’t read the board.',
   olderFailed: 'Althar couldn’t load older tasks.',
@@ -582,15 +579,13 @@ export function ProjectView({
                         className={s.firstConnections}
                       />
                     )}
-                    {coordinator.earlier && (
-                      <ThreadDivider
-                        icon="up"
-                        action={model.loadingEarlier ? text.loadingEarlier : text.showEarlier}
-                        onAction={() => void model.loadEarlier()}
-                      >
-                        {text.earlier}
-                      </ThreadDivider>
-                    )}
+                    <EarlierTurns
+                      key={coordinator.threadId}
+                      earlier={coordinator.earlier}
+                      load={model.loadEarlier}
+                      version={coordinator.items}
+                      loading={model.loadingEarlier}
+                    />
                     {/* The coordinator only reads: what it hands back is pictures, which open in the lightbox; it writes no documents. */}
                     <ThreadShellProvider value={shown.shell}>
                       <ThreadBlocks

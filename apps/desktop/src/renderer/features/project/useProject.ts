@@ -244,19 +244,24 @@ export const useProject = (projectId: string): ProjectModel => {
     timer.current ??= setTimeout(readChanged, GATHER)
   })
 
-  const loadEarlier = useCallback(async () => {
+  const earlierRequest = useRef<Promise<void> | null>(null)
+  const loadEarlier = useCallback(() => {
+    if (earlierRequest.current) return earlierRequest.current
     const first = coordinator?.items[0]
-    if (first === undefined) return
+    if (first === undefined || !coordinator?.earlier) return Promise.resolve()
     setLoadingEarlier(true)
-    try {
-      const page = await client.getCoordinator(projectId, { before: first.sequence, limit: PAGE })
-      setCoordinator((current) => ({ ...current, items: mergeItems(current.items, page.items), earlier: page.earlier }))
-    } catch (failure) {
-      fail(failure)
-    } finally {
-      setLoadingEarlier(false)
-    }
-  }, [client, projectId, coordinator, setCoordinator, fail])
+    const request = client
+      .getCoordinator(projectId, { before: first.sequence, limit: PAGE })
+      .then((page) => {
+        setCoordinator((current) => ({ ...current, items: mergeItems(current.items, page.items), earlier: page.earlier }))
+      })
+      .finally(() => {
+        earlierRequest.current = null
+        setLoadingEarlier(false)
+      })
+    earlierRequest.current = request
+    return request
+  }, [client, projectId, coordinator, setCoordinator])
 
   /** Runs an action, says what went wrong if it did, and reads the thread's head again. */
   const act = useCallback(
