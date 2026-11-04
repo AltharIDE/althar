@@ -1,4 +1,5 @@
 import {
+  changeTable,
   type ChosenField,
   type Choice,
   ConnectorFailed,
@@ -13,7 +14,7 @@ import {
 import type { IssueChangesCard } from '@althar/contracts'
 import { type ActorId, Ids, type IssueChangeState, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
+import { Clock, Context, type Crypto, Duration, Effect, Layer, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Connections } from './Connections'
@@ -23,7 +24,7 @@ import { NotFound, OutwardUncertain } from './errors'
 import { Instance } from './Instance'
 import { changeWords, lineWords, linesOf } from './issueChangeWords'
 import { anything, AskedFields, fieldSchema, readFields, type Wanted, wantedFields } from './issueFields'
-import { Issues } from './Issues'
+import { Issues, keyRange } from './Issues'
 import { outward } from './outward'
 import { movesIssues, Policies } from './Policies'
 import { change, fact, timestamp } from './records'
@@ -218,8 +219,40 @@ const AskedChange = Schema.Struct({
   description: Schema.optional(Schema.String),
 })
 
-/** A lead's change: to its own issue, or another it may change, by key or link. */
-const LeadChange = Schema.Struct({ ...AskedChange.fields, issue: Schema.optional(Schema.String), at_once: Schema.optional(Schema.Boolean) })
+/**
+ * A lead's change: to its own issue, or others by key or link; the same
+ * change to several (`issues`), or a change of its own to each (`changes`).
+ */
+const LeadChange = Schema.Struct({
+  ...AskedChange.fields,
+  issue: Schema.optional(Schema.String),
+  issues: Schema.optional(Schema.Array(Schema.String)),
+  changes: Schema.optional(Schema.Array(Schema.Struct({ issue: Schema.String, ...AskedChange.fields }))),
+  at_once: Schema.optional(Schema.Boolean),
+})
+
+/** A run of keys in what someone wrote: DEV-60..DEV-70, DEV-60..70, #10..#20. */
+const RUNS = /#?[A-Za-z][A-Za-z0-9]*-\d+\s*(?:\.\.\.?|–|—)\s*(?:[A-Za-z][A-Za-z0-9]*-)?\d+|#\d+\s*(?:\.\.\.?|–|—)\s*#?\d+/g
+
+/** How many issues one change, or one comment, goes to at most. */
+const BATCH = 50
+
+/** From how many issues on a card applying it is paced to its trackers' limits. */
+const PACED_FROM = 10
+
+/**
+ * How long applying waits between one issue and the next on a tracker, in a
+ * batch that big: GitHub asks a second between writes (its secondary limits),
+ * Trello allows a hundred calls in ten seconds a token, and Jira Cloud counts
+ * calls' cost a while; the others' limits hold a batch at once.
+ */
+const PACE: Readonly<Partial<Record<Product, number>>> = { github: 1_000, trello: 150, jira_cloud: 100 }
+
+/** How long a tracker that asks Althar to wait is waited for, in a batch, before its issue is said not to have changed. */
+const WAITED = 60_000
+
+/** Keys as typed, a run of them read as its keys. */
+const keysIn = (typed: ReadonlyArray<string>) => typed.flatMap((one) => keyRange(one) ?? [one.trim()]).filter((one) => one !== '')
 
 const ChangesAsked = Schema.Struct({
   changes: Schema.Array(Schema.Struct({ issue: Schema.String, ...AskedChange.fields })),
@@ -227,7 +260,11 @@ const ChangesAsked = Schema.Struct({
   at_once: Schema.optional(Schema.Boolean),
 })
 
-const CommentAsked = Schema.Struct({ issue: Schema.optional(Schema.String), body: Schema.String })
+const CommentAsked = Schema.Struct({
+  issue: Schema.optional(Schema.String),
+  issues: Schema.optional(Schema.Array(Schema.String)),
+  body: Schema.String,
+})
 
 /** What a tool was asked, as a change. */
 const wantedOf = (asked: typeof AskedChange.Type): Effect.Effect<Wanted, ToolRefused> =>
@@ -332,6 +369,20 @@ export class IssueChanges extends Context.Service<
       readonly by: Proposer
       readonly actorId: ActorId
     }): Effect.Effect<IssueChangesCard, unknown>
+    /**
+     * Comments the same on several issues, on one card: at once, or, where
+     * `direct` is false, once the person applies it. Each that can't be read
+     * is left off and said; what applied, and what didn't, each issue says.
+     */
+    commentOnEach(input: {
+      readonly projectId: ProjectId
+      readonly threadId: string
+      readonly targets: ReadonlyArray<Target>
+      readonly body: string
+      readonly direct: boolean
+      readonly by: Proposer
+      readonly actorId: ActorId
+    }): Effect.Effect<{ readonly card: IssueChangesCard | null; readonly left: ReadonlyArray<string> }, unknown>
     /** Links a pull request to an issue at once, where its tracker has links, and says so in the thread, as a line. */
     link(input: {
       readonly projectId: ProjectId
@@ -449,8 +500,13 @@ export class IssueChanges extends Context.Service<
           return { connectionId: where.connectionId, product: adapters.info.product, name, tracker, issue }
         })
 
-      /** What an agent asked of an issue, read against its tracker, field by field. */
-      const resolve = (at: Found, wanted: Wanted) =>
+      /**
+       * What an agent asked of an issue, read against its tracker, field by
+       * field. A batch reads each field's choices once for issues in the same
+       * place (a team, board, project or repository): not Jira's statuses or
+       * labels, which are each issue's own.
+       */
+      const resolve = (at: Found, wanted: Wanted, read: Map<string, Effect.Effect<ReadonlyArray<Choice>, ConnectorFailed>>) =>
         readFields(
           {
             tracker: at.tracker,
@@ -459,7 +515,15 @@ export class IssueChanges extends Context.Service<
             issue: at.issue,
             // A code host's issue is `owner/repo#12`: a parent's `#7` is in its repository.
             ...(at.issue.ref.includes('#') ? { repository: at.issue.ref.slice(0, at.issue.ref.lastIndexOf('#')) } : {}),
-            choices: (field: ChosenField, typed?: string) => at.tracker.choices(at.issue, field, typed),
+            choices: (field: ChosenField, typed?: string) => {
+              const own = (at.product === 'jira_cloud' || at.product === 'jira_dc') && (field === 'status' || field === 'labels')
+              const asked = at.tracker.choices(at.issue, field, typed)
+              if (own || at.issue.container === null) return asked
+              const key = `${at.connectionId}\u0000${at.issue.container}\u0000${field}\u0000${typed ?? ''}`
+              const kept = read.get(key)
+              if (kept !== undefined) return kept
+              return Effect.tap(asked, (choices) => Effect.sync(() => read.set(key, Effect.succeed(choices))))
+            },
           },
           wanted,
         )
@@ -572,6 +636,29 @@ export class IssueChanges extends Context.Service<
         })
 
       /**
+       * An issue's change applied in a batch: after a pause its tracker's
+       * limits ask for, where the batch is big; and once more after the wait
+       * a tracker asks for, where it says how long and that isn't long.
+       */
+      const pacedEntry = (row: Row, entry: Entry, index: number, paced: boolean) =>
+        Effect.gen(function* () {
+          const pause = PACE[entry.product] ?? 0
+          if (paced && index > 0 && pause > 0) yield* Effect.sleep(Duration.millis(pause))
+          return yield* applyEntry(row, entry, index).pipe(
+            Effect.catchIf(
+              (error) => error instanceof ConnectorFailed && error.reason === 'rate_limited' && error.retryAt !== undefined,
+              (error) =>
+                Effect.gen(function* () {
+                  const wait = Date.parse((error as ConnectorFailed).retryAt ?? '') - (yield* Clock.currentTimeMillis)
+                  if (Number.isNaN(wait) || wait > WAITED) return yield* Effect.fail(error)
+                  yield* Effect.sleep(Duration.millis(Math.max(0, wait)))
+                  return yield* applyEntry(row, entry, index)
+                }),
+            ),
+          )
+        })
+
+      /**
        * Tells a task's lead what the person decided about a card of its,
        * quietly: in its thread, as input Althar writes. Nothing for the
        * coordinator's, which it hears as news, or Althar's own; nor for a
@@ -618,11 +705,12 @@ export class IssueChanges extends Context.Service<
             if (!marked.changed) return marked.row.state === 'applying' ? cardOf(marked.row) : yield* closed(marked.row)
             const row = marked.row
             const before = decodeEntries(row.changes)
-            // Each issue on its own: what applied stays applied, and what didn't says why.
+            // Each issue on its own: what applied stays applied, and what didn't says why. A big batch is paced to its trackers.
+            const paced = before.length >= PACED_FROM
             const after = yield* Effect.forEach(before, (entry, index) =>
               entry.applied === true
                 ? Effect.succeed(entry)
-                : Effect.map(Effect.result(applyEntry(row, entry, index)), (made): Entry => {
+                : Effect.map(Effect.result(pacedEntry(row, entry, index, paced)), (made): Entry => {
                     if (made._tag === 'Success')
                       return {
                         ...entry,
@@ -738,6 +826,7 @@ export class IssueChanges extends Context.Service<
           Effect.gen(function* () {
             if (input.issues.length === 0) return yield* refused('Name at least one issue to change.')
             // Each issue on its own: one that can't be read, or has nothing left to change, leaves the others to go ahead.
+            const choices = new Map<string, Effect.Effect<ReadonlyArray<Choice>, ConnectorFailed>>()
             const read = yield* Effect.forEach(input.issues, ({ target, change: wanted }) =>
               Effect.gen(function* () {
                 const at = yield* Effect.result(found(input.projectId, target))
@@ -747,7 +836,7 @@ export class IssueChanges extends Context.Service<
                     left: [at.failure instanceof IssueChangeRefused ? at.failure.message : `${named}: Althar couldn’t read it.`],
                     already: [],
                   }
-                const fields = yield* resolve(at.success, wanted)
+                const fields = yield* resolve(at.success, wanted, choices)
                 const key = at.success.issue.key
                 return {
                   entry: anything(fields.change)
@@ -791,6 +880,34 @@ export class IssueChanges extends Context.Service<
               actorId: input.actorId,
               direct: true,
             })
+          }),
+        )
+
+      const commentOnEach: IssueChanges['Service']['commentOnEach'] = (input) =>
+        provide(
+          Effect.gen(function* () {
+            const body = input.body.trim()
+            if (body === '') return yield* refused('Write the comment: it is empty.')
+            const read = yield* Effect.forEach(input.targets, (target) => Effect.result(found(input.projectId, target)))
+            const entries = read.flatMap((one) => (one._tag === 'Success' ? [entryOf(one.success, { comment: body })] : []))
+            const left = read.flatMap((one, index) => {
+              if (one._tag === 'Success') return []
+              const target = input.targets[index]
+              const named = target === undefined ? 'it' : 'issue' in target ? target.issue : target.ref
+              return [one.failure instanceof IssueChangeRefused ? one.failure.message : `${named}: Althar couldn’t read it.`]
+            })
+            const keys = entries.map((entry) => `${entry.connectionId}:${entry.ref}`)
+            if (new Set(keys).size !== keys.length) return yield* refused('Name each issue once.')
+            if (entries.length === 0) return { card: null, left }
+            const card = yield* proposeEntries({
+              projectId: input.projectId,
+              threadId: input.threadId,
+              entries,
+              by: input.by,
+              actorId: input.actorId,
+              direct: input.direct,
+            })
+            return { card, left }
           }),
         )
 
@@ -958,9 +1075,34 @@ export class IssueChanges extends Context.Service<
               AND (thread_id = ${access.threadId}
                 OR id IN (SELECT user_input_id FROM task_request_inputs WHERE task_id = ${access.taskId ?? ''}))
             ORDER BY accepted_at DESC LIMIT 200`
-          // DEV-67 as a word, not inside DEV-670; #12 not inside #123.
+          // DEV-67 as a word, not inside DEV-670; #12 not inside #123; or in a run of keys they named, DEV-60..DEV-70.
           const key = new RegExp(`(^|[^\\w#-])${issue.key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i')
-          return said.some((one) => key.test(one.body) || one.body.includes(issue.url))
+          const inRun = (body: string) =>
+            [...body.matchAll(RUNS)].some((run) => (keyRange(run[0]) ?? []).some((one) => one.toLowerCase() === issue.key.toLowerCase()))
+          return said.some((one) => key.test(one.body) || one.body.includes(issue.url) || inRun(one.body))
+        })
+
+      /**
+       * Where an issue a lead names is, and whether it is the lead's to change
+       * or comment on: the one its task came from, those its task filed, and
+       * those the person named to it. Any other it may only propose, on a
+       * card the person applies. Refused where no tracker has it.
+       */
+      const leadScope = (access: ToolAccess, named: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const read = yield* issues
+            .read(named, access.projectId)
+            .pipe(Effect.mapError(() => new ToolRefused({ message: `Althar can’t find ${named} on a connected tracker.` })))
+          const target = { connectionId: read.connectionId, ref: read.ref }
+          const [own] = yield* sql<{ id: string }>`
+            SELECT id FROM external_links WHERE task_id = ${access.taskId ?? ''} AND kind = 'issue'
+              AND connection_id = ${read.connectionId} AND ref = ${read.ref} LIMIT 1`
+          if (own !== undefined) return { target, key: read.key, theirs: true }
+          const [filed] = yield* sql<{ id: string }>`
+            SELECT id FROM issue_drafts WHERE thread_id = ${access.threadId} AND state = 'filed'
+              AND connection_id = ${read.connectionId} AND issue_ref = ${read.ref} LIMIT 1`
+          return { target, key: read.key, theirs: filed !== undefined || (yield* namedByThePerson(access, read)) }
         })
 
       /**
@@ -992,44 +1134,130 @@ export class IssueChanges extends Context.Service<
       const actorOf = (access: ToolAccess) => (access.role === 'coordinator' ? instance.coordinatorId : instance.systemId)
       const byOf = (access: ToolAccess): Proposer => (access.role === 'coordinator' ? 'coordinator' : 'lead')
 
+      /**
+       * Where a lead's issues are, each the lead's own to change or not, and
+       * each it named that no tracker has, said: by their keys or links, runs
+       * of keys read as their keys. At most a batch.
+       */
+      const leadScopes = (access: ToolAccess, named: ReadonlyArray<string>) =>
+        Effect.gen(function* () {
+          if (named.length > BATCH)
+            return yield* new ToolRefused({ message: `That is ${named.length} issues: name at most ${BATCH} at once.` })
+          const read = yield* Effect.forEach(named, (one) => Effect.result(leadScope(access, one)), { concurrency: 4 })
+          return {
+            // Each as it was named, or undefined where no tracker has it.
+            scopes: read.map((one) => (one._tag === 'Success' ? one.success : undefined)),
+            unknown: read.flatMap((one) => (one._tag === 'Failure' ? [one.failure.message] : [])),
+          }
+        })
+
+      /** Why a lead leaves issues as they are: they aren't its to change, a line for them all. */
+      const notTheirs = (keys: ReadonlyArray<string>) =>
+        `${keys.join(', ')} ${keys.length === 1 ? 'isn’t' : 'aren’t'} this task’s issue, one it filed, or one the person named to it, so ${keys.length === 1 ? 'it was' : 'they were'} left as ${keys.length === 1 ? 'it is' : 'they are'}. Tell the person what ${keys.length === 1 ? 'it needs' : 'they need'}: the coordinator changes them for them.`
+
+      /**
+       * Those of a lead's issues it may change or comment on, by where they
+       * are, and a line for those it may not and those no tracker has. The
+       * coordinator's are all its own.
+       */
+      const mayChange = (access: ToolAccess, named: ReadonlyArray<string>) =>
+        Effect.gen(function* () {
+          if (access.role === 'coordinator')
+            return { allowed: named.map((one, index) => ({ index, target: { issue: one } as Target })), said: [] }
+          const { scopes, unknown } = yield* leadScopes(access, named)
+          const others = scopes.flatMap((one) => (one !== undefined && !one.theirs ? [one.key] : []))
+          return {
+            allowed: scopes.flatMap((one, index) => (one !== undefined && one.theirs ? [{ index, target: one.target }] : [])),
+            said: [...unknown, ...(others.length === 0 ? [] : [notTheirs(others)])],
+          }
+        })
+
       const commentTool = (access: ToolAccess, value: unknown) =>
         Effect.gen(function* () {
           const asked = yield* readInput(CommentAsked, value)
-          const target =
-            access.role === 'coordinator'
-              ? asked.issue === undefined
-                ? yield* new ToolRefused({ message: 'Say which issue, by its key or link, as issue.' })
-                : { issue: asked.issue }
-              : yield* leadTarget(access, asked.issue)
-          const card = yield* comment({
+          const several = asked.issues !== undefined && asked.issues.length > 0
+          if (access.role === 'coordinator' && !several && asked.issue === undefined)
+            return yield* new ToolRefused({ message: 'Say which issue, by its key or link, as issue.' })
+          if (!several) {
+            const target = access.role === 'coordinator' ? { issue: asked.issue ?? '' } : yield* leadTarget(access, asked.issue)
+            const card = yield* comment({
+              projectId: access.projectId as ProjectId,
+              threadId: access.threadId,
+              target,
+              body: asked.body,
+              by: byOf(access),
+              actorId: actorOf(access),
+            })
+            const [issue] = card.issues
+            return card.state === 'applied'
+              ? `Commented on ${issue?.key ?? 'it'}. The thread shows it as a line.`
+              : `The comment on ${issue?.key ?? 'it'} wasn't posted: ${issue?.error ?? card.error ?? ''}`
+          }
+          // The same comment on each it may comment on, on one card, at once; each said posted or not.
+          const { allowed, said } = yield* mayChange(
+            access,
+            keysIn([...(asked.issue === undefined ? [] : [asked.issue]), ...(asked.issues ?? [])]),
+          )
+          if (allowed.length === 0) return said.join('\n')
+          const made = yield* commentOnEach({
             projectId: access.projectId as ProjectId,
             threadId: access.threadId,
-            target,
+            targets: allowed.map((one) => one.target),
             body: asked.body,
+            direct: true,
             by: byOf(access),
             actorId: actorOf(access),
           })
-          const [issue] = card.issues
-          return card.state === 'applied'
-            ? `Commented on ${issue?.key ?? 'it'}. The thread shows it as a line.`
-            : `The comment on ${issue?.key ?? 'it'} wasn't posted: ${issue?.error ?? card.error ?? ''}`
+          const card = made.card
+          const posted = card?.issues.filter((issue) => issue.applied === true).map((issue) => issue.key) ?? []
+          return [
+            ...(posted.length === 0 ? [] : [`Commented on ${posted.join(', ')}. The thread shows it as a line.`]),
+            ...(card?.issues ?? []).flatMap((issue) =>
+              issue.applied === true ? [] : [`${issue.key}: not posted: ${issue.error ?? card?.error ?? ''}`],
+            ),
+            ...made.left,
+            ...said,
+          ].join('\n')
         })
 
       const changeTool = (access: ToolAccess, value: unknown) =>
         Effect.gen(function* () {
-          const { issue, at_once: atOnce, ...asked } = yield* readInput(LeadChange, value)
-          const target = yield* leadTarget(access, issue)
+          const { issue, issues: several, changes: each, at_once: atOnce, ...asked } = yield* readInput(LeadChange, value)
+          const named = keysIn([...(issue === undefined ? [] : [issue]), ...(several ?? [])])
           const wanted = yield* wantedOf(asked)
-          return proposedWords(
-            yield* propose({
-              projectId: access.projectId as ProjectId,
-              threadId: access.threadId,
-              issues: [{ target, change: wanted }],
-              direct: atOnce === true,
-              by: 'lead',
-              actorId: instance.systemId,
-            }),
+          // One issue, or none: its task's own, as before.
+          if (named.length <= 1 && (each ?? []).length === 0)
+            return proposedWords(
+              yield* propose({
+                projectId: access.projectId as ProjectId,
+                threadId: access.threadId,
+                issues: [{ target: yield* leadTarget(access, named[0]), change: wanted }],
+                direct: atOnce === true,
+                by: 'lead',
+                actorId: instance.systemId,
+              }),
+            )
+          // Several: the same change to each named, or each its own; those it may change go on one card, as the person's setting says.
+          const asks = [
+            ...named.map((one) => ({ issue: one, change: wanted })),
+            ...(yield* Effect.forEach(each ?? [], ({ issue: one, ...rest }) =>
+              Effect.map(wantedOf(rest), (change) => ({ issue: one, change })),
+            )),
+          ]
+          const { allowed, said } = yield* mayChange(
+            access,
+            asks.map((one) => one.issue),
           )
+          if (allowed.length === 0) return said.join('\n')
+          const proposed = yield* propose({
+            projectId: access.projectId as ProjectId,
+            threadId: access.threadId,
+            issues: allowed.map((one) => ({ target: one.target, change: asks[one.index]?.change ?? wanted })),
+            direct: atOnce === true,
+            by: 'lead',
+            actorId: instance.systemId,
+          })
+          return [proposedWords(proposed), ...said].join('\n')
         })
 
       const changesTool = (access: ToolAccess, value: unknown) =>
@@ -1086,12 +1314,13 @@ export class IssueChanges extends Context.Service<
       yield* toolServer.serve('lead', [
         tool(
           'comment_on_issue',
-          'Comments on an issue at once, in Markdown: what the person would want on it, such as what you found or what changed. The thread shows it as a line. The issue this task came from unless you name another, by key or link: one this task filed, or one the person named to it.',
+          `Comments on an issue at once, in Markdown: what the person would want on it, such as what you found or what changed. The thread shows it as a line. The issue this task came from unless you name another, by key or link: one this task filed, or one the person named to it. The same comment on several as issues (keys, links, runs of keys), at most ${BATCH}, each said posted or not.`,
           {
             type: 'object',
             properties: {
               body: { type: 'string', description: 'Markdown.' },
               issue: { type: 'string', description: 'Its key or link, where it isn’t this task’s own issue.' },
+              issues: { type: 'array', items: { type: 'string' }, description: `Several, by key, link or run of keys: at most ${BATCH}.` },
             },
             required: ['body'],
           },
@@ -1105,12 +1334,26 @@ export class IssueChanges extends Context.Service<
         ),
         tool(
           'change_issue',
-          'Changes an issue: its status (any of its tracker’s, such as In Review), closing it, its priority, assignees, labels, project, milestone, cycle, parent, estimate, type, components, due date, title or description. As a card the person applies in this thread, unless at_once: where the project’s notes say issues are changed at once, or the person just said to. You hear what they decide. The issue this task came from unless you name another: one this task filed, or one the person named to it. Althar reads each name against the tracker, changes what it can, and says what it couldn’t and why.',
+          `Changes an issue: its status (any of its tracker’s, such as In Review), closing it, its priority, assignees, labels, project, milestone, cycle, parent, estimate, type, components, due date, title or description. As a card the person applies in this thread, unless at_once: where the project’s notes say issues are changed at once, or the person just said to. You hear what they decide. The issue this task came from unless you name another: one this task filed, or one the person named to it. Several at once: the same change to each of issues (keys, links, runs of keys such as DEV-180..DEV-195, as find_issues finds them), or a change of its own to each in changes; at most ${BATCH}. Any of them not this task’s, filed by it or named by the person (by key, link or a run of keys) is left as it is, and said. Althar reads each name against its tracker, changes what it can, paces a big batch to the tracker’s limits, and says for each issue what changed, what didn’t and why.\n\n${changeTable()}`,
           {
             type: 'object',
             properties: {
               issue: { type: 'string', description: 'Its key or link, where it isn’t this task’s own issue.' },
+              issues: {
+                type: 'array',
+                items: { type: 'string' },
+                description: `Several to change alike, by key, link or run of keys: at most ${BATCH}.`,
+              },
               ...changeFields,
+              changes: {
+                type: 'array',
+                description: 'Several, each changed its own way.',
+                items: {
+                  type: 'object',
+                  properties: { issue: { type: 'string', description: 'Its key or link.' }, ...changeFields },
+                  required: ['issue'],
+                },
+              },
               at_once: atOnceField,
             },
           },
@@ -1120,7 +1363,7 @@ export class IssueChanges extends Context.Service<
       yield* toolServer.serve('coordinator', [
         tool(
           'change_issues',
-          'Changes issues on the person’s trackers, by key or link, several on one card: “move DEV-67 to Done, set DEV-142 to Low”. Each can change its status (any of its tracker’s), close it, or set its priority, assignees, labels, project, milestone, cycle, parent, estimate, type, components, due date, title or description. As a card the person applies in your thread, unless at_once: where the project’s notes say issues are changed at once, or the person just said to. You hear what they decide. Althar reads each name against its tracker, changes what it can, and says what it couldn’t and why: a name it hasn’t, with what it has, or a field that tracker hasn’t.',
+          `Changes issues on the person’s trackers, by key or link, several on one card: “move DEV-67 to Done, set DEV-142 to Low”. Each can change its status (any of its tracker’s), close it, or set its priority, assignees, labels, project, milestone, cycle, parent, estimate, type, components, due date, title or description. As a card the person applies in your thread, unless at_once: where the project’s notes say issues are changed at once, or the person just said to. You hear what they decide. Althar reads each name against its tracker, changes what it can, paces a big batch to the tracker’s limits, and says what it couldn’t and why: a name it hasn’t, with what it has, or a field that tracker hasn’t.\n\n${changeTable()}`,
           {
             type: 'object',
             properties: {
@@ -1151,7 +1394,7 @@ export class IssueChanges extends Context.Service<
         ),
       ])
 
-      return IssueChanges.of({ propose, comment, link, apply, discard, followPullRequest })
+      return IssueChanges.of({ propose, comment, commentOnEach, link, apply, discard, followPullRequest })
     }),
   )
 }

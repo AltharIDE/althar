@@ -23,6 +23,7 @@ import type {
   Issue,
   IssueComment,
   IssueField,
+  IssuePage,
   IssueQuery,
   ListedChange,
   Person,
@@ -30,11 +31,28 @@ import type {
   Repository,
   Review,
   ReviewEvent,
+  StatusCategory,
   Tracker,
   TrackerCapabilities,
   Verdict,
 } from './model'
-import { branchPath, cantChange, lacking, leftAsItIs, mergedForGood, noPictures, notOpen, stillOpen, unchangeable } from './model'
+import {
+  branchPath,
+  cantChange,
+  cantFind,
+  filtersOf,
+  inIssueState,
+  issueMatches,
+  lacking,
+  leftAsItIs,
+  mergedForGood,
+  noPictures,
+  notOpen,
+  pageAt,
+  stillOpen,
+  unchangeable,
+  unfindable,
+} from './model'
 import {
   type Answer,
   answered,
@@ -520,13 +538,26 @@ const issueRef = /^([^/\s]+)\/([^#\s]+)#(\d+)$/
  * (`NO_FIELD`), files one with its people, milestone and type, and takes
  * several people on an issue.
  */
-const TRACKING: TrackerCapabilities = {
+export const GITHUB_TRACKING: TrackerCapabilities = {
   links: false,
   starts: false,
   changes: ['status', 'close', 'assignee', 'labels', 'project', 'milestone', 'parent', 'type', 'title', 'description'],
   creates: ['assignee', 'milestone', 'type'],
   assignees: 'many',
+  // Its issue search narrows by each it has; issues by number Althar reads one by one. It has no priority or cycle.
+  finds: {
+    text: 'search',
+    labels: 'search',
+    status: 'search',
+    project: 'search',
+    milestone: 'search',
+    assignee: 'search',
+    parent: 'search',
+    updatedSince: 'search',
+    keys: 'after',
+  },
 }
+const TRACKING = GITHUB_TRACKING
 
 /** Why GitHub refuses a field its issues haven't, in words an agent can pass on: a project board's fields are the board's own. */
 const NO_FIELD: Partial<Record<IssueField, string>> = {
@@ -540,10 +571,10 @@ const NO_FIELD: Partial<Record<IssueField, string>> = {
 /** Why an issue isn't taken out of its parent: GitHub's REST API says nothing of an issue's parent to take it from. */
 const PARENT_KEPT = 'it can put a GitHub issue under another, but not yet take one out of its parent'
 
-/** The open project boards of a repository's owner, a user's or an organisation's: GraphQL alone lists them. */
+/** The project boards of a repository's owner, a user's or an organisation's, and whether each is closed: GraphQL alone lists them. */
 const PROJECTS = `query($owner: String!) {
   repositoryOwner(login: $owner) {
-    ... on ProjectV2Owner { projectsV2(first: 100) { nodes { id title closed } } }
+    ... on ProjectV2Owner { projectsV2(first: 100) { nodes { id number title closed } } }
   }
 }`
 
@@ -552,7 +583,9 @@ const ProjectsAnswer = Schema.Struct({
     Schema.Struct({
       projectsV2: Schema.optional(
         Schema.Struct({
-          nodes: Schema.Array(Schema.NullOr(Schema.Struct({ id: Schema.String, title: Schema.String, closed: Schema.Boolean }))),
+          nodes: Schema.Array(
+            Schema.NullOr(Schema.Struct({ id: Schema.String, number: Schema.Number, title: Schema.String, closed: Schema.Boolean })),
+          ),
         }),
       ),
     }),
@@ -593,13 +626,81 @@ const DELETE_PROJECT_ITEM = `mutation($project: ID!, $item: ID!) {
 /** An organisation's issue type, and whether it is turned on. */
 const IssueTypeAnswer = Schema.Struct({ name: Schema.String, is_enabled: Schema.optional(Schema.Boolean) })
 
+/** An issue's statuses on GitHub: open, or closed as done or as not planned, by the state reason each closes with. */
+const ISSUE_STATES: ReadonlyArray<Choice> = [
+  { id: 'open', name: 'Open', also: ['reopened'] },
+  { id: 'completed', name: 'Closed', also: ['done', 'completed'] },
+  { id: 'not_planned', name: 'Closed as not planned', also: ['not planned', 'cancelled', 'canceled'] },
+]
+
+/** The category each of GitHub's statuses is read as, by its id in `ISSUE_STATES`. */
+const STATUS_CATEGORIES: Readonly<Record<string, StatusCategory>> = { open: 'todo', completed: 'done', not_planned: 'cancelled' }
+
+/** How GitHub's search finds each set of its statuses, by their ids in `ISSUE_STATES`' order: all three need nothing. */
+const STATUS_SEARCH: Readonly<Record<string, string>> = {
+  open: 'is:open',
+  // Closed without a reason is done, as an issue reads.
+  completed: 'is:closed -reason:"not planned"',
+  not_planned: 'is:closed reason:"not planned"',
+  'open completed': '-reason:"not planned"',
+  'open not_planned': '-reason:completed',
+  'completed not_planned': 'is:closed',
+  'open completed not_planned': '',
+}
+
+/** Two names alike, in any case. */
+const same = (a: string | null | undefined, b: string) => a != null && a.trim().toLowerCase() === b.trim().toLowerCase()
+
+/** Which of GitHub's statuses a query finds, by their ids: those its state allows, of those its status names or categories pick. */
+export const statusesOf = (query: Pick<IssueQuery, 'state' | 'status'>): ReadonlyArray<string> =>
+  ISSUE_STATES.filter((state) => {
+    const category = STATUS_CATEGORIES[state.id] ?? 'todo'
+    const status = query.status
+    return (
+      inIssueState(query.state, category) &&
+      (status === undefined ||
+        status.names.length + status.categories.length === 0 ||
+        status.categories.includes(category) ||
+        status.names.some((name) => [state.name, ...(state.also ?? [])].some((one) => same(one, name))))
+    )
+  }).map((state) => state.id)
+
+/** The `owner/repo#12` a key or ref names, `#12` in the container's repository; none where it names no GitHub issue. */
+export const issueRefOf = (typed: string, container?: string): string | undefined => {
+  const key = typed.trim()
+  if (issueRef.test(key)) return key
+  const number = /^#(\d+)$/.exec(key)?.[1]
+  return number === undefined || container === undefined ? undefined : `${container}#${number}`
+}
+
+/** What a search names that GitHub's API alone says: the assignee's login, and the project board's `owner/number`; null for none. */
+export interface IssueSearchResolved {
+  readonly assignee?: string | null
+  readonly project?: string | null
+}
+
+/** A value of a search's qualifier, quoted, so none of it is read as another. */
+const quoted = (value: string) => `"${value.replaceAll('"', ' ').replace(/\s+/g, ' ').trim()}"`
+
 /**
  * What GitHub's search is asked for issues: issues alone, in a repository,
  * or else those that involve the account, as GitHub has no bound of its own;
- * narrowed as the query says. Each word of the text is quoted, so none of it
- * is read as a qualifier.
+ * narrowed as the query says, by what was `resolved` of it. Each word of the
+ * text is quoted, so none of it is read as a qualifier. Null where it can
+ * find none: no status of GitHub's is asked for, or no one, or no board, goes
+ * by the name, or the parent is no GitHub issue.
  */
-export const issueSearchOf = (query: IssueQuery, login: string): string => {
+export const issueSearchOf = (query: IssueQuery, login: string, resolved: IssueSearchResolved = {}): string | null => {
+  const statuses = STATUS_SEARCH[statusesOf(query).join(' ')]
+  const parent = query.parent === undefined ? '' : issueRefOf(query.parent, query.container)
+  const assignee =
+    typeof query.assignee === 'string'
+      ? resolved.assignee === undefined
+        ? query.assignee.trim().replace(/^@/, '')
+        : resolved.assignee
+      : ''
+  const project = query.project === undefined ? '' : resolved.project
+  if (statuses === undefined || parent === undefined || assignee === null || project == null) return null
   const words = (query.text ?? '')
     .replaceAll('"', ' ')
     .split(/\s+/)
@@ -608,8 +709,14 @@ export const issueSearchOf = (query: IssueQuery, login: string): string => {
     'is:issue',
     // Those assigned to the account are bound already.
     query.container !== undefined ? `repo:${query.container}` : query.mine === true ? '' : `involves:${login}`,
-    { open: 'is:open', closed: 'is:closed', all: '' }[query.state],
+    statuses,
     query.mine === true ? 'assignee:@me' : '',
+    query.assignee === null ? 'no:assignee' : assignee === '' ? '' : `assignee:${assignee}`,
+    ...(query.labels ?? []).map((label) => `label:${quoted(label)}`),
+    query.milestone === undefined ? '' : `milestone:${quoted(query.milestone)}`,
+    project === '' ? '' : `project:${project}`,
+    parent === '' ? '' : `parent-issue:${parent}`,
+    query.updatedSince === undefined ? '' : `updated:>=${query.updatedSince.trim()}`,
     ...words.map((word) => `"${word}"`),
     words.length === 0 ? '' : 'in:title,body',
   ]
@@ -617,12 +724,17 @@ export const issueSearchOf = (query: IssueQuery, login: string): string => {
     .join(' ')
 }
 
-/** An issue's statuses on GitHub: open, or closed as done or as not planned, by the state reason each closes with. */
-const ISSUE_STATES: ReadonlyArray<Choice> = [
-  { id: 'open', name: 'Open', also: ['reopened'] },
-  { id: 'completed', name: 'Closed', also: ['done', 'completed'] },
-  { id: 'not_planned', name: 'Closed as not planned', also: ['not planned', 'cancelled', 'canceled'] },
-]
+/** How far GitHub's search reads: its first thousand results. */
+const SEARCH_REACH = 1000
+
+/** The page a cursor says, from the first. */
+export const pageOfCursor = (cursor: string | undefined): number => {
+  const page = Number(cursor)
+  return Number.isInteger(page) && page >= 1 ? page : 1
+}
+
+/** A page of nothing. */
+const NOTHING: IssuePage = { issues: [], next: null }
 
 /** `owner/repo`: a repository, where an issue is filed. */
 const repositoryRef = /^([^/\s]+)\/([^/#\s]+)$/
@@ -972,18 +1084,97 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         }))
     })
 
+  /** Who an assignee is in a repository, by login: the one of its people whose login or name it is; null where none is. */
+  const assigneeIn = (owner: string, name: string, typed: string) =>
+    Effect.map(
+      choicesOf(owner, name, 'assignee'),
+      (people) => people.find((person) => same(person.id, typed) || same(person.name, typed))?.id ?? null,
+    )
+
+  /** The owner's project board of a name, as `owner/number`; null where it has none. */
+  const boardOf = (owner: string, title: string) =>
+    Effect.map(http.graphql(ProjectsAnswer, graphqlUrl, PROJECTS, { owner }), (answer) => {
+      const board = (answer.repositoryOwner?.projectsV2?.nodes ?? []).find((project) => project !== null && same(project.title, title))
+      return board == null ? null : `${owner}/${board.number}`
+    })
+
+  /** Issues by number, which GitHub's search can't find: each read on its own, narrowed as the query says, and paged. */
+  const findByKeys = (query: IssueQuery) =>
+    Effect.gen(function* () {
+      const refs = new Set<string>()
+      for (const key of query.keys ?? []) {
+        const ref = issueRefOf(key, query.container)
+        if (ref === undefined)
+          return yield* cantFind(
+            product,
+            /^#\d+$/.test(key.trim())
+              ? `${key} is a number in a repository: say which, or as owner/repo${key.trim()}`
+              : `Not a GitHub issue: ${key}`,
+          )
+        refs.add(ref)
+      }
+      const me = query.mine === true ? yield* account : undefined
+      const read = yield* Effect.forEach(
+        [...refs],
+        (ref) =>
+          Effect.gen(function* () {
+            const { owner, name, number } = yield* parseRef(ref)
+            const found = yield* http.json(IssueAnswer, 'GET', `${repo([owner, name])}/issues/${number}`)
+            // A pull request is no issue.
+            return found.pull_request === undefined ? [issueOf(found, owner, name)] : []
+          }).pipe(
+            Effect.catchIf(
+              (error) => error.reason === 'not_found',
+              () => Effect.succeed([]),
+            ),
+          ),
+        { concurrency: 4 },
+      )
+      return pageAt(
+        read.flat().filter((issue) => issueMatches(issue, query, me)),
+        query,
+      )
+    })
+
   const findIssues: Tracker['find'] = (query) =>
     Effect.gen(function* () {
-      if (query.container !== undefined) yield* parseRepository(query.container)
+      const refused = unfindable(TRACKING, query)
+      if (refused.length > 0) return yield* cantFind(product, `GitHub’s issues have no ${refused.join(' or ')} to find them by`)
+      const repository = query.container === undefined ? undefined : yield* parseRepository(query.container)
+      if (query.parent !== undefined && issueRefOf(query.parent, query.container) === undefined)
+        return yield* cantFind(
+          product,
+          query.container === undefined && /^#\d+$/.test(query.parent.trim())
+            ? `${query.parent} is a number in a repository: say which, or as owner/repo${query.parent.trim()}`
+            : `Not a GitHub issue: ${query.parent}`,
+        )
+      if (query.project !== undefined && repository === undefined)
+        return yield* cantFind(product, 'A GitHub project board is its owner’s: say the repository whose owner’s board it is')
+      if (filtersOf(query).includes('keys')) return yield* findByKeys(query)
+      if (statusesOf(query).length === 0) return NOTHING
+      const typed = typeof query.assignee === 'string' ? query.assignee.trim().replace(/^@/, '') : undefined
+      const resolved: IssueSearchResolved = {
+        ...(typed === undefined || repository === undefined
+          ? {}
+          : { assignee: yield* assigneeIn(repository.owner, repository.name, typed) }),
+        ...(query.project === undefined || repository === undefined ? {} : { project: yield* boardOf(repository.owner, query.project) }),
+      }
       const login = query.container === undefined && query.mine !== true ? (yield* account).login : ''
+      const q = issueSearchOf(query, login, resolved)
+      if (q === null) return NOTHING
+      const page = pageOfCursor(query.cursor)
       const n = Math.min(Math.max(Math.floor(query.limit), 1), 100)
-      const search = new URLSearchParams({ q: issueSearchOf(query, login), sort: 'updated', order: 'desc', per_page: String(n) })
-      const { items } = yield* http.json(
-        Schema.Struct({ items: Schema.Array(IssueAnswer) }),
+      const search = new URLSearchParams({ q, sort: 'updated', order: 'desc', per_page: String(n) })
+      if (page > 1) search.set('page', String(page))
+      const { items, total_count } = yield* http.json(
+        Schema.Struct({ total_count: Schema.Number, items: Schema.Array(IssueAnswer) }),
         'GET',
         `${api}/search/issues?${search.toString()}`,
       )
-      return items.filter((issue) => issue.pull_request === undefined).map((issue) => listedIssueOf(issue, query.container))
+      return {
+        issues: items.filter((issue) => issue.pull_request === undefined).map((issue) => listedIssueOf(issue, query.container)),
+        next: page * n < Math.min(total_count, SEARCH_REACH) ? String(page + 1) : null,
+      }
     })
 
   return {
