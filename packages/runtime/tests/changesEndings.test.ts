@@ -17,7 +17,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
-import { HOST, hosted, items, repository, until } from './support'
+import { HOST, hosted, items, pushLog, repository, until } from './support'
 
 import { runtimeWith, connect, ask, cards, git, withoutReview } from './changesSupport'
 
@@ -203,13 +203,12 @@ describe('a task that ends in a pull request', () => {
     () => {
       const { working, bare } = hosted(['you', 'api'])
       git(working, 'remote', 'add', 'upstream', `${HOST}/meridian/api.git`)
-      const pushedTo: Array<string> = []
-      const github = makeFakeService({
-        pushUrl: (path) => {
-          pushedTo.push(path.join('/'))
-          return bare
-        },
-      })
+      const { bare: upstream } = hosted(['meridian', 'api'])
+      // What took a push, not what Althar fetched from: it fetches the branch a pull request goes into to look for conflicts.
+      const pushes = pushLog()
+      pushes.watch(bare, 'you/api')
+      pushes.watch(upstream, 'meridian/api')
+      const github = makeFakeService({ pushUrl: (path) => (path.join('/') === 'meridian/api' ? upstream : bare) })
       github.addRepository(['you', 'api'])
       github.addRepository(['meridian', 'api'], 'trunk')
       return Effect.gen(function* () {
@@ -264,7 +263,7 @@ describe('a task that ends in a pull request', () => {
         assert.strictEqual(github.forkOf(1), 'you/api')
         assert.strictEqual(github.changes[0]?.target, 'trunk')
         // Nothing was pushed while the sign-in was lost.
-        assert.deepStrictEqual(pushedTo, ['you/api'])
+        assert.deepStrictEqual(pushes.pushedTo(), ['you/api'])
       }).pipe(Effect.provide(runtimeWith({ github })))
     },
   )
