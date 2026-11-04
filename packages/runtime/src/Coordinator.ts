@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { type CommandEnvelope, type ProjectId, type WorksIn } from '@althar/domain'
 import type { Commands, Ledger } from '@althar/persistence-sqlite'
 import { AUTOMATION_DEFAULTS, type AutomationDefinition, knownModelName, Schedule, scheduleInLine } from '@althar/contracts'
+import { Priority, StatusCategory } from '@althar/connectors'
 import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -12,7 +13,7 @@ import { Busy } from './Busy'
 import { Connections } from './Connections'
 import { touchCard } from './cards'
 import { Changes } from './Changes'
-import { modelNamer } from './coordinatorNews'
+import { endWords, modelNamer, teamOf, withEffort } from './coordinatorNews'
 import { suggestedCoordinator } from './coordinatorChoice'
 import { Accounts } from './Accounts'
 import { AutomationRefused, Automations } from './Automations'
@@ -24,7 +25,7 @@ import { branchOnFirstWrite } from './firstWrite'
 import { Instance } from './Instance'
 import { IssueDrafts, refusedDraft } from './IssueDrafts'
 import { AskedFields, fieldSchema, wantedFields } from './issueFields'
-import { Issues, keyRange, readRefusal } from './Issues'
+import { findWords, foundLine, Issues, keysOf, READ_ISSUE, READ_ISSUE_INPUT, stoppedAt } from './Issues'
 import { answeredIn, quickIn } from './kinds'
 import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
@@ -48,11 +49,13 @@ import { localTakenFor, worksLocal } from './local'
 import { Projects } from './Projects'
 import { ReviewRefused, Reviews } from './Reviews'
 import { findTasks, foundWords } from './Search'
+import { changeOf, diffWords, touchedWords } from './otherTasks'
+import { taskFindingsOf } from './taskFindings'
 import { notesSection, projectOverview } from './handover'
 import { dropNote, keepNote, NOTE_LENGTH, NoteRefused, NOTES_KEPT, notesOf, sayNotes } from './notes'
 import { envelope } from './envelope'
 import { fact } from './records'
-import { type PlanStep, Runs } from './Runs'
+import { PlanParameters, type PlanStep, Runs } from './Runs'
 import { type Disposition, passedOn, Sessions } from './Sessions'
 import { blockedModelsOf } from './preferences'
 import type { InputFile } from './sentFiles'
@@ -141,7 +144,6 @@ const Attaching = Schema.Struct({
   pull_request: Schema.Union([Schema.String, Schema.Number]),
   start_from_head: Schema.optional(Schema.Boolean),
 })
-const Asked = Schema.Struct({ issue: Schema.String })
 const DraftedIssue = Schema.Struct({
   ...AskedFields.fields,
   title: Schema.String,
@@ -151,14 +153,30 @@ const DraftedIssue = Schema.Struct({
   labels: Schema.optional(Schema.Array(Schema.String)),
   file_now: Schema.optional(Schema.Boolean),
 })
-/** A search for issues: words, where, how they stand, whose, or a run of keys. */
+/** What was given of what a tool takes: what was left out isn't there at all, as `exactOptionalPropertyTypes` reads it. */
+const given = <A extends object>(asked: A) =>
+  Object.fromEntries(Object.entries(asked).filter(([, value]) => value !== undefined)) as { [K in keyof A]?: Exclude<A[K], undefined> }
+
+/** A search for issues: words, where, how they stand, whose, what they are in and part of, when they changed, or keys; and where the page before stopped. */
 const SoughtIssues = Schema.Struct({
   text: Schema.optional(Schema.String),
   tracker: Schema.optional(Schema.String),
   container: Schema.optional(Schema.String),
   state: Schema.optional(Schema.Literals(['open', 'closed', 'all'])),
   mine: Schema.optional(Schema.Boolean),
-  keys: Schema.optional(Schema.String),
+  labels: Schema.optional(Schema.Array(Schema.String)),
+  status: Schema.optional(Schema.Array(Schema.String)),
+  category: Schema.optional(Schema.Array(StatusCategory)),
+  project: Schema.optional(Schema.String),
+  milestone: Schema.optional(Schema.String),
+  cycle: Schema.optional(Schema.String),
+  assignee: Schema.optional(Schema.String),
+  unassigned: Schema.optional(Schema.Boolean),
+  priority: Schema.optional(Schema.Array(Priority)),
+  parent: Schema.optional(Schema.String),
+  updated_since: Schema.optional(Schema.String),
+  keys: Schema.optional(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
+  cursor: Schema.optional(Schema.String),
   limit: Schema.optional(Schema.Number),
 })
 /*
@@ -242,6 +260,12 @@ const SoughtPullRequests = Schema.Struct({
 })
 /* A thread to read: a task's, or, with none, the coordinator's own; and, to read further back, where the part read before began. */
 const Reading = Schema.Struct({ task: Schema.optional(Schema.String), before: Schema.optional(Schema.Int) })
+/* Another task's change to read: all of it, or some of its paths, and which page of a long one. */
+const DiffAsked = Schema.Struct({
+  task: Schema.String,
+  paths: Schema.optional(Schema.Array(Schema.String)),
+  page: Schema.optional(Schema.Int),
+})
 const Noted = Schema.Struct({ note: Schema.String })
 const Dropped = Schema.Struct({ id: Schema.String })
 const Passed = Schema.Struct({ task: Schema.String, message: Schema.String, now: Schema.optional(Schema.Boolean) })
@@ -392,6 +416,73 @@ export class Coordinator extends Context.Service<
           return [yield* projectOverview(access.projectId), notesSection(yield* notesOf(access.projectId))].join('\n\n')
         })
 
+      /**
+       * Where a task stands, in a word or two, as list_tasks says it: planned, ready, finished once its pull requests merged
+       * (ADR-034), or its state.
+       */
+      const standingOf = (task: { readonly state: string; readonly run: string | null }, seen: PullRequestFacts | undefined) => {
+        // A done task was settled as merged, so no repository of it is left out.
+        const found = task.state === 'done' && seen !== undefined ? { ...seen, unmerged: 0 } : seen
+        // Whose pull requests are all merged (or closed, as far as Althar can tell) is finished, whatever its last run said; not
+        // one with commits after them in none yet (ADR-034).
+        const finished =
+          task.state === 'done' && (found?.unshipped ?? 0) === 0
+            ? 'merged'
+            : (task.state === 'open' || task.state === 'done') && found !== undefined
+              ? finishedBy(found)
+              : null
+        const state =
+          task.state === 'draft' ? 'planned' : finished !== null ? 'finished, merged' : task.run === 'succeeded' ? 'ready' : task.state
+        return { found, state }
+      }
+
+      /**
+       * What a lead (or a reviewer) is told of each task besides, in list_tasks and find_tasks: which is its own, where each
+       * works, Local or in a worktree, on which branch, and the files an open one changes now, uncommitted ones too, read
+       * from git on its behalf (otherTasks.ts).
+       */
+      const seenByLead = (access: ToolAccess, taskIds: ReadonlyArray<string>) =>
+        Effect.gen(function* () {
+          const said = new Map<string, string>()
+          if (access.role === 'coordinator' || taskIds.length === 0) return said
+          const sql = yield* SqlClient.SqlClient
+          const places = yield* sql<{ taskId: string; state: string; kind: string | null; branch: string; branched: number }>`
+            SELECT w.task_id, k.state, w.kind, w.branch, w.branched_at IS NOT NULL AS branched
+            FROM workspaces w JOIN tasks k ON k.id = w.task_id JOIN repository_bindings b ON b.id = w.binding_id
+            WHERE w.task_id IN ${sql.in([...taskIds])} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
+            ORDER BY b.created_at, b.rowid`
+          const open = [...new Set(places.filter((place) => place.state === 'open').map((place) => place.taskId))]
+          const changed = new Map(
+            yield* Effect.forEach(
+              open,
+              (taskId) =>
+                changeOf(taskId).pipe(
+                  Effect.map((change) => [taskId, touchedWords(change)] as const),
+                  Effect.orElseSucceed(() => [taskId, 'Althar couldn’t read which files it changes just now'] as const),
+                ),
+              { concurrency: 4 },
+            ),
+          )
+          for (const taskId of taskIds) {
+            const own = places.filter((place) => place.taskId === taskId)
+            const branches = [...new Set(own.filter((place) => place.branched === 1).map((place) => place.branch))]
+            const where =
+              own.length === 0
+                ? 'no folder here'
+                : own.some((place) => place.kind === 'checkout')
+                  ? "works Local, in the person's checkout"
+                  : 'works in a worktree'
+            const words = [
+              ...(taskId === access.taskId ? ['Yours: the task you are on'] : []),
+              where,
+              branches.length === 0 ? 'no branch yet' : `branch ${branches.join(', ')}`,
+              ...(changed.has(taskId) ? [changed.get(taskId) ?? ''] : []),
+            ]
+            said.set(taskId, `  ${upper(words.join('; '))}.`)
+          }
+          return said
+        })
+
       const list = (access: ToolAccess) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -412,30 +503,19 @@ export class Coordinator extends Context.Service<
             FROM tasks k WHERE k.project_id = ${access.projectId} ORDER BY k.created_at DESC LIMIT 50`
           if (tasks.length === 0) return 'The project has no tasks yet.'
           const facts = yield* Effect.forEach(tasks, (task) => pullRequests(task.id), { concurrency: 4 })
+          const seen = yield* seenByLead(
+            access,
+            tasks.map((task) => task.id),
+          )
           return tasks
             .map((task, at) => {
-              // A done task was settled as merged, so no repository of it is left out.
-              const found = task.state === 'done' && facts[at] !== undefined ? { ...facts[at], unmerged: 0 } : facts[at]
-              // Whose pull requests are all merged (or closed, as far as Althar can tell) is finished, whatever its last run said; not
-              // one with commits after them in none yet (ADR-034).
-              const finished =
-                task.state === 'done' && (found?.unshipped ?? 0) === 0
-                  ? 'merged'
-                  : (task.state === 'open' || task.state === 'done') && found !== undefined
-                    ? finishedBy(found)
-                    : null
-              const state =
-                task.state === 'draft'
-                  ? 'planned'
-                  : finished !== null
-                    ? 'finished, merged'
-                    : task.run === 'succeeded'
-                      ? 'ready'
-                      : task.state
+              const { found, state } = standingOf(task, facts[at])
               // A plain task that hasn't changed the repository has no branch, and nothing to ship.
               const words =
                 task.unbranched === 1 ? 'no branch: it has changed nothing in the repository' : found === undefined ? '' : listWords(found)
-              return `- ${task.slug}: ${task.title} (${state}${task.lead === null ? '' : `, led by ${nameOf(task.lead)}`})${words === '' ? '' : ` — ${words}`}`
+              const line = `- ${task.slug}: ${task.title} (${state}${task.lead === null ? '' : `, led by ${nameOf(task.lead)}`})${words === '' ? '' : ` — ${words}`}`
+              const more = seen.get(task.id)
+              return more === undefined ? line : `${line}\n${more}`
             })
             .join('\n')
         })
@@ -445,7 +525,12 @@ export class Coordinator extends Context.Service<
           const { text } = yield* read(Sought, input)
           if (text.trim() === '') return yield* new ToolRefused({ message: 'Say what to look for. list_tasks lists the newest tasks.' })
           const working = new Set((yield* sessions.onTasks).flatMap((session) => (session.turnRunning ? [session.taskId] : [])))
-          return foundWords(text, yield* findTasks({ projectId: access.projectId, text, limit: 20 }, working))
+          const found = yield* findTasks({ projectId: access.projectId, text, limit: 20 }, working)
+          const seen = yield* seenByLead(
+            access,
+            found.map((task) => task.taskId),
+          )
+          return foundWords(text, found, (task) => seen.get(task.taskId))
         })
 
       const readTask = (access: ToolAccess, input: unknown) =>
@@ -465,6 +550,7 @@ export class Coordinator extends Context.Service<
           const { built, unverified } = yield* taskShown(task.threadId)
           return [
             `${task.slug}: ${task.title}`,
+            ...(access.role === 'coordinator' ? [] : [yield* leadsRead(access, task, found)]),
             task.description === '' ? '' : task.description,
             built === null ? '' : `What it built, as its lead says it now stands:\n${built}`,
             unverified.length === 0 ? '' : `What its lead couldn't show working:\n${unverified.map((line) => `- ${line}`).join('\n')}`,
@@ -477,9 +563,61 @@ export class Coordinator extends Context.Service<
               return `${result.step ?? 'step'}${result.verdict === undefined ? '' : ` (${result.verdict})`}: ${result.summary ?? ''}`
             }),
             found === undefined ? 'Pull request: Althar could not read its state just now.' : sectionWords(found),
+            ...(access.role === 'coordinator' ? [] : [yield* findingsWords(task.id)]),
           ]
             .filter((line) => line !== '')
             .join('\n\n')
+        })
+
+      /**
+       * What a lead (or a reviewer) reads of a task besides what the coordinator does: whether it is its own, where it stands,
+       * its plan, and how to read its change. Read-only: nothing it calls changes the task.
+       */
+      const leadsRead = (access: ToolAccess, task: { readonly id: string; readonly state: string }, seen: PullRequestFacts | undefined) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [run] = yield* sql<{ state: string }>`
+            SELECT state FROM runs WHERE task_id = ${task.id} ORDER BY created_at DESC, rowid DESC LIMIT 1`
+          const [plan] = yield* sql<{ parameters: string }>`
+            SELECT parameters FROM task_plans WHERE task_id = ${task.id} AND state IN ('proposed', 'accepted')
+            ORDER BY proposed_at DESC, rowid DESC LIMIT 1`
+          const parameters = plan === undefined ? null : Schema.decodeUnknownOption(Schema.fromJsonString(PlanParameters))(plan.parameters)
+          const named = withEffort(yield* modelNamer)
+          return [
+            task.id === access.taskId ? 'This is your own task.' : '',
+            `Where it stands: ${standingOf({ state: task.state, run: run?.state ?? null }, seen).state}.`,
+            parameters === null || Option.isNone(parameters)
+              ? ''
+              : `Its plan: ${teamOf(parameters.value, named)}; ${endWords(parameters.value.end)}.`,
+            "Its change, what isn't committed included: read_task_diff. Its thread: read_thread with its slug.",
+          ]
+            .filter((line) => line !== '')
+            .join('\n')
+        })
+
+      /** What the reviews of a task's latest reviewed run found, as its reviewers named each: open ones first. */
+      const findingsWords = (taskId: string) =>
+        Effect.gen(function* () {
+          const { findings } = yield* taskFindingsOf(taskId, [])
+          if (findings.length === 0) return ''
+          const order = { open: 0, set_aside: 1, fixed: 2 } as const
+          return [
+            'What its review found:',
+            ...findings
+              .toSorted((a, b) => order[a.state] - order[b.state])
+              .map(
+                (finding) =>
+                  `- ${finding.severity}, ${finding.state === 'set_aside' ? 'set aside' : finding.state}: ${finding.title ?? finding.claim}${finding.file === null ? '' : ` (${finding.file}${finding.line === null ? '' : `:${finding.line}`})`}`,
+              ),
+          ].join('\n')
+        })
+
+      /** Another task's change, as read_task_diff gives it: uncommitted work included, read without touching its folder. */
+      const readTaskDiff = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const { task: reference, paths, page } = yield* read(DiffAsked, input)
+          const task = yield* taskOf(access, reference)
+          return yield* diffWords(task, yield* changeOf(task.id), { paths, page })
         })
 
       /** A task's branch in a repository, or that it has none yet: a plain task whose lead hasn't changed the repository. */
@@ -1190,38 +1328,44 @@ export class Coordinator extends Context.Service<
             : `No lead is running on ${task.slug}, so nobody reads this yet; its lead will when one starts. Tell the person.`
         })
 
-      const readIssue = (access: ToolAccess, input: unknown) =>
-        Effect.gen(function* () {
-          const { issue: wanted } = yield* read(Asked, input)
-          return yield* issues
-            .words(wanted, access.projectId)
-            .pipe(Effect.mapError((error) => new ToolRefused({ message: readRefusal(error, wanted) })))
-        })
+      const readIssue = (access: ToolAccess, input: unknown) => issues.readTool(input, access.projectId)
 
-      /** Issues as a search narrows them, a line each; each tracker it couldn't read said as such, never as none found. */
+      /**
+       * Issues as a search narrows them, a line each, and where to read on from; each tracker it couldn't read or didn't search
+       * said as such, never as none found.
+       */
       const findIssues = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
-          const asked = yield* read(SoughtIssues, input)
-          if (asked.keys !== undefined && keyRange(asked.keys) === null)
-            return yield* new ToolRefused({ message: `“${asked.keys}” isn’t a run of keys: say it as DEV-170..DEV-185, at most 50.` })
+          const { updated_since: updatedSince, unassigned, assignee, ...asked } = yield* read(SoughtIssues, input)
+          if (asked.keys !== undefined && keysOf(asked.keys) === null)
+            return yield* new ToolRefused({
+              message: `“${String(asked.keys)}” isn’t a run or a list of keys: say it as DEV-170..DEV-185, or DEV-3, DEV-9; at most 50.`,
+            })
+          if (asked.cursor !== undefined && stoppedAt(asked.cursor) === null)
+            return yield* new ToolRefused({ message: 'That cursor isn’t one find_issues gave: give the one its last page ended with.' })
+          if (updatedSince !== undefined && Number.isNaN(Date.parse(updatedSince)))
+            return yield* new ToolRefused({ message: `“${updatedSince}” isn’t a day or a moment: say it as 2026-11-01, or with a time.` })
+          if (unassigned === true && assignee !== undefined)
+            return yield* new ToolRefused({ message: 'Ask for unassigned issues, or for someone’s: not both.' })
           const found = yield* issues.find(access.projectId, {
-            ...(asked.text === undefined ? {} : { text: asked.text }),
-            ...(asked.tracker === undefined ? {} : { tracker: asked.tracker }),
-            ...(asked.container === undefined ? {} : { container: asked.container }),
-            ...(asked.state === undefined ? {} : { state: asked.state }),
-            ...(asked.mine === undefined ? {} : { mine: asked.mine }),
-            ...(asked.keys === undefined ? {} : { keys: asked.keys }),
-            ...(asked.limit === undefined ? {} : { limit: asked.limit }),
+            ...given(asked),
+            ...(updatedSince === undefined ? {} : { updatedSince }),
+            ...(unassigned === true ? { assignee: null } : assignee === undefined ? {} : { assignee }),
           })
-          const asSaid = asked.text === undefined && asked.container === undefined && asked.state === undefined && asked.keys === undefined
+          const asSaid =
+            Object.keys(asked).every((key) => key === 'mine' || key === 'limit' || key === 'tracker') &&
+            assignee === undefined &&
+            unassigned !== true &&
+            updatedSince === undefined
           const none = asSaid && asked.mine !== false ? 'The person has no open issues on the connected trackers.' : 'No issues found.'
           return [
             found.issues.length === 0
-              ? found.failed.length === 0
+              ? found.failed.length === 0 && found.next === null
                 ? none
                 : ''
-              : found.issues.map((issue) => `- ${issue.key}: ${issue.title} (${issue.status.name}) ${issue.url}`).join('\n'),
+              : found.issues.map(foundLine).join('\n'),
             ...found.failed,
+            ...(found.next === null ? [] : [`More: call find_issues again with the same filters and cursor "${found.next}".`]),
           ]
             .filter((line) => line !== '')
             .join('\n')
@@ -1525,27 +1669,64 @@ export class Coordinator extends Context.Service<
       }
 
       // The person's issues and drafting one are the coordinator's, and a task's lead's: it drafts what it finds along the way, and the
-      // person files it from a card in the task's thread.
-      const findIssuesTool = tool(
-        'find_issues',
-        'Finds issues on the connected trackers and in the project’s repository, newest change first. With nothing given, the person’s open issues. Narrow by words in the title or description, a tracker, where on it (a team, project, repository or list), open, closed or all, only those assigned to the person, or a run of keys. A tracker that couldn’t be searched is said, never taken for none found.',
-        {
-          type: 'object',
-          properties: {
-            text: { type: 'string', description: 'Words in its title or description.' },
-            tracker: { type: 'string', description: 'The tracker, by name: Linear, Jira, Trello, GitHub, GitLab, or a workspace.' },
-            container: {
-              type: 'string',
-              description: "Where on it: a Linear team's key, a Jira project's key, a repository as owner/name, a Trello list.",
+      // person files it from a card in the task's thread. Finding only reads, so a reviewer and a review's lead find too.
+      const findIssuesTool: Tool = {
+        ...tool(
+          'find_issues',
+          `Finds issues on the connected trackers and in the project’s repository, newest change first, a page at a time: each a line with its key, title, status, link, who has it and its labels. With nothing given, the person’s open issues. Narrow by words, a tracker, where on it (a team, project, repository or list), open, closed or all, the person’s own, labels (all of them), status by name or category, project, milestone, cycle, assignee (anyone, by name) or unassigned, priority, parent, when they last changed, or keys (a run or a list, in their order). A page that stops short of the end says the cursor to read on from: call again with the same filters and it. A tracker that couldn’t be searched is said, never taken for none found. Reads only. ${findWords()}`,
+          {
+            type: 'object',
+            properties: {
+              text: { type: 'string', description: 'Words in its title or description: all of them.' },
+              tracker: { type: 'string', description: 'The tracker, by name: Linear, Jira, Trello, GitHub, GitLab, or a workspace.' },
+              container: {
+                type: 'string',
+                description: "Where on it: a Linear team's key, a Jira project's key, a repository as owner/name, a Trello list.",
+              },
+              state: { type: 'string', enum: ['open', 'closed', 'all'], description: 'Open unless said; with keys, all unless said.' },
+              mine: {
+                type: 'boolean',
+                description: 'Only those assigned to the person. So with nothing else given; otherwise everyone’s.',
+              },
+              labels: { type: 'array', items: { type: 'string' }, description: 'Only those with every one of these labels.' },
+              status: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Only those in one of these statuses, by its tracker’s name: In Review.',
+              },
+              category: {
+                type: 'array',
+                items: { type: 'string', enum: StatusCategory.literals },
+                description: 'Only those in a status of one of these categories, as every tracker’s fall into; with status, either.',
+              },
+              project: { type: 'string', description: 'Only those in the project of this name: Linear’s project, a GitHub project board.' },
+              milestone: {
+                type: 'string',
+                description:
+                  'Only those in this milestone: Linear’s project milestone, GitHub’s or GitLab’s milestone, Jira’s fix version.',
+              },
+              cycle: { type: 'string', description: 'Only those in this cycle (Jira’s sprint), by name or number, or current.' },
+              assignee: { type: 'string', description: 'Only those assigned to this person, by name, login or email.' },
+              unassigned: { type: 'boolean', description: 'Only those assigned to no one.' },
+              priority: {
+                type: 'array',
+                items: { type: 'string', enum: Priority.literals },
+                description: 'Only those of one of these priorities.',
+              },
+              parent: { type: 'string', description: 'Only those part of this issue, by its key.' },
+              updated_since: { type: 'string', description: 'Only those changed since this day or moment: 2026-11-01.' },
+              keys: {
+                description: 'Only these, in their order: a run (DEV-170..DEV-185, #10..#20) or a list (DEV-3, DEV-9); at most 50.',
+                anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
+              },
+              cursor: { type: 'string', description: 'Where the page before stopped, as it said: with the same filters.' },
+              limit: { type: 'number', description: 'How many to a page: 50 unless said, 100 at most.' },
             },
-            state: { type: 'string', enum: ['open', 'closed', 'all'], description: 'Open unless said.' },
-            mine: { type: 'boolean', description: 'Only those assigned to the person. So with nothing else given; otherwise everyone’s.' },
-            keys: { type: 'string', description: 'A run of keys, read one by one: DEV-170..DEV-185, #10..#20; at most 50.' },
-            limit: { type: 'number', description: 'How many at most: 50 unless said, 100 at most.' },
           },
-        },
-        findIssues,
-      )
+          findIssues,
+        ),
+        inReview: true,
+      }
       const draftIssueTool = tool(
         'draft_issue',
         "Drafts an issue on one of the person's connected trackers, for something to track rather than do now: a bug found, follow-up work, an idea. As a card the person files, changes or discards, unless file_now: where the project's notes say issues are filed at once, or the person just said to. Give it a title and a description in Markdown with what whoever picks it up needs, and any of its tracker's fields: its project, milestone, cycle, parent, assignee, status, estimate, type, components or due date, each set as it is filed. Without tracker and container, it goes where the project's issues come from, or its repository's issues; when that isn't clear, Althar says what to name. Althar reads each name against the tracker and says what it left off and why.",
@@ -1599,8 +1780,75 @@ export class Coordinator extends Context.Service<
         find,
       )
 
-      // A lead sees the project's tasks as the coordinator does, read-only (a review's lead is refused them with every tool not marked
-      // for a review), and checks them before it drafts: work the person asked for may be another task's already.
+      const readTaskTool = tool(
+        'read_task',
+        "A task: what it is, what it built as its lead last said it (and what it couldn't show working), its branch, what each of its steps reported, and its pull request: link, checks (passing, failing with names, pending), commits not pushed yet, when it was merged or closed, and what isn't known or may be out of date.",
+        named,
+        readTask,
+      )
+      const readThreadTool = tool(
+        'read_thread',
+        "A thread as text, oldest first: a task's, with what the person, its lead and Althar said; or, without a task, your own conversation with the person. It reads the latest part; to read further back, pass before as it says.",
+        {
+          type: 'object',
+          properties: {
+            task: { type: 'string', description: "The task's slug, as list_tasks shows it. Leave it out for your own conversation." },
+            before: { type: 'integer', description: 'To read further back: the number an earlier read_thread gave.' },
+          },
+        },
+        readThread,
+      )
+
+      /*
+       * A task's lead and its reviewer see the project's other tasks, read-only: what each is and where it stands, its brief,
+       * report and thread, and its change as it stands, uncommitted work included (docs/architecture/04, "What a lead sees of
+       * other tasks"). The same tools as the coordinator's, saying more of each task's work; nothing among them messages another
+       * lead, changes another task, or writes in another folder. Leads still talk to each other only through the coordinator. A
+       * review of someone else's pull request isn't given them (they aren't `inReview`): its lead reads what the pull request
+       * says, untrusted, and reaches the web, so it reads none of the person's work in progress.
+       */
+      const readOnly = ' Read-only: nothing here reaches another task’s lead or changes its work.'
+      const otherTasksTools: ReadonlyArray<Tool> = [
+        {
+          ...listTasksTool,
+          description: `${listTasksTool.description} Under each: whether it is yours, where it works (Local, in the person's checkout, or a worktree of its own), its branch, and for an open one the files it changes now, what isn't committed included. Before changing code another open task changes, or where your brief names another task, read it with read_task, read_task_diff and read_thread.${readOnly}`,
+        },
+        {
+          ...findTasksTool,
+          description: `${findTasksTool.description} Under each, as list_tasks says: whether it is yours, where it works, its branch and the files it changes.${readOnly}`,
+        },
+        {
+          ...readTaskTool,
+          description: `Another task of this project, or your own: whether it is yours, where it stands and its plan; its brief (its title and description, what it was asked); what it built and couldn't show working, as its lead last said it; its branch and folder; what each of its steps reported; its pull request; and what its review found.${readOnly}`,
+        },
+        {
+          ...readThreadTool,
+          description: `A task's thread as text, oldest first: what the person, its lead and Althar said, the person's messages included; without a task, your own. It reads the latest part; to read further back, pass before as it says.${readOnly}`,
+          input: {
+            type: 'object',
+            properties: {
+              task: { type: 'string', description: "The task's slug, as list_tasks shows it. Leave it out for your own thread." },
+              before: { type: 'integer', description: 'To read further back: the number an earlier read_thread gave.' },
+            },
+          },
+        },
+        tool(
+          'read_task_diff',
+          `Another task's change against where its branch started: the files it changed, then their diff, as it stands now in its worktree (or in the person's checkout, for a task that works Local), what isn't committed yet included. Althar reads it for you without touching that folder: nothing there is written or locked, so its lead isn't disturbed. Give paths, as the list names them, to read only some files; a long diff comes a page at a time (page). Read it before changing code another open task changes, so your work doesn't conflict with its.${readOnly}`,
+          {
+            type: 'object',
+            properties: {
+              task: { type: 'string', description: "The task's slug, as list_tasks shows it." },
+              paths: { type: 'array', items: { type: 'string' }, description: 'Only these files, as its list of files names them.' },
+              page: { type: 'integer', description: 'Which page of a long diff, from 1.' },
+            },
+            required: ['task'],
+          },
+          readTaskDiff,
+        ),
+      ]
+
+      // A lead checks the project's tasks before it drafts: work the person asked for may be another task's already.
       const leadDraftIssueTool: Tool = {
         ...draftIssueTool,
         description: `${draftIssueTool.description} Before drafting an issue for something the person asked for that is outside your brief, check find_tasks: when a task covers it, say so in your report instead of drafting.`,
@@ -1612,24 +1860,8 @@ export class Coordinator extends Context.Service<
         ),
         listTasksTool,
         findTasksTool,
-        tool(
-          'read_task',
-          "A task: what it is, what it built as its lead last said it (and what it couldn't show working), its branch, what each of its steps reported, and its pull request: link, checks (passing, failing with names, pending), commits not pushed yet, when it was merged or closed, and what isn't known or may be out of date.",
-          named,
-          readTask,
-        ),
-        tool(
-          'read_thread',
-          "A thread as text, oldest first: a task's, with what the person, its lead and Althar said; or, without a task, your own conversation with the person. It reads the latest part; to read further back, pass before as it says.",
-          {
-            type: 'object',
-            properties: {
-              task: { type: 'string', description: "The task's slug, as list_tasks shows it. Leave it out for your own conversation." },
-              before: { type: 'integer', description: 'To read further back: the number an earlier read_thread gave.' },
-            },
-          },
-          readThread,
-        ),
+        readTaskTool,
+        readThreadTool,
         tool(
           'draft_task',
           `Drafts a task for a change: its title, saying what should change in a few words (at most ${TITLE_LENGTH} characters), and a description with what the lead needs: the context, where to look, constraints, and what done looks like. When it comes from an issue, pass the issue's link or key as issue, and part_of where it does only part of it. When it works on an open pull request, such as to answer its review, pass it as pull_request: the task starts on its head and follows it, and its work goes there, with no new pull request. Then propose its plan.`,
@@ -1686,12 +1918,7 @@ export class Coordinator extends Context.Service<
           },
           attachTool,
         ),
-        tool(
-          'read_issue',
-          'An issue on a connected tracker, or in the project’s repository: its title, status, assignees, labels, project, milestone, parent and the like, its description, and its latest comments. Takes its link or its key.',
-          { type: 'object', properties: { issue: { type: 'string' } }, required: ['issue'] },
-          readIssue,
-        ),
+        tool('read_issue', READ_ISSUE, READ_ISSUE_INPUT, readIssue),
         findIssuesTool,
         tool(
           'find_pull_requests',
@@ -2002,9 +2229,9 @@ export class Coordinator extends Context.Service<
 
       // A quick task's lead makes it a change when the person asks: the one lead tool that plans, as the coordinator's do. Offered
       // only on a quick task not made one yet; refused, with why, on any other.
+      yield* toolServer.serve('reviewer', otherTasksTools)
       yield* toolServer.serve('lead', [
-        listTasksTool,
-        findTasksTool,
+        ...otherTasksTools,
         findIssuesTool,
         leadDraftIssueTool,
         tool(
@@ -2044,6 +2271,7 @@ export class Coordinator extends Context.Service<
           inReview: true,
         },
       ])
+      yield* toolServer.serve('reviewer', [findIssuesTool])
       yield* toolServer.guard('lead', (tool, access) =>
         tool.name !== 'make_it_a_change'
           ? Effect.succeed(null)

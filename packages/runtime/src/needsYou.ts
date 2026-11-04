@@ -19,14 +19,16 @@ export type ByItself = 'pushing' | 'checks_running'
  * where the first thing in its way is theirs, or nothing is. Commits Althar
  * pushes on its own, unheld (ADR-072), are on their way, whatever is behind
  * them; checks running are, only with no parted branch, commits of the
- * person's, conflict or failure before them.
+ * person's, conflict or failure before them. Where failures go to the lead
+ * once the checks end (`failuresGo`), some failed while the rest still run
+ * are on their way too: nothing is the person's yet.
  */
-export const byItself = (change: ChangeSummary | null): ByItself | null => {
+export const byItself = (change: ChangeSummary | null, how: { readonly failuresGo?: boolean } = {}): ByItself | null => {
   if (change === null || change.state !== 'open' || change.diverged !== null) return null
   const unpushed = change.localHead !== null && change.unpushed > 0
   if (unpushed) return change.pushing !== undefined && change.pushing.held === null ? 'pushing' : null
   const checks = change.checks
-  if (change.conflicts === true || checks === null || checks.failed > 0) return null
+  if (change.conflicts === true || checks === null || (checks.failed > 0 && how.failuresGo !== true)) return null
   // Run again by Althar (a cancelled check), they are running before its host shows them so.
   return checks.running > 0 || checks.outcome === 'running' ? 'checks_running' : null
 }

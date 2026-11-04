@@ -11,7 +11,7 @@ import { LIPO_ARCH, macBuild, wrongArchs } from './archs.ts'
  * The Mac smoke test, for a build bun run package made: every program in the
  * app is for the build's processor, the Node, Codex, Claude Code and speech
  * engine it bundles run on it, and Althar opens on a profile of its own and
- * its first screen finds the agents. For an Intel build on Apple silicon,
+ * its first screen, past the welcome's tour, finds the agents. For an Intel build on Apple silicon,
  * where no Intel Mac is at hand, all of it runs under Rosetta: `arch -x86_64`
  * starts each program as an Intel Mac would, and ps says Althar's processes
  * are translated. Run from apps/desktop, after bun run package:
@@ -128,11 +128,16 @@ try {
   )
     throw new Error('Althar has no window to read.')
   const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`)
-  // Althar's window, among the menu bar's: the one whose first screen lists the agents, once it has found them.
+  // Althar's window, among the menu bar's: the one whose first screen lists the agents, once it has found them. A new
+  // profile opens on the welcome's tour, which Skip leaves for the agents, as the end-to-end tests' pastTheTour does.
   const agentsIn = (page: Page) => page.getByRole('list', { name: /^Agents on / }).getByRole('listitem')
   let page: Page | undefined
   await until('the first screen found no agent', async () => {
-    for (const each of browser.contexts().flatMap((context) => context.pages())) if ((await agentsIn(each).count()) > 0) page = each
+    for (const each of browser.contexts().flatMap((context) => context.pages())) {
+      const skip = each.getByRole('button', { name: 'Skip', exact: true })
+      if (await skip.isVisible()) await skip.click()
+      if ((await agentsIn(each).count()) > 0) page = each
+    }
     return page !== undefined
   })
   if (page === undefined) bad('no window of Althar’s shows its first screen')

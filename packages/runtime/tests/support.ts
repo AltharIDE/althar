@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { cpSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
@@ -604,3 +604,24 @@ export const callToolAtOnce = (access: ToolAccess, name: string, calls: Readonly
       }
     })
   })
+
+/**
+ * The repositories that took a push, in the order they took them, each by the name given it: a hook in each bare repository
+ * writes it down as it takes one. A host's push target alone doesn't say, as Althar fetches from it too.
+ */
+export const pushLog = () => {
+  const file = join(mkdtempSync(join(tmpdir(), 'althar-pushes-')), 'pushes').replaceAll('\\', '/')
+  return {
+    /** Writes `name` down each time `bare` takes a push. */
+    watch: (bare: string, name: string) =>
+      writeFileSync(join(bare, 'hooks', 'pre-receive'), `#!/bin/sh\ncat >/dev/null\necho '${name}' >> '${file}'\n`, {
+        mode: 0o755,
+      }),
+    pushedTo: (): ReadonlyArray<string> =>
+      existsSync(file)
+        ? readFileSync(file, 'utf8')
+            .split('\n')
+            .filter((line) => line !== '')
+        : [],
+  }
+}

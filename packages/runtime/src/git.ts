@@ -6,7 +6,7 @@ import { dirname, join, posix, resolve } from 'node:path'
 
 import type { ChangeTarget } from '@althar/domain'
 import { cleanUp } from '@althar/provider-adapters'
-import { Duration, Effect } from 'effect'
+import { Context, Duration, Effect } from 'effect'
 
 import { GitFailed } from './errors'
 import { forkOf } from './forks'
@@ -218,6 +218,9 @@ export const gitOutcome = (
 export const gitExactly = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> =>
   run(60_000, cwd, args, {}, false)
 
+/** What every git command in an effect runs with besides, as `untouched` sets it for a folder someone else works in. */
+const Untouched = Context.Reference<Readonly<Record<string, string>>>('@althar/runtime/git/Untouched', { defaultValue: () => ({}) })
+
 const run = (
   timeout: number,
   cwd: string,
@@ -253,17 +256,47 @@ const runProcess = (
   env: Readonly<Record<string, string>>,
   input: string | undefined,
 ): Effect.Effect<GitProcessResult> =>
-  Effect.acquireUseRelease(
-    Effect.sync(() => spawnGit(cwd, args, env, input)),
-    (running) =>
-      Effect.race(
-        running.result,
-        Effect.sleep(Duration.millis(timeout)).pipe(
-          Effect.tap(() => Effect.sync(() => running.timeout(timeout))),
-          Effect.andThen(running.result),
+  Effect.flatMap(Untouched, (aside) =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => spawnGit(cwd, args, { ...aside, ...env }, input)),
+      (running) =>
+        Effect.race(
+          running.result,
+          Effect.sleep(Duration.millis(timeout)).pipe(
+            Effect.tap(() => Effect.sync(() => running.timeout(timeout))),
+            Effect.andThen(running.result),
+          ),
         ),
-      ),
-    (running) => Effect.sync(running.stop),
+      (running) => Effect.sync(running.stop),
+    ),
+  )
+
+/** A copy of a worktree's index, in a folder of its own: git may refresh the copy as it reads, never the worktree's own. */
+const indexCopy = (cwd: string, args: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const index = resolve(cwd, yield* git(cwd, 'rev-parse', '--git-path', 'index'))
+    return yield* Effect.try({
+      try: () => {
+        const copy = join(mkdtempSync(join(tmpdir(), 'althar-index-')), 'index')
+        if (existsSync(index)) copyFileSync(index, copy)
+        return copy
+      },
+      catch: (error) => new GitFailed({ args: [...args], cwd, stderr: String(error) }),
+    })
+  })
+
+/**
+ * Runs an effect's git commands in a folder someone else is working in,
+ * another task's worktree or the person's checkout, without touching it:
+ * on a copy of its index, which `git diff` would otherwise refresh and write
+ * back under its lock, and with git's optional locks off. What it reads of
+ * the files themselves it only reads. The copy goes once the effect ends.
+ */
+export const untouched = <A, E, R>(cwd: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | GitFailed, R> =>
+  Effect.acquireUseRelease(
+    indexCopy(cwd, ['diff']),
+    (copy) => Effect.provideService(effect, Untouched, { GIT_INDEX_FILE: copy, GIT_OPTIONAL_LOCKS: '0' }),
+    (copy) => cleanUp(dirname(copy), "where another task's worktree was read"),
   )
 
 /**
@@ -273,17 +306,7 @@ const runProcess = (
  */
 export const treeOf = (cwd: string): Effect.Effect<string, GitFailed> =>
   Effect.acquireUseRelease(
-    Effect.gen(function* () {
-      const index = resolve(cwd, yield* git(cwd, 'rev-parse', '--git-path', 'index'))
-      return yield* Effect.try({
-        try: () => {
-          const copy = join(mkdtempSync(join(tmpdir(), 'althar-index-')), 'index')
-          if (existsSync(index)) copyFileSync(index, copy)
-          return copy
-        },
-        catch: (error) => new GitFailed({ args: ['add', '-A'], cwd, stderr: String(error) }),
-      })
-    }),
+    indexCopy(cwd, ['add', '-A']),
     (copy) =>
       Effect.andThen(run(60_000, cwd, ['add', '-A'], { GIT_INDEX_FILE: copy }), run(60_000, cwd, ['write-tree'], { GIT_INDEX_FILE: copy })),
     // The index's copy goes as best it can: a folder git still holds a moment after it exits leaves the tree as it was read.

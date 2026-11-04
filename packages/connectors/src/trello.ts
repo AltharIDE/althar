@@ -6,6 +6,7 @@ import { ConnectorFailed } from './errors'
 import { makeHttp } from './http'
 import {
   cantChange,
+  cantFind,
   type Account,
   type Choice,
   type Container,
@@ -14,12 +15,16 @@ import {
   type IssueChange,
   type IssueComment,
   type IssueField,
-  type IssueState,
+  issueMatches,
+  type IssueQuery,
+  inIssueState,
   leftAsItIs,
+  pageAt,
   type Person,
   type StatusCategory,
   type Tracker,
   type TrackerCapabilities,
+  unfindable,
   unstarted,
 } from './model'
 import { answered, failedOf, probe, readAs, stopped, UNREADABLE, UNSAID } from './probe'
@@ -153,24 +158,34 @@ const issueOf = (card: Card, list: List, board: Board): Issue => ({
   due: dayOf(card.due),
 })
 
-/** Whether a card in a category is in the state a search asks for: open is neither done nor cancelled. */
-const inState = (state: IssueState, category: StatusCategory): boolean =>
-  state === 'all' || (state === 'closed') === (category === 'done' || category === 'cancelled')
+/** The status a search narrows to by a list's name: the one name asked, alone; any other narrowing of status is Althar's, after. */
+const oneList = (status: IssueQuery['status']): string | undefined =>
+  status !== undefined && status.names.length === 1 && status.categories.length === 0 ? status.names[0]?.trim() || undefined : undefined
 
-/** Whether a card has every word asked for in its name or description, where Trello doesn't search them itself. */
-const matching =
-  (text: string | undefined) =>
-  (issue: Issue): boolean => {
-    const said = `${issue.title}\n${issue.body}`.toLowerCase()
-    return (text ?? '')
-      .toLowerCase()
-      .split(/\s+/)
-      .every((word) => said.includes(word))
-  }
+/**
+ * What Trello's search is asked for a query, of open cards or archived ones:
+ * its words, a label operator for each label, a list operator where one
+ * status name alone is asked, and the account's cards where only they are.
+ * A name goes in quotes, its own quotes dropped.
+ */
+export const searchQuery = (query: Pick<IssueQuery, 'text' | 'labels' | 'status' | 'mine'>, archive: 'open' | 'archived'): string => {
+  const quoted = (operator: string, name: string) => `${operator}:"${name.replaceAll('"', '').trim()}"`
+  const list = oneList(query.status)
+  return [
+    ...(query.text ?? '').split(/\s+/).filter((word) => word !== ''),
+    ...(query.labels ?? []).filter((label) => label.trim() !== '').map((label) => quoted('label', label)),
+    ...(list === undefined ? [] : [quoted('list', list)]),
+    `is:${archive}`,
+    ...(query.mine === true ? ['member:me'] : []),
+  ].join(' ')
+}
 
-/** Cards newest activity first, to a limit. */
-const newest = (issues: ReadonlyArray<Issue>, limit: number): ReadonlyArray<Issue> =>
-  issues.toSorted((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)).slice(0, limit)
+/** Whether Trello's search has something to narrow by: words, a label, or a list's name. */
+const searchable = (query: IssueQuery): boolean =>
+  (query.text ?? '').trim() !== '' || (query.labels ?? []).some((label) => label.trim() !== '') || oneList(query.status) !== undefined
+
+/** The most cards Trello's search gives at once. */
+const SEARCHED = 1000
 
 /** The account, with its cards and its boards' lists, in one call. */
 const Mine = Schema.Struct({
@@ -223,13 +238,16 @@ const HASNT: Record<Unchanged, string> = {
 const unchanged = (field: IssueField): field is Unchanged => field in HASNT
 
 /** Trello files a card with its people and due date as well as its name, description and labels. */
-const CAPABILITIES: TrackerCapabilities = {
+export const TRELLO_TRACKING: TrackerCapabilities = {
   links: true,
   starts: true,
   changes: CHANGES,
   creates: ['assignee', 'due'],
   assignees: 'many',
+  // Its search takes words, labels and a list's name; what it can't narrow by, Althar does with the cards it gives; cards by key are read one by one. A card has no priority, project, milestone, cycle or parent.
+  finds: { text: 'search', labels: 'search', status: 'after', assignee: 'after', updatedSince: 'after', keys: 'search' },
 }
+const CAPABILITIES = TRELLO_TRACKING
 
 export const makeTrello = (options: AdapterOptions): Tracker => {
   const product = 'trello' as const
@@ -255,7 +273,8 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
       ? Effect.succeed(`${day}T12:00:00.000Z`)
       : Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: `Not a day: ${day}` }))
 
-  const read = (ref: string) =>
+  /** A card, and the id of the list it is on. */
+  const readCard = (ref: string) =>
     Effect.flatMap(named(ref, 'card'), (card) =>
       Effect.map(
         call(
@@ -263,9 +282,10 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
           'GET',
           `${api}/cards/${card}?fields=${CARD_FIELDS}&members=true&member_fields=${MEMBER_FIELDS}&list=true&board=true&board_fields=name,closed`,
         ),
-        (found) => issueOf(found, found.list, found.board),
+        (found) => ({ issue: issueOf(found, found.list, found.board), list: found.idList }),
       ),
     )
+  const read = (ref: string) => Effect.map(readCard(ref), (found) => found.issue)
 
   /** The board a card is on, by its id. */
   const boardOf = (issue: Issue) =>
@@ -378,6 +398,37 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
       },
     )
 
+  /**
+   * Every card on the boards the account can see, anyone's or no one's, each
+   * on its list and board: those not archived, on open boards, or all of
+   * them. One call for the boards and their lists, then one for each board.
+   */
+  const boardCards = (filter: 'open' | 'all') =>
+    Effect.gen(function* () {
+      const boards = yield* call(
+        Schema.Array(Schema.Struct({ ...Board.fields, lists: Schema.Array(List) })),
+        'GET',
+        `${api}/members/me/boards?filter=${filter}&fields=name,closed&lists=all`,
+      )
+      const cards = yield* Effect.forEach(
+        boards,
+        (board) =>
+          Effect.gen(function* () {
+            const onBoard = yield* call(
+              Schema.Array(Card),
+              'GET',
+              `${api}/boards/${yield* named(board.id, 'board')}/cards/${filter}?fields=${CARD_FIELDS}&members=true&member_fields=${MEMBER_FIELDS}`,
+            )
+            return onBoard.flatMap((card) => {
+              const list = board.lists.find((candidate) => candidate.id === card.idList)
+              return list === undefined ? [] : [issueOf(card, list, board)]
+            })
+          }),
+        { concurrency: 4 },
+      )
+      return cards.flat()
+    })
+
   /** A list's cards, on it and its board: those not archived, or all of them. */
   const listCards = (container: string, filter: 'open' | 'all') =>
     Effect.gen(function* () {
@@ -397,43 +448,70 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
     })
 
   /**
-   * Cards Trello's search finds by words, in their name, description or
-   * comments. It leaves archived cards out unless asked for them alone, so
+   * Cards Trello's search finds, as `searchQuery` asks for them, to the most
+   * it gives. It leaves archived cards out unless asked for them alone, so
    * closed and all ask twice: a card done is often in a Done list, not archived.
    */
-  const searchCards = (text: string, state: IssueState, mine: boolean, limit: number) =>
+  const searchCards = (query: IssueQuery) =>
     Effect.gen(function* () {
-      const asked = yield* Effect.forEach(state === 'open' ? ['is:open'] : ['is:open', 'is:archived'], (archive) =>
+      const asked = yield* Effect.forEach(query.state === 'open' ? (['open'] as const) : (['open', 'archived'] as const), (archive) =>
         call(
           Found,
           'GET',
-          `${api}/search?query=${encodeURIComponent([text, archive, ...(mine ? ['member:me'] : [])].join(' '))}&modelTypes=cards&cards_limit=${Math.min(limit, 1000)}&card_fields=${CARD_FIELDS}&card_board=true&card_list=true&card_members=true`,
+          `${api}/search?query=${encodeURIComponent(searchQuery(query, archive))}&modelTypes=cards&cards_limit=${SEARCHED}&card_fields=${CARD_FIELDS}&card_board=true&card_list=true&card_members=true`,
         ),
       )
       const byId = new Map(asked.flatMap(({ cards }) => cards).map((card) => [card.id, issueOf(card, card.list, card.board)]))
       return [...byId.values()]
     })
 
+  /** The cards keys name, each read by its short link, on a list where one is asked: a key no card has is left out. */
+  const keyedCards = (keys: ReadonlyArray<string>, container: string | undefined) =>
+    Effect.map(
+      Effect.forEach(
+        [...new Set(keys.map((key) => key.trim()).filter((key) => key !== ''))],
+        (key) =>
+          Effect.catchIf(
+            readCard(key),
+            (error) => error.reason === 'not_found',
+            () => Effect.succeed(undefined),
+          ),
+        { concurrency: 4 },
+      ),
+      (cards) => {
+        const byId = new Map<string, Issue>()
+        for (const card of cards)
+          if (card !== undefined && (container === undefined || card.list === container)) byId.set(card.issue.id, card.issue)
+        return [...byId.values()]
+      },
+    )
+
+  /**
+   * Cards by key; else a list's; else those Trello's search finds by words,
+   * labels or a list's name; else the account's own where only those are
+   * asked, or every card on its boards. What Trello can't narrow by, Althar
+   * does (`issueMatches`), and pages through them by offset.
+   */
   const find: Tracker['find'] = (query) =>
     Effect.gen(function* () {
-      const text = query.text?.trim() ?? ''
+      const refused = unfindable(CAPABILITIES, query)
+      if (refused.length > 0) return yield* cantFind(product, `A Trello card has no ${refused.join(' or ')} to find it by`)
       const filter = query.state === 'open' ? 'open' : 'all'
-      const issues =
-        query.container !== undefined
+      const keyed = (query.keys ?? []).length > 0
+      const issues = keyed
+        ? yield* keyedCards(query.keys ?? [], query.container)
+        : query.container !== undefined
           ? yield* listCards(query.container, filter)
-          : text !== ''
-            ? yield* searchCards(text, query.state, query.mine === true, query.limit)
-            : yield* memberCards(filter)
-      // Within a list, only the account's where asked: elsewhere Trello's search, or the account's own cards, keep to them already.
-      const me = query.container !== undefined && query.mine === true ? (yield* account).id : undefined
-      return newest(
-        issues.filter(
-          (issue) =>
-            inState(query.state, issue.status.category) &&
-            (me === undefined || issue.assignees.some((person) => person.id === me)) &&
-            (query.container === undefined || matching(text)(issue)),
-        ),
-        query.limit,
+          : searchable(query)
+            ? yield* searchCards(query)
+            : query.mine === true
+              ? yield* memberCards(filter)
+              : yield* boardCards(filter)
+      // Only the account's where asked: Trello's search, and the account's own cards, keep to them already; cards by key or on a list don't.
+      const me = query.mine === true && (keyed || query.container !== undefined) ? yield* account : undefined
+      return pageAt(
+        issues.filter((issue) => issueMatches(issue, query, me)),
+        query,
       )
     })
 
@@ -444,13 +522,16 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
     issue: read,
     // The cards the account is on, not archived, on an open board; those done or cancelled left out, as other trackers' are.
     mine: (options = {}) =>
-      Effect.map(memberCards('open'), (issues) =>
-        newest(
-          issues.filter(
-            (issue) => inState('open', issue.status.category) && (options.container === undefined || issue.container === options.container),
-          ),
-          options.limit ?? 50,
-        ),
+      Effect.map(
+        memberCards('open'),
+        (issues) =>
+          pageAt(
+            issues.filter(
+              (issue) =>
+                inIssueState('open', issue.status.category) && (options.container === undefined || issue.container === options.container),
+            ),
+            { limit: options.limit ?? 50 },
+          ).issues,
       ),
     find,
     // Trello lists a card's comments newest first, as actions on it.

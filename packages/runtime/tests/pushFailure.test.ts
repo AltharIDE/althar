@@ -8,7 +8,7 @@ import { Effect } from 'effect'
 
 import { GitFailed, PushRefused } from '../src/errors'
 import { gitWithin } from '../src/git'
-import { pushDetailOf, pushFailureOf } from '../src/pushFailure'
+import { pushDetailOf, pushFailureOf, secondsOf } from '../src/pushFailure'
 import { words } from '../src/words'
 
 /*
@@ -186,4 +186,33 @@ describe('a git command that fails', () => {
       assert.strictEqual(words(slow, String).message, 'git slow got no answer in a second, so Althar stopped it. Try again.')
     }),
   )
+})
+
+describe('what a push that failed says, in its parts', () => {
+  it('keeps what the host said of a protected branch, and of a hook that said nothing but its name', () => {
+    assert.deepStrictEqual(
+      pushFailureOf({ stderr: 'remote: GH006: Protected branch update failed for refs/heads/main.\nerror: failed to push some refs' }),
+      { why: 'protected', said: 'Protected branch update failed for refs/heads/main.' },
+    )
+    assert.deepStrictEqual(pushFailureOf({ stderr: ' ! [remote rejected] main -> main (pre-receive hook declined)' }), {
+      why: 'refused',
+      said: 'pre-receive hook declined',
+    })
+    assert.deepStrictEqual(
+      pushFailureOf({ stderr: 'remote: Commits must be signed\n ! [remote rejected] main -> main (pre-receive hook declined)' }),
+      { why: 'refused', said: 'Commits must be signed' },
+    )
+  })
+
+  it('says a time limit in words', () => {
+    assert.deepStrictEqual([undefined, 400, 1000, 15_000, 60_000, 90_000, 120_000].map(secondsOf), [
+      'its time',
+      'a second',
+      'a second',
+      '15 seconds',
+      'a minute',
+      '90 seconds',
+      '2 minutes',
+    ])
+  })
 })

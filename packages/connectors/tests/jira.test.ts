@@ -4,7 +4,9 @@ import { Effect } from 'effect'
 import type { Credential } from '../src/credential'
 import {
   categoryOf,
+  type Found,
   jiraLabelOf,
+  jqlFor,
   levelOf,
   makeJiraCloud,
   makeJiraDataCenter,
@@ -12,7 +14,7 @@ import {
   siteOf,
   withoutTrailingSlashes,
 } from '../src/jira'
-import type { Issue } from '../src/model'
+import type { Issue, IssueQuery } from '../src/model'
 import { products } from '../src/products'
 import { type Route, stubFetch } from './stub'
 
@@ -254,6 +256,58 @@ describe('Jira, either edition', () => {
       'none',
       'medium',
     ])
+  })
+
+  it('narrows a search by each filter, in JQL', () => {
+    const jql = (query: Partial<IssueQuery>, found: Found = { people: [], priorities: [] }) => {
+      const said = jqlFor({ state: 'all', limit: 10, ...query }, found)
+      return said === null ? null : said.replace(/ ORDER BY updated DESC$/, '')
+    }
+    assert.strictEqual(jql({ labels: ['payments', 'needs "review"'] }), 'labels = "payments" AND labels = "needs \\"review\\""')
+    // A status by name, or by category: Jira has three, so a backlog is To Do, and cancelled Done.
+    assert.strictEqual(jql({ status: { names: ['In Review', 'QA'], categories: [] } }), 'status in ("In Review", "QA")')
+    assert.strictEqual(
+      jql({ status: { names: [], categories: ['triage', 'backlog', 'todo', 'started', 'done', 'cancelled'] } }),
+      'statusCategory in ("To Do", "In Progress", "Done")',
+    )
+    assert.strictEqual(
+      jql({ status: { names: ['In Review'], categories: ['started'] } }),
+      '(status in ("In Review") OR statusCategory in ("In Progress"))',
+    )
+    assert.strictEqual(jql({ milestone: '7.2.0' }), 'fixVersion = "7.2.0"')
+    assert.deepStrictEqual(
+      ['current', 'Sprint 12'].map((cycle) => jql({ cycle })),
+      ['sprint in openSprints()', 'sprint = "Sprint 12"'],
+    )
+    // Assigned to no one, or to those a name was found to be.
+    assert.strictEqual(jql({ assignee: null }), 'assignee is EMPTY')
+    assert.strictEqual(
+      jql({ assignee: 'ana' }, { people: ['557058:a1', '557058:a2'], priorities: [] }),
+      'assignee in ("557058:a1", "557058:a2")',
+    )
+    assert.isNull(jql({ assignee: 'nobody' }))
+    // Priorities by the site's names of each level; none is those without one.
+    const priorities = ['Blocker', 'Critical', 'Major', 'Minor', 'Trivial']
+    assert.strictEqual(jql({ priority: ['urgent', 'high'] }, { people: [], priorities }), 'priority in ("Blocker", "Critical")')
+    assert.strictEqual(
+      jql({ priority: ['low', 'none'] }, { people: [], priorities }),
+      '(priority in ("Minor", "Trivial") OR priority is EMPTY)',
+    )
+    assert.strictEqual(jql({ priority: ['none'] }), 'priority is EMPTY')
+    assert.isNull(jql({ priority: ['urgent'] }, { people: [], priorities: ['Major'] }))
+    assert.strictEqual(jql({ parent: 'hhh-20000' }), 'parent = HHH-20000')
+    assert.isNull(jql({ parent: 'Bootstrap' }))
+    // A day as it is; a moment to its minute, in UTC.
+    assert.strictEqual(jql({ updatedSince: '2026-11-01' }), 'updated >= "2026-11-01"')
+    assert.strictEqual(jql({ updatedSince: '2026-11-01T10:30:45+02:00' }), 'updated >= "2026-11-01 08:30"')
+    // Keys upper-cased, once each; one that isn't Jira's is left out, and none that is finds nothing.
+    assert.strictEqual(jql({ keys: ['hhh-1', 'HHH-2', '#12', 'HHH-1'] }), 'key in (HHH-1, HHH-2)')
+    assert.isNull(jql({ keys: ['#12'] }))
+    // Each clause after where it lives, where its work stands, the account's and words.
+    assert.strictEqual(
+      jql({ container: 'HHH', state: 'open', labels: ['orm'], keys: ['HHH-1'] }),
+      'project = "HHH" AND statusCategory != Done AND labels = "orm" AND key in (HHH-1)',
+    )
   })
 })
 
@@ -1234,7 +1288,7 @@ describe('Jira Cloud', () => {
     Effect.gen(function* () {
       const { tracker, sent } = cloud([['GET', /\/rest\/api\/3\/search\/jql\?/, { json: { issues: [cloudIssue()], isLast: true } }]])
       assert.deepStrictEqual(
-        (yield* tracker.find({ state: 'open', limit: 10 })).map((found) => found.key),
+        (yield* tracker.find({ state: 'open', limit: 10 })).issues.map((found) => found.key),
         ['HHH-20844'],
       )
       assert.strictEqual(jqlOf(sent[0]?.url), 'statusCategory != Done ORDER BY updated DESC')
@@ -1249,6 +1303,144 @@ describe('Jira Cloud', () => {
       // Narrowed by nothing, which Cloud refuses: every issue in a project.
       yield* tracker.find({ state: 'all', limit: 20 })
       assert.strictEqual(jqlOf(sent[3]?.url), 'project IS NOT EMPTY ORDER BY updated DESC')
+    }),
+  )
+
+  it.effect('finds issues by those a name finds, by account id, and by the site’s priorities of each level', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = cloud([
+        [
+          'GET',
+          `${CLOUD}/user/search?query=Ana%20Ruiz&maxResults=10`,
+          {
+            json: [
+              { accountId: '557058:a1', displayName: 'Ana Ruiz' },
+              { accountId: '557058:a2', displayName: 'Ana Ruiz-Ortega' },
+            ],
+          },
+        ],
+        ['GET', `${CLOUD}/user/search?query=nobody&maxResults=10`, { json: [] }],
+        [
+          'GET',
+          `${CLOUD}/priority`,
+          {
+            json: [
+              { id: '1', name: 'Blocker' },
+              { id: '2', name: 'Critical' },
+              { id: '3', name: 'Major' },
+              { id: '4', name: 'Minor' },
+            ],
+          },
+        ],
+        ['GET', /\/rest\/api\/3\/search\/jql\?/, { json: { issues: [cloudIssue()], isLast: true } }],
+      ])
+      const found = yield* tracker.find({ state: 'open', assignee: '@Ana Ruiz', priority: ['urgent', 'none'], limit: 10 })
+      assert.deepStrictEqual([found.issues.map((one) => one.key), found.next], [['HHH-20844'], null])
+      assert.strictEqual(
+        jqlOf(sent.at(-1)?.url),
+        'statusCategory != Done AND assignee in ("557058:a1", "557058:a2") AND (priority in ("Blocker") OR priority is EMPTY) ORDER BY updated DESC',
+      )
+      // Nobody by that name: nothing found, and no search made.
+      const asked = sent.length
+      assert.deepStrictEqual(yield* tracker.find({ state: 'open', assignee: 'nobody', limit: 10 }), { issues: [], next: null })
+      assert.strictEqual(sent.length, asked + 1)
+      // None without a priority asks for none of the site's.
+      yield* tracker.find({ state: 'all', priority: ['none'], limit: 10 })
+      assert.isFalse(sent.slice(asked + 1).some((request) => request.url.endsWith('/priority')))
+    }),
+  )
+
+  it.effect('tells a backlog from to do, and cancelled from done, after its search, paging on by its own cursor', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = cloud([
+        [
+          'GET',
+          /\/rest\/api\/3\/search\/jql\?/,
+          {
+            json: {
+              issues: [
+                cloudIssue({ status: { name: 'Backlog', statusCategory: { key: 'new' } } }),
+                cloudIssue({ status: { name: 'To Do', statusCategory: { key: 'new' } } }),
+                cloudIssue({ status: { name: 'Closed', statusCategory: { key: 'done' } }, resolution: { name: "Won't Do" } }),
+                cloudIssue({ status: { name: 'Closed', statusCategory: { key: 'done' } }, resolution: { name: 'Fixed' } }),
+              ],
+              nextPageToken: 'Ck11cGRhdGVk',
+              isLast: false,
+            },
+          },
+        ],
+      ])
+      const found = yield* tracker.find({ state: 'all', status: { names: [], categories: ['backlog', 'cancelled'] }, limit: 4 })
+      assert.deepStrictEqual(
+        found.issues.map((one) => [one.status.name, one.status.category]),
+        [
+          ['Backlog', 'backlog'],
+          ['Closed', 'cancelled'],
+        ],
+      )
+      assert.strictEqual(found.next, 'Ck11cGRhdGVk')
+      assert.strictEqual(jqlOf(sent[0]?.url), 'statusCategory in ("To Do", "Done") ORDER BY updated DESC')
+      assert.notInclude(sent[0]?.url, 'nextPageToken')
+      yield* tracker.find({ state: 'all', status: { names: [], categories: ['backlog', 'cancelled'] }, limit: 4, cursor: 'Ck11cGRhdGVk' })
+      assert.include(sent[1]?.url, '&maxResults=4&')
+      assert.strictEqual(new URL(sent[1]?.url ?? '').searchParams.get('nextPageToken'), 'Ck11cGRhdGVk')
+    }),
+  )
+
+  it.effect('finds keys Jira has when it refuses a search naming one it hasn’t', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = cloud([
+        [
+          'GET',
+          /\/rest\/api\/3\/search\/jql\?/,
+          (request) =>
+            /HHH-404/.test(jqlOf(request.url) ?? '')
+              ? { status: 400, json: { errorMessages: ["An issue with key 'HHH-404' does not exist for field 'key'."] } }
+              : { json: { issues: [cloudIssue()], isLast: true } },
+        ],
+        ['GET', `${CLOUD}/issue/HHH-20844?${FIELDS}`, { json: cloudIssue() }],
+        ['GET', `${CLOUD}/issue/HHH-404?${FIELDS}`, { status: 404, json: { errorMessages: ['Issue does not exist'] } }],
+      ])
+      const found = yield* tracker.find({ state: 'open', keys: ['hhh-20844', 'HHH-404'], limit: 10 })
+      assert.deepStrictEqual([found.issues.map((one) => one.key), found.next], [['HHH-20844'], null])
+      assert.strictEqual(jqlOf(sent[0]?.url), 'statusCategory != Done AND key in (HHH-20844, HHH-404) ORDER BY updated DESC')
+      assert.strictEqual(jqlOf(sent.at(-1)?.url), 'statusCategory != Done AND key in (HHH-20844) ORDER BY updated DESC')
+      // None of them there: nothing found.
+      const gone = cloud([
+        ['GET', /\/rest\/api\/3\/search\/jql\?/, { status: 400, json: { errorMessages: ["An issue with key 'HHH-404' does not exist"] } }],
+        ['GET', `${CLOUD}/issue/HHH-404?${FIELDS}`, { status: 404, json: { errorMessages: ['Issue does not exist'] } }],
+      ])
+      assert.deepStrictEqual(yield* gone.tracker.find({ state: 'all', keys: ['HHH-404'], limit: 10 }), { issues: [], next: null })
+      assert.lengthOf(gone.sent, 2)
+      // A refusal of a search without keys stands.
+      const refused = cloud([
+        [
+          'GET',
+          /\/rest\/api\/3\/search\/jql\?/,
+          { status: 400, json: { errorMessages: ["The value 'Nope' does not exist for the field 'status'."] } },
+        ],
+      ])
+      const failed = yield* Effect.flip(refused.tracker.find({ state: 'all', status: { names: ['Nope'], categories: [] }, limit: 10 }))
+      assert.deepStrictEqual([failed.reason, failed.message], ['rejected', "The value 'Nope' does not exist for the field 'status'."])
+    }),
+  )
+
+  it.effect('finds nothing, unasked, by keys none of which is Jira’s, and refuses what it can’t narrow by', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = cloud([])
+      assert.deepStrictEqual(yield* tracker.find({ state: 'all', keys: ['#12', 'meridian/api#3'], limit: 10 }), { issues: [], next: null })
+      // A project is where a Jira issue lives: a filter by one is never sent, and refused if it is.
+      const project = yield* Effect.flip(tracker.find({ state: 'all', project: 'Q4 launch', limit: 10 }))
+      const parent = yield* Effect.flip(tracker.find({ state: 'all', parent: 'Bootstrap', limit: 10 }))
+      assert.deepStrictEqual(
+        [project, parent].map((refusal) => [refusal.product, refusal.reason]),
+        [
+          ['jira_cloud', 'rejected'],
+          ['jira_cloud', 'rejected'],
+        ],
+      )
+      assert.match(parent.message, /Bootstrap/)
+      assert.lengthOf(sent, 0)
     }),
   )
 
@@ -1754,7 +1946,7 @@ describe('Jira Data Center', () => {
         jqlOf(sent[0]?.url),
         'project = "KAFKA" AND statusCategory != Done AND assignee = currentUser() ORDER BY updated DESC',
       )
-      const said = yield* tracker.comments(found[0] ?? issue(), 10)
+      const said = yield* tracker.comments(found.issues[0] ?? issue(), 10)
       assert.deepStrictEqual(said, [
         {
           author: { id: 'JIRAUSER1', login: 'chia7712', name: 'Chia-Ping Tsai', bot: false },
@@ -1763,6 +1955,32 @@ describe('Jira Data Center', () => {
         },
         { author: null, body: 'Thanks!', at: '2026-10-08T10:00:00.000Z' },
       ])
+    }),
+  )
+
+  it.effect('pages a search by its offset, and finds those a name finds by user name', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = dataCenter([
+        ['GET', `${DC}/user/search?username=chia`, { json: [{ name: 'chia7712', key: 'JIRAUSER1', displayName: 'Chia-Ping Tsai' }] }],
+        [
+          'GET',
+          /\/rest\/api\/2\/search\?/,
+          (request) =>
+            new URL(request.url).searchParams.get('startAt') === null
+              ? { json: { startAt: 0, maxResults: 2, total: 3, issues: [dcIssue(), dcIssue()] } }
+              : { json: { startAt: 2, maxResults: 2, total: 3, issues: [dcIssue()] } },
+        ],
+      ])
+      const first = yield* tracker.find({ container: 'KAFKA', state: 'open', assignee: 'chia', limit: 2 })
+      assert.deepStrictEqual([first.issues.length, first.next], [2, '2'])
+      assert.strictEqual(
+        jqlOf(sent[1]?.url),
+        'project = "KAFKA" AND statusCategory != Done AND assignee in ("chia7712") ORDER BY updated DESC',
+      )
+      assert.include(sent[1]?.url, '&maxResults=2&')
+      const second = yield* tracker.find({ container: 'KAFKA', state: 'open', assignee: 'chia', limit: 2, cursor: first.next ?? '' })
+      assert.deepStrictEqual([second.issues.length, second.next], [1, null])
+      assert.strictEqual(new URL(sent.at(-1)?.url ?? '').searchParams.get('startAt'), '2')
     }),
   )
 })

@@ -37,7 +37,7 @@ describe('plans and reviews', () => {
     expect(within(page).getByRole('combobox', { name: 'Start a plan after' }).textContent).toBe('10 seconds')
     await choose(page, 'Rounds of review', '2 rounds')
     expect(client.setPlansAndReviews).toHaveBeenLastCalledWith({ rounds: 2 })
-    await userEvent.click(within(page).getByRole('button', { name: 'Use 25 seconds' }))
+    await userEvent.click(within(page).getByRole('button', { name: 'Default: 25 seconds' }))
     expect(client.setPlansAndReviews).toHaveBeenLastCalledWith({ countdown: 25 })
   })
 
