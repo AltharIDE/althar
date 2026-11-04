@@ -299,8 +299,8 @@ describe('files sent with a message, at their edges', () => {
         assert.strictEqual((yield* Effect.flip(send('thr_gone', logs.slice(0, 1)))).message, "That task isn't there any more.")
         yield* send(task.threadId, logs)
         const [message] = messages((yield* client.GetThread({ threadId: task.threadId })).items).slice(-1)
-        const files =
-          (message?.content as { readonly files?: ReadonlyArray<{ readonly name: string; readonly path?: string }> }).files ?? []
+        const content = (message?.content ?? {}) as { readonly files?: ReadonlyArray<{ readonly name: string }> }
+        const files = content.files ?? []
         assert.deepStrictEqual(
           files.map((file) => file.name),
           ['build.log', 'build.log', 'build.log'],
