@@ -1,9 +1,11 @@
 import { existsSync } from 'node:fs'
+import { lstat } from 'node:fs/promises'
+import { join } from 'node:path'
 
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { baseOf, changedBetween, type ChangedFile, changedFiles, newFile } from './diffs'
+import { baseOf, changedBetween, type ChangedFile, changedFiles, newFile, READ_AT_MOST } from './diffs'
 import { commitOf, currentBranch, git, gitExactly, untouched } from './git'
 import { Instance } from './Instance'
 
@@ -191,10 +193,21 @@ const fromWords = (repository: RepositoryChange) => {
   }
 }
 
+/** How large a file is, without following a link; none, where it can't be told. */
+const sizeOf = (path: string) =>
+  Effect.promise(() => lstat(path).then((stats) => stats.size)).pipe(Effect.catchDefect(() => Effect.succeed(0)))
+
+const mebibytes = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(bytes % (1024 * 1024) === 0 ? 0 : 1)} MiB`
+
 /** A new file nobody has added to git yet, as a diff that adds it. */
 const newFileDiff = (folder: string, path: string, prefix: string) =>
-  Effect.map(newFile(folder, path, true), (content) => {
-    const head = `diff --git a/${prefix}${path} b/${prefix}${path}\nnew file, not added to git yet\n`
+  Effect.map(Effect.all([newFile(folder, path, true), sizeOf(join(folder, path))]), ([content, size]) => {
+    // Only so much of a new file is read (diffs.ts): one longer is said to be, so its start isn't taken for all of it.
+    const cut =
+      content.kind === 'text' && size > READ_AT_MOST
+        ? `Only its first ${mebibytes(READ_AT_MOST)} are shown, of ${mebibytes(size)}: the rest isn't read.\n`
+        : ''
+    const head = `diff --git a/${prefix}${path} b/${prefix}${path}\nnew file, not added to git yet\n${cut}`
     if (content.kind === 'binary') return `${head}Binary file, not shown.`
     if (content.kind === 'other') return `${head}Not a file git adds.`
     const text = content.kind === 'link' ? content.target : content.text

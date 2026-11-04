@@ -57,7 +57,7 @@ export interface FileDiff {
  */
 const LINES_SHOWN = 4_000
 const WHOLE_LINES = 20_000
-const READ_AT_MOST = 2 * 1024 * 1024
+export const READ_AT_MOST = 2 * 1024 * 1024
 const NEW_FILES_COUNTED = 50
 
 /** Whether bytes look like a binary file: git's own test, a NUL early on. */

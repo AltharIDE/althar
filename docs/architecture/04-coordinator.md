@@ -196,7 +196,7 @@ work to them, and one more:
 | `list_tasks`, `find_tasks` | As the coordinator does, and under each task: whether it is the lead's own, where it works (Local, in the person's checkout, or a worktree), its branch, and, for an open task, the files it changes now, uncommitted ones too |
 | `read_task` | Its brief (title and description), where it stands, its plan, what it built and couldn't show working, its branch and folder, each step's report, its pull request, and what its review found |
 | `read_thread` | Its thread, the person's messages included, the latest part first, then further back a page at a time |
-| `read_task_diff` | Its change against where its branch started, as it stands in its folder now, uncommitted work and new files nobody has added included; all of it or the paths asked for, with the list of files first and a long diff a page at a time |
+| `read_task_diff` | Its change against where its branch started, as it stands in its folder now, uncommitted work and new files nobody has added included; all of it or the paths asked for, with the list of files first and a long diff a page at a time. A new file is read up to 2 MiB, as the Changes view reads one, and a longer one says so |
 
 Only tasks of the same project are found (`taskOf` reads by project). Nothing
 among these tools messages another lead, changes another task or writes in
@@ -217,13 +217,13 @@ with it, and once they switch it away, only the branch's commits are read.
 A task whose folder was removed is read from its branch's commits too.
 
 Leads whose work meets get a heads-up (`Overlaps.ts`). When a lead's edit
-ends, or its turn does (for what it changed with a command), Althar compares
+or command ends, or a lead's turn starts or ends, Althar compares
 the paths in its change with those of the project's other running tasks (open,
 with a lead's session here). For each task changing a file it changes too,
 the lead is told once which task and which files, and to read that task's work
 before going on, and the other lead is told the same. A lead is told only while
-it is in a turn, at work on the task. One between turns isn't woken for it:
-it hears of the overlap the next time it changes a file the other changes.
+it is still in a turn as it is told, at work on the task. One between turns
+isn't woken for it: it hears of the overlap as its next turn starts.
 What was told is kept in the record (`task.overlap_noticed`, for each pair
 and direction), so further edits and later launches say nothing more. Looks
 run one at a time, and a task asking again while it waits is looked at once.

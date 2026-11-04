@@ -160,6 +160,13 @@ describe('a lead reading another task', () => {
       const last = yield* callTool(lead, 'read_task_diff', { task: theirs.slug, page: 3 })
       assert.include(last, '+export const n1499 = 1499')
       assert.match(last, /\(Page 3 of 3: lines 1201–150\d of 150\d\. pass paths/)
+      // A new file longer than is read says so, rather than passing its start off as all of it.
+      writeFileSync(join(theirs.path, 'bundle.js'), `${'x'.repeat(99)}\n`.repeat(30_000))
+      const bundle = yield* callTool(lead, 'read_task_diff', { task: theirs.slug, paths: ['bundle.js'] })
+      assert.include(
+        bundle,
+        "diff --git a/bundle.js b/bundle.js\nnew file, not added to git yet\nOnly its first 2 MiB are shown, of 2.9 MiB: the rest isn't read.",
+      )
     }).pipe(Effect.provide(runtime()))
   })
 
