@@ -53,11 +53,18 @@ const runOf = (launch: Launch, now: string): RunTargetRun =>
 export const MAIN: RunPlace = { key: 'main', kind: 'main', label: 'main' }
 
 /**
- * Where a run with no task runs, by name: the branch the project works
- * toward (ADR-093), as Run runs a copy of it, else its default branch; with
- * repositories that go different ways, the default branch's word.
+ * Where a run with no task runs, by name. While one runs there, the branch
+ * its copy is of, as it says: the copy stays as it was until nothing runs
+ * there, even where Work toward has moved since. Otherwise the branch the
+ * project works toward (ADR-093), which the next run copies, else its default
+ * branch; with repositories that go different ways, the default branch's word.
  */
-export const mainOf = (repositories: ReadonlyArray<Pick<ProjectRepository, 'defaultBranch' | 'workToward'>> | undefined): RunPlace => {
+export const mainOf = (
+  repositories: ReadonlyArray<Pick<ProjectRepository, 'defaultBranch' | 'workToward'>> | undefined,
+  launches: ReadonlyArray<Launch> = [],
+): RunPlace => {
+  const running = launches.find((launch) => launch.taskId === null && launch.branch == null && launch.ended === null)
+  if (running !== undefined) return { ...MAIN, label: running.where }
   const names = [...new Set((repositories ?? []).map((one) => one.workToward ?? one.defaultBranch ?? MAIN.label))]
   return names.length === 1 && names[0] !== undefined ? { ...MAIN, label: names[0] } : MAIN
 }
@@ -457,7 +464,7 @@ export function Runs({
 }) {
   const dialogs = useRunDialogs(projectId)
   const { client } = useServices()
-  const main = mainOf(useQuery(reads(client).repositories(projectId)).data)
+  const main = mainOf(useQuery(reads(client).repositories(projectId)).data, launches)
   const [kept, setPicked] = useState(() => (taskId === null ? readPlace(projectId) : MAIN))
   // The default branch's place says the branch it runs now, whatever it was called when it was kept.
   const picked = kept.kind === 'main' ? main : kept

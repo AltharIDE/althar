@@ -394,6 +394,11 @@ export class Launches extends Context.Service<
        * fresh as a run starts, unless something of the repository runs from it
        * now, which a fresh copy would change under it.
        */
+      /**
+       * The branch each repository's run copy was made of, by binding: what a run there runs, which stays as it was while
+       * one runs there, even where the project's Work toward has moved since (ADR-093).
+       */
+      const copiedOf = new Map<string, string>()
       const runCopy = (projectId: string, binding: Binding) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -413,8 +418,9 @@ export class Launches extends Context.Service<
             })
             yield* freshCopy(binding.repository, path, base, binding.repository, remote)
             yield* installedAsLocked(path)
+            copiedOf.set(binding.id, binding.base ?? 'main')
           }
-          return path
+          return { path, branch: copiedOf.get(binding.id) ?? binding.base ?? 'main' }
         })
 
       /** A run's card as its thread keeps it: what it runs, where it answers, and how it ended, with its last line. */
@@ -573,10 +579,8 @@ export class Launches extends Context.Service<
                       )
                         launches.delete(ended.id)
                     const { binding } = chosen
-                    const at =
-                      input.taskId === null
-                        ? yield* runCopy(input.projectId, binding)
-                        : (places.find((place) => place.binding.id === binding.id)?.root ?? '')
+                    const copy = input.taskId === null ? yield* runCopy(input.projectId, binding) : null
+                    const at = copy?.path ?? places.find((place) => place.binding.id === binding.id)?.root ?? ''
                     const folder = within(binding, at)
                     const run = runOfKept(chosen.kept, binding, at)
                     if (run === null)
@@ -584,7 +588,7 @@ export class Launches extends Context.Service<
                         why: 'unknown',
                         message: `Althar can't tell how ${binding.name} runs: it has no dev, start or serve script, Procfile or Makefile target. Ask the coordinator to keep how it runs.`,
                       })
-                    // Where it runs, in words: what the task is, or the default branch it is a copy of.
+                    // Where it runs, in words: what the task is, or the branch its copy is of, which may be the one before Work toward moved.
                     const [task] =
                       input.taskId === null ? [] : yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${input.taskId}`
                     return yield* launchIn({
@@ -596,7 +600,7 @@ export class Launches extends Context.Service<
                       binding,
                       run,
                       folder,
-                      where: task?.title ?? binding.base ?? 'main',
+                      where: task?.title ?? copy?.branch ?? binding.base ?? 'main',
                       branch: null,
                       copy: null,
                     })

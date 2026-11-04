@@ -320,6 +320,22 @@ describe('where Run runs with no task, by name', () => {
     expect(screen.queryByRole('button', { name: 'main' })).toBeNull()
   })
 
+  it('names the branch a run there runs while it runs, though Work toward moved since, and the new one once it stops', async () => {
+    const { emit } = await shown([launch({ where: 'main' })], {
+      getRepositories: vi.fn(async () => [{ ...repositories[0]!, defaultBranch: 'main', workToward: 'release/0.8.0' }]),
+    })
+    expect(await screen.findByRole('button', { name: 'main' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'release/0.8.0' })).toBeNull()
+    act(() =>
+      emit({
+        _tag: 'Launches',
+        projectId: 'p1',
+        launches: [launch({ where: 'main', ended: { at: '2026-10-14T09:05:00.000Z', code: 0 } })],
+      }),
+    )
+    expect(await screen.findByRole('button', { name: 'release/0.8.0' })).toBeTruthy()
+  })
+
   it('says the default branch where repositories go different ways, and where none says one', () => {
     expect(
       mainOf([
