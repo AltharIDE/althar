@@ -39,7 +39,7 @@ const EDITS: ReadonlySet<string> = new Set(['edit', 'delete', 'move'])
 export const overlapWords = (other: { readonly slug: string; readonly title: string }, files: ReadonlyArray<string>) => {
   const named = files.slice(0, 8)
   const more = files.length - named.length
-  return `Heads-up: another running task, ${other.title} (${other.slug}), is changing ${files.length === 1 ? 'a file' : 'files'} you are changing too: ${named.join(', ')}${more > 0 ? ` and ${more} more` : ''}. Before you go further there, read its work with read_task_diff and read_task (read_thread for what it was asked), so yours doesn't conflict with it. You can't message its lead; where you need it to change course, say so in your report. Althar says this once for this task.`
+  return `Heads-up: another running task, ${other.title} (${other.slug}), is changing ${files.length === 1 ? 'a file' : 'files'} you are changing too: ${named.join(', ')}${more > 0 ? ` and ${more} more` : ''}. Before you go further there, read its work with read_task_diff and read_task (read_thread for what it was asked), so yours doesn't conflict with it. You can't message its lead; where you need it to change course, say so in your report. Althar won't say it again for that task.`
 }
 
 export class Overlaps extends Context.Service<

@@ -103,7 +103,7 @@ describe('a lead reading another task', () => {
       assert.match(
         listed,
         new RegExp(
-          `- ${theirs.slug}: Go service for payments [^\\n]*\\n {2}Works in a worktree; [^\\n]*changes README\\.md, notes\\.md, pay/main\\.go \\(2 not all committed\\)\\.`,
+          `- ${theirs.slug}: Go service for payments [^\\n]*\\n {2}Works in a worktree; [^\\n]*changes README\\.md, notes\\.md, pay/main\\.go \\(2 with work not committed yet\\)\\.`,
         ),
       )
       const found = yield* callTool(lead, 'find_tasks', { text: 'go payments' })
@@ -120,9 +120,9 @@ describe('a lead reading another task', () => {
 
       const diff = yield* callTool(lead, 'read_task_diff', { task: theirs.slug })
       assert.include(diff, "what isn't committed included")
-      assert.include(diff, '- README.md: modified, +1 −0, not all committed')
+      assert.include(diff, '- README.md: modified, +1 −0, not committed yet')
       assert.include(diff, '- notes.md: added, +1 −0')
-      assert.include(diff, '- pay/main.go: added, +1 −0, not all committed')
+      assert.include(diff, '- pay/main.go: added, +1 −0, not committed yet')
       assert.include(diff, '+Payments run in Go.')
       assert.include(diff, '+Payments')
       assert.include(diff, 'diff --git a/pay/main.go b/pay/main.go\nnew file, not added to git yet')
@@ -151,7 +151,7 @@ describe('a lead reading another task', () => {
       writeFileSync(join(theirs.path, 'client.ts'), Array.from({ length: 1500 }, (_, at) => `export const n${at} = ${at}`).join('\n'))
       const lead = leadOf(projectId, mine)
       const first = yield* callTool(lead, 'read_task_diff', { task: theirs.slug })
-      assert.include(first, '- client.ts: added, +1500 −0, not all committed')
+      assert.include(first, '- client.ts: added, +1500 −0, not committed yet')
       assert.match(
         first,
         /\(Page 1 of 3: lines 1–600 of 150\d\. read_task_diff with page 2 reads on; pass paths to read only some files\.\)$/,

@@ -163,7 +163,7 @@ export const touchedWords = (change: TaskChange, shown = 6) => {
   const named = files.slice(0, shown).map((file) => file.path)
   const more = files.length - named.length
   const uncommitted = files.filter((file) => file.uncommitted).length
-  return `changes ${named.join(', ')}${more > 0 ? ` and ${more} more` : ''}${uncommitted === 0 ? '' : ` (${uncommitted} not all committed)`}`
+  return `changes ${named.join(', ')}${more > 0 ? ` and ${more} more` : ''}${uncommitted === 0 ? '' : ` (${uncommitted} with work not committed yet)`}`
 }
 
 /** How many lines of a diff a page holds: a few thousand words, what an agent reads in one go. */
@@ -172,7 +172,7 @@ export const PAGE_LINES = 600
 const FILES_LISTED = 200
 
 const fileLine = (shown: string, file: ChangedFile, from: string | null) =>
-  `- ${shown}: ${file.status}${from === null ? '' : ` from ${from}`}${file.binary ? ', binary' : `, +${file.add} −${file.del}`}${file.uncommitted ? ', not all committed' : ''}`
+  `- ${shown}: ${file.status}${from === null ? '' : ` from ${from}`}${file.binary ? ', binary' : `, +${file.add} −${file.del}`}${file.uncommitted ? ', not committed yet' : ''}`
 
 /** Where a repository's change was read from, in words, for the head of a diff. */
 const fromWords = (repository: RepositoryChange) => {
