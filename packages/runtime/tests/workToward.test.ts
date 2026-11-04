@@ -10,6 +10,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { withoutSignIns } from '../src/Config'
 import { Coordinator } from '../src/Coordinator'
 import { coordinatorFolder, freshCopy } from '../src/coordinatorFolder'
 import { place, spotsOf } from '../src/local'
@@ -110,7 +111,8 @@ describe('a project working toward a release branch', () => {
         assert.include(started?.env.ALTHAR_TOWARD_BRANCHES?.split(' ') ?? [], RELEASE)
         const pushed = spawnSync('git', ['push', bare, `HEAD:refs/heads/${RELEASE}`], {
           cwd: workspace?.path ?? '',
-          env: { ...process.env, ...started?.env },
+          // As a lead's shell has it: the guard's entry of git's config goes after the signed-out ones.
+          env: { ...process.env, ...withoutSignIns(mkdtempSync(join(tmpdir(), 'althar-signed-out-'))), ...started?.env },
           encoding: 'utf8',
         })
         assert.notStrictEqual(pushed.status, 0)
@@ -254,7 +256,7 @@ describe('a task whose pull request conflicts with the release branch it goes in
       yield* titled(threadId, `The lead resolved the conflict with ${RELEASE}`)
       const [brought] = (yield* given(threadId)).filter((body) => body.includes('Bring the branch up to date'))
       assert.include(brought, `${RELEASE} has moved on`)
-      assert.match(brought ?? '', new RegExp(`merge \\S*${RELEASE.replace(/\./g, '\\.')} into it`))
+      assert.match(brought ?? '', /merge \S*release\/0\.8\.0 into it/)
       // What it pushed holds the release branch's change: it merged that, and its pull request merges cleanly into it.
       assert.isFalse(conflictsIn(bare, RELEASE, taskBranch(bare) ?? ''))
       assert.include(git(bare, 'show', `${taskBranch(bare)}:change.txt`), 'rate limits')
@@ -435,7 +437,12 @@ describe('the coordinator’s release branches', () => {
       // One there already, elsewhere, is never moved.
       const other = yield* turn(coordinator, 'Make release/0.7.1 from main')
       git(working, 'push', '-q', bare, `${git(working, 'rev-parse', 'main')}:refs/heads/release/0.7.1`)
-      git(bare, 'update-ref', 'refs/heads/release/0.7.1', git(bare, 'commit-tree', '-m', 'Elsewhere', `${main}^{tree}`))
+      git(
+        bare,
+        'update-ref',
+        'refs/heads/release/0.7.1',
+        git(bare, '-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit-tree', '-m', 'Elsewhere', `${main}^{tree}`),
+      )
       assert.include(
         yield* callTool(coordinator, 'create_branch', { branch: 'release/0.7.1', from: 'main', message: other }),
         'never moves a branch that is there',
