@@ -34,7 +34,7 @@
   padding: 0 var(--gut);
   text-align: center;
 }
-.numeral { display: flex; align-items: center; gap: 18px; margin: 0 0 4px; font: 500 14px/1 'Inter Display', var(--display); letter-spacing: 0.08em; color: var(--ink); }
+.numeral { display: flex; align-items: center; gap: 18px; margin: 0 0 4px; font: 500 14px/1 'Inter Display', var(--display); letter-spacing: 0.08em; color: var(--ink); font-feature-settings: 'cv08' 1; }
 .numeral::before,
 .numeral::after { content: ''; width: 56px; height: 1px; background: var(--rule); }
 .head .title { font-size: clamp(40px, 5.8vw, 88px); color: var(--ink); }

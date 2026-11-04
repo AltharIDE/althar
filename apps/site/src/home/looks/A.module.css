@@ -90,7 +90,6 @@
 .seen {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
-  align-items: start;
   column-gap: 40px;
   max-width: 1320px;
   margin: 100px auto -110px;
