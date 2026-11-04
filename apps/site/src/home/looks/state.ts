@@ -1,18 +1,21 @@
 import { useSyncExternalStore } from 'react'
 
 /*
- * Prototype: which look the homepage's sections wear, A, B, C or as they are
+ * Prototype: which look the homepage's sections wear, A to F or as they are
  * today. The address keeps it (?look=b), so a link opens it again; keys 1 to
- * 4 pick one, ← and → step through them. Swapping keeps the section you are
+ * 7 pick one, ← and → step through them. Swapping keeps the section you are
  * reading where it was on the screen.
  */
 
-export type Look = 'A' | 'B' | 'C' | 'Today'
+export type Look = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'Today'
 
 export const LOOKS: ReadonlyArray<{ value: Look; name: string }> = [
   { value: 'A', name: 'Night descent' },
   { value: 'B', name: 'Engraved plates' },
   { value: 'C', name: 'Ruled paper' },
+  { value: 'D', name: 'Above the clouds' },
+  { value: 'E', name: 'Horizon' },
+  { value: 'F', name: 'Cyanotype' },
   { value: 'Today', name: 'Today' },
 ]
 
@@ -74,7 +77,7 @@ export const useLook = () =>
     () => look,
   )
 
-/** Keys 1 to 4 pick a look, ← and → step through them; never while typing, or on a control that takes the arrows itself. */
+/** Keys 1 to 7 pick a look, ← and → step through them; never while typing, or on a control that takes the arrows itself. */
 export const onKey = (event: KeyboardEvent) => {
   if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
   const target = event.target instanceof Element ? event.target : null
@@ -86,7 +89,7 @@ export const onKey = (event: KeyboardEvent) => {
       ? LOOKS[(at + 1) % LOOKS.length]
       : event.key === 'ArrowLeft'
         ? LOOKS[(at - 1 + LOOKS.length) % LOOKS.length]
-        : /^[1-4]$/.test(event.key)
+        : /^[1-9]$/.test(event.key)
           ? LOOKS[Number(event.key) - 1]
           : undefined
   if (!picked) return

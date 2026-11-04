@@ -7,12 +7,15 @@ import { DesktopBody } from '../bodies/desktop/DesktopBody'
 import { NightBody } from './A'
 import { PlatesBody } from './B'
 import { RuledBody } from './C'
+import { CloudsBody } from './D'
+import { HorizonBody } from './E'
+import { CyanotypeBody } from './F'
 import s from './Looks.module.css'
 import { go, keepPlace, LOOKS, type Look, onKey, useLook } from './state'
 
 /*
  * Prototype, in development only (Home.tsx): the homepage's sections between
- * the Runs on band and the footer, in one of three looks or as they are
+ * the Runs on band and the footer, in one of six looks or as they are
  * today, with a bar along the foot of the window that swaps them in place.
  * Everything above and below them is the page's own, untouched.
  */
@@ -21,13 +24,17 @@ const BODIES: Record<Look, ComponentType> = {
   A: NightBody,
   B: PlatesBody,
   C: RuledBody,
+  D: CloudsBody,
+  E: HorizonBody,
+  F: CyanotypeBody,
   Today: DesktopBody,
 }
 
 export default function Looks() {
   const look = useLook()
   const Body = BODIES[look]
-  const narrow = useMedia('(max-width: 700px)')
+  // Letters alone where the names don't fit.
+  const narrow = useMedia('(max-width: 1240px)')
   useEffect(() => {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -65,7 +72,8 @@ export default function Looks() {
               kbd: String(at + 1),
             }))}
           />
-          <span className={s.hint}>1–4 or ← →</span>
+          {/* Where only the letters fit, the name of the one shown. */}
+          <span className={s.hint}>{narrow ? (LOOKS.find((one) => one.value === look)?.name ?? '') : `1–${LOOKS.length} or ← →`}</span>
         </div>,
         document.body,
       )}

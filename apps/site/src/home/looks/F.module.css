@@ -1,0 +1,145 @@
+/* Prototype, F: one sun print from under the band to over the footer: the footer's blue, deep, brushed on paper; the words the paper left white. */
+
+.body {
+  /* The print's blue: the footer's cobalt, as deep as a sun print exposes it. */
+  --cyan: #14245f;
+  --white: #f5f2ea;
+  --gap: 56px;
+  --edge-h: 130px;
+  position: relative;
+  isolation: isolate;
+  overflow-x: clip;
+  padding: calc(var(--gap) + var(--edge-h) - 30px) 0 var(--gap);
+  background: var(--n-2);
+  color: var(--white);
+  /* The app's pictures laid on the print: a pale hairline and the print's deep shadow. */
+  --board-frame: 0 0 0 1px rgba(245, 242, 234, 0.2), 0 50px 120px rgba(6, 10, 40, 0.5);
+  --talk-frame: 0 0 0 1px rgba(245, 242, 234, 0.24), 0 44px 110px rgba(6, 10, 40, 0.45);
+  --review-mask: none;
+  --review-radius: 16px;
+  --review-frame: 0 0 0 1px rgba(245, 242, 234, 0.16), 0 50px 120px rgba(6, 10, 40, 0.5);
+  --bezel-fall: 0 50px 120px rgba(6, 10, 40, 0.55);
+  --scene-frame: 0 0 0 1px rgba(245, 242, 234, 0.16), 0 44px 110px rgba(6, 10, 40, 0.5);
+}
+
+/* ---- the print ---- */
+.print {
+  position: absolute;
+  z-index: -1;
+  inset: var(--gap) 0;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+  color: var(--cyan);
+}
+.edge { display: block; flex: none; width: 100%; height: var(--edge-h); fill: currentColor; }
+.foot { scale: 1 -1; }
+/* The blue, exposed a little unevenly, as a print is. */
+.wash {
+  flex: 1;
+  background:
+    radial-gradient(ellipse 60% 14% at 18% 30%, rgba(70, 100, 210, 0.09), transparent),
+    radial-gradient(ellipse 70% 18% at 86% 52%, rgba(4, 8, 30, 0.2), transparent),
+    radial-gradient(ellipse 60% 14% at 30% 74%, rgba(70, 100, 210, 0.07), transparent),
+    var(--cyan);
+}
+/* The paper's tooth, through the blue and out over the edges' streaks. */
+.print::after { content: ''; position: absolute; inset: 0; background: var(--tooth) 0 0 / 220px 220px; }
+/* Dark under the nav over the whole print. */
+.under { top: var(--gap); bottom: var(--gap); }
+
+/* ---- a claim: the paper left white ---- */
+.scene { position: relative; padding-top: 200px; }
+.first { padding-top: 110px; }
+.head {
+  display: grid;
+  justify-items: start;
+  gap: 24px;
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 0 var(--gut);
+}
+.head .title { font-size: clamp(44px, 7vw, 108px); color: var(--white); }
+.head .lead { max-width: 33em; font-size: 19px; color: rgba(245, 242, 234, 0.74); }
+
+/* ---- the coordinator: its words beside the conversation ---- */
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  align-items: center;
+  max-width: 1320px;
+  margin: 0 auto;
+}
+.split > .head { padding-right: 0; }
+.split > .head .title { font-size: clamp(44px, 5.4vw, 84px); }
+.split > :last-child { width: 100%; margin-top: 0; }
+
+/* ---- what keeps you in flow: laid on the print in two staggered files ---- */
+.laid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  align-items: start;
+  gap: 120px 40px;
+  max-width: 1320px;
+  margin: 110px auto 0;
+  padding: 0 var(--gut);
+  list-style: none;
+}
+.thing { display: grid; min-width: 0; }
+.accounts { grid-column: 1 / span 7; }
+.away { grid-column: 9 / span 4; margin-top: 170px; }
+.automations, .worktrees { grid-column: 1 / span 6; }
+.conflicts, .workspaces { grid-column: 7 / span 6; margin-top: 170px; }
+.home { grid-column: 2 / span 10; }
+.pic { display: grid; place-items: center; }
+.thing[data-drawn] .pic > * { border-radius: 14px; box-shadow: 0 0 0 1px rgba(245, 242, 234, 0.16), 0 36px 90px rgba(6, 10, 40, 0.45); }
+.thingTitle {
+  margin: 28px 0 0;
+  font-family: 'Inter Display', var(--display);
+  font-size: clamp(24px, 2.2vw, 32px);
+  font-weight: 300;
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+  color: var(--white);
+  text-wrap: balance;
+}
+.thingTitle b { font-weight: 700; letter-spacing: -0.04em; }
+.thingLead { max-width: 34em; margin: 10px 0 0; font-size: 15px; line-height: 1.5; color: rgba(245, 242, 234, 0.66); text-wrap: pretty; }
+
+/* ---- the end: the last line and the download, at the foot of the print ---- */
+.end { padding: 240px var(--gut) calc(var(--edge-h) + 70px); text-align: center; }
+.endLine {
+  max-width: 16em;
+  margin: 0 auto;
+  font-family: 'Inter Display', var(--display);
+  font-size: clamp(36px, 5.2vw, 76px);
+  font-weight: 200;
+  line-height: 1.02;
+  letter-spacing: -0.05em;
+  color: var(--white);
+  text-wrap: balance;
+}
+.endLine b { font-weight: 720; letter-spacing: -0.056em; }
+.endGet { display: grid; justify-items: center; margin-top: 40px; }
+.endGet > p { margin-top: 12px; }
+
+@media (max-width: 1100px) {
+  .split { display: block; }
+  .split > :last-child { margin-top: 56px; }
+  .laid { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 80px; }
+  .accounts, .home { grid-column: 1 / -1; }
+  .away, .automations, .conflicts, .worktrees, .workspaces { grid-column: auto; margin-top: 0; }
+}
+@media (max-width: 700px) {
+  .body { --gap: 32px; --edge-h: 70px; }
+  .scene { padding-top: 120px; }
+  .first { padding-top: 70px; }
+  .head { gap: 18px; }
+  .head .lead { font-size: 16px; }
+  .laid { grid-template-columns: minmax(0, 1fr); row-gap: 64px; margin-top: 56px; }
+  .away, .automations, .conflicts, .worktrees, .workspaces { grid-column: 1 / -1; }
+  .end { padding-top: 140px; }
+  .endLine { font-size: 34px; line-height: 1.06; }
+  .endGet > div { display: grid; gap: 10px; width: 100%; max-width: 420px; }
+  .endGet > div > a { justify-content: center; height: 50px; }
+}
