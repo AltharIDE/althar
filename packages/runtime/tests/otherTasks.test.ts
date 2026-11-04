@@ -293,7 +293,7 @@ describe('a heads-up of another task changing the same files', () => {
 })
 
 describe('a heads-up to a lead between turns', () => {
-  it.live('waits until it is at work: the lead in a turn hears of it, and one whose turn ended isn’t woken', () => {
+  it.live('isn’t woken for it, and hears of it as its next turn starts, though it changed the file only with a command', () => {
     const root = repository()
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -305,16 +305,19 @@ describe('a heads-up to a lead between turns', () => {
       yield* sessions.start({ threadId: working.threadId, agentId: 'claude-code' })
       yield* sessions.start({ threadId: resting.threadId, agentId: 'claude-code' })
       yield* until(turns(working.threadId), (rows) => rows.some((row) => row.state === 'delivered'))
+      // Its first turn ended as turns do: the runtime said so, after it was no longer in it.
       yield* until(turns(resting.threadId), (rows) => rows.length >= 1 && rows.every((row) => row.state === 'completed'))
+      // Each changed README.md with a command: no edit call says so.
       writeFileSync(join(resting.path, 'README.md'), '# Meridian\nPayments run in Go.\n')
       writeFileSync(join(working.path, 'README.md'), '# Meridian\nRetry declined cards.\n')
 
       const told = (threadId: string) =>
         sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${threadId} AND body LIKE 'Heads-up:%'`
+      // The lead at work runs a command, which ends while it is still in its turn.
       yield* live.publish({
         _tag: 'Agent',
         threadId: working.threadId,
-        event: { _tag: 'ToolCall', toolCallId: 'call-1', title: 'Edit README.md', kind: 'edit', status: 'pending' },
+        event: { _tag: 'ToolCall', toolCallId: 'call-1', title: 'sed -i README.md', kind: 'execute', status: 'in_progress' },
       })
       yield* live.publish({
         _tag: 'Agent',
@@ -322,13 +325,40 @@ describe('a heads-up to a lead between turns', () => {
         event: { _tag: 'ToolCallUpdate', toolCallId: 'call-1', status: 'completed' },
       })
       yield* until(told(working.threadId), (rows) => rows.length === 1)
+      // The resting lead isn't woken: nothing waits for it, and its pair isn't kept as told.
       yield* (yield* Overlaps).look(resting.taskId)
       assert.lengthOf(yield* told(resting.threadId), 0)
-      // Its pair isn't kept as told: it hears of it once it changes a file the other changes while at work.
-      const kept = yield* sql<{ taskId: string }>`SELECT aggregate_id AS task_id FROM record_events WHERE type = 'task.overlap_noticed'`
+      const kept = sql<{ taskId: string }>`SELECT aggregate_id AS task_id FROM record_events WHERE type = 'task.overlap_noticed'`
       assert.deepStrictEqual(
-        kept.map((row) => row.taskId),
+        (yield* kept).map((row) => row.taskId),
         [working.taskId],
+      )
+
+      // The person writes to it, and it works on that a while: as its turn starts, it hears of the other task, once.
+      const before = (yield* turns(resting.threadId)).length
+      const body = 'Carry on. [lead:wait]'
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', { threadId: resting.threadId, body }),
+        threadId: resting.threadId,
+        body,
+        disposition: 'after_current',
+        sender: { kind: 'window' },
+      })
+      const [heard] = yield* until(told(resting.threadId), (rows) => rows.length === 1)
+      assert.strictEqual(heard?.body, overlapWords({ slug: working.slug, title: 'Retry the checkout' }, ['README.md']))
+      // It reads it as that turn ends, in the next, and nothing more is said as those turns start and end.
+      yield* sessions.interrupt(resting.threadId)
+      const delivered = yield* until(
+        turns(resting.threadId),
+        (rows) => rows.length >= before + 2 && rows.every((row) => !['pending', 'delivered'].includes(row.state)),
+      )
+      assert.include(delivered.at(-1)?.prompt ?? '', 'Heads-up: another running task, Retry the checkout')
+      yield* (yield* Overlaps).look(resting.taskId)
+      assert.lengthOf(yield* told(resting.threadId), 1)
+      assert.lengthOf(yield* told(working.threadId), 1)
+      assert.sameMembers(
+        (yield* kept).map((row) => row.taskId),
+        [working.taskId, resting.taskId],
       )
     }).pipe(Effect.provide(runtime(':memory:', {}, { countdown: Duration.hours(1) })))
   })

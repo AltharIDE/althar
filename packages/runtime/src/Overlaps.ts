@@ -20,20 +20,21 @@ import { Sessions } from './Sessions'
  * long as the tasks last: kept in the record (`task.overlap_noticed`), so
  * neither more edits nor a relaunch say it again.
  *
- * It looks after a lead's edit ends, and as its turn ends, for what it
- * changed with a command. Looks wait their turn, one at a time, and a task
- * that asks again while it waits is looked at once: a lead making many
- * edits in a row costs one look, not one for each. A running task is an
- * open one with its lead's session here. A lead is told only while it is in
- * a turn, at work on the task, and reads it as that turn ends; one between
- * turns isn't woken for it, and hears of it the next time it changes a file
- * the other task changes.
+ * It looks as a lead's call that may change files ends, an edit or a
+ * command, while the lead is still in its turn; as a turn ends, for the
+ * other lead at work; and as a lead's turn starts. Looks wait their turn,
+ * one at a time, and a task that asks again while it waits is looked at
+ * once: a lead making many edits in a row costs one look, not one for each.
+ * A running task is an open one with its lead's session here. A lead is told
+ * only while it is in a turn, at work on the task, and reads it as that turn
+ * ends; one between turns isn't woken for it, and hears of it as its next
+ * turn starts.
  */
 
 type Store = SqlClient.SqlClient | Instance | Sessions | Ledger | Crypto.Crypto
 
-/** The calls that change files, by what their agent said they are. */
-const EDITS: ReadonlySet<string> = new Set(['edit', 'delete', 'move'])
+/** The calls that may change files, by what their agent said they are: its edits, and its commands, which may write too. */
+const CHANGING: ReadonlySet<string> = new Set(['edit', 'delete', 'move', 'execute'])
 
 /** The heads-up a lead gets of another task changing the files it changes. */
 export const overlapWords = (other: { readonly slug: string; readonly title: string }, files: ReadonlyArray<string>) => {
@@ -83,6 +84,8 @@ export class Overlaps extends Context.Service<
       ) =>
         Effect.gen(function* () {
           if (files.length === 0 || (yield* told(to.id, about.id))) return
+          // Still in its turn as it is told: reading the changes takes a while, and a turn may have ended meanwhile.
+          if (!(yield* sessions.onTasks).some((session) => session.taskId === to.id && !session.reviewer && session.turnRunning)) return
           const sql = yield* SqlClient.SqlClient
           const [task] = yield* sql<{ revision: number }>`SELECT revision FROM tasks WHERE id = ${to.id}`
           yield* fact({
@@ -170,18 +173,22 @@ export class Overlaps extends Context.Service<
           return thread?.taskId ?? null
         })
 
-      /** Whether an event ends a lead's change of files: an edit's call, or its turn, which may have changed them with a command. */
+      /**
+       * Whether an event is a time to look: a call that may have changed files ended, an edit or a command (one that failed may
+       * have written something first), while its lead is still in its turn; a turn ended, for the other lead at work; or a turn
+       * started, for a lead that was between turns when its overlap was first seen.
+       */
       const ends = (event: LiveEvent) => {
-        if (event._tag === 'TurnEnded') return true
+        if (event._tag === 'TurnEnded' || event._tag === 'TurnStarted') return true
         if (event._tag !== 'Agent') return false
         const agent = event.event
-        if (agent._tag === 'ToolCall' && EDITS.has(agent.kind)) {
-          if (agent.status === 'completed') return true
-          if (agent.status !== 'failed') editing.add(`${event.threadId}\u0000${agent.toolCallId}`)
+        const ended = (status: string | undefined) => status === 'completed' || status === 'failed'
+        if (agent._tag === 'ToolCall' && CHANGING.has(agent.kind)) {
+          if (ended(agent.status)) return true
+          editing.add(`${event.threadId}\u0000${agent.toolCallId}`)
           return false
         }
-        if (agent._tag !== 'ToolCallUpdate' || (agent.status !== 'completed' && agent.status !== 'failed')) return false
-        return editing.delete(`${event.threadId}\u0000${agent.toolCallId}`) && agent.status === 'completed'
+        return agent._tag === 'ToolCallUpdate' && ended(agent.status) && editing.delete(`${event.threadId}\u0000${agent.toolCallId}`)
       }
 
       const onLive = (event: LiveEvent) =>
