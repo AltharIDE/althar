@@ -95,9 +95,14 @@ describe('why a review needed the person', () => {
     expect(stuckWords.what(stuck({ why: 'over_budget' }), 'Codex')).toBe('Codex has worked on this step for a long time.')
   })
 
-  it('counts the findings still open after the last review round, and says none where none are', () => {
-    expect(stuckWords.what(stuck({ why: 'round_limit', open: 0 }), 'Codex')).toBe('Reviewed three times.')
-    expect(stuckWords.what(stuck({ why: 'round_limit', open: 3 }), 'Codex')).toBe('Reviewed three times. 3 findings open.')
+  it('says how many rounds of review ran, whatever today’s setting is, and that the last fixes were not reviewed', () => {
+    const said = (round: number, open = 0) => stuckWords.what(stuck({ why: 'round_limit', round, open }), 'Codex')
+    expect(said(1)).toBe("Reviewed once; the last fixes weren't reviewed.")
+    expect(said(2)).toBe("Reviewed twice; the last fixes weren't reviewed.")
+    expect(said(3)).toBe("Reviewed 3 times; the last fixes weren't reviewed.")
+    expect(said(5)).toBe("Reviewed 5 times; the last fixes weren't reviewed.")
+    expect(said(1, 1)).toBe("Reviewed once; the last fixes weren't reviewed. 1 finding open.")
+    expect(said(3, 3)).toBe("Reviewed 3 times; the last fixes weren't reviewed. 3 findings open.")
   })
 })
 
