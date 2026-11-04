@@ -49,7 +49,7 @@ import { ChecksAsked, inspectChecks } from './readChecks'
 import { logForLead, logPage, readLog } from './checkLogs'
 import { Agents, RuntimeConfig } from './Config'
 import { Models } from './Models'
-import { detailsOf, reviewRecordOf, reviewSeal, sealOf, type SessionNamer } from './pullRequestReview'
+import { detailsOf, reviewRecordOf, reviewSeal, sealOf, unreviewedNote, unreviewedOf, type SessionNamer } from './pullRequestReview'
 import { Connections, NotConnected } from './Connections'
 import {
   ATTEMPTS,
@@ -1038,7 +1038,7 @@ export class Changes extends Context.Service<
         issue: { readonly key: string; readonly url: string; readonly sameHost: boolean; readonly partOf?: boolean } | null,
         repository: { readonly slug: string; readonly template: string | null },
         since: string | null = null,
-        review: { readonly seal: string | null; readonly details: string } | null = null,
+        review: { readonly seal: string | null; readonly details: string | null; readonly note?: string | null } | null = null,
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -1075,8 +1075,9 @@ export class Changes extends Context.Service<
       /**
        * What the pull request says of the review its change had, where the
        * person has it on and the run had one: the folded section, and the
-       * seal where the host shows one (pullRequestReview.ts). Nothing it
-       * can't read holds the pull request up: it opens without it.
+       * seal where the host shows one (pullRequestReview.ts); and, whatever
+       * the person has on, a note where the task went on with fixes no review
+       * read. Nothing it can't read holds the pull request up: it opens without it.
        */
       const reviewFor = (input: {
         readonly runId: string
@@ -1087,10 +1088,12 @@ export class Changes extends Context.Service<
       }) =>
         Effect.gen(function* () {
           const setting = yield* reviewSeal
-          if (!setting.on) return null
-          const record = yield* reviewRecordOf({ ...input, named: yield* sessionNamer, sent: memory.recall })
-          if (record === null) return null
-          return { seal: input.github ? sealOf(setting.style, record) : null, details: detailsOf(record) }
+          // A task that went on with fixes no review read says so, whatever the person chose to show of the review.
+          const unreviewed = yield* unreviewedOf(input.runId)
+          const record = setting.on ? yield* reviewRecordOf({ ...input, named: yield* sessionNamer, sent: memory.recall }) : null
+          const note = unreviewed === null ? null : unreviewedNote(unreviewed, record?.passes ?? null)
+          if (record === null) return note === null ? null : { seal: null, details: null, note }
+          return { seal: input.github ? sealOf(setting.style, record) : null, details: detailsOf(record), note }
         }).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('The pull request opens without its review', cause), null)))
 
       /** The hosts of a project's repositories, or of those a task changes, the first first: null for each on none Althar knows. */

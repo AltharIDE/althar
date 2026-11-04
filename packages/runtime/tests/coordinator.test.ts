@@ -279,7 +279,7 @@ describe('the coordinator loop', () => {
   it.live('stops after two rounds when the person set two', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      yield* setPlansAndReviews({ rounds: 2 })
+      yield* setPlansAndReviews({ rounds: 2, roundsOut: 'ask' })
       const { projectId, threadId } = yield* opened
       yield* say(threadId, 'Tighten the types. [coordinator:plan] [lead:finish] [review:always]')
       const [waiting] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'waiting')
@@ -296,10 +296,68 @@ describe('the coordinator loop', () => {
     }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.millis(50) }))),
   )
 
+  it.live('goes on to its end after its last round when the lead settled every finding, saying the fixes were not reviewed again', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      // One round, and the default for when rounds run out.
+      yield* setPlansAndReviews({ rounds: 1 })
+      const { projectId, threadId } = yield* opened
+      yield* say(threadId, 'Tighten the types. [coordinator:plan] [lead:finish] [review:always]')
+      const [card] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
+      assert.lengthOf(yield* sql`SELECT id FROM attention_requests WHERE kind = 'stuck'`, 0)
+      assert.deepStrictEqual(
+        (yield* results(card?.threadId ?? '')).map((step) => step.step),
+        ['implement', 'review', 'settle'],
+      )
+      const notices = yield* sql<{ title: string; description: string | null }>`
+        SELECT json_extract(content, '$.title') AS title, json_extract(content, '$.description') AS description
+        FROM thread_items WHERE thread_id = ${card?.threadId ?? ''} AND kind = 'notice'`
+      assert.deepStrictEqual(
+        notices.map((notice) => [notice.title, notice.description]).filter(([title]) => /re-reviewed/.test(title ?? '')),
+        [['Reviewed once; the last fixes weren’t re-reviewed.', null]],
+      )
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.millis(50) }))),
+  )
+
+  it.live('stops at its last round with a finding the lead left open, unless the person has it always carry on', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* setPlansAndReviews({ rounds: 1 })
+      const { projectId, threadId } = yield* opened
+      yield* say(threadId, 'Tighten the types. [coordinator:plan] [lead:finish] [lead:leave-open] [review:always]')
+      // Settled: stuck as it was.
+      const [waiting] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'waiting')
+      const [call] = yield* sql<{ payload: string }>`SELECT payload FROM attention_requests WHERE kind = 'stuck'`
+      assert.deepStrictEqual(pick(JSON.parse(call?.payload ?? '{}') as Record<string, unknown>, ['step', 'why', 'round', 'open']), {
+        step: 'review',
+        why: 'round_limit',
+        round: 1,
+        open: 1,
+      })
+      assert.isDefined(waiting)
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.millis(50) }))),
+  )
+
+  it.live('goes on with a finding left open when the person has it always carry on, and lists it on the task', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* setPlansAndReviews({ rounds: 1, roundsOut: 'always' })
+      const { projectId, threadId } = yield* opened
+      yield* say(threadId, 'Tighten the types. [coordinator:plan] [lead:finish] [lead:leave-open] [review:always]')
+      const [card] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
+      assert.lengthOf(yield* sql`SELECT id FROM attention_requests WHERE kind = 'stuck'`, 0)
+      const [notice] = yield* sql<{ description: string | null }>`
+        SELECT json_extract(content, '$.description') AS description FROM thread_items
+        WHERE thread_id = ${card?.threadId ?? ''} AND kind = 'notice' AND json_extract(content, '$.title') LIKE '%re-reviewed%'`
+      assert.match(notice?.description ?? '', /^Findings left open:\n- /)
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.millis(50) }))),
+  )
+
   it.live('stops after three rounds for the person, and takes a settling that changes nothing as the last word', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const runs = yield* Runs
+      yield* setPlansAndReviews({ roundsOut: 'ask' })
       const { projectId, threadId } = yield* opened
       yield* say(threadId, 'Tighten the types. [coordinator:plan] [lead:finish] [review:always]')
       // Out of rounds, with settled changes no review has seen: it needs the person, with the findings still open.
@@ -1021,6 +1079,7 @@ describe('a step that needs the person', () => {
   it.live('starts afresh, each round, a reviewer that says yes to its step’s model but stays on another', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
+      yield* setPlansAndReviews({ roundsOut: 'ask' })
       const { task } = yield* planned('Tighten the types', '[lead:finish] [review:always]', [
         { key: 'implement', agentId: 'claude-code' },
         { key: 'review', agentId: 'codex', model: 'large' },

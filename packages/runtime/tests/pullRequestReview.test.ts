@@ -17,6 +17,8 @@ import {
   sealUrl,
   setReviewSeal,
   setReviewSealStyle,
+  timesOf,
+  unreviewedNote,
 } from '../src/pullRequestReview'
 import { ask, cards, connect, git, runtimeWith } from './changesSupport'
 import { HOST, hosted, until } from './support'
@@ -260,5 +262,28 @@ describe('a pull request opened after a review', () => {
       assert.notInclude(body, '<picture>')
       assert.notInclude(body, '<details>')
     }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+})
+
+describe('a pull request whose last fixes no review read', () => {
+  const unreviewed = { open: ['Name it better.'] }
+
+  it('has no seal, and folds the review as one that did not read the last fixes', () => {
+    assert.isNull(sealOf('ring', { ...RECORD, unreviewed }))
+    assert.isNotNull(sealOf('ring', { ...RECORD, unreviewed: null }))
+    const folded = detailsOf({ ...RECORD, unreviewed })
+    assert.include(folded, '<summary>Reviewed by GPT-6.1 Sol in 3 passes; the last fixes weren’t re-reviewed</summary>')
+    assert.include(folded, '**Left open**\n\n- Name it better.')
+  })
+
+  it('says so plainly at its head, with what was left open', () => {
+    assert.strictEqual(
+      unreviewedNote({ open: [] }, 1),
+      '> **Reviewed once; the last fixes weren’t re-reviewed.** The code changed after the last review pass, and no later pass read it.',
+    )
+    assert.include(unreviewedNote(unreviewed, null), '> **The last fixes weren’t re-reviewed.**')
+    assert.include(unreviewedNote(unreviewed, 2), '> Findings left open:\n> - Name it better.')
+    assert.strictEqual(timesOf(2), 'twice')
+    assert.strictEqual(timesOf(5), '5 times')
   })
 })

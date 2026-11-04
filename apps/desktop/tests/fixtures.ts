@@ -1070,7 +1070,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       postTeamReviews: false,
       automationsPaused: false,
       folderWait: 'smart' as const,
-      plansAndReviews: { countdown: 25, rounds: 3 } as const,
+      plansAndReviews: { countdown: 25, rounds: 3, roundsOut: 'settled' } as const,
       newProjects: { permissions: 'rules', usageLimit: 'move', rotateAccounts: false, end: 'draft' } as const,
     })),
     setCoAuthor: vi.fn(async () => {}),

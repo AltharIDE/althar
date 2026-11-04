@@ -639,7 +639,7 @@ const playStall = async (
  * report a review. Settling findings, it writes a file and commits it, so
  * the change changes, and finishes; a later review round passes. The session remembers its
  * markers: `[review:always]` finds something every round, and
- * `[lead:set-aside]` settles without changing anything. `[lead:wait]` works
+ * `[lead:set-aside]` settles without changing anything, and `[lead:leave-open]` settles only the first finding it is given. `[lead:wait]` works
  * until it is stopped, and so does `[review:wait]` reviewing, or `[review:wait-later]` from its second round: never ending
  * by itself, but only when its turn is cancelled, its session closed, or the test opens the marker's hold;
  * `[review:slowly]` takes some seconds before it reports, long enough for what it reviews for to change meanwhile;
@@ -1003,7 +1003,8 @@ const playRole = async (
               )
             ).trim()
         // What became of each finding, by the ids Althar gave them: a fix with what changed and the commit that made it.
-        const findings = (text.match(/find_[0-9a-f]{32}/g) ?? []).map((id) =>
+        const ids = text.match(/find_[0-9a-f]{32}/g) ?? []
+        const findings = (session.markers.has('[lead:leave-open]') ? ids.slice(0, 1) : ids).map((id) =>
           aside
             ? { id, outcome: 'set_aside', reason: 'It reads as intended.' }
             : { id, outcome: 'fixed', reason: 'The heading names the retry.', commit: fix },

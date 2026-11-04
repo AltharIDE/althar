@@ -5,7 +5,7 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 import { States } from '../../storybook/States'
 import { PlansAndReviews, type PlansAndReviewsValue, plansAndReviewsDefault } from './PlansAndReviews'
 
-/* The two rows, their choices kept as Settings keeps them. */
+/* The rows, their choices kept as Settings keeps them. */
 function Rows({
   start = plansAndReviewsDefault,
   onChange,
@@ -75,6 +75,18 @@ export const NoCountdown: Story = {
   },
 }
 
+/** Another choice for what happens when the rounds run out offers the way back to today's. */
+export const AlwaysCarryOn: Story = {
+  render: () => <Rows start={{ ...plansAndReviewsDefault, roundsOut: 'always' }} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('combobox', { name: 'When rounds run out' })).toHaveTextContent('Always carry on')
+    await userEvent.click(c.getByRole('button', { name: 'Use Carry on when every finding is settled' }))
+    await expect(onChange).toHaveBeenLastCalledWith({ roundsOut: 'settled' })
+    await expect(c.getByRole('combobox', { name: 'When rounds run out' })).toHaveTextContent('Carry on when every finding is settled')
+  },
+}
+
 export const AllStates: Story = {
   render: () => (
     <States
@@ -83,12 +95,13 @@ export const AllStates: Story = {
         { state: 'today’s values', node: <PlansAndReviews value={plansAndReviewsDefault} onChange={fn()} /> },
         {
           state: 'shorter',
-          node: <PlansAndReviews value={{ countdown: 10, rounds: 1 }} onChange={fn()} />,
+          node: <PlansAndReviews value={{ countdown: 10, rounds: 1, roundsOut: 'ask' }} onChange={fn()} />,
         },
         {
           state: 'longer',
-          node: <PlansAndReviews value={{ countdown: 60, rounds: 5 }} onChange={fn()} />,
+          node: <PlansAndReviews value={{ countdown: 60, rounds: 5, roundsOut: 'always' }} onChange={fn()} />,
         },
+        { state: 'ask me', node: <PlansAndReviews value={{ ...plansAndReviewsDefault, roundsOut: 'ask' }} onChange={fn()} /> },
         { state: 'right away', node: <PlansAndReviews value={{ ...plansAndReviewsDefault, countdown: 0 }} onChange={fn()} /> },
       ]}
     />

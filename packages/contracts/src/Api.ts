@@ -353,12 +353,19 @@ export type FolderWait = typeof FolderWait.Type
  */
 export const COUNTDOWNS = [0, 10, 25, 60] as const
 export const REVIEW_ROUNDS = [1, 2, 3, 5] as const
+/**
+ * What a task does when its rounds of review run out with changes no review has seen: goes on to its ending once the lead has
+ * settled every finding, goes on whatever is left open, or asks the person (the stuck card).
+ */
+export const ROUNDS_OUT = ['settled', 'always', 'ask'] as const
 
 export const PlansAndReviews = Schema.Struct({
   /** Seconds a proposed plan waits before it starts on its own; 0 starts it at once. */
   countdown: Schema.Literals(COUNTDOWNS),
   /** Review rounds before a task is left to the person with findings open. */
   rounds: Schema.Literals(REVIEW_ROUNDS),
+  /** What a task does when its rounds run out and the lead's last fixes were never reviewed. */
+  roundsOut: Schema.Literals(ROUNDS_OUT),
 })
 export type PlansAndReviews = typeof PlansAndReviews.Type
 
@@ -366,7 +373,7 @@ export type PlansAndReviews = typeof PlansAndReviews.Type
 export type PlansAndReviewsChange = { readonly [Key in keyof PlansAndReviews]?: PlansAndReviews[Key] | undefined }
 
 /** Today's values, which a setting keeps until the person changes it. */
-export const PLANS_AND_REVIEWS: PlansAndReviews = { countdown: 25, rounds: 3 }
+export const PLANS_AND_REVIEWS: PlansAndReviews = { countdown: 25, rounds: 3, roundsOut: 'settled' }
 
 /**
  * What a project's rules start from when it is made. A project made earlier keeps its own rules, and each is changed in a
@@ -3729,6 +3736,7 @@ export const Api = RpcGroup.make(
     {
       countdown: Schema.optional(PlansAndReviews.fields.countdown),
       rounds: Schema.optional(PlansAndReviews.fields.rounds),
+      roundsOut: Schema.optional(PlansAndReviews.fields.roundsOut),
     },
     Schema.Void,
   ),

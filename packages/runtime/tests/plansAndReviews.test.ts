@@ -5,7 +5,7 @@ import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Instance } from '../src/Instance'
-import { plansAndReviewsOf, newProjectDefaultsOf, setPlansAndReviews, setNewProjectDefaults } from '../src/plansAndReviews'
+import { plansAndReviewsOf, roundsOutNow, newProjectDefaultsOf, setPlansAndReviews, setNewProjectDefaults } from '../src/plansAndReviews'
 import { Plans } from '../src/Plans'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
@@ -38,14 +38,27 @@ describe('how long work goes on alone', () => {
       yield* setPlansAndReviews({ countdown: 25 })
       assert.deepStrictEqual(yield* settings, [['review_rounds', '2']])
       yield* setPlansAndReviews({ countdown: 60 })
-      assert.deepStrictEqual(yield* plansAndReviewsOf, { countdown: 60, rounds: 2 })
+      assert.deepStrictEqual(yield* plansAndReviewsOf, { countdown: 60, rounds: 2, roundsOut: 'settled' })
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.effect('keeps what happens when rounds run out, read live, a row only when it differs', () =>
+    Effect.gen(function* () {
+      assert.strictEqual((yield* plansAndReviewsOf).roundsOut, 'settled')
+      yield* setPlansAndReviews({ roundsOut: 'always' })
+      assert.strictEqual(yield* roundsOutNow, 'always')
+      assert.deepStrictEqual(yield* settings, [['review_rounds_out', 'always']])
+      yield* setPlansAndReviews({ roundsOut: 'ask' })
+      assert.strictEqual(yield* roundsOutNow, 'ask')
+      yield* setPlansAndReviews({ roundsOut: 'settled' })
+      assert.deepStrictEqual(yield* settings, [])
     }).pipe(Effect.provide(runtime())),
   )
 
   it.effect('reads a value that is no choice as today’s', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      yield* sql`INSERT INTO settings (key, value, updated_at) VALUES ('review_rounds', '9', '2026-10-31T10:00:00.000Z'), ('plan_countdown_seconds', 'soon', '2026-10-31T10:00:00.000Z')`
+      yield* sql`INSERT INTO settings (key, value, updated_at) VALUES ('review_rounds', '9', '2026-10-31T10:00:00.000Z'), ('review_rounds_out', 'never', '2026-10-31T10:00:00.000Z'), ('plan_countdown_seconds', 'soon', '2026-10-31T10:00:00.000Z')`
       assert.deepStrictEqual(yield* plansAndReviewsOf, PLANS_AND_REVIEWS)
     }).pipe(Effect.provide(runtime())),
   )

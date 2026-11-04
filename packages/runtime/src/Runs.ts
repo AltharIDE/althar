@@ -45,7 +45,8 @@ import { type CheckoutConsent, type CheckoutSeen, checkoutsHeld, giveBackSpot, p
 import { quickIn } from './kinds'
 import { capitalized, Limits, lowWords, NEARLY_OUT, type Out, outStep, outWords, type Room, whenWords } from './Limits'
 import { Live, type LiveEvent } from './Live'
-import { roundsNow } from './plansAndReviews'
+import { roundsNow, roundsOutNow } from './plansAndReviews'
+import { unreviewedLine } from './pullRequestReview'
 import { Policies, usageLimitOf } from './Policies'
 import { conventionsAt } from './conventions'
 import { commitOf, commitsAhead, git, treeOf, uncommittedFiles } from './git'
@@ -3630,8 +3631,16 @@ export class Runs extends Context.Service<
             yield* review(current, attempt.iteration + 1, summary)
             return 'Althar has your summary. The review looks again.'
           }
-          // Out of rounds, with changes no review has seen: that isn't ready, it's the person's call (05: Stuck, findings open).
+          // Out of rounds, with changes no review has seen: that isn't ready. It goes on to its ending where the person's setting says
+          // it may, once every finding is settled or whatever is left open; else it's their call (05: Stuck, findings open).
           if (workAfter !== workBefore) {
+            const left = yield* openFindings(current)
+            const carry = yield* roundsOutNow
+            if (carry === 'always' || (carry === 'settled' && left.length === 0)) {
+              yield* carriedOn(current, attempt.id, attempt.iteration + 1, summary, left)
+              yield* conclude(current)
+              return 'Althar has your summary. That was the last round of review; the task goes on to its end with the last fixes not reviewed again, and the person decides on any merge.'
+            }
             const { review: reviewer } = yield* stepsOf(current)
             yield* stuck(current, null, {
               step: 'review',
@@ -3639,7 +3648,7 @@ export class Runs extends Context.Service<
               detail: summary,
               agentId: reviewer?.agentId ?? null,
               round: attempt.iteration + 1,
-              open: (yield* openFindings(current)).length,
+              open: left.length,
             })
             return 'Althar has your summary. That was the last round of review, so the person decides what comes next.'
           }
@@ -3677,6 +3686,29 @@ export class Runs extends Context.Service<
             { id: itemId },
           )
           return `Althar shows ${pictures.length === 1 ? 'it' : `the ${pictures.length}`} in the thread now, each with its caption, and keeps ${pictures.length === 1 ? 'it' : 'them'}: don't list ${pictures.length === 1 ? 'it' : 'them'} again in what you say.`
+        })
+
+      /**
+       * The task goes on after its rounds of review ran out, the lead's last fixes never read by a reviewer: the settle that made
+       * them says so (the pull request tells it, pullRequestReview.ts), and the thread does, with what was left open.
+       */
+      const carriedOn = (
+        run: RunRow,
+        attemptId: string,
+        reviews: number,
+        summary: string,
+        left: ReadonlyArray<{ readonly title: string | null; readonly claim: string }>,
+      ) =>
+        Effect.gen(function* () {
+          yield* change('node_attempts', attemptId, { output: JSON.stringify({ summary, unreviewed: 1 }) })
+          yield* addItem({ projectId: run.projectId, threadId: run.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: unreviewedLine(reviews),
+            ...(left.length === 0
+              ? {}
+              : { description: `Findings left open:\n${left.map((finding) => `- ${finding.title ?? finding.claim}`).join('\n')}` }),
+          })
         })
 
       /** Records what the lead did about each of the run's open findings it names: fixed, or set aside with its reason. */
