@@ -60,6 +60,7 @@ import type { InputImage } from './sentImages'
 import { SignIns } from './SignIns'
 import { alsoPlanned, siblingsOf } from './siblings'
 import { Tasks } from './Tasks'
+import { setToward } from './towards'
 import { addItem, transcript } from './threads'
 import { personsWords, quoted } from './TaskActions'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
@@ -119,10 +120,14 @@ type Store =
   | Automations
   | RuntimeConfig
 
-/* Where a task works, as the coordinator says it (ADR-091): Local, in the person's own checkout, or a worktree; and why. */
+/*
+ * Where a task works, as the coordinator says it (ADR-091): Local, in the person's own checkout, or a worktree; and why. And the
+ * branch it works toward (ADR-093): it starts from it and its pull request goes into it; the project's Work toward without it.
+ */
 const Where = {
   works_in: Schema.optional(Schema.Literals(['local', 'worktree'])),
   works_in_why: Schema.optional(Schema.String),
+  toward: Schema.optional(Schema.String),
 }
 const Drafted = Schema.Struct({
   title: Schema.String,
@@ -403,8 +408,10 @@ export class Coordinator extends Context.Service<
             run: string | null
             lead: string | null
             unbranched: number
+            toward: string | null
           }>`
             SELECT k.id, k.slug, k.title, k.state,
+              (SELECT group_concat(DISTINCT w.toward) FROM workspaces w WHERE w.task_id = k.id AND w.toward IS NOT NULL) AS toward,
               (SELECT r.state FROM runs r WHERE r.task_id = k.id ORDER BY r.created_at DESC LIMIT 1) AS run,
               EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = k.id AND w.access = 'write' AND w.branched_at IS NULL) AS unbranched,
               (SELECT s.agent_id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
@@ -435,7 +442,9 @@ export class Coordinator extends Context.Service<
               // A plain task that hasn't changed the repository has no branch, and nothing to ship.
               const words =
                 task.unbranched === 1 ? 'no branch: it has changed nothing in the repository' : found === undefined ? '' : listWords(found)
-              return `- ${task.slug}: ${task.title} (${state}${task.lead === null ? '' : `, led by ${nameOf(task.lead)}`})${words === '' ? '' : ` — ${words}`}`
+              // What it works toward, where it isn't the default branch (ADR-093).
+              const toward = task.toward === null ? '' : `, toward ${task.toward.split(',').join(' and ')}`
+              return `- ${task.slug}: ${task.title} (${state}${task.lead === null ? '' : `, led by ${nameOf(task.lead)}`}${toward})${words === '' ? '' : ` — ${words}`}`
             })
             .join('\n')
         })
@@ -455,8 +464,9 @@ export class Coordinator extends Context.Service<
           const task = yield* taskOf(access, reference)
           const results = yield* sql<{ content: string }>`
             SELECT content FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'step_result' ORDER BY sequence`
-          const workspaces = yield* sql<{ branch: string; path: string; name: string; branched: number }>`
-            SELECT w.branch, w.path, b.display_name AS name, w.branched_at IS NOT NULL AS branched
+          const workspaces = yield* sql<{ branch: string; path: string; name: string; branched: number; into: string }>`
+            SELECT w.branch, w.path, b.display_name AS name, w.branched_at IS NOT NULL AS branched,
+              coalesce(w.toward, b.default_base_ref, 'main') AS into
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             WHERE w.task_id = ${task.id} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
           const seen = yield* pullRequests(task.id)
@@ -482,11 +492,14 @@ export class Coordinator extends Context.Service<
             .join('\n\n')
         })
 
-      /** A task's branch in a repository, or that it has none yet: a plain task whose lead hasn't changed the repository. */
-      const branchWords = (workspace: { readonly branch: string; readonly branched: number } | undefined) =>
+      /**
+       * A task's branch in a repository, and the branch its work goes into (ADR-093), or that it has none yet: a plain task whose
+       * lead hasn't changed the repository.
+       */
+      const branchWords = (workspace: { readonly branch: string; readonly branched: number; readonly into: string } | undefined) =>
         workspace === undefined || workspace.branched === 1
-          ? `branch ${workspace?.branch ?? ''}`
-          : 'no branch yet: its lead has changed nothing in the repository'
+          ? `branch ${workspace?.branch ?? ''}, toward ${workspace?.into ?? 'main'}`
+          : `no branch yet: its lead has changed nothing in the repository; it works toward ${workspace.into}`
       const upper = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`
 
       /** The issue a task came from, where it stands as last seen, and whether Althar moved it to In Progress as the task started. */
@@ -592,7 +605,7 @@ export class Coordinator extends Context.Service<
        */
       const drafting = (
         access: ToolAccess,
-        { title, description, issue: from, part_of: partOf, repositories, works_in: asked }: typeof Drafted.Type,
+        { title, description, issue: from, part_of: partOf, repositories, works_in: asked, toward }: typeof Drafted.Type,
         plain = false,
       ) =>
         Effect.gen(function* () {
@@ -640,8 +653,17 @@ export class Coordinator extends Context.Service<
               ...(plain ? { plain } : {}),
               // Where it works: as the coordinator said, else the project's default (ADR-091).
               worksIn: yield* worksInFor(access.projectId, asked),
+              // What it works toward: as the coordinator said, else the project's Work toward (ADR-093).
+              ...(toward === undefined || toward.trim() === '' ? {} : { toward }),
             })
             .pipe(
+              Effect.catchTag('BranchNotFound', (missing) =>
+                Effect.fail(
+                  new ToolRefused({
+                    message: `${missing.repository} has no branch ${missing.branch} on its remote, so the task wasn't drafted. Check the name with the person; create_branch makes one, when they ask for it.`,
+                  }),
+                ),
+              ),
               // A project of several repositories needs to hear which the task changes: said so, with the ones it has.
               Effect.catchTag('RepositoriesNeeded', (needed) =>
                 Effect.fail(
@@ -1149,6 +1171,17 @@ export class Coordinator extends Context.Service<
           const steps: Array<PlanStep> = [{ key: 'implement', ...(yield* stepOf(access.projectId, proposed.lead)), skipped: false }]
           if (proposed.review !== null && proposed.review !== undefined)
             steps.push({ key: 'review', ...(yield* stepOf(access.projectId, proposed.review)), skipped: false })
+          // What it works toward, as said now; as it was drafted without it (ADR-093).
+          if (proposed.toward !== undefined)
+            yield* setToward(task.id, proposed.toward.trim() === '' ? null : proposed.toward).pipe(
+              Effect.catchTag('BranchNotFound', (missing) =>
+                Effect.fail(
+                  new ToolRefused({
+                    message: `${missing.repository} has no branch ${missing.branch} on its remote, so the plan wasn't proposed. Check the name with the person.`,
+                  }),
+                ),
+              ),
+            )
           // Where it works: as said now, else as it was drafted, else the project's default (ADR-091).
           const drafted = (yield* worksLocal(task.id)) ? 'local' : undefined
           const worksIn = yield* worksInFor(access.projectId, proposed.works_in ?? drafted)
@@ -1584,7 +1617,7 @@ export class Coordinator extends Context.Service<
 
       const listTasksTool = tool(
         'list_tasks',
-        "The project's tasks, newest first: what each is, where it stands, who leads it, and, after a dash, how its pull request stands as Althar last saw it: draft or ready for review, checks, commits not pushed yet, merged or closed. A merged pull request is finished: don't suggest merging it. A closed one is as last seen only, since Althar stops watching it and it may have been reopened: say so rather than calling the task finished.",
+        "The project's tasks, newest first: what each is, where it stands, who leads it, the branch it works toward where that isn't the default, and, after a dash, how its pull request stands as Althar last saw it: draft or ready for review, checks, commits not pushed yet, merged or closed. A merged pull request is finished: don't suggest merging it. A closed one is as last seen only, since Althar stops watching it and it may have been reopened: say so rather than calling the task finished.",
         nothing,
         (access) => list(access),
       )
@@ -1614,7 +1647,7 @@ export class Coordinator extends Context.Service<
         findTasksTool,
         tool(
           'read_task',
-          "A task: what it is, what it built as its lead last said it (and what it couldn't show working), its branch, what each of its steps reported, and its pull request: link, checks (passing, failing with names, pending), commits not pushed yet, when it was merged or closed, and what isn't known or may be out of date.",
+          "A task: what it is, what it built as its lead last said it (and what it couldn't show working), its branch and the branch it works toward, what each of its steps reported, and its pull request: link, checks (passing, failing with names, pending), commits not pushed yet, when it was merged or closed, and what isn't known or may be out of date.",
           named,
           readTask,
         ),
@@ -1663,6 +1696,11 @@ export class Coordinator extends Context.Service<
               works_in_why: {
                 type: 'string',
                 description: "Why, in a few words, where it isn't the project's default: shown on its card.",
+              },
+              toward: {
+                type: 'string',
+                description:
+                  "The branch it works toward, such as release/0.8.0: it starts from it, and its pull request goes into it. Only where the person asked for that branch, or the task is a fix for it; the project's Work toward without it. Its repository's remote must have it.",
               },
             },
             required: ['title'],
@@ -1733,8 +1771,14 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'read_default_branch_checks',
-          "The checks on the latest commit of a repository's default branch (main, often), with the end of the first failed ones' logs: to tell whether a check failing on a pull request fails there too, broken already rather than by the change. repository names it, in a project of several. It only reads.",
-          { type: 'object', properties: { repository: { type: 'string' } } },
+          "The checks on the latest commit of a repository's default branch (main, often), or of the branch named (branch: the one a pull request goes into, such as release/0.8.0), with the end of the first failed ones' logs: to tell whether a check failing on a pull request fails there too, broken already rather than by the change. repository names it, in a project of several. It only reads.",
+          {
+            type: 'object',
+            properties: {
+              repository: { type: 'string' },
+              branch: { type: 'string', description: 'A branch other than the default: the one the pull request goes into.' },
+            },
+          },
           (access, input) => readDefaultBranchChecks(access.projectId, input),
         ),
         tool(
@@ -1813,6 +1857,11 @@ export class Coordinator extends Context.Service<
                 type: 'string',
                 description: "Why, in a few words, where it isn't the project's default: shown on its card.",
               },
+              toward: {
+                type: 'string',
+                description:
+                  "The branch it works toward, such as release/0.8.0: it starts from it, and its pull request goes into it. Only where the person asked for that branch, or the task is a fix for it; the project's Work toward without it. Its repository's remote must have it.",
+              },
             },
             required: ['task', 'lead'],
           },
@@ -1845,6 +1894,11 @@ export class Coordinator extends Context.Service<
               works_in_why: {
                 type: 'string',
                 description: "Why, in a few words, where it isn't the project's default: shown on its card.",
+              },
+              toward: {
+                type: 'string',
+                description:
+                  "The branch it works toward, such as release/0.8.0: it starts from it, and its pull request goes into it. Only where the person asked for that branch, or the task is a fix for it; the project's Work toward without it. Its repository's remote must have it.",
               },
             },
             required: ['title', 'lead'],

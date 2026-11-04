@@ -12,6 +12,7 @@ import { coordinatorFolderAt } from './coordinatorFolder'
 import { repositoryOf, viaHost } from './coordinatorPullRequests'
 import type { AskedAction, AskedResult, FreshAction } from './Errands'
 import { Instance } from './Instance'
+import { commitsOf, fetchBranch, fetchSpecs, git, PUSHED, pushTo } from './git'
 import { bounded } from './readChecks'
 import { ActionNotPerformed, ToolRefused } from './toolErrors'
 import type { Tool, ToolAccess } from './ToolServer'
@@ -564,6 +565,153 @@ const readReleaseSteps = (projectId: string, input: unknown) =>
     )
   })
 
+// ---- Release branches (ADR-093) ---------------------------------------------
+
+const BranchAsked = Schema.Struct({
+  branch: Schema.String,
+  from: Schema.optional(Schema.NullOr(Schema.String)),
+  repository: Schema.optional(Schema.NullOr(Schema.String)),
+  ...Word,
+})
+
+/** A repository's clone here, as the project names it: what a branch is pushed from, with Althar's sign-in. */
+const cloneOf = (projectId: string, named: string | null | undefined, path: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const instance = yield* Instance
+    const bindings = yield* sql<{ slug: string; name: string; clone: string }>`
+      SELECT b.slug, b.display_name AS name, l.path AS clone FROM repository_bindings b
+      JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+      WHERE b.project_id = ${projectId} AND b.detached_at IS NULL ORDER BY b.created_at, b.rowid`
+    const wanted = (named ?? '').trim().toLowerCase()
+    const binding =
+      bindings.find((one) => one.name.toLowerCase() === wanted || one.slug.toLowerCase() === wanted) ??
+      (bindings.length === 1 ? bindings[0] : undefined) ??
+      bindings.find((one) => path.at(-1)?.toLowerCase() === one.name.toLowerCase())
+    if (binding === undefined) return yield* refused('Name the repository, as the project names it.')
+    return binding.clone
+  })
+
+/** A name git takes for a branch, and never one read as an option. */
+const branchNameOf = (asked: string) =>
+  Effect.gen(function* () {
+    const name = asked.trim().replace(/^refs\/heads\//, '')
+    if (name === '' || name.startsWith('-') || !/^[A-Za-z0-9._/-]+$/.test(name) || name.includes('..') || name.endsWith('/'))
+      return yield* refused(`\`${asked}\` isn't a name git takes for a branch.`)
+    return name
+  })
+
+/**
+ * Makes a branch on the code host from a branch, a tag or a commit, on the
+ * person's word: release/0.8.0 from main, or from v0.7.0. Pushed by Althar
+ * from the person's clone, never forced, so a branch there already is never
+ * moved: one at that commit is done, one elsewhere refused.
+ */
+const createBranch = (projectId: string, input: unknown) =>
+  Effect.gen(function* () {
+    const asked = yield* decode(BranchAsked, input)
+    const branch = yield* branchNameOf(asked.branch)
+    const { host, repository } = yield* repositoryOf(projectId, asked.repository)
+    const clone = yield* cloneOf(projectId, asked.repository, repository.path)
+    const from = asked.from?.trim() || repository.defaultBranch
+    const where = repository.path.join('/')
+    const read: Effect.Effect<FreshAction, ToolRefused> = Effect.gen(function* () {
+      const commit = yield* viaHost(host.commitOf(repository, from))
+      const there = yield* host.branchHead(repository, branch).pipe(
+        Effect.map((head): string | null => head),
+        Effect.catch((error) => (error.reason === 'not_found' ? Effect.succeed(null) : Effect.fail(refused(error.message)))),
+      )
+      if (there === null) return { state: 'absent', head: commit }
+      if (there === commit) return { state: 'done', head: commit, answer: `${where} has ${branch} on ${sha(commit)} already.` }
+      return yield* refused(
+        `${where} has a branch ${branch} already, on ${sha(there)}, not on ${from} (${sha(commit)}). Althar never moves a branch that is there: tell the person.`,
+      )
+    })
+    const act = (fresh: FreshAction): Effect.Effect<AskedResult, ToolRefused | ActionNotPerformed> =>
+      Effect.gen(function* () {
+        const commit = fresh.head ?? ''
+        const target = yield* host.pushTarget(repository).pipe(Effect.mapError(definite))
+        const start = `refs/althar/start/${branch}`
+        // The commit, where the clone hasn't it yet: fetched by Althar, as nothing of the person's moves.
+        if ((yield* commitsOf(clone, [commit]))[0] == null) yield* fetchSpecs(clone, target, [`+${commit}:${start}`])
+        if ((yield* commitsOf(clone, [commit]))[0] == null)
+          return yield* new ActionNotPerformed({ message: `Althar couldn't fetch ${sha(commit)} from ${where}.` })
+        yield* pushTo(clone, target, branch, commit).pipe(Effect.mapError((error) => refused(error.stderr || error.message)))
+        yield* Effect.ignore(git(clone, 'update-ref', '-d', start))
+        yield* Effect.ignore(git(clone, 'update-ref', '-d', `${PUSHED}${branch}`))
+        yield* fetchBranch(clone, branch)
+        return `Made ${branch} on ${where}, from ${from} at ${sha(commit)}. Tasks work toward it with toward: ${branch}; the person can make it the project's Work toward in its settings.`
+      })
+    return {
+      ...wordOf(asked),
+      target: `${where} branch ${branch}`,
+      request: { branch, from },
+      read,
+      act,
+    }
+  })
+
+const PullAsked = Schema.Struct({
+  from: Schema.String,
+  into: Schema.optional(Schema.NullOr(Schema.String)),
+  title: Schema.String,
+  body: Schema.optional(Schema.NullOr(Schema.String)),
+  draft: Schema.optional(Schema.Boolean),
+  repository: Schema.optional(Schema.NullOr(Schema.String)),
+  ...Word,
+})
+
+/**
+ * Opens a pull request from one of the repository's branches into another,
+ * on the person's word: a release branch back into main, as its fixes go
+ * there too. One open from that branch already is done.
+ */
+const openPullRequest = (projectId: string, input: unknown) =>
+  Effect.gen(function* () {
+    const asked = yield* decode(PullAsked, input)
+    const from = yield* branchNameOf(asked.from)
+    const { host, repository } = yield* repositoryOf(projectId, asked.repository)
+    const into = asked.into?.trim() || repository.defaultBranch
+    if (from === into) return yield* refused(`A pull request goes from one branch into another: ${from} is both.`)
+    const where = repository.path.join('/')
+    const title = asked.title.trim()
+    if (title === '') return yield* refused('Give it a title.')
+    const draft = asked.draft === true && host.capabilities.drafts
+    const named = (change: { readonly number: number; readonly url: string }) =>
+      `${host.words.short} ${host.words.prefix}${change.number} (${change.url})`
+    const read: Effect.Effect<FreshAction, ToolRefused> = Effect.gen(function* () {
+      const head = yield* host
+        .branchHead(repository, from)
+        .pipe(
+          Effect.catch((error) => Effect.fail(refused(error.reason === 'not_found' ? `${where} has no branch ${from}.` : error.message))),
+        )
+      const open = yield* viaHost(host.findChange(repository, from))
+      if (open !== null)
+        return {
+          state: 'done',
+          head,
+          answer: `${named(open)} is open from ${from} already, into ${open.target}.`,
+        }
+      return { state: 'absent', head }
+    })
+    const act = (): Effect.Effect<AskedResult, ToolRefused | ActionNotPerformed> =>
+      host.openChange(repository, { title, body: asked.body?.trim() ?? '', source: from, target: into, draft }).pipe(
+        Effect.map(
+          (change) =>
+            `Opened ${named(change)}${draft ? ' as a draft' : ''}: ${from} into ${into}. Its checks run on it; merging it is the person's word, as any merge.`,
+        ),
+        Effect.mapError(definite),
+      )
+    return {
+      ...wordOf(asked),
+      target: `${where} pull ${from} into ${into}`,
+      branch: into,
+      request: { from, into, title, ...(draft ? { draft } : {}) },
+      read,
+      act,
+    }
+  })
+
 // ---- The tools -------------------------------------------------------------------
 
 /** The coordinator's release tools, each run in its context by `provide`. */
@@ -618,6 +766,39 @@ export const releaseTools = (
         required: ['tag'],
       },
       pushTag,
+    ),
+    asked(
+      'create_branch',
+      "Makes a branch on the code host, on the person's word only, never on your own initiative: from a branch, a tag or a commit (from), the default branch's latest without, such as release/0.8.0 from main or from v0.7.0. Pushed by Althar, never forced: a branch there already on that commit is done, one elsewhere is refused. A task then works toward it with toward. Their message in this turn (message) or an open errand's step (errand, step); a step binds target `<owner/repo> branch <branch>` and request {branch, from}, and no head or branch.",
+      {
+        type: 'object',
+        properties: {
+          branch: { type: 'string', description: 'The new branch: release/0.8.0.' },
+          from: { type: 'string', description: 'Where it starts: a branch, a tag or a commit. The default branch’s latest without.' },
+          repository: { type: 'string', description: 'The repository, by name. Needed only in a project of several.' },
+          ...wordInput,
+        },
+        required: ['branch'],
+      },
+      createBranch,
+    ),
+    asked(
+      'open_pull_request',
+      "Opens a pull request from one of the repository's branches into another, on the person's word only, never on your own initiative: a release branch back into the default branch (into, the default without), so its fixes land there too. One already open from that branch is done. Merging it is their word again, as any merge. Their message in this turn (message) or an open errand's step (errand, step); a step binds target `<owner/repo> pull <from> into <into>`, branch <into>, and request {from, into, title, draft?}.",
+      {
+        type: 'object',
+        properties: {
+          from: { type: 'string', description: 'The branch it brings in: release/0.8.0.' },
+          into: { type: 'string', description: 'The branch it goes into. The default branch without.' },
+          title: { type: 'string' },
+          body: { type: 'string', description: 'Its description, in Markdown: what the branch brings, in a few lines.' },
+          draft: { type: 'boolean' },
+          repository: { type: 'string', description: 'The repository, by name. Needed only in a project of several.' },
+          ...wordInput,
+        },
+        required: ['from', 'title'],
+      },
+      openPullRequest,
     ),
     ordinary(
       'read_release',
