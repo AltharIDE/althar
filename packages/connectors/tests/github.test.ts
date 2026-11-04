@@ -3,7 +3,15 @@ import { Duration, Effect } from 'effect'
 import { TestClock } from 'effect/testing'
 
 import { checkRunState, issueSearchOf, leftQueueOf, LISTING_KEPT_MS, makeGitHub, searchOf, statusesOf, tail } from '../src/github'
-import { fromOutside, type Issue, type IssueChange, type IssueQuery, type Repository, type StatusCategory } from '../src/model'
+import {
+  fromOutside,
+  type Issue,
+  type IssueChange,
+  type IssuePage,
+  type IssueQuery,
+  type Repository,
+  type StatusCategory,
+} from '../src/model'
 import { type Route, type Sent, stubFetch, variablesOf } from './stub'
 
 const API = 'https://api.github.com'
@@ -1687,6 +1695,66 @@ describe('GitHub as a tracker', () => {
         assert.isNull(rest.next)
         // Closed asked for, the open ones are left out.
         assert.lengthOf((yield* host.find(query({ keys, state: 'closed' }))).issues, 0)
+      }),
+    )
+
+    it.effect('narrows issues by number to a board and a parent by the board’s items and the parent’s sub-issues', () =>
+      Effect.gen(function* () {
+        const { host, sent } = github([
+          ['GET', `${REPO}/issues/12`, { json: issue() }],
+          ['GET', `${REPO}/issues/13`, { json: issue({ number: 13, html_url: 'https://github.com/meridian/api/issues/13' }) }],
+          ['GET', `${REPO}/issues/14`, { json: issue({ number: 14, html_url: 'https://github.com/meridian/api/issues/14' }) }],
+          [
+            'GET',
+            `${REPO}/issues/7/sub_issues?per_page=100&page=1`,
+            {
+              json: [
+                issue({ number: 12, repository_url: `${REPO}` }),
+                issue({ number: 13, repository_url: `${REPO}` }),
+                issue({ number: 99, repository_url: `${REPO}` }),
+              ],
+            },
+          ],
+          [
+            'POST',
+            `${API}/graphql`,
+            (request) => {
+              const body = request.body as { query: string; variables: { number?: number } }
+              if (body.query.includes('projectsV2'))
+                return {
+                  json: {
+                    data: {
+                      repositoryOwner: {
+                        projectsV2: { nodes: [{ id: 'PVT_roadmap', number: 4, title: 'Roadmap', closed: false }, null] },
+                      },
+                    },
+                  },
+                }
+              const boards = body.variables.number === 12 ? ['PVT_roadmap'] : ['PVT_other']
+              return {
+                json: {
+                  data: { repository: { issue: { projectItems: { nodes: boards.map((id) => ({ id: `PVTI_${id}`, project: { id } })) } } } },
+                },
+              }
+            },
+          ],
+        ])
+        const refs = (page: IssuePage) => page.issues.map((one) => one.ref)
+        const keys = ['#12', '#13', '#14']
+        // Under #7: those of its sub-issues asked for.
+        assert.deepStrictEqual(refs(yield* host.find(query({ keys, parent: '#7' }))), ['meridian/api#12', 'meridian/api#13'])
+        // On the board: those whose items are on it.
+        assert.deepStrictEqual(refs(yield* host.find(query({ keys, project: 'roadmap' }))), ['meridian/api#12'])
+        // Both: those under #7 on the board, the board asked of only those.
+        const before = sent.length
+        assert.deepStrictEqual(refs(yield* host.find(query({ keys: ['#13', '#14'], parent: '#7', project: 'Roadmap' }))), [])
+        assert.lengthOf(
+          sent.slice(before).filter((request) => JSON.stringify(request.body ?? '').includes('projectItems')),
+          1,
+        )
+        // A board of no such name: none.
+        assert.deepStrictEqual(refs(yield* host.find(query({ keys, project: 'Nowhere' }))), [])
+        assert.isFalse(sent.some((request) => request.url.includes('/search/')))
       }),
     )
   })

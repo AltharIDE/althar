@@ -398,6 +398,37 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
       },
     )
 
+  /**
+   * Every card on the boards the account can see, anyone's or no one's, each
+   * on its list and board: those not archived, on open boards, or all of
+   * them. One call for the boards and their lists, then one for each board.
+   */
+  const boardCards = (filter: 'open' | 'all') =>
+    Effect.gen(function* () {
+      const boards = yield* call(
+        Schema.Array(Schema.Struct({ ...Board.fields, lists: Schema.Array(List) })),
+        'GET',
+        `${api}/members/me/boards?filter=${filter}&fields=name,closed&lists=all`,
+      )
+      const cards = yield* Effect.forEach(
+        boards,
+        (board) =>
+          Effect.gen(function* () {
+            const onBoard = yield* call(
+              Schema.Array(Card),
+              'GET',
+              `${api}/boards/${yield* named(board.id, 'board')}/cards/${filter}?fields=${CARD_FIELDS}&members=true&member_fields=${MEMBER_FIELDS}`,
+            )
+            return onBoard.flatMap((card) => {
+              const list = board.lists.find((candidate) => candidate.id === card.idList)
+              return list === undefined ? [] : [issueOf(card, list, board)]
+            })
+          }),
+        { concurrency: 4 },
+      )
+      return cards.flat()
+    })
+
   /** A list's cards, on it and its board: those not archived, or all of them. */
   const listCards = (container: string, filter: 'open' | 'all') =>
     Effect.gen(function* () {
@@ -457,8 +488,9 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
 
   /**
    * Cards by key; else a list's; else those Trello's search finds by words,
-   * labels or a list's name; else the account's own. What Trello can't
-   * narrow by, Althar does (`issueMatches`), and pages through them by offset.
+   * labels or a list's name; else the account's own where only those are
+   * asked, or every card on its boards. What Trello can't narrow by, Althar
+   * does (`issueMatches`), and pages through them by offset.
    */
   const find: Tracker['find'] = (query) =>
     Effect.gen(function* () {
@@ -472,7 +504,9 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
           ? yield* listCards(query.container, filter)
           : searchable(query)
             ? yield* searchCards(query)
-            : yield* memberCards(filter)
+            : query.mine === true
+              ? yield* memberCards(filter)
+              : yield* boardCards(filter)
       // Only the account's where asked: Trello's search, and the account's own cards, keep to them already; cards by key or on a list don't.
       const me = query.mine === true && (keyed || query.container !== undefined) ? yield* account : undefined
       return pageAt(

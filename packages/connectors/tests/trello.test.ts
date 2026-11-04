@@ -1145,13 +1145,13 @@ describe('Trello', () => {
           'Doin0001',
         ])
         assert.lengthOf(sent, 2)
-        // Two names, or a name and a category, aren't one list to search: the account's own cards, narrowed after.
+        // Two names, or a name and a category, aren't one list to search: the account's own cards, narrowed after, where asked.
         assert.deepStrictEqual(
-          keys(yield* tracker.find({ status: { names: ['Doing', 'Intermediate'], categories: [] }, state: 'open', limit: 10 })),
+          keys(yield* tracker.find({ status: { names: ['Doing', 'Intermediate'], categories: [] }, state: 'open', mine: true, limit: 10 })),
           ['FUKG6oiY', 'XQYe3hhh'],
         )
         assert.deepStrictEqual(
-          keys(yield* tracker.find({ status: { names: ['Basics'], categories: ['started'] }, state: 'open', limit: 10 })),
+          keys(yield* tracker.find({ status: { names: ['Basics'], categories: ['started'] }, state: 'open', mine: true, limit: 10 })),
           [],
         )
         assert.match(sent[2]?.url ?? '', /\/members\/me\?fields=id&cards=open&/)
@@ -1168,7 +1168,7 @@ describe('Trello', () => {
       }),
     )
 
-    it.effect('without words, labels, a list or keys: the account’s own cards, by state', () =>
+    it.effect('without words, labels, a list or keys, only the account’s where asked: its own cards, by state', () =>
       Effect.gen(function* () {
         const { tracker, sent } = trello([
           ['GET', /\/members\/me\?fields=id&cards=open&/, { json: member }],
@@ -1187,10 +1187,52 @@ describe('Trello', () => {
             },
           ],
         ])
-        assert.deepStrictEqual(keys(yield* tracker.find({ state: 'open', limit: 10 })), ['FUKG6oiY', 'XQYe3hhh'])
-        assert.deepStrictEqual(keys(yield* tracker.find({ state: 'closed', limit: 10 })), ['Arch0001', 'shQLVUu6'])
-        assert.deepStrictEqual(keys(yield* tracker.find({ state: 'all', limit: 2 })), ['Arch0001', 'FUKG6oiY'])
+        assert.deepStrictEqual(keys(yield* tracker.find({ state: 'open', mine: true, limit: 10 })), ['FUKG6oiY', 'XQYe3hhh'])
+        assert.deepStrictEqual(keys(yield* tracker.find({ state: 'closed', mine: true, limit: 10 })), ['Arch0001', 'shQLVUu6'])
+        assert.deepStrictEqual(keys(yield* tracker.find({ state: 'all', mine: true, limit: 2 })), ['Arch0001', 'FUKG6oiY'])
         assert.match(sent[1]?.url ?? '', /&boards=all&board_fields=name,closed&board_lists=all$/)
+      }),
+    )
+
+    it.effect('without them, and not only the account’s: every card on its boards, anyone’s or no one’s, narrowed after and paged', () =>
+      Effect.gen(function* () {
+        const roadmap = { id: BOARD, name: 'Trello Development Roadmap', closed: false }
+        const doing = { id: 'l-doing', name: 'Doing', closed: false }
+        const alice = { id: 'mem2', username: 'alice', fullName: 'Alice Liddell' }
+        const cards = [
+          card({ id: 'b1', shortLink: 'Nobo0001', idList: LIST, members: [], dateLastActivity: '2026-10-05T00:00:00.000Z' }),
+          card({ id: 'b2', shortLink: 'Alic0001', idList: 'l-doing', members: [alice], dateLastActivity: '2026-10-04T00:00:00.000Z' }),
+          card({ id: 'b3', shortLink: 'Taco0001', idList: LIST, members: [taco], dateLastActivity: '2026-09-01T00:00:00.000Z' }),
+          // On a list the board didn't list: left out.
+          card({ id: 'b4', shortLink: 'Lost0001', idList: 'l-gone', members: [], dateLastActivity: '2026-10-06T00:00:00.000Z' }),
+        ]
+        const { tracker, sent } = trello([
+          [
+            'GET',
+            `${API}/members/me/boards?filter=open&fields=name,closed&lists=all`,
+            { json: [{ ...roadmap, lists: [{ id: LIST, name: 'Live (Oct-Dec 2018)', closed: false }, doing] }] },
+          ],
+          [
+            'GET',
+            `${API}/boards/${BOARD}/cards/open?fields=name,desc,url,shortLink,dateLastActivity,closed,due,dueComplete,labels,idBoard,idList&members=true&member_fields=fullName,username`,
+            { json: cards },
+          ],
+        ])
+        const open = { state: 'open', limit: 10 } as const
+        assert.deepStrictEqual(keys(yield* tracker.find(open)), ['Nobo0001', 'Alic0001', 'Taco0001'])
+        // No one's, and someone else's, aren't only the account's.
+        assert.deepStrictEqual(keys(yield* tracker.find({ ...open, assignee: null })), ['Nobo0001'])
+        assert.deepStrictEqual(keys(yield* tracker.find({ ...open, assignee: 'Alice' })), ['Alic0001'])
+        assert.deepStrictEqual(keys(yield* tracker.find({ ...open, updatedSince: '2026-10-01' })), ['Nobo0001', 'Alic0001'])
+        assert.deepStrictEqual(
+          keys(yield* tracker.find({ ...open, status: { names: ['Doing', 'Live (Oct-Dec 2018)'], categories: [] }, assignee: 'taco' })),
+          ['Taco0001'],
+        )
+        const first = yield* tracker.find({ ...open, limit: 2 })
+        assert.deepStrictEqual([keys(first), first.next], [['Nobo0001', 'Alic0001'], '2'])
+        assert.deepStrictEqual(keys(yield* tracker.find({ ...open, limit: 2, cursor: '2' })), ['Taco0001'])
+        // Never the account's own cards alone.
+        assert.isFalse(sent.some((request) => request.url.includes('/members/me?')))
       }),
     )
   })

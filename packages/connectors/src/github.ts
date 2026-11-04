@@ -1091,11 +1091,50 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       (people) => people.find((person) => same(person.id, typed) || same(person.name, typed))?.id ?? null,
     )
 
+  /** The owner's project board of a name; null where it has none. */
+  const boardNamed = (owner: string, title: string) =>
+    Effect.map(
+      http.graphql(ProjectsAnswer, graphqlUrl, PROJECTS, { owner }),
+      (answer) =>
+        (answer.repositoryOwner?.projectsV2?.nodes ?? []).find((project) => project !== null && same(project.title, title)) ?? null,
+    )
+
   /** The owner's project board of a name, as `owner/number`; null where it has none. */
   const boardOf = (owner: string, title: string) =>
-    Effect.map(http.graphql(ProjectsAnswer, graphqlUrl, PROJECTS, { owner }), (answer) => {
-      const board = (answer.repositoryOwner?.projectsV2?.nodes ?? []).find((project) => project !== null && same(project.title, title))
-      return board == null ? null : `${owner}/${board.number}`
+    Effect.map(boardNamed(owner, title), (board) => (board === null ? null : `${owner}/${board.number}`))
+
+  /**
+   * Of issues read by number, those on the owner's board of the name and
+   * those under the parent, where asked: an issue GitHub reads by number says
+   * neither, so the board's items of each, and the parent's sub-issues, are
+   * asked for instead.
+   */
+  const onBoardAndUnder = (issues: ReadonlyArray<Issue>, query: IssueQuery) =>
+    Effect.gen(function* () {
+      let kept = issues
+      if (query.parent !== undefined) {
+        const { owner, name, number } = yield* parseRef(issueRefOf(query.parent, query.container) ?? '')
+        const children = yield* everyPage(IssueAnswer, `${repo([owner, name])}/issues/${number}/sub_issues`)
+        const under = new Set(children.map((child) => listedIssueOf(child).ref.toLowerCase()))
+        kept = kept.filter((issue) => under.has(issue.ref.toLowerCase()))
+      }
+      if (query.project !== undefined && kept.length > 0) {
+        const { owner } = yield* parseRepository(query.container ?? '')
+        const board = yield* boardNamed(owner, query.project)
+        if (board === null) return []
+        const on = yield* Effect.forEach(
+          kept,
+          (issue) =>
+            Effect.gen(function* () {
+              const { owner: at, name, number } = yield* parseRef(issue.ref)
+              const answer = yield* http.graphql(ProjectItemsAnswer, graphqlUrl, PROJECT_ITEMS, { owner: at, name, number })
+              return (answer.repository?.issue?.projectItems.nodes ?? []).some((item) => item?.project.id === board.id)
+            }),
+          { concurrency: 4 },
+        )
+        kept = kept.filter((_, index) => on[index] === true)
+      }
+      return kept
     })
 
   /** Issues by number, which GitHub's search can't find: each read on its own, narrowed as the query says, and paged. */
@@ -1130,8 +1169,13 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           ),
         { concurrency: 4 },
       )
+      // The board and the parent asked of each on their own; the rest as the issue reads.
+      const { project: _project, parent: _parent, ...rest } = query
       return pageAt(
-        read.flat().filter((issue) => issueMatches(issue, query, me)),
+        yield* onBoardAndUnder(
+          read.flat().filter((issue) => issueMatches(issue, rest, me)),
+          query,
+        ),
         query,
       )
     })
