@@ -62,3 +62,16 @@ it('offers retry after failure', async () => {
   fireEvent.click(await screen.findByRole('button', { name: 'Retry' }))
   await waitFor(() => expect(load).toHaveBeenCalledTimes(2))
 })
+
+it('checks a short initial page even when there is no scrollbar to move', async () => {
+  const load = vi.fn(() => new Promise<void>(() => {}))
+  render(
+    <div style={{ overflowY: 'auto' }} data-testid="scroll">
+      <EarlierTurns earlier load={load} loading={false} version={1} />
+    </div>,
+  )
+  const box = screen.getByTestId('scroll')
+  Object.defineProperty(box, 'clientHeight', { value: 600 })
+  Object.defineProperty(box, 'scrollHeight', { value: 100 })
+  await waitFor(() => expect(load).toHaveBeenCalledTimes(1))
+})

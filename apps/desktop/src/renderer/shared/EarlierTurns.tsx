@@ -1,13 +1,14 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { ThreadDivider } from '@althar/ui'
+import { messageOf } from '../data/client'
 import s from './EarlierTurns.module.css'
 
 /** Fetch near the top; preserve a visible item rather than the total height,
  * which can also grow below the reader while an answer streams. */
-export function useEarlierTurns(load: () => Promise<void>, version: unknown, earlier: boolean) {
+export function useEarlierTurns(load: (quiet?: boolean) => Promise<void>, version: unknown, earlier: boolean) {
   const sentinel = useRef<HTMLDivElement>(null)
   const anchor = useRef<{ element: HTMLElement; top: number; box: HTMLElement } | null>(null)
-  const [failed, setFailed] = useState(false)
+  const [failed, setFailed] = useState<string | null>(null)
   const active = useRef(false)
   const current = useRef(load)
   useLayoutEffect(() => {
@@ -16,11 +17,11 @@ export function useEarlierTurns(load: () => Promise<void>, version: unknown, ear
   const request = async () => {
     if (active.current) return
     active.current = true
-    setFailed(false)
+    setFailed(null)
     try {
-      await current.current()
-    } catch {
-      setFailed(true)
+      await current.current(true)
+    } catch (error) {
+      setFailed(messageOf(error))
     } finally {
       active.current = false
     }
@@ -50,7 +51,12 @@ export function useEarlierTurns(load: () => Promise<void>, version: unknown, ear
       )
       anchor.current = element ? { element, top: element.getBoundingClientRect().top, box: scroller } : null
     }
+    const near = () => scroller.getBoundingClientRect().top - marker.parentElement!.getBoundingClientRect().top < scroller.clientHeight
     const check = () => {
+      if (!near()) {
+        anchor.current = null
+        return
+      }
       remember()
       if (
         earlier &&
@@ -69,10 +75,16 @@ export function useEarlierTurns(load: () => Promise<void>, version: unknown, ear
           })
     if (marker.parentElement) resize?.observe(marker.parentElement)
     scroller.addEventListener('scroll', check, { passive: true })
+    const initial = requestAnimationFrame(() => {
+      initialFrame = requestAnimationFrame(check)
+    })
+    let initialFrame = 0
     // The initial page starts at the latest turn. Only scrolling back requests history.
     return () => {
       scroller.removeEventListener('scroll', check)
       resize?.disconnect()
+      cancelAnimationFrame(initial)
+      cancelAnimationFrame(initialFrame)
     }
   }, [failed, earlier])
 
@@ -85,7 +97,7 @@ export function EarlierTurns({
   loading,
   earlier,
 }: {
-  load: () => Promise<void>
+  load: (quiet?: boolean) => Promise<void>
   version: unknown
   loading: boolean
   earlier: boolean
@@ -95,7 +107,7 @@ export function EarlierTurns({
     <div ref={sentinel} className={s.sentinel}>
       {failed ? (
         <ThreadDivider icon="up" action="Retry" onAction={() => void request()}>
-          Earlier turns couldn't load
+          {failed}
         </ThreadDivider>
       ) : loading ? (
         <ThreadDivider icon="up">Loading…</ThreadDivider>

@@ -3049,7 +3049,10 @@ describe('a task', () => {
     const computed = window.getComputedStyle
     vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
       const style = computed(element)
-      Object.defineProperty(style, 'overflowY', { value: 'auto', configurable: true })
+      Object.defineProperty(style, 'overflowY', {
+        value: element.classList.contains('scroll') || element.getAttribute('class')?.includes('scroll_') ? 'auto' : 'visible',
+        configurable: true,
+      })
       return style
     })
     withServices(<Task />, client)
@@ -3057,7 +3060,7 @@ describe('a task', () => {
     scrollEarlier()
     await screen.findByText('An earlier one.')
     expect(client.getThread).toHaveBeenLastCalledWith('th1', { before: newest.items[0]?.sequence, limit: 100 })
-    expect(screen.queryByText('Earlier in this task')).toBeNull()
+    expect(screen.queryByText('Loading…')).toBeNull()
   })
 
   it('says what went wrong, and lets it go', async () => {
@@ -3093,7 +3096,10 @@ describe('a task', () => {
     const computed = window.getComputedStyle
     vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
       const style = computed(element)
-      Object.defineProperty(style, 'overflowY', { value: 'auto', configurable: true })
+      Object.defineProperty(style, 'overflowY', {
+        value: element.classList.contains('scroll') || element.getAttribute('class')?.includes('scroll_') ? 'auto' : 'visible',
+        configurable: true,
+      })
       return style
     })
     withServices(<Task />, client)
@@ -3399,7 +3405,7 @@ describe('the face a task opens on', () => {
 
 function scrollEarlier() {
   const thread = document.querySelector<HTMLElement>('section[data-arrivals]')!
-  let box = thread
+  let box = thread.parentElement!
   while (!/(auto|scroll)/.test(getComputedStyle(box).overflowY) && box.parentElement) box = box.parentElement
   Object.defineProperty(box, 'clientHeight', { configurable: true, value: 600 })
   fireEvent.scroll(box)

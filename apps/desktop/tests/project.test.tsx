@@ -942,7 +942,10 @@ describe('the Talk room', () => {
     const computed = window.getComputedStyle
     vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
       const style = computed(element)
-      Object.defineProperty(style, 'overflowY', { value: 'auto', configurable: true })
+      Object.defineProperty(style, 'overflowY', {
+        value: element.classList.contains('scroll') || element.getAttribute('class')?.includes('scroll_') ? 'auto' : 'visible',
+        configurable: true,
+      })
       return style
     })
     withServices(<Project room={Room.Talk} />, client)
@@ -993,7 +996,10 @@ describe('what can go wrong', () => {
     const computed = window.getComputedStyle
     vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
       const style = computed(element)
-      Object.defineProperty(style, 'overflowY', { value: 'auto', configurable: true })
+      Object.defineProperty(style, 'overflowY', {
+        value: element.classList.contains('scroll') || element.getAttribute('class')?.includes('scroll_') ? 'auto' : 'visible',
+        configurable: true,
+      })
       return style
     })
     withServices(<Project room={Room.Talk} />, client)
@@ -1019,7 +1025,7 @@ describe('a send to the coordinator that fails', () => {
 
 function scrollEarlier() {
   const thread = document.querySelector<HTMLElement>('section[data-arrivals]')!
-  let box = thread
+  let box = thread.parentElement!
   while (!/(auto|scroll)/.test(getComputedStyle(box).overflowY) && box.parentElement) box = box.parentElement
   Object.defineProperty(box, 'clientHeight', { configurable: true, value: 600 })
   fireEvent.scroll(box)
