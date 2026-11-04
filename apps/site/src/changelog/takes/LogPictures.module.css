@@ -389,3 +389,123 @@
 
 .drawn { position: relative; overflow: hidden; border-radius: 18px; box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.08); }
 .drawnStage { position: relative; width: 100%; aspect-ratio: 16 / 10; overflow: hidden; container-type: inline-size; }
+
+/* ---- 0.7.0: a review read three times ---- */
+
+/* The window, and the pull request laid over its corner as it takes its seal. */
+.rvStage { position: relative; padding-top: 6.8em; }
+.rvWin { margin-right: 2.4em; }
+.rvHead { display: flex; align-items: center; gap: 0.9em; padding: 0.85em 1.4em; border-bottom: 1px solid var(--line); font-size: 0.86em; color: var(--t2); white-space: nowrap; }
+.rvHead > code { color: var(--t1); }
+.rvPass { display: inline-flex; align-items: center; gap: 0.5em; margin-left: 0.6em; color: var(--live); }
+.rvPassWords { animation: rvIn 0.5s var(--ease-out) both; }
+
+/* The code, and the reviewer's light passing down it. Its height is the height with both findings open, so a finding opening moves the lines under it and never the page. */
+.rvCode { position: relative; overflow: hidden; box-sizing: border-box; height: 33.4em; padding: 0.8em 0 0; font-size: 0.84em; }
+.rvLine { display: grid; grid-template-columns: 3.4em 1.4em minmax(0, 1fr); align-items: baseline; height: 1.8em; line-height: 1.8em; white-space: pre; color: var(--t2); }
+.rvLine code { font-size: 0.95em; overflow: hidden; text-overflow: clip; }
+.rvLine[data-sign='+'] { background: rgba(95, 196, 126, 0.075); color: var(--t1); }
+.rvLine[data-sign='-'] { background: rgba(242, 129, 111, 0.07); color: var(--t3); }
+.rvNo { padding-right: 1em; text-align: right; font-family: var(--mono); font-size: 0.8em; color: var(--t4); }
+.rvSign { font-family: var(--mono); color: var(--t4); }
+.rvLine[data-sign='+'] .rvSign { color: var(--ok); }
+.rvLine[data-sign='-'] .rvSign { color: #f2816f; }
+.k { color: #c4b3f5; }
+.f { color: #9fd3c7; }
+.s { color: #e0bd8a; }
+.rvScan {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 1;
+  height: 5em;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, transparent, rgba(86, 98, 255, 0.11) 70%, rgba(150, 160, 255, 0.5) 98%, transparent),
+    radial-gradient(60% 100% at 30% 100%, rgba(90, 104, 255, 0.18), transparent 70%);
+  mix-blend-mode: screen;
+  animation: rvScan 1.5s cubic-bezier(0.45, 0.05, 0.35, 1) both;
+}
+@keyframes rvScan {
+  from { transform: translateY(-5em); opacity: 0; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  to { transform: translateY(33em); opacity: 0; }
+}
+
+/* A finding, opening under its line: what is wrong, then what the lead did. */
+.rvFold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.7s var(--ease-out); }
+.rvFold[data-shown='true'] { grid-template-rows: 1fr; }
+.rvFold > .rvNote { min-height: 0; overflow: hidden; }
+.rvNote {
+  display: grid;
+  gap: 0.25em;
+  margin: 0 1.4em 0 4.8em;
+  padding: 0 1em;
+  border-radius: 0.6em;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px rgba(150, 160, 255, 0.4), 0 0 2.2em -0.6em rgba(90, 104, 255, 0.55);
+  opacity: 0;
+  transform: translateY(-0.4em);
+  transition: opacity 0.5s, transform 0.7s var(--ease-out), margin 0.7s var(--ease-out), padding 0.7s var(--ease-out), box-shadow 0.8s, background 0.8s;
+}
+.rvFold[data-shown='true'] .rvNote { margin-top: 0.45em; margin-bottom: 0.55em; padding: 0.6em 1em 0.7em; opacity: 1; transform: none; }
+.rvNote[data-settled='true'] { background: var(--paper); box-shadow: inset 0 0 0 1px var(--line-2); }
+.rvNoteHead { display: flex; align-items: baseline; gap: 0.7em; min-width: 0; font-size: 0.92em; white-space: nowrap; }
+.rvNoteHead b { overflow: hidden; font-weight: 550; text-overflow: ellipsis; }
+.rvWeight, .rvHeavy { flex: none; font-size: 0.82em; font-weight: 600; color: var(--t3); transition: color 0.6s; }
+.rvHeavy { color: #e3a052; }
+.rvState { display: inline-flex; align-items: center; gap: 0.3em; flex: none; margin-left: auto; font-size: 0.82em; font-weight: 600; color: var(--t3); opacity: 0; transition: opacity 0.5s 0.15s; }
+.rvState[data-fixed='true'] { color: var(--ok); }
+.rvNote[data-settled='true'] .rvState { opacity: 1; }
+/* The claim gives way to the lead's answer, in the same room. */
+.rvSay { display: grid; font-size: 0.84em; color: var(--t3); }
+.rvClaim, .rvAnswer { grid-area: 1 / 1; transition: opacity 0.5s, transform 0.6s var(--ease-out); }
+.rvAnswer { display: flex; gap: 0.6em; align-items: baseline; color: var(--t2); opacity: 0; transform: translateY(0.3em); }
+.rvAnswer code { color: var(--t3); }
+.rvNote[data-settled='true'] .rvClaim { opacity: 0; transform: translateY(-0.3em); }
+.rvNote[data-settled='true'] .rvAnswer { opacity: 1; transform: none; }
+
+/* The pull request, a slim slab over the window's corner, and its seal pressed on. */
+.rvPr {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 1.2em;
+  width: 31em;
+  padding: 1em 1em 1em 1.4em;
+  border-radius: 0.8em;
+  background: linear-gradient(180deg, #2a2723, #211f1b);
+  box-shadow: 0 0 0 1px rgba(255, 240, 215, 0.12), inset 0 1px 0 rgba(255, 240, 215, 0.07), 0 2em 3.4em -1.2em rgba(0, 0, 0, 0.9), 0 0 5em -1.6em rgba(60, 76, 255, 0.5);
+  opacity: 0;
+  transform: translateY(0.8em) rotate(-1.5deg);
+  transition: opacity 0.6s, transform 0.9s var(--ease-out);
+}
+.rvPr[data-shown='true'] { opacity: 1; transform: rotate(-1.5deg); }
+.rvPrWords { display: grid; gap: 0.3em; min-width: 0; }
+.rvPrWords b { font-size: 0.98em; letter-spacing: -0.01em; }
+.rvOpen { display: inline-flex; align-items: center; gap: 0.4em; font-size: 0.78em; font-weight: 600; color: #8fe0a6; }
+.rvPrLine { font-size: 0.78em; color: var(--t3); }
+/* Pressed on as the slab arrives; as it goes, it fades with the slab. */
+.rvSeal { flex: none; width: 7em; height: auto; transform: rotate(-6deg); filter: drop-shadow(0 0 0.5em rgba(138, 149, 255, 0.3)); }
+.rvPr[data-shown='true'] .rvSeal { animation: rvStamp 0.9s 0.45s cubic-bezier(0.3, 1.35, 0.5, 1) both; }
+@keyframes rvStamp {
+  0% { opacity: 0; transform: scale(1.7) rotate(-14deg); filter: drop-shadow(0 0 0 rgba(138, 149, 255, 0)); }
+  55% { opacity: 1; filter: drop-shadow(0 0 1.4em rgba(138, 149, 255, 0.85)); }
+  100% { opacity: 1; transform: scale(1) rotate(-6deg); filter: drop-shadow(0 0 0.5em rgba(138, 149, 255, 0.3)); }
+}
+@keyframes rvIn { from { opacity: 0; transform: translateY(0.3em); } }
+
+/* Narrow: the pull request goes over the top, the window under it. */
+@container (max-width: 560px) {
+  .rvStage { display: flex; flex-direction: column; padding-top: 0; }
+  .rvWin { margin-right: 0; }
+  .rvPr { position: relative; order: -1; width: auto; margin-bottom: 1.2em; }
+  .rvHead > code { overflow: hidden; text-overflow: ellipsis; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rvScan { display: none; }
+  .rvPr[data-shown='true'] .rvSeal { animation: none; }
+}
