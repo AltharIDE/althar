@@ -1151,26 +1151,51 @@ export class IssueChanges extends Context.Service<
           }
         })
 
-      /** Why a lead leaves issues as they are: they aren't its to change, a line for them all. */
+      /** Why issues a lead asked to change wait on a card for the person: they aren't its own, a line for them all. */
       const notTheirs = (keys: ReadonlyArray<string>) =>
-        `${keys.join(', ')} ${keys.length === 1 ? 'isn’t' : 'aren’t'} this task’s issue, one it filed, or one the person named to it, so ${keys.length === 1 ? 'it was' : 'they were'} left as ${keys.length === 1 ? 'it is' : 'they are'}. Tell the person what ${keys.length === 1 ? 'it needs' : 'they need'}: the coordinator changes them for them.`
+        `${keys.join(', ')} ${keys.length === 1 ? 'isn’t' : 'aren’t'} this task’s issue, one it filed, or one the person named to it, so ${keys.length === 1 ? 'it waits' : 'they wait'} on a card for the person, never at once.`
+
+      /** The note on a card of a lead's for issues that aren't its own. */
+      const NOT_THEIRS_NOTE = 'Not this task’s issues: its lead asks you to apply these.'
 
       /**
-       * Those of a lead's issues it may change or comment on, by where they
-       * are, and a line for those it may not and those no tracker has. The
+       * A lead's issues by where they are: those it may change or comment on
+       * at once, as its agent says, and those that wait on a card for the
+       * person, with a line for those and for each no tracker has. The
        * coordinator's are all its own.
        */
       const mayChange = (access: ToolAccess, named: ReadonlyArray<string>) =>
         Effect.gen(function* () {
           if (access.role === 'coordinator')
-            return { allowed: named.map((one, index) => ({ index, target: { issue: one } as Target })), said: [] }
+            return { allowed: named.map((one, index) => ({ index, target: { issue: one } as Target })), others: [], said: [] }
           const { scopes, unknown } = yield* leadScopes(access, named)
-          const others = scopes.flatMap((one) => (one !== undefined && !one.theirs ? [one.key] : []))
+          const others = scopes.flatMap((one, index) =>
+            one !== undefined && !one.theirs ? [{ index, target: one.target, key: one.key }] : [],
+          )
           return {
             allowed: scopes.flatMap((one, index) => (one !== undefined && one.theirs ? [{ index, target: one.target }] : [])),
-            said: [...unknown, ...(others.length === 0 ? [] : [notTheirs(others)])],
+            others,
+            said: [...unknown, ...(others.length === 0 ? [] : [notTheirs(others.map((one) => one.key))])],
           }
         })
+
+      /** What a lead's comments came to, on one card: each said posted or not, and a card waiting on the person said as such. */
+      const commentedWords = (made: { readonly card: IssueChangesCard | null; readonly left: ReadonlyArray<string> }) => {
+        const card = made.card
+        if (card !== null && !card.direct)
+          return [
+            `The comment on ${card.issues.map((issue) => issue.key).join(', ')} waits on its card in this thread until the person posts it, or discards it. You'll hear what they decide.`,
+            ...made.left,
+          ]
+        const posted = card?.issues.filter((issue) => issue.applied === true).map((issue) => issue.key) ?? []
+        return [
+          ...(posted.length === 0 ? [] : [`Commented on ${posted.join(', ')}. The thread shows it as a line.`]),
+          ...(card?.issues ?? []).flatMap((issue) =>
+            issue.applied === true ? [] : [`${issue.key}: not posted: ${issue.error ?? card?.error ?? ''}`],
+          ),
+          ...made.left,
+        ]
+      }
 
       const commentTool = (access: ToolAccess, value: unknown) =>
         Effect.gen(function* () {
@@ -1178,8 +1203,9 @@ export class IssueChanges extends Context.Service<
           const several = asked.issues !== undefined && asked.issues.length > 0
           if (access.role === 'coordinator' && !several && asked.issue === undefined)
             return yield* new ToolRefused({ message: 'Say which issue, by its key or link, as issue.' })
-          if (!several) {
-            const target = access.role === 'coordinator' ? { issue: asked.issue ?? '' } : yield* leadTarget(access, asked.issue)
+          // The coordinator's, or the lead's task's own: posted at once, as before.
+          if (!several && (access.role === 'coordinator' || asked.issue === undefined || asked.issue.trim() === '')) {
+            const target = access.role === 'coordinator' ? { issue: asked.issue ?? '' } : yield* leadTarget(access, undefined)
             const card = yield* comment({
               projectId: access.projectId as ProjectId,
               threadId: access.threadId,
@@ -1193,30 +1219,36 @@ export class IssueChanges extends Context.Service<
               ? `Commented on ${issue?.key ?? 'it'}. The thread shows it as a line.`
               : `The comment on ${issue?.key ?? 'it'} wasn't posted: ${issue?.error ?? card.error ?? ''}`
           }
-          // The same comment on each it may comment on, on one card, at once; each said posted or not.
-          const { allowed, said } = yield* mayChange(
-            access,
-            keysIn([...(asked.issue === undefined ? [] : [asked.issue]), ...(asked.issues ?? [])]),
-          )
-          if (allowed.length === 0) return said.join('\n')
-          const made = yield* commentOnEach({
-            projectId: access.projectId as ProjectId,
-            threadId: access.threadId,
-            targets: allowed.map((one) => one.target),
-            body: asked.body,
-            direct: true,
-            by: byOf(access),
-            actorId: actorOf(access),
-          })
-          const card = made.card
-          const posted = card?.issues.filter((issue) => issue.applied === true).map((issue) => issue.key) ?? []
+          // The same comment on each: at once on those the lead may comment on, on a card for the person on any other.
+          const names = keysIn([...(asked.issue === undefined ? [] : [asked.issue]), ...(asked.issues ?? [])])
+          // One named alone that no tracker has is refused, as before.
+          if (names.length === 1 && access.role !== 'coordinator') yield* leadScope(access, names[0] ?? '')
+          const { allowed, others, said } = yield* mayChange(access, names)
+          const each = (targets: ReadonlyArray<Target>, direct: boolean) =>
+            targets.length === 0
+              ? Effect.succeed([] as ReadonlyArray<string>)
+              : Effect.map(
+                  commentOnEach({
+                    projectId: access.projectId as ProjectId,
+                    threadId: access.threadId,
+                    targets,
+                    body: asked.body,
+                    direct,
+                    by: byOf(access),
+                    actorId: actorOf(access),
+                  }),
+                  commentedWords,
+                )
           return [
-            ...(posted.length === 0 ? [] : [`Commented on ${posted.join(', ')}. The thread shows it as a line.`]),
-            ...(card?.issues ?? []).flatMap((issue) =>
-              issue.applied === true ? [] : [`${issue.key}: not posted: ${issue.error ?? card?.error ?? ''}`],
-            ),
-            ...made.left,
+            ...(yield* each(
+              allowed.map((one) => one.target),
+              true,
+            )),
             ...said,
+            ...(yield* each(
+              others.map((one) => one.target),
+              false,
+            )),
           ].join('\n')
         })
 
@@ -1225,39 +1257,47 @@ export class IssueChanges extends Context.Service<
           const { issue, issues: several, changes: each, at_once: atOnce, ...asked } = yield* readInput(LeadChange, value)
           const named = keysIn([...(issue === undefined ? [] : [issue]), ...(several ?? [])])
           const wanted = yield* wantedOf(asked)
-          // One issue, or none: its task's own, as before.
-          if (named.length <= 1 && (each ?? []).length === 0)
+          // None named: its task's own, as before.
+          if (named.length === 0 && (each ?? []).length === 0)
             return proposedWords(
               yield* propose({
                 projectId: access.projectId as ProjectId,
                 threadId: access.threadId,
-                issues: [{ target: yield* leadTarget(access, named[0]), change: wanted }],
+                issues: [{ target: yield* leadTarget(access, undefined), change: wanted }],
                 direct: atOnce === true,
                 by: 'lead',
                 actorId: instance.systemId,
               }),
             )
-          // Several: the same change to each named, or each its own; those it may change go on one card, as the person's setting says.
+          // The same change to each named, or each its own: those the lead may change on one card, as its agent says; any other on a card waiting on the person.
           const asks = [
             ...named.map((one) => ({ issue: one, change: wanted })),
             ...(yield* Effect.forEach(each ?? [], ({ issue: one, ...rest }) =>
               Effect.map(wantedOf(rest), (change) => ({ issue: one, change })),
             )),
           ]
-          const { allowed, said } = yield* mayChange(
+          // One named alone that no tracker has is refused, as before.
+          if (asks.length === 1) yield* leadScope(access, asks[0]?.issue ?? '')
+          const { allowed, others, said } = yield* mayChange(
             access,
             asks.map((one) => one.issue),
           )
-          if (allowed.length === 0) return said.join('\n')
-          const proposed = yield* propose({
-            projectId: access.projectId as ProjectId,
-            threadId: access.threadId,
-            issues: allowed.map((one) => ({ target: one.target, change: asks[one.index]?.change ?? wanted })),
-            direct: atOnce === true,
-            by: 'lead',
-            actorId: instance.systemId,
-          })
-          return [proposedWords(proposed), ...said].join('\n')
+          const onCard = (chosen: ReadonlyArray<{ readonly index: number; readonly target: Target }>, direct: boolean) =>
+            chosen.length === 0
+              ? Effect.succeed([] as ReadonlyArray<string>)
+              : Effect.map(
+                  propose({
+                    projectId: access.projectId as ProjectId,
+                    threadId: access.threadId,
+                    issues: chosen.map((one) => ({ target: one.target, change: asks[one.index]?.change ?? wanted })),
+                    ...(direct ? {} : { note: NOT_THEIRS_NOTE }),
+                    direct,
+                    by: 'lead',
+                    actorId: instance.systemId,
+                  }),
+                  (proposed) => [proposedWords(proposed)],
+                )
+          return [...(yield* onCard(allowed, atOnce === true)), ...said, ...(yield* onCard(others, false))].join('\n')
         })
 
       const changesTool = (access: ToolAccess, value: unknown) =>
@@ -1314,7 +1354,7 @@ export class IssueChanges extends Context.Service<
       yield* toolServer.serve('lead', [
         tool(
           'comment_on_issue',
-          `Comments on an issue at once, in Markdown: what the person would want on it, such as what you found or what changed. The thread shows it as a line. The issue this task came from unless you name another, by key or link: one this task filed, or one the person named to it. The same comment on several as issues (keys, links, runs of keys), at most ${BATCH}, each said posted or not.`,
+          `Comments on an issue at once, in Markdown: what the person would want on it, such as what you found or what changed. The thread shows it as a line. The issue this task came from unless you name another, by key or link: one this task filed, or one the person named to it. The same comment on several as issues (keys, links, runs of keys), at most ${BATCH}, each said posted or not. One not this task’s, filed by it or named by the person waits on a card for the person to post, never at once.`,
           {
             type: 'object',
             properties: {
@@ -1334,7 +1374,7 @@ export class IssueChanges extends Context.Service<
         ),
         tool(
           'change_issue',
-          `Changes an issue: its status (any of its tracker’s, such as In Review), closing it, its priority, assignees, labels, project, milestone, cycle, parent, estimate, type, components, due date, title or description. As a card the person applies in this thread, unless at_once: where the project’s notes say issues are changed at once, or the person just said to. You hear what they decide. The issue this task came from unless you name another: one this task filed, or one the person named to it. Several at once: the same change to each of issues (keys, links, runs of keys such as DEV-180..DEV-195, as find_issues finds them), or a change of its own to each in changes; at most ${BATCH}. Any of them not this task’s, filed by it or named by the person (by key, link or a run of keys) is left as it is, and said. Althar reads each name against its tracker, changes what it can, paces a big batch to the tracker’s limits, and says for each issue what changed, what didn’t and why.\n\n${changeTable()}`,
+          `Changes an issue: its status (any of its tracker’s, such as In Review), closing it, its priority, assignees, labels, project, milestone, cycle, parent, estimate, type, components, due date, title or description. As a card the person applies in this thread, unless at_once: where the project’s notes say issues are changed at once, or the person just said to. You hear what they decide. The issue this task came from unless you name another: one this task filed, or one the person named to it. Several at once: the same change to each of issues (keys, links, runs of keys such as DEV-180..DEV-195, as find_issues finds them), or a change of its own to each in changes; at most ${BATCH}. Any of them not this task’s, filed by it or named by the person (by key, link or a run of keys) goes on a card of its own for the person to apply, never at once, and is said. Althar reads each name against its tracker, changes what it can, paces a big batch to the tracker’s limits, and says for each issue what changed, what didn’t and why.\n\n${changeTable()}`,
           {
             type: 'object',
             properties: {

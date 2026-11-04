@@ -610,9 +610,13 @@ describe('changes to issues', () => {
           yield* callTool(lead, 'comment_on_issue', { issue: 'MER-240', body: 'Fixed alongside MER-231.' }),
           'Commented on MER-240. The thread shows it as a line.',
         )
-        // Any other is the coordinator's, for the person.
-        assert.match(yield* callTool(lead, 'change_issue', { issue: 'MER-241', status: 'Done' }), /^MER-241 isn’t this task’s issue/)
-        assert.match(yield* callTool(lead, 'comment_on_issue', { issue: 'MER-241', body: 'Hi.' }), /^MER-241 isn’t this task’s issue/)
+        // Any other waits on a card for the person, never at once.
+        const changed = yield* callTool(lead, 'change_issue', { issue: 'MER-241', status: 'Done', at_once: true })
+        assert.match(changed, /^MER-241 isn’t this task’s issue, one it filed, or one the person named to it, so it waits on a card/)
+        assert.include(changed, 'Proposed MER-241: status to Done.')
+        const commented = yield* callTool(lead, 'comment_on_issue', { issue: 'MER-241', body: 'Hi.' })
+        assert.match(commented, /^MER-241 isn’t this task’s issue/)
+        assert.include(commented, 'waits on its card in this thread until the person posts it')
         assert.deepStrictEqual(tracker.issueComments('MER-241'), [])
         assert.strictEqual((yield* tracker.issue('MER-241')).status.name, 'Todo')
       }).pipe(Effect.provide(withQueries({ linear: tracker })))

@@ -692,8 +692,9 @@ Leads and the coordinator change issues that already exist
   asked the coordinator for it), by key, link or a run of keys
   (`DEV-180..DEV-195`): `comment_on_issue` and `link_pull_request` apply at
   once, and show in its thread as a line; `change_issue` proposes any field
-  below. Both take several issues ("What leads do with issues", below). For
-  any other issue it tells the person, and the coordinator changes it.
+  below. Both take several issues ("What leads do with issues", below). A
+  change or comment it asks for on any other issue, such as one it only
+  found by searching, waits on a card for the person, never at once.
 - **The coordinator** changes any issue on the person's trackers, by key or
   link: `change_issues` proposes the same, several issues on one card
   ("move DEV-67 to Done, set DEV-142 to Low"); `comment_on_issue` comments
@@ -835,7 +836,7 @@ flowchart LR
   R["read_issue<br/>up to 25"] --> I[issues]
   C["change_issue / comment_on_issue<br/>up to 50"] --> G{the lead's to change?}
   G -- yes --> K["one card: at once (at_once)<br/>or waiting on the person"]
-  G -- no --> L[left as it is, said]
+  G -- no --> L["a card of its own,<br/>waiting on the person"]
   K --> P["applied per issue,<br/>paced to the tracker"]
 ```
 
@@ -844,10 +845,13 @@ flowchart LR
 - **Change several:** `change_issue` takes `issues`, one change for each,
   or `changes`, each its own, up to fifty. Those that are the lead's go on
   one card, at once where its agent says so (`at_once`) or waiting on the
-  person; any other is left as it is and said, never on a card. Each issue
-  says what changed, what didn't and why, and what was so already.
+  person; any other, such as those `find_issues` found that nobody named to
+  it, goes on a card of its own that waits on the person, whatever
+  `at_once` says, and is said. Each issue says what changed, what didn't and
+  why, and what was so already.
 - **Comment on several:** `comment_on_issue` takes `issues`, the same
-  comment on each, at once, each said posted or not.
+  comment on each: at once on the lead's own, each said posted or not; on a
+  card for the person to post on any other.
 - **Paced:** a batch reads each field's choices once per place (a team,
   board, project or repository; not Jira's statuses or labels, each
   issue's own). A card of ten or more applies one issue after another, a
