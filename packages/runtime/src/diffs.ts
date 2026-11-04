@@ -57,7 +57,7 @@ export interface FileDiff {
  */
 const LINES_SHOWN = 4_000
 const WHOLE_LINES = 20_000
-const READ_AT_MOST = 2 * 1024 * 1024
+export const READ_AT_MOST = 2 * 1024 * 1024
 const NEW_FILES_COUNTED = 50
 
 /** Whether bytes look like a binary file: git's own test, a NUL early on. */
@@ -77,14 +77,14 @@ const reader = (output: string) => {
 }
 
 /** What a new file nobody has added yet holds, as git would add it: a file's text, or that it is binary; a link's target; or nothing git adds. */
-type NewFile =
+export type NewFile =
   | { readonly kind: 'text'; readonly text: string }
   | { readonly kind: 'binary' }
   | { readonly kind: 'link'; readonly target: string }
   | { readonly kind: 'other' }
 
 /** Reads a new file as git would add it, without following a link, and without waiting on anything that isn't a file. */
-const newFile = (worktree: string, path: string, read: boolean): Effect.Effect<NewFile> =>
+export const newFile = (worktree: string, path: string, read: boolean): Effect.Effect<NewFile> =>
   Effect.promise(async (): Promise<NewFile> => {
     const at = join(worktree, path)
     const stats = await lstat(at)

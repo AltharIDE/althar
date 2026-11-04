@@ -1,8 +1,8 @@
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
-import { jobState, makeGitLab, mergesOf, readyTitle, verdictOf } from '../src/gitlab'
-import type { ChangeRequest, Issue, Repository } from '../src/model'
+import { issueParamsOf, issueStatesOf, jobState, makeGitLab, mergesOf, readyTitle, verdictOf } from '../src/gitlab'
+import type { ChangeRequest, Issue, IssueQuery, Repository, StatusCategory } from '../src/model'
 import { type Route, stubFetch } from './stub'
 
 const API = 'https://gitlab.com/api/v4'
@@ -998,16 +998,18 @@ describe('GitLab as a tracker', () => {
       ])
       // In a project, each is said to be there.
       assert.deepStrictEqual(
-        found.map((one) => one.container),
+        found.issues.map((one) => one.container),
         ['meridian/payments/api', 'meridian/payments/api'],
       )
+      // A page short of what was asked is the last.
+      assert.isNull(found.next)
       const mine = yield* host.find({ state: 'open', mine: true, limit: 500 })
       assert.deepStrictEqual(asked(1), [
         '/api/v4/issues',
         { scope: 'assigned_to_me', state: 'opened', order_by: 'updated_at', sort: 'desc', per_page: '100' },
       ])
       assert.deepStrictEqual(
-        mine.map((one) => one.ref),
+        mine.issues.map((one) => one.ref),
         ['meridian/payments/api#231', 'meridian/web#9'],
       )
       // Everywhere and anyone's: those the account made.
@@ -1020,6 +1022,148 @@ describe('GitLab as a tracker', () => {
       assert.lengthOf(sent, 3)
     }),
   )
+
+  describe('narrowing a search', () => {
+    const query = (narrowed: Partial<IssueQuery> = {}): IssueQuery => ({
+      container: 'meridian/payments/api',
+      state: 'all',
+      limit: 10,
+      ...narrowed,
+    })
+    const status = (names: ReadonlyArray<string>, categories: ReadonlyArray<StatusCategory> = []) => ({ names, categories })
+    /** What the list is asked beyond its bound, its order and its page. */
+    const narrowed = (asked: Partial<IssueQuery>, assignee?: string | null) => {
+      const params = issueParamsOf(query(asked), assignee === undefined ? {} : { assignee })
+      if (params === null) return null
+      for (const kept of ['scope', 'order_by', 'sort', 'per_page']) params.delete(kept)
+      return [...params].map(([key, value]) => `${key}=${value}`).join('&')
+    }
+
+    it('asks for labels, a milestone, when it last changed and who it is assigned to by GitLab’s parameters', () => {
+      assert.strictEqual(
+        narrowed({ labels: ['payments', ' type::bug '], milestone: 'Q4 launch', updatedSince: '2026-11-01T08:00:00Z' }),
+        'state=all&labels=payments,type::bug&milestone=Q4 launch&updated_after=2026-11-01T08:00:00Z',
+      )
+      assert.strictEqual(narrowed({ assignee: null }), 'state=all&assignee_id=None')
+      // Taken as a username, unless GitLab said whose it is.
+      assert.strictEqual(narrowed({ assignee: '@sam' }), 'state=all&assignee_username=sam')
+      assert.strictEqual(narrowed({ assignee: 'Sam Rivera' }, 'sam'), 'state=all&assignee_username=sam')
+      assert.isNull(narrowed({ assignee: 'nobody' }, null))
+      assert.strictEqual(narrowed({ text: ' rate limit ' }), 'state=all&search=rate limit')
+    })
+
+    it('finds GitLab’s two statuses by their names or categories, with the state it is asked in', () => {
+      assert.deepStrictEqual(issueStatesOf({ state: 'all', status: status(['OPENED', 'done']) }), ['opened', 'closed'])
+      assert.deepStrictEqual(issueStatesOf({ state: 'all', status: status([], ['cancelled', 'started']) }), [])
+      assert.strictEqual(narrowed({ status: status(['Open']) }), 'state=opened')
+      assert.strictEqual(narrowed({ status: status([], ['done']) }), 'state=closed')
+      assert.strictEqual(narrowed({ status: status(['open', 'closed']) }), 'state=all')
+      assert.strictEqual(narrowed({ state: 'open', status: status(['open', 'closed']) }), 'state=opened')
+      assert.isNull(narrowed({ state: 'open', status: status(['Closed']) }))
+      assert.isNull(narrowed({ status: status(['In Review']) }))
+    })
+
+    it('finds the project’s own issues by number in its list, and pages it from its cursor', () => {
+      assert.strictEqual(narrowed({ keys: ['#12', 'Meridian/Payments/API#13'] }), 'state=all&iids[]=12&iids[]=13')
+      // Another project's is read on its own.
+      assert.isNull(narrowed({ keys: ['#12', 'meridian/web#3'] }))
+      assert.isNull(issueParamsOf({ state: 'all', limit: 5, keys: ['meridian/web#3'] }))
+      const paged = issueParamsOf(query({ cursor: '3', limit: 500 }))
+      assert.deepStrictEqual([paged?.get('per_page'), paged?.get('page')], ['100', '3'])
+      assert.isFalse(issueParamsOf(query())?.has('page'))
+    })
+
+    it.effect('asks the project who an assignee is, and finds none for no one there, without asking for issues', () =>
+      Effect.gen(function* () {
+        const { host, sent } = gitlab([
+          [
+            'GET',
+            `${AT}/members/all?query=Sam%20Rivera&per_page=100&page=1`,
+            { json: [user(6, 'sam', { name: 'Sam Rivera' }), user(7, 'samuel')] },
+          ],
+          ['GET', `${AT}/members/all?query=Alex&per_page=100&page=1`, { json: [user(8, 'alexandra')] }],
+          ['GET', /\/issues\?/, { json: [issue()] }],
+        ])
+        const found = yield* host.find(query({ assignee: 'Sam Rivera' }))
+        assert.lengthOf(found.issues, 1)
+        assert.strictEqual(new URL(sent.at(-1)?.url ?? '').searchParams.get('assignee_username'), 'sam')
+        const asked = sent.length
+        assert.deepStrictEqual(yield* host.find(query({ assignee: 'Alex' })), { issues: [], next: null })
+        assert.deepStrictEqual(yield* host.find(query({ status: status(['In Review']) })), { issues: [], next: null })
+        assert.lengthOf(sent, asked + 1)
+        // Everywhere, an assignee is a username, and no one is asked who it is.
+        yield* host.find({ state: 'open', assignee: 'sam', limit: 5 })
+        assert.strictEqual(new URL(sent.at(-1)?.url ?? '').searchParams.get('assignee_username'), 'sam')
+      }),
+    )
+
+    it.effect('refuses what it can’t find by, before asking', () =>
+      Effect.gen(function* () {
+        const { host, sent } = gitlab([])
+        for (const refused of [
+          query({ project: 'Roadmap' }),
+          query({ cycle: 'current' }),
+          query({ priority: ['high'] }),
+          query({ parent: '#3' }),
+          { state: 'all', limit: 5, keys: ['#3'] } satisfies IssueQuery,
+          query({ keys: ['MER-3', 'meridian/web#3'] }),
+        ]) {
+          const failed = yield* Effect.flip(host.find(refused))
+          assert.strictEqual(failed.reason, 'rejected')
+        }
+        assert.lengthOf(sent, 0)
+      }),
+    )
+
+    it.effect('reads on while a page comes back full', () =>
+      Effect.gen(function* () {
+        const { host, sent } = gitlab([
+          [
+            'GET',
+            /\/issues\?/,
+            (request) => ({ json: new URL(request.url).searchParams.get('page') === '2' ? [issue()] : [issue(), issue({ iid: 232 })] }),
+          ],
+        ])
+        const first = yield* host.find(query({ limit: 2 }))
+        assert.strictEqual(first.next, '2')
+        const second = yield* host.find(query({ limit: 2, cursor: first.next ?? '' }))
+        assert.strictEqual(new URL(sent.at(-1)?.url ?? '').searchParams.get('page'), '2')
+        assert.isNull(second.next)
+      }),
+    )
+
+    it.effect('reads issues of other projects by number one by one, leaving out those it hasn’t, narrowed as asked, and pages them', () =>
+      Effect.gen(function* () {
+        const { host, sent } = gitlab([
+          ['GET', `${AT}/issues/231`, { json: issue() }],
+          ['GET', `${AT}/issues/232`, { json: issue({ iid: 232, state: 'closed', updated_at: '2026-10-08T00:00:00Z' }) }],
+          ['GET', `${API}/projects/meridian%2Fweb/issues/9`, { json: issue({ iid: 9, labels: [], updated_at: '2026-10-09T00:00:00Z' }) }],
+          ['GET', `${API}/projects/meridian%2Fweb/issues/10`, { status: 404, json: { message: '404 Not found' } }],
+        ])
+        const keys = ['#231', '#232', 'meridian/web#9', 'meridian/web#10']
+        const found = yield* host.find(query({ keys, labels: ['PAYMENTS'], limit: 1 }))
+        assert.deepStrictEqual(
+          found.issues.map((one) => one.ref),
+          ['meridian/payments/api#232'],
+        )
+        assert.strictEqual(found.next, '1')
+        assert.lengthOf(sent, 4)
+        assert.isFalse(sent.some((request) => request.url.includes('/issues?')))
+        const rest = yield* host.find(query({ keys, labels: ['PAYMENTS'], limit: 1, cursor: '1' }))
+        assert.deepStrictEqual(
+          rest.issues.map((one) => one.ref),
+          ['meridian/payments/api#231'],
+        )
+        assert.isNull(rest.next)
+        // Without a project, each is where its ref says.
+        const anywhere = yield* host.find({ state: 'open', keys: ['meridian/web#9', 'meridian/payments/api#232'], limit: 5 })
+        assert.deepStrictEqual(
+          anywhere.issues.map((one) => one.ref),
+          ['meridian/web#9'],
+        )
+      }),
+    )
+  })
 
   it.effect('reads an issue’s latest comments, oldest first, leaving out GitLab’s own notes of what changed', () =>
     Effect.gen(function* () {

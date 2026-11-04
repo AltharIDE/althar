@@ -26,3 +26,4 @@ export { addressOf, available, classicTokenPage, hostedOf, type ProductInfo, pro
 export { identify, type Identified } from './servers'
 export * from './signIn'
 export { makeTrello } from './trello'
+export { changeTable, findTable, trackerCapabilities, TRACKERS } from './trackers'
