@@ -14,7 +14,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
 import { Api, clientProtocol, emitterPort, MESSAGE_FILES, type ThreadItem, type ThreadSnapshot } from '@althar/contracts'
@@ -307,7 +307,7 @@ describe('files sent with a message, at their edges', () => {
         )
         const copied = yield* setup.sql<{ path: string }>`SELECT path FROM user_input_files ORDER BY position`
         assert.deepStrictEqual(
-          copied.map((row) => row.path.slice(row.path.lastIndexOf('/') + 1)),
+          copied.map((row) => basename(row.path)),
           ['build.log', 'build 2.log', 'build 3.log'],
         )
         for (const row of copied) assert.isTrue(row.path.startsWith(join(worktree, '.althar', 'attachments')), row.path)
