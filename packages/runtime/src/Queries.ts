@@ -2034,6 +2034,10 @@ export class Queries extends Context.Service<
           const fixing = task.state === 'open' ? yield* (yield* Changes).fixing(taskId).pipe(Effect.orElseSucceed(() => null)) : null
           const checksRun = (seeing && hands.running) || fixing?.running === true
           const resolving = round?.state === 'resolving' ? round : undefined
+          // Waiting on the checks of the merge a round pushed: under way, the lead asked again should they fail.
+          const roundChecks = round?.state === 'checking'
+          // Conflicting, and about to go to its lead as Althar next looks at it: on its way back to work, not the person's.
+          const due = round?.state === 'due'
           const lead = yield* sessions.running(task.threadId)
           const reviewer = task.review === null ? Option.none() : yield* sessions.running(task.review)
           const working = task.starting > 0 || Option.isSome(lead) || Option.isSome(reviewer)
@@ -2084,7 +2088,9 @@ export class Queries extends Context.Service<
           // The first still open, for the person to act on: one merged while another isn't leaves the other. Else its latest.
           const shown = changes.find((candidate) => candidate.state === 'open') ?? changes.at(-1) ?? null
           // Its commits going up on their own, or its checks running with nothing of the person's before them: under way (DEV-173).
-          const going = task.runState === 'succeeded' ? byItself(shown) : null
+          // Some failed while the rest still run, they go to its lead once they end, unless its tries are spent, the lead brought
+          // them to the person, or the person stopped it since (ADR-070).
+          const going = task.runState === 'succeeded' ? byItself(shown, { failuresGo: fixing?.failuresGo === true }) : null
           // Not checks that ran too long, that Althar gave up on as so, or that it can't read (ADR-041): those are the person's. Commits made outside
           // a turn, which nothing pushes, aren't going up (`Changes.pushing`): those are the person's too.
           const goes = going === 'checks_running' && (yield* ranTooLong(taskId, shown?.head ?? null)) ? null : going
@@ -2116,7 +2122,7 @@ export class Queries extends Context.Service<
             // Failing checks its lead is told or at are its lead's, not the person's, while they are (ADR-070, DEV-173): not once a
             // conflict round whose merge they fail on handed them back, its lead not told again.
             const withLead = fixing?.withLead === true && round?.state !== 'handed_back'
-            if (task.runState === 'succeeded') return checksRun || withLead || goes !== null ? 'running' : 'ready'
+            if (task.runState === 'succeeded') return checksRun || withLead || roundChecks || due || goes !== null ? 'running' : 'ready'
             if (task.runState !== null && task.runState !== 'running') return 'stopped'
             // Held for a reset, it carries on on its own: under way, not stopped.
             return (working && !cutShort) || task.held !== null || settingUp || unstarted || between ? 'running' : 'stopped'
@@ -2263,11 +2269,15 @@ export class Queries extends Context.Service<
                   ? resolving.checks
                     ? 'checks'
                     : 'conflict'
-                  : seeing || fixing?.open === true
-                    ? busy || !checksRun
-                      ? 'checks'
-                      : 'checks_running'
-                    : goes),
+                  : due
+                    ? 'conflict'
+                    : roundChecks && !busy
+                      ? 'checks_running'
+                      : seeing || fixing?.open === true
+                        ? busy || !checksRun
+                          ? 'checks'
+                          : 'checks_running'
+                        : goes),
             followUp: task.runState === 'running' && task.runPlan === null,
             summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
             lead: task.lead ?? (implement?.agentId || null),
@@ -2982,7 +2992,8 @@ export class Queries extends Context.Service<
               launches: (yield* launches.ofProject(head.projectId)).filter((launch) => launch.taskId === head.taskId),
               resolveConflicts: {
                 task: head.resolveConflicts === null ? null : head.resolveConflicts === 1,
-                project: head.projectResolves === 1,
+                // On unless the person turned it off (Policies.resolvesConflicts).
+                project: head.projectResolves !== 0,
               },
               allowEverything: { task: head.allowEverything === 1, project: head.projectAllows === 1 },
               review: yield* reviewBriefOf(head.taskId),

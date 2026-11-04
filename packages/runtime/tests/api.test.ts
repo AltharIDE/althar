@@ -1164,7 +1164,7 @@ describe('project rules, through the API', () => {
           commands: [],
           end: null,
           worksIn: 'worktree',
-          resolveConflicts: false,
+          resolveConflicts: true,
           pushCommits: true,
           postScreenshots: false,
           leadsReachWeb: true,
@@ -1195,7 +1195,7 @@ describe('project rules, through the API', () => {
           never: ['force-push'],
           commands: [{ pattern: 'terraform *', decision: 'ask' }],
           end: 'ready',
-          resolveConflicts: true,
+          resolveConflicts: false,
           leadsReachWeb: false,
           usageLimit: 'wait',
           rotateAccounts: true,
@@ -1218,7 +1218,7 @@ describe('project rules, through the API', () => {
             ['force-push'],
             [{ pattern: 'terraform *', decision: 'ask' }],
             'ready',
-            true,
+            false,
             false,
             'wait',
             true,
@@ -1243,7 +1243,7 @@ describe('project rules, through the API', () => {
         const back = yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, end: null, onlyAccounts: null })
         assert.deepStrictEqual(
           [back.end, back.onlyAccounts, back.rotateAccounts, back.never, back.resolveConflicts],
-          [null, null, true, ['force-push'], true],
+          [null, null, true, ['force-push'], false],
         )
         assert.deepStrictEqual(yield* client.GetProjectRules({ projectId: project.id }), back)
         // Allow everything is a switch over the mode (ADR-043): the mode is kept under it, and holds again once it is off.
@@ -2007,6 +2007,8 @@ describe('the coordinator, through the API', () => {
         const { client, grant } = yield* connected()
         const root = repository()
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(root) })
+        // The person turned it off, as it is on unless they do.
+        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, resolveConflicts: false })
         const task = yield* client.StartTask({
           commandId: commandId(),
           projectId: project.id,
@@ -2051,6 +2053,8 @@ describe('the coordinator, through the API', () => {
         const { client, grant, store } = yield* connected()
         const root = repository()
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(root) })
+        // The project leaves conflicts to the person, so the task turning it on is what asks its lead.
+        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, resolveConflicts: false })
         const task = yield* client.StartTask({
           commandId: commandId(),
           projectId: project.id,

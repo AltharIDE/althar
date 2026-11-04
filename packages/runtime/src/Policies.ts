@@ -199,8 +199,8 @@ export const movesIssues = (rules: ProjectRules): boolean => rules.moveIssues ??
 /** Where a revision's rules start new tasks (ADR-091): in a worktree of their own unless the person chose Local. */
 export const worksInOf = (rules: ProjectRules): WorksIn => rules.worksIn ?? 'worktree'
 
-/** Whether a revision's rules have the lead resolve a conflict on its own: not unless the person turned it on. */
-export const resolvesConflicts = (rules: ProjectRules): boolean => rules.resolveConflicts === true
+/** Whether a revision's rules have the lead resolve a conflict on its own: they do unless the person turned it off. */
+export const resolvesConflicts = (rules: ProjectRules): boolean => rules.resolveConflicts !== false
 
 /** Whether a revision's rules push a lead's commits on their own (ADR-072): they do unless the person turned it off. */
 export const pushesCommits = (rules: ProjectRules): boolean => rules.pushCommits ?? true
