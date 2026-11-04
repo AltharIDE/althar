@@ -6,14 +6,15 @@ Measured 4 November 2026, against `3ffcc477c66c`. Investigation only; no runtime
 
 ## Evidence and limits
 
-Selected the profile's **last 20 tasks in `done`, ordered by `settled_at`**, as of 21:19 UTC. This is 19 Althar tasks and one FNT research task, completed 3–4 November but created as early as 28 October. Seventeen have merged PRs; three have no attached PR. Some were reopened or left awaiting a decision for days. Their plans end at draft/ready/none, not automatic merge (`TaskEnd`, `packages/contracts/src/Api.ts:1201`). Consequently, their median creation-to-done time, **19h48m**, includes substantial time awaiting merge action or further conversation, not just autonomous execution.
+Selected the profile's **last 20 tasks in `done`, ordered by `settled_at`**, as of 21:19 UTC. This includes one anonymous research task. Its project and content are withheld; the row remains only to preserve the selected cohort and its statistics. Seventeen have merged PRs; three have no attached PR. Some were reopened or left awaiting a decision for days. Their plans end at draft/ready/none, not automatic merge (`TaskEnd`, `packages/contracts/src/Api.ts:1201`). Consequently, their median creation-to-done time, **19h48m**, includes substantial time awaiting merge action or further conversation, not just autonomous execution.
 
 Read `~/Library/Application Support/Althar/althar.sqlite` and its WAL through temporary copies. A live `mode=ro` connection and backup both failed with `database is locked`, including outside the sandbox. This is explained by [Database.ts](../../packages/persistence-sqlite/src/Database.ts):56–75: deliberate exclusive profile ownership, **not evidence of a blocked writer or a sandbox defect**. Database/WAL sizes and nanosecond modification times were unchanged across the copy, and the copied database passed `PRAGMA integrity_check` (`ok`). Copying two live files is not an atomic SQLite backup; this remains a snapshot limitation. The source database was never written to.
 
-The attached data contains timestamps and identifiers, without prompts, command arguments, credentials or tool output:
+The profile-derived exports are redacted for this public repository: **all task titles and project names are omitted, profile IDs are replaced with local aliases, and every event position is a whole-minute offset from its own task's creation**. No absolute profile timestamps, prompts, command arguments, credentials or tool output are included. Exact elapsed durations are retained separately so rounding event positions does not change the measured medians. Public PR links and GitHub's already-public timestamps remain; offsets can still reveal approximate timing around those public events. The anonymous research task's content is also omitted from the prose below.
 
 - [Task totals and disjoint wall-state estimates](task-flow-latency-data/tasks.csv).
 - [Plans, worktrees, setup, every attempt and turn, provider startups, attention, holds and host observations](task-flow-latency-data/phases.csv).
+- [Exact elapsed samples](task-flow-latency-data/samples.csv), [extraction and summary script](task-flow-latency-data/reproduce.py), and [public PR merge timestamps](task-flow-latency-data/prs.csv).
 - [GitHub check timestamps](task-flow-latency-data/checks.csv): all returned check runs on the 17 final PR heads, including retry records, plus PR #583's merge-group jobs. GitHub's REST API was read through the connected GitHub tool. Pagination was checked: every head returned fewer than 100 checks. This does **not** include every job on superseded heads or every historical merge-group attempt.
 
 The SQLite snapshot does not store per-job CI start/end timestamps, CPU seconds per tool, or historical machine pressure. Tool intervals below are **estimates** from `thread_items.created_at` through the final `change_log.changed_at` of a terminal tool item, intersected with its task's recorded turn intervals. Status/output enrichment can extend that endpoint. A tool being open does not mean it was consuming CPU. An agent turn being open does not mean the model was computing continuously.
@@ -37,7 +38,7 @@ The SQLite snapshot does not store per-job CI start/end timestamps, CPU seconds 
 | GitHub merged → Althar observed merge | 17 PRs | 18.69 s | 142.05 s | Direct host-versus-local comparison |
 | Automatic CI rerun → next result on same SHA | 5 matched episodes | 7m07s | 12m51s | Seven reruns recorded across five tasks; two lack a matched later result |
 
-**Admission waits are real.** Eleven `machine_busy` hold episodes have a median duration of **20m43s**, worst **105m42s**, until the next resume/running/terminal event. Examples: OpenCode Zen waited 00:15:47–02:01:29 on 3 November; the no-change task waited 18:34:23–19:19:03. This is Althar's task-place admission, not a measured OS-pressure pause. Two `agent_unavailable` holds lasted 15 s and 233 s. No checkout hold was recorded in this cohort.
+**Admission waits are real.** Eleven `machine_busy` hold episodes have a median duration of **20m43s**, worst **105m42s**, until the next resume/running/terminal event. Examples: OpenCode Zen waited **105m42s**; the no-change task waited **44m40s**. This is Althar's task-place admission, not a measured OS-pressure pause. Two `agent_unavailable` holds lasted 15 s and 233 s. No checkout hold was recorded in this cohort.
 
 ### All 20 tasks
 
@@ -52,7 +53,7 @@ The disjoint partition gives overlapping intervals this precedence: attention �
 | Read other tasks' work | [580](https://github.com/AltharIDE/althar/pull/580) | 141.87 | 34.53 | 16.64 | 70.36 | 0 | 7.94 | 12.28 |
 | Conflicts/checks back to work | [568](https://github.com/AltharIDE/althar/pull/568) | 738.73 | 127.95 | 30.35 | 1.71 | 0.85 | 27.32 | 549.36 |
 | Cramped usage note | [572](https://github.com/AltharIDE/althar/pull/572) | 27.55 | 4.46 | 6.77 | 0 | 0.20 | 7.09 | 8.83 |
-| FNT go-to-market research | — | 7269.05 | 20.76 | 11.84 | 0 | 0 | 0 | 7236.00 |
+| Anonymous research task | — | 7269.05 | 20.76 | 11.84 | 0 | 0 | 0 | 7236.00 |
 | OpenCode Zen usage | — | 1410.54 | 0.98 | 1.55 | 0 | 105.59 | 0 | 1301.84 |
 | Plan-card model label | [524](https://github.com/AltharIDE/althar/pull/524) | 1630.47 | 2.95 | 1.53 | 13.36 | 0.01 | 18.49 | 1593.94 |
 | Local/checkout/worktree | [564](https://github.com/AltharIDE/althar/pull/564) | 1512.36 | 155.49 | 87.02 | 1109.35 | 30.06 | 14.68 | 114.57 |
@@ -72,13 +73,13 @@ Across tasks, median estimated tool time is **35m32s** (worst 155m29s), remainin
 
 ### Three revealing paths
 
-**Small copy fix, #583 (4 November, UTC):** created 20:47:42.725; setup 20:47:46.204–49.992; first turn 20:47:55.832; implement ended 20:49:15.277; review 20:49:20.810–20:58:30.608; publish ended 20:58:39.348. GitHub's final successful PR check completed 21:06:33; Althar recorded passed checks at 21:06:59.128; merge queue entry was announced 21:07:21.368; GitHub merged 21:15:38; Althar observed it 21:16:18.361.
+**Small copy fix, #583 (`task-01`):** relative to task creation, setup and the first turn began around minute 0; implementation ended around minute 2; review ran from around minute 2 to minute 11; publication finished around minute 11. Passed checks were observed around minute 19; the queue-entry notice appeared around minute 20 (`queue_entry_notice` in the phase export); merge was observed around minute 29. GitHub merged at 21:15:38 UTC on 4 November; Althar observed it **40.361 s later**. Private event positions are rounded to minutes; elapsed samples retain the precise interval lengths.
 
 The [PR desktop jobs](https://github.com/AltharIDE/althar/actions/runs/41911673404) show the longest E2E job taking **6m35s**, of which 4m59s was the E2E command and 1m20s its apt installation. The [merge-group jobs](https://github.com/AltharIDE/althar/actions/runs/41913074951) then ran E2E again: longest job **7m06s**, including a 6m28s E2E command. Job queue waits for those two jobs were only 2 s and 3 s. This path pays for review and two successive remote validation gates; a faster Mac cannot remove those remote minutes. The merge queue verifies the combined tree, so removing that gate would sacrifice an existing correctness guarantee.
 
 **Bulk tools, #581, and read-other-tasks, #580:** implementation took about 34 and 33 minutes; each reviewer took about 1½ minutes; each settle took about 16 minutes. They then stopped at `round_limit`, with **zero open findings**, for **84m25s and 70m22s**, respectively, before publication. This is intentional: changed code after the last allowed review requires the person ([Runs.ts](../../packages/runtime/src/Runs.ts):3632–3653), even if findings are settled. The already-open task **“Setting: carry on when review rounds run out”** addresses this policy; do not file a duplicate. Its eventual behavior must retain an honest record of which tree was reviewed.
 
-**Conflict/check repair, #568:** implementation 54m07s, then three review/settle pairs, another review, and publication at 23:07:37 on 3 November. Conflict observed 23:07:43.791 → lead turn delivered 23:08:13.544: **30 s**; the lead then worked until 23:21:57.802. A later implement attempt waited **28 s** in `machine_busy` before starting at 23:40:10. On 4 November, failed checks observed 00:13:07.195 → automatic rerun 00:13:12.660 → still failed 00:20:19.481 → lead notified 00:20:23.210 → lead turn delivered 00:20:28.525. That is **7m16s from failure observation to notification**, predominantly the rerun cycle. Checks were green at 00:36:57.446; queue entry was announced only at 09:30:19.336; GitHub merged at 09:32:32. The **8h53m green-to-queue gap** belongs to time awaiting merge action, not continuous tests or a polling sleep. The records do not prove every intervening decision's cause.
+**Conflict/check repair, #568 (`task-04`):** implementation 54m07s, then three review/settle pairs, another review, and publication around minute 114. Conflict notice → next lead turn: **29.753 s**; that turn lasted about 13m44s. A later implement attempt waited **28 s** in `machine_busy`. Around minute 179, failed checks triggered an automatic rerun; the next failed result and notification arrived around minute 186. That is **7m16s from the first failure observation on that SHA to notification**, predominantly the rerun cycle. Checks were green around minute 203; queue entry was announced around minute 736; GitHub merged at 09:32:32 UTC on 4 November. The **8h53m green-to-queue gap** (32,001.890 s in `samples.csv`, metric `green_to_queue_notice`) belongs to time awaiting merge action, not continuous tests or a polling sleep. The records do not prove every intervening decision's cause. The queue-entry source is `thread_items.created_at`, joined through `threads.task_id`, with `kind='notice'` and the runtime title pattern `PR #<number> is in the merge queue for main.`; its text is not exported.
 
 ```mermaid
 flowchart LR
@@ -157,25 +158,39 @@ Run only each follow-up's changed-package checks and the named relevant tests, e
 
 ## Rechecking the result
 
-Selection and phase joins are reproducible on the temporary snapshot or a consistent profile backup with `sqlite3 -readonly <backup>`. Do not use `immutable=1` on the live WAL database: it can hide uncheckpointed data.
+The committed [reproduce.py](task-flow-latency-data/reproduce.py) contains the selection, every phase query/join, tool-envelope heuristic and disjoint partition. It uses only Python's standard library, opens SQLite with `mode=ro` and `query_only=ON`, checks integrity, and writes only redacted results into a **new** output directory. Use the original private snapshot or a consistent profile backup; rerunning on a newer profile selects a different cohort. The private snapshot is not committed. Do not use `immutable=1` on a live WAL database: it can hide uncheckpointed data.
 
-```sql
-PRAGMA query_only = ON;
-WITH recent AS (
-  SELECT id FROM tasks WHERE state = 'done'
-  ORDER BY settled_at DESC LIMIT 20
-)
-SELECT t.id, t.title, t.created_at, t.settled_at,
-       n.node_key, n.iteration, a.id AS attempt,
-       a.admitted_at, a.started_at, a.ended_at, a.state
-FROM recent q JOIN tasks t ON t.id = q.id
-JOIN runs r ON r.task_id = t.id
-JOIN workflow_executions e ON e.run_id = r.id
-JOIN nodes n ON n.execution_id = e.id
-JOIN node_attempts a ON a.node_id = n.id
-ORDER BY t.settled_at DESC, a.admitted_at;
+Recompute all profile-derived headline medians and worst cases directly from the committed elapsed samples, with no profile access:
+
+```bash
+python3 docs/research/task-flow-latency-data/reproduce.py --summarize docs/research/task-flow-latency-data
 ```
 
-Join `turn_deliveries` through `threads.task_id`; provider starts through `record_events.aggregate_id = provider_sessions.id`; setup endpoints from task-thread `kind='setup'` content; worktree readiness from `workspace.ready` events. Accepted plans clear `starts_at`, so the CSV recovers due times from their proposed/changed event payloads. Host phases come from `observations` joined through `external_links.task_id`; merge lag compares `kind='merged'.observed_at` to GitHub `merged_at` on that PR. CI rows were read from `GET /repos/AltharIDE/althar/commits/{head_sha}/check-runs?filter=all&per_page=100`, plus #583's merge-group run `41913074951/jobs`.
+To independently re-extract the phases and samples from a private backup (the command never modifies that backup):
 
-Validation: integrity check passed; every task's unrounded disjoint categories reconciled to its creation-to-done duration within 0.01 s; 17 PR merge timestamps were independently fetched; evidence CSVs contain no prompts or tool output. GitHub includes incomplete old check records and occasionally negative start/end ordering on **skipped** jobs: retain their source values, exclude them from duration calculations. Remaining gaps: older-head/merge-group job history, process birth identities and reparented-process attribution, matched idle-versus-loaded suite timing and first-token/tool-execution telemetry. These prevent an exact Mac-versus-Althar percentage, not the queue/round-limit/CI findings above.
+```bash
+python3 docs/research/task-flow-latency-data/reproduce.py /path/to/consistent-private-backup.sqlite \
+  --out /tmp/althar-latency-recheck \
+  --prs docs/research/task-flow-latency-data/prs.csv
+```
+
+The public `prs.csv` input supplies host merge times for merge-detection lag. Check/job data is separate from the private extraction: `checks.csv` was fetched from `GET /repos/AltharIDE/althar/commits/{head_sha}/check-runs?filter=all&per_page=100`, with run `41913074951/jobs` added for #583's merge group. `prs.csv` records `GET /repos/AltharIDE/althar/pulls/{number}` fields. `job-steps.csv` retains the public steps for the sampled #583 jobs from runs `41911673404` and `41913074951`; job duration is completed minus started, runner queue time is started minus created, and each command/apt duration is its step's completed minus started. These durations can be recomputed without the profile. Fetch later histories with pagination if a head has 100 or more check runs.
+
+| Phase / elapsed sample | SQLite source and calculation (implemented in the script) |
+| --- | --- |
+| Cohort / lifetime | `tasks.state='done' ORDER BY settled_at DESC LIMIT 20`; `settled_at - created_at` |
+| Plan | `task_plans.proposed_at/decided_at`; due time recovered from ordered `record_events.payload.startsAt` for that plan |
+| Worktree | `workspaces.created_at` to first `record_events.occurred_at` with the workspace ID and `type='workspace.ready'` |
+| Setup | Task-thread `thread_items.kind='setup'`, JSON `content.startedAt` to `content.ended.at` |
+| Attempts / handoff | `runs.task_id → workflow_executions.run_id → nodes.execution_id → node_attempts.node_id`; admission/start/end; next admission minus previous end, ordered by admission |
+| Turn / dispatch | `turn_deliveries.thread_id → threads.task_id`; delivered-to-ended, and delivered minus requested |
+| Provider startup | `provider_sessions.thread_id → threads.task_id`; first active event minus first starting event via `record_events.aggregate_id`; fallback to `provider_sessions.started_at` if no starting event |
+| Attention / admission holds | `attention_requests.created_at/answered_at`; hold events through the attempt join, from `node_attempt.held` until next held/running/resumed/terminal event |
+| Tools / heavy tools | Terminal task-thread `tool_call` items, creation to last `change_log.changed_at` for the item, intersected with delivered-to-ended turn intervals; the script contains the command classifier, which exports no command text |
+| Observed CI / reruns | `observations.subject_id → external_links.id → external_links.task_id`; `checks_running` or `checks_rerun` to next `checks` on the same link and SHA |
+| Queue entry / green-to-queue | Task-thread `notice` title matching the runtime queue-entry pattern above; notice `created_at` minus the most recent preceding passed `checks` observation on that PR |
+| Merge detection | `observations.kind='merged'.observed_at` minus that PR's public `merged_at` |
+
+`phases.csv` names its source fields per row. `start/end/due/started_offset_min` are rounded positions, **not inputs for precise duration arithmetic**; `duration_s` is the exact endpoint difference (attempt rows use admitted-to-ended). `samples.csv` stores exact elapsed samples, including started-to-ended attempt durations, inter-attempt gaps, dispatch delays, green-to-queue and merge lag. Its `task` aliases join the phases and totals; `reproduce.py --summarize` groups by `metric`. Counts include **748 phases**, with 23 queue-entry notices and 13 conflict notices, **119 attempts, 162 turns, 103 successful startups, 11 capacity holds**, and **538 unique GitHub checks/jobs across 17 PRs**. The additional notice rows make the narrative paths recheckable without publishing notice bodies.
+
+Validation: snapshot integrity passed; regenerated task totals and disjoint categories match the original accounting; rounded category totals reconcile within 3 s/task. All phase counts above and headline elapsed statistics were recomputed from the redacted exports. Exact elapsed samples retain at most 1 ms rounding, so a median may differ by at most 0.5 ms from computing it before rounding. No runtime code changed and no product tests were needed. GitHub includes incomplete old check records and occasionally negative start/end ordering on **skipped** jobs: retain their source values, exclude them from duration calculations. Remaining gaps: older-head/merge-group job history, process birth identities and reparented-process attribution, matched idle-versus-loaded suite timing and first-token/tool-execution telemetry. These prevent an exact Mac-versus-Althar percentage, not the queue/round-limit/CI findings above.

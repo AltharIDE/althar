@@ -1,0 +1,69 @@
+job_id,run_id,name,started_at,completed_at
+126865443480,41913074951,Run actions/checkout@v5,2026-11-04T21:07:26Z,2026-11-04T21:07:28Z
+126865443480,41913074951,Post Run actions/checkout@v5,2026-11-04T21:07:30Z,2026-11-04T21:07:30Z
+126865525660,41913074951,Run actions/checkout@v5,2026-11-04T21:07:38Z,2026-11-04T21:07:44Z
+126865525660,41913074951,"Run bun packages/testing/src/select.ts plan desktop ""$RUNNER_TEMP/changed""",2026-11-04T21:07:51Z,2026-11-04T21:07:52Z
+126865525660,41913074951,Post Run actions/checkout@v5,2026-11-04T21:07:52Z,2026-11-04T21:07:52Z
+126865525757,41913074951,Run actions/checkout@v5,2026-11-04T21:07:36Z,2026-11-04T21:07:38Z
+126865525757,41913074951,Run bun install --frozen-lockfile,2026-11-04T21:07:40Z,2026-11-04T21:07:48Z
+126865525757,41913074951,Run bun run check,2026-11-04T21:07:48Z,2026-11-04T21:07:51Z
+126865525757,41913074951,Run bun run test,2026-11-04T21:07:56Z,2026-11-04T21:08:02Z
+126865525757,41913074951,Run bun run build,2026-11-04T21:08:02Z,2026-11-04T21:08:08Z
+126865525757,41913074951,Post Run actions/checkout@v5,2026-11-04T21:08:11Z,2026-11-04T21:08:11Z
+126865525777,41913074951,Run actions/checkout@v5,2026-11-04T21:07:39Z,2026-11-04T21:07:46Z
+126865525777,41913074951,Run bun install --frozen-lockfile,2026-11-04T21:07:54Z,2026-11-04T21:07:59Z
+126865525777,41913074951,"Run bun packages/testing/src/select.ts plan ui ""$RUNNER_TEMP/changed""",2026-11-04T21:08:00Z,2026-11-04T21:08:00Z
+126865525777,41913074951,Run bun packages/testing/src/select.ts run,2026-11-04T21:08:05Z,2026-11-04T21:08:31Z
+126865525777,41913074951,Run bun run build,2026-11-04T21:08:31Z,2026-11-04T21:08:44Z
+126865525777,41913074951,Post Run actions/checkout@v5,2026-11-04T21:08:48Z,2026-11-04T21:08:48Z
+126865753410,41913074951,Run actions/checkout@v5,2026-11-04T21:08:01Z,2026-11-04T21:08:04Z
+126865753410,41913074951,Run bun install --frozen-lockfile,2026-11-04T21:08:08Z,2026-11-04T21:08:16Z
+126865753410,41913074951,Run bun packages/testing/src/select.ts run,2026-11-04T21:08:19Z,2026-11-04T21:11:50Z
+126865753410,41913074951,Post Run actions/checkout@v5,2026-11-04T21:11:51Z,2026-11-04T21:11:51Z
+126865753787,41913074951,Run actions/checkout@v5,2026-11-04T21:08:01Z,2026-11-04T21:08:04Z
+126865753787,41913074951,Run bun install --frozen-lockfile,2026-11-04T21:08:07Z,2026-11-04T21:08:13Z
+126865753787,41913074951,Run sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0,2026-11-04T21:08:13Z,2026-11-04T21:08:31Z
+126865753787,41913074951,"Run dbus-run-session -- bash -c 'printf ""althar\n"" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; xvfb-run --auto-servernum bun run test:e2e --shard=""$SHARD""'",2026-11-04T21:08:32Z,2026-11-04T21:15:00Z
+126865753787,41913074951,Post Run actions/checkout@v5,2026-11-04T21:15:01Z,2026-11-04T21:15:01Z
+126865753832,41913074951,Run actions/checkout@v5,2026-11-04T21:08:01Z,2026-11-04T21:08:03Z
+126865753832,41913074951,Run bun install --frozen-lockfile,2026-11-04T21:08:07Z,2026-11-04T21:08:14Z
+126865753832,41913074951,Run sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0,2026-11-04T21:08:14Z,2026-11-04T21:08:31Z
+126865753832,41913074951,"Run dbus-run-session -- bash -c 'printf ""althar\n"" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; xvfb-run --auto-servernum bun run test:e2e --shard=""$SHARD""'",2026-11-04T21:08:33Z,2026-11-04T21:13:53Z
+126865753832,41913074951,Post Run actions/checkout@v5,2026-11-04T21:13:54Z,2026-11-04T21:13:54Z
+126865753936,41913074951,Run actions/checkout@v5,2026-11-04T21:08:02Z,2026-11-04T21:08:05Z
+126865753936,41913074951,Run bun install --frozen-lockfile,2026-11-04T21:08:09Z,2026-11-04T21:08:15Z
+126865753936,41913074951,Run sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0,2026-11-04T21:08:16Z,2026-11-04T21:08:32Z
+126865753936,41913074951,"Run dbus-run-session -- bash -c 'printf ""althar\n"" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; xvfb-run --auto-servernum bun run test:e2e --shard=""$SHARD""'",2026-11-04T21:08:34Z,2026-11-04T21:12:09Z
+126865753936,41913074951,Post Run actions/checkout@v5,2026-11-04T21:12:10Z,2026-11-04T21:12:10Z
+126865753975,41913074951,Run actions/checkout@v5,2026-11-04T21:08:00Z,2026-11-04T21:08:03Z
+126865753975,41913074951,Run bun install --frozen-lockfile,2026-11-04T21:08:04Z,2026-11-04T21:08:10Z
+126865753975,41913074951,Run sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0,2026-11-04T21:08:10Z,2026-11-04T21:09:14Z
+126865753975,41913074951,"Run dbus-run-session -- bash -c 'printf ""althar\n"" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; xvfb-run --auto-servernum bun run test:e2e --shard=""$SHARD""'",2026-11-04T21:09:16Z,2026-11-04T21:13:13Z
+126865753975,41913074951,Post Run actions/checkout@v5,2026-11-04T21:13:13Z,2026-11-04T21:13:14Z
+126860579018,41911673404,Run actions/checkout@v5,2026-11-04T20:58:44Z,2026-11-04T20:58:47Z
+126860579018,41911673404,"Run bun packages/testing/src/select.ts plan desktop ""$RUNNER_TEMP/changed""",2026-11-04T20:58:48Z,2026-11-04T20:58:49Z
+126860579018,41911673404,Post Run actions/checkout@v5,2026-11-04T20:58:49Z,2026-11-04T20:58:49Z
+126860681146,41911673404,Run actions/checkout@v5,2026-11-04T20:58:56Z,2026-11-04T20:58:58Z
+126860681146,41911673404,Run bun install --frozen-lockfile,2026-11-04T20:59:01Z,2026-11-04T20:59:09Z
+126860681146,41911673404,Run bun packages/testing/src/select.ts run,2026-11-04T20:59:10Z,2026-11-04T21:01:47Z
+126860681146,41911673404,Post Run actions/checkout@v5,2026-11-04T21:01:48Z,2026-11-04T21:01:48Z
+126860681249,41911673404,Run actions/checkout@v5,2026-11-04T20:58:56Z,2026-11-04T20:58:58Z
+126860681249,41911673404,Run bun install --frozen-lockfile,2026-11-04T20:58:59Z,2026-11-04T20:59:06Z
+126860681249,41911673404,Run sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0,2026-11-04T20:59:06Z,2026-11-04T20:59:21Z
+126860681249,41911673404,"Run dbus-run-session -- bash -c 'printf ""althar\n"" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; xvfb-run --auto-servernum bun run test:e2e --shard=""$SHARD""'",2026-11-04T20:59:22Z,2026-11-04T21:02:46Z
+126860681249,41911673404,Post Run actions/checkout@v5,2026-11-04T21:02:46Z,2026-11-04T21:02:46Z
+126860681333,41911673404,Run actions/checkout@v5,2026-11-04T20:58:56Z,2026-11-04T20:58:58Z
+126860681333,41911673404,Run bun install --frozen-lockfile,2026-11-04T20:59:00Z,2026-11-04T20:59:06Z
+126860681333,41911673404,Run sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0,2026-11-04T20:59:07Z,2026-11-04T20:59:21Z
+126860681333,41911673404,"Run dbus-run-session -- bash -c 'printf ""althar\n"" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; xvfb-run --auto-servernum bun run test:e2e --shard=""$SHARD""'",2026-11-04T20:59:23Z,2026-11-04T21:05:02Z
+126860681333,41911673404,Post Run actions/checkout@v5,2026-11-04T21:05:02Z,2026-11-04T21:05:02Z
+126860681385,41911673404,Run actions/checkout@v5,2026-11-04T20:58:56Z,2026-11-04T20:58:58Z
+126860681385,41911673404,Run bun install --frozen-lockfile,2026-11-04T20:58:59Z,2026-11-04T20:59:05Z
+126860681385,41911673404,Run sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0,2026-11-04T20:59:05Z,2026-11-04T21:00:25Z
+126860681385,41911673404,"Run dbus-run-session -- bash -c 'printf ""althar\n"" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; xvfb-run --auto-servernum bun run test:e2e --shard=""$SHARD""'",2026-11-04T21:00:27Z,2026-11-04T21:05:26Z
+126860681385,41911673404,Post Run actions/checkout@v5,2026-11-04T21:05:27Z,2026-11-04T21:05:27Z
+126860681523,41911673404,Run actions/checkout@v5,2026-11-04T20:58:56Z,2026-11-04T20:58:58Z
+126860681523,41911673404,Run bun install --frozen-lockfile,2026-11-04T20:58:59Z,2026-11-04T20:59:06Z
+126860681523,41911673404,Run sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0,2026-11-04T20:59:06Z,2026-11-04T21:00:34Z
+126860681523,41911673404,"Run dbus-run-session -- bash -c 'printf ""althar\n"" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; xvfb-run --auto-servernum bun run test:e2e --shard=""$SHARD""'",2026-11-04T21:00:36Z,2026-11-04T21:04:42Z
+126860681523,41911673404,Post Run actions/checkout@v5,2026-11-04T21:04:42Z,2026-11-04T21:04:42Z
