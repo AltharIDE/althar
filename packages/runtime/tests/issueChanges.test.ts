@@ -477,10 +477,21 @@ describe('changes to issues', () => {
       yield* callTool(access, 'change_issues', { changes: [{ issue: 'MER-232', priority: 'low' }] })
       const [done, low] = yield* cardsIn(threadId)
       yield* changes.apply(done?.changesId ?? '', instance.personId)
+      // One Althar offered, with why, as it does of a pull request merged.
+      yield* sql`UPDATE issue_changes SET proposed_by = 'althar', note = 'its pull request merged' WHERE id = ${low?.changesId ?? ''}`
       yield* changes.discard(low?.changesId ?? '', instance.personId)
+      // One the tracker turns down.
+      yield* callTool(access, 'change_issues', { changes: [{ issue: 'MER-232', status: 'Done' }] })
+      const failing = (yield* cardsIn(threadId)).at(-1)
+      tracker.failNext('update', 'rejected')
+      yield* changes.apply(failing?.changesId ?? '', instance.personId)
       const news = (yield* coordinatorNews(threadId, projectId, yield* modelNamer)) ?? ''
       assert.include(news, '- Your change to issues is applied: MER-231: status to Done.')
-      assert.include(news, '- The person discarded your change to issues: MER-232: priority to Low. Nothing changed.')
+      assert.include(
+        news,
+        "- The person discarded Althar's change (its pull request merged) to issues: MER-232: priority to Low. Nothing changed.",
+      )
+      assert.match(news, /- Your change to issues didn't all apply: .* The person can apply it again from its card\./)
     }).pipe(Effect.provide(withQueries({ linear: tracker })))
   })
 
