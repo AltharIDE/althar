@@ -972,6 +972,10 @@ The following questions should guide both product development and the eventual w
 * How should bidirectional sync be handled?
 * What is the minimum persistent state Althar needs in order to remain useful?
 
+Working answer, for now ([ADR-093](docs/decisions/093-one-thing-really-well-and-play-well-with-what-people-already-use.md)): Althar owns one thing, taking work through the agents a person already pays for to a change they can trust and merge. It stops at the merge. What a team already keeps elsewhere stays there: issues and requirements on their tracker, conventions in their repository, checks in their CI, review rules on their code host. Althar reads those tools, writes to them when the person says, and keeps links rather than copies. It should be useful to one person on a team that has never heard of it.
+
+This is a working answer, not a settled one. The questions above stay open to evidence.
+
 ---
 
 # 13. Evidence to collect during prototyping
@@ -1161,6 +1165,12 @@ A second, increasingly important proposition is:
 > **Durable engineering intelligence should belong to the people and scope it serves, not to the transient agent, developer session, or corporation through which the work happened.**
 
 That scope may be a project. It may also be a team, product, programme, portfolio, organisation, or federation of otherwise autonomous contexts.
+
+A third proposition governs how Althar is built while the first two are tested:
+
+> **Do one thing really well, and play well with the tools a person or organisation already uses.**
+
+The one thing is taking work through transient agents to a change a person can trust and merge. Everything around it — trackers, CI, code review, deployment, knowledge systems — is something to connect to, not to rebuild ([ADR-093](docs/decisions/093-one-thing-really-well-and-play-well-with-what-people-already-use.md)).
 
 The next question is therefore not only whether the project can persist, but whether it is the highest useful primitive at all.
 
