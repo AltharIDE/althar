@@ -25,7 +25,6 @@ export interface ModelRoomText {
   until: (at: string) => string
   /** Side · 79%. */
   account: (name: string, share: string) => string
-  noReading: string
   /** Beside the chip once nearly out: 3% left, Out. */
   chipLeft: (percent: number) => string
   chipOut: string
@@ -36,7 +35,6 @@ export const modelRoomText: ModelRoomText = {
   out: 'out',
   until: (at) => `until ${at}`,
   account: (name, share) => `${name} · ${share}`,
-  noReading: 'no reading',
   chipLeft: (n) => `${n}% left`,
   chipOut: 'Out',
 }
@@ -52,8 +50,8 @@ export const roomWords = (room: ModelRoom, t: ModelRoomText, compact = false): s
 }
 
 /**
- * A model's room at the end of a picker's row, or "no reading" where `room`
- * is null. Compact, where the model's name needs the room, as in All models:
+ * A model's room at the end of a picker's row, nothing where `room`
+ * is null (no reading). Compact, where the model's name needs the room, as in All models:
  * the figure alone, the rest on hover.
  */
 export function RoomNote({
@@ -68,7 +66,8 @@ export function RoomNote({
   className?: string
 }) {
   const t = { ...modelRoomText, ...text }
-  if (room === null) return <span className={cx(s.room, s.none, className)}>{t.noReading}</span>
+  // No reading is the common case, and says nothing a row could act on: the row stays quiet.
+  if (room === null) return null
   const full = roomWords(room, t)
   const words = roomWords(room, t, compact)
   return (
@@ -80,8 +79,9 @@ export function RoomNote({
 
 /**
  * Beside a picker's chip, once its model is nearly out: 3% left · until 14:00,
- * Out · until 14:00. One run at the chip's size, in the chip's ink, a step
- * deeper as it runs down. Nothing before.
+ * Out · until 14:00. One quiet run a step smaller than the chip, with a gap
+ * of its own from it, in ink only, a step deeper as it runs down; cut with an
+ * ellipsis on a narrow row, its whole words on hover. Nothing before.
  */
 export function RoomSaid({ room, text }: { room: ModelRoom | null | undefined; text?: Partial<ModelRoomText> }) {
   const t = { ...modelRoomText, ...text }

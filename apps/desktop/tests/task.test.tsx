@@ -2199,7 +2199,7 @@ describe('a task', () => {
       within(pinned)
         .getAllByRole('radio')
         .map((radio) => radio.textContent),
-    ).toEqual(['Claude Opus, via Claude Codenot pinned', 'Claude Code default, via Claude Code', 'gpt-5.2-codex, via Codex'])
+    ).toEqual(['Claude Opus, via Claude Code', 'Claude Code default, via Claude Code', 'gpt-5.2-codex, via Codex'])
     // High is not what Claude Code is on; the person makes it Opus's.
     expect(screen.getByText(/default Medium/)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Make this default' }))
@@ -2514,10 +2514,10 @@ describe('a task', () => {
     // Out of review rounds: accepted as it is.
     again.unmount()
     vi.mocked(client.getThread).mockImplementation(async () =>
-      thread({ attention: [stuck({ step: 'review', why: 'round_limit', open: 2 })] }),
+      thread({ attention: [stuck({ step: 'review', why: 'round_limit', round: 3, open: 2 })] }),
     )
     withServices(<Task />, client)
-    expect(await screen.findByText(/Reviewed three times\. 2 findings open\./)).toBeTruthy()
+    expect(await screen.findByText(/Reviewed 3 times; the last fixes weren't reviewed\. 2 findings open\./)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Accept it as it is' }))
     await waitFor(() => expect(client.answerStuck).toHaveBeenCalledWith({ attentionId: 'st1', answer: { kind: 'abandon' } }))
   })
@@ -2576,12 +2576,12 @@ describe('a task', () => {
 
   it('says why each step needed the person', () => {
     const at = (why: StuckStep['why'], detail: string | null = null, open = 0) =>
-      stuckWords.what({ step: 'implement', why, detail, agentId: null, round: 0, open }, 'Codex')
+      stuckWords.what({ step: 'implement', why, detail, agentId: null, round: 3, open }, 'Codex')
     expect([at('session_ended'), at('restarted'), at('failed_to_start'), at('round_limit', null, 1), at('usage_limit')]).toEqual([
       'Codex closed before finishing the step.',
       'Althar stopped unexpectedly twice while this step ran.',
       "Codex couldn't start.",
-      'Reviewed three times. 1 finding open.',
+      "Reviewed 3 times; the last fixes weren't reviewed. 1 finding open.",
       'Codex is out of usage.',
     ])
     // A review has no lead to tell: it advises the buttons it has.

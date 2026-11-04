@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -299,5 +299,113 @@ describe('reading a file a message names', () => {
       assert.strictEqual(around.text.split('\n').length, CODE_AROUND * 2)
       assert.deepInclude(yield* readCode(place, 'big.ts', undefined, 59_999), { from: 60_000 - CODE_AROUND * 2 + 1 })
     }),
+  )
+})
+
+describe('finding what a message names, at its edges', () => {
+  it.effect('finds nothing where nothing is asked, and reads a line given as #L', () =>
+    Effect.gen(function* () {
+      const { root, second } = repository()
+      assert.deepStrictEqual(yield* findCode(onMain(root, second), []), [])
+      assert.deepStrictEqual(parseName('Runs.ts#L5'), { name: 'Runs.ts', line: 5 })
+    }),
+  )
+
+  it.effect('on the default branch, follows a file and a range from when they were said, and says nothing from before it was there', () =>
+    Effect.gen(function* () {
+      const { root, first, second } = repository()
+      const said = '2026-10-01T12:00:00.000Z'
+      const [then = [], before = []] = yield* findCode(onMain(root, second), [
+        {
+          at: said,
+          names: [
+            'packages/runtime/src/Runs.ts',
+            'packages/runtime/src/Runs.ts:10-16',
+            'packages/runtime/src/Runs.ts:2-15',
+            'packages/ui/src/model.ts:1',
+            '/work/meridian/.coordinator/althar/gone/x.ts',
+          ],
+        },
+        { at: '2026-09-01T00:00:00.000Z', names: ['packages/runtime/src/Runs.ts:10'] },
+      ])
+      const sinceOf = (one: (typeof then)[number] | undefined) => (one?.kind === 'file' ? one.since : undefined)
+      // Changed since, the file named whole says when; a range moves with its lines, or is to be read as it was where one was rewritten.
+      assert.deepStrictEqual(sinceOf(then[0]), { commit: first, said })
+      assert.deepStrictEqual(sinceOf(then[1]), { commit: first, said, now: { line: 13, end: 19 } })
+      assert.deepStrictEqual(sinceOf(then[2]), { commit: first, said, now: null })
+      // A file nothing changed in since says nothing of when.
+      assert.isNull(sinceOf(then[3]))
+      // A path under the coordinator's copy that isn't there is missing, by its path in the repository.
+      assert.deepStrictEqual(then[4], {
+        kind: 'missing',
+        name: '/work/meridian/.coordinator/althar/gone/x.ts',
+        path: 'gone/x.ts',
+        near: [],
+      })
+      // Said before the default branch had any commit, there is nothing to follow it from.
+      assert.isNull(sinceOf(before[0]))
+    }),
+  )
+
+  it.effect(
+    'in a task’s worktree, takes a name its message’s folder holds, reads under the folder a project is about, and leaves out what isn’t its',
+    () =>
+      Effect.gen(function* () {
+        const { root, first, write } = repository()
+        write('packages/ui/src/hinted.ts', 'export function sharedName() {}\n')
+        write('apps/desktop/src/hinted.ts', 'export function sharedName() {}\n')
+        write('packages/ui/tests/only.test.ts', 'export function onlyInTests() {}\n')
+        write('big.bin', Buffer.alloc(9 * 1024 * 1024, 1))
+        write('.althar/scratch/top.md', 'x\n')
+        write('.althar/scratch/node_modules/x/kept.md', 'x\n')
+        write('.althar/scratch/1/2/3/4/5/6/7/deep.md', 'x\n')
+        symlinkSync(join(root, '.althar/scratch/top.md'), join(root, '.althar/scratch/link.md'))
+        symlinkSync('/etc/hosts', join(root, 'linked.txt'))
+        const task: CodeRoots = { kind: 'task', roots: [rootOf(root, { base: first, within: 'packages/ui' })] }
+        const [hinted = [], found = []] = yield* findCode(task, [
+          { at: null, names: ['sharedName', 'packages/ui/src/index.ts'] },
+          {
+            at: null,
+            names: [
+              'onlyInTests',
+              'big.bin',
+              'linked.txt',
+              'src/hinted.ts',
+              'hinted.ts',
+              `${root}/gone.ts`,
+              'docs/decisions/050-x.md',
+              'a/b/c',
+              'top.md',
+              'kept.md',
+              'deep.md',
+              'link.md',
+              'packages/ui/src',
+            ],
+          },
+        ])
+        // Declared in two files, the name is the one in the folder its message names.
+        assert.deepInclude(hinted[0], { kind: 'file', path: 'packages/ui/src/hinted.ts', symbol: 'sharedName', line: 1 })
+        assert.deepStrictEqual(kinds(found), [
+          'file onlyInTests',
+          'file big.bin',
+          'missing linked.txt',
+          'file src/hinted.ts',
+          'several hinted.ts',
+          `missing ${root}/gone.ts`,
+          'missing docs/decisions/050-x.md',
+          'missing a/b/c',
+          'file top.md',
+        ])
+        const [tests, big, linked, within, , gone] = found
+        // A name only a test declares is found there all the same.
+        assert.deepInclude(tests, { path: 'packages/ui/tests/only.test.ts', changed: { add: 1, del: 0 } })
+        // A file too large to read is named, not read; a link out of the worktree isn't there to read.
+        assert.deepInclude(big, { content: 'large', lines: 0 })
+        assert.deepStrictEqual(linked, { kind: 'missing', name: 'linked.txt', path: 'linked.txt', near: [] })
+        assert.deepInclude(within, { path: 'packages/ui/src/hinted.ts' })
+        assert.deepInclude(gone, { path: 'gone.ts' })
+        // Neither is read for the window.
+        for (const path of ['linked.txt', 'big.bin']) assert.instanceOf(yield* Effect.flip(readCode(task, path)), NotFound, path)
+      }),
   )
 })

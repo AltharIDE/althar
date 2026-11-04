@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { cpSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
@@ -327,6 +327,8 @@ export const runtime = (
     /** When what settled tasks left running is first looked for, and how often after; not within a test unless it says. */
     readonly leftFirst?: Duration.Duration
     readonly leftEvery?: Duration.Duration
+    /** How often what waits for a checkout is looked at again (ADR-091): every 100 milliseconds unless a test says. */
+    readonly localEvery?: Duration.Duration
   } = {},
 ) =>
   Runtime.layer({
@@ -369,6 +371,7 @@ export const runtime = (
     connectivity: { answers: () => Effect.succeed(true), ...more.connectivity },
     leftFirst: more.leftFirst ?? Duration.hours(1),
     ...(more.leftEvery === undefined ? {} : { leftEvery: more.leftEvery }),
+    local: { every: more.localEvery ?? Duration.millis(100) },
   })
 
 /** A disk with half of its 1 TB free: room enough that no finished task's folder goes for want of space. */
@@ -584,3 +587,24 @@ export const callToolAtOnce = (access: ToolAccess, name: string, calls: Readonly
       }
     })
   })
+
+/**
+ * The repositories that took a push, in the order they took them, each by the name given it: a hook in each bare repository
+ * writes it down as it takes one. A host's push target alone doesn't say, as Althar fetches from it too.
+ */
+export const pushLog = () => {
+  const file = join(mkdtempSync(join(tmpdir(), 'althar-pushes-')), 'pushes').replaceAll('\\', '/')
+  return {
+    /** Writes `name` down each time `bare` takes a push. */
+    watch: (bare: string, name: string) =>
+      writeFileSync(join(bare, 'hooks', 'pre-receive'), `#!/bin/sh\ncat >/dev/null\necho '${name}' >> '${file}'\n`, {
+        mode: 0o755,
+      }),
+    pushedTo: (): ReadonlyArray<string> =>
+      existsSync(file)
+        ? readFileSync(file, 'utf8')
+            .split('\n')
+            .filter((line) => line !== '')
+        : [],
+  }
+}

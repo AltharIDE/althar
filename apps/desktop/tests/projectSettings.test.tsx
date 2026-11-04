@@ -380,6 +380,22 @@ describe('a project’s settings', () => {
     await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', pushCommits: false }))
   })
 
+  it('starts new tasks in a worktree until the person chooses Local, saying what each gives up (ADR-091)', async () => {
+    const { client } = windowAt('/projects/p1')
+    await openSettings()
+    const tasks = within(screen.getByRole('region', { name: 'Tasks' }))
+    const where = tasks.getByRole('radiogroup', { name: 'New tasks start in' })
+    expect(within(where).getByRole('radio', { name: 'Worktree' }).getAttribute('aria-checked')).toBe('true')
+    expect(
+      tasks.getByText(
+        'Local works in your own checkout, with your builds, simulators and services: one task at a time, beside your own edits. A worktree gives each task a copy of its own, side by side, that builds from cold.',
+      ),
+    ).toBeTruthy()
+    await userEvent.click(within(where).getByRole('radio', { name: 'Local' }))
+    expect(within(where).getByRole('radio', { name: 'Local' }).getAttribute('aria-checked')).toBe('true')
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', worksIn: 'checkout' }))
+  })
+
   it('posts a task’s screenshots to its pull request by itself once switched on, off until then', async () => {
     const { client } = windowAt('/projects/p1')
     await openSettings()

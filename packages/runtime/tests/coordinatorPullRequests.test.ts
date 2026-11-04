@@ -198,6 +198,53 @@ describe('the coordinator running checks again', () => {
     }).pipe(Effect.provide(withQueries(github)))
   })
 
+  it.live('says so where the project’s repository is on no connected host', () => {
+    const github = makeFakeService()
+    const working = seeded(github)
+    return Effect.gen(function* () {
+      const opened = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      const coordinator: ToolAccess = {
+        role: 'coordinator',
+        projectId: opened.projectId,
+        threadId: yield* (yield* Coordinator).thread(opened.projectId),
+        sessionId: 'coordinator-session',
+        taskId: null,
+      }
+      const unhosted = 'The project’s repository isn’t on a host Althar is connected to. The person connects it in Settings.'
+      assert.include(yield* callTool(coordinator, 'rerun_check', {}), unhosted)
+      assert.include(yield* callTool(coordinator, 'rerun_check', { pull_request: '#1' }), unhosted)
+      assert.include(
+        yield* callTool(coordinator, 'rerun_check', { pull_request: 'the last one' }),
+        'Give the pull request’s link, or its number',
+      )
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('names in each host’s words a check it can’t run again, and Bitbucket Cloud’s pipeline as run again whole', () =>
+    Effect.gen(function* () {
+      for (const [product, words] of [
+        ['gitlab', "only a pipeline's job runs again from Althar, and it isn't one"],
+        ['bitbucket_cloud', 'only a Bitbucket pipeline runs again from Althar, and it isn’t one'],
+      ] as const) {
+        const service = makeFakeService({
+          product,
+          checksFor: () => [
+            { name: 'unit', state: 'failed' },
+            { name: 'external', state: 'failed', rerun: false },
+          ],
+        })
+        const working = seeded(service)
+        service.addPullRequest({ path: ['meridian', 'api'], title: 'Their fix', author: 'dana' })
+        const said = yield* Effect.gen(function* () {
+          const { coordinator } = yield* project(working)
+          return yield* callTool(coordinator, 'rerun_check', { pull_request: '#1' })
+        }).pipe(Effect.provide(withQueries(service)))
+        assert.include(said, `external can't be run again here: ${words}. The person runs it again where it ran.`, product)
+        if (product === 'bitbucket_cloud') assert.include(said, '(the whole pipeline, on the same commit)')
+      }
+    }),
+  )
+
   it.live('says what the host said where it refuses to run a check again (Data Center: whose build it is)', () => {
     const refusal = new ConnectorFailed({
       product: 'bitbucket_dc',

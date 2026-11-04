@@ -240,6 +240,16 @@ export enum TaskKind {
 }
 
 /** What a task does with its work when it is done. */
+/**
+ * Where a task works (ADR-091): Local, in each of its repositories' own
+ * checkouts, where the person works, one task at a time; or a worktree of
+ * its own, side by side with other tasks.
+ */
+export enum WorksIn {
+  Local = 'checkout',
+  Worktree = 'worktree',
+}
+
 export enum TaskEnd {
   DraftPr = 'draft',
   ReadyPr = 'ready',

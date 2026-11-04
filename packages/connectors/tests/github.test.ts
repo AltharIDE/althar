@@ -2,8 +2,16 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect } from 'effect'
 import { TestClock } from 'effect/testing'
 
-import { checkRunState, leftQueueOf, LISTING_KEPT_MS, makeGitHub, searchOf, tail } from '../src/github'
-import { fromOutside, type Issue, type IssueChange, type Repository } from '../src/model'
+import { checkRunState, issueSearchOf, leftQueueOf, LISTING_KEPT_MS, makeGitHub, searchOf, statusesOf, tail } from '../src/github'
+import {
+  fromOutside,
+  type Issue,
+  type IssueChange,
+  type IssuePage,
+  type IssueQuery,
+  type Repository,
+  type StatusCategory,
+} from '../src/model'
 import { type Route, type Sent, stubFetch, variablesOf } from './stub'
 
 const API = 'https://api.github.com'
@@ -1183,7 +1191,11 @@ describe('GitHub as a tracker', () => {
       'offers, for an issue about to be filed, the repository’s milestones, its owner’s open boards and its organisation’s types',
       () =>
         Effect.gen(function* () {
-          const boards = [{ id: 'PVT_1', title: 'Roadmap', closed: false }, { id: 'PVT_2', title: 'Old roadmap', closed: true }, null]
+          const boards = [
+            { id: 'PVT_1', number: 1, title: 'Roadmap', closed: false },
+            { id: 'PVT_2', number: 2, title: 'Old roadmap', closed: true },
+            null,
+          ]
           const { host, sent } = github([
             ['GET', `${REPO}/milestones?state=open&per_page=100&page=1`, { json: [{ number: 3, title: 'Q4 launch' }] }],
             ['POST', `${API}/graphql`, { json: { data: { repositoryOwner: { projectsV2: { nodes: boards } } } } }],
@@ -1488,12 +1500,14 @@ describe('GitHub as a tracker', () => {
         }
         const everywhere = yield* host.find({ state: 'open', limit: 5 })
         assert.deepStrictEqual(
-          everywhere.map((found) => found.ref),
+          everywhere.issues.map((found) => found.ref),
           ['meridian/web#12'],
         )
+        // All it found are on this page.
+        assert.isNull(everywhere.next)
         assert.deepStrictEqual(searched(), { q: 'is:issue involves:you is:open', sort: 'updated', order: 'desc', per_page: '5' })
         const here = yield* host.find({ container: 'meridian/api', state: 'closed', text: 'rate "limit"', mine: true, limit: 500 })
-        assert.strictEqual(here[0]?.ref, 'meridian/api#12')
+        assert.strictEqual(here.issues[0]?.ref, 'meridian/api#12')
         assert.deepStrictEqual(searched(), {
           q: 'is:issue repo:meridian/api is:closed assignee:@me "rate" "limit" in:title,body',
           sort: 'updated',
@@ -1512,6 +1526,238 @@ describe('GitHub as a tracker', () => {
         assert.lengthOf(sent, asked)
       }),
   )
+
+  describe('narrowing a search', () => {
+    const query = (narrowed: Partial<IssueQuery> = {}): IssueQuery => ({ container: 'meridian/api', state: 'all', limit: 10, ...narrowed })
+    const status = (names: ReadonlyArray<string>, categories: ReadonlyArray<StatusCategory> = []) => ({ names, categories })
+
+    it('says labels, a milestone, a parent, when it last changed and who it is assigned to in GitHub’s qualifiers, quoted', () => {
+      assert.strictEqual(
+        issueSearchOf(query({ labels: ['bug', 'needs "triage"'], milestone: 'Q4 launch', updatedSince: '2026-11-01' }), ''),
+        'is:issue repo:meridian/api label:"bug" label:"needs triage" milestone:"Q4 launch" updated:>=2026-11-01',
+      )
+      // A number is in the repository searched; a ref is where it says.
+      assert.strictEqual(issueSearchOf(query({ parent: '#3' }), ''), 'is:issue repo:meridian/api parent-issue:meridian/api#3')
+      assert.strictEqual(issueSearchOf(query({ parent: 'meridian/web#4' }), ''), 'is:issue repo:meridian/api parent-issue:meridian/web#4')
+      assert.isNull(issueSearchOf({ state: 'all', limit: 10, parent: '#3' }, 'you'))
+      assert.isNull(issueSearchOf(query({ parent: 'MER-3' }), ''))
+      assert.strictEqual(issueSearchOf(query({ assignee: null }), ''), 'is:issue repo:meridian/api no:assignee')
+      // Taken as a login, unless GitHub said whose it is.
+      assert.strictEqual(issueSearchOf(query({ assignee: '@Sam' }), ''), 'is:issue repo:meridian/api assignee:Sam')
+      assert.strictEqual(
+        issueSearchOf(query({ assignee: 'Sam Rivera' }), '', { assignee: 'sam' }),
+        'is:issue repo:meridian/api assignee:sam',
+      )
+      assert.isNull(issueSearchOf(query({ assignee: 'nobody' }), '', { assignee: null }))
+      assert.strictEqual(
+        issueSearchOf(query({ project: 'Roadmap' }), '', { project: 'meridian/1' }),
+        'is:issue repo:meridian/api project:meridian/1',
+      )
+      assert.isNull(issueSearchOf(query({ project: 'Roadmap' }), '', { project: null }))
+      assert.isNull(issueSearchOf(query({ project: 'Roadmap' }), ''))
+    })
+
+    it('finds GitHub’s three statuses by their names or categories, as its search can say each set of them', () => {
+      const searched = (asked: Partial<IssueQuery>) =>
+        issueSearchOf(query(asked), '')?.replace('is:issue repo:meridian/api', '').trim() ?? null
+      assert.deepStrictEqual(statusesOf({ state: 'all', status: status(['OPEN', 'cancelled']) }), ['open', 'not_planned'])
+      assert.deepStrictEqual(statusesOf({ state: 'all', status: status([], ['done', 'started']) }), ['completed'])
+      assert.deepStrictEqual(statusesOf({ state: 'all', status: status(['In Review'], ['backlog']) }), [])
+      assert.strictEqual(searched({ status: status([], ['todo']) }), 'is:open')
+      assert.strictEqual(searched({ status: status(['Closed']) }), 'is:closed -reason:"not planned"')
+      assert.strictEqual(searched({ status: status(['not planned']) }), 'is:closed reason:"not planned"')
+      assert.strictEqual(searched({ status: status(['open', 'done']) }), '-reason:"not planned"')
+      assert.strictEqual(searched({ status: status(['open'], ['cancelled']) }), '-reason:completed')
+      assert.strictEqual(searched({ status: status([], ['done', 'cancelled']) }), 'is:closed')
+      assert.strictEqual(searched({ status: status(['Open', 'Closed', 'Closed as not planned']) }), '')
+      assert.isNull(searched({ status: status(['In Review']) }))
+      // With the state it is asked in: open and done is none.
+      assert.strictEqual(searched({ state: 'closed', status: status(['open', 'done']) }), 'is:closed -reason:"not planned"')
+      assert.isNull(searched({ state: 'open', status: status([], ['done']) }))
+    })
+
+    it.effect('asks the repository who an assignee is and its owner which board is which, and finds none for no one, or no board', () =>
+      Effect.gen(function* () {
+        const { host, sent } = github([
+          [
+            'GET',
+            `${REPO}/assignees?per_page=100&page=1`,
+            {
+              json: [
+                { id: 5, login: 'you', name: 'You Person' },
+                { id: 6, login: 'sam', name: 'Sam Rivera' },
+              ],
+            },
+          ],
+          [
+            'POST',
+            `${API}/graphql`,
+            {
+              json: {
+                data: { repositoryOwner: { projectsV2: { nodes: [null, { id: 'PVT_1', number: 4, title: 'Roadmap', closed: false }] } } },
+              },
+            },
+          ],
+          ['GET', /\/search\/issues\?/, { json: { total_count: 1, items: [issue()] } }],
+        ])
+        const found = yield* host.find(query({ assignee: 'sam rivera', project: 'roadmap' }))
+        assert.deepStrictEqual(
+          found.issues.map((one) => one.ref),
+          ['meridian/api#12'],
+        )
+        assert.deepStrictEqual(variablesOf(sent[1]), { owner: 'meridian' })
+        assert.strictEqual(
+          new URL(sent.at(-1)?.url ?? '').searchParams.get('q'),
+          'is:issue repo:meridian/api assignee:sam project:meridian/4',
+        )
+        const asked = sent.length
+        assert.deepStrictEqual(yield* host.find(query({ assignee: 'Alex' })), { issues: [], next: null })
+        assert.deepStrictEqual(yield* host.find(query({ project: 'Backlog' })), { issues: [], next: null })
+        assert.isFalse(sent.slice(asked).some((request) => request.url.includes('/search/')))
+        // Without a repository, an assignee is a login, and no one is asked who it is.
+        yield* host.find({ state: 'open', mine: true, assignee: '@sam', limit: 5 })
+        assert.strictEqual(new URL(sent.at(-1)?.url ?? '').searchParams.get('q'), 'is:issue is:open assignee:@me assignee:sam')
+      }),
+    )
+
+    it.effect('finds none, without asking, for a status GitHub hasn’t; and refuses what it can’t find by, before asking', () =>
+      Effect.gen(function* () {
+        const { host, sent } = github([])
+        assert.deepStrictEqual(yield* host.find(query({ status: status(['In Review']) })), { issues: [], next: null })
+        assert.deepStrictEqual(yield* host.find(query({ state: 'open', status: status([], ['cancelled']) })), { issues: [], next: null })
+        for (const refused of [
+          query({ priority: ['high'] }),
+          query({ cycle: 'current' }),
+          { state: 'all', limit: 5, project: 'Roadmap' } satisfies IssueQuery,
+          { state: 'all', limit: 5, parent: '#3' } satisfies IssueQuery,
+          query({ parent: 'MER-3' }),
+          { state: 'all', limit: 5, keys: ['#3'] } satisfies IssueQuery,
+          query({ keys: ['MER-3'] }),
+        ]) {
+          const failed = yield* Effect.flip(host.find(refused))
+          assert.strictEqual(failed.reason, 'rejected')
+        }
+        assert.lengthOf(sent, 0)
+      }),
+    )
+
+    it.effect('reads on page after page, as far as GitHub’s search reaches: its first thousand', () =>
+      Effect.gen(function* () {
+        const { host, sent } = github([
+          [
+            'GET',
+            /\/search\/issues\?/,
+            (request) => ({
+              json: { total_count: new URL(request.url).searchParams.get('page') === '11' ? 5000 : 250, items: [issue()] },
+            }),
+          ],
+        ])
+        const first = yield* host.find(query({ limit: 100 }))
+        assert.strictEqual(first.next, '2')
+        assert.isNull(new URL(sent.at(-1)?.url ?? '').searchParams.get('page'))
+        const second = yield* host.find(query({ limit: 100, cursor: '2' }))
+        assert.strictEqual(new URL(sent.at(-1)?.url ?? '').searchParams.get('page'), '2')
+        assert.strictEqual(second.next, '3')
+        assert.isNull((yield* host.find(query({ limit: 100, cursor: '3' }))).next)
+        assert.isNull((yield* host.find(query({ limit: 100, cursor: '10' }))).next)
+        assert.strictEqual((yield* host.find(query({ limit: 50, cursor: '11' }))).next, '12')
+      }),
+    )
+
+    it.effect('reads issues by number one by one, leaving out those it hasn’t and pull requests, narrowed as asked, and pages them', () =>
+      Effect.gen(function* () {
+        const { host, sent } = github([
+          ['GET', `${REPO}/issues/12`, { json: issue({ updated_at: '2026-10-02T08:00:00Z' }) }],
+          ['GET', `${REPO}/issues/13`, { json: issue({ number: 13, labels: ['docs'] }) }],
+          ['GET', `${REPO}/issues/14`, { json: issue({ number: 14, pull_request: {} }) }],
+          [
+            'GET',
+            `${API}/repos/meridian/web/issues/3`,
+            { json: issue({ number: 3, html_url: 'https://github.com/meridian/web/issues/3' }) },
+          ],
+          ['GET', `${REPO}/issues/15`, { status: 404, json: { message: 'Not Found' } }],
+        ])
+        const keys = ['#12', '#13', '#14', 'meridian/web#3', '#15', 'meridian/api#12']
+        const found = yield* host.find(query({ keys, labels: ['BUG'], limit: 1 }))
+        assert.deepStrictEqual(
+          found.issues.map((one) => one.ref),
+          ['meridian/api#12'],
+        )
+        assert.strictEqual(found.next, '1')
+        // Each read once.
+        assert.lengthOf(sent, 5)
+        assert.isFalse(sent.some((request) => request.url.includes('/search/')))
+        const rest = yield* host.find(query({ keys, labels: ['BUG'], limit: 1, cursor: '1' }))
+        assert.deepStrictEqual(
+          rest.issues.map((one) => one.ref),
+          ['meridian/web#3'],
+        )
+        assert.isNull(rest.next)
+        // Closed asked for, the open ones are left out.
+        assert.lengthOf((yield* host.find(query({ keys, state: 'closed' }))).issues, 0)
+      }),
+    )
+
+    it.effect('narrows issues by number to a board and a parent by the board’s items and the parent’s sub-issues', () =>
+      Effect.gen(function* () {
+        const { host, sent } = github([
+          ['GET', `${REPO}/issues/12`, { json: issue() }],
+          ['GET', `${REPO}/issues/13`, { json: issue({ number: 13, html_url: 'https://github.com/meridian/api/issues/13' }) }],
+          ['GET', `${REPO}/issues/14`, { json: issue({ number: 14, html_url: 'https://github.com/meridian/api/issues/14' }) }],
+          [
+            'GET',
+            `${REPO}/issues/7/sub_issues?per_page=100&page=1`,
+            {
+              json: [
+                issue({ number: 12, repository_url: `${REPO}` }),
+                issue({ number: 13, repository_url: `${REPO}` }),
+                issue({ number: 99, repository_url: `${REPO}` }),
+              ],
+            },
+          ],
+          [
+            'POST',
+            `${API}/graphql`,
+            (request) => {
+              const body = request.body as { query: string; variables: { number?: number } }
+              if (body.query.includes('projectsV2'))
+                return {
+                  json: {
+                    data: {
+                      repositoryOwner: {
+                        projectsV2: { nodes: [{ id: 'PVT_roadmap', number: 4, title: 'Roadmap', closed: false }, null] },
+                      },
+                    },
+                  },
+                }
+              const boards = body.variables.number === 12 ? ['PVT_roadmap'] : ['PVT_other']
+              return {
+                json: {
+                  data: { repository: { issue: { projectItems: { nodes: boards.map((id) => ({ id: `PVTI_${id}`, project: { id } })) } } } },
+                },
+              }
+            },
+          ],
+        ])
+        const refs = (page: IssuePage) => page.issues.map((one) => one.ref)
+        const keys = ['#12', '#13', '#14']
+        // Under #7: those of its sub-issues asked for.
+        assert.deepStrictEqual(refs(yield* host.find(query({ keys, parent: '#7' }))), ['meridian/api#12', 'meridian/api#13'])
+        // On the board: those whose items are on it.
+        assert.deepStrictEqual(refs(yield* host.find(query({ keys, project: 'roadmap' }))), ['meridian/api#12'])
+        // Both: those under #7 on the board, the board asked of only those.
+        const before = sent.length
+        assert.deepStrictEqual(refs(yield* host.find(query({ keys: ['#13', '#14'], parent: '#7', project: 'Roadmap' }))), [])
+        assert.lengthOf(
+          sent.slice(before).filter((request) => JSON.stringify(request.body ?? '').includes('projectItems')),
+          1,
+        )
+        // A board of no such name: none.
+        assert.deepStrictEqual(refs(yield* host.find(query({ keys, project: 'Nowhere' }))), [])
+        assert.isFalse(sent.some((request) => request.url.includes('/search/')))
+      }),
+    )
+  })
 
   it.effect('reads an issue’s latest comments, oldest first, from only the pages that hold them', () =>
     Effect.gen(function* () {

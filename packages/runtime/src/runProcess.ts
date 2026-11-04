@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { constants } from 'node:os'
 
 import type { LaunchSpec } from '@althar/provider-adapters'
 import { Effect } from 'effect'
@@ -32,7 +31,34 @@ export const runSpec = (line: string, env: Readonly<Record<string, string>>, pla
 /** Signals a process gets for its own fault, rather than from someone stopping it. */
 const CRASHES = new Set(['SIGSEGV', 'SIGBUS', 'SIGILL', 'SIGFPE', 'SIGABRT', 'SIGTRAP', 'SIGSYS'])
 
-const signalNamed = (number: number) => Object.entries(constants.signals).find(([, value]) => value === number)?.[0]
+/**
+ * The numbers the shell a run runs in gives signals: Linux's, or, elsewhere off
+ * Windows, the BSDs' and macOS's. Not os.constants.signals, which is the
+ * numbering of the machine Althar runs on (Windows' own SIGABRT is 22).
+ */
+const SIGNAL_NUMBERS = {
+  shared: {
+    SIGHUP: 1,
+    SIGINT: 2,
+    SIGQUIT: 3,
+    SIGILL: 4,
+    SIGTRAP: 5,
+    SIGABRT: 6,
+    SIGFPE: 8,
+    SIGKILL: 9,
+    SIGSEGV: 11,
+    SIGPIPE: 13,
+    SIGALRM: 14,
+    SIGTERM: 15,
+  },
+  linux: { SIGBUS: 7, SIGUSR1: 10, SIGUSR2: 12, SIGSYS: 31 },
+  bsd: { SIGBUS: 10, SIGSYS: 12, SIGUSR1: 30, SIGUSR2: 31 },
+} as const
+
+const signalNamed = (number: number, platform: NodeJS.Platform) =>
+  Object.entries({ ...SIGNAL_NUMBERS.shared, ...SIGNAL_NUMBERS[platform === 'linux' ? 'linux' : 'bsd'] }).find(
+    ([, value]) => value === number,
+  )?.[0]
 
 const killedBy = (signal: string) => `killed by ${signal}${CRASHES.has(signal) ? ', so it crashed' : ''}`
 
@@ -48,7 +74,7 @@ export const endedHow = (
   if (exit.signal !== null) return `, ${killedBy(exit.signal)}`
   if (exit.code === null) return ''
   if (platform === 'win32' && exit.code >= 0xc0000000) return `, with exit code 0x${exit.code.toString(16).toUpperCase()}, so it crashed`
-  const signal = platform !== 'win32' && exit.code > 128 ? signalNamed(exit.code - 128) : undefined
+  const signal = platform !== 'win32' && exit.code > 128 ? signalNamed(exit.code - 128, platform) : undefined
   return `, with exit code ${exit.code}${signal === undefined ? '' : `: ${killedBy(signal)}`}`
 }
 

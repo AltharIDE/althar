@@ -91,7 +91,7 @@ export const text = {
       case 'restarted':
         return text.crashed
       case 'round_limit':
-        return `Reviewed three times.${stuck.open === 0 ? '' : stuck.open === 1 ? ' 1 finding open.' : ` ${stuck.open} findings open.`}`
+        return `${text.reviewed(stuck.round)}${stuck.open === 0 ? '' : stuck.open === 1 ? ' 1 finding open.' : ` ${stuck.open} findings open.`}`
       case 'not_connected':
         return "Althar isn't connected to this repository's host."
       case 'usage_limit':
@@ -108,6 +108,9 @@ export const text = {
         return `${agent} is signed out.`
     }
   },
+  /** How many rounds of review the task ran, not today's setting; its last settle changed code no review has seen. */
+  reviewed: (rounds: number): string =>
+    `Reviewed ${rounds <= 1 ? 'once' : rounds === 2 ? 'twice' : `${rounds} times`}; the last fixes weren't reviewed.`,
   /** One provider within the agent refused its sign-in, not the agent: which, and for which model. */
   refused: (provider: string, model: string): string => `${provider} refused the sign-in for ${model}.`,
   /** What Althar did before it asked. */

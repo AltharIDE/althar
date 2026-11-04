@@ -79,9 +79,10 @@ describe('a task’s lead', () => {
       const created = yield* made(projectId, 'Automations screen', null)
       const lead: ToolAccess = { role: 'lead', projectId, threadId: created.threadId, sessionId: 'none', taskId: created.taskId }
       assert.includeMembers(yield* listTools(lead), ['find_tasks', 'list_tasks', 'find_issues', 'draft_issue'])
-      // Read-only: nothing that plans or starts work is among them, and a reviewer is offered none of these.
+      // Read-only: nothing that plans or starts work is among them. A reviewer reads the project's tasks too, and drafts nothing.
       assert.notIncludeMembers(yield* listTools(lead), ['draft_task', 'start_task', 'propose_plan', 'message_lead'])
-      assert.notInclude(yield* listTools({ ...lead, role: 'reviewer' }), 'find_tasks')
+      assert.includeMembers(yield* listTools({ ...lead, role: 'reviewer' }), ['find_tasks', 'list_tasks', 'read_task', 'read_task_diff'])
+      assert.notInclude(yield* listTools({ ...lead, role: 'reviewer' }), 'draft_issue')
 
       const described = yield* toolDescriptions(lead)
       assert.match(described['draft_issue'] ?? '', /outside your brief, check find_tasks: when a task covers it, say so in your report/)
