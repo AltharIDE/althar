@@ -230,7 +230,7 @@ describe('the issue tool', () => {
         yield* callTool(lead, 'read_issue', { issue: 'MER-231' }),
         'MER-231: Rate-limit refunds\n\nTodo, High priority, in MER. https://linear.app/fake/issue/MER-231/rate-limit-refunds\n\nAssigned to You.\n\nNo description.\n\nNo comments.',
       )
-      assert.match(yield* callTool(lead, 'read_issue', { issue: 3 }), /can’t read that issue/)
+      assert.match(yield* callTool(lead, 'read_issue', { issue: 3 }), /couldn't read that: Expected string/)
       // The coordinator reads it the same.
       const coordinator = {
         role: 'coordinator' as const,

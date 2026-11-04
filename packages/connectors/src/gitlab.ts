@@ -8,7 +8,7 @@ import { updateInCopy } from './branchUpdate'
 import { ConnectorFailed } from './errors'
 import { makeHttp, paged } from './http'
 import { makeGitLabReleases } from './gitlabReleases'
-import { tail } from './github'
+import { pageOfCursor, tail } from './github'
 import type {
   Account,
   Activity,
@@ -25,6 +25,8 @@ import type {
   IssueChange,
   IssueComment,
   IssueField,
+  IssuePage,
+  IssueQuery,
   ListedChange,
   MergeMethod,
   Person,
@@ -34,7 +36,21 @@ import type {
   TrackerCapabilities,
   Verdict,
 } from './model'
-import { cantChange, lacking, leftAsItIs, mergedForGood, noReviews, stillOpen, unchangeable } from './model'
+import {
+  cantChange,
+  cantFind,
+  filtersOf,
+  inIssueState,
+  issueMatches,
+  lacking,
+  leftAsItIs,
+  mergedForGood,
+  noReviews,
+  pageAt,
+  stillOpen,
+  unchangeable,
+  unfindable,
+} from './model'
 import { answered, failedOf, probe, type Reached, reachLine, readAs, refusalOf, seenOf, serverLine, stopped, UNREADABLE } from './probe'
 
 /*
@@ -379,13 +395,24 @@ const NOT_CHANGED: Partial<Record<IssueField, string>> = {
 }
 
 /** What GitLab does as a tracker: several people to an issue. */
-const TRACKING = {
+export const GITLAB_TRACKING: TrackerCapabilities = {
   links: false,
   starts: false,
   changes: ISSUE_CHANGES,
   creates: ISSUE_CREATES,
   assignees: 'many',
-} as const satisfies TrackerCapabilities
+  // Its issues list narrows by each it has. It has no priority or project of an issue's own, and its epics and iterations are paid tiers'.
+  finds: {
+    text: 'search',
+    labels: 'search',
+    status: 'search',
+    milestone: 'search',
+    assignee: 'search',
+    updatedSince: 'search',
+    keys: 'search',
+  },
+}
+const TRACKING = GITLAB_TRACKING
 
 /** An issue's statuses on GitLab: open or closed, by the event that takes it there. */
 const ISSUE_STATES: ReadonlyArray<Choice> = [
@@ -404,8 +431,94 @@ const ISSUE_TYPES: ReadonlyArray<Choice> = [
 /** A kind of issue by its plain name; one GitLab adds later by its own. */
 const typeOf = (type: string): string => ISSUE_TYPES.find((one) => one.id === type)?.name ?? type
 
-/** GitLab's state for each a search for issues can ask for. */
-const FOUND_STATES = { open: 'opened', closed: 'closed', all: 'all' } as const
+/** GitLab's two states, as its issues list asks for them, with the category each is read as and its status in `ISSUE_STATES`. */
+const ISSUE_LISTED_STATES = [
+  { state: 'opened', category: 'todo', status: 'reopen' },
+  { state: 'closed', category: 'done', status: 'close' },
+] as const
+
+/** Two names alike, in any case. */
+const same = (a: string | null | undefined, b: string) => a != null && a.trim().toLowerCase() === b.trim().toLowerCase()
+
+/** Which of GitLab's states a query finds: those its state allows, of those its status names or categories pick. */
+export const issueStatesOf = (query: Pick<IssueQuery, 'state' | 'status'>): ReadonlyArray<'opened' | 'closed'> =>
+  ISSUE_LISTED_STATES.filter(({ category, status: id }) => {
+    const choice = ISSUE_STATES.find((one) => one.id === id)
+    const status = query.status
+    return (
+      inIssueState(query.state, category) &&
+      (status === undefined ||
+        status.names.length + status.categories.length === 0 ||
+        status.categories.includes(category) ||
+        status.names.some((name) => [choice?.name, ...(choice?.also ?? [])].some((one) => same(one, name))))
+    )
+  }).map(({ state }) => state)
+
+/** The `group/project#12` a key or ref names, `#12` in the container's project; none where it names no GitLab issue. */
+export const issueRefOf = (typed: string, container?: string): string | undefined => {
+  const key = typed.trim()
+  if (issueRef.test(key)) return key
+  const number = /^#(\d+)$/.exec(key)?.[1]
+  return number === undefined || container === undefined ? undefined : `${container}#${number}`
+}
+
+/** The numbers keys give in a project, as `#12` or its own `path#12`; none where one is in another, or is no GitLab issue. */
+export const iidsIn = (keys: ReadonlyArray<string>, container: string | undefined): ReadonlyArray<number> | undefined => {
+  if (container === undefined) return undefined
+  const iids: Array<number> = []
+  for (const key of keys) {
+    const match = issueRef.exec(issueRefOf(key, container) ?? '')
+    if (match === null || !same(match[1], container)) return undefined
+    iids.push(Number(match[2]))
+  }
+  return iids
+}
+
+/** What a search names that GitLab's API alone says: the assignee's username, in the project; null where no one there goes by the name. */
+export interface IssueParamsResolved {
+  readonly assignee?: string | null
+}
+
+/**
+ * What GitLab's issues list is asked: everywhere and anyone's, those the
+ * account made, as GitLab's bound is those it made or those it is assigned,
+ * never both at once (those it is assigned are `mine`); narrowed as the
+ * query says, by what was `resolved` of it. Null where it can find none (no
+ * state of GitLab's is asked for, or no one goes by the name), or where its
+ * keys aren't all the project's: those are read one by one.
+ */
+export const issueParamsOf = (query: IssueQuery, resolved: IssueParamsResolved = {}): URLSearchParams | null => {
+  const states = issueStatesOf(query)
+  const iids = filtersOf(query).includes('keys') ? iidsIn(query.keys ?? [], query.container) : []
+  const assignee =
+    typeof query.assignee === 'string'
+      ? resolved.assignee === undefined
+        ? query.assignee.trim().replace(/^@/, '')
+        : resolved.assignee
+      : ''
+  if (states.length === 0 || iids === undefined || assignee === null) return null
+  const params = new URLSearchParams({
+    scope: query.mine === true ? 'assigned_to_me' : query.container === undefined ? 'created_by_me' : 'all',
+    state: states.length === 2 ? 'all' : (states[0] ?? 'all'),
+  })
+  if (query.text !== undefined && query.text.trim() !== '') params.set('search', query.text.trim())
+  // GitLab finds those with every label it is given.
+  if (query.labels !== undefined && query.labels.length > 0) params.set('labels', query.labels.map((label) => label.trim()).join(','))
+  if (query.milestone !== undefined) params.set('milestone', query.milestone.trim())
+  if (query.assignee === null) params.set('assignee_id', 'None')
+  else if (assignee !== '') params.set('assignee_username', assignee)
+  if (query.updatedSince !== undefined) params.set('updated_after', query.updatedSince.trim())
+  for (const iid of iids) params.append('iids[]', String(iid))
+  params.set('order_by', 'updated_at')
+  params.set('sort', 'desc')
+  params.set('per_page', String(Math.min(Math.max(Math.floor(query.limit), 1), 100)))
+  const page = pageOfCursor(query.cursor)
+  if (page > 1) params.set('page', String(page))
+  return params
+}
+
+/** A page of nothing. */
+const NOTHING: IssuePage = { issues: [], next: null }
 
 /**
  * Who an issue is assigned to after a change, by GitLab's ids: those added
@@ -688,24 +801,69 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
       header: `Authorization: Basic ${Buffer.from(`oauth2:${credential.token}`).toString('base64')}`,
     }))
 
+  /** Who an assignee is in a project, by username: the one of its people whose username or name it is; null where none is. */
+  const assigneeIn = (path: ReadonlyArray<string>, typed: string) =>
+    Effect.map(
+      choicesAt(path, 'assignee', typed),
+      (people) => people.find((person) => same(person.also?.[0], typed) || same(person.name, typed))?.also?.[0] ?? null,
+    )
+
+  /** Issues by number in projects other than the container, or with none: each read on its own, narrowed as the query says, and paged. */
+  const findByKeys = (query: IssueQuery) =>
+    Effect.gen(function* () {
+      const refs = new Set<string>()
+      for (const key of query.keys ?? []) {
+        const ref = issueRefOf(key, query.container)
+        if (ref === undefined)
+          return yield* cantFind(
+            product,
+            /^#\d+$/.test(key.trim())
+              ? `${key} is a number in a project: say which, or as group/project${key.trim()}`
+              : `Not a GitLab issue: ${key}`,
+          )
+        refs.add(ref)
+      }
+      const me = query.mine === true ? yield* account : undefined
+      const read = yield* Effect.forEach(
+        [...refs],
+        (ref) =>
+          Effect.gen(function* () {
+            const { path, number } = yield* parseRef(ref)
+            return [issueOf(yield* http.json(IssueAnswer, 'GET', `${project(path.split('/'))}/issues/${number}`), path)]
+          }).pipe(
+            Effect.catchIf(
+              (error) => error.reason === 'not_found',
+              () => Effect.succeed([]),
+            ),
+          ),
+        { concurrency: 4 },
+      )
+      return pageAt(
+        read.flat().filter((issue) => issueMatches(issue, query, me)),
+        query,
+      )
+    })
+
   const findIssues: Tracker['find'] = (query) =>
     Effect.gen(function* () {
+      const refused = unfindable(TRACKING, query)
+      if (refused.length > 0) return yield* cantFind(product, `GitLab’s issues have no ${refused.join(' or ')} to find them by`)
       const path = query.container === undefined ? undefined : yield* projectIn(query.container)
-      // Everywhere and anyone's, GitLab's bound is those the account made or those it is assigned, never both at once: those it made, as those it is assigned are `mine`.
-      const params = new URLSearchParams({
-        scope: query.mine === true ? 'assigned_to_me' : path === undefined ? 'created_by_me' : 'all',
-        state: FOUND_STATES[query.state],
-      })
-      if (query.text !== undefined && query.text.trim() !== '') params.set('search', query.text.trim())
-      params.set('order_by', 'updated_at')
-      params.set('sort', 'desc')
-      params.set('per_page', String(Math.min(Math.max(query.limit, 1), 100)))
+      if (filtersOf(query).includes('keys') && iidsIn(query.keys ?? [], query.container) === undefined) return yield* findByKeys(query)
+      if (issueStatesOf(query).length === 0) return NOTHING
+      const typed = typeof query.assignee === 'string' ? query.assignee.trim().replace(/^@/, '') : undefined
+      const params = issueParamsOf(query, typed === undefined || path === undefined ? {} : { assignee: yield* assigneeIn(path, typed) })
+      if (params === null) return NOTHING
       const issues = yield* http.json(
         Schema.Array(IssueAnswer),
         'GET',
         `${path === undefined ? api : project(path)}/issues?${params.toString()}`,
       )
-      return issues.map((found) => issueOf(found, query.container ?? containerOf(found)))
+      // A page short of what was asked is the last.
+      return {
+        issues: issues.map((found) => issueOf(found, query.container ?? containerOf(found))),
+        next: issues.length < Number(params.get('per_page')) ? null : String(pageOfCursor(query.cursor) + 1),
+      }
     })
 
   const issueComments: Tracker['comments'] = (issue, limit) =>
@@ -1072,12 +1230,15 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
         return issueOf(issue, path)
       }),
     mine: (options = {}) =>
-      findIssues({
-        ...(options.container === undefined ? {} : { container: options.container }),
-        state: 'open',
-        mine: true,
-        limit: options.limit ?? 50,
-      }),
+      Effect.map(
+        findIssues({
+          ...(options.container === undefined ? {} : { container: options.container }),
+          state: 'open',
+          mine: true,
+          limit: options.limit ?? 50,
+        }),
+        (page) => page.issues,
+      ),
     find: findIssues,
     comments: issueComments,
     comment: (issue, body) =>

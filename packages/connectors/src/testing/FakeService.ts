@@ -28,10 +28,13 @@ import type {
   Repository,
   Review,
   Tracker,
+  TrackerCapabilities,
   Verdict,
 } from '../model'
 import {
   cantChange,
+  cantFind,
+  issueMatches,
   leftAsItIs,
   mergedForGood,
   noListing,
@@ -40,10 +43,16 @@ import {
   noReviews,
   notOpen,
   notOurBuild,
+  pageAt,
   stillOpen,
   unchangeable,
+  unfindable,
   unstarted,
 } from '../model'
+import { trackerCapabilities } from '../trackers'
+
+/** What a fake of a product without a tracker of its own finds by: as GitHub. */
+const GITHUB_FINDS = trackerCapabilities('github')?.finds ?? {}
 
 /*
  * A code host and tracker that lives in memory, for tests and the desktop's
@@ -98,6 +107,8 @@ export interface FakeServiceOptions {
   readonly changes?: ReadonlyArray<IssueField>
   /** What of those it sets as it files an issue, the rest left to `update` right after: as its product's adapter does, unless a test says. */
   readonly creates?: ReadonlyArray<IssueField>
+  /** What it narrows a search by: as its product's adapter does, unless a test says. */
+  readonly finds?: TrackerCapabilities['finds']
   /**
    * What each call waits for before it answers, by method, as a host far away takes its time: a gate the test opens when
    * it has seen what it looks for meanwhile, never a time of the fake's. At once unless said.
@@ -187,6 +198,8 @@ export interface FakeControls {
     readonly assigned?: boolean
     /** Where its work stands: To do unless said. */
     readonly status?: Issue['status']
+    /** What else it has, as a tracker reads it: its labels, priority, project, milestone, cycle, parent, people and the like. */
+    readonly with?: Partial<Omit<Issue, 'id' | 'ref' | 'key' | 'title' | 'body' | 'status'>>
   }): Issue
   /**
    * A place issues can be filed, such as a Linear team (`{ id: 'team-1', key:
@@ -375,6 +388,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     changes: changesHere,
     creates: createsHere,
     assignees: product === 'linear' || product === 'jira_cloud' || product === 'jira_dc' ? ('one' as const) : ('many' as const),
+    // It finds by what its product's adapter does, unless a test says: a code host without issues as GitHub.
+    finds: options.finds ?? trackerCapabilities(product)?.finds ?? GITHUB_FINDS,
   }
   /** Its statuses: a repository's issue is open or closed; any other has a team's. */
   const statusesOf = (issue: Issue) => (issue.ref.includes('#') ? OPEN_CLOSED : STATUSES)
@@ -1068,23 +1083,21 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         created.push(filed)
         return Effect.succeed(filed)
       }),
+    // Every filter as the model means it, a page at a time; one its product can't narrow by refused, as the adapter would be never asked it.
     find: (query) =>
       Effect.andThen(called('find'), () => {
-        const words = query.text?.trim().toLowerCase() ?? ''
+        const refused = unfindable(capabilitiesHere, query)
+        if (refused.length > 0) return Effect.fail(cantFind(product, `The fake finds no issues by ${refused.join(', ')}`))
         const within = query.container === undefined ? undefined : filable().find((one) => one.id === query.container)
         return Effect.succeed(
-          [...issues.values()]
-            .filter((issue) => {
-              const ended = issue.status.category === 'done' || issue.status.category === 'cancelled'
-              return (
-                (query.state === 'all' || (query.state === 'closed') === ended) &&
-                (query.mine !== true || issue.assignees.some((person) => person.id === me.id)) &&
-                (within === undefined || issue.container === within.name || issue.container === within.key) &&
-                (words === '' || `${issue.title}\n${issue.body}`.toLowerCase().includes(words))
-              )
-            })
-            .toSorted((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
-            .slice(0, query.limit),
+          pageAt(
+            [...issues.values()].filter(
+              (issue) =>
+                issueMatches(issue, query, me) &&
+                (within === undefined || issue.container === within.name || issue.container === within.key),
+            ),
+            query,
+          ),
         )
       }),
     comments: (issue, limit) =>
@@ -1161,9 +1174,10 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         labels: [],
         container,
         updatedAt: now(),
+        ...input.with,
       }
       issues.set(input.ref, issue)
-      if (input.assigned !== false) assigned.add(input.ref)
+      if (issue.assignees.some((person) => person.id === me.id)) assigned.add(input.ref)
       return issue
     },
     addContainer: (input) => {

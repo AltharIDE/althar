@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { type CommandEnvelope, type ProjectId, type WorksIn } from '@althar/domain'
 import type { Commands, Ledger } from '@althar/persistence-sqlite'
 import { AUTOMATION_DEFAULTS, type AutomationDefinition, knownModelName, Schedule, scheduleInLine } from '@althar/contracts'
+import { Priority, StatusCategory } from '@althar/connectors'
 import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -24,7 +25,7 @@ import { branchOnFirstWrite } from './firstWrite'
 import { Instance } from './Instance'
 import { IssueDrafts, refusedDraft } from './IssueDrafts'
 import { AskedFields, fieldSchema, wantedFields } from './issueFields'
-import { Issues, keyRange, readRefusal } from './Issues'
+import { findWords, foundLine, Issues, keysOf, READ_ISSUE, READ_ISSUE_INPUT, stoppedAt } from './Issues'
 import { answeredIn, quickIn } from './kinds'
 import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
@@ -141,7 +142,6 @@ const Attaching = Schema.Struct({
   pull_request: Schema.Union([Schema.String, Schema.Number]),
   start_from_head: Schema.optional(Schema.Boolean),
 })
-const Asked = Schema.Struct({ issue: Schema.String })
 const DraftedIssue = Schema.Struct({
   ...AskedFields.fields,
   title: Schema.String,
@@ -151,14 +151,30 @@ const DraftedIssue = Schema.Struct({
   labels: Schema.optional(Schema.Array(Schema.String)),
   file_now: Schema.optional(Schema.Boolean),
 })
-/** A search for issues: words, where, how they stand, whose, or a run of keys. */
+/** What was given of what a tool takes: what was left out isn't there at all, as `exactOptionalPropertyTypes` reads it. */
+const given = <A extends object>(asked: A) =>
+  Object.fromEntries(Object.entries(asked).filter(([, value]) => value !== undefined)) as { [K in keyof A]?: Exclude<A[K], undefined> }
+
+/** A search for issues: words, where, how they stand, whose, what they are in and part of, when they changed, or keys; and where the page before stopped. */
 const SoughtIssues = Schema.Struct({
   text: Schema.optional(Schema.String),
   tracker: Schema.optional(Schema.String),
   container: Schema.optional(Schema.String),
   state: Schema.optional(Schema.Literals(['open', 'closed', 'all'])),
   mine: Schema.optional(Schema.Boolean),
-  keys: Schema.optional(Schema.String),
+  labels: Schema.optional(Schema.Array(Schema.String)),
+  status: Schema.optional(Schema.Array(Schema.String)),
+  category: Schema.optional(Schema.Array(StatusCategory)),
+  project: Schema.optional(Schema.String),
+  milestone: Schema.optional(Schema.String),
+  cycle: Schema.optional(Schema.String),
+  assignee: Schema.optional(Schema.String),
+  unassigned: Schema.optional(Schema.Boolean),
+  priority: Schema.optional(Schema.Array(Priority)),
+  parent: Schema.optional(Schema.String),
+  updated_since: Schema.optional(Schema.String),
+  keys: Schema.optional(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
+  cursor: Schema.optional(Schema.String),
   limit: Schema.optional(Schema.Number),
 })
 /*
@@ -1190,38 +1206,44 @@ export class Coordinator extends Context.Service<
             : `No lead is running on ${task.slug}, so nobody reads this yet; its lead will when one starts. Tell the person.`
         })
 
-      const readIssue = (access: ToolAccess, input: unknown) =>
-        Effect.gen(function* () {
-          const { issue: wanted } = yield* read(Asked, input)
-          return yield* issues
-            .words(wanted, access.projectId)
-            .pipe(Effect.mapError((error) => new ToolRefused({ message: readRefusal(error, wanted) })))
-        })
+      const readIssue = (access: ToolAccess, input: unknown) => issues.readTool(input, access.projectId)
 
-      /** Issues as a search narrows them, a line each; each tracker it couldn't read said as such, never as none found. */
+      /**
+       * Issues as a search narrows them, a line each, and where to read on from; each tracker it couldn't read or didn't search
+       * said as such, never as none found.
+       */
       const findIssues = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
-          const asked = yield* read(SoughtIssues, input)
-          if (asked.keys !== undefined && keyRange(asked.keys) === null)
-            return yield* new ToolRefused({ message: `“${asked.keys}” isn’t a run of keys: say it as DEV-170..DEV-185, at most 50.` })
+          const { updated_since: updatedSince, unassigned, assignee, ...asked } = yield* read(SoughtIssues, input)
+          if (asked.keys !== undefined && keysOf(asked.keys) === null)
+            return yield* new ToolRefused({
+              message: `“${String(asked.keys)}” isn’t a run or a list of keys: say it as DEV-170..DEV-185, or DEV-3, DEV-9; at most 50.`,
+            })
+          if (asked.cursor !== undefined && stoppedAt(asked.cursor) === null)
+            return yield* new ToolRefused({ message: 'That cursor isn’t one find_issues gave: give the one its last page ended with.' })
+          if (updatedSince !== undefined && Number.isNaN(Date.parse(updatedSince)))
+            return yield* new ToolRefused({ message: `“${updatedSince}” isn’t a day or a moment: say it as 2026-11-01, or with a time.` })
+          if (unassigned === true && assignee !== undefined)
+            return yield* new ToolRefused({ message: 'Ask for unassigned issues, or for someone’s: not both.' })
           const found = yield* issues.find(access.projectId, {
-            ...(asked.text === undefined ? {} : { text: asked.text }),
-            ...(asked.tracker === undefined ? {} : { tracker: asked.tracker }),
-            ...(asked.container === undefined ? {} : { container: asked.container }),
-            ...(asked.state === undefined ? {} : { state: asked.state }),
-            ...(asked.mine === undefined ? {} : { mine: asked.mine }),
-            ...(asked.keys === undefined ? {} : { keys: asked.keys }),
-            ...(asked.limit === undefined ? {} : { limit: asked.limit }),
+            ...given(asked),
+            ...(updatedSince === undefined ? {} : { updatedSince }),
+            ...(unassigned === true ? { assignee: null } : assignee === undefined ? {} : { assignee }),
           })
-          const asSaid = asked.text === undefined && asked.container === undefined && asked.state === undefined && asked.keys === undefined
+          const asSaid =
+            Object.keys(asked).every((key) => key === 'mine' || key === 'limit' || key === 'tracker') &&
+            assignee === undefined &&
+            unassigned !== true &&
+            updatedSince === undefined
           const none = asSaid && asked.mine !== false ? 'The person has no open issues on the connected trackers.' : 'No issues found.'
           return [
             found.issues.length === 0
-              ? found.failed.length === 0
+              ? found.failed.length === 0 && found.next === null
                 ? none
                 : ''
-              : found.issues.map((issue) => `- ${issue.key}: ${issue.title} (${issue.status.name}) ${issue.url}`).join('\n'),
+              : found.issues.map(foundLine).join('\n'),
             ...found.failed,
+            ...(found.next === null ? [] : [`More: call find_issues again with the same filters and cursor "${found.next}".`]),
           ]
             .filter((line) => line !== '')
             .join('\n')
@@ -1525,27 +1547,64 @@ export class Coordinator extends Context.Service<
       }
 
       // The person's issues and drafting one are the coordinator's, and a task's lead's: it drafts what it finds along the way, and the
-      // person files it from a card in the task's thread.
-      const findIssuesTool = tool(
-        'find_issues',
-        'Finds issues on the connected trackers and in the project’s repository, newest change first. With nothing given, the person’s open issues. Narrow by words in the title or description, a tracker, where on it (a team, project, repository or list), open, closed or all, only those assigned to the person, or a run of keys. A tracker that couldn’t be searched is said, never taken for none found.',
-        {
-          type: 'object',
-          properties: {
-            text: { type: 'string', description: 'Words in its title or description.' },
-            tracker: { type: 'string', description: 'The tracker, by name: Linear, Jira, Trello, GitHub, GitLab, or a workspace.' },
-            container: {
-              type: 'string',
-              description: "Where on it: a Linear team's key, a Jira project's key, a repository as owner/name, a Trello list.",
+      // person files it from a card in the task's thread. Finding only reads, so a reviewer and a review's lead find too.
+      const findIssuesTool: Tool = {
+        ...tool(
+          'find_issues',
+          `Finds issues on the connected trackers and in the project’s repository, newest change first, a page at a time: each a line with its key, title, status, link, who has it and its labels. With nothing given, the person’s open issues. Narrow by words, a tracker, where on it (a team, project, repository or list), open, closed or all, the person’s own, labels (all of them), status by name or category, project, milestone, cycle, assignee (anyone, by name) or unassigned, priority, parent, when they last changed, or keys (a run or a list, in their order). A page that stops short of the end says the cursor to read on from: call again with the same filters and it. A tracker that couldn’t be searched is said, never taken for none found. Reads only. ${findWords()}`,
+          {
+            type: 'object',
+            properties: {
+              text: { type: 'string', description: 'Words in its title or description: all of them.' },
+              tracker: { type: 'string', description: 'The tracker, by name: Linear, Jira, Trello, GitHub, GitLab, or a workspace.' },
+              container: {
+                type: 'string',
+                description: "Where on it: a Linear team's key, a Jira project's key, a repository as owner/name, a Trello list.",
+              },
+              state: { type: 'string', enum: ['open', 'closed', 'all'], description: 'Open unless said; with keys, all unless said.' },
+              mine: {
+                type: 'boolean',
+                description: 'Only those assigned to the person. So with nothing else given; otherwise everyone’s.',
+              },
+              labels: { type: 'array', items: { type: 'string' }, description: 'Only those with every one of these labels.' },
+              status: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Only those in one of these statuses, by its tracker’s name: In Review.',
+              },
+              category: {
+                type: 'array',
+                items: { type: 'string', enum: StatusCategory.literals },
+                description: 'Only those in a status of one of these categories, as every tracker’s fall into; with status, either.',
+              },
+              project: { type: 'string', description: 'Only those in the project of this name: Linear’s project, a GitHub project board.' },
+              milestone: {
+                type: 'string',
+                description:
+                  'Only those in this milestone: Linear’s project milestone, GitHub’s or GitLab’s milestone, Jira’s fix version.',
+              },
+              cycle: { type: 'string', description: 'Only those in this cycle (Jira’s sprint), by name or number, or current.' },
+              assignee: { type: 'string', description: 'Only those assigned to this person, by name, login or email.' },
+              unassigned: { type: 'boolean', description: 'Only those assigned to no one.' },
+              priority: {
+                type: 'array',
+                items: { type: 'string', enum: Priority.literals },
+                description: 'Only those of one of these priorities.',
+              },
+              parent: { type: 'string', description: 'Only those part of this issue, by its key.' },
+              updated_since: { type: 'string', description: 'Only those changed since this day or moment: 2026-11-01.' },
+              keys: {
+                description: 'Only these, in their order: a run (DEV-170..DEV-185, #10..#20) or a list (DEV-3, DEV-9); at most 50.',
+                anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
+              },
+              cursor: { type: 'string', description: 'Where the page before stopped, as it said: with the same filters.' },
+              limit: { type: 'number', description: 'How many to a page: 50 unless said, 100 at most.' },
             },
-            state: { type: 'string', enum: ['open', 'closed', 'all'], description: 'Open unless said.' },
-            mine: { type: 'boolean', description: 'Only those assigned to the person. So with nothing else given; otherwise everyone’s.' },
-            keys: { type: 'string', description: 'A run of keys, read one by one: DEV-170..DEV-185, #10..#20; at most 50.' },
-            limit: { type: 'number', description: 'How many at most: 50 unless said, 100 at most.' },
           },
-        },
-        findIssues,
-      )
+          findIssues,
+        ),
+        inReview: true,
+      }
       const draftIssueTool = tool(
         'draft_issue',
         "Drafts an issue on one of the person's connected trackers, for something to track rather than do now: a bug found, follow-up work, an idea. As a card the person files, changes or discards, unless file_now: where the project's notes say issues are filed at once, or the person just said to. Give it a title and a description in Markdown with what whoever picks it up needs, and any of its tracker's fields: its project, milestone, cycle, parent, assignee, status, estimate, type, components or due date, each set as it is filed. Without tracker and container, it goes where the project's issues come from, or its repository's issues; when that isn't clear, Althar says what to name. Althar reads each name against the tracker and says what it left off and why.",
@@ -1686,12 +1745,7 @@ export class Coordinator extends Context.Service<
           },
           attachTool,
         ),
-        tool(
-          'read_issue',
-          'An issue on a connected tracker, or in the project’s repository: its title, status, assignees, labels, project, milestone, parent and the like, its description, and its latest comments. Takes its link or its key.',
-          { type: 'object', properties: { issue: { type: 'string' } }, required: ['issue'] },
-          readIssue,
-        ),
+        tool('read_issue', READ_ISSUE, READ_ISSUE_INPUT, readIssue),
         findIssuesTool,
         tool(
           'find_pull_requests',
@@ -2044,6 +2098,7 @@ export class Coordinator extends Context.Service<
           inReview: true,
         },
       ])
+      yield* toolServer.serve('reviewer', [findIssuesTool])
       yield* toolServer.guard('lead', (tool, access) =>
         tool.name !== 'make_it_a_change'
           ? Effect.succeed(null)

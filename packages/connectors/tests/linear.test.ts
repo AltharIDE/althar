@@ -2,7 +2,8 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
 import type { Credential } from '../src/credential'
-import { categoryOf, makeLinear } from '../src/linear'
+import { categoryOf, filterOf, makeLinear } from '../src/linear'
+import type { IssueQuery } from '../src/model'
 import { type Route, stubFetch, variablesOf } from './stub'
 
 const URL = 'https://api.linear.app/graphql'
@@ -234,7 +235,10 @@ describe('Linear', () => {
           {
             json: {
               data: {
-                issues: { nodes: [issue(), issue({ identifier: 'MER-232', assignee: null, state: { name: 'Done', type: 'completed' } })] },
+                issues: {
+                  nodes: [issue(), issue({ identifier: 'MER-232', assignee: null, state: { name: 'Done', type: 'completed' } })],
+                  pageInfo: { hasNextPage: false, endCursor: 'c2' },
+                },
               },
             },
           },
@@ -242,29 +246,144 @@ describe('Linear', () => {
       ])
       const found = yield* tracker.find({ text: ' refunds ', container: 'team-mer', state: 'open', mine: true, limit: 10 })
       assert.deepStrictEqual(
-        found.map((one) => [one.key, one.status.category, one.assignees.length]),
+        found.issues.map((one) => [one.key, one.status.category, one.assignees.length]),
         [
           ['MER-231', 'started', 1],
           ['MER-232', 'done', 0],
         ],
       )
-      assert.match(JSON.stringify(sent[0]?.body), /issues\(first: \$first, orderBy: updatedAt, filter: \$filter\)/)
+      assert.isNull(found.next)
+      assert.match(
+        JSON.stringify(sent[0]?.body),
+        /issues\(first: \$first, after: \$after, orderBy: updatedAt, filter: \$filter\) \{ nodes \{ \.\.\.IssueFields \} pageInfo \{ hasNextPage endCursor \} \}/,
+      )
       assert.deepStrictEqual(variablesOf(sent[0]), {
         first: 10,
         filter: {
-          team: { id: { eq: 'team-mer' } },
-          state: { type: { nin: ['completed', 'canceled'] } },
-          assignee: { isMe: { eq: true } },
-          or: [{ title: { containsIgnoreCase: 'refunds' } }, { description: { containsIgnoreCase: 'refunds' } }],
+          and: [
+            { team: { id: { eq: 'team-mer' } } },
+            { state: { type: { nin: ['completed', 'canceled'] } } },
+            { assignee: { isMe: { eq: true } } },
+            { or: [{ title: { containsIgnoreCase: 'refunds' } }, { description: { containsIgnoreCase: 'refunds' } }] },
+          ],
         },
       })
       // Closed is done or cancelled; all, whoever has it, anywhere, narrows nothing; and a page is held to Linear's most.
       yield* tracker.find({ state: 'closed', limit: 5 })
       yield* tracker.find({ text: '  ', state: 'all', mine: false, limit: 1000 })
       assert.deepStrictEqual(sent.slice(1).map(variablesOf), [
-        { first: 5, filter: { state: { type: { in: ['completed', 'canceled'] } } } },
+        { first: 5, filter: { and: [{ state: { type: { in: ['completed', 'canceled'] } } }] } },
         { first: 250, filter: {} },
       ])
+    }),
+  )
+
+  it('narrows a search by each filter, as Linear’s IssueFilter takes it', () => {
+    const narrowed = (query: Partial<IssueQuery>) => filterOf({ state: 'all', limit: 10, ...query })
+    assert.deepStrictEqual(narrowed({ labels: ['payments', ' Bug '] }), {
+      and: [{ labels: { some: { name: { eqIgnoreCase: 'payments' } } } }, { labels: { some: { name: { eqIgnoreCase: 'Bug' } } } }],
+    })
+    // A status by its name, or any of a category's: each category by its state type.
+    assert.deepStrictEqual(
+      narrowed({ status: { names: ['In Review'], categories: ['triage', 'backlog', 'todo', 'started', 'done', 'cancelled'] } }),
+      {
+        and: [
+          {
+            or: [
+              { state: { name: { eqIgnoreCase: 'In Review' } } },
+              { state: { type: { in: ['triage', 'backlog', 'unstarted', 'started', 'completed', 'canceled'] } } },
+            ],
+          },
+        ],
+      },
+    )
+    assert.deepStrictEqual(narrowed({ status: { names: ['In Review', 'QA'], categories: [] } }), {
+      and: [{ or: [{ state: { name: { eqIgnoreCase: 'In Review' } } }, { state: { name: { eqIgnoreCase: 'QA' } } }] }],
+    })
+    assert.deepStrictEqual(narrowed({ status: { names: [], categories: [] } }), {})
+    assert.deepStrictEqual(narrowed({ project: 'Q4 launch', milestone: 'Beta' }), {
+      and: [{ project: { name: { eqIgnoreCase: 'Q4 launch' } } }, { projectMilestone: { name: { eqIgnoreCase: 'Beta' } } }],
+    })
+    // A cycle under way, by number, or by name.
+    assert.deepStrictEqual(
+      ['Current', '42', 'Hardening'].map((cycle) => narrowed({ cycle })),
+      [
+        { and: [{ cycle: { isActive: { eq: true } } }] },
+        { and: [{ cycle: { number: { eq: 42 } } }] },
+        { and: [{ cycle: { name: { eqIgnoreCase: 'Hardening' } } }] },
+      ],
+    )
+    // Assigned to no one, or to someone by name, display name or email.
+    assert.deepStrictEqual(narrowed({ assignee: null }), { and: [{ assignee: { null: true } }] })
+    assert.deepStrictEqual(narrowed({ assignee: ' @ana ' }), {
+      and: [
+        {
+          assignee: {
+            or: [{ name: { containsIgnoreCase: 'ana' } }, { displayName: { eqIgnoreCase: 'ana' } }, { email: { eqIgnoreCase: 'ana' } }],
+          },
+        },
+      ],
+    })
+    assert.deepStrictEqual(narrowed({ priority: ['urgent', 'low', 'none'] }), { and: [{ priority: { in: [1, 4, 0] } }] })
+    assert.deepStrictEqual(narrowed({ parent: 'mer-200' }), {
+      and: [{ parent: { team: { key: { eqIgnoreCase: 'MER' } }, number: { eq: 200 } } }],
+    })
+    // A day is from its start, in UTC.
+    assert.deepStrictEqual(narrowed({ updatedSince: '2026-11-01' }), { and: [{ updatedAt: { gte: '2026-11-01T00:00:00.000Z' } }] })
+    assert.deepStrictEqual(narrowed({ updatedSince: '2026-11-01T10:30:00+02:00' }), {
+      and: [{ updatedAt: { gte: '2026-11-01T08:30:00.000Z' } }],
+    })
+    // Keys by their team's, each team's numbers together; one that isn't Linear's is left out.
+    assert.deepStrictEqual(narrowed({ keys: ['MER-231', 'mer-232', 'OPS-7', '#12', 'MER-231'] }), {
+      and: [
+        {
+          or: [
+            { team: { key: { eqIgnoreCase: 'MER' } }, number: { in: [231, 232] } },
+            { team: { key: { eqIgnoreCase: 'OPS' } }, number: { in: [7] } },
+          ],
+        },
+      ],
+    })
+    // Nothing to find: no key Linear's, or a parent that isn't one.
+    assert.isNull(narrowed({ keys: ['#12', 'abc123'] }))
+    assert.isNull(narrowed({ parent: 'refunds' }))
+    assert.deepStrictEqual(narrowed({ keys: [] }), {})
+  })
+
+  it.effect('reads on from where a page stopped, by Linear’s cursor', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = linear([
+        [
+          'POST',
+          URL,
+          (request) => ({
+            json: {
+              data: {
+                issues:
+                  (variablesOf(request) as { after?: string }).after === undefined
+                    ? { nodes: [issue()], pageInfo: { hasNextPage: true, endCursor: 'cursor-1' } }
+                    : { nodes: [issue({ identifier: 'MER-232' })], pageInfo: { hasNextPage: false, endCursor: 'cursor-2' } },
+              },
+            },
+          }),
+        ],
+      ])
+      const first = yield* tracker.find({ state: 'open', limit: 1 })
+      assert.deepStrictEqual([first.issues.map((one) => one.key), first.next], [['MER-231'], 'cursor-1'])
+      const second = yield* tracker.find({ state: 'open', limit: 1, cursor: 'cursor-1' })
+      assert.deepStrictEqual([second.issues.map((one) => one.key), second.next], [['MER-232'], null])
+      assert.deepInclude(variablesOf(sent[1]) as object, { first: 1, after: 'cursor-1' })
+    }),
+  )
+
+  it.effect('finds nothing, unasked, by keys none of which is Linear’s, and refuses a parent that isn’t a key', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = linear([])
+      assert.deepStrictEqual(yield* tracker.find({ state: 'all', keys: ['#12', 'meridian/api#3'], limit: 10 }), { issues: [], next: null })
+      const refused = yield* Effect.flip(tracker.find({ state: 'all', parent: 'Refunds', limit: 10 }))
+      assert.deepStrictEqual([refused.product, refused.reason], ['linear', 'rejected'])
+      assert.match(refused.message, /Refunds/)
+      assert.lengthOf(sent, 0)
     }),
   )
 

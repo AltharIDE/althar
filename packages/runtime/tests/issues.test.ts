@@ -474,7 +474,7 @@ describe('issues read and found by an agent', () => {
         // In the order of their keys; MER-234, which isn't there, left out.
         ['MER-231', 'MER-232', 'MER-233'],
       )
-      assert.match(yield* find({ keys: 'MER-1..MER-900' }), /isn’t a run of keys/)
+      assert.match(yield* find({ keys: 'MER-1..MER-900' }), /isn’t a run or a list of keys/)
       tracker.failNext('find', 'forbidden')
       assert.strictEqual(yield* find({ text: 'refunds' }), 'Couldn’t search Linear: The fake find failed (forbidden).')
       // On the tracker named, by its product or its name, and in a container it has by its key, name or id.
@@ -485,10 +485,10 @@ describe('issues read and found by an agent', () => {
       assert.match(yield* find({ container: 'team-mer', text: 'refunds' }), /MER-231/)
       assert.include(yield* find({ container: 'Nowhere', text: 'refunds' }), 'Linear has nowhere called Nowhere for issues.')
       assert.include(yield* find({ tracker: 'Jira', text: 'refunds' }), 'No tracker called Jira is connected.')
-      // A run of keys narrowed by its words and its state; one the tracker failed to read said.
+      // A run of keys narrowed by its words and its state; a tracker that failed to read them said.
       assert.match(yield* find({ keys: 'MER-231..MER-233', text: 'webhooks', state: 'closed' }), /^- MER-233/)
-      tracker.failNext('issue', 'unreachable')
-      assert.include(yield* find({ keys: 'MER-231..MER-231' }), 'Some of MER-231..MER-231 couldn’t be read')
+      tracker.failNext('find', 'unreachable')
+      assert.include(yield* find({ keys: 'MER-231..MER-231' }), 'Couldn’t search Linear')
     }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ linear: tracker }) })))
   })
 

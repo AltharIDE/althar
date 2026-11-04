@@ -837,12 +837,11 @@ describe('issue drafts', () => {
         const drafts = yield* IssueDrafts
         const instance = yield* Instance
         const { projectId, task, lead } = yield* led('Add a retry')
-        // The lead can look for duplicates and draft; a reviewer only reads.
+        // The lead can look for duplicates and draft; a reviewer only reads and finds.
         assert.includeMembers(yield* listTools(lead), ['draft_issue', 'find_issues', 'read_issue'])
         const reviewer = yield* listTools({ ...lead, role: 'reviewer' })
-        assert.includeMembers(reviewer, ['read_issue'])
+        assert.includeMembers(reviewer, ['read_issue', 'find_issues'])
         assert.notInclude(reviewer, 'draft_issue')
-        assert.notInclude(reviewer, 'find_issues')
 
         // What the project says waits, less the calls open on it: what the lead's drafts add.
         const waitingOnDrafts = Effect.gen(function* () {
