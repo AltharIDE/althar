@@ -10,9 +10,9 @@ import { useSyncExternalStore } from 'react'
 export type Look = 'A' | 'B' | 'C' | 'Today'
 
 export const LOOKS: ReadonlyArray<{ value: Look; name: string }> = [
-  { value: 'A', name: 'Flight deck' },
-  { value: 'B', name: 'Orbit' },
-  { value: 'C', name: 'Ruler' },
+  { value: 'A', name: 'Night side' },
+  { value: 'B', name: 'Engraved' },
+  { value: 'C', name: 'Flight chart' },
   { value: 'Today', name: 'Today' },
 ]
 
