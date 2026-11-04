@@ -1,3 +1,5 @@
+import { lazy, Suspense } from 'react'
+
 import { DesktopBody } from './bodies/desktop/DesktopBody'
 import { Footer } from '../shared/footer/Footer'
 import { Nav, NavSpace } from '../shared/Nav'
@@ -11,13 +13,22 @@ import { Hero } from './Hero'
  * and the footer (shared/footer).
  */
 
+/** Prototype: in development, the product's sections wear one of three looks, swapped in place (looks/). Never in the build. */
+const Looks = import.meta.env.DEV ? lazy(() => import('./looks/Looks')) : null
+
 export function Home() {
   return (
     <div className={s.page} id="top">
       <Nav opening />
       <Hero nav={<NavSpace />} />
       <RunsOn />
-      <DesktopBody />
+      {Looks ? (
+        <Suspense fallback={null}>
+          <Looks />
+        </Suspense>
+      ) : (
+        <DesktopBody />
+      )}
       <Footer />
     </div>
   )

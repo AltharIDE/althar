@@ -1,0 +1,104 @@
+/* Prototype, C: the page's paper, ruled as the Runs on band is; every claim a band, no panels anywhere. */
+
+.body {
+  overflow-x: clip;
+  background: var(--n-2);
+  /* The app's pictures stand on the paper, as they would on a desk: a hairline and a soft fall, no panel. */
+  --board-frame: 0 0 0 1px var(--line-2), 0 34px 80px rgba(40, 30, 10, 0.11), 0 8px 22px rgba(40, 30, 10, 0.05);
+  --review-mask: none;
+  --review-radius: 16px;
+  --review-frame: 0 34px 80px rgba(40, 30, 10, 0.16), 0 8px 22px rgba(40, 30, 10, 0.06);
+  --bezel-fall: 0 34px 80px rgba(40, 30, 10, 0.18);
+  --scene-frame: 0 0 0 1px var(--line-2), 0 30px 60px rgba(40, 30, 10, 0.12);
+  --edge-words: var(--t-2);
+  --edge-title: var(--t-1);
+  --edge-path: var(--t-3);
+  --edge-faint: var(--t-4);
+}
+
+/* ---- a claim's band: the hairline across the window with its number on it, the claim at the left, its lead beside it ---- */
+.scene { padding-bottom: 150px; }
+.scene:first-child { margin-top: 130px; }
+.rule { border-top: 1px solid var(--line-2); }
+.no { display: block; max-width: 1320px; margin: 0 auto; padding: 18px var(--gut) 0; font: 500 11px/1 var(--mono); letter-spacing: 0.1em; color: var(--t-3); }
+.head {
+  display: grid;
+  grid-template-columns: minmax(0, 8fr) minmax(0, 4fr);
+  align-items: end;
+  gap: 24px 48px;
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 56px var(--gut) 0;
+}
+.head .title { font-size: clamp(40px, 6.2vw, 96px); }
+.head .lead { max-width: 26em; padding-bottom: 0.4em; font-size: 17px; }
+
+/* ---- the coordinator: its words at the left, the conversation beside them ---- */
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  align-items: center;
+}
+.split > .rule { grid-column: 1 / -1; }
+.split > .head { grid-template-columns: minmax(0, 1fr); justify-self: end; width: 100%; max-width: calc(1320px * 5 / 12); padding-top: 0; }
+.split > .head .title { font-size: clamp(40px, 5vw, 80px); }
+.split > :last-child { justify-self: start; width: 100%; margin: 56px 0 0; }
+
+/* ---- what keeps you in flow: ruled cells, the rules running out to the window's edges ---- */
+.cells {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  max-width: 1320px;
+  margin: 80px auto 0;
+  padding: 0 var(--gut);
+  list-style: none;
+}
+.cells::after { content: ''; position: absolute; left: -100vw; right: -100vw; bottom: 0; height: 1px; background: var(--line-2); }
+.cell { position: relative; display: flex; flex-direction: column; min-width: 0; padding: 32px 32px 40px; }
+/* A row's rule, out to both edges of the window, drawn by the row's first cell. */
+.cell:is(:nth-child(1), :nth-child(3), :nth-child(5), :nth-child(6))::before { content: ''; position: absolute; top: 0; left: -100vw; right: -100vw; height: 1px; background: var(--line-2); }
+/* Between cells side by side, a rule from row's rule to row's rule. */
+.cell:is(:nth-child(2), :nth-child(4), :nth-child(7))::after { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 1px; background: var(--line-2); }
+.span2 { grid-column: span 2; }
+.span3 { grid-column: span 3; }
+.span4 { grid-column: span 4; }
+.span6 { grid-column: span 6; }
+/* A row's first cell starts where the words over it start; its last ends where they end. */
+.span4, .span6, .cell:nth-child(3), .cell:nth-child(6) { padding-left: 0; }
+.span2, .span6, .cell:nth-child(4), .cell:nth-child(7) { padding-right: 0; }
+.cellHead { display: grid; gap: 8px; }
+.cellTitle { margin: 0; font-family: 'Inter Display', var(--display); font-size: clamp(24px, 2.2vw, 32px); font-weight: 300; line-height: 1.05; letter-spacing: -0.035em; color: var(--t-1); text-wrap: balance; }
+.cellTitle b { font-weight: 700; letter-spacing: -0.04em; }
+.cellLead { max-width: 36em; margin: 0; font-size: 14.5px; line-height: 1.5; color: var(--t-2); text-wrap: pretty; }
+.pic { display: grid; place-items: center; margin-top: auto; padding-top: 30px; }
+.pic > * { width: 100%; }
+.cell[data-drawn] .pic > * { border-radius: 12px; box-shadow: 0 0 0 1px var(--line-2); }
+.span6 .pic > * { max-width: 1000px; }
+
+.end { margin-top: 0; }
+
+@media (max-width: 1100px) {
+  .head { grid-template-columns: minmax(0, 1fr); }
+  .split { display: block; }
+  .split > .head { max-width: none; padding-top: 56px; }
+  .split > :last-child { margin: 56px auto 0; }
+  .cells { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .span2, .span3, .span4 { grid-column: span 1; }
+  .span6 { grid-column: span 2; }
+  .cell { padding: 28px 24px 32px; }
+  .cell:nth-child(odd) { padding-left: 0; }
+  .cell:nth-child(even) { padding-right: 0; }
+  .cell.span6 { padding-left: 0; padding-right: 0; }
+}
+@media (max-width: 700px) {
+  .scene { padding-bottom: 96px; }
+  .scene:first-child { margin-top: 80px; }
+  .head { padding-top: 36px; }
+  .head .lead { font-size: 15.5px; }
+  .cells { grid-template-columns: minmax(0, 1fr); margin-top: 48px; }
+  .span2, .span3, .span4, .span6 { grid-column: auto; }
+  .cell, .cell:nth-child(odd), .cell:nth-child(even) { padding: 24px 0 30px; }
+  .cell::before { content: ''; position: absolute; top: 0; left: -100vw; right: -100vw; height: 1px; background: var(--line-2); }
+  .cell::after { display: none; }
+}

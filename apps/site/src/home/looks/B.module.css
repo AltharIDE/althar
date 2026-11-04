@@ -1,0 +1,127 @@
+/* Prototype, B: plates in a book printed in the footer's cobalt on its paper. */
+
+.body {
+  --ink: #1f35c8;
+  --ink-2: rgba(31, 53, 200, 0.8);
+  --ink-3: rgba(31, 53, 200, 0.58);
+  --rule: rgba(31, 53, 200, 0.3);
+  --pressed: #f7f5f0;
+  overflow-x: clip;
+  background: var(--n-2);
+  color: var(--ink);
+  /* The app's pictures in cobalt hairlines, no shadows: printed, not floating. */
+  --board-frame: 0 0 0 1px var(--rule);
+  --talk-frame: 0 0 0 1px var(--rule);
+  --review-mask: none;
+  --review-radius: 4px;
+  --bezel-fall: 0 0 0 0 transparent;
+  --scene-frame: 0 0 0 1px var(--rule);
+  --edge-words: var(--ink-2);
+  --edge-title: var(--ink);
+  --edge-path: var(--ink-3);
+  --edge-faint: rgba(31, 53, 200, 0.3);
+}
+
+/* ---- a chapter's opening: its numeral between rules, the claim, the lead ---- */
+.scene { isolation: isolate; padding-top: 72px; }
+.scene:first-child { padding-top: 160px; }
+.head {
+  display: grid;
+  justify-items: center;
+  gap: 22px;
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 0 var(--gut);
+  text-align: center;
+}
+.numeral { display: flex; align-items: center; gap: 18px; margin: 0 0 4px; font: 500 14px/1 'Inter Display', var(--display); letter-spacing: 0.08em; color: var(--ink); }
+.numeral::before,
+.numeral::after { content: ''; width: 56px; height: 1px; background: var(--rule); }
+.head .title { font-size: clamp(40px, 5.8vw, 88px); color: var(--ink); }
+.head .lead { color: var(--ink-2); }
+
+/* ---- the plate mark: a pressed rule round the print, a fainter one outside it, and its shadow cut in hatching ---- */
+.plate {
+  position: relative;
+  width: calc(100% - 2 * var(--gut));
+  max-width: 1240px;
+  margin: 72px auto 0;
+  padding: 18px;
+  background: var(--pressed);
+  box-shadow: inset 0 0 0 1px var(--rule);
+  outline: 1px solid rgba(31, 53, 200, 0.16);
+  outline-offset: 6px;
+}
+.plate::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 16px -16px -16px 16px;
+  background: repeating-linear-gradient(-45deg, rgba(31, 53, 200, 0.3) 0 1px, transparent 1px 6px);
+}
+/* The picture's own wrap sits flush in the plate. */
+.plate.plate > div { margin: 0 auto; padding: 0; }
+.wide > div { max-width: none; }
+.narrow { max-width: min(880px, calc((100svh - 150px) * 760 / 720)); }
+.edge { padding-bottom: 40px; }
+.edge > div > :last-child { margin-top: 96px; }
+
+/* ---- the ornament between the plates: the altar and its light ---- */
+.altar { display: block; width: 116px; height: auto; margin: 120px auto 48px; overflow: visible; }
+.light path { fill: none; stroke-width: 0.9; stroke-linecap: round; }
+.stone { fill: none; stroke: var(--ink); stroke-width: 1.1; }
+.hatch { fill: none; stroke: var(--ink); stroke-width: 0.7; opacity: 0.8; }
+.ground { fill: none; stroke: var(--ink); stroke-width: 0.7; stroke-linecap: round; opacity: 0.6; }
+
+/* ---- what keeps you in flow: one plate of figures, ruled, two by two, home across the whole ---- */
+.figuresPlate { padding: 0; background: var(--pressed); }
+.figures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; padding: 0; list-style: none; }
+.figure { display: grid; grid-template-rows: auto 1fr; align-content: start; gap: 22px; min-width: 0; padding: 26px 26px 30px; box-shadow: inset -1px 0 0 var(--rule), inset 0 -1px 0 var(--rule); }
+.away, .conflicts, .workspaces { box-shadow: inset 0 -1px 0 var(--rule); }
+.home { grid-column: 1 / -1; box-shadow: inset 0 -1px 0 var(--rule); }
+.worktrees { box-shadow: inset -1px 0 0 var(--rule); }
+.workspaces { box-shadow: none; }
+.pic { display: grid; place-items: center; min-height: 0; }
+.figure[data-drawn] .pic > * { box-shadow: 0 0 0 1px rgba(31, 53, 200, 0.18); }
+.home .pic { padding: 8px 0; }
+.home .pic > * { max-width: 980px; }
+.caption { display: grid; gap: 8px; align-content: start; max-width: 36em; }
+.fig { font: 500 10.5px/1 var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); }
+.figTitle { margin: 2px 0 0; font-family: 'Inter Display', var(--display); font-size: clamp(22px, 2vw, 28px); font-weight: 300; line-height: 1.08; letter-spacing: -0.035em; color: var(--ink); text-wrap: balance; }
+.figTitle b { font-weight: 700; letter-spacing: -0.04em; }
+.figLead { margin: 0; font-size: 14.5px; line-height: 1.5; color: var(--ink-2); text-wrap: pretty; }
+
+/* ---- the colophon: the altar, the last line, the download, and a rule to close the book ---- */
+.end { padding: 0 var(--gut); text-align: center; }
+.endAltar { width: 140px; margin-top: 150px; margin-bottom: 40px; }
+.endLine { margin: 0 auto; font-family: 'Inter Display', var(--display); font-size: clamp(30px, 3.6vw, 52px); font-weight: 200; line-height: 1.06; letter-spacing: -0.045em; color: var(--ink); }
+.endLine b { font-weight: 720; letter-spacing: -0.05em; }
+.endGet { display: grid; justify-items: center; margin-top: 34px; }
+.endGet > div > a:first-child { background: var(--ink); --os-belly: var(--ink); }
+.endGet > div > a:last-child { color: var(--ink); box-shadow: inset 0 0 0 1px var(--rule); }
+.endGet > p a { color: var(--ink-3); }
+.water {
+  max-width: var(--max);
+  height: 7px;
+  margin: 120px auto 0;
+  border-top: 2px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+  opacity: 0.5;
+}
+
+@media (max-width: 900px) {
+  .figures { grid-template-columns: minmax(0, 1fr); }
+  .figure, .away, .conflicts, .worktrees { box-shadow: inset 0 -1px 0 var(--rule); }
+  .home { grid-column: auto; }
+}
+@media (max-width: 700px) {
+  .scene:first-child { padding-top: 110px; }
+  .plate { width: calc(100% - 24px); margin-top: 48px; padding: 8px; outline-offset: 4px; }
+  .plate::after { inset: 10px -8px -8px 10px; }
+  .figuresPlate { padding: 0; }
+  .figure { padding: 18px 16px 22px; }
+  .altar { width: 84px; margin: 88px auto 32px; }
+  .edge > div > :last-child { margin-top: 64px; }
+  .endGet > div { display: grid; gap: 10px; width: 100%; max-width: 420px; }
+  .endGet > div > a { justify-content: center; height: 50px; }
+}

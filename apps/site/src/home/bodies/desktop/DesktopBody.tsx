@@ -55,85 +55,89 @@ function Scene({
   )
 }
 
+/** What each scene says: its claim and its lead, by the scene's id. */
+export const SCENE = {
+  independent: {
+    title: (
+      <>
+        Usage gets cut.
+        <br />
+        Models get pulled.
+        <br />
+        <b>Althar stays.</b>
+      </>
+    ),
+    lead: 'Open source, local-first, your data on your computer, any agent you have. None of the industry’s bullshit touches it.',
+  },
+  coordinator: {
+    title: (
+      <>
+        Every project
+        <br />
+        <b>has a manager.</b>
+      </>
+    ),
+    lead: 'It’s called the coordinator. It knows your whole project, and puts a team of agents on every ask.',
+  },
+  review: {
+    title: (
+      <>
+        No more <b>meat proxying.</b>
+      </>
+    ),
+    lead: 'Every change is reviewed by a model from another lab, and fixed until it’s clean.',
+  },
+  flow: {
+    title: (
+      <>
+        Fall in love
+        <br />
+        <b>with building again.</b>
+      </>
+    ),
+    lead: 'Tired of juggling terminals, re-explaining your project and babysitting agents? So were we.',
+  },
+  edge: {
+    title: (
+      <>
+        Wherever you are, <b>still in reach.</b>
+      </>
+    ),
+    lead: 'Althar sits round your Mac’s notch, in whatever you’re doing: point at it to answer a permission or open a pull request, and carry on.',
+  },
+} as const
+
+/** The last line, by the download: its quiet half, then its heavy one. */
+export const END = ['The craft of a paid app.', 'The freedom of open source.'] as const
+
 export function DesktopBody() {
   return (
     <main id="main" tabIndex={-1} className={s.body}>
-      <Scene
-        id="independent"
-        tone="cabin"
-        title={
-          <>
-            Usage gets cut.
-            <br />
-            Models get pulled.
-            <br />
-            <b>Althar stays.</b>
-          </>
-        }
-        lead="Open source, local-first, your data on your computer, any agent you have. None of the industry’s bullshit touches it."
-      >
+      <Scene id="independent" tone="cabin" {...SCENE.independent}>
         <AtWork />
       </Scene>
 
-      <Scene
-        id="coordinator"
-        title={
-          <>
-            Every project
-            <br />
-            <b>has a manager.</b>
-          </>
-        }
-        lead="It’s called the coordinator. It knows your whole project, and puts a team of agents on every ask."
-      >
+      <Scene id="coordinator" {...SCENE.coordinator}>
         <AskOnce />
       </Scene>
 
-      <Scene
-        id="review"
-        tone="lit"
-        title={
-          <>
-            No more <b>meat proxying.</b>
-          </>
-        }
-        lead="Every change is reviewed by a model from another lab, and fixed until it’s clean."
-      >
+      <Scene id="review" tone="lit" {...SCENE.review}>
         <Review />
       </Scene>
 
-      <Scene
-        id="flow"
-        title={
-          <>
-            Fall in love
-            <br />
-            <b>with building again.</b>
-          </>
-        }
-        lead="Tired of juggling terminals, re-explaining your project and babysitting agents? So were we."
-      >
+      <Scene id="flow" {...SCENE.flow}>
         <Bento />
       </Scene>
 
-      <Scene
-        id="edge"
-        tone="ink"
-        title={
-          <>
-            Wherever you are, <b>still in reach.</b>
-          </>
-        }
-        lead="Althar sits round your Mac’s notch, in whatever you’re doing: point at it to answer a permission or open a pull request, and carry on."
-      >
+      <Scene id="edge" tone="ink" {...SCENE.edge}>
         <EdgeTour />
       </Scene>
 
-      <section className={s.end} aria-label="Download Althar">
+      <section id="end" className={s.end} aria-label="Download Althar">
         <div className={s.endRow}>
           <p className={s.endLine}>
-            The craft of a paid app. <br className={s.phoneBreak} />
-            <b>The freedom of open source.</b>
+            {END[0]} <br className={s.phoneBreak} />
+            <b>{END[1]}</b>
           </p>
           <div className={s.endGet}>
             <Get tone="paper" />
