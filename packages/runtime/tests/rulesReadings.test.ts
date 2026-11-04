@@ -1,3 +1,5 @@
+import { resolve } from 'node:path'
+
 import type { PermissionRequest } from '@althar/provider-adapters'
 import { assert, describe, it } from '@effect/vitest'
 
@@ -127,7 +129,7 @@ describe('the git a line runs', () => {
 
   it('is in the folder it runs in, where Althar can tell, its assignments and redirects left out', () => {
     assert.deepStrictEqual(gitRunsOf('git -C /elsewhere push origin', context), [
-      { words: 'git -C /elsewhere push origin', folder: '/elsewhere', push: { remote: 'origin' } },
+      { words: 'git -C /elsewhere push origin', folder: resolve('/elsewhere'), push: { remote: 'origin' } },
     ])
     assert.deepStrictEqual(gitRunsOf('FOO=1 git status > out.txt', context), [{ words: 'git status', folder: worktree }])
     // After a `cd` it can't follow, the folder isn't known, nor so where the push goes.
