@@ -6,10 +6,11 @@ import { useRef } from 'react'
 import { TaskThread as Built, type TaskThreadProps } from '../../../../../apps/desktop/src/renderer/features/task/TaskThread'
 import { CycleCard, HandoffCard, NeedsYou, ShortTurn, StandingFacts } from '../parts'
 import s from './directions.module.css'
+import { useProto } from '../state'
 import { useOpenAt, useStory, useWho } from './shared'
 
 /** The history, in order: shared with B's conversation, which has no handoff pinned. */
-export function History(props: TaskThreadProps) {
+export function History({ pinned = false, ...props }: TaskThreadProps & { pinned?: boolean }) {
   const { story } = useStory(props.rounds, props.threadId)
   const who = useWho(props.session)
   // The latest review open: the one that left the person something, else the last, unless it found nothing.
@@ -19,7 +20,13 @@ export function History(props: TaskThreadProps) {
     <>
       {story.beats.map((beat) =>
         beat.kind === 'lead' ? (
-          <ShortTurn key={beat.id} turn={beat} model={who.lead} threadId={props.threadId} />
+          // The turn the pinned handoff comes from leaves its words to it, so nothing is said twice.
+          <ShortTurn
+            key={beat.id}
+            turn={pinned && story.handoff?.from?.id === beat.id ? { ...beat, outcome: null, said: false } : beat}
+            model={who.lead}
+            threadId={props.threadId}
+          />
         ) : beat.kind === 'review' ? (
           <CycleCard
             key={beat.id}
@@ -44,7 +51,7 @@ export function ThreadA(props: TaskThreadProps) {
   useOpenAt(pinned)
   return (
     <>
-      <History {...props} />
+      <History {...props} pinned />
       {story.handoff !== null && (
         <div ref={pinned} className={s.pinned}>
           <NeedsYou

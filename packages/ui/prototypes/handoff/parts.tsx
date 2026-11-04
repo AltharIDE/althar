@@ -144,7 +144,9 @@ export function TurnLines({ turn, threadId, quiet = false }: { turn: LeadTurn; t
         </div>
       )}
       <div className={s.chips}>
-        {report !== null && <ChecksChip id={report.id} evidence={report.result.evidence} unverified={report.result.unverified ?? []} />}
+        {report !== null && turn.said !== false && (
+          <ChecksChip id={report.id} evidence={report.result.evidence} unverified={report.result.unverified ?? []} />
+        )}
         {message !== null && message !== turn.outcome && (
           <LinkButton className={s.readAll} onClick={() => setWhole(!whole)}>
             {whole ? words.less : words.readAll}
@@ -199,7 +201,9 @@ export function FindingRow({ row, rounds }: { row: Row; rounds?: ReadonlyArray<n
               {row.title}
             </span>
             {rounds !== undefined && rounds.length > 1 ? (
-              <span className={s.again}>{rounds.map((one) => one + 1).join(', ')}</span>
+              <span className={s.again} title={`Found in reviews ${rounds.map((one) => one + 1).join(' and ')}`}>
+                {words.again}
+              </span>
             ) : (
               row.again !== null && <span className={s.again}>{words.again}</span>
             )}

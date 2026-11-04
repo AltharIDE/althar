@@ -25,9 +25,11 @@ export interface Proto {
   readonly bare: boolean
   /** What the person decided on the page, by what was asked: a finding of theirs, or a call. */
   readonly answers: Readonly<Record<string, string>>
+  /** What the page opens on, for screenshots (?open=r2&scroll=top&face=talk): a review opened, the thread at its start, B's conversation. */
+  readonly opening: { readonly review: number | null; readonly top: boolean; readonly talk: boolean }
 }
 
-let state: Proto = { direction: 'C', bare: false, answers: {} }
+let state: Proto = { direction: 'C', bare: false, answers: {}, opening: { review: null, top: false, talk: false } }
 const listeners = new Set<() => void>()
 
 export const proto = {

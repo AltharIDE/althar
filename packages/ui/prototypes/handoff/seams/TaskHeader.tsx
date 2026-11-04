@@ -7,14 +7,15 @@ import { useProto } from '../state'
 type Props = ComponentProps<typeof Built>
 
 export function TaskHeader(props: Props) {
-  const { direction } = useProto()
+  const { direction, opening } = useProto()
   const opened = useRef(false)
   const { face, onFace } = props
   useEffect(() => {
     if (direction !== 'B' || opened.current) return
     opened.current = true
-    if (face !== 'out') onFace?.('out' as never)
-  }, [direction, face, onFace])
+    const want = opening.talk ? 'talk' : 'out'
+    if (face !== want) onFace?.(want as never)
+  }, [direction, face, onFace, opening.talk])
   if (direction !== 'B' || props.faces === undefined) return <Built {...props} />
   const faces = [
     ...props.faces.filter((one) => one.value === 'out').map((one) => ({ ...one, label: 'Where it stands' })),

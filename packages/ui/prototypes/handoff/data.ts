@@ -404,6 +404,17 @@ const longItems: ThreadItem[] = [
   }),
   L.says(94, SETTLE_ONE_RESULT),
 
+  // The person asks something on the way; the lead answers before the next review.
+  L.you(94.2, 'While you’re at it: does the coordinator’s handoff to a new lead wait on the same cold start?'),
+  L.tool(94.4, 'Read packages/runtime/src/Coordinator.ts', 'read', { path: 'packages/runtime/src/Coordinator.ts' }),
+  L.tool(94.5, 'Search for createSession in Coordinator.ts', 'search', {
+    command: 'rg -n createSession packages/runtime/src/Coordinator.ts',
+  }),
+  L.says(
+    94.8,
+    'Yes, the same way: the coordinator creates a new task’s lead only once the task is made, so its first word waits on a cold start too, about 50s at the median. The fix is the same overlap, but in `Coordinator.ts`, which this task doesn’t touch; I’ve left it out rather than widen the change. It’s a line in the pull request’s description.',
+  ),
+
   // Review two: Codex went quiet, started again, and found the memory cost.
   L.notice(95, 'Started Codex afresh.'),
   L.tool(97, 'Read packages/runtime/src/Runs.ts', 'read', { path: 'packages/runtime/src/Runs.ts' }, 'codex'),

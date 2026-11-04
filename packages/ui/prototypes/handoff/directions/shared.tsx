@@ -9,6 +9,7 @@ import { useServices } from '../../../../../apps/desktop/src/renderer/data/servi
 import { useModelNames } from '../../../../../apps/desktop/src/renderer/shared/modelNames'
 import type { RoundBlock } from '../../../../../apps/desktop/src/renderer/shared/rounds'
 import { snapshotOf } from '../snapshots'
+import { proto } from '../state'
 import { storyOf } from '../story'
 
 /** The task as a story, from the rounds the thread has and what its reviews found, as the Changes view reads them. */
@@ -46,6 +47,7 @@ const scrollerOf = (from: HTMLElement): HTMLElement | null => {
 /** Opens the thread with this at its top, once, as the task opens: after the thread has followed its end. */
 export const useOpenAt = (ref: RefObject<HTMLElement | null>, gap = 20) => {
   useEffect(() => {
+    if (proto.get().opening.top) return
     let done = false
     const place = () => {
       const el = ref.current

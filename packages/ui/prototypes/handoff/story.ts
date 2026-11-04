@@ -35,6 +35,8 @@ export interface LeadTurn {
   readonly outcome: string | null
   /** What Althar said along the way that the person needn't read: a pull request opened, a commit made. */
   readonly noted: ReadonlyArray<string>
+  /** Its checks and whole message are shown here; false where they stand elsewhere, as pinned. */
+  readonly said?: boolean
 }
 
 /** A review, with the settle that answers it. */
@@ -129,7 +131,7 @@ const rowOf = (finding: TaskFinding, earlier: ReadonlyArray<TaskFinding>): Row =
   id: finding.id,
   round: finding.round,
   weight: finding.severity,
-  title: finding.title ?? firstSentence(finding.claim),
+  title: (finding.title ?? firstSentence(finding.claim)).replace(/`/g, ''),
   claim: finding.claim,
   at: finding.file === null ? null : finding.line === null ? finding.file : `${finding.file}:${finding.line}`,
   state: finding.state,
@@ -148,7 +150,8 @@ const turnOf = (round: Round, noted: ReadonlyArray<string>): LeadTurn => {
     round,
     step: report?.step ?? null,
     intent: round.ack === null ? null : firstSentence(round.ack.text),
-    outcome: report !== null && report.summary.trim() !== '' ? report.summary : said === null ? null : firstSentence(said),
+    // A step's report says what came of it; a turn with none, a reply to the person, is its own words.
+    outcome: report !== null && report.summary.trim() !== '' ? report.summary : said,
     noted,
   }
 }
@@ -201,6 +204,7 @@ export const storyOf = (
   let noise: string[] = []
   let reviewing: Round[] = []
   let noted: string[] = []
+  let published = false
   const lastTurn = () => beats.findLast((beat): beat is LeadTurn => beat.kind === 'lead')
   for (const block of rounds) {
     switch (block.kind) {
@@ -267,6 +271,21 @@ export const storyOf = (
         beats.push(cycle)
         break
       }
+      case 'published': {
+        // Althar's word for the pull request it opened: the task's state says it, and the rail's last stop opens it.
+        published = true
+        const change = block.result.change
+        const said =
+          block.result.summary.trim() !== ''
+            ? block.result.summary
+            : change === null
+              ? 'Pushed the branch.'
+              : `Opened ${change.short} ${change.prefix}${change.number}.`
+        const turn = lastTurn()
+        if (turn === undefined) beats.push({ kind: 'block', id: block.id, block })
+        else beats[beats.indexOf(turn)] = { ...turn, noted: [...turn.noted, said] }
+        break
+      }
       default:
         beats.push({ kind: 'block', id: block.id, block })
     }
@@ -296,15 +315,15 @@ export const storyOf = (
   const chains = new Map<string, Row[]>()
   for (const row of all) chains.set(first(row).id, [...(chains.get(first(row).id) ?? []), row])
   const order = (row: Row) => (row.yours ? 0 : row.state === 'open' ? 1 : row.state === 'set_aside' ? 2 : 3)
+  const weight = { blocking: 0, major: 1, minor: 2, nit: 3 }
   const ledger = [...chains.values()]
     .map((chain) => ({ ...chain.at(-1)!, rounds: chain.map((one) => one.round) }))
-    .sort((a, b) => order(a) - order(b))
+    .sort((a, b) => order(a) - order(b) || weight[a.weight] - weight[b.weight])
   const calls = snapshot?.attention ?? []
   const change = snapshot?.task.changes.at(-1) ?? null
   // The rail: its work, each review with its settle, and publishing.
   const implement = turns.find((turn) => turn.step === 'implement')
   const publishing = snapshot?.task.step === 'publish'
-  const published = beats.some((beat) => beat.kind === 'block' && beat.block.kind === 'published')
   const rail: Stop[] = [
     ...(implement === undefined
       ? []

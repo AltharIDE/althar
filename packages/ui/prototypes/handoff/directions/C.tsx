@@ -1,14 +1,15 @@
 // Scrappy: C, one ask, one answer. The reviews are part of the lead's work, not turns of the conversation: what the person asked
 // gets one answer from its lead, whose work is a rail of what it went through (its work, each review with its settle, publishing),
 // each stop opening in place, and whose words are what the task has built, as it stands. What waits on the person follows it.
-import { type ReactNode, useRef, useState } from 'react'
+import { type ReactNode, type RefObject, useRef, useState } from 'react'
 
-import { Issue, Model, Round as KitRound } from '../../../src/index'
+import { Issue, Markdown, Model, Round as KitRound } from '../../../src/index'
 import { TaskThread as Built, type TaskThreadProps } from '../../../../../apps/desktop/src/renderer/features/task/TaskThread'
 import { productBrand, productName } from '../../../../../apps/desktop/src/renderer/shared/products'
 import { ChecksChip, CycleBody, HandoffBody, NeedsYou, Noise, Rail, StandingFacts, TurnLines, words } from '../parts'
 import type { Beat, Cycle, LeadTurn, Stop } from '../story'
 import s from './directions.module.css'
+import { useProto } from '../state'
 import { useOpenAt, useStory, useWho } from './shared'
 
 /** The thread in exchanges: what the person asked (or the coordinator passed on), and everything until the next ask. */
@@ -48,8 +49,9 @@ export function ThreadC(props: TaskThreadProps) {
           <div key={exchange.ask?.id ?? `start-${at}`} className={s.exchange}>
             {ask}
             {(turns.length > 0 || cycles.length > 0) && (
-              <div ref={latest ? top : undefined}>
+              <div>
                 <Answer
+                  topRef={latest ? top : undefined}
                   props={props}
                   turns={turns}
                   cycles={cycles}
@@ -98,6 +100,7 @@ function Answer({
   change,
   publishing,
   needs,
+  topRef,
 }: {
   props: TaskThreadProps
   turns: ReadonlyArray<LeadTurn>
@@ -109,18 +112,26 @@ function Answer({
   change: ReturnType<typeof useStory>['story']['change']
   publishing: boolean
   needs: ReactNode
+  /** Where the thread opens: the rail of the latest answer, so what needs the person and what it built are in view. */
+  topRef: RefObject<HTMLDivElement | null> | undefined
 }) {
-  const [open, setOpen] = useState<string | null>(null)
+  const asked = useProto().opening.review
+  const [open, setOpen] = useState<string | null>(cycles.find((one) => one.round === asked)?.id ?? null)
   const first = turns[0]
   const last = turns.at(-1)
   const turn = turns.find((one) => one.id === open)
   const cycle = cycles.find((one) => one.id === open)
   const report = last?.round.report ?? null
   return (
-    <KitRound model={lead} at={first?.round.at ?? ''} data-item={first?.id}>
-      {first?.intent != null && <p className={s.intent}>{first.intent}</p>}
+    <KitRound model={lead} at={first?.round.at ?? ''} data-item={first?.id} ref={stops.length > 1 ? undefined : topRef}>
+      {/* A reply to what the person asked opens the answer in its own words; a step's work, with what it set out to do. */}
+      {first !== undefined && first.step === null && first.outcome !== null ? (
+        <Markdown source={first.outcome} />
+      ) : (
+        first?.intent != null && <p className={s.intent}>{first.intent}</p>
+      )}
       {stops.length > 1 && (
-        <div className={s.railBox}>
+        <div className={s.railBox} ref={topRef}>
           <Rail stops={stops} open={open} onOpen={setOpen} />
           {turn !== undefined && (
             <div className={s.stopOpen}>

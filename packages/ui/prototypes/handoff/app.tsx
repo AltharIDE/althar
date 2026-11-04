@@ -189,7 +189,27 @@ function App({ router }: { router: ReturnType<typeof makeRouter> }) {
 export const boot = () => {
   const params = new URLSearchParams(window.location.search)
   const shown = DIRECTIONS.find((one) => one.value.toLowerCase() === params.get('d')?.toLowerCase())?.value ?? 'C'
-  proto.set({ direction: shown, bare: params.has('bare') })
+  const review = /^r(\d+)$/.exec(params.get('open') ?? '')?.[1]
+  proto.set({
+    direction: shown,
+    bare: params.has('bare'),
+    opening: {
+      review: review === undefined ? null : Number(review) - 1,
+      top: params.get('scroll') === 'top',
+      talk: params.get('face') === 'talk',
+    },
+  })
+  // Opened at the thread's start, for a screenshot of it scrolled back: once the thread has followed its end.
+  if (params.get('scroll') === 'top')
+    for (const ms of [500, 900])
+      window.setTimeout(() => {
+        const thread = document.querySelector('section[aria-label="Thread"]')
+        for (let box = thread?.parentElement ?? null; box !== null; box = box.parentElement)
+          if (getComputedStyle(box).overflowY === 'auto' || getComputedStyle(box).overflowY === 'scroll') {
+            box.scrollTop = 0
+            break
+          }
+      }, ms)
   titled(shown)
   window.localStorage.removeItem('althar.tabs')
   if (window.location.hash === '' || window.location.hash === '#/') window.location.hash = `#/threads/${TASKS.long.threadId}`
