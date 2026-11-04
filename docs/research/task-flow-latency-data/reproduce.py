@@ -11,13 +11,14 @@ import json
 import re
 import sqlite3
 import statistics
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("snapshot", nargs="?", help="Consistent SQLite backup; opened mode=ro")
 parser.add_argument("--out", type=Path, help="New directory for redacted exports")
-parser.add_argument("--prs", type=Path, help="Public prs.csv containing number and merged_at")
+parser.add_argument("--prs", type=Path, help="Public prs.csv containing url and merged_at; refresh for a new cohort")
 parser.add_argument("--summarize", type=Path, help="Recompute medians from samples.csv")
 args = parser.parse_args()
 if args.summarize:
@@ -34,7 +35,7 @@ DB = str(Path(args.snapshot).resolve())
 OUT = args.out
 OUT.mkdir(exist_ok=False)
 with args.prs.open() as f:
-    public_prs = {r["number"]: r for r in csv.DictReader(f)}
+    public_prs = {r["url"].rstrip('/'): r for r in csv.DictReader(f)}
 c = sqlite3.connect(Path(DB).as_uri() + '?mode=ro', uri=True)
 c.row_factory = sqlite3.Row
 c.execute('pragma query_only=ON')
@@ -60,6 +61,7 @@ byid={}
 for e in events: byid.setdefault(e['aggregate_id'],[]).append(e)
 changes={r['aggregate_id']:r['last'] for r in rows("select aggregate_id,max(changed_at) last from change_log where aggregate_type='thread_item' group by aggregate_id")}
 summaries=[]; phases=[]; samples=[]
+missing_merge_times=0; ambiguous_queue_links=0
 for t in tasks:
     tid=t['id']; a=sec(t['created_at']); b=sec(t['settled_at']); bound=[(a,b)]
     def keep(k,v):
@@ -174,8 +176,14 @@ for t in tasks:
         match = re.fullmatch(r'PR #(\d+) is in the merge queue for main\.', obj(item['content']).get('title',''))
         if not match: continue
         number = match[1]
-        url='https://github.com/AltharIDE/althar/pull/'+number
+        # PR numbers are repository-local. Recover the actual external link
+        # from this task's observations rather than inventing a repository.
+        urls={o['url'] for o in obs if o['url'].rstrip('/').endswith('/pull/'+number)}
+        url=next(iter(urls)) if len(urls)==1 else ''
         phase('queue_entry_notice',item['created_at'],None,url=url)
+        if not url:
+            ambiguous_queue_links+=1
+            continue
         green = [o for o in obs if o['kind']=='checks' and o['url']==url
                  and obj(o['payload']).get('outcome')=='passed' and o['observed_at']<item['created_at']]
         if green: keep('green_to_queue_notice',sec(item['created_at'])-sec(max(o['observed_at'] for o in green)))
@@ -197,8 +205,11 @@ for t in tasks:
             failed=[z for z in failed if not previous or z['observed_at']>max(previous)]
             if failed: keep('first_failed_result_to_notification',sec(ob['observed_at'])-sec(min(z['observed_at'] for z in failed)))
         if ob['kind']=='merged':
-            pr=public_prs[ob['url'].rsplit('/',1)[1]]
-            keep('merge_detection_lag',sec(ob['observed_at'])-sec(pr['merged_at']))
+            pr=public_prs.get(ob['url'].rstrip('/'))
+            if pr and pr.get('merged_at'):
+                keep('merge_detection_lag',sec(ob['observed_at'])-sec(pr['merged_at']))
+            else:
+                missing_merge_times+=1
 
 # Only whitelisted fields leave memory. Profile IDs encode creation times, so
 # replace them, not just the timestamp columns. Preserve elapsed durations;
@@ -254,4 +265,8 @@ for s in samples: s['task']=aliases[s['task']]
 write('tasks.csv',public_tasks,list(public_tasks[0]))
 write('phases.csv',public_phases,list(public_phases[0]))
 write('samples.csv',samples,['task','metric','seconds'])
+if missing_merge_times:
+    print(f"Warning: skipped {missing_merge_times} merge-detection lag samples without a matching URL and merge time in --prs; refresh prs.csv for this cohort. Other exports are complete.", file=sys.stderr)
+if ambiguous_queue_links:
+    print(f"Warning: {ambiguous_queue_links} queue notices have no unique matching external link; exported with a blank URL and omitted their green-to-queue samples.", file=sys.stderr)
 print(f"Exported {len(public_tasks)} tasks, {len(public_phases)} phases, {len(samples)} duration samples; no profile titles, IDs or absolute timestamps.")
