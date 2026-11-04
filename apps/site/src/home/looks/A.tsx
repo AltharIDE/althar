@@ -1,7 +1,10 @@
-import type { CSSProperties, ReactNode } from 'react'
+import { type ReactNode, type RefObject, useEffect, useRef } from 'react'
 
+import { HERO } from '../../content/home'
+import { askedSecond } from '../../lib/browser'
 import { cx } from '../../lib/cx'
 import { Get, OtherMac } from '../../shared/Close'
+import { useGrain } from '../../shared/grain'
 import { LightUnder } from '../../shared/lightUnder'
 import { AskOnce } from '../bodies/desktop/AskOnce'
 import { AtWork } from '../bodies/desktop/AtWork'
@@ -10,39 +13,65 @@ import { END, SCENE } from '../bodies/desktop/DesktopBody'
 import { Review } from '../bodies/desktop/Review'
 import { EdgeTour } from '../bodies/kit/EdgeTour'
 import t from '../bodies/kit/type.module.css'
+import { altitudeAfter, AT, velocityAfter } from '../hero/journey'
 import a from './A.module.css'
-import { starsUrl } from './sky'
 
 /*
- * Prototype, A: the night, carried down. The first screen leaves the capsule
- * at 38 km; under the band the descent goes on in one night, with no panels:
- * stars over the planet's edge, its atmosphere a thin blue line the board
- * hangs across, then the dark of the night side, lifting a little as it
- * nears the ground. The flight deck keeps reading the altitude over each
- * claim. The app's pictures are what is seen on the way down, lit by the
- * planet's glow; the drawings melt into the night. At the end it is dawn,
- * and the light comes up into the footer's paper.
+ * Prototype, A: the flight deck. The first screen is the capsule's cabin, and
+ * under the band the page stays in it: the cabin's warm dark, its grain, the
+ * walls lit amber at the sides and the window's blue faint overhead. Each
+ * claim is set as the first screen's words are, in the middle of the window,
+ * with the flight deck's readouts in its corners reading on as the first
+ * screen's do; each picture of the app is a screen mounted in the console's smoked glass,
+ * labelled as the console labels the agents and the install. What keeps you
+ * in flow is one console, its cells ruled by hairlines, and the download is
+ * the first screen's console again.
  */
 
 type Id = keyof typeof SCENE
 
-/** What the flight deck reads at each claim, on the way down from the first screen's 38 km. */
-const ALTITUDE: Record<Id, string> = {
-  independent: '31.40',
-  coordinator: '24.06',
-  review: '16.52',
-  flow: '9.18',
-  edge: '2.64',
+/** The readouts as the first screen's read them, `s` seconds after its rest. */
+const VELOCITY = (s: number) => `${velocityAfter(s).toFixed(3)} km/s`
+const ALTITUDE = (s: number) => `${altitudeAfter(s).toFixed(2)} km`
+
+/** The flight deck's readouts, in the claim's top corners, as in the first screen's window. */
+function Hud() {
+  return (
+    <div className={a.hud} aria-hidden="true">
+      <span>
+        <i>{HERO.velocity}</i>
+        <b data-read="velocity">{VELOCITY(0)}</b>
+      </span>
+      <span>
+        <i>{HERO.altitude}</i>
+        <b data-read="altitude">{ALTITUDE(0)}</b>
+      </span>
+    </div>
+  )
+}
+
+/** Every readout reads on, a few times a second, as the first screen's do from its rest; held, or with reduced motion, they stay at rest's. */
+function useReading(within: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    if (askedSecond() !== null || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const reading = window.setInterval(() => {
+      const after = Math.max(0, performance.now() / 1000 - AT.settled)
+      const velocity = VELOCITY(after)
+      const altitude = ALTITUDE(after)
+      for (const el of within.current?.querySelectorAll<HTMLElement>('[data-read]') ?? []) {
+        const text = el.dataset.read === 'velocity' ? velocity : altitude
+        if (el.textContent !== text) el.textContent = text
+      }
+    }, 250)
+    return () => window.clearInterval(reading)
+  }, [within])
 }
 
 function Scene({ id, className, children }: { id: Id; className?: string; children: ReactNode }) {
   return (
     <section id={id} className={cx(a.scene, className)} aria-labelledby={`${id}-h`}>
+      <Hud />
       <div className={a.head}>
-        <p className={a.hud} aria-hidden="true">
-          <i>Altitude</i>
-          <b>{ALTITUDE[id]} km</b>
-        </p>
         <h2 id={`${id}-h`} className={cx(t.title, a.title)}>
           {SCENE[id].title}
         </h2>
@@ -53,57 +82,83 @@ function Scene({ id, className, children }: { id: Id; className?: string; childr
   )
 }
 
-/** What keeps you in flow, seen on the way down: no cards, each picture loose in the night with its words under it, every drawing in its dark. */
-function Seen() {
+/** A picture of the app as a screen in the console: the glass round it, its label over it. */
+function Mount({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
   return (
-    <ul className={a.seen}>
-      {TILES.map((tile) => (
-        <li key={tile.id} className={cx(a.thing, a[tile.id])} data-drawn={tile.drawn ? '' : undefined}>
-          <div className={a.pic}>{tile.piece('dark')}</div>
-          <div>
-            <h3 className={a.thingTitle}>{tile.title}</h3>
-            <p className={a.thingLead}>{tile.lead}</p>
-          </div>
-        </li>
-      ))}
-    </ul>
+    <div className={cx(a.mount, className)}>
+      <div className={a.glass}>
+        <span className={a.label} aria-hidden="true">
+          {label}
+        </span>
+        <div className={a.screen}>{children}</div>
+      </div>
+    </div>
   )
 }
 
-export function NightBody() {
+/** What keeps you in flow, as one console: the bento's widths, its cells ruled by hairlines, every drawing in the dark. */
+function Console() {
   return (
-    <main id="main" tabIndex={-1} className={a.body} style={{ '--stars': `url("${starsUrl()}")` } as CSSProperties}>
+    <div className={a.mount}>
+      <ul className={a.console}>
+        {TILES.map((tile) => (
+          <li key={tile.id} className={cx(a.cell, a[`span${tile.span}`])} data-drawn={tile.drawn ? '' : undefined}>
+            <div className={a.cellHead}>
+              <h3 className={a.cellTitle}>{tile.title}</h3>
+              <p className={a.cellLead}>{tile.lead}</p>
+            </div>
+            <div className={a.pic}>{tile.piece('dark')}</div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+export function FlightDeckBody() {
+  const grain = useRef<HTMLDivElement>(null)
+  useGrain(grain, 7)
+  const main = useRef<HTMLElement>(null)
+  useReading(main)
+  return (
+    <main ref={main} id="main" tabIndex={-1} className={a.body}>
       <LightUnder tone="ink" className={a.under} />
+      <div ref={grain} className={a.grain} aria-hidden="true" />
       <Scene id="independent" className={a.first}>
-        <div className={a.stars} aria-hidden="true" />
-        {/* The board hangs across the planet's edge: space and its stars over it, the night side under. */}
-        <div className={a.over}>
-          <div className={a.limb} aria-hidden="true" />
+        <Mount label="Board">
           <AtWork />
-        </div>
+        </Mount>
       </Scene>
-      <Scene id="coordinator" className={a.split}>
-        <AskOnce />
+      <Scene id="coordinator">
+        <Mount label="Coordinator" className={a.narrow}>
+          <AskOnce />
+        </Mount>
       </Scene>
       <Scene id="review">
-        <Review />
+        <Mount label="Review" className={a.review}>
+          <Review />
+        </Mount>
       </Scene>
       <Scene id="flow">
-        <Seen />
+        <Console />
       </Scene>
       <Scene id="edge">
         <EdgeTour />
       </Scene>
+      {/* The first screen's console again: the last line in its first cell, the download in its last. */}
       <section id="end" className={a.end} aria-label="Download Althar">
-        <p className={a.endLine}>
-          {END[0]} <br className={a.phoneBreak} />
-          <b>{END[1]}</b>
-        </p>
-        <div className={a.endGet}>
-          <Get tone="blue" />
-          <OtherMac tone="blue" />
+        <div className={a.endConsole}>
+          <div className={a.endCell}>
+            <p className={a.endLine}>
+              {END[0]} <br className={a.phoneBreak} />
+              <b>{END[1]}</b>
+            </p>
+          </div>
+          <div className={cx(a.endCell, a.endGet)}>
+            <Get tone="blue" />
+            <OtherMac tone="blue" />
+          </div>
         </div>
-        <div className={a.dawn} aria-hidden="true" />
       </section>
     </main>
   )

@@ -1,186 +1,166 @@
-/* Prototype, A: one night from the band down to the dawn, no panels; the flight deck's readouts over each claim. */
+/* Prototype, A: the flight deck. The cabin's dark under the band, its grain, the app's pictures as screens in the console's smoked glass. */
 
 .body {
-  --space: #050506;
-  /* The night side: the warm black of the first screen's cabin and of the drawings' own ground, so they melt into it. */
-  --night: #0c0b0a;
-  --warm-white: rgba(255, 248, 240, 0.72);
   position: relative;
+  isolation: isolate;
   overflow-x: clip;
-  /* The night side of the planet, turning to the blue before dawn near the ground. */
-  background: linear-gradient(var(--night), var(--night) 62%, #0c0e14 76%, #0d1424);
+  padding-bottom: 130px;
   color: #fff;
+  /* The window's blue, faint overhead as the cabin is lit by it; then the cabin's own warm dark. */
+  background:
+    radial-gradient(ellipse 80% 760px at 50% -120px, rgba(74, 112, 255, 0.16), transparent 72%),
+    #0c0907;
+  /* The pictures are screens in the glass: a dark hairline where screen meets bezel, no frame of their own. */
+  --board-frame: 0 0 0 1px rgba(0, 0, 0, 0.7);
+  --talk-frame: 0 0 0 1px rgba(0, 0, 0, 0.7);
+  --review-mask: none;
+  --review-radius: 10px;
+  --review-frame: none;
+  /* The console's glass and its hairlines, as the first screen's. */
+  --glass: rgba(255, 248, 240, 0.04);
+  --rim: rgba(255, 255, 255, 0.13);
+  --hair: rgba(255, 255, 255, 0.1);
+  --label: rgba(255, 248, 240, 0.62);
 }
-/* Dark under the nav down to the dawn's light. */
-.under { top: 0; bottom: clamp(200px, 26vw, 340px); }
+/* The whole of it is dark under the nav. */
+.under { top: 0; bottom: 0; }
+/* The first screen's film grain, still: the tile's own faint specks, laid over as they are. */
+.grain { position: absolute; inset: 0; z-index: -1; background-size: 128px 128px; opacity: 0.7; pointer-events: none; }
 
-.scene { position: relative; padding-top: 180px; }
-.head {
-  display: grid;
-  justify-items: start;
-  gap: 24px;
-  max-width: 1320px;
-  margin: 0 auto;
-  padding: 0 var(--gut);
-}
-/* The flight deck's readout, as the first screen sets it in its window's corners. */
-.hud { display: flex; align-items: baseline; gap: 12px; margin: 0 0 2px; }
-.hud i { font: 500 10px/1 var(--font-label); font-style: normal; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 248, 240, 0.62); }
-.hud b { min-width: 9ch; font: 500 15px/1 var(--mono); font-variant-numeric: tabular-nums; color: #fff; }
-/* The first screen's scale. */
-.head .title { font-size: clamp(44px, 7.4vw, 116px); color: #fff; }
-.head .lead { max-width: 33em; font-size: 19px; color: var(--warm-white); }
-
-/* ---- the first claim: space, its stars, and the planet's edge the board hangs across ---- */
-.first { isolation: isolate; padding-bottom: 170px; background: var(--space); }
-.stars {
-  position: absolute;
-  inset: 0;
-  z-index: -2;
-  background: var(--stars) 0 0 / 1400px 1400px;
-  /* Fewer towards the planet. */
-  -webkit-mask-image: linear-gradient(#000 40%, rgba(0, 0, 0, 0.5));
-  mask-image: linear-gradient(#000 40%, rgba(0, 0, 0, 0.5));
-}
-.over { position: relative; }
-/* The planet's edge, its apex just over the board: the atmosphere a lit hairline with a glow over it, the night side under, meeting the night below. */
-.limb {
+/* ---- a claim, as the first screen's words are: in the middle, white, its lead warm under it ---- */
+.scene { position: relative; padding-top: 170px; }
+.first { padding-top: 140px; }
+/* The cabin's walls, lit amber at the sides as the first screen's are. */
+.scene::before {
+  content: '';
   position: absolute;
   z-index: -1;
-  top: -112px;
-  bottom: -170px;
-  left: 50%;
-  width: 100vw;
-  translate: -50% 0;
-  background: radial-gradient(
-    ellipse 66% 100% at 50% 100%,
-    var(--night) 0,
-    var(--night) 84%,
-    #0d1426 95.5%,
-    #1c3468 98.6%,
-    #5b86d8 99.5%,
-    #d8e5ff 99.8%,
-    rgba(130, 175, 255, 0.55) 100%,
-    rgba(100, 150, 255, 0.2) 102.4%,
-    rgba(80, 130, 255, 0.07) 106%,
-    rgba(70, 120, 255, 0) 114%
-  );
+  inset: 0;
+  background:
+    radial-gradient(ellipse 14% 52% at 0% 56%, rgba(255, 132, 56, 0.2), rgba(255, 132, 56, 0.06) 45%, transparent 78%),
+    radial-gradient(ellipse 14% 52% at 100% 44%, rgba(255, 132, 56, 0.17), rgba(255, 132, 56, 0.05) 45%, transparent 78%);
+  pointer-events: none;
 }
 
-/* The board, lit from under by the atmosphere. */
-.first {
-  --board-frame: 0 0 0 1px rgba(255, 255, 255, 0.14), 0 50px 120px rgba(0, 0, 0, 0.7), 0 0 120px rgba(110, 160, 255, 0.16);
-}
+/* The flight deck's readouts, as the first screen's, at the corners of the window the claim stands in; the figures keep their width. */
+.hud { display: flex; justify-content: space-between; max-width: 1344px; margin: 0 auto 36px; padding: 0 calc(var(--gut) + 18px); }
+.hud span { display: grid; gap: 5px; }
+.hud span:last-child { justify-items: end; text-align: right; }
+.hud i { font: 500 10px/1 var(--font-label); font-style: normal; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 248, 240, 0.8); }
+.hud b { min-width: 9ch; font: 500 15px/1 var(--mono); font-variant-numeric: tabular-nums; color: #fff; }
+.head { display: grid; justify-items: center; gap: 22px; max-width: 1040px; margin: 0 auto; padding: 0 var(--gut); text-align: center; }
+.head .title { color: #fff; }
+.head .lead { max-width: 34em; color: rgba(255, 248, 240, 0.74); }
 
-/* ---- the coordinator: its words beside the conversation ---- */
-.split {
-  --talk-frame: 0 0 0 1px rgba(255, 255, 255, 0.16), 0 40px 100px rgba(0, 0, 0, 0.6), 0 0 90px rgba(110, 160, 255, 0.1);
-  display: grid;
-  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+/* ---- a picture of the app, a screen in the console's glass, its label over it as the console labels its cells ---- */
+.mount { max-width: 1344px; margin: 72px auto 0; padding: 0 var(--gut); }
+.glass {
+  position: relative;
+  padding: 40px 12px 12px;
+  border-radius: 22px;
+  background: var(--glass);
+  box-shadow: inset 0 0 0 1px var(--rim), 0 30px 90px rgba(0, 0, 0, 0.5), 0 0 160px rgba(255, 150, 70, 0.07);
+}
+.label {
+  position: absolute;
+  top: 15px;
+  left: 18px;
+  right: 18px;
+  display: flex;
   align-items: center;
-  max-width: 1320px;
-  margin: 0 auto;
+  justify-content: space-between;
+  font: 500 10px/1 var(--font-label);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--label);
 }
-.split > .head { padding-right: 0; }
-.split > .head .title { font-size: clamp(44px, 5.6vw, 88px); }
-/* The conversation's own wrap keeps its height to the screen; here it stands in its column. */
-.split > :last-child { width: 100%; margin-top: 0; }
+/* The screen's light, lit. */
+.label::after { content: ''; width: 5px; height: 5px; border-radius: 50%; background: #ffb46e; box-shadow: 0 0 8px rgba(255, 160, 80, 0.8); }
+/* The picture's own place in the page, given over to the glass. */
+.glass .screen > * { max-width: none; margin: 0; padding: 0; }
+.screen { border-radius: 12px; overflow: hidden; }
+/* The coordinator's conversation keeps its own measure, never taller than the screen. */
+.narrow { max-width: calc(min(784px, (100svh - 150px) * 760 / 720) + 24px + 2 * var(--gut)); }
+.review { max-width: 1160px; }
 
-/* ---- what keeps you in flow: things seen on the way down, loose in the night ---- */
-.seen {
+/* ---- what keeps you in flow: one console, its cells ruled by hairlines, as the first screen's is ---- */
+.console {
   display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  column-gap: 40px;
-  max-width: 1320px;
-  margin: 100px auto -110px;
-  padding: 0 var(--gut);
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-auto-rows: minmax(470px, auto);
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
   list-style: none;
+  border-radius: 22px;
+  /* The hairlines are the console showing between its cells. */
+  background: #262019;
+  box-shadow: 0 0 0 1px var(--rim), 0 30px 90px rgba(0, 0, 0, 0.5), 0 0 160px rgba(255, 150, 70, 0.07);
 }
-.thing { display: grid; min-width: 0; align-content: start; }
-.accounts { grid-column: 1 / span 8; }
-.away { grid-column: 9 / span 4; }
-.automations, .worktrees { grid-column: 1 / span 6; }
-.conflicts, .workspaces { grid-column: 7 / span 6; }
-.home { grid-column: 2 / span 10; }
-/* Each takes two of the list's rows, the picture and its words, so the words of things side by side start on one line. */
-.thing { grid-row: span 2; grid-template-rows: subgrid; row-gap: 0; }
-.pic { display: grid; place-items: center; }
-/* A drawing melts into the night at its edges, so its own dark has no frame. */
-.thing[data-drawn] .pic {
-  -webkit-mask-image: linear-gradient(to right, transparent, #000 7%, #000 93%, transparent), linear-gradient(transparent, #000 7%, #000 93%, transparent);
-  -webkit-mask-composite: source-in;
-  mask-image: linear-gradient(to right, transparent, #000 7%, #000 93%, transparent), linear-gradient(transparent, #000 7%, #000 93%, transparent);
-  mask-composite: intersect;
-}
-.thingTitle {
-  margin: 26px 0 0;
-  font-family: 'Inter Display', var(--display);
-  font-size: clamp(24px, 2.2vw, 32px);
-  font-weight: 300;
-  line-height: 1.08;
-  letter-spacing: -0.035em;
-  color: #fff;
-  text-wrap: balance;
-}
-.thingTitle b { font-weight: 700; letter-spacing: -0.04em; }
-.thing[data-drawn] .thingTitle { margin-top: 10px; }
-.thingLead { max-width: 34em; margin: 10px 0 110px; font-size: 15px; line-height: 1.5; color: rgba(255, 248, 240, 0.62); text-wrap: pretty; }
+.span2 { grid-column: span 2; }
+.span3 { grid-column: span 3; }
+.span4 { grid-column: span 4; }
+.span6 { grid-column: span 6; }
+/* Each cell the drawings' own ground, so they stand in it with no edge. */
+.cell { display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: #0e0b09; }
+.cellHead { display: grid; gap: 8px; padding: 28px 30px 0; }
+.cellTitle { margin: 0; font-family: 'Inter Display', var(--display); font-size: clamp(24px, 2.2vw, 32px); font-weight: 300; line-height: 1.05; letter-spacing: -0.035em; color: #f4efe7; text-wrap: balance; }
+.cellTitle b { font-weight: 700; letter-spacing: -0.04em; }
+.cellLead { max-width: 36em; margin: 0; font-size: 14.5px; line-height: 1.5; color: rgba(244, 239, 231, 0.64); text-wrap: pretty; }
+/* A piece of the app runs off the cell's foot, as a screen's picture would; a drawing stands whole in what is left. */
+.pic { flex: 1; display: flex; align-items: flex-end; justify-content: center; min-height: 0; margin-top: 24px; padding: 0 30px; }
+.pic > * { width: 100%; margin-bottom: -28px; }
+.cell[data-drawn] .pic { align-items: center; padding: 0 1px 1px; }
+.cell[data-drawn] .pic > * { margin-bottom: 0; }
+.span2:not([data-drawn]) .pic { align-items: center; padding-bottom: 30px; }
+.span2:not([data-drawn]) .pic > * { margin-bottom: 0; }
 
-/* ---- the end: dawn, and the light coming up into the footer's paper ---- */
-.end { position: relative; padding: 230px var(--gut) 0; text-align: center; }
-.endLine {
-  max-width: 16em;
-  margin: 0 auto;
-  font-family: 'Inter Display', var(--display);
-  font-size: clamp(36px, 5.2vw, 76px);
-  font-weight: 200;
-  line-height: 1.02;
-  letter-spacing: -0.05em;
-  color: #fff;
-  text-wrap: balance;
+/* ---- the download: the first screen's console again ---- */
+.end { max-width: 1160px; margin: 170px auto 0; padding: 0 var(--gut); }
+.endConsole {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  border-radius: 14px;
+  background: rgba(12, 9, 7, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14), 0 20px 50px rgba(0, 0, 0, 0.35);
 }
-.endLine b { font-weight: 720; letter-spacing: -0.056em; }
-.endGet { display: grid; justify-items: center; margin-top: 40px; }
-.endGet > p { margin-top: 12px; }
-.dawn {
-  height: clamp(420px, 52vw, 700px);
-  margin: 150px calc(-1 * var(--gut)) 0;
-  background: linear-gradient(
-    #0d1424 0%,
-    #141d36 18%,
-    #26304f 34%,
-    #4a4f6c 48%,
-    #857a83 60%,
-    #c4a592 72%,
-    #e6cfb9 83%,
-    #f1e7da 92%,
-    var(--n-2) 100%
-  );
-}
+.endCell { display: grid; align-content: center; gap: 10px; padding: 26px 30px; }
+.endCell + .endCell { border-left: 1px solid var(--hair); }
+.endGet { justify-items: center; }
+.endGet > div { flex-wrap: nowrap; }
+.endGet > p { margin: 0; }
+.endLine { margin: 0; font-family: 'Inter Display', var(--display); font-size: clamp(22px, 2.3vw, 30px); font-weight: 300; line-height: 1.15; letter-spacing: -0.035em; color: rgba(255, 248, 240, 0.86); }
+.endLine b { font-weight: 680; letter-spacing: -0.04em; color: #fff; }
 .phoneBreak { display: none; }
 
 @media (max-width: 1100px) {
-  .split { display: block; }
-  .split > :last-child { margin-top: 56px; }
-  .seen { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: -80px; }
-  .thingLead { margin-bottom: 80px; }
-  .accounts, .home { grid-column: 1 / -1; }
-  .away, .automations, .conflicts, .worktrees, .workspaces { grid-column: auto; }
-
+  .console { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .span2, .span3, .span4 { grid-column: span 1; }
+  .span6 { grid-column: span 2; }
 }
 @media (max-width: 700px) {
-  .scene { padding-top: 110px; }
-  .first { padding-bottom: 110px; }
-  .limb { top: -36px; bottom: -110px; background-size: 100% 100%; }
-  .head { gap: 18px; }
-  .head .lead { font-size: 16px; }
-  .seen { grid-template-columns: minmax(0, 1fr); margin: 56px auto -64px; }
-  .thingLead { margin-bottom: 64px; }
-  .away, .automations, .conflicts, .worktrees, .workspaces { grid-column: 1 / -1; }
-  .end { padding-top: 140px; }
-  .endLine { font-size: 34px; line-height: 1.06; }
+  .body { padding-bottom: 80px; }
+  /* No room for the readouts, as on the first screen. */
+  .hud { display: none; }
+  .scene { padding-top: 104px; }
+  .first { padding-top: 88px; }
+  .mount { margin-top: 40px; padding: 0 12px; }
+  .glass { padding: 34px 6px 6px; border-radius: 18px; }
+  .label { top: 12px; left: 14px; right: 14px; }
+  .console { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; border-radius: 18px; }
+  .span2, .span3, .span4, .span6 { grid-column: auto; }
+  .cell { min-height: 380px; }
+  .cellHead { padding: 22px 22px 0; }
+  .pic { padding: 0 18px; margin-top: 20px; }
+  .end { margin-top: 110px; padding: 0 12px; }
+  .endConsole { grid-template-columns: minmax(0, 1fr); }
+  .endCell { padding: 24px 20px; }
+  .endCell + .endCell { border-left: 0; border-top: 1px solid var(--hair); }
+  .endLine { font-size: 28px; line-height: 1.08; }
   .phoneBreak { display: inline; }
-  .endGet > div { display: grid; gap: 10px; width: 100%; max-width: 420px; }
+  .endGet { justify-items: stretch; }
+  .endGet > div { display: grid; gap: 10px; }
   .endGet > div > a { justify-content: center; height: 50px; }
-  .dawn { margin-top: 96px; }
+  .endGet > p { text-align: center; }
 }
