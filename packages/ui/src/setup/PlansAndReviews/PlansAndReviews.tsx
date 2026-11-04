@@ -17,10 +17,10 @@ export type Countdown = 0 | 10 | 25 | 60
 export type ReviewRounds = 1 | 2 | 3 | 5
 
 /**
- * What a task does when its rounds run out with fixes no review has seen: goes on once every finding is settled, goes on with
- * findings open, or asks the person.
+ * What a task does when its rounds run out with fixes no review has seen: goes on once every finding is settled, or asks the
+ * person.
  */
-export type RoundsOut = 'settled' | 'always' | 'ask'
+export type RoundsOut = 'settled' | 'ask'
 
 export interface PlansAndReviewsValue {
   countdown: Countdown
@@ -52,21 +52,15 @@ export const plansAndReviewsText: PlansAndReviewsText = {
   },
   roundsOut: {
     title: 'When rounds run out',
-    note: (choice) =>
-      choice === 'settled'
-        ? 'A finding left open stops the task.'
-        : choice === 'always'
-          ? 'Findings left open are listed on the task and its pull request.'
-          : 'The task waits for you.',
-    label: (choice) =>
-      choice === 'settled' ? 'Carry on when every finding is settled' : choice === 'always' ? 'Always carry on' : 'Ask me',
+    note: (choice) => (choice === 'settled' ? 'A finding left open stops the task.' : 'The task waits for you.'),
+    label: (choice) => (choice === 'settled' ? 'Carry on when every finding is settled' : 'Ask me'),
   },
   reset: (label) => `Default: ${label}`,
 }
 
 const COUNTDOWNS: readonly Countdown[] = [0, 10, 25, 60]
 const ROUNDS: readonly ReviewRounds[] = [1, 2, 3, 5]
-const ROUNDS_OUT: readonly RoundsOut[] = ['settled', 'always', 'ask']
+const ROUNDS_OUT: readonly RoundsOut[] = ['settled', 'ask']
 
 export interface PlansAndReviewsProps {
   value: PlansAndReviewsValue

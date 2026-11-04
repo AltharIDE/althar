@@ -1096,7 +1096,7 @@ export class Changes extends Context.Service<
             : yield* reviewRecordOf({ ...input, named: yield* sessionNamer, sent: memory.recall }).pipe(
                 Effect.catchCause((cause) => Effect.as(Effect.logWarning('The pull request opens without its review record', cause), null)),
               )
-          const note = unreviewed === null ? null : unreviewedNote(unreviewed, record?.passes ?? null)
+          const note = unreviewed ? unreviewedNote(record?.passes ?? null) : null
           if (record === null) return note === null ? null : { seal: null, details: null, note }
           return { seal: input.github ? sealOf(setting.style, record) : null, details: detailsOf(record), note }
         }).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('The pull request opens without its review', cause), null)))

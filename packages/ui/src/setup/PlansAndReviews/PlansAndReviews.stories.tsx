@@ -75,12 +75,12 @@ export const NoCountdown: Story = {
   },
 }
 
-/** Another choice for what happens when the rounds run out offers the way back to today's. */
-export const AlwaysCarryOn: Story = {
-  render: () => <Rows start={{ ...plansAndReviewsDefault, roundsOut: 'always' }} onChange={onChange} />,
+/** Asking instead of carrying on offers the way back to today's. */
+export const AskMe: Story = {
+  render: () => <Rows start={{ ...plansAndReviewsDefault, roundsOut: 'ask' }} onChange={onChange} />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByRole('combobox', { name: 'When rounds run out' })).toHaveTextContent('Always carry on')
+    await expect(c.getByRole('combobox', { name: 'When rounds run out' })).toHaveTextContent('Ask me')
     await userEvent.click(c.getByRole('button', { name: 'Default: Carry on when every finding is settled' }))
     await expect(onChange).toHaveBeenLastCalledWith({ roundsOut: 'settled' })
     await expect(c.getByRole('combobox', { name: 'When rounds run out' })).toHaveTextContent('Carry on when every finding is settled')
@@ -99,7 +99,7 @@ export const AllStates: Story = {
         },
         {
           state: 'longer',
-          node: <PlansAndReviews value={{ countdown: 60, rounds: 5, roundsOut: 'always' }} onChange={fn()} />,
+          node: <PlansAndReviews value={{ countdown: 60, rounds: 5, roundsOut: 'settled' }} onChange={fn()} />,
         },
         { state: 'ask me', node: <PlansAndReviews value={{ ...plansAndReviewsDefault, roundsOut: 'ask' }} onChange={fn()} /> },
         { state: 'right away', node: <PlansAndReviews value={{ ...plansAndReviewsDefault, countdown: 0 }} onChange={fn()} /> },

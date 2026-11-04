@@ -266,23 +266,19 @@ describe('a pull request opened after a review', () => {
 })
 
 describe('a pull request whose last fixes no review read', () => {
-  const unreviewed = { open: ['Name it better.'] }
-
   it('has no seal, and folds the review as one that did not read the last fixes', () => {
-    assert.isNull(sealOf('ring', { ...RECORD, unreviewed }))
-    assert.isNotNull(sealOf('ring', { ...RECORD, unreviewed: null }))
-    const folded = detailsOf({ ...RECORD, unreviewed })
+    assert.isNull(sealOf('ring', { ...RECORD, unreviewed: true }))
+    assert.isNotNull(sealOf('ring', { ...RECORD, unreviewed: false }))
+    const folded = detailsOf({ ...RECORD, unreviewed: true })
     assert.include(folded, '<summary>Reviewed by GPT-6.1 Sol in 3 passes; the last fixes weren’t reviewed</summary>')
-    assert.include(folded, '**Left open**\n\n- Name it better.')
   })
 
-  it('says so plainly at its head, with what was left open', () => {
+  it('says so plainly at its head', () => {
     assert.strictEqual(
-      unreviewedNote({ open: [] }, 1),
+      unreviewedNote(1),
       '> **Reviewed once; the last fixes weren’t reviewed.** The code changed after the last review pass, and no later pass read it.',
     )
-    assert.include(unreviewedNote(unreviewed, null), '> **The last fixes weren’t reviewed.**')
-    assert.include(unreviewedNote(unreviewed, 2), '> Findings left open:\n> - Name it better.')
+    assert.include(unreviewedNote(null), '> **The last fixes weren’t reviewed.**')
     assert.strictEqual(timesOf(2), 'twice')
     assert.strictEqual(timesOf(5), '5 times')
   })

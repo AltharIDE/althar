@@ -47,15 +47,10 @@ export interface ReviewRecord {
   /** What the reviewer raised that the lead kept as it was, and why. */
   readonly kept: ReadonlyArray<{ readonly point: string; readonly why: string | null }>
   /**
-   * Set where the task went on after its rounds of review ran out: the lead's last fixes were never read by a reviewer, and
-   * `open` is what it left unsettled, if anything. Absent where the last pass read the change as it stands.
+   * True where the task went on after its rounds of review ran out: the lead's last fixes were never read by a reviewer.
+   * Absent where the last pass read the change as it stands.
    */
-  readonly unreviewed?: Unreviewed | null
-}
-
-/** The last round's fixes that no review read, and the findings still open beside them. */
-export interface Unreviewed {
-  readonly open: ReadonlyArray<string>
+  readonly unreviewed?: boolean
 }
 
 /** How many times the change was reviewed, in words: once, twice, 3 times. */
@@ -66,16 +61,11 @@ export const unreviewedLine = (passes: number | null) =>
   passes === null ? 'The last fixes weren’t reviewed.' : `Reviewed ${timesOf(passes)}; the last fixes weren’t reviewed.`
 
 /**
- * What the head of the description says when the task went on with fixes no review read, and what it left open: plain, outside
- * the fold, whatever the person chose to show of the review.
+ * What the head of the description says when the task went on with fixes no review read: plain, outside the fold, whatever
+ * the person chose to show of the review.
  */
-export const unreviewedNote = (unreviewed: Unreviewed, passes: number | null) =>
-  [
-    `> **${unreviewedLine(passes)}** The code changed after the last review pass, and no later pass read it.`,
-    ...(unreviewed.open.length === 0
-      ? []
-      : [`>\n> Findings left open:\n${unreviewed.open.map((point) => `> - ${lineOf(point)}`).join('\n')}`]),
-  ].join('\n')
+export const unreviewedNote = (passes: number | null) =>
+  `> **${unreviewedLine(passes)}** The code changed after the last review pass, and no later pass read it.`
 
 /** How many passes, in words: 1 pass, 3 passes. */
 export const passesOf = (passes: number) => `${passes} ${passes === 1 ? 'pass' : 'passes'}`
@@ -115,7 +105,7 @@ const reviewedLine = (record: ReviewRecord) => `Reviewed by ${record.reviewer} i
  */
 export const sealOf = (style: SealStyle, record: ReviewRecord, origin = SEAL_ORIGIN): string | null => {
   // A seal says a pass read the change: fixes no pass read have none.
-  if (record.unreviewed != null) return null
+  if (record.unreviewed === true) return null
   // A seal names the commit it passed: without one that holds what the last pass read, there is none.
   const sha = record.sha
   if (sha === null || !sealable(record) || record.passes < 1 || record.passes > 99) return null
@@ -130,8 +120,8 @@ export const sealOf = (style: SealStyle, record: ReviewRecord, origin = SEAL_ORI
 
 /** The review, folded at the description's end: what changed after it, what was kept, and who built and reviewed the change. */
 export const detailsOf = (record: ReviewRecord) => {
-  const at = record.sha === null || record.unreviewed != null ? '' : `, at <code>${short(record.sha)}</code>`
-  const summary = record.unreviewed == null ? reviewedLine(record) : `${reviewedLine(record)}; the last fixes weren’t reviewed`
+  const at = record.sha === null || record.unreviewed === true ? '' : `, at <code>${short(record.sha)}</code>`
+  const summary = record.unreviewed !== true ? reviewedLine(record) : `${reviewedLine(record)}; the last fixes weren’t reviewed`
   const parts = [`<details>\n<summary>${lineOf(summary)}${at}</summary>`]
   if (record.changed.length > 0)
     parts.push(
@@ -143,8 +133,6 @@ export const detailsOf = (record: ReviewRecord) => {
     parts.push(
       `**Looked at and kept**\n\n${record.kept.map((one) => `- ${lineOf(one.point)}${one.why === null ? '' : ` — ${lineOf(one.why)}`}`).join('\n')}`,
     )
-  if (record.unreviewed != null && record.unreviewed.open.length > 0)
-    parts.push(`**Left open**\n\n${record.unreviewed.open.map((point) => `- ${lineOf(point)}`).join('\n')}`)
   parts.push(`<sub>Built by ${lineOf(record.lead)} · Reviewed by ${lineOf(record.reviewer)}</sub>\n</details>`)
   return parts.join('\n\n')
 }
@@ -252,10 +240,9 @@ export const reviewRecordOf = (input: {
       claim: string
       state: 'fixed' | 'set_aside'
       response: string | null
-      settledIn: string | null
       fixedBy: string | null
     }>`
-      SELECT n.iteration AS round, f.claim, f.state, f.response, f.settled_in_attempt_id AS settled_in,
+      SELECT n.iteration AS round, f.claim, f.state, f.response,
         (SELECT json_extract(r.payload, '$.commit') FROM record_events r
           WHERE r.aggregate_type = 'finding' AND r.aggregate_id = f.id AND r.type = 'finding.fixed' ORDER BY r.sequence DESC LIMIT 1) AS fixed_by
       FROM findings f JOIN node_attempts a ON a.id = f.review_attempt_id JOIN nodes n ON n.id = a.node_id
@@ -281,15 +268,11 @@ export const reviewRecordOf = (input: {
         return (yield* within(from, commit)) && (yield* within(commit, to)) ? [commit] : []
       })
 
-    // A decline with no reason, made by the settle the task went on after, is listed as left open at the description's head.
-    const carried = yield* carriedOn(input.runId)
     const changed: Array<{ what: string; commits: ReadonlyArray<string> }> = []
     const kept: Array<{ point: string; why: string | null }> = []
     for (const finding of findings) {
       const response = finding.response?.trim() || null
-      if (finding.state === 'set_aside') {
-        if (response !== null || finding.settledIn !== carried) kept.push({ point: finding.claim, why: response })
-      }
+      if (finding.state === 'set_aside') kept.push({ point: finding.claim, why: response })
       // Fixed without a word on what changed, as a lead may: what the reviewer said, as fixed.
       else changed.push({ what: response ?? `Fixed: ${finding.claim}`, commits: yield* fixedBy(finding.round, finding.fixedBy) })
     }
@@ -320,20 +303,9 @@ const carriedOn = (runId: string) =>
 
 /**
  * Whether the run went on after its rounds of review ran out, the lead's last fixes never read (Runs.ts marks the settle that
- * made them), and what it left open then: null where it didn't.
+ * made them).
  */
-export const unreviewedOf = (runId: string) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const carried = yield* carriedOn(runId)
-    if (carried === null) return null
-    const open = yield* sql<{ claim: string; title: string | null }>`
-      SELECT f.claim, f.title FROM findings f JOIN node_attempts a ON a.id = f.review_attempt_id JOIN nodes n ON n.id = a.node_id
-      JOIN workflow_executions e ON e.id = n.execution_id WHERE e.run_id = ${runId}
-      AND (f.state = 'open' OR (f.state = 'set_aside' AND f.settled_in_attempt_id = ${carried} AND (f.response IS NULL OR trim(f.response) = '')))
-      ORDER BY f.created_at`
-    return { open: open.map((finding) => finding.title ?? finding.claim) } satisfies Unreviewed
-  })
+export const unreviewedOf = (runId: string) => Effect.map(carriedOn(runId), (carried) => carried !== null)
 
 /**
  * The commit that holds exactly what a review pass read, or null. A pass

@@ -45,11 +45,9 @@ describe('how long work goes on alone', () => {
   it.effect('keeps what happens when rounds run out, read live, a row only when it differs', () =>
     Effect.gen(function* () {
       assert.strictEqual((yield* plansAndReviewsOf).roundsOut, 'settled')
-      yield* setPlansAndReviews({ roundsOut: 'always' })
-      assert.strictEqual(yield* roundsOutNow, 'always')
-      assert.deepStrictEqual(yield* settings, [['review_rounds_out', 'always']])
       yield* setPlansAndReviews({ roundsOut: 'ask' })
       assert.strictEqual(yield* roundsOutNow, 'ask')
+      assert.deepStrictEqual(yield* settings, [['review_rounds_out', 'ask']])
       yield* setPlansAndReviews({ roundsOut: 'settled' })
       assert.deepStrictEqual(yield* settings, [])
     }).pipe(Effect.provide(runtime())),
@@ -58,7 +56,7 @@ describe('how long work goes on alone', () => {
   it.effect('reads a value that is no choice as today’s', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      yield* sql`INSERT INTO settings (key, value, updated_at) VALUES ('review_rounds', '9', '2026-10-31T10:00:00.000Z'), ('review_rounds_out', 'never', '2026-10-31T10:00:00.000Z'), ('plan_countdown_seconds', 'soon', '2026-10-31T10:00:00.000Z')`
+      yield* sql`INSERT INTO settings (key, value, updated_at) VALUES ('review_rounds', '9', '2026-10-31T10:00:00.000Z'), ('review_rounds_out', 'always', '2026-10-31T10:00:00.000Z'), ('plan_countdown_seconds', 'soon', '2026-10-31T10:00:00.000Z')`
       assert.deepStrictEqual(yield* plansAndReviewsOf, PLANS_AND_REVIEWS)
     }).pipe(Effect.provide(runtime())),
   )

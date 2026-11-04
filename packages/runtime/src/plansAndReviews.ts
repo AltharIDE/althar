@@ -57,7 +57,7 @@ const ROUND_CHOICES: ReadonlyArray<PlansAndReviews['rounds']> = [1, 2, 3, 5]
 export const plansAndReviewsOf = Effect.map(rowsOf, (kept): PlansAndReviews => ({
   countdown: numberOf(kept.get(COUNTDOWN), COUNTDOWNS, PLANS_AND_REVIEWS.countdown),
   rounds: numberOf(kept.get(ROUNDS), ROUND_CHOICES, PLANS_AND_REVIEWS.rounds),
-  roundsOut: choiceOf(kept.get(ROUNDS_OUT), ['settled', 'always', 'ask'], PLANS_AND_REVIEWS.roundsOut),
+  roundsOut: choiceOf(kept.get(ROUNDS_OUT), ['settled', 'ask'], PLANS_AND_REVIEWS.roundsOut),
 }))
 
 /** How long a proposed plan waits now before it starts on its own. */
