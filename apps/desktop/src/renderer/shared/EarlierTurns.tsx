@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { ThreadDivider } from '@althar/ui'
+import s from './EarlierTurns.module.css'
 
 /** Fetch near the top; preserve a visible item rather than the total height,
  * which can also grow below the reader while an answer streams. */
@@ -55,7 +56,7 @@ export function useEarlierTurns(load: () => Promise<void>, version: unknown, ear
         earlier &&
         !failed &&
         scroller.clientHeight > 0 &&
-        scroller.getBoundingClientRect().top - marker.getBoundingClientRect().top < scroller.clientHeight
+        scroller.getBoundingClientRect().top - marker.parentElement!.getBoundingClientRect().top < scroller.clientHeight
       )
         void request()
     }
@@ -91,7 +92,7 @@ export function EarlierTurns({
 }) {
   const { sentinel, failed, request } = useEarlierTurns(load, version, earlier)
   return (
-    <div ref={sentinel}>
+    <div ref={sentinel} className={s.sentinel}>
       {failed ? (
         <ThreadDivider icon="up" action="Retry" onAction={() => void request()}>
           Earlier turns couldn't load
