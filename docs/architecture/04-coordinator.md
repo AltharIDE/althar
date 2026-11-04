@@ -180,7 +180,70 @@ review's lead doesn't have it: its draft is what it hands the person.
 
 The same server serves every session. The read tools are how a lead, a step,
 or an agent that took over a task reads the record its brief left out. Command
-tools are granted per role; a lead gets none of the coordinator's.
+tools are granted per role; a lead gets none of the coordinator's commands,
+and reads the project's other tasks as below.
+
+## What a lead sees of other tasks
+
+Two tasks often touch the same code. Rather than the coordinator telling
+each lead by hand to read the other's branch, every task's lead, and the
+reviewer of a task's change, sees the project's other tasks, read-only.
+They get the coordinator's own read tools, which say more of each task's
+work to them, and one more:
+
+| Tool | What a lead reads |
+|---|---|
+| `list_tasks`, `find_tasks` | As the coordinator does, and under each task: whether it is the lead's own, where it works (Local, in the person's checkout, or a worktree), its branch, and, for an open task, the files it changes now, uncommitted ones too |
+| `read_task` | Its brief (title and description), where it stands, its plan, what it built and couldn't show working, its branch and folder, each step's report, its pull request, and what its review found |
+| `read_thread` | Its thread, the person's messages included, the latest part first, then further back a page at a time |
+| `read_task_diff` | Its change against where its branch started, as it stands in its folder now, uncommitted work and new files nobody has added included; all of it or the paths asked for, with the list of files first and a long diff a page at a time |
+
+Only tasks of the same project are found (`taskOf` reads by project). Nothing
+among these tools messages another lead, changes another task or writes in
+another folder: leads still talk to each other only through the coordinator.
+A review of someone else's pull request isn't given them, since its lead
+reads that pull request's untrusted words and reaches the web, and so reads
+none of the person's work in progress.
+
+The runtime reads another task's folder on the lead's behalf, outside the
+lead's sandbox (`otherTasks.ts`), so the sandbox needn't widen to reach
+another worktree. It reads without disturbing whoever works there: every git
+command runs on a copy of that folder's index with git's optional locks off
+(`untouched` in `git.ts`), because `git diff` and `git status` refresh the
+index as they read and write it back under its lock. Files themselves are
+only read. A Local task's checkout is read as it stands only while the task
+holds it and it is on the task's branch: the person's own edits there show
+with it, and once they switch it away, only the branch's commits are read.
+A task whose folder was removed is read from its branch's commits too.
+
+Leads whose work meets get a heads-up (`Overlaps.ts`). When a lead's edit
+ends, or its turn does (for what it changed with a command), Althar compares
+the paths in its change with those of the project's other running tasks (open,
+with a lead's session here). For each task changing a file it changes too,
+the lead is told once which task and which files, and to read that task's work
+before going on, and the other lead is told the same. A lead is told only while
+it is in a turn, at work on the task. One between turns isn't woken for it:
+it hears of the overlap the next time it changes a file the other changes.
+What was told is kept in the record (`task.overlap_noticed`, for each pair
+and direction), so further edits and later launches say nothing more. Looks
+run one at a time, and a task asking again while it waits is looked at once.
+
+```mermaid
+sequenceDiagram
+  participant A as Lead A (in a turn)
+  participant R as Runtime
+  participant B as Lead B (in a turn)
+  A->>R: edit ends (live event)
+  R->>R: A's and B's changes, read untouched
+  R-->>A: Heads-up: B changes README.md too
+  R-->>B: Heads-up: A changes README.md too
+  R->>R: keep task.overlap_noticed for both directions
+  A->>R: read_task_diff B
+  R-->>A: B's diff, uncommitted work included
+```
+
+Each lead's brief says these tools exist, and to read another task's work
+before changing code it changes, and where the brief names another task.
 
 ## Conversation and context
 

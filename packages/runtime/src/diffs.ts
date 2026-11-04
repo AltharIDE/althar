@@ -77,14 +77,14 @@ const reader = (output: string) => {
 }
 
 /** What a new file nobody has added yet holds, as git would add it: a file's text, or that it is binary; a link's target; or nothing git adds. */
-type NewFile =
+export type NewFile =
   | { readonly kind: 'text'; readonly text: string }
   | { readonly kind: 'binary' }
   | { readonly kind: 'link'; readonly target: string }
   | { readonly kind: 'other' }
 
 /** Reads a new file as git would add it, without following a link, and without waiting on anything that isn't a file. */
-const newFile = (worktree: string, path: string, read: boolean): Effect.Effect<NewFile> =>
+export const newFile = (worktree: string, path: string, read: boolean): Effect.Effect<NewFile> =>
   Effect.promise(async (): Promise<NewFile> => {
     const at = join(worktree, path)
     const stats = await lstat(at)
