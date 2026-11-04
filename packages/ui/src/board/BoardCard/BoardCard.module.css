@@ -73,6 +73,7 @@
   color: var(--t-3);
 }
 .toward code {
+  min-width: 0;
   overflow: hidden;
   font-family: var(--mono);
   font-size: 11px;
