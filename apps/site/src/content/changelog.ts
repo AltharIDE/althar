@@ -34,7 +34,6 @@ export const releaseUrl = (version: string) => `${REPO}/releases/tag/v${version}
 export const RELEASES: readonly Release[] = [
   {
     version: '0.7.0',
-    /** The day v0.7.0 is tagged: set it when it is. */
     date: '2026-11-04',
     title: 'Reviewed before you see it',
     changes: [
