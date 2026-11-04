@@ -128,6 +128,29 @@ const layer = (service: FakeService, database = ':memory:', keychain?: Map<strin
   )
 
 describe('the coordinator’s merge line', () => {
+  it.live('refuses a draft or a closed one, holds one whose checks failed, and merges one into its own branch', () => {
+    const { service, checks } = host()
+    const { working } = hosted(['meridian', 'api'])
+    const add = (title: string, more: { draft?: boolean; target?: string; state?: 'closed' } = {}) =>
+      service.addPullRequest({ path: ['meridian', 'api'], title, author: 'you', ...more }).number
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      const draft = add('Sketch', { draft: true })
+      const other = add('Into release', { target: 'release' })
+      const closed = add('Gave up', { state: 'closed' })
+      const red = add('Breaks the build')
+      checks.set(`head-${red}`, 'failed')
+      const message = yield* turn(access, 'person', 'Merge them all')
+      const said = (number: number) => merge(access, { pull_request: `#${number}`, head: `head-${number}`, message })
+      assert.match(yield* said(draft), /draft/i)
+      assert.match(yield* said(closed), /closed/i)
+      assert.match(yield* said(red), /checks failed/)
+      const into = yield* said(other)
+      assert.match(into, /^Merged PR #2 at head-2 into release/)
+      yield* sweep(access)
+    }).pipe(Effect.provide(layer(service)))
+  })
+
   it.live('two errands, the first merge held pending: the second waits, then starts again from the new head', () => {
     const { service, pull } = host()
     const { working } = hosted(['meridian', 'api'])

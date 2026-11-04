@@ -427,10 +427,21 @@ request that names the issue links it.
   turn for a few turns, not taken for a no. Where the project resolves
   conflicts, Althar doesn't go by the host alone (below).
 
-**Resolving a conflict, where the project says so** (ADR-030). A project's
-rules can have its leads resolve a conflict with the default branch on their
-own, switched by "Resolve conflicts automatically" in its settings. Off, a conflict waits
-for the person, as above.
+**Resolving a conflict, where the project says so** (ADR-030, ADR-092). A
+project's leads resolve a conflict with the default branch on their own
+unless the person turns off "Resolve merge conflicts automatically" in its
+settings. Off, a conflict waits for the person, and its card says it is off,
+for the task or the project, beside Resolve now.
+
+- **Conflicts and failed checks at once are one ask** (ADR-092). A conflict
+  found as the checks fail, or after they failed while they are the lead's
+  (ADR-070), is asked with them, to fix in the one commit on top of the merge.
+  While a round is under way, failed checks aren't told to the lead apart
+  from it. A round waiting for its merge's checks is overtaken by a new
+  conflict once what it merged moves on: it ends, and the new conflict is a
+  round of its own. Its card is under way meanwhile, as is one whose checks
+  still run with some failed. A change's tries at its checks count across
+  rounds.
 
 - **A task can say otherwise.** Its ⋯ menu offers "Resolve conflicts
   automatically" as three choices side by side, changed in place: as the
@@ -678,10 +689,12 @@ Leads and the coordinator change issues that already exist
 
 - **A lead** changes the issue its task came from, the issues its task
   filed, and any the person named to it (in its thread, or in what they
-  asked the coordinator for it), by key or link: `comment_on_issue` and
-  `link_pull_request` apply at once, and show in its thread as a line;
-  `change_issue` proposes any field below. For any other issue it tells the
-  person, and the coordinator changes it.
+  asked the coordinator for it), by key, link or a run of keys
+  (`DEV-180..DEV-195`): `comment_on_issue` and `link_pull_request` apply at
+  once, and show in its thread as a line; `change_issue` proposes any field
+  below. Both take several issues ("What leads do with issues", below). A
+  change or comment it asks for on any other issue, such as one it only
+  found by searching, waits on a card for the person, never at once.
 - **The coordinator** changes any issue on the person's trackers, by key or
   link: `change_issues` proposes the same, several issues on one card
   ("move DEV-67 to Done, set DEV-142 to Low"); `comment_on_issue` comments
@@ -756,15 +769,96 @@ branch carries (Linear's, by its team's settings).
 
 ### Finding and reading issues
 
-`find_issues` takes words in the title or description, a tracker by name,
-where on it (a team, project, repository or list), open, closed or all,
-whether only the person's, and a run of keys (`DEV-170..DEV-185`, read one
-by one, at most fifty), through each tracker's `find`. With nothing given it
-lists the person's open issues, as the issue picker does. `read_issue` says
-who has an issue, its labels, project, milestone, cycle, parent, type,
-estimate and due date, its description, and its ten latest comments. A
-tracker that couldn't be searched or read is said as such, with its words,
-never taken for none found.
+`find_issues` searches through each tracker's `find`, by an `IssueQuery`
+(`model.ts`) that means the same on every tracker: words in the title or
+description (all of them), a tracker by name, where on it (a team, project,
+repository or list), open, closed or all, whether only the person's, labels
+(all of them), a status by its tracker's name or by category, a project,
+milestone or cycle by name (`current` for the cycle under way), an assignee
+by name, login or email, or none, priorities, a parent, when it last
+changed, and keys, a run (`DEV-170..DEV-185`) or a list, at most fifty, in
+their order. With nothing given it lists the person's open issues, as the
+issue picker does. `issueMatches` is that meaning, written once: the fakes
+narrow by it, and so does each adapter where its tracker's search can't.
+Each adapter turns the query into its tracker's own search:
+
+- **Linear:** one `IssueFilter`, its clauses under `and`; keys by team key
+  and number; paged by `after`.
+- **Jira:** JQL. A cycle is a sprint, a milestone a fix version; people
+  are found by name first (`user/search`); a priority by the site's own
+  names of its level. JQL can't tell a backlog from to do, nor cancelled
+  from done, so those are narrowed after. Paged by Cloud's
+  `nextPageToken`, Data Center's `startAt`.
+- **GitHub:** its issue search's qualifiers (`label:`, `milestone:`,
+  `assignee:`, `no:assignee`, `project:owner/number`, `parent-issue:`,
+  `updated:>=`, and its three statuses as `is:` and `reason:`); issues by
+  number are read one by one. Paged by `page`.
+- **GitLab:** its issues list's parameters (`labels`, `milestone`,
+  `assignee_username`, `iids[]`, `updated_after`). Paged by `page`.
+- **Trello:** its search's operators (`label:`, `list:`, `member:me`),
+  or a list's cards, or the account's; status, assignee and when it changed
+  are narrowed by Althar, and paged over what the search gave.
+
+What each tracker searches by is in its `capabilities.finds`: by its own
+search (`search`), or by Althar after it (`after`), when a page can hold
+fewer than its limit. A filter its tracker has no field for (Trello's
+priority, GitHub's cycle) is never sent to it: that tracker isn't searched,
+and the result says so in a line, rather than dropping the filter and
+answering for everything. `findTable` and `changeTable` (`trackers.ts`)
+make a table of what each tracker finds by and changes from those
+capabilities, which `find_issues`, `change_issue` and `change_issues` carry
+in their descriptions, so an agent knows what a filter means where.
+
+A page that stops short says a cursor to read on from. Across several
+trackers it holds where each stopped (its own cursor, and how many of that
+page were said), so the next page goes on in order, newest change first,
+each issue once: one tracker that ran out of what it read stops a page
+early rather than skip what it would say next.
+
+`read_issue` says who has an issue, its labels, project, milestone, cycle,
+parent, type, estimate and due date, its description, and its ten latest
+comments. It reads up to twenty-five at once (keys, links, runs of keys),
+four at a time, each said on its own: one comes with its comments, several
+without unless asked. A tracker that couldn't be searched or read is said
+as such, with its words, never taken for none found.
+
+### What leads do with issues
+
+A task's lead works through issues as the coordinator does, on every
+tracker alike, within the issues it may change (above):
+
+```mermaid
+flowchart LR
+  F["find_issues<br/>(lead, reviewer, coordinator)"] --> Q[IssueQuery]
+  Q -->|capabilities.finds| T{tracker has<br/>the field?}
+  T -- yes --> S["its own search<br/>(GraphQL, JQL, search string)"]
+  T -- no --> N[not searched, said]
+  R["read_issue<br/>up to 25"] --> I[issues]
+  C["change_issue / comment_on_issue<br/>up to 50"] --> G{the lead's to change?}
+  G -- yes --> K["one card: at once (at_once)<br/>or waiting on the person"]
+  G -- no --> L["a card of its own,<br/>waiting on the person"]
+  K --> P["applied per issue,<br/>paced to the tracker"]
+```
+
+- **Find and read:** `find_issues` and `read_issue`, which only read, so
+  a reviewer and a review's lead have them too.
+- **Change several:** `change_issue` takes `issues`, one change for each,
+  or `changes`, each its own, up to fifty. Those that are the lead's go on
+  one card, at once where its agent says so (`at_once`) or waiting on the
+  person; any other, such as those `find_issues` found that nobody named to
+  it, goes on a card of its own that waits on the person, whatever
+  `at_once` says, and is said. Each issue says what changed, what didn't and
+  why, and what was so already.
+- **Comment on several:** `comment_on_issue` takes `issues`, the same
+  comment on each: at once on the lead's own, each said posted or not; on a
+  card for the person to post on any other.
+- **Paced:** a batch reads each field's choices once per place (a team,
+  board, project or repository; not Jira's statuses or labels, each
+  issue's own). A card of ten or more applies one issue after another, a
+  pause between them on a tracker whose limits ask it (GitHub a second,
+  Trello 150 ms, Jira Cloud 100 ms); a tracker that says to wait, and for
+  how long, up to a minute, is waited for, and asked once more.
+- **Never filed:** leads draft issues only when the person asks, as before.
 
 ### Reviewing someone else's pull request
 
@@ -821,7 +915,7 @@ Althar narrows them itself. A listing refused for a scope says which
   language servers; Codex with its hooks off. Git takes no bare repository
   the pull request carries for its own unless named (`safe.bareRepository`).
 - **Only a review's tools.** Its lead is given `read_pull_request`,
-  `read_issue` and `draft_review`; every other lead tool is refused to it
+  `read_issue`, `find_issues` and `draft_review`; every other lead tool is refused to it
   when called, listed or not, nothing that could change the project
   (keeping how it runs, which Althar later runs outside any sandbox) or reach
   the host (a reply, a push).
@@ -1063,9 +1157,9 @@ external observation, not Althar's run authority.
 
 What is built so far is narrower than this section: one store on the
 computer, a curated default catalog and each lead's set fixed and recorded
-for its session ([ADR-092](../decisions/092-skills-one-store-a-curated-catalog.md)),
+for its session ([ADR-093](../decisions/093-skills-one-store-a-curated-catalog.md)),
 and skill and OpenSpec files held off the repository unless the project says
-so ([ADR-093](../decisions/093-skill-and-openspec-files-stay-off-the-repository.md)).
+so ([ADR-094](../decisions/094-skill-and-openspec-files-stay-off-the-repository.md)).
 Bindings by scope, precedence and conflicts are not built; every lead gets
 the same active set, and the catalog's skills are off until the person turns
 them on. [The plan](../plans/skills-across-harnesses.md#implementation-status)

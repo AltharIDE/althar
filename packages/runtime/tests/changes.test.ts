@@ -18,7 +18,7 @@ import { Projects } from '../src/Projects'
 import { taskShown } from '../src/evidence'
 import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
-import { HOST, hosted, items, notices, until } from './support'
+import { HOST, hosted, items, notices, pushLog, until } from './support'
 
 import { refused, runtimeWith, connect, ask, cards, tipOf, git, arrivals, withoutReview } from './changesSupport'
 
@@ -256,13 +256,12 @@ describe('a task that ends in a pull request', () => {
   it.live('pushes a fork’s branch to the fork, and opens its pull request where the project says: on the fork, or upstream', () => {
     const { working, bare } = hosted(['you', 'api'])
     git(working, 'remote', 'add', 'upstream', `${HOST}/meridian/api.git`)
-    const pushedTo: Array<string> = []
-    const github = makeFakeService({
-      pushUrl: (path) => {
-        pushedTo.push(path.join('/'))
-        return bare
-      },
-    })
+    const { bare: upstream } = hosted(['meridian', 'api'])
+    // What took a push, not what Althar fetched from: it fetches the branch a pull request goes into to look for conflicts.
+    const pushes = pushLog()
+    pushes.watch(bare, 'you/api')
+    pushes.watch(upstream, 'meridian/api')
+    const github = makeFakeService({ pushUrl: (path) => (path.join('/') === 'meridian/api' ? upstream : bare) })
     github.addRepository(['you', 'api'])
     // The repository it came from has another default branch.
     github.addRepository(['meridian', 'api'], 'trunk')
@@ -278,7 +277,7 @@ describe('a task that ends in a pull request', () => {
       assert.strictEqual(ready?.change?.url, 'https://github.com/meridian/api/pull/1')
       assert.strictEqual(github.forkOf(1), 'you/api')
       assert.strictEqual(github.changes[0]?.target, 'trunk')
-      assert.deepStrictEqual(pushedTo, ['you/api'])
+      assert.deepStrictEqual(pushes.pushedTo(), ['you/api'])
       // Back on the fork, the next one opens there.
       yield* projects.setRepository({ projectId, repositoryId: repository?.id ?? '', changeTarget: 'fork' })
       yield* ask(working, 'Add a limit. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')

@@ -149,6 +149,15 @@ export const briefOf = (task: HomeTask): string | undefined => {
   return [where, ...factsOf(change).map((one) => one.words), ...size].join(' · ')
 }
 
+/** A ready change whose conflict Althar didn't ask of its lead: its pull request, then why, as its card says. */
+const unsentBriefOf = (task: HomeTask): string | undefined => {
+  if (task.conflictUnsent == null) return undefined
+  const change = task.change
+  return change === null
+    ? task.conflictUnsent
+    : `${change.repository.slice(change.repository.lastIndexOf('/') + 1)} ${change.prefix}${change.number} · ${task.conflictUnsent}`
+}
+
 /** The one next thing a ready task's open pull request needs, where it has one: none for a review, a plain task, a conflict handed back, or checks its lead brought to the person. */
 export const nextOf = (task: HomeTask): Next | null =>
   task.kind !== 'change' || task.handedBack != null || task.checksBack != null || task.change === null || task.change.state !== 'open'
@@ -235,7 +244,8 @@ export const needsOf = ({
     // `ready` is the tasks that wait on the person (`readyOf`): a task that finished and isn't a change among them.
     if (project === undefined) return []
     const next = nextOf(task)
-    const brief = task.checksBack ?? task.handedBack ?? briefOf(task)
+    // Its conflict not asked of its lead (the person turned that off, say): why, beside the button, never the button alone.
+    const brief = task.checksBack ?? task.handedBack ?? unsentBriefOf(task) ?? briefOf(task)
     return [
       {
         id: task.taskId,

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useState } from 'react'
+import { useState, type ComponentProps } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { FROM_231, PLAN_432, PLAN_433 } from '../../fixtures/coordinator'
@@ -14,7 +14,11 @@ import { WorksIn } from '../../foundations/vocabulary'
 import { TaskLaunch, type LaunchPick, type LaunchStep } from './TaskLaunch'
 
 /** The consumer's picker for one agent of a step: the composer's own, bordered. */
-function usePicker(steps: readonly LaunchStep[], setSteps: (s: readonly LaunchStep[]) => void) {
+function usePicker(
+  steps: readonly LaunchStep[],
+  setSteps: (s: readonly LaunchStep[]) => void,
+  room?: ComponentProps<typeof ModelPick>['room'],
+) {
   const prefs = useModelPrefs()
   const [efforts, setEfforts] = useState<Record<string, string>>({})
   return ({ step, agent, k, owner }: LaunchPick) => {
@@ -24,6 +28,7 @@ function usePicker(steps: readonly LaunchStep[], setSteps: (s: readonly LaunchSt
         variant="field"
         placement="below"
         owner={owner}
+        room={room}
         model={agent}
         pinned={prefs.pinned}
         effort={efforts[key] ?? effortFor(agent, prefs.efforts)}
@@ -50,10 +55,11 @@ function Launch({
   plan = PLAN_432,
   wait,
   onStart = () => {},
+  room,
   ...rest
-}: Partial<Parameters<typeof TaskLaunch>[0]> & { plan?: LaunchStep[] }) {
+}: Partial<Parameters<typeof TaskLaunch>[0]> & { plan?: LaunchStep[]; room?: ComponentProps<typeof ModelPick>['room'] }) {
   const [steps, setSteps] = useState<readonly LaunchStep[]>(plan)
-  const picker = usePicker(steps, setSteps)
+  const picker = usePicker(steps, setSteps, room)
   return (
     <TaskLaunch
       task="432"
@@ -161,6 +167,17 @@ export const AReview: Story = {
     await expect(reviewStarted).not.toHaveBeenCalled()
   },
 }
+
+/** The reviewer's model nearly out: its note sits beside the chip, a quiet aside, and the plan still starts. */
+const reviewerNearly = (left: number): Story => ({
+  render: () => <Launch plan={PLAN_ASKED} room={(x) => (x.runtime === CODEX.runtime ? { left, until: '18:05', account: null } : null)} />,
+  play: async ({ canvasElement }) => {
+    const said = left === 0 ? 'Out · until 18:05' : `${left}% left · until 18:05`
+    await expect(within(canvasElement).getByText(said)).toBeInTheDocument()
+  },
+})
+export const ReviewerNearlyOut: Story = reviewerNearly(4)
+export const ReviewerOut: Story = reviewerNearly(0)
 
 const heldChanged = fn()
 const startedHeld = fn()

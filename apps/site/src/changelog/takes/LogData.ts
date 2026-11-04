@@ -8,8 +8,8 @@
 
 /** When each release was published on GitHub, UTC. The mission's clock starts at 0.1.0's. */
 export const PUBLISHED: Record<string, string> = {
-  /** For now: set it to v0.6.0's publish time when it is tagged (#370). */
-  '0.6.0': '2026-10-31T12:00:00Z',
+  '0.7.0': '2026-11-04T20:56:43Z',
+  '0.6.0': '2026-10-30T23:31:15Z',
   '0.5.0': '2026-10-20T18:18:17Z',
   '0.4.1': '2026-10-18T19:50:59Z',
   '0.4.0': '2026-10-18T13:05:20Z',
@@ -19,7 +19,7 @@ export const PUBLISHED: Record<string, string> = {
 }
 
 /** The pictures the highlights are shown with (LogPictures.tsx). */
-export type Picture = 'automations' | 'plans' | 'windows' | 'reviewer' | 'report' | 'run' | 'evidence' | 'plan'
+export type Picture = 'findings' | 'automations' | 'plans' | 'windows' | 'reviewer' | 'report' | 'run' | 'evidence' | 'plan'
 
 export interface Highlight {
   /** The feature, named plainly. */
@@ -36,6 +36,14 @@ export interface Highlight {
  * opens the page, so its entry shows the rest and keeps the lead's lines.
  */
 export const HIGHLIGHTS: Record<string, readonly Highlight[]> = {
+  '0.7.0': [
+    {
+      title: 'Reviews, supercharged',
+      why: 'Every finding sits at the line it’s about, with what the lead did: fixed, with its commit, or kept, with why. And the pull request says who reviewed it, in how many passes, with screenshots of what was built.',
+      picture: 'findings',
+      covers: [0, 1, 2],
+    },
+  ],
   '0.6.0': [
     {
       title: 'Automations',

@@ -140,7 +140,7 @@ The app is packaged for macOS on Apple silicon and on Intel, x86_64 Linux and x6
 
 [`release.yml`](../../.github/workflows/release.yml) runs on a tag `v<version>` pushed on a commit on main. It checks the tag against `package.json`'s version, waits for a reviewer to approve the `release` environment, builds macOS, Linux and Windows packages in platform jobs, and leaves one draft GitHub Release with each platform's files. It never runs on a pull request, and it is the only workflow that publishes a desktop release; `post-merge.yml` checks Linux and Windows packages after merge, and `windows-installer.yml` the Windows installer on a pull request that changes packaging, but neither publishes them.
 
-1. On main: raise `version` in `apps/desktop/package.json`, and write a few plain lines for testers in `apps/desktop/release-notes/<version>.md`, under the headings New, Improved and Fixed (leave out one with nothing in it). No commit dump.
+1. On main: raise `version` in `apps/desktop/package.json`, and write a few plain lines for testers in `apps/desktop/release-notes/<version>.md`, under the headings New, Improved and Fixed (leave out one with nothing in it), as [release-notes/README.md](release-notes/README.md) says. No commit dump.
 2. Tag that commit and push the tag: `git tag v0.1.1 && git push origin v0.1.1`.
 3. In Actions, open the release run and approve it (Review deployments). Notarizing takes from a few minutes to an hour.
 4. In Releases, open the draft, download its dmgs, and try each on its Mac (the run has opened both already, Intel's under Rosetta): it should open with only the usual "downloaded from the internet" question. Try its Windows installer on a Windows machine: SmartScreen warns while it is unsigned (More info → Run anyway).

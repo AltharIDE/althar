@@ -75,6 +75,9 @@ describe("a run's process", () => {
     // The shell it runs in says what killed what it ran as 128 and the signal's number.
     assert.strictEqual(endedHow({ code: 134, signal: null }, 'darwin'), ', with exit code 134: killed by SIGABRT, so it crashed')
     assert.strictEqual(endedHow({ code: 143, signal: null }, 'linux'), ', with exit code 143: killed by SIGTERM')
+    // By the numbers of the shell's system, not of the one Althar runs on: a bus error is 7 on Linux, 10 on macOS.
+    assert.strictEqual(endedHow({ code: 135, signal: null }, 'linux'), ', with exit code 135: killed by SIGBUS, so it crashed')
+    assert.strictEqual(endedHow({ code: 138, signal: null }, 'darwin'), ', with exit code 138: killed by SIGBUS, so it crashed')
     // Windows says a crash by its NTSTATUS, an access violation here.
     assert.strictEqual(endedHow({ code: 0xc0000005, signal: null }, 'win32'), ', with exit code 0xC0000005, so it crashed')
     assert.strictEqual(endedHow({ code: 134, signal: null }, 'win32'), ', with exit code 134')

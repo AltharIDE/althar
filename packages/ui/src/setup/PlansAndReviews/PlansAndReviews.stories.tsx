@@ -47,7 +47,7 @@ export const Today: Story = {
     const c = within(canvasElement)
     await expect(c.getByRole('combobox', { name: 'Start a plan after' })).toHaveTextContent('25 seconds')
     await expect(c.getByRole('combobox', { name: 'Rounds of review' })).toHaveTextContent('3 rounds')
-    await expect(c.queryByRole('button', { name: /^Use / })).toBeNull()
+    await expect(c.queryByRole('button', { name: /^Default: / })).toBeNull()
   },
 }
 
@@ -59,7 +59,7 @@ export const Changed: Story = {
     await userEvent.click(c.getByRole('combobox', { name: 'Start a plan after' }))
     await userEvent.click(await page.findByRole('option', { name: '10 seconds' }))
     await expect(onChange).toHaveBeenLastCalledWith({ countdown: 10 })
-    await userEvent.click(await c.findByRole('button', { name: 'Use 25 seconds' }))
+    await userEvent.click(await c.findByRole('button', { name: 'Default: 25 seconds' }))
     await expect(onChange).toHaveBeenLastCalledWith({ countdown: 25 })
     await expect(c.getByRole('combobox', { name: 'Start a plan after' })).toHaveTextContent('25 seconds')
   },

@@ -2,8 +2,8 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
 import { ConnectorFailed } from '../src/errors'
-import type { Issue } from '../src/model'
-import { categoryOf, classified, makeTrello } from '../src/trello'
+import type { Issue, IssuePage } from '../src/model'
+import { categoryOf, classified, makeTrello, searchQuery } from '../src/trello'
 import { type Route, stubFetch } from './stub'
 
 /*
@@ -985,10 +985,11 @@ describe('Trello', () => {
       ['GET', `${API}/boards/${BOARD}?fields=name,closed`, { json: { id: BOARD, name: 'Trello Development Roadmap', closed: false } }],
     ]
 
+    const keys = (page: IssuePage) => page.issues.map((issue) => issue.key)
+
     it.effect('within a list: its cards by state, words in their name or description, the account’s, newest first, to the limit', () =>
       Effect.gen(function* () {
         const { tracker } = trello([...inList('open'), ...inList('all'), me])
-        const keys = (issues: ReadonlyArray<Issue>) => issues.map((issue) => issue.key)
         assert.deepStrictEqual(keys(yield* tracker.find({ container: LIST, state: 'open', limit: 10 })), ['Wdgt0001', 'Siri0001'])
         assert.deepStrictEqual(keys(yield* tracker.find({ container: LIST, state: 'open', limit: 1 })), ['Wdgt0001'])
         assert.deepStrictEqual(keys(yield* tracker.find({ container: LIST, state: 'closed', limit: 10 })), ['Siri0002'])
@@ -999,11 +1000,89 @@ describe('Trello', () => {
         ])
         assert.deepStrictEqual(keys(yield* tracker.find({ container: LIST, state: 'all', text: 'siri voice', limit: 10 })), ['Siri0001'])
         assert.deepStrictEqual(keys(yield* tracker.find({ container: LIST, state: 'open', mine: true, limit: 10 })), ['Wdgt0001'])
-        const found = (yield* tracker.find({ container: LIST, state: 'open', limit: 1 }))[0]
+        const found = (yield* tracker.find({ container: LIST, state: 'open', limit: 1 })).issues[0]
         assert.deepStrictEqual(
           [found?.container, found?.status],
           ['Trello Development Roadmap', { name: 'Live (Oct-Dec 2018)', category: 'todo' }],
         )
+      }),
+    )
+
+    it.effect(
+      'narrows what Trello can’t itself: by status, by category or name, by assignee, anyone or no one, and by when it changed',
+      () =>
+        Effect.gen(function* () {
+          const { tracker, sent } = trello(inList('all'))
+          const all = { container: LIST, state: 'all', limit: 10 } as const
+          assert.deepStrictEqual(keys(yield* tracker.find({ ...all, status: { names: [], categories: ['done'] } })), ['Siri0002'])
+          assert.deepStrictEqual(keys(yield* tracker.find({ ...all, status: { names: [], categories: ['todo', 'started'] } })), [
+            'Wdgt0001',
+            'Siri0001',
+          ])
+          assert.deepStrictEqual(keys(yield* tracker.find({ ...all, status: { names: [' live (oct-dec 2018) '], categories: [] } })), [
+            'Siri0002',
+            'Wdgt0001',
+            'Siri0001',
+          ])
+          assert.deepStrictEqual(keys(yield* tracker.find({ ...all, status: { names: ['Done'], categories: [] } })), [])
+          // By name, login or a part of the name; or no one.
+          assert.deepStrictEqual(keys(yield* tracker.find({ ...all, assignee: 'Taco' })), ['Wdgt0001'])
+          assert.deepStrictEqual(keys(yield* tracker.find({ ...all, assignee: '@taco' })), ['Wdgt0001'])
+          assert.deepStrictEqual(keys(yield* tracker.find({ ...all, assignee: 'ac' })), ['Wdgt0001'])
+          assert.deepStrictEqual(keys(yield* tracker.find({ ...all, assignee: 'sam' })), [])
+          assert.deepStrictEqual(keys(yield* tracker.find({ ...all, assignee: null })), ['Siri0002', 'Siri0001'])
+          // A day is from its start; a moment, from then.
+          assert.deepStrictEqual(keys(yield* tracker.find({ ...all, updatedSince: '2026-10-02' })), ['Siri0002', 'Wdgt0001'])
+          assert.deepStrictEqual(keys(yield* tracker.find({ ...all, updatedSince: '2026-10-02T12:00:00.000Z' })), ['Siri0002'])
+          // Every filter given narrows further.
+          assert.deepStrictEqual(
+            keys(yield* tracker.find({ ...all, assignee: null, updatedSince: '2026-10-02', status: { names: [], categories: ['done'] } })),
+            ['Siri0002'],
+          )
+          // A list's cards are asked for each time, and nothing else: no search, no account.
+          assert.isTrue(sent.every((request) => !request.url.includes('/search?') && !request.url.includes('/members/me')))
+        }),
+    )
+
+    it.effect('pages through what it found, by offset, to the end', () =>
+      Effect.gen(function* () {
+        const { tracker } = trello(inList('all'))
+        const first = yield* tracker.find({ container: LIST, state: 'all', limit: 2 })
+        assert.deepStrictEqual([keys(first), first.next], [['Siri0002', 'Wdgt0001'], '2'])
+        const second = yield* tracker.find({ container: LIST, state: 'all', limit: 2, cursor: first.next ?? '' })
+        assert.deepStrictEqual([keys(second), second.next], [['Siri0001'], null])
+        // A page that ends where the cards do has no next.
+        assert.isNull((yield* tracker.find({ container: LIST, state: 'all', limit: 3 })).next)
+      }),
+    )
+
+    it.effect('by key: each card read by its short link, those not there left out, in the state and list asked, and the account’s', () =>
+      Effect.gen(function* () {
+        const elsewhere = card({ id: 'c5', shortLink: 'Else0001', idList: 'l-other', dateLastActivity: '2026-10-04T00:00:00.000Z' })
+        const { tracker, sent } = trello([
+          ...[...listed, elsewhere].map((one): Route => ['GET', new RegExp(`/cards/${one.shortLink}\\?fields=`), { json: one }]),
+          me,
+        ])
+        const asked = ['Wdgt0001', 'Siri0001', 'Gone0001', 'Wdgt0001', 'Siri0002', 'Else0001', '../me']
+        assert.deepStrictEqual(keys(yield* tracker.find({ keys: asked, state: 'all', limit: 10 })), [
+          'Else0001',
+          'Siri0002',
+          'Wdgt0001',
+          'Siri0001',
+        ])
+        // Each key once; one that is no short link isn't asked for.
+        assert.lengthOf(sent, 5)
+        assert.strictEqual(
+          sent[0]?.url,
+          `${API}/cards/Wdgt0001?fields=name,desc,url,shortLink,dateLastActivity,closed,due,dueComplete,labels,idBoard,idList&members=true&member_fields=fullName,username&list=true&board=true&board_fields=name,closed`,
+        )
+        assert.deepStrictEqual(keys(yield* tracker.find({ keys: asked, state: 'open', limit: 10 })), ['Else0001', 'Wdgt0001', 'Siri0001'])
+        assert.deepStrictEqual(keys(yield* tracker.find({ keys: asked, container: LIST, state: 'open', limit: 10 })), [
+          'Wdgt0001',
+          'Siri0001',
+        ])
+        assert.deepStrictEqual(keys(yield* tracker.find({ keys: asked, state: 'open', mine: true, limit: 10 })), ['Wdgt0001'])
+        assert.deepStrictEqual(keys(yield* tracker.find({ keys: ['Gone0001'], state: 'all', limit: 10 })), [])
       }),
     )
 
@@ -1022,21 +1101,74 @@ describe('Trello', () => {
           ['GET', /query=siri%20is%3Aarchived&/, { json: searched([listed[1]!]) }],
           ['GET', /query=siri%20is%3Aopen%20member%3Ame&/, { json: searched([listed[2]!]) }],
         ])
-        const keys = (issues: ReadonlyArray<Issue>) => issues.map((issue) => issue.key)
         assert.deepStrictEqual(keys(yield* tracker.find({ text: ' siri ', state: 'open', limit: 5 })), ['Wdgt0001', 'Siri0001'])
         assert.strictEqual(
           sent[0]?.url,
-          `${API}/search?query=siri%20is%3Aopen&modelTypes=cards&cards_limit=5&card_fields=name,desc,url,shortLink,dateLastActivity,closed,due,dueComplete,labels,idBoard,idList&card_board=true&card_list=true&card_members=true`,
+          `${API}/search?query=siri%20is%3Aopen&modelTypes=cards&cards_limit=1000&card_fields=name,desc,url,shortLink,dateLastActivity,closed,due,dueComplete,labels,idBoard,idList&card_board=true&card_list=true&card_members=true`,
         )
         // Closed: archived, or in a list for work done.
         assert.deepStrictEqual(keys(yield* tracker.find({ text: 'siri', state: 'closed', limit: 5 })), ['Done0001', 'Siri0002'])
         assert.deepStrictEqual(keys(yield* tracker.find({ text: 'siri', state: 'all', limit: 3 })), ['Done0001', 'Siri0002', 'Wdgt0001'])
         assert.deepStrictEqual(keys(yield* tracker.find({ text: 'siri', state: 'open', mine: true, limit: 5 })), ['Wdgt0001'])
         assert.lengthOf(sent, 6)
+        // What the search gave is paged through, as it gave it.
+        const second = yield* tracker.find({ text: 'siri', state: 'all', limit: 3, cursor: '3' })
+        assert.deepStrictEqual([keys(second), second.next], [['Siri0001'], null])
       }),
     )
 
-    it.effect('without words or a list: the account’s own cards, by state', () =>
+    it.effect('by labels or a list’s name: Trello’s search, with what it matched otherwise (a colour, a list named alike) left out', () =>
+      Effect.gen(function* () {
+        const searched = (cards: ReadonlyArray<ReturnType<typeof card>>) => ({ cards, options: { terms: [] } })
+        const doing = { id: 'l-doing', name: 'Doing', closed: false }
+        const { tracker, sent } = trello([
+          [
+            'GET',
+            /query=label%3A%22mobile%22%20is%3Aopen&/,
+            // One with a label named otherwise, in Mobile's colour.
+            { json: searched([listed[0]!, card({ id: 'c6', shortLink: 'Pink0001', labels: [{ name: 'Web', color: 'pink' }] })]) },
+          ],
+          [
+            'GET',
+            /query=list%3A%22Doing%22%20is%3Aopen&/,
+            {
+              json: searched([
+                card({ id: 'c7', shortLink: 'Doin0001', list: doing }),
+                card({ id: 'c8', shortLink: 'Doin0002', list: { ...doing, id: 'l-later', name: 'Doing later' } }),
+              ]),
+            },
+          ],
+          ['GET', /\/members\/me\?fields=id&cards=open&/, { json: member }],
+        ])
+        assert.deepStrictEqual(keys(yield* tracker.find({ labels: ['mobile'], state: 'open', limit: 10 })), ['Siri0001'])
+        assert.deepStrictEqual(keys(yield* tracker.find({ status: { names: ['Doing'], categories: [] }, state: 'open', limit: 10 })), [
+          'Doin0001',
+        ])
+        assert.lengthOf(sent, 2)
+        // Two names, or a name and a category, aren't one list to search: the account's own cards, narrowed after, where asked.
+        assert.deepStrictEqual(
+          keys(yield* tracker.find({ status: { names: ['Doing', 'Intermediate'], categories: [] }, state: 'open', mine: true, limit: 10 })),
+          ['FUKG6oiY', 'XQYe3hhh'],
+        )
+        assert.deepStrictEqual(
+          keys(yield* tracker.find({ status: { names: ['Basics'], categories: ['started'] }, state: 'open', mine: true, limit: 10 })),
+          [],
+        )
+        assert.match(sent[2]?.url ?? '', /\/members\/me\?fields=id&cards=open&/)
+      }),
+    )
+
+    it.effect('refuses a filter a card hasn’t, before asking Trello anything', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = trello([])
+        const refused = yield* Effect.flip(tracker.find({ text: 'siri', priority: ['high'], milestone: 'GA', state: 'open', limit: 10 }))
+        assert.deepStrictEqual([refused.product, refused.reason], ['trello', 'rejected'])
+        assert.strictEqual(refused.message, 'A Trello card has no milestone or priority to find it by')
+        assert.lengthOf(sent, 0)
+      }),
+    )
+
+    it.effect('without words, labels, a list or keys, only the account’s where asked: its own cards, by state', () =>
       Effect.gen(function* () {
         const { tracker, sent } = trello([
           ['GET', /\/members\/me\?fields=id&cards=open&/, { json: member }],
@@ -1055,13 +1187,76 @@ describe('Trello', () => {
             },
           ],
         ])
-        const keys = (issues: ReadonlyArray<Issue>) => issues.map((issue) => issue.key)
-        assert.deepStrictEqual(keys(yield* tracker.find({ state: 'open', limit: 10 })), ['FUKG6oiY', 'XQYe3hhh'])
-        assert.deepStrictEqual(keys(yield* tracker.find({ state: 'closed', limit: 10 })), ['Arch0001', 'shQLVUu6'])
-        assert.deepStrictEqual(keys(yield* tracker.find({ state: 'all', limit: 2 })), ['Arch0001', 'FUKG6oiY'])
+        assert.deepStrictEqual(keys(yield* tracker.find({ state: 'open', mine: true, limit: 10 })), ['FUKG6oiY', 'XQYe3hhh'])
+        assert.deepStrictEqual(keys(yield* tracker.find({ state: 'closed', mine: true, limit: 10 })), ['Arch0001', 'shQLVUu6'])
+        assert.deepStrictEqual(keys(yield* tracker.find({ state: 'all', mine: true, limit: 2 })), ['Arch0001', 'FUKG6oiY'])
         assert.match(sent[1]?.url ?? '', /&boards=all&board_fields=name,closed&board_lists=all$/)
       }),
     )
+
+    it.effect('without them, and not only the account’s: every card on its boards, anyone’s or no one’s, narrowed after and paged', () =>
+      Effect.gen(function* () {
+        const roadmap = { id: BOARD, name: 'Trello Development Roadmap', closed: false }
+        const doing = { id: 'l-doing', name: 'Doing', closed: false }
+        const alice = { id: 'mem2', username: 'alice', fullName: 'Alice Liddell' }
+        const cards = [
+          card({ id: 'b1', shortLink: 'Nobo0001', idList: LIST, members: [], dateLastActivity: '2026-10-05T00:00:00.000Z' }),
+          card({ id: 'b2', shortLink: 'Alic0001', idList: 'l-doing', members: [alice], dateLastActivity: '2026-10-04T00:00:00.000Z' }),
+          card({ id: 'b3', shortLink: 'Taco0001', idList: LIST, members: [taco], dateLastActivity: '2026-09-01T00:00:00.000Z' }),
+          // On a list the board didn't list: left out.
+          card({ id: 'b4', shortLink: 'Lost0001', idList: 'l-gone', members: [], dateLastActivity: '2026-10-06T00:00:00.000Z' }),
+        ]
+        const { tracker, sent } = trello([
+          [
+            'GET',
+            `${API}/members/me/boards?filter=open&fields=name,closed&lists=all`,
+            { json: [{ ...roadmap, lists: [{ id: LIST, name: 'Live (Oct-Dec 2018)', closed: false }, doing] }] },
+          ],
+          [
+            'GET',
+            `${API}/boards/${BOARD}/cards/open?fields=name,desc,url,shortLink,dateLastActivity,closed,due,dueComplete,labels,idBoard,idList&members=true&member_fields=fullName,username`,
+            { json: cards },
+          ],
+        ])
+        const open = { state: 'open', limit: 10 } as const
+        assert.deepStrictEqual(keys(yield* tracker.find(open)), ['Nobo0001', 'Alic0001', 'Taco0001'])
+        // No one's, and someone else's, aren't only the account's.
+        assert.deepStrictEqual(keys(yield* tracker.find({ ...open, assignee: null })), ['Nobo0001'])
+        assert.deepStrictEqual(keys(yield* tracker.find({ ...open, assignee: 'Alice' })), ['Alic0001'])
+        assert.deepStrictEqual(keys(yield* tracker.find({ ...open, updatedSince: '2026-10-01' })), ['Nobo0001', 'Alic0001'])
+        assert.deepStrictEqual(
+          keys(yield* tracker.find({ ...open, status: { names: ['Doing', 'Live (Oct-Dec 2018)'], categories: [] }, assignee: 'taco' })),
+          ['Taco0001'],
+        )
+        const first = yield* tracker.find({ ...open, limit: 2 })
+        assert.deepStrictEqual([keys(first), first.next], [['Nobo0001', 'Alic0001'], '2'])
+        assert.deepStrictEqual(keys(yield* tracker.find({ ...open, limit: 2, cursor: '2' })), ['Taco0001'])
+        // Never the account's own cards alone.
+        assert.isFalse(sent.some((request) => request.url.includes('/members/me?')))
+      }),
+    )
+  })
+
+  describe('the search it asks Trello for', () => {
+    it('its words, a label operator for each label, a list operator for one status name alone, then the archive and the account', () => {
+      assert.strictEqual(searchQuery({ text: '  siri   voice ' }, 'open'), 'siri voice is:open')
+      assert.strictEqual(searchQuery({}, 'archived'), 'is:archived')
+      assert.strictEqual(searchQuery({ labels: ['Mobile', 'Needs "QA"', ' '] }, 'open'), 'label:"Mobile" label:"Needs QA" is:open')
+      assert.strictEqual(searchQuery({ status: { names: [' In review '], categories: [] } }, 'open'), 'list:"In review" is:open')
+      assert.strictEqual(searchQuery({ mine: true }, 'open'), 'is:open member:me')
+      assert.strictEqual(searchQuery({ mine: false }, 'open'), 'is:open')
+      assert.strictEqual(
+        searchQuery({ text: 'siri', labels: ['Mobile'], status: { names: ['Doing'], categories: [] }, mine: true }, 'archived'),
+        'siri label:"Mobile" list:"Doing" is:archived member:me',
+      )
+    })
+
+    it('no list operator where status is two names, a category, or a name and a category: Althar narrows those after', () => {
+      assert.strictEqual(searchQuery({ status: { names: ['Doing', 'Review'], categories: [] } }, 'open'), 'is:open')
+      assert.strictEqual(searchQuery({ status: { names: [], categories: ['started'] } }, 'open'), 'is:open')
+      assert.strictEqual(searchQuery({ status: { names: ['Doing'], categories: ['done'] } }, 'open'), 'is:open')
+      assert.strictEqual(searchQuery({ status: { names: ['  '], categories: [] } }, 'open'), 'is:open')
+    })
   })
 
   it.effect('reads a card’s latest comments, oldest first, with who wrote them', () =>

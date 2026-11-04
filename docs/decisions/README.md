@@ -98,5 +98,6 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [089](089-the-asks-and-refusals-left-are-what-can-t-be-undone.md) | The asks and refusals left once the sandbox is the boundary are what can't be undone: a crossing goes unread, a line is read from the shell's folder, and tearing down or publishing asks |
 | [090](090-run-opens-its-list-and-runs-where-it-is-picked.md) | Run opens its list, and runs where it is picked |
 | [091](091-a-task-works-local-in-the-person-s-checkout-or-in-a-worktree.md) | A task works Local, in the person's own checkout, one task at a time, or in a worktree of its own: a project default the coordinator overrides per task; Althar asks before switching a checkout and never stashes or resets it |
-| [092](092-skills-one-store-a-curated-catalog.md) | Skills are one store on the computer, from a curated catalog, given to each lead for its session |
-| [093](093-skill-and-openspec-files-stay-off-the-repository.md) | Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them |
+| [092](092-conflicts-and-failed-checks-send-a-task-back-to-work.md) | Conflicts and failed checks send a task back to work, one ask for both, on unless the person turned it off or stopped it; waiting on the person always says why |
+| [093](093-skills-one-store-a-curated-catalog.md) | Skills are one store on the computer, from a curated catalog, given to each lead for its session |
+| [094](094-skill-and-openspec-files-stay-off-the-repository.md) | Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them |
