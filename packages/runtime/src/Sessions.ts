@@ -281,6 +281,10 @@ const askedFor = (thread: { readonly title: string; readonly description: string
 /** The other tasks planned from the message a task came from, for its lead's brief (siblings.ts). */
 const alongside = (taskId: string) => siblingsOf(taskId).pipe(Effect.map((others) => (others.length === 0 ? [] : [alsoPlanned(others)])))
 
+/** What a lead is told of the project's other tasks, which it can read but not change (otherTasks.ts, Overlaps.ts). */
+export const OTHER_TASKS =
+  "Other tasks of this project may change the same code as yours. list_tasks and find_tasks show each with where it stands, its branch, where it works and the files it changes now; read_task (its brief, plan, report and review findings), read_task_diff (its change as it stands, what isn't committed included) and read_thread (what the person and its lead said) read one. Read them before you change code another open task changes, and where your brief names another task. Where Althar tells you another running task changes files you change, read its work before you go on there. They only read: you can't message another task's lead or change its work."
+
 /** A role's Althar tools. */
 const toolRoleOf = (thread: ThreadContext) => (thread.role === 'task' ? 'lead' : thread.role)
 
@@ -3028,6 +3032,7 @@ export class Sessions extends Context.Service<
             ...askedFor(thread),
             `Open errands concerning this task:\n${(yield* errandLines(thread.projectId, thread.taskId)).join('\n') || 'None.'} Read their records with read_errands. read_turn gives this turn’s byPerson and message ids; only their message from the window or a paired device, or an open errand’s recorded next step, may authorize an asked-for tool. Pause an objection with pause_errand; resuming needs their fresh message.`,
             ...(yield* alongside(thread.taskId)),
+            OTHER_TASKS,
             // The person's decisions the code doesn't show, which the coordinator keeps: whether issues are filed at once among them.
             ...(yield* Effect.map(notesOf(thread.projectId), (notes) => (notes.length === 0 ? [] : [notesSection(notes)]))),
             several
