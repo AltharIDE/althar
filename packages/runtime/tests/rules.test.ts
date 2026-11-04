@@ -1473,7 +1473,7 @@ describe('what could lose work or a secret (DEV-69)', () => {
     for (const command of discarding) assert.deepInclude(run(command, local), { verdict: 'ask', held: false }, command)
     assert.strictEqual(
       reasonOf(run('git stash', local)),
-      `\`git stash\` in your checkout asks even with everything allowed: it could throw away your own uncommitted work: ${worktree}`,
+      `\`git stash\` in your checkout asks even with everything allowed: it could throw away your own uncommitted work: ${resolve(worktree)}`,
     )
     // In a worktree of its own, nothing of the person's is there to lose.
     for (const command of discarding) assert.strictEqual(run(command, rules(allow)).verdict, 'allow', command)

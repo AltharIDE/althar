@@ -180,7 +180,8 @@ describe('a lead’s pull request tools, at their edges', () => {
     github.addRepository(['meridian', 'api'])
     return Effect.gen(function* () {
       const { lead, worktree } = yield* withPullRequest(working)
-      rmSync(worktree, { recursive: true, force: true })
+      // On Windows a folder can't go while a process still has it open, as git looking at it for a conflict may for a moment.
+      rmSync(worktree, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
       assert.strictEqual(
         yield* callTool(lead, 'push_to_pull_request', {}),
         `The task's worktree isn't on ${thisDevice()}, so Althar can't see what is on its branch. Tell the person.`,

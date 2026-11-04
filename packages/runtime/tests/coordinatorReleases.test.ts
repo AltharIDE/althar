@@ -241,6 +241,49 @@ describe('the coordinator approving and publishing', () => {
   })
 })
 
+describe('the coordinator where there is nothing to do yet', () => {
+  it.live('reads no release before its draft, approves nothing before a run, and runs nothing again where nothing failed', () => {
+    const { host, working } = github()
+    return Effect.gen(function* () {
+      const { coordinator } = yield* project(working)
+      host.tagByHand(PATH, 'v0.7.0', OTHER)
+      assert.include(yield* callTool(coordinator, 'read_release', { tag: 'v0.7.0' }), 'The tag v0.7.0 is on 5ca1ab1e on meridian/api.')
+      assert.include(yield* callTool(coordinator, 'read_release', { tag: 'v9' }), 'meridian/api has no tag v9.')
+      const word = yield* turn(coordinator, 'Approve the release run')
+      assert.include(
+        yield* callTool(coordinator, 'approve_release_run', { tag: 'v0.7.0', gate: 'release', message: word }),
+        'No run on v0.7.0 yet: nothing waits for release.',
+      )
+      assert.include(
+        yield* callTool(coordinator, 'approve_release_run', { tag: 'v0.7.0', gate: 'release', workflow: 'release', message: word }),
+        'No run of release on v0.7.0 yet',
+      )
+      host.startRun(PATH, { ref: 'v0.7.0', name: 'release', state: 'running' })
+      assert.include(
+        yield* callTool(coordinator, 'approve_release_run', { tag: 'v0.7.0', gate: 'release', message: word }),
+        'The run on v0.7.0 goes on, and waits for release not yet, or no longer.',
+      )
+      assert.lengthOf(host.approvals, 0)
+      assert.include(
+        yield* callTool(coordinator, 'rerun_failed_jobs', { tag: 'v0.7.0' }),
+        'None of the runs on v0.7.0 failed (release: running), so nothing runs again.',
+      )
+      host.draftRelease(PATH, 'v0.7.0', [])
+      assert.include(
+        yield* callTool(coordinator, 'read_release', { tag: 'v0.7.0' }),
+        'A draft release of v0.7.0, "v0.7.0", not published: no files.',
+      )
+      const publish = yield* turn(coordinator, 'Publish it')
+      assert.include(yield* callTool(coordinator, 'publish_release', { tag: 'v0.7.0', message: publish }), 'Published v0.7.0')
+      assert.include(yield* callTool(coordinator, 'publish_release', { tag: 'v0.7.0', message: publish }), 'v0.7.0 is published already')
+      assert.match(
+        yield* callTool(coordinator, 'read_release', { tag: 'v0.7.0', repository: 'nowhere' }),
+        /^The project’s repositories are .*\. Name one of those\.$/,
+      )
+    }).pipe(Effect.provide(withHost(host)))
+  })
+})
+
 describe('the coordinator releasing on Bitbucket', () => {
   it.live('links the manual step only the person runs, and puts the repository’s files in Downloads', () => {
     // Through the one fake host the harness connects, as Bitbucket Cloud's adapter releases.

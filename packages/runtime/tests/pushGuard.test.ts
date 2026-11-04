@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -229,5 +229,39 @@ describe('the git commands a pass names', () => {
     assert.deepStrictEqual(runsOf('git push', work)[0]?.push, { remote: undefined })
     // Where Althar can't tell the folder, the pass names none, and the guard lets nothing through on it.
     assert.strictEqual(runsOf('cd "$(cat where)" && git push origin HEAD:main', work)[0]?.folder, undefined)
+  })
+})
+
+describe('a pass past the guard, as written for the hook', () => {
+  const passed = (sessionId: string, runs: Parameters<typeof passGuard>[1]) => {
+    const at = { hooks: mkdtempSync(join(tmpdir(), 'althar-hooks-')), passes: mkdtempSync(join(tmpdir(), 'althar-passes-')) }
+    passGuard(sessionId, runs, at)
+    const file = join(at.passes, sessionId)
+    return existsSync(file) ? readFileSync(file, 'utf8') : null
+  }
+  const repo = () => {
+    const work = realpathSync(mkdtempSync(join(tmpdir(), 'althar-pass-')))
+    execFileSync('git', ['init', '-q', '-b', 'main', work])
+    return work
+  }
+
+  it('names where a push goes: the remote named, else the branch’s push remote as its config says, else origin', () => {
+    const work = repo()
+    execFileSync('git', ['-C', work, 'remote', 'add', 'origin', 'https://example.test/a.git'])
+    execFileSync('git', ['-C', work, 'remote', 'add', 'fork', 'https://example.test/fork.git'])
+    const push = (remote: string | undefined) => [{ words: 'git push', folder: work, push: { remote } }]
+    assert.strictEqual(passed('s1', push(undefined)), `${work}\thttps://example.test/a.git\tgit push\n`)
+    assert.strictEqual(passed('s2', push('fork')), `${work}\thttps://example.test/fork.git\tgit push\n`)
+    // A remote it doesn't have is passed as it is named: a URL or a path.
+    assert.strictEqual(passed('s3', push('/srv/bare.git')), `${work}\t/srv/bare.git\tgit push\n`)
+    execFileSync('git', ['-C', work, 'config', 'remote.pushDefault', 'fork'])
+    assert.strictEqual(passed('s4', push(undefined)), `${work}\thttps://example.test/fork.git\tgit push\n`)
+    // Not a push: its repository alone.
+    assert.strictEqual(passed('s5', [{ words: 'git reset --hard', folder: work }]), `${work}\t\tgit reset --hard\n`)
+  })
+
+  it('writes none for a git whose repository Althar can’t tell', () => {
+    assert.isNull(passed('s6', [{ words: 'git push', folder: undefined, push: { remote: 'origin' } }]))
+    assert.isNull(passed('s7', [{ words: 'git push', folder: mkdtempSync(join(tmpdir(), 'althar-not-git-')) }]))
   })
 })
