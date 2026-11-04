@@ -252,9 +252,10 @@ export const reviewRecordOf = (input: {
       claim: string
       state: 'fixed' | 'set_aside'
       response: string | null
+      settledIn: string | null
       fixedBy: string | null
     }>`
-      SELECT n.iteration AS round, f.claim, f.state, f.response,
+      SELECT n.iteration AS round, f.claim, f.state, f.response, f.settled_in_attempt_id AS settled_in,
         (SELECT json_extract(r.payload, '$.commit') FROM record_events r
           WHERE r.aggregate_type = 'finding' AND r.aggregate_id = f.id AND r.type = 'finding.fixed' ORDER BY r.sequence DESC LIMIT 1) AS fixed_by
       FROM findings f JOIN node_attempts a ON a.id = f.review_attempt_id JOIN nodes n ON n.id = a.node_id
@@ -280,11 +281,15 @@ export const reviewRecordOf = (input: {
         return (yield* within(from, commit)) && (yield* within(commit, to)) ? [commit] : []
       })
 
+    // A decline with no reason, made by the settle the task went on after, is listed as left open at the description's head.
+    const carried = yield* carriedOn(input.runId)
     const changed: Array<{ what: string; commits: ReadonlyArray<string> }> = []
     const kept: Array<{ point: string; why: string | null }> = []
     for (const finding of findings) {
       const response = finding.response?.trim() || null
-      if (finding.state === 'set_aside') kept.push({ point: finding.claim, why: response })
+      if (finding.state === 'set_aside') {
+        if (response !== null || finding.settledIn !== carried) kept.push({ point: finding.claim, why: response })
+      }
       // Fixed without a word on what changed, as a lead may: what the reviewer said, as fixed.
       else changed.push({ what: response ?? `Fixed: ${finding.claim}`, commits: yield* fixedBy(finding.round, finding.fixedBy) })
     }
@@ -302,6 +307,17 @@ export const reviewRecordOf = (input: {
     } satisfies ReviewRecord
   })
 
+/** The settle attempt after which the run went on with fixes no review read, or null. */
+const carriedOn = (runId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [carried] = yield* sql<{ id: string }>`
+      SELECT a.id FROM workflow_executions e JOIN nodes n ON n.execution_id = e.id AND n.node_key = 'settle'
+      JOIN node_attempts a ON a.node_id = n.id
+      WHERE e.run_id = ${runId} AND a.state = 'succeeded' AND json_extract(a.output, '$.unreviewed') = 1 LIMIT 1`
+    return carried?.id ?? null
+  })
+
 /**
  * Whether the run went on after its rounds of review ran out, the lead's last fixes never read (Runs.ts marks the settle that
  * made them), and what it left open then: null where it didn't.
@@ -309,15 +325,12 @@ export const reviewRecordOf = (input: {
 export const unreviewedOf = (runId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const [carried] = yield* sql<{ id: string }>`
-      SELECT a.id FROM workflow_executions e JOIN nodes n ON n.execution_id = e.id AND n.node_key = 'settle'
-      JOIN node_attempts a ON a.node_id = n.id
-      WHERE e.run_id = ${runId} AND a.state = 'succeeded' AND json_extract(a.output, '$.unreviewed') = 1 LIMIT 1`
-    if (carried === undefined) return null
+    const carried = yield* carriedOn(runId)
+    if (carried === null) return null
     const open = yield* sql<{ claim: string; title: string | null }>`
       SELECT f.claim, f.title FROM findings f JOIN node_attempts a ON a.id = f.review_attempt_id JOIN nodes n ON n.id = a.node_id
       JOIN workflow_executions e ON e.id = n.execution_id WHERE e.run_id = ${runId}
-      AND (f.state = 'open' OR (f.state = 'set_aside' AND f.settled_in_attempt_id = ${carried.id} AND (f.response IS NULL OR trim(f.response) = '')))
+      AND (f.state = 'open' OR (f.state = 'set_aside' AND f.settled_in_attempt_id = ${carried} AND (f.response IS NULL OR trim(f.response) = '')))
       ORDER BY f.created_at`
     return { open: open.map((finding) => finding.title ?? finding.claim) } satisfies Unreviewed
   })

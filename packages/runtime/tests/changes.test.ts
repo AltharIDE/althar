@@ -211,6 +211,27 @@ describe('a task that ends in a pull request', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('lists a finding the lead set aside with no reason once, as left open, and not also as kept', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    git(working, 'config', 'user.name', 'Fake')
+    git(working, 'config', 'user.email', 'fake@althar.test')
+    return Effect.gen(function* () {
+      yield* setPlansAndReviews({ rounds: 1, roundsOut: 'always' })
+      yield* connect('github', HOST)
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [lead:decline-quietly] [review:always]',
+      )
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+      const body = github.changes[0]?.body ?? ''
+      assert.match(body, /> Findings left open:\n> - /)
+      assert.include(body, '**Left open**')
+      assert.notInclude(body, 'Looked at and kept')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('follows the team’s conventions: a branch named as its guide says, and a description in its template, no box ticked', () => {
     const { working, bare } = hosted()
     mkdirSync(join(working, '.github'))
