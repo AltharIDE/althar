@@ -418,7 +418,8 @@ export class Launches extends Context.Service<
             })
             yield* freshCopy(binding.repository, path, base, binding.repository, remote)
             yield* installedAsLocked(path)
-            copiedOf.set(binding.id, binding.base ?? 'main')
+            // The branch the copy is of, as resolved: a fork's upstream's default, where its work goes there, needn't be named as its own.
+            copiedOf.set(binding.id, base)
           }
           return { path, branch: copiedOf.get(binding.id) ?? binding.base ?? 'main' }
         })

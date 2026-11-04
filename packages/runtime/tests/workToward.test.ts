@@ -12,6 +12,8 @@ import { SqlClient } from 'effect/sql'
 
 import { withoutSignIns } from '../src/Config'
 import { Coordinator } from '../src/Coordinator'
+import { Instance } from '../src/Instance'
+import { Launches } from '../src/Launches'
 import { coordinatorFolder, freshCopy } from '../src/coordinatorFolder'
 import { place, spotsOf } from '../src/local'
 import { Projects } from '../src/Projects'
@@ -372,6 +374,49 @@ describe('a fork whose work goes upstream, offline', () => {
       yield* freshCopy(working, join(into, 'fork'), RELEASE, working, 'origin')
       assert.strictEqual(git(join(into, 'fork'), 'rev-parse', 'HEAD'), main)
     })
+  })
+})
+
+describe('Run in a fork whose work goes upstream', () => {
+  it.live('says the branch its copy is of: upstream’s default, where it isn’t named as the fork’s is', () => {
+    const { working } = hosted(['you', 'api'])
+    writeFileSync(
+      join(working, 'package.json'),
+      JSON.stringify({ name: 'api', scripts: { dev: 'node serve.js', storybook: 'node serve.js' } }),
+    )
+    writeFileSync(join(working, 'serve.js'), 'setInterval(() => {}, 1000)\n')
+    git(working, 'add', '.')
+    git(working, '-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-q', '-m', 'Serve')
+    git(working, 'remote', 'add', 'upstream', `${HOST}/meridian/api.git`)
+    const main = git(working, 'rev-parse', 'main')
+    // The fork's default is main; the repository it came from calls its default develop.
+    git(working, 'update-ref', 'refs/remotes/origin/main', main)
+    git(working, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main')
+    git(working, 'update-ref', 'refs/remotes/upstream/develop', main)
+    git(working, 'symbolic-ref', 'refs/remotes/upstream/HEAD', 'refs/remotes/upstream/develop')
+    const github = makeFakeService({})
+    github.addRepository(['you', 'api'])
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const { projectId, repositoryId } = yield* opened(working)
+      const projects = yield* Projects
+      yield* projects.setRepository({ projectId, repositoryId, changeTarget: 'upstream' })
+      const launches = yield* Launches
+      const instance = yield* Instance
+      const dev = yield* launches.start({ projectId, taskId: null, threadId: null })
+      assert.strictEqual(dev.where, 'develop')
+      // Another started beside it, from the same copy, says the same.
+      const storybook = yield* launches.keepRunnable({
+        projectId,
+        name: 'Storybook',
+        command: 'npm run storybook',
+        actorId: instance.personId,
+      })
+      const book = yield* launches.start({ projectId, taskId: null, runnableId: storybook.id, threadId: null })
+      assert.strictEqual(book.where, 'develop')
+      for (const running of yield* launches.ofProject(projectId)) yield* launches.stop(running.id)
+    }).pipe(Effect.provide(runtimeWith({ github })))
   })
 })
 
