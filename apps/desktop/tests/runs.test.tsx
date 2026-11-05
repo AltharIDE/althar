@@ -204,7 +204,7 @@ describe('what the project runs, from its front', () => {
     expect(await screen.findByRole('dialog', { name: 'Add something to run' })).toBeTruthy()
   })
 
-  it('runs on a branch or pull request picked beside Run, fetching it, and says on its line what went wrong', async () => {
+  it('runs on a pull request picked beside Run, fetching it, and says on its line what went wrong', async () => {
     // The host has more open than it listed: words are searched there.
     const older = { number: 12, name: 'PR #12', title: 'An older pull request', branch: 'older', author: 'sam', draft: false, fork: true }
     const getRunnableRefs = vi.fn(async (_projectId: string, text?: string) =>
@@ -232,7 +232,7 @@ describe('what the project runs, from its front', () => {
     )
     const runProject = vi
       .fn()
-      .mockRejectedValueOnce(new ApiError({ reason: 'LaunchRefused', message: 'origin has no branch feature/gone.' }))
+      .mockRejectedValueOnce(new ApiError({ reason: 'LaunchRefused', message: 'origin has no pull request #41.' }))
       .mockResolvedValue(launch({ id: 'proc_9', branch: 'PR #41 · feature/find-a-pro', where: 'PR #41 · feature/find-a-pro' }))
     const { client, emit } = await shown([], { getRunnableRefs, runProject })
     // Run runs on the default branch until another place is picked.
@@ -252,27 +252,19 @@ describe('what the project runs, from its front', () => {
     expect(await picker.findByRole('option', { name: /An older pull request/ })).toBeTruthy()
     expect(getRunnableRefs).toHaveBeenCalledWith('p1', 'older')
     await userEvent.clear(picker.getByRole('combobox'))
-    await userEvent.type(picker.getByRole('combobox'), 'gone{Enter}')
-    expect(await screen.findByRole('button', { name: 'feature/gone' })).toBeTruthy()
+    await userEvent.type(picker.getByRole('combobox'), 'services{Enter}')
+    expect(await screen.findByRole('button', { name: 'PR #41' })).toBeTruthy()
 
     // Run there fetches it; refused, its line says why, and tries again.
-    let list = await listed()
+    const list = await listed()
     await userEvent.click(list.getByRole('button', { name: 'Run bun run dev' }))
-    expect(client.runProject).toHaveBeenLastCalledWith('p1', null, 'thc', 'rnbl_dev', { branch: 'feature/gone' })
-    expect(await list.findByText('origin has no branch feature/gone.')).toBeTruthy()
+    expect(client.runProject).toHaveBeenLastCalledWith('p1', null, 'thc', 'rnbl_dev', { pullRequest: '41' })
+    expect(await list.findByText('origin has no pull request #41.')).toBeTruthy()
     expect(screen.getByRole('button', { name: /^Run\s*1 failed$/ })).toBeTruthy()
     await userEvent.click(list.getByRole('button', { name: 'Clear bun run dev' }))
-    expect(list.queryByText('origin has no branch feature/gone.')).toBeNull()
-    await userEvent.keyboard('{Escape}')
+    expect(list.queryByText('origin has no pull request #41.')).toBeNull()
 
-    // On the pull request, it runs and says where it answers; the switcher says it.
-    await userEvent.click(screen.getByRole('button', { name: 'feature/gone' }))
-    await userEvent.click(
-      await within(await screen.findByRole('dialog', { name: 'Where Run runs' })).findByRole('option', {
-        name: /Add a services directory/,
-      }),
-    )
-    list = await listed()
+    // Again, it runs and says where it answers; the switcher says it.
     await userEvent.click(list.getByRole('button', { name: 'Run bun run dev' }))
     expect(client.runProject).toHaveBeenLastCalledWith('p1', null, 'thc', 'rnbl_dev', { pullRequest: '41' })
     act(() =>
@@ -334,6 +326,53 @@ describe('where Run runs with no task, by name', () => {
       }),
     )
     expect(await screen.findByRole('button', { name: 'release/0.8.0' })).toBeTruthy()
+  })
+
+  it('takes a branch picked beside Run as the project’s Work toward, and makes one typed that the remote doesn’t have', async () => {
+    let kept = [{ ...repositories[0]!, defaultBranch: 'main', workToward: null as string | null, branches: ['main', 'release/0.8.0'] }]
+    const setRepository = vi.fn(async (input: { repositoryId: string; workToward?: string | null }) => {
+      kept = kept.map((each) => (each.id === input.repositoryId ? { ...each, workToward: input.workToward ?? null } : each))
+    })
+    const getRunnableRefs = vi.fn(async () => [
+      { repository: 'meridian-api', pullRequests: [], branches: ['main', 'release/0.8.0'], note: null, more: false },
+    ])
+    const { client } = await shown([], { setRepository, getRunnableRefs, getRepositories: vi.fn(async () => kept) })
+    await userEvent.click(await screen.findByRole('button', { name: 'main' }))
+    let picker = within(await screen.findByRole('dialog', { name: 'Where Run runs' }))
+    // Its foot says what picking a branch does.
+    expect(picker.getByText(/A branch picked here is what new tasks work toward too/)).toBeTruthy()
+    await userEvent.click(await picker.findByRole('option', { name: 'release/0.8.0' }))
+    await waitFor(() =>
+      expect(setRepository).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: kept[0]!.id, workToward: 'release/0.8.0' }),
+    )
+    // Run's own place runs it: no fetched copy of the branch.
+    expect(await screen.findByRole('button', { name: 'release/0.8.0' })).toBeTruthy()
+    await userEvent.click((await listed()).getByRole('button', { name: 'Run bun run dev' }))
+    expect(client.runProject).toHaveBeenLastCalledWith('p1', null, 'thc', 'rnbl_dev')
+    await userEvent.keyboard('{Escape}')
+
+    // A name it doesn't have is made from the default branch, then worked toward.
+    await userEvent.click(screen.getByRole('button', { name: 'release/0.8.0' }))
+    picker = within(await screen.findByRole('dialog', { name: 'Where Run runs' }))
+    await picker.findByRole('option', { name: 'main' })
+    await userEvent.type(picker.getByRole('combobox'), 'release/0.9.0')
+    await userEvent.click(await picker.findByRole('option', { name: /Create release\/0\.9\.0/ }))
+    await waitFor(() =>
+      expect(client.createBranch).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: kept[0]!.id, branch: 'release/0.9.0' }),
+    )
+    await waitFor(() =>
+      expect(setRepository).toHaveBeenLastCalledWith({ projectId: 'p1', repositoryId: kept[0]!.id, workToward: 'release/0.9.0' }),
+    )
+    expect(await screen.findByRole('button', { name: 'release/0.9.0' })).toBeTruthy()
+  })
+
+  it('says, while a run goes on the old branch, that it stays there until stopped and the next run takes the new one', async () => {
+    await shown([launch({ where: 'main' })], {
+      getRepositories: vi.fn(async () => [{ ...repositories[0]!, defaultBranch: 'main', workToward: 'release/0.8.0' }]),
+    })
+    await userEvent.click(await screen.findByRole('button', { name: 'main' }))
+    const picker = within(await screen.findByRole('dialog', { name: 'Where Run runs' }))
+    expect(await picker.findByText('bun run dev runs on main until stopped. The next run takes release/0.8.0.')).toBeTruthy()
   })
 
   it('says the default branch where repositories go different ways, and where none says one', () => {

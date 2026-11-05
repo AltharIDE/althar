@@ -19,21 +19,39 @@
     and it is kept current with it. Null is the default branch, so every task
     made before keeps going to main, and so does every new task unless
     something says otherwise.
-  - **The project has a default for new tasks, "Work toward",** in its
-    General settings, one per repository (`repository_bindings.work_toward`,
-    null for the default branch). It must be a branch of the remote tasks
-    start from: a fork's upstream, where its work goes there, whose branches
-    and default are what the setting lists. Tasks already made keep theirs.
-    The coordinator's brief names it, so it plans toward it; its copies of
-    the repositories and Run's copy follow it too, from that same remote.
+  - **The project has a default for new tasks, "Work toward",** one per
+    repository (`repository_bindings.work_toward`, null for the default
+    branch). It must be a branch of the remote tasks start from: a fork's
+    upstream, where its work goes there, whose branches and default are what
+    the setting lists. Tasks already made keep theirs. The coordinator's
+    brief names it, so it plans toward it; its copies of the repositories
+    and Run's copy follow it too, from that same remote.
+  - **It is picked beside Run,** at the top of the project's screen: the
+    branch Run's own place runs is the project's one branch, so a branch
+    picked there is Work toward too, and Run runs a copy of it; a task or a
+    pull request picked there is only where Run runs. The list's foot says
+    so. A run going on the old branch's copy keeps going there until it
+    stops, the chip saying that branch meanwhile, and the list says the next
+    run takes the new one. It is in General settings too. The coordinator's
+    composer has no control of its own: asked in words, the coordinator
+    points a task elsewhere itself.
+  - **A branch the remote doesn't have can be made from any branch list**
+    (Run's, the plan card's, General's) by typing its name: `CreateBranch`
+    makes it on the code host, on the remote tasks start from, from that
+    remote's default branch, pushed by Althar with its sign-in and never
+    forced, as `create_branch`; one there already is left as it is and is
+    the one the person gets. The person's own click is their word.
   - **A single task can be pointed elsewhere.** `draft_task`, `propose_plan`
-    and `start_task` take `toward`; the plan card has a branch picker beside
-    Local and Worktree, listing the remote's branches as last fetched, its
-    default marked. It can change until the first step starts. A worktree
+    and `start_task` take `toward`; the plan card's last row says it after
+    how the work ends ("Open a draft PR into release/0.8.0"), a list of the
+    remote's branches as last fetched, its default marked, found by typing.
+    It can change until the first step starts. A worktree
     made for the draft then moves, unused, to the new start (`git reset
-    --keep`), keeping what its setup made. The card, the board and the task
-    header say the branch quietly ("→ release/0.8.0") only where it isn't the
-    default; `list_tasks` and `read_task` say it to the coordinator.
+    --keep`), keeping what its setup made. The board's card says the branch
+    quietly ("→ release/0.8.0"), and the task's ⋯ says it first ("Into
+    release/0.8.0", copied when chosen), only where it isn't the default:
+    not its bar, which keeps to where it stands. `list_tasks` and
+    `read_task` say it to the coordinator.
   - **What follows the task's target:** where it starts; its pull request's
     base, on a fork's upstream too when that is where its work goes (a
     target there is a branch of the upstream); the lead's bring-up-to-date
@@ -71,6 +89,13 @@
     Putting a merged fix on another branch is a task toward that branch, its
     lead cherry-picking it, with a pull request of its own.
 - **Alternatives considered:**
+  - **Work toward at the coordinator's composer,** above it or in its row:
+    always in sight while planning, but beside Run there was then a second
+    branch, and the two read as different things; and over the composer it
+    competed with what floats there while work runs.
+  - **A plain branch picked beside Run as only where Run runs** (ADR-066):
+    kept for pull requests and tasks; a branch run apart from the project's
+    one is rare, and its pull request runs it.
   - **Reading the target off `baseRef` alone:** no new column, but a task
     whose fetch fell back to the local branch, or a fork's work bound
     upstream, loses where it goes, and a draft can't be pointed elsewhere

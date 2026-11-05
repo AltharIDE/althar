@@ -65,12 +65,18 @@ export const setToward = (taskId: string, toward: string | null) =>
 /**
  * What a task's plan card offers to work toward: its first repository's
  * default branch, the branch it works toward where that isn't it, and the
- * remote's branches. Null for a task with no repository here.
+ * remote's branches; and that repository, where a branch typed in the list
+ * is made. Null for a task with no repository here.
  */
 export const towardChoicesOf = (taskId: string) =>
   Effect.gen(function* () {
     const [spot] = yield* spotsOf(taskId)
     if (spot === undefined) return null
     const { remote, base } = yield* startOf({ ...spot, toward: null })
-    return { toward: spot.toward, defaultBranch: base, branches: yield* remoteBranches(spot.repository, remote, base) }
+    return {
+      toward: spot.toward,
+      defaultBranch: base,
+      branches: yield* remoteBranches(spot.repository, remote, base),
+      repositoryId: spot.bindingId,
+    }
   }).pipe(Effect.orElseSucceed(() => null))

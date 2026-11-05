@@ -509,6 +509,24 @@ describe('the Talk room', () => {
     expect(client.startPlan).toHaveBeenCalledWith('pln1')
   })
 
+  it('points a plan at another branch from its last row, or at one it makes from the default branch (ADR-093)', async () => {
+    const planned = card({
+      plan: { ...card().plan!, end: 'draft', defaultBranch: 'main', branches: ['main', 'release/0.8.0'], repositoryId: 'repo_api' },
+    })
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(planned)] })) })
+    withServices(<Project room={Room.Talk} />, client)
+    // After how the work ends: Open a draft PR into main.
+    await userEvent.click(await screen.findByRole('button', { name: 'Works toward: main' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'release/0.8.0' }))
+    await waitFor(() => expect(client.changePlan).toHaveBeenLastCalledWith('pln1', expect.anything(), 'draft', undefined, 'release/0.8.0'))
+    // One it doesn't have is made first, then the plan goes toward it.
+    await userEvent.click(await screen.findByRole('button', { name: 'Works toward: release/0.8.0' }))
+    await userEvent.type(screen.getByRole('combobox', { name: 'Find or name a branch' }), 'hotfix/0.8.1{Enter}')
+    expect(await screen.findByRole('button', { name: 'Works toward: hotfix/0.8.1' })).toBeTruthy()
+    await waitFor(() => expect(client.changePlan).toHaveBeenLastCalledWith('pln1', expect.anything(), 'draft', undefined, 'hotfix/0.8.1'))
+    expect(client.createBranch).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: 'repo_api', branch: 'hotfix/0.8.1' })
+  })
+
   it('lets the person change a started plan while its first step waits for a free agent, saying what it waits for', async () => {
     const waitingCard = card({ phase: 'running', step: 'implement', queued: { busy: 4, atOnce: 4 }, planWaits: true })
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })

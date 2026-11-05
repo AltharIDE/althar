@@ -93,6 +93,14 @@ export interface ProjectModel {
     worksIn?: WorksIn,
     toward?: string | null,
   ) => Promise<void>
+  /** Makes a branch the remote doesn't have, from the default branch, then points the plan at it (ADR-093). */
+  readonly changePlanToNewBranch: (
+    planId: string,
+    steps: ReadonlyArray<PlanStep>,
+    end: TaskEnd | null | undefined,
+    repositoryId: string,
+    branch: string,
+  ) => Promise<void>
   readonly fileIssueDraft: (draftId: string) => Promise<void>
   readonly changeIssueDraft: (
     draftId: string,
@@ -414,6 +422,11 @@ export const useProject = (projectId: string): ProjectModel => {
             ? client.changePlan(planId, steps, end)
             : client.changePlan(planId, steps, end, worksIn),
       ),
+    changePlanToNewBranch: (planId, steps, end, repositoryId, branch) =>
+      act(async () => {
+        const made = await client.createBranch({ projectId, repositoryId, branch })
+        await client.changePlan(planId, steps, end, undefined, made)
+      }),
     fileIssueDraft: (draftId) => act(() => client.fileIssueDraft(draftId)),
     changeIssueDraft: (draftId, edit) => act(() => client.changeIssueDraft(draftId, edit)),
     discardIssueDraft: (draftId) => act(() => client.discardIssueDraft(draftId)),

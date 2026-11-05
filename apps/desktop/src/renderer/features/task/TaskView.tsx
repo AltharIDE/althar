@@ -739,6 +739,8 @@ export function TaskView({
         />
       )}
       <TaskMenu
+        // What its work goes into, where it isn't the default branch (ADR-093): first in its menu, out of its bar.
+        {...(snapshot.task.toward === undefined ? {} : { toward: snapshot.task.toward })}
         onRename={() => setRenaming(true)}
         {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
         {...(drafts.length > 0 ? { onMarkReady: () => void model.markAllReady(drafts.map((one) => one.url)) } : {})}
@@ -970,8 +972,6 @@ export function TaskView({
               onFace={setFace}
               // Finished and the person's to settle: Done and Keep for later, inside where it stands.
               {...(settle === null ? {} : { beside: settle })}
-              // What its work goes into, where it isn't the default branch (ADR-093).
-              {...(snapshot.task.toward === undefined ? {} : { toward: snapshot.task.toward })}
               actions={actions}
             />
           }

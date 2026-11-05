@@ -1,11 +1,11 @@
 import type { ProjectInk as Inks, ProjectRepository, WorksIn } from '@althar/contracts'
 import type { ReactNode } from 'react'
 import {
+  BranchSelect,
   LinkButton,
   ProjectIdentity,
   type ProjectInk,
   Segmented,
-  Select,
   SettingGroup,
   SettingList,
   SettingRow,
@@ -16,7 +16,7 @@ import { contractInk, kitInk } from '../../shared/inks'
 import s from './ProjectSettings.module.css'
 import { HEADING } from './sections'
 import type { ProjectSettingsModel, RuleSwitch } from './useProjectSettings'
-import { useWorkToward } from './useWorkToward'
+import { useWorkToward } from '../../shared/useWorkToward'
 
 /*
  * What a project is, and how its tasks work: its name and the ink its mark
@@ -40,8 +40,9 @@ export const text = {
     title: 'Work toward',
     /** In a project of several repositories, one row each. */
     titleIn: (repository: string) => `Work toward in ${repository}`,
-    line: 'New tasks start from this branch, and their pull requests go into it. Tasks already made keep theirs.',
-    defaultBranch: (branch: string) => `${branch} (default)`,
+    line: 'New tasks start from this branch, and their pull requests go into it. Run runs it too.',
+    /** Under its list: what changing it leaves as it is. */
+    keeps: 'Tasks already made keep theirs. A name it doesn’t have is made from the default branch.',
   },
   conflicts: {
     title: 'Resolve merge conflicts automatically',
@@ -100,9 +101,6 @@ interface Shown {
 /** A repository as Work toward reads it: its default branch, the branch kept, and the remote's branches. */
 type Toward = Pick<ProjectRepository, 'id' | 'name' | 'defaultBranch' | 'workToward' | 'branches'>
 
-/** A list of branches longer than this opens with a field to find one by name. */
-const SEARCHED = 8
-
 /** The branch a repository's new tasks work toward: a row each, its default first in the list. */
 function WorkToward({ projectId, repositories }: { projectId: string; repositories: ReadonlyArray<Toward> }) {
   const toward = useWorkToward(projectId)
@@ -120,16 +118,15 @@ function WorkToward({ projectId, repositories }: { projectId: string; repositori
         }
       >
         {() => (
-          <Select<string>
+          <BranchSelect
             label={title}
             variant="filled"
             value={shown}
+            branches={branches}
+            defaultBranch={fallback}
             onChange={(next) => toward.change(repository.id, next === fallback ? null : next)}
-            options={(branches.includes(shown) ? branches : [...branches, shown]).map((branch) => ({
-              value: branch,
-              label: branch === fallback ? text.workToward.defaultBranch(branch) : branch,
-            }))}
-            searchable={branches.length > SEARCHED}
+            onCreate={(name) => toward.create(repository.id, name)}
+            note={text.workToward.keeps}
             className={s.branch}
           />
         )}

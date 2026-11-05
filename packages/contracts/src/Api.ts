@@ -1879,6 +1879,8 @@ export const TaskCard = Schema.Struct({
       defaultBranch: Schema.optional(Schema.String),
       /** Its repository's branches on the remote, its default first, for the person to point it at another until it starts. */
       branches: Schema.optional(Schema.Array(Schema.String)),
+      /** That repository, by its id: where a branch named in the list that it doesn't have is made (CreateBranch). */
+      repositoryId: Schema.optional(Schema.String),
     }),
   ),
   /** The issue it came from, and the connection Althar reads it and moves it through, where it has one. */

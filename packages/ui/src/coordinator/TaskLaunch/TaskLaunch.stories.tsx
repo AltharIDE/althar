@@ -10,7 +10,7 @@ import { States } from '../../storybook/States'
 import { threadDecorator } from '../../storybook/ThreadFrame'
 import { Turn } from '../../thread/Turn/Turn'
 import { You } from '../../thread/You/You'
-import { WorksIn } from '../../foundations/vocabulary'
+import { TaskEnd, WorksIn } from '../../foundations/vocabulary'
 import { TaskLaunch, type LaunchPick, type LaunchStep } from './TaskLaunch'
 
 /** The consumer's picker for one agent of a step: the composer's own, bordered. */
@@ -257,29 +257,35 @@ export const LocalTaken: Story = {
 
 const BRANCHES = ['main', 'release/0.8.0', 'release/0.7.x', 'feature/onboarding'] as const
 
-/** What it works toward (ADR-093), beside where it works: the remote's branches, changeable until it starts. */
+/** What it works toward (ADR-093), after how it ends: the remote's branches, changeable until it starts, and a new one made. */
 function Toward({ toward: start, ...rest }: Partial<Parameters<typeof TaskLaunch>[0]>) {
   const [toward, setToward] = useState(start)
+  const [branches, setBranches] = useState<readonly string[]>(BRANCHES)
   const [worksIn, setWorksIn] = useState(WorksIn.Worktree)
   return (
     <Launch
       worksIn={worksIn}
       onWorksInChange={setWorksIn}
       defaultBranch="main"
-      branches={BRANCHES}
+      branches={branches}
       {...(toward === undefined ? {} : { toward })}
       onTowardChange={setToward}
+      onCreateBranch={(name) => {
+        setBranches((was) => [...was, name])
+        setToward(name)
+      }}
       {...rest}
     />
   )
 }
 
-/** Toward the default branch, as most tasks are: the picker says main. */
+/** Toward the default branch, as most tasks are: Open a draft PR into main. */
 export const TowardMain: Story = {
   render: () => <Toward />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByRole('combobox', { name: 'Works toward' })).toHaveTextContent('main (default)')
+    await expect(c.getByRole('button', { name: 'Works toward: main' })).toBeInTheDocument()
+    await expect(c.getByText('into')).toBeInTheDocument()
   },
 }
 
@@ -288,7 +294,37 @@ export const TowardARelease: Story = {
   render: () => <Toward toward="release/0.8.0" />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByRole('combobox', { name: 'Works toward' })).toHaveTextContent('release/0.8.0')
+    await expect(c.getByRole('button', { name: 'Works toward: release/0.8.0' })).toBeInTheDocument()
+  },
+}
+export const TowardAReleaseDark: Story = { ...TowardARelease, globals: { theme: 'dark' } }
+
+/** Pushed only, no pull request: the branch it works toward, all the same. */
+export const TowardPushOnly: Story = {
+  render: () => <Toward toward="release/0.8.0" defaultEnd={TaskEnd.PushOnly} />,
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('toward')).toBeInTheDocument()
+  },
+}
+
+/** A branch the remote doesn't have, named in the list and made from main, for this task. */
+export const TowardANewBranch: Story = {
+  render: () => <Toward />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const page = within(document.body)
+    await userEvent.click(c.getByRole('button', { name: 'Works toward: main' }))
+    await userEvent.type(await page.findByRole('combobox', { name: 'Find or name a branch' }), 'hotfix/0.8.1')
+    await userEvent.click(page.getByRole('option', { name: 'Create hotfix/0.8.1 from main' }))
+    await expect(await c.findByRole('button', { name: 'Works toward: hotfix/0.8.1' })).toBeInTheDocument()
+  },
+}
+
+/** With no row for how it ends, the branch has a row of its own. */
+export const TowardWithNoEnd: Story = {
+  render: () => <Toward toward="release/0.8.0" hideEnd />,
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('button', { name: 'Works toward: release/0.8.0' })).toBeInTheDocument()
   },
 }
 

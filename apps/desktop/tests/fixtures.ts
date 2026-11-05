@@ -1161,6 +1161,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     addRepositories: vi.fn(async () => {}),
     leaveOutRepository: vi.fn(async () => {}),
     setRepository: vi.fn(async () => {}),
+    createBranch: vi.fn(async ({ branch }: { readonly branch: string }) => branch.trim()),
     getProjectRules: vi.fn(async (projectId: string) => ({ ...projectRules, projectId })),
     getProjectNotes: vi.fn(async (): Promise<ReadonlyArray<ProjectNote>> => []),
     dropProjectNote: vi.fn(async () => {}),

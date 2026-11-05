@@ -106,13 +106,6 @@ export const Reviewing: Story = {
 }
 /** Its lead implementing, the review to come; how long in all is the step's own, so it is said once. */
 export const Implementing: Story = { args: { state: 'Implementing', steps: planAt(0), took: '52m', elapsed: '52m' } }
-/** Working toward a release branch rather than the default (ADR-093): the branch, quietly, after where it stands. */
-export const TowardARelease: Story = {
-  args: { state: 'Implementing', steps: planAt(0), took: '52m', elapsed: '52m', toward: 'release/0.8.0' },
-  play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText('Toward release/0.8.0')).toBeInTheDocument()
-  },
-}
 /** Reviewed and settled; accepting it is yours. Nothing runs, so where it stands has nothing more to say: no bars, no card. */
 export const ReadyForYou: Story = {
   args: { status: TaskStatus.Yours, state: 'Ready to accept', steps: planAt(1, true), face: 'out' },

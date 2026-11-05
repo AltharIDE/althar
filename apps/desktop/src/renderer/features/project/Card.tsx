@@ -65,6 +65,8 @@ export interface CardActions {
     /** The branch it works toward (ADR-093); null for the default branch. */
     toward?: string | null,
   ) => void
+  /** Makes a branch its list doesn't have, in the plan's repository, and points the plan at it (ADR-093). */
+  readonly onCreateBranch: (planId: string, steps: ReadonlyArray<PlanStep>, end: End | null, repositoryId: string, branch: string) => void
   readonly onOpen: (threadId: string) => void
   /** Stops a command a task's lead left running, from the task that waits for the place it keeps. */
   readonly onStopBackground: (threadId: string, id: string) => void
@@ -201,6 +203,15 @@ function PlanCard({
             branches: plan.branches,
             toward: toward ?? plan.defaultBranch,
             onTowardChange: (next: string) => change(steps, end, undefined, next === plan.defaultBranch ? null : next),
+            ...(plan.repositoryId == null
+              ? {}
+              : {
+                  onCreateBranch: (branch: string) => {
+                    // Shown at once, as a branch picked is; the plan moves to it once the remote has it.
+                    setShown({ from: plan, steps, end, worksIn, toward: branch })
+                    actions.onCreateBranch(plan.id, steps, end, plan.repositoryId ?? '', branch)
+                  },
+                }),
           })}
       onStart={() => actions.onStart(plan.id)}
     />

@@ -417,6 +417,8 @@ export interface Client {
     /** The branch new tasks work toward there (ADR-093); null for its default branch. */
     readonly workToward?: string | null
   }) => Promise<void>
+  /** Makes a branch on the code host from the default branch, where a repository's tasks start (ADR-093); answers its name as made. */
+  readonly createBranch: (input: { readonly projectId: string; readonly repositoryId: string; readonly branch: string }) => Promise<string>
   readonly getProjectRules: (projectId: string) => Promise<ProjectRulesView>
   /** A project's notes, oldest first: the decisions its coordinator keeps. */
   readonly getProjectNotes: (projectId: string) => Promise<ReadonlyArray<ProjectNote>>
@@ -794,6 +796,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     addRepositories: (projectId, grant) => command((commandId) => api.AddRepositories({ commandId, projectId, grant })),
     leaveOutRepository: (projectId, repositoryId) => command((commandId) => api.LeaveOutRepository({ commandId, projectId, repositoryId })),
     setRepository: (input) => command((commandId) => api.SetRepository({ commandId, ...input })),
+    createBranch: (input) => command((commandId) => api.CreateBranch({ commandId, ...input })),
     getProjectRules: (projectId) => settle(api.GetProjectRules({ projectId })),
     getProjectNotes: (projectId) => settle(api.GetProjectNotes({ projectId })),
     dropProjectNote: (projectId, noteId) => command((commandId) => api.DropProjectNote({ commandId, projectId, noteId })),
