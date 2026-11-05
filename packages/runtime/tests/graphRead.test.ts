@@ -127,6 +127,32 @@ describe('a task’s graph', () => {
       assert.strictEqual(rounds[0]?.steps[0]?.model, was)
       assert.isTrue(after.steps.every((step) => step.state === 'done'))
 
+      // Every item keeps the model its own turn ran on, so the thread can name the round it belongs to after a switch.
+      const snapshot = yield* Effect.orDie((yield* Queries).thread(card.threadId))
+      const roundOpener = snapshot.items.find((item) => item.id === after.said?.itemId) ?? assert.fail('no opening turn')
+      // What an agent's turns wrote: a report is its step's, and says its model on its own.
+      const leading = snapshot.items.filter((item) => ['agent_message', 'agent_thought', 'tool_call', 'plan'].includes(item.kind))
+      const modelsOf = (items: typeof leading) => [...new Set(items.map((item) => item.model ?? null))]
+      assert.deepStrictEqual(modelsOf(leading.filter((item) => item.sequence < roundOpener.sequence)), [was])
+      assert.deepStrictEqual(modelsOf(leading.filter((item) => item.sequence > roundOpener.sequence)), [other])
+      // Its reports say the model too, for a step that reported without a turn the thread groups.
+      const reportModels = (items: typeof snapshot.items, step: string) =>
+        items.flatMap((item) => (item.kind === 'step_result' && item.content.step === step ? [item.content.model ?? null] : []))
+      assert.deepStrictEqual(
+        reportModels(
+          snapshot.items.filter((item) => item.sequence < roundOpener.sequence),
+          'implement',
+        ),
+        [was],
+      )
+      assert.deepStrictEqual(
+        reportModels(
+          snapshot.items.filter((item) => item.sequence > roundOpener.sequence),
+          'implement',
+        ),
+        [other],
+      )
+
       // The turn that opened the follow-up, given before its step was there, is that step's.
       const [opener] = yield* (yield* SqlClient.SqlClient)<{ model: string | null; marked: number }>`
           SELECT model, node_attempt_id IS NOT NULL AS marked FROM turn_deliveries
