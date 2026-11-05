@@ -1,7 +1,7 @@
 import { act, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { type ComponentProps, useState } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { TaskThread } from '../src/renderer/features/task/TaskThread'
 import { type HandedFile, NOTHING_HANDED } from '../src/renderer/shared/handed'
@@ -64,6 +64,10 @@ const shown = (first: Props) => {
 }
 
 describe('a task’s thread', () => {
+  beforeEach(() => {
+    drawn.length = 0
+  })
+
   it('draws a finished round again only when what it shows changed, and opens its files as the person now does', async () => {
     const before = vi.fn()
     const now = vi.fn()
