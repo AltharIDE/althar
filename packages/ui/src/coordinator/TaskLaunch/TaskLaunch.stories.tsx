@@ -40,10 +40,7 @@ function usePicker(
         /* a step with several agents can go down to one; its reason was about the pair, so it goes too */
         onRemove={
           step.agents.length > 1
-            ? () =>
-                setSteps(
-                  steps.map((st) => (st.id === step.id ? { ...st, agents: st.agents.filter((_, i) => i !== k), why: undefined } : st)),
-                )
+            ? () => setSteps(steps.map((st) => (st.id === step.id ? { ...st, agents: st.agents.filter((_, i) => i !== k) } : st)))
             : undefined
         }
       />
@@ -145,7 +142,7 @@ const reviewStarted = fn()
 export const AReview: Story = {
   render: () => (
     <Launch
-      plan={[{ id: 'implement', label: 'Review', agents: [OPUS], why: 'Strong at reading a large change' }]}
+      plan={[{ id: 'implement', label: 'Review', agents: [OPUS] }]}
       task="review-1199-send-back"
       title="Review #1199: Send back won’t restart a dead lead session"
       from={undefined}
@@ -362,8 +359,8 @@ export const AgentOut: Story = {
 
 /** A lead and one reviewer from another maker: the plan the coordinator proposes most days. */
 const PLAN_ASKED: LaunchStep[] = [
-  { id: 'impl', label: 'Implement', agents: [OPUS], why: 'recommended · writes to money records', fixed: 'the lead' },
-  { id: 'review', label: 'Review', agents: [CODEX], why: 'a different maker from the lead', optional: true },
+  { id: 'impl', label: 'Implement', agents: [OPUS], fixed: 'the lead' },
+  { id: 'review', label: 'Review', agents: [CODEX], optional: true },
 ]
 
 /** Where a plan comes from: what you asked, the coordinator's answer, and the plan under it. */

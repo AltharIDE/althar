@@ -47,11 +47,11 @@ describe('a plan about to start', () => {
     expect(onStart).toHaveBeenCalledTimes(1)
   })
 
-  it('says a different end is for this task only', async () => {
+  it('starts with a different end, the row being just its select', async () => {
     const onStart = launch({ defaultHeld: true })
     await userEvent.click(screen.getByRole('button', { name: /Open a draft PR/ }))
     await userEvent.click(await screen.findByRole('menuitemradio', { name: /Push the branch only/ }))
-    expect(screen.getByText('this task only')).toBeInTheDocument()
+    expect(screen.queryByText('this task only')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Start' }))
     expect(onStart).toHaveBeenCalledWith(PLAN_432, TaskEnd.PushOnly)
   })
