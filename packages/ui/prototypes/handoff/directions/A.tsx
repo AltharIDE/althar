@@ -1,43 +1,61 @@
-// Scrappy: A, the thread tidied. In order, as it happened: the lead's turns in two lines, each review one card with the settle
-// that answers it, only the latest open. Then where it stands now, pinned last and open, with what waits on the person under it;
-// the thread opens with it at the top.
-import { useRef } from 'react'
+// Scrappy: A, calmer. The thread as it is, in order, each part quieter: the lead's turns say what came of them in a line or
+// two, each review is one faint line, Althar's restarts sit on its hover. The lead's latest turn says what the task has
+// built, whole; what needs the person ends the thread, and the thread opens on that turn.
+import { Fragment, type RefObject, useRef } from 'react'
 
-import { TaskThread as Built, type TaskThreadProps } from '../../../../../apps/desktop/src/renderer/features/task/TaskThread'
-import { CycleCard, HandoffCard, NeedsYou, ShortTurn, StandingFacts } from '../parts'
-import s from './directions.module.css'
+import { TaskThread as Thread, type TaskThreadProps } from '../../../../../apps/desktop/src/renderer/features/task/TaskThread'
+import { Asks, ReviewLine, Turn } from '../calm'
 import { useProto } from '../state'
+import type { Story } from '../story'
 import { useOpenAt, useStory, useWho } from './shared'
 
-/** The history, in order: shared with B's conversation, which has no handoff pinned. */
-export function History({ pinned = false, ...props }: TaskThreadProps & { pinned?: boolean }) {
-  const { story } = useStory(props.rounds, props.threadId)
-  const who = useWho(props.session)
-  // The latest review open: the one that left the person something, else the last, unless it found nothing.
-  const open =
-    story.cycles.findLast((cycle) => cycle.rows.some((row) => row.yours)) ?? story.cycles.findLast((cycle) => cycle.rows.length > 0)
+/** The thread, quieter, from a beat on: shared with E, whose history it is, where the handoff stands above it instead. */
+export function Quieter({
+  props,
+  story,
+  who,
+  from = 0,
+  handoffHere = true,
+  holderRef,
+}: {
+  props: TaskThreadProps
+  story: Story
+  who: ReturnType<typeof useWho>
+  from?: number
+  handoffHere?: boolean
+  holderRef?: RefObject<HTMLElement | null>
+}) {
+  const asked = useProto().opening.review
+  const holder = story.handoff?.from?.id
+  const turn = (one: Parameters<typeof Turn>[0]['turn']) => (
+    <Turn
+      key={one.id}
+      turn={one}
+      lead={who.lead}
+      threadId={props.threadId}
+      handoff={handoffHere && one.id === holder ? story.handoff : null}
+      {...(one.id === holder && holderRef !== undefined ? { ref: holderRef } : {})}
+    />
+  )
   return (
     <>
-      {story.beats.map((beat) =>
+      {story.beats.slice(from).map((beat) =>
         beat.kind === 'lead' ? (
-          // The turn the pinned handoff comes from leaves its words to it, so nothing is said twice.
-          <ShortTurn
-            key={beat.id}
-            turn={pinned && story.handoff?.from?.id === beat.id ? { ...beat, outcome: null, said: false } : beat}
-            model={who.lead}
-            threadId={props.threadId}
-          />
+          turn(beat)
         ) : beat.kind === 'review' ? (
-          <CycleCard
-            key={beat.id}
-            cycle={beat}
-            reviewer={who.of(beat.agentId)}
-            lead={who.lead}
-            threadId={props.threadId}
-            defaultOpen={beat === open}
-          />
+          <Fragment key={beat.id}>
+            <ReviewLine
+              cycle={beat}
+              reviewer={who.of(beat.agentId)}
+              lead={who.lead}
+              threadId={props.threadId}
+              withSettle={false}
+              defaultOpen={asked === beat.round}
+            />
+            {beat.settle !== null && turn(beat.settle)}
+          </Fragment>
         ) : (
-          <Built key={beat.id} {...props} rounds={[beat.block]} />
+          <Thread key={beat.id} {...props} rounds={[beat.block]} />
         ),
       )}
     </>
@@ -45,28 +63,14 @@ export function History({ pinned = false, ...props }: TaskThreadProps & { pinned
 }
 
 export function ThreadA(props: TaskThreadProps) {
-  const { story, snapshot } = useStory(props.rounds, props.threadId)
+  const { story } = useStory(props.rounds, props.threadId)
   const who = useWho(props.session)
-  const pinned = useRef<HTMLDivElement>(null)
-  useOpenAt(pinned)
+  const holder = useRef<HTMLElement>(null)
+  useOpenAt(holder)
   return (
     <>
-      <History {...props} pinned />
-      {story.handoff !== null && (
-        <div ref={pinned} className={s.pinned}>
-          <NeedsYou
-            calls={story.yours.calls}
-            findings={story.yours.findings}
-            project={snapshot?.project.name ?? ''}
-            {...(props.onPassOn === undefined ? {} : { onPassOn: props.onPassOn })}
-          />
-          <HandoffCard
-            handoff={story.handoff}
-            lead={who.lead}
-            facts={<StandingFacts change={story.change} cycles={story.cycles} ledger={story.ledger} />}
-          />
-        </div>
-      )}
+      <Quieter props={props} story={story} who={who} holderRef={holder} />
+      <Asks calls={story.yours.calls} findings={story.yours.findings} onPassOn={props.onPassOn} />
     </>
   )
 }

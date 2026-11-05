@@ -1,175 +1,98 @@
-// Scrappy: C, one ask, one answer. The reviews are part of the lead's work, not turns of the conversation: what the person asked
-// gets one answer from its lead, whose work is a rail of what it went through (its work, each review with its settle, publishing),
-// each stop opening in place, and whose words are what the task has built, as it stands. What waits on the person follows it.
-import { type ReactNode, type RefObject, useRef, useState } from 'react'
+// Scrappy: C, one answer. Each thing the person said gets one answer from the lead, as the thread's Round draws one: its
+// reply or what it set out to do, then all the work it took, reviews and all, in one faint line that opens in place, then
+// what came of it. The latest answer's words are what the task has built, and what needs the person closes it.
+import { Fragment, useRef } from 'react'
 
-import { Issue, Markdown, Model, Round as KitRound } from '../../../src/index'
-import { TaskThread as Built, type TaskThreadProps } from '../../../../../apps/desktop/src/renderer/features/task/TaskThread'
-import { productBrand, productName } from '../../../../../apps/desktop/src/renderer/shared/products'
-import { ChecksChip, CycleBody, HandoffBody, NeedsYou, Noise, Rail, StandingFacts, TurnLines, words } from '../parts'
-import type { Beat, Cycle, LeadTurn, Stop } from '../story'
-import s from './directions.module.css'
+import { Markdown, Round as KitRound, WorkLine } from '../../../src/index'
+import { TaskThread as Thread, type TaskThreadProps } from '../../../../../apps/desktop/src/renderer/features/task/TaskThread'
+import type { Round } from '../../../../../apps/desktop/src/renderer/shared/rounds'
+import { Asks, HandoffWords, ReviewLine, tookAll, TurnLine } from '../calm'
 import { useProto } from '../state'
-import { useOpenAt, useStory, useWho } from './shared'
+import type { Cycle, LeadTurn } from '../story'
+import { exchangesOf, useOpenAt, useStory, useWho } from './shared'
 
-/** The thread in exchanges: what the person asked (or the coordinator passed on), and everything until the next ask. */
-const exchangesOf = (beats: ReadonlyArray<Beat>) => {
-  const out: Array<{ ask: Beat | null; rest: Beat[] }> = [{ ask: null, rest: [] }]
-  for (const beat of beats) {
-    if (beat.kind === 'block' && (beat.block.kind === 'you' || beat.block.kind === 'relayed')) out.push({ ask: beat, rest: [] })
-    else out.at(-1)?.rest.push(beat)
-  }
-  return out.filter((one) => one.ask !== null || one.rest.length > 0)
+const times = (n: number) => (n === 1 ? 'once' : n === 2 ? 'twice' : `${n} times`)
+
+/** What its reviews came to, after how long it worked: reviewed twice, 2 of 3 findings fixed, 1 for you. */
+const reviewedSum = (cycles: ReadonlyArray<Cycle>) => {
+  if (cycles.length === 0) return undefined
+  const rows = cycles.flatMap((cycle) => cycle.rows)
+  if (rows.length === 0) return `reviewed ${times(cycles.length)}, nothing to change`
+  const fixed = rows.filter((row) => row.state === 'fixed').length
+  const yours = rows.filter((row) => row.yours).length
+  return `reviewed ${times(cycles.length)}, ${fixed} of ${rows.length} findings fixed${yours > 0 ? `, ${yours} for you` : ''}`
 }
 
 export function ThreadC(props: TaskThreadProps) {
-  const { story, snapshot } = useStory(props.rounds, props.threadId)
+  const { story } = useStory(props.rounds, props.threadId)
   const who = useWho(props.session)
-  const top = useRef<HTMLDivElement>(null)
-  useOpenAt(top)
+  const asked = useProto().opening.review
+  const latest = useRef<HTMLElement>(null)
+  useOpenAt(latest)
   const exchanges = exchangesOf(story.beats)
   return (
     <>
       {exchanges.map((exchange, at) => {
-        const latest = at === exchanges.length - 1
-        const turns = exchange.rest.filter((beat): beat is LeadTurn => beat.kind === 'lead')
-        const cycles = exchange.rest.filter((beat): beat is Cycle => beat.kind === 'review')
-        const others = exchange.rest.filter((beat) => beat.kind === 'block')
-        const ids = new Set([...turns.map((one) => one.id), ...cycles.map((one) => one.id)])
-        const stops = story.rail.filter((stop) => ids.has(stop.id) || (latest && stop.id === 'publish'))
-        const ask =
-          exchange.ask === null ? null : (
-            <Built
-              key={exchange.ask.id}
-              {...props}
-              rounds={[exchange.ask.kind === 'block' ? exchange.ask.block : (exchange.ask as never)]}
-            />
-          )
+        const last = at === exchanges.length - 1
+        const turns = exchange.beats.filter((beat): beat is LeadTurn => beat.kind === 'lead')
+        const cycles = exchange.beats.filter((beat): beat is Cycle => beat.kind === 'review')
+        const others = exchange.beats.filter((beat) => beat.kind === 'block')
+        // A reply to the person opens the answer in its own words; a step's turn, with what it set out to do.
+        const reply = turns[0]?.step === null ? turns[0] : undefined
+        const work = turns.filter((turn) => turn !== reply)
+        const rounds: Round[] = [
+          ...work.map((turn) => turn.round),
+          ...cycles.flatMap((cycle) => [...cycle.work, ...(cycle.settle === null ? [] : [cycle.settle.round])]),
+        ]
+        const reported = [...work, ...cycles.flatMap((cycle) => (cycle.settle === null ? [] : [cycle.settle]))].filter(
+          (turn) => turn.round.report !== null,
+        )
+        const said = reported.at(-1)?.round.report?.result.summary ?? null
+        const lastAt = [...turns, ...cycles].at(-1)
+        const summary = reviewedSum(cycles)
         return (
-          <div key={exchange.ask?.id ?? `start-${at}`} className={s.exchange}>
-            {ask}
+          <Fragment key={exchange.ask?.id ?? `start-${at}`}>
+            {exchange.ask !== null && <Thread {...props} rounds={[exchange.ask.block]} />}
             {(turns.length > 0 || cycles.length > 0) && (
-              <div>
-                <Answer
-                  topRef={latest ? top : undefined}
-                  props={props}
-                  turns={turns}
-                  cycles={cycles}
-                  stops={stops}
-                  lead={who.lead}
-                  of={who.of}
-                  words={
-                    latest && story.handoff !== null ? (
-                      <HandoffBody
-                        handoff={story.handoff}
-                        facts={<StandingFacts change={story.change} cycles={story.cycles} ledger={story.ledger} />}
-                      />
-                    ) : undefined
-                  }
-                  change={latest ? story.change : null}
-                  publishing={latest && snapshot?.task.step === 'publish'}
-                  needs={
-                    latest ? (
-                      <NeedsYou
-                        calls={story.yours.calls}
-                        findings={story.yours.findings}
-                        {...(props.onPassOn === undefined ? {} : { onPassOn: props.onPassOn })}
-                      />
-                    ) : null
-                  }
-                />
-              </div>
+              <KitRound
+                model={who.lead}
+                at={lastAt === undefined ? '' : lastAt.kind === 'review' ? lastAt.at : lastAt.round.at}
+                {...(last ? { ref: latest } : {})}
+              >
+                {reply !== undefined && reply.round.result !== null && <Markdown source={reply.round.result.text} />}
+                {reply === undefined && work[0]?.round.ack != null && <Markdown source={work[0].round.ack.text} />}
+                {rounds.length > 0 && (
+                  <WorkLine took={tookAll(rounds)} {...(summary === undefined ? {} : { summary })}>
+                    {exchange.beats.map((beat) =>
+                      beat.kind === 'lead' ? (
+                        beat === reply ? null : (
+                          <TurnLine key={beat.id} turn={beat} lead={who.lead} threadId={props.threadId} />
+                        )
+                      ) : beat.kind === 'review' ? (
+                        <ReviewLine
+                          key={beat.id}
+                          cycle={beat}
+                          reviewer={who.of(beat.agentId)}
+                          lead={who.lead}
+                          threadId={props.threadId}
+                          defaultOpen={asked === beat.round}
+                        />
+                      ) : null,
+                    )}
+                  </WorkLine>
+                )}
+                {last && story.handoff !== null ? (
+                  <HandoffWords handoff={story.handoff} />
+                ) : (
+                  said !== null && reported.length > 0 && <Markdown source={said} />
+                )}
+                {last && <Asks calls={story.yours.calls} findings={story.yours.findings} onPassOn={props.onPassOn} bare />}
+              </KitRound>
             )}
-            {others.map((beat) => (beat.kind === 'block' ? <Built key={beat.id} {...props} rounds={[beat.block]} /> : null))}
-          </div>
+            {others.map((beat) => (beat.kind === 'block' ? <Thread key={beat.id} {...props} rounds={[beat.block]} /> : null))}
+          </Fragment>
         )
       })}
     </>
-  )
-}
-
-/** The lead's one answer to an ask: what it set out to do, the rail of what it went through, and what it has built. */
-function Answer({
-  props,
-  turns,
-  cycles,
-  stops,
-  lead,
-  of,
-  words: said,
-  change,
-  publishing,
-  needs,
-  topRef,
-}: {
-  props: TaskThreadProps
-  turns: ReadonlyArray<LeadTurn>
-  cycles: ReadonlyArray<Cycle>
-  stops: ReadonlyArray<Stop>
-  lead: ReturnType<typeof useWho>['lead']
-  of: ReturnType<typeof useWho>['of']
-  words: ReactNode | undefined
-  change: ReturnType<typeof useStory>['story']['change']
-  publishing: boolean
-  needs: ReactNode
-  /** Where the thread opens: the rail of the latest answer, so what needs the person and what it built are in view. */
-  topRef: RefObject<HTMLDivElement | null> | undefined
-}) {
-  const asked = useProto().opening.review
-  const [open, setOpen] = useState<string | null>(cycles.find((one) => one.round === asked)?.id ?? null)
-  const first = turns[0]
-  const last = turns.at(-1)
-  const turn = turns.find((one) => one.id === open)
-  const cycle = cycles.find((one) => one.id === open)
-  const report = last?.round.report ?? null
-  return (
-    <KitRound model={lead} at={first?.round.at ?? ''} data-item={first?.id} ref={stops.length > 1 ? undefined : topRef}>
-      {/* A reply to what the person asked opens the answer in its own words; a step's work, with what it set out to do. */}
-      {first !== undefined && first.step === null && first.outcome !== null ? (
-        <Markdown source={first.outcome} />
-      ) : (
-        first?.intent != null && <p className={s.intent}>{first.intent}</p>
-      )}
-      {stops.length > 1 && (
-        <div className={s.railBox} ref={topRef}>
-          <Rail stops={stops} open={open} onOpen={setOpen} />
-          {turn !== undefined && (
-            <div className={s.stopOpen}>
-              <TurnLines turn={{ ...turn, intent: turn === first ? null : turn.intent }} threadId={props.threadId} quiet />
-            </div>
-          )}
-          {cycle !== undefined && (
-            <div className={s.stopOpen}>
-              <div className={s.stopHead}>
-                <Model model={of(cycle.agentId)} />
-                <span className={s.quiet}>{cycle.at}</span>
-                <Noise noise={cycle.noise} />
-              </div>
-              <CycleBody cycle={cycle} lead={lead} threadId={props.threadId} />
-            </div>
-          )}
-          {open === 'publish' && change !== null && (
-            <div className={s.stopOpen}>
-              {publishing && <p className={s.quiet}>{words.publishWaits}</p>}
-              <Issue
-                mark={productBrand(change.product)}
-                source={productName(change.product)}
-                id={`${change.short} ${change.prefix}${change.number}`}
-                title={change.title}
-                href={change.url}
-                meta={[change.repository, change.draft ? words.draft : change.state].join(' · ')}
-              />
-            </div>
-          )}
-        </div>
-      )}
-      {needs}
-      {said ?? (
-        <>
-          {last?.outcome != null && <p className={s.outcome}>{last.outcome}</p>}
-          {report !== null && <ChecksChip id={report.id} evidence={report.result.evidence} unverified={report.result.unverified ?? []} />}
-        </>
-      )}
-    </KitRound>
   )
 }

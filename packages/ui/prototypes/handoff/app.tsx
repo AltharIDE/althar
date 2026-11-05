@@ -127,7 +127,7 @@ const go = (direction: Direction) => {
   window.history.replaceState(window.history.state, '', `${window.location.pathname}?${params.toString()}${window.location.hash}`)
 }
 
-/** Keys 1 to 4 pick a direction, [ and ] step through them; never while typing, or inside a menu, dialog or list. */
+/** Keys 1 to 6 pick a take, [ and ] step through them; never while typing, or inside a menu, dialog or list. */
 const onKey = (event: KeyboardEvent) => {
   if (event.metaKey || event.ctrlKey || event.altKey) return
   const target = event.target instanceof Element ? event.target : null
@@ -138,7 +138,7 @@ const onKey = (event: KeyboardEvent) => {
       ? DIRECTIONS[(at + 1) % DIRECTIONS.length]
       : event.key === '['
         ? DIRECTIONS[(at - 1 + DIRECTIONS.length) % DIRECTIONS.length]
-        : /^[1-4]$/.test(event.key)
+        : /^[1-6]$/.test(event.key)
           ? DIRECTIONS[Number(event.key) - 1]
           : undefined
   if (picked === undefined) return
@@ -154,7 +154,7 @@ function Switcher() {
   return (
     <div className={s.strip}>
       <Segmented<Direction>
-        label="Direction"
+        label="Take"
         value={p.direction}
         onChange={go}
         options={DIRECTIONS.map((one, at) => ({
@@ -168,7 +168,7 @@ function Switcher() {
       <LinkButton onClick={() => open('short')}>Short task</LinkButton>
       <LinkButton onClick={() => window.location.assign('#/projects/p1?room=both')}>Board</LinkButton>
       <span className={s.grow} />
-      <span>1–4 or [ ] switch</span>
+      <span>1–6 or [ ] switch</span>
     </div>
   )
 }
@@ -185,10 +185,10 @@ function App({ router }: { router: ReturnType<typeof makeRouter> }) {
   )
 }
 
-/** Opens the app on the direction and task the URL says, or C on the long task. */
+/** Opens the app on the take and task the URL says, or B on the long task. */
 export const boot = () => {
   const params = new URLSearchParams(window.location.search)
-  const shown = DIRECTIONS.find((one) => one.value.toLowerCase() === params.get('d')?.toLowerCase())?.value ?? 'C'
+  const shown = DIRECTIONS.find((one) => one.value.toLowerCase() === params.get('d')?.toLowerCase())?.value ?? 'B'
   const review = /^r(\d+)$/.exec(params.get('open') ?? '')?.[1]
   proto.set({
     direction: shown,
@@ -196,7 +196,6 @@ export const boot = () => {
     opening: {
       review: review === undefined ? null : Number(review) - 1,
       top: params.get('scroll') === 'top',
-      talk: params.get('face') === 'talk',
     },
   })
   // Opened at the thread's start, for a screenshot of it scrolled back: once the thread has followed its end.

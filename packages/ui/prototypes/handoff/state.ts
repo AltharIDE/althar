@@ -1,20 +1,34 @@
-// Scrappy: what every direction's page shares: the direction shown, and what the person answered on the page.
+// Scrappy: what every take's page shares: the direction shown, and what the person answered on the page.
 import { useSyncExternalStore } from 'react'
 
-export type Direction = 'A' | 'B' | 'C' | 'Today'
+export type Direction = 'A' | 'B' | 'C' | 'D' | 'E' | 'Today'
 
-/** The directions in the switcher's order, each with its key: 1 to 4. */
+/** The takes in the switcher's order, each with its key: 1 to 6. Each keeps the chat; they differ in where the handoff stands. */
 export const DIRECTIONS: ReadonlyArray<{ readonly value: Direction; readonly name: string; readonly about: string }> = [
-  { value: 'A', name: 'Thread, tidied', about: 'In order, each review one card, the handoff last and open, the thread opened on it' },
+  {
+    value: 'A',
+    name: 'Calmer',
+    about: 'The thread as it is, each part quieter; the lead’s latest turn says what it built, and what needs you ends it',
+  },
   {
     value: 'B',
-    name: 'Where it stands',
-    about: 'A page first: what needs you, what it built, every finding, the pull request; the conversation behind it',
+    name: 'Last word',
+    about: 'All the work is faint lines; the lead’s handoff is the last message, what needs you its closing lines',
   },
   {
     value: 'C',
-    name: 'One ask, one answer',
-    about: 'The reviews are the lead’s work: one answer to what you asked, its rounds a rail, the handoff its words',
+    name: 'One answer',
+    about: 'One answer to each thing you asked: its work and reviews one line, its words what it built',
+  },
+  {
+    value: 'D',
+    name: 'Replies',
+    about: 'The reviews hang under the message they reviewed; what needs you waits over the composer',
+  },
+  {
+    value: 'E',
+    name: 'Answer first',
+    about: 'Your ask, then where it stands and what needs you; how it got here under them',
   },
   { value: 'Today', name: 'Today', about: 'The thread as built, on the same tasks' },
 ]
@@ -25,11 +39,11 @@ export interface Proto {
   readonly bare: boolean
   /** What the person decided on the page, by what was asked: a finding of theirs, or a call. */
   readonly answers: Readonly<Record<string, string>>
-  /** What the page opens on, for screenshots (?open=r2&scroll=top&face=talk): a review opened, the thread at its start, B's conversation. */
-  readonly opening: { readonly review: number | null; readonly top: boolean; readonly talk: boolean }
+  /** What the page opens on, for screenshots (?open=r2&scroll=top): a review opened, the thread at its start. */
+  readonly opening: { readonly review: number | null; readonly top: boolean }
 }
 
-let state: Proto = { direction: 'C', bare: false, answers: {}, opening: { review: null, top: false, talk: false } }
+let state: Proto = { direction: 'B', bare: false, answers: {}, opening: { review: null, top: false } }
 const listeners = new Set<() => void>()
 
 export const proto = {

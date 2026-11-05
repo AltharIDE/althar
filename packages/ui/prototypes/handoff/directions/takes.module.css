@@ -1,0 +1,25 @@
+/* Scrappy: what a take lays out its own way. */
+
+/* D: each review, under the report it answers */
+.reply {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0 8px;
+}
+.reply + .reply {
+  border-top: 1px solid var(--line);
+}
+.replyHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--t-2);
+}
+.replyAt {
+  font-weight: 400;
+  color: var(--t-3);
+}

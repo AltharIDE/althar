@@ -1,0 +1,247 @@
+/* Scrappy: the calm parts, in the kit's tokens. One faint line for anything that is work; words in the thread's own prose. */
+
+/* A line inside an opened line: the kit turns every chevron under an open line, so this one stays closed while it is. */
+.line > [data-state='closed'][data-state] > button > span > svg {
+  transform: none;
+}
+
+/* ——— A review's sheet: its findings, the reviewer's notes, the lead's answer ——— */
+
+.sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 0;
+}
+.findings {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -6px;
+}
+.finding {
+  display: block;
+}
+.findingRow {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  min-height: 28px;
+  padding: 5px 6px;
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--t-1);
+  text-align: left;
+  transition: background-color var(--fast) var(--ease);
+}
+.findingRow:hover {
+  background: var(--n-3);
+}
+.findingTitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.findingRow[data-state-of='fixed'] .findingTitle {
+  color: var(--t-2);
+}
+.blocking {
+  margin-right: 8px;
+  font-weight: 550;
+  color: var(--t-1);
+}
+.findingAt {
+  flex: none;
+  max-width: 34%;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t-4);
+}
+.findingOutcome {
+  flex: none;
+  width: 92px;
+  font-size: 12px;
+  color: var(--t-3);
+  text-align: right;
+}
+.findingRow[data-state-of='yours'] .findingOutcome {
+  color: var(--signal);
+}
+.findingBody {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 6px 10px;
+  --prose-size: 12.5px;
+  --t-1: var(--t-2);
+}
+.reason {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  color: var(--t-3);
+}
+.reason > svg {
+  flex: none;
+  margin-top: 5px;
+}
+.commit {
+  margin-left: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--t-3);
+}
+
+.notes {
+  display: block;
+}
+.notesRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 22px;
+  font-size: 12px;
+  color: var(--t-4);
+  text-align: left;
+  transition: color var(--fast) var(--ease);
+}
+.notesRow:hover,
+.notes[data-state='open'] .notesRow {
+  color: var(--t-3);
+}
+.notesChevron {
+  flex: none;
+  transition: transform var(--fold) var(--ease-fold);
+}
+.notes[data-state='open'] .notesChevron {
+  transform: rotate(90deg);
+}
+.notesName {
+  flex: none;
+  color: var(--t-3);
+}
+.notesLine {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notes[data-state='open'] .notesLine {
+  visibility: hidden;
+}
+.notesBody {
+  padding: 4px 0 6px 18px;
+  --prose-size: 12.5px;
+  --t-1: var(--t-2);
+}
+
+/* ——— What waits on the person: a short quiet list, the answers on each line ——— */
+
+.asks {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 16px;
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+/* inside a message: no card, a rule above it */
+.bare {
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  border-top: 1px solid var(--line);
+}
+/* over the composer: it stays in view as the thread scrolls, clear of what floats on the composer's edge; a line each */
+.docked {
+  position: sticky;
+  bottom: 44px;
+  z-index: 2;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-pop);
+}
+.docked .askWhy,
+.docked .askCode {
+  display: none;
+}
+.docked .ask {
+  align-items: center;
+  padding: 8px 0;
+}
+.docked .dot {
+  margin-top: 0;
+}
+.ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 12px;
+  padding: 12px 0;
+}
+.ask + .ask {
+  border-top: 1px solid var(--line);
+}
+.dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--signal);
+}
+.ask[data-said] .dot {
+  background: var(--n-5);
+}
+.askText {
+  display: flex;
+  flex: 1 1 280px;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.askTitle {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 550;
+  line-height: 1.4;
+  color: var(--t-1);
+}
+.ask[data-said] .askTitle {
+  font-weight: 450;
+  color: var(--t-2);
+}
+.askWhy {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+.askCode {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.6;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t-3);
+}
+.askActions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.askSaid {
+  font-size: 12px;
+  color: var(--t-3);
+}
