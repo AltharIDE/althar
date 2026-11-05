@@ -794,11 +794,11 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
   const writerOf = (repository: Repository, user: User | null, association: string | undefined) =>
     Effect.gen(function* () {
       if (memberOf(association)) return true
-      if (user === null) return false
+      if (user === null || personOf(user).bot) return false
       const key = `${repo(repository)}/${user.login}`.toLowerCase()
       const now = yield* Clock.currentTimeMillis
       const kept = permissions.get(key)
-      if (kept !== undefined && now - kept.at < 60_000) return kept.member
+      if (kept !== undefined && now - kept.at < 300_000) return kept.member
       const member = yield* http
         .json(
           Schema.Struct({ permission: Schema.String }),
@@ -808,18 +808,17 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         .pipe(
           Effect.map((answer) => ['admin', 'maintain', 'write'].includes(answer.permission)),
           Effect.catchTag('ConnectorFailed', (error) => {
-            if (error.status !== 403 && error.status !== 404) return Effect.fail(error)
             return Effect.gen(function* () {
-              if (!warnedPermissions) {
+              if (error.status !== 404 && !warnedPermissions) {
                 warnedPermissions = true
-                yield* Effect.logWarning('GitHub repository permissions are unreadable; falling back to author association')
+                yield* Effect.logWarning('GitHub repository permission lookup failed; falling back to author association')
               }
               return false
             })
           }),
         )
       // Discard expired entries as new authors arrive, keeping the cache bounded by recent activity.
-      for (const [oldKey, value] of permissions) if (now - value.at >= 60_000) permissions.delete(oldKey)
+      for (const [oldKey, value] of permissions) if (now - value.at >= 300_000) permissions.delete(oldKey)
       permissions.set(key, { at: now, member })
       return member
     })
