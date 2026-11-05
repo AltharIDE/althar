@@ -375,11 +375,62 @@ describe('the always-ask list', () => {
     assert.strictEqual(decide(request({ kind: 'other', title: 'Terminal', rawInput: { cmd: 'npm publish' } }), context).verdict, 'ask')
   })
 
-  it('reads a sandbox’s network request by its host, never as a release script', () => {
-    const host = (name: string) => decide(request({ kind: 'other', title: name, rawInput: { host: name } }), context)
-    // Where Electron downloads its build from.
-    assert.notInclude(JSON.stringify(host('release-assets.githubusercontent.com')), 'Deploying or publishing')
-    assert.notInclude(JSON.stringify(host('deploy.example.com')), 'Deploying or publishing')
+  it('allows a sandbox’s network request by its host under the first rules, never as a release script', () => {
+    const host = (name: string, overrides: Partial<RuleContext> = {}) =>
+      decide(request({ kind: 'other', title: name, rawInput: { host: name } }), { ...context, ...overrides })
+    // Where Electron downloads its build from, with the host as a sandbox may spell it.
+    for (const name of [
+      'release-assets.githubusercontent.com',
+      'release-assets.example.com:443',
+      'release_assets.example.com',
+      'deploy.example.com',
+      'publish.localhost:3000',
+    ])
+      assert.deepStrictEqual(host(name), { verdict: 'allow' }, name)
+    // None of the command kinds is what a host does, even one the project never allows.
+    assert.strictEqual(host('release-assets.githubusercontent.com', { project: { ...MVP_RULES, never: ['deploy'] } }).verdict, 'allow')
+    assert.deepStrictEqual(host('release-assets.githubusercontent.com', { project: { ...MVP_RULES, mode: 'allow', never: ['deploy'] } }), {
+      verdict: 'allow',
+    })
+    // Nor is it what the coordinator is asked to judge as a deploy.
+    assert.strictEqual(
+      host('release-assets.githubusercontent.com', {
+        project: { ...MVP_RULES, mode: 'coordinator', ask: ['deploy'], never: [], allow: [], commands: [] },
+      }).verdict,
+      'judge',
+    )
+  })
+
+  it('reads a tool that only takes a host argument by its title, not as a network request', () => {
+    const host = 'release-assets.githubusercontent.com'
+    // The title is what the tool does; a deploy still asks, though the input names a host.
+    assert.deepStrictEqual(decide(request({ kind: 'other', title: 'deploy_to_host', rawInput: { host } }), context), {
+      verdict: 'ask',
+      reason: 'Deploying or publishing always asks.',
+      held: true,
+    })
+    assert.strictEqual(decide(request({ kind: 'other', title: 'npm publish', rawInput: { host } }), context).verdict, 'ask')
+    // And an always-allow keeps the tool, not the host.
+    assert.strictEqual(alwaysOf(request({ kind: 'other', title: 'ssh_exec', rawInput: { host } }), context).command, 'ssh_exec')
+  })
+
+  it('still refuses a host the person’s rules never allow', () => {
+    const name = 'release-assets.githubusercontent.com'
+    const project: ProjectRuleSet = { ...MVP_RULES, commands: [{ pattern: name, decision: 'never' }] }
+    assert.deepStrictEqual(decide(request({ kind: 'other', title: name, rawInput: { host: name } }), { ...context, project }), {
+      verdict: 'deny',
+      reason: `The project's rules never allow \`${name}\`.`,
+    })
+  })
+
+  it('still reads a real command that publishes or releases, even where it names a host', () => {
+    assert.deepStrictEqual(run('npm publish'), {
+      verdict: 'ask',
+      reason: 'Tearing down, deleting or publishing always asks: once it is gone or published, it can’t be taken back.',
+      held: true,
+    })
+    assert.strictEqual(run('gh release create v1').verdict, 'deny')
+    assert.strictEqual(run('npm publish --registry https://release-assets.githubusercontent.com').verdict, 'ask')
   })
 })
 
