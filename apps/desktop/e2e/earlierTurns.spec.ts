@@ -22,6 +22,9 @@ import { launch, openFirstProject, shown, startTask, still, toConversation } fro
 /** Exchanges between the person and an agent: two items each, so four pages of them. */
 const TURNS = 200
 
+/** The items a thread reads at once, as the renderer asks for them (`PAGE` in @althar/contracts). */
+const PAGE = 100
+
 const hex = () => randomUUID().replaceAll('-', '')
 
 /** Replies of a few lengths, so pages differ in height as real ones do. */
@@ -33,7 +36,7 @@ const seed = (home: string) => {
   try {
     // The person's own message to the coordinator, whose author and state the seeded ones take.
     const said = store.prepare('SELECT author_actor_id AS author, disposition, state FROM user_inputs LIMIT 1').get()!
-    const threads = store.prepare(`SELECT id, project_id FROM threads WHERE kind IN ('coordinator', 'task')`).all()
+    const threads = store.prepare(`SELECT id, project_id, kind FROM threads WHERE kind IN ('coordinator', 'task')`).all()
     const input = store.prepare(
       'INSERT INTO user_inputs (id, project_id, thread_id, sequence, command_id, disposition, body, author_actor_id, state, accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     )
@@ -41,7 +44,8 @@ const seed = (home: string) => {
       'INSERT INTO thread_items (id, project_id, thread_id, sequence, kind, user_input_id, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     )
     const at = new Date().toISOString()
-    for (const { id, project_id } of threads) {
+    const items: Record<string, number> = {}
+    for (const { id, project_id, kind } of threads) {
       const [thread, project] = [String(id), String(project_id)]
       let next = Number(store.prepare('SELECT coalesce(max(sequence), 0) AS n FROM thread_items WHERE thread_id = ?').get(thread)?.n)
       let asked = Number(store.prepare('SELECT coalesce(max(sequence), 0) AS n FROM user_inputs WHERE thread_id = ?').get(thread)?.n)
@@ -63,8 +67,10 @@ const seed = (home: string) => {
         item.run(`item_${hex()}`, project, thread, ++next, 'user_message', inputId, JSON.stringify({ text: body }), at)
         item.run(`item_${hex()}`, project, thread, ++next, 'agent_message', null, JSON.stringify({ text: reply(i) }), at)
       }
+      items[String(kind)] = Number(store.prepare('SELECT count(*) AS n FROM thread_items WHERE thread_id = ?').get(thread)?.n)
     }
-    return threads.length
+    // How many items each thread has, so how many pages it reads back to its beginning.
+    return items
   } finally {
     store.close()
   }
@@ -81,22 +87,17 @@ const scrollTo = (thread: Locator, top: number) =>
     return { id: item.dataset.item!, top: item.getBoundingClientRect().top }
   }, top)
 
-/** Scrolls back page by page to the start, saying how far the turn on show moved as each page came in, in px. */
-const backToTheStart = async (page: Page, thread: Locator) => {
+/**
+ * Scrolls back page by page to the start of a thread of `total` items, which opened on its latest page, saying how far
+ * the turn on show moved as each earlier page came in, in px.
+ */
+const backToTheStart = async (page: Page, thread: Locator, total: number) => {
   const moved: number[] = []
   const items = thread.locator('[data-item]')
-  for (;;) {
+  for (let earlier = Math.ceil(total / PAGE) - 1; earlier > 0; earlier--) {
     const had = await items.count()
     const before = await scrollTo(thread, 200)
-    // Nothing more coming in: the thread's beginning.
-    const more = await expect
-      .poll(() => items.count(), { timeout: 5_000 })
-      .toBeGreaterThan(had)
-      .then(
-        () => true,
-        () => false,
-      )
-    if (!more) break
+    await expect.poll(() => items.count()).toBeGreaterThan(had)
     await expect(thread.getByText('Loading…')).toHaveCount(0)
     await still(page)
     const after = await thread.locator(`[data-item="${before.id}"]`).evaluate((one) => one.getBoundingClientRect().top)
@@ -136,14 +137,14 @@ const sweep = (thread: Locator) =>
   )
 
 test('task and coordinator threads scroll back through 400 turns without the turn on show moving', async () => {
-  test.setTimeout(240_000)
   const home = mkdtempSync(join(tmpdir(), 'althar-history-'))
   let app = await launch(home)
   await openFirstProject(app.electronApp, app.page, repository(home))
   await startTask(app.page, 'History scrolling')
   await expect(shown(app.page, 'Ready', { exact: true }).first()).toBeVisible()
   await app.electronApp.close()
-  expect(seed(home)).toBe(2)
+  const items = seed(home)
+  expect(Object.keys(items).sort()).toEqual(['coordinator', 'task'])
   app = await launch(home)
   const { page } = app
   try {
@@ -152,7 +153,7 @@ test('task and coordinator threads scroll back through 400 turns without the tur
     await expect(coordinator.getByText(`History turn ${TURNS}`, { exact: true })).toBeVisible()
     await still(page)
     const coordinatorOpened = await coordinator.locator('[data-item]').count()
-    const coordinatorMoved = await backToTheStart(page, coordinator)
+    const coordinatorMoved = await backToTheStart(page, coordinator, items.coordinator!)
     await expect(coordinator.getByText('History scrolling [coordinator:plan-no-review] [lead:finish]')).toBeAttached()
     await scrollTo(coordinator, 0)
     await still(page)
@@ -167,7 +168,7 @@ test('task and coordinator threads scroll back through 400 turns without the tur
     await expect(task.getByText(`History turn ${TURNS}`, { exact: true })).toBeVisible()
     await still(page)
     const taskOpened = await task.locator('[data-item]').count()
-    const taskMoved = await backToTheStart(page, task)
+    const taskMoved = await backToTheStart(page, task, items.task!)
     await scrollTo(task, 0)
     await still(page)
     await page.screenshot({ path: 'test-results/history-task-start.png', scale: 'css' })
@@ -181,10 +182,11 @@ test('task and coordinator threads scroll back through 400 turns without the tur
     // Opening a thread reads only its latest page (100 items, here 50 exchanges), however long it is.
     expect(coordinatorOpened).toBeLessThanOrEqual(51)
     expect(taskOpened).toBeLessThanOrEqual(51)
-    // Each thread came back through several pages, to its first turn.
+    // Each thread came back through several pages, to its first turn, and nothing is left loading.
     expect(coordinatorMoved.length).toBeGreaterThanOrEqual(2)
     expect(taskMoved.length).toBeGreaterThanOrEqual(2)
     await expect(task.getByText('Question 1', { exact: true })).toBeAttached()
+    await expect(page.getByText('Loading…')).toHaveCount(0)
     for (const moved of [...coordinatorMoved, ...taskMoved]) expect(moved).toBeLessThan(2)
   } finally {
     await app.electronApp.close()
