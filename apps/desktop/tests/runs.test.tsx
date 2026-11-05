@@ -366,6 +366,29 @@ describe('where Run runs with no task, by name', () => {
     expect(await screen.findByRole('button', { name: 'release/0.9.0' })).toBeTruthy()
   })
 
+  it('takes a branch a run goes on, picked beside Run, as Work toward too, and opens there so the run can be stopped', async () => {
+    const kept = [{ ...repositories[0]!, defaultBranch: 'main', workToward: null as string | null, branches: ['main', 'release/0.8.0'] }]
+    const setRepository = vi.fn(async (input: { repositoryId: string; workToward?: string | null }) => {
+      kept[0] = { ...kept[0]!, workToward: input.workToward ?? null }
+    })
+    const getRunnableRefs = vi.fn(async () => [
+      { repository: 'meridian-api', pullRequests: [], branches: ['main', 'release/0.8.0'], note: null, more: false },
+    ])
+    await shown([launch({ branch: 'release/0.8.0', where: 'release/0.8.0' })], {
+      setRepository,
+      getRunnableRefs,
+      getRepositories: vi.fn(async () => kept),
+    })
+    await userEvent.click(await screen.findByRole('button', { name: 'main' }))
+    const picker = within(await screen.findByRole('dialog', { name: 'Where Run runs' }))
+    await userEvent.click(await picker.findByRole('option', { name: /^release\/0\.8\.0/ }))
+    await waitFor(() =>
+      expect(setRepository).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: kept[0]!.id, workToward: 'release/0.8.0' }),
+    )
+    // Where the run goes, so it can be stopped there.
+    expect((await listed()).getByRole('button', { name: 'Stop bun run dev' })).toBeTruthy()
+  })
+
   it('says, while a run goes on the old branch, that it stays there until stopped and the next run takes the new one', async () => {
     await shown([launch({ where: 'main' })], {
       getRepositories: vi.fn(async () => [{ ...repositories[0]!, defaultBranch: 'main', workToward: 'release/0.8.0' }]),

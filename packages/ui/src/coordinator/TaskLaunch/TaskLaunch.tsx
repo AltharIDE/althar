@@ -308,8 +308,10 @@ export function TaskLaunch({
   })()
   const share = Math.min(1, left / wait)
 
-  // A choice of branch where the remote has more than one, or where it already goes elsewhere.
-  const picks = onTowardChange !== undefined && (branches.length > 1 || (toward !== undefined && toward !== defaultBranch))
+  // A choice of branch where the remote has more than one, where one can be made, or where it already goes elsewhere.
+  const picks =
+    onTowardChange !== undefined &&
+    (branches.length > 1 || (onCreateBranch !== undefined && branches.length > 0) || (toward !== undefined && toward !== defaultBranch))
   // The branch, beside how the work ends, looking as that choice does: Open a draft PR into release/0.8.0.
   const branchPick = picks && (
     <BranchSelect

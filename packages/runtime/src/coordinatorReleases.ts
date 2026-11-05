@@ -646,11 +646,18 @@ const createBranch = (projectId: string, input: unknown) =>
         // Only where there is no such branch, checked by the host as it takes the push (an empty lease): one made there
         // meanwhile, even behind this commit, stays as it is, and this push is refused.
         yield* pushTo(clone, target, branch, commit, '').pipe(
-          Effect.mapError((error) =>
-            refused(
-              /stale info|rejected|already exists/i.test(error.stderr)
-                ? `${where} has a branch ${branch} now, made while Althar was making it. Althar never moves a branch that is there: tell the person.`
-                : error.stderr || error.message,
+          Effect.catch((error) =>
+            // Made there meanwhile, where the host has it now; otherwise a hook or the host's rules refused it.
+            branchOn(clone, target, branch).pipe(
+              Effect.flatMap((there) =>
+                Effect.fail(
+                  refused(
+                    typeof there === 'string'
+                      ? `${where} has a branch ${branch} now, made while Althar was making it. Althar never moves a branch that is there: tell the person.`
+                      : `${where} didn't take ${branch}: ${error.stderr.trim() || error.message}`,
+                  ),
+                ),
+              ),
             ),
           ),
         )

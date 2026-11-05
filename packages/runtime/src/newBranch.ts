@@ -3,7 +3,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Connections } from './Connections'
 import { BranchRefused, NotFound } from './errors'
-import { branchOn, commitsOf, fetchBranch, fetchInto, git, gitOutcome, namedRemotes, PUSHED, pushTo } from './git'
+import { branchOn, fetchBranch, fetchInto, git, gitOutcome, namedRemotes, PUSHED, pushTo } from './git'
 import { Instance } from './Instance'
 import { startOf } from './Projects'
 
@@ -57,24 +57,25 @@ export const makeBranch = (input: { readonly projectId: string; readonly reposit
     if (there === undefined) return yield* refused(`Althar couldn’t reach ${where} to read its branches. Try again.`)
     const held = `refs/althar/start/${branch}`
     // From the default branch as the host has it now; or the one there already, which the person gets.
-    yield* fetchInto(clone, target, there === null ? base : branch, held).pipe(Effect.ignore)
-    const [start = null] = yield* commitsOf(clone, [held])
+    const start = yield* fetchInto(clone, target, there === null ? base : branch, held)
     if (start === null) return yield* refused(`Althar couldn’t read ${there === null ? base : branch} on ${where}. Try again.`)
     let at = there ?? start
     if (there === null) {
-      const pushed = yield* pushTo(clone, target, branch, start, '').pipe(
-        Effect.as(true),
-        Effect.catch((error) =>
-          // One made there meanwhile is left as it is, and is the person's now; anything else is said as git said it.
-          /stale info|rejected|already exists/i.test(error.stderr)
-            ? Effect.succeed(false)
-            : Effect.fail(refused(`${where} didn’t take the new branch: ${error.stderr.trim() || error.message}`)),
-        ),
+      const failed = yield* pushTo(clone, target, branch, start, '').pipe(
+        Effect.as(null),
+        Effect.catch((error) => Effect.succeed(error.stderr.trim() || error.message)),
       )
-      if (pushed) yield* Effect.ignore(git(clone, 'update-ref', '-d', `${PUSHED}${branch}`))
+      if (failed === null) yield* Effect.ignore(git(clone, 'update-ref', '-d', `${PUSHED}${branch}`))
       else {
-        yield* fetchInto(clone, target, branch, held).pipe(Effect.ignore)
-        at = (yield* commitsOf(clone, [held]))[0] ?? at
+        // Refused: by one made there meanwhile, left as it is and the person's now, where the host has it; otherwise, as a
+        // hook or the host's rules refusing it, said as git said it.
+        yield* Effect.ignore(git(clone, 'update-ref', '-d', held))
+        const made = yield* fetchInto(clone, target, branch, held)
+        if (made === null) {
+          yield* Effect.ignore(git(clone, 'update-ref', '-d', held))
+          return yield* refused(`${where} didn’t take the new branch: ${failed}`)
+        }
+        at = made
       }
     }
     yield* Effect.ignore(git(clone, 'update-ref', '-d', held))

@@ -528,11 +528,10 @@ export function Runs({
   const pickOrMove = (next: RunPlace) => {
     const choice = next.choice?.kind === 'branch' ? next.choice : undefined
     const repository = choice === undefined ? undefined : repositoryNamed(choice.repository)
-    const live = launches.some((launch) => launch.ended === null && runsAt(launch, next))
-    if (choice === undefined || repository === undefined || live) return pick(next)
+    if (choice === undefined || repository === undefined) return pick(next)
     const fallback = repository.defaultBranch ?? MAIN.label
     toward.change(repository.id, choice.branch === fallback ? null : choice.branch)
-    pick(MAIN)
+    pick(launches.some((launch) => launch.ended === null && runsAt(launch, next)) ? next : MAIN)
   }
   const create = (branch: string, name?: string) => {
     const repository = repositoryNamed(name)

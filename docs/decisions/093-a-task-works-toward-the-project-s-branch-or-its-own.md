@@ -40,7 +40,11 @@
     makes it on the code host, on the remote tasks start from, from that
     remote's default branch, pushed by Althar with its sign-in and never
     forced, as `create_branch`; one there already is left as it is and is
-    the one the person gets. The person's own click is their word.
+    the one the person gets, but a push the host refuses for any other
+    reason, a hook or a protection rule, is refused as git said it. The
+    person's own click is their word. Made from a plan card, the plan is
+    held first, so its countdown can't start it toward the old branch while
+    the host makes the new one; it then waits for the person's Start.
   - **A single task can be pointed elsewhere.** `draft_task`, `propose_plan`
     and `start_task` take `toward`; the plan card's last row says it after
     how the work ends ("Open a draft PR into release/0.8.0"), a list of the

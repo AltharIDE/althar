@@ -258,9 +258,9 @@ export const LocalTaken: Story = {
 const BRANCHES = ['main', 'release/0.8.0', 'release/0.7.x', 'feature/onboarding'] as const
 
 /** What it works toward (ADR-093), after how it ends: the remote's branches, changeable until it starts, and a new one made. */
-function Toward({ toward: start, ...rest }: Partial<Parameters<typeof TaskLaunch>[0]>) {
+function Toward({ toward: start, branches: known = BRANCHES, ...rest }: Partial<Parameters<typeof TaskLaunch>[0]>) {
   const [toward, setToward] = useState(start)
-  const [branches, setBranches] = useState<readonly string[]>(BRANCHES)
+  const [branches, setBranches] = useState<readonly string[]>(known)
   const [worksIn, setWorksIn] = useState(WorksIn.Worktree)
   return (
     <Launch
@@ -317,6 +317,19 @@ export const TowardANewBranch: Story = {
     await userEvent.type(await page.findByRole('combobox', { name: 'Find or name a branch' }), 'hotfix/0.8.1')
     await userEvent.click(page.getByRole('option', { name: 'Create hotfix/0.8.1 from main' }))
     await expect(await c.findByRole('button', { name: 'Works toward: hotfix/0.8.1' })).toBeInTheDocument()
+  },
+}
+
+/** A remote with only its default branch: still a list, to make the first release branch from it. */
+export const TowardTheOnlyBranch: Story = {
+  render: () => <Toward branches={['main']} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const page = within(document.body)
+    await userEvent.click(c.getByRole('button', { name: 'Works toward: main' }))
+    await userEvent.type(await page.findByRole('combobox', { name: 'Find or name a branch' }), 'release/0.8.0')
+    await userEvent.click(page.getByRole('option', { name: 'Create release/0.8.0 from main' }))
+    await expect(await c.findByRole('button', { name: 'Works toward: release/0.8.0' })).toBeInTheDocument()
   },
 }
 

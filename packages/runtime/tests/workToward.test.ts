@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -554,6 +554,18 @@ describe('a branch the person makes from a branch list', () => {
       assert.strictEqual(yield* makeBranch({ projectId, repositoryId, branch: 'release/0.7.1' }), 'release/0.7.1')
       assert.strictEqual(git(bare, 'rev-parse', 'release/0.7.1'), elsewhere)
       assert.strictEqual(git(working, 'rev-parse', 'refs/remotes/origin/release/0.7.1'), elsewhere)
+
+      // One the host's rules refuse is refused, as git said it, and the lists never have it.
+      writeFileSync(join(bare, 'hooks', 'pre-receive'), '#!/bin/sh\necho "release branches are protected" >&2\nexit 1\n', {
+        mode: 0o755,
+      })
+      const declined = yield* Effect.flip(makeBranch({ projectId, repositoryId, branch: 'release/1.0.0' }))
+      assert.strictEqual(declined._tag, 'BranchRefused')
+      assert.include('message' in declined ? declined.message : '', 'release branches are protected')
+      assert.strictEqual(spawnSync('git', ['rev-parse', '--verify', '-q', 'refs/remotes/origin/release/1.0.0'], { cwd: working }).status, 1)
+      assert.strictEqual(spawnSync('git', ['rev-parse', '--verify', '-q', 'refs/althar/start/release/1.0.0'], { cwd: working }).status, 1)
+      assert.notInclude((yield* (yield* Projects).repositories(projectId))[0]?.branches ?? [], 'release/1.0.0')
+      rmSync(join(bare, 'hooks', 'pre-receive'))
 
       // A name git doesn't take is refused in words for the person, and nothing is pushed.
       const refused = yield* Effect.flip(makeBranch({ projectId, repositoryId, branch: 'my branch' }))

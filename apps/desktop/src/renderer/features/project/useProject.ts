@@ -93,7 +93,7 @@ export interface ProjectModel {
     worksIn?: WorksIn,
     toward?: string | null,
   ) => Promise<void>
-  /** Makes a branch the remote doesn't have, from the default branch, then points the plan at it (ADR-093). */
+  /** Holds the plan, makes a branch the remote doesn't have from the default branch, then points the plan at it (ADR-093). */
   readonly changePlanToNewBranch: (
     planId: string,
     steps: ReadonlyArray<PlanStep>,
@@ -424,6 +424,9 @@ export const useProject = (projectId: string): ProjectModel => {
       ),
     changePlanToNewBranch: (planId, steps, end, repositoryId, branch) =>
       act(async () => {
+        // Held first, so its countdown can't start it toward the old branch while the host makes the new one; it then
+        // waits for the person's Start, pointed at it, or, where the host refused it, as it was, saying why.
+        await client.holdPlan(planId)
         const made = await client.createBranch({ projectId, repositoryId, branch })
         await client.changePlan(planId, steps, end, undefined, made)
       }),
