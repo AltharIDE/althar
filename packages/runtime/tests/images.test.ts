@@ -189,6 +189,60 @@ describe('images sent with a message', () => {
           ),
       )
     }
+
+    it.live(`keeps an earlier queued batch ahead of a later interruption for the ${role}`, () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const setup = yield* connected()
+          const { client, sql } = setup
+          const { project, task } = yield* taskWithLead(setup)
+          const threadId = role === 'lead' ? task.threadId : (yield* client.GetCoordinator({ projectId: project.id })).threadId
+          const snapshot = Effect.gen(function* () {
+            return role === 'lead' ? yield* client.GetThread({ threadId }) : yield* client.GetCoordinator({ projectId: project.id })
+          })
+          if (role === 'coordinator') {
+            yield* client.Send({ commandId: commandId(), threadId, body: 'hello', disposition: 'after_current' })
+            yield* until(snapshot, (thread) => thread.session !== null && !thread.session.turnRunning && said(thread.items).length > 0)
+          }
+          yield* client.Send({ commandId: commandId(), threadId, body: scenarios.slow, disposition: 'after_current' })
+          yield* until(snapshot, (thread) => said(thread.items).includes('Starting'))
+
+          const bodies = ['Read the docs.', 'Then the tests.'] as const
+          yield* client.Send({ commandId: commandId(), threadId, body: bodies[0], disposition: 'after_current' })
+          // Separate the batches by seconds, well beyond the quiet interval, while the agent keeps working.
+          yield* Effect.sleep('2 seconds')
+          const waiting = yield* snapshot
+          assert.isTrue(waiting.session?.turnRunning)
+          assert.isFalse(said(waiting.items).some((text) => text.includes(bodies[0])))
+          const queued = yield* sql<{ state: string; deliveryId: string | null }>`
+            SELECT i.state, di.delivery_id FROM user_inputs i
+            LEFT JOIN turn_delivery_inputs di ON di.user_input_id = i.id
+            WHERE i.thread_id = ${threadId} AND i.body = ${bodies[0]}`
+          assert.deepStrictEqual(queued, [{ state: 'queued', deliveryId: null }])
+
+          yield* client.Send({ commandId: commandId(), threadId, body: bodies[1], disposition: 'interrupt_and_continue' })
+          const expected = `The person interrupted your last turn to say:\n\n${bodies.join('\n\n')}\n\nTake it into account, and carry on with the task.`
+          const thread = yield* until(snapshot, (value) => said(value.items).some((text) => text.includes(expected)))
+          assert.deepStrictEqual(
+            messages(thread.items).map((item) => item.content.text),
+            [...(role === 'coordinator' ? ['hello'] : []), scenarios.slow, ...bodies],
+          )
+          const delivered = yield* sql<{ body: string; deliveryId: string; position: number; prompt: string }>`
+            SELECT i.body, di.delivery_id, di.position, d.prompt FROM user_inputs i
+            JOIN turn_delivery_inputs di ON di.user_input_id = i.id JOIN turn_deliveries d ON d.id = di.delivery_id
+            WHERE i.thread_id = ${threadId} AND i.body IN ${sql.in(bodies)} ORDER BY di.position`
+          assert.deepStrictEqual(
+            delivered.map((row) => [row.body, row.position, row.prompt]),
+            bodies.map((body, index) => [body, index + 1, expected]),
+          )
+          assert.strictEqual(new Set(delivered.map((row) => row.deliveryId)).size, 1)
+          const [interrupted] = yield* sql<{ state: string }>`SELECT d.state FROM turn_deliveries d
+            JOIN turn_delivery_inputs di ON di.delivery_id = d.id JOIN user_inputs i ON i.id = di.user_input_id
+            WHERE i.thread_id = ${threadId} AND i.body = ${scenarios.slow}`
+          assert.strictEqual(interrupted?.state, 'interrupted')
+        }),
+      ),
+    )
   }
 
   it.live('go to the agent as image blocks after its words, and show on the message, kept in the store by their digests', () =>
