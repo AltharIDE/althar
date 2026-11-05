@@ -177,7 +177,7 @@ test('asks the coordinator, which plans a task that is implemented, reviewed, se
     // The plan, with the time it starts on its own; held, it waits. Up next on the board beside says the same.
     const conversation = page.getByRole('region', { name: 'Conversation' })
     await expect(conversation.getByText(/^Starts in \d+s$/)).toBeVisible()
-    await expect(page.getByText('It knows the code.')).toBeVisible()
+    await expect(page.getByText('It knows the code.')).toHaveCount(0)
     await page.screenshot({ path: 'test-results/plan.png' })
     await page.getByRole('button', { name: 'Hold' }).click()
     await expect(conversation.getByText('Held. Starts when you say')).toBeVisible()

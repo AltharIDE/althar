@@ -288,9 +288,9 @@ describe('the Talk room', () => {
     expect(screen.getByText('The call has no retry. I planned a task.')).toBeTruthy()
     expect(screen.queryByText('checkout.ts')).toBeNull()
     expect(screen.getByRole('button', { name: /^Worked for/ })).toBeTruthy()
-    // A running task's card says where it is; a planned one shows its plan, and why the coordinator chose its lead.
+    // A running task's card says where it is; a planned one shows its plan, with no reason beside the lead.
     expect(screen.getByText('Reviewing')).toBeTruthy()
-    expect(screen.getByText('It knows the code.')).toBeTruthy()
+    expect(screen.queryByText('It knows the code.')).toBeNull()
     expect(screen.getByText(/^Starts in \d+s$/)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /Open task/ }))
     expect(onTask).toHaveBeenCalledWith('th2')
