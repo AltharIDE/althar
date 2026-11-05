@@ -638,6 +638,7 @@ describe('the API', () => {
               AddRepositories: () => Effect.die('unused'),
               LeaveOutRepository: () => Effect.die('unused'),
               SetRepository: () => Effect.die('unused'),
+              CreateBranch: () => Effect.die('unused'),
               SetProjectRules: () => Effect.die('unused'),
               SetProjectAccounts: () => Effect.void,
               RenameAccount: () => Effect.void,
