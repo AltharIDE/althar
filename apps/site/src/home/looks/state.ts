@@ -30,9 +30,7 @@ export type HeroLook = 'Today' | 'Night' | 'Chart' | 'Cloud' | 'Dither'
 export const HEROES: ReadonlyArray<{ value: HeroLook; name: string }> = [
   { value: 'Today', name: 'Today' },
   { value: 'Night', name: 'Orrery' },
-  { value: 'Chart', name: 'Descent' },
   { value: 'Cloud', name: 'Cloud' },
-  { value: 'Dither', name: 'Dither' },
 ]
 
 const heroOf = (word: string | null): HeroLook | undefined => HEROES.find((one) => one.value.toLowerCase() === word?.toLowerCase())?.value
