@@ -1,0 +1,179 @@
+/* Cloud, the calm first screen (Cloud.tsx): the screen is the window. The
+   night, lifting to an even cobalt sky; the cloud sea rising into the foot of
+   the frame, its bank nearer, both painted in the footer's two inks, and the
+   cloud's foot the page's paper; the heat over it all in ember while it
+   lasts. The words on the sky, the console resting over the cloud tops. */
+
+.hero {
+  --cobalt: #274eba;
+  --paper: #f4f2ec;
+  --ember: #ff6d2a;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  height: clamp(640px, 100svh, 1060px);
+  background: #04061a;
+  color: var(--paper);
+  container-type: size;
+}
+
+/* The whole first screen is dark or cobalt under the nav. */
+.under { top: 0; bottom: 0; }
+
+/* What the camera sees, moved as one: the sky, the cloud, the heat, the headline. */
+.camera { position: absolute; inset: 0; z-index: -1; transform-origin: 50% 40%; will-change: transform; }
+.hero[data-settled] .camera { will-change: auto; }
+
+.sky { position: absolute; inset: 0; background: var(--cobalt); }
+
+/* The cloud sea, its sky melting into the sky above it; and the bank in front of it, nearer. */
+.sea, .bank { position: absolute; left: 50%; display: block; height: auto; pointer-events: none; transform: translate3d(-50%, 0, 0); will-change: transform; }
+.sea { bottom: -14cqh; width: max(100cqw, 1200px); -webkit-mask: linear-gradient(transparent, #000 30%); mask: linear-gradient(transparent, #000 30%); }
+.bank { bottom: -2px; width: max(100cqw, 900px); }
+.hero[data-settled] :is(.sea, .bank) { will-change: auto; }
+
+/* The night over it all at first, lifting as the capsule comes down. */
+.night { position: absolute; inset: 0; background: #04061a; will-change: opacity; }
+
+/* The heat at the glass, in ember. */
+.heat {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: radial-gradient(ellipse 120% 80% at 50% 100%, rgba(255, 109, 42, 0.95), rgba(200, 50, 10, 0.55) 45%, rgba(120, 20, 0, 0) 85%);
+  mix-blend-mode: screen;
+  will-change: opacity;
+}
+
+/* The fire breaking: the glass too bright for a moment, and fading. */
+.flash {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: radial-gradient(ellipse 70% 70% at 50% 40%, #fffaf2, rgba(255, 250, 240, 0) 75%);
+  mix-blend-mode: screen;
+  will-change: opacity;
+}
+.hero[data-settled] :is(.night, .heat, .flash) { will-change: auto; visibility: hidden; }
+
+/* Up out of the dark as it sets off (--dark, from the script). */
+.curtain { position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; }
+@media (scripting: enabled) { .curtain { opacity: var(--dark, 1); } }
+
+/* The words wait for the capsule to set off; crawlers read them in the HTML all the same. */
+.words { display: contents; }
+@media (scripting: enabled) { .hero:not([data-begun]) :is(.words, .deck) { visibility: hidden; } }
+
+.h1 {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  margin: 0;
+  pointer-events: none;
+  font-family: 'Inter Display', var(--display);
+  text-align: center;
+}
+.line, .fast { position: absolute; left: 16px; right: 16px; }
+.line {
+  top: 17cqh;
+  font-size: clamp(28px, 6cqh, 52px);
+  font-weight: 500;
+  line-height: 1.08;
+  letter-spacing: -0.032em;
+  text-wrap: balance;
+}
+.fast {
+  top: calc(17cqh + clamp(28px, 6cqh, 52px) * 1.08);
+  font-size: min(27cqh, 19cqw);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.06em;
+  /* Forged in the heat: ember and glowing (--cool 0), cooling to paper (--cool 1). */
+  color: color-mix(in srgb, var(--paper) calc(var(--cool, 1) * 100%), var(--ember));
+  text-shadow:
+    0 0 calc((1 - var(--cool, 1)) * 12px) rgba(255, 170, 90, calc(1 - var(--cool, 1))),
+    0 0 calc((1 - var(--cool, 1)) * 40px) rgba(255, 90, 20, calc((1 - var(--cool, 1)) * 0.8));
+  /* Slammed in at its height, settling (--punch from 1 to 0). */
+  transform: scale(calc(1 + 0.06 * var(--punch, 0)));
+  transform-origin: 50% 60%;
+}
+.mask { display: inline-block; overflow: hidden; vertical-align: top; padding: 0.1em 0.08em 0.2em; margin: -0.1em -0.08em -0.2em; }
+.word { display: inline-block; transform-origin: 0 100%; }
+
+/* The flight deck's readouts, in the top corners. */
+.hud {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  display: flex;
+  justify-content: space-between;
+  left: max(24px, 50cqw - 560px);
+  right: max(24px, 50cqw - 560px);
+  top: calc(64px + 3cqh);
+}
+.hud span { display: grid; gap: 5px; }
+.hud span:last-child { justify-items: end; text-align: right; }
+.hud i, .label { font: 500 10px/1 var(--font-label); font-style: normal; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(244, 242, 236, 0.66); }
+.hud i { color: rgba(244, 242, 236, 0.8); }
+.hud b { min-width: 9ch; font: 500 15px/1 var(--mono); font-variant-numeric: tabular-nums; color: var(--paper); }
+
+/* The lead and the console under it, standing still in front of the camera, over the cloud tops. */
+.deck {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  bottom: 24cqh;
+  width: min(1160px, calc(100cqw - 32px));
+  transform: translateX(-50%);
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  text-align: center;
+}
+.lead { max-width: 44em; margin: 0; font-size: 15px; line-height: 1.55; letter-spacing: -0.006em; text-wrap: pretty; color: rgba(244, 242, 236, 0.9); }
+
+.console {
+  display: grid;
+  grid-auto-flow: column;
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 1px rgba(244, 242, 236, 0.28);
+}
+.cell { display: grid; align-content: center; justify-items: start; gap: 10px; padding: 14px 20px; }
+.cell + .cell { border-left: 1px solid rgba(244, 242, 236, 0.2); }
+.ways { justify-items: center; }
+.cell.ways > div { flex-wrap: nowrap; }
+.cell.ways > p { margin: 0; }
+.agents { display: flex; gap: 10px; margin: 0; padding: 0; list-style: none; color: var(--paper); }
+.agents li { display: grid; place-items: center; width: 18px; height: 18px; }
+.command { display: flex; align-items: center; gap: 4px; padding: 3px 3px 3px 12px; border-radius: 8px; box-shadow: inset 0 0 0 1px rgba(244, 242, 236, 0.26); }
+.command code { font: 13px/1 var(--mono); color: var(--paper); white-space: nowrap; }
+.command code span { color: rgba(244, 242, 236, 0.55); }
+.command button { width: 26px; padding: 0; justify-content: center; color: rgba(244, 242, 236, 0.7); }
+.command button:hover { color: #fff; }
+.command button span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+@media (max-width: 1200px) {
+  .console { grid-auto-flow: row; grid-template-columns: auto auto; }
+  .cell.ways { grid-column: 1 / -1; border-left: 0; border-top: 1px solid rgba(244, 242, 236, 0.2); }
+}
+
+/* At rest the cloud drifts, barely; stopped off screen, and still with reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .hero[data-settled] .sea { animation: drift 70s ease-in-out infinite alternate; }
+  .hero[data-settled] .bank { animation: drift 46s ease-in-out infinite alternate-reverse; }
+  .hero[data-away] :is(.sea, .bank) { animation-play-state: paused; }
+}
+@keyframes drift { to { translate: 1.2% 0; } }
+
+@media (max-width: 760px) {
+  .line { top: 15cqh; font-size: clamp(26px, 7.4vw, 32px); }
+  .fast { top: calc(15cqh + 80px); font-size: 30vw; }
+  .hud, .install { display: none; }
+  .deck { bottom: 18cqh; }
+  .console { width: 100%; max-width: 440px; grid-template-columns: 1fr; }
+  .cell { justify-items: center; }
+  .cell.ways { justify-items: stretch; padding: 12px; }
+  .ways > div { display: grid; gap: 8px; }
+  .ways > div a { justify-content: center; height: 48px; padding: 0 16px; border-radius: 10px; font-size: 15px; }
+}
