@@ -121,7 +121,7 @@ export const paged = <A, At>(
       all.push(...items)
       at = next
     }
-    if (at !== undefined) yield* Effect.logWarning(`A listing still had pages after ${limit}: the rest was left unread`)
+    if (at !== undefined) yield* Effect.logWarning(`A listing reached its ${limit}-page bound: more may have been left unread`)
     return all
   })
 
