@@ -46,6 +46,8 @@ export interface ModelChoiceProps {
   onChange: (choice: Choice) => void
   /** Take the pick off what it was for, like a step's review. */
   onRemove?: () => void
+  /** Open everyone on the work: the lead's pick of a plan that hasn't begun. */
+  onTeam?: () => void
   /** A model it doesn't offer, by key: for a step handed on, the one that failed it. */
   without?: string | null
   /** The project the pick is for, whose rule for moving work through an agent's accounts says which account each model's room is of. */
@@ -63,6 +65,7 @@ export function ModelChoice({
   value,
   onChange,
   onRemove,
+  onTeam,
   without = null,
   projectId,
   handover,
@@ -113,6 +116,7 @@ export function ModelChoice({
         {...(choiceOf(current.id).model === null ? {} : { onMakeDefault: (name: string) => makeDefault(current.id, name) })}
         onBrowse={() => setBrowsing(true)}
         {...(onRemove === undefined ? {} : { onRemove })}
+        {...(onTeam === undefined ? {} : { onTeam })}
         {...(confirm === undefined ? {} : { confirm })}
         room={room}
         asking={asking}

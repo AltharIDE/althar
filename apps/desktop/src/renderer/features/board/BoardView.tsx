@@ -46,6 +46,7 @@ import { doingWords, doneHere, factsOf, labelWords, nextWords, readyWordOf, stan
 import { afterSteps, isAutomatedStep, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
+import { teamChangeOf, TeamMenu } from '../team/Team'
 import s from './Board.module.css'
 import { type Held, heldOf, holding, type Lanes, type Waiting } from './lanes'
 import type { LineActions } from './useBoard'
@@ -169,6 +170,13 @@ export interface ClosingPullRequests {
 
 /** How many of what a task handed back show on its card: a row of pictures, or a few files. */
 const HANDED_SHOWN = 3
+
+/** Starting a plan up next, by its id, and opening a task's team, by the task's id, in the project whose usage the menu says. */
+export interface TeamActions {
+  readonly projectId: string
+  readonly start: (planId: string) => Promise<void>
+  readonly change: (taskId: string) => void
+}
 
 /** What the home's dock holds: a task, by its id, or a call. */
 export type DockTarget = { readonly kind: 'task'; readonly id: string } | { readonly kind: 'call'; readonly id: string }
@@ -686,6 +694,7 @@ export function BoardView({
   folds,
   onFoldsChange,
   onTalk,
+  team,
 }: {
   lanes: Lanes
   agents: ReadonlyArray<AgentStatus>
@@ -706,6 +715,12 @@ export function BoardView({
   onFoldsChange?: (folds: BoardFolds) => void
   /** Puts the person in the coordinator's composer, from Up next while the board has nothing on it; without it, Up next says how work gets here and offers nothing to press. */
   onTalk?: () => void
+  /**
+   * Starting a plan up next and changing who does it, from its row: a plan held or on its countdown says Start where its line
+   * was as the person points at it, and its row and a started one's whose first step waits have a menu to change the team.
+   * Without it, a row only opens its task.
+   */
+  team?: TeamActions
 }) {
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
   // Which of Settled's tabs shows, while something is kept for later.
@@ -716,6 +731,8 @@ export function BoardView({
     ...lanes.calls.map((call) => ({ at: call.createdAt, waiting: null, call })),
   ].toSorted((a, b) => a.at.localeCompare(b.at))
 
+  // The plans starting from their rows, by id, until the runtime has answered.
+  const [starting, setStarting] = useState<ReadonlySet<string>>(new Set())
   // While the person points at Up next or Running, or drags in the line, what would move between them stays where it was.
   const [held, setHeld] = useState<Held | null>(null)
   const shown = held === null ? lanes : holding(lanes, held)
@@ -767,9 +784,40 @@ export function BoardView({
         wait={index < continuing + free + paused || startsAt !== null ? Wait.Workers : Wait.You}
         reason={reason}
         onOpen={() => onOpen(work.threadId)}
+        {...teamOf(work)}
         text={{ task: unnamed }}
       />
     )
+  }
+  // A plan that hasn't begun starts, or changes who does it, from its row; one starting offers Start no more until it has.
+  const teamOf = (work: BoardTask) => {
+    const change = team === undefined ? null : teamChangeOf(work)
+    if (team === undefined || change === null || work.plan === null) return {}
+    const planId = work.plan.id
+    const start =
+      change === 'starts' && !starting.has(planId)
+        ? () => {
+            setStarting((was) => new Set(was).add(planId))
+            void team.start(planId).finally(() =>
+              setStarting((was) => {
+                const next = new Set(was)
+                next.delete(planId)
+                return next
+              }),
+            )
+          }
+        : undefined
+    return {
+      ...(start === undefined ? {} : { onStart: start }),
+      menu: (
+        <TeamMenu
+          projectId={team.projectId}
+          task={work}
+          {...(start === undefined ? {} : { onStart: start })}
+          onChange={() => team.change(work.taskId)}
+        />
+      ),
+    }
   }
 
   return (
