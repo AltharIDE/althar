@@ -26,7 +26,8 @@ import { fakeAgents, runtime, task, turns, until } from './support'
 
 const MINUTE = 60_000
 const turn = (from: number, to: number, tokens: number, ours = true): TurnSpan => ({ from, to, tokens, ours })
-const week = (at: number, usedPercent: number, resetsAt: string | null = 'Thu') => ({ at, usedPercent, resetsAt })
+const THU = '2026-11-09T11:00:00.000Z'
+const week = (at: number, usedPercent: number, resetsAt: string | null = THU) => ({ at, usedPercent, resetsAt })
 
 describe('a week’s share', () => {
   it('is the rise between two readings while only the task ran', () => {
@@ -49,7 +50,68 @@ describe('a week’s share', () => {
   })
 
   it('counts all a week says once it started again', () => {
-    assert.strictEqual(tookOf([week(0, 90, 'Mon'), week(10 * MINUTE, 2, 'next Mon')], [turn(0, 10 * MINUTE, 500)]), 2)
+    assert.strictEqual(tookOf([week(0, 90, THU), week(10 * MINUTE, 2, '2026-11-16T11:00:00.000Z')], [turn(0, 10 * MINUTE, 500)]), 2)
+  })
+
+  it('counts a week that started again mid-task as all the new one says, never more than the week now says', () => {
+    const readings = [
+      week(0, 80),
+      week(10 * MINUTE, 85),
+      week(20 * MINUTE, 3, '2026-11-16T11:00:00.000Z'),
+      week(30 * MINUTE, 6, '2026-11-16T11:00:00.000Z'),
+    ]
+    assert.strictEqual(tookOf(readings, [turn(0, 30 * MINUTE, 500)]), 6)
+  })
+
+  it('takes a week whose reset time wavers by moments for the same week', () => {
+    // As kept on 3 November 2026: the same Thursday reset, read to the millisecond from two sources.
+    const readings = [
+      week(0, 23),
+      week(20 * MINUTE, 24, '2026-11-09T11:00:00.023Z'),
+      week(23 * MINUTE, 23),
+      week(25 * MINUTE, 24),
+      week(30 * MINUTE, 25, '2026-11-09T10:59:59.867Z'),
+      week(31 * MINUTE, 24),
+      week(32 * MINUTE, 25),
+    ]
+    assert.strictEqual(tookOf(readings, [turn(0, 32 * MINUTE, 500)]), 2)
+  })
+
+  it('counts nothing for a reading that dips and climbs back', () => {
+    assert.strictEqual(tookOf([week(0, 24), week(MINUTE, 23), week(2 * MINUTE, 24)], [turn(0, 2 * MINUTE, 500)]), 0)
+  })
+
+  it('leaves out a reading whose reset went back, another window’s, such as a model’s own week', () => {
+    const readings = [week(0, 25), week(10 * MINUTE, 60, '2026-11-06T09:00:00.000Z'), week(20 * MINUTE, 26)]
+    assert.strictEqual(tookOf(readings, [turn(0, 20 * MINUTE, 500)]), 1)
+  })
+
+  it('starts a week again where a reset time is unknown only when its use fell by more than rounding', () => {
+    const readings = [week(0, 40, null), week(10 * MINUTE, 42, null), week(20 * MINUTE, 1, null), week(30 * MINUTE, 4, null)]
+    assert.strictEqual(tookOf(readings, [turn(0, 30 * MINUTE, 500)]), 4)
+  })
+
+  it('takes a one-point dip with a reset time unknown, on either side, for the same week', () => {
+    const readings = [week(0, 23), week(MINUTE, 24, null), week(2 * MINUTE, 23), week(3 * MINUTE, 24, null), week(4 * MINUTE, 23, null)]
+    assert.strictEqual(tookOf(readings, [turn(0, 4 * MINUTE, 500)]), 1)
+  })
+
+  it('starts a new week once when its first reading has no reset time and a later one has', () => {
+    const readings = [week(0, 80), week(10 * MINUTE, 2, null), week(20 * MINUTE, 5, '2026-11-16T11:00:00.000Z')]
+    assert.strictEqual(tookOf(readings, [turn(0, 20 * MINUTE, 500)]), 5)
+  })
+
+  it('takes a reset time that shifts by hours, as a rolling window’s would, for the same week', () => {
+    const readings = [week(0, 30), week(10 * MINUTE, 31, '2026-11-09T14:00:00.000Z'), week(20 * MINUTE, 32, '2026-11-09T18:30:00.000Z')]
+    assert.strictEqual(tookOf(readings, [turn(0, 20 * MINUTE, 500)]), 2)
+  })
+
+  it('never puts on a task more than the week now says', () => {
+    // The old week's 10 points and the new week's 3 were all this task's, but the week it's read against says 3.
+    const readings = [week(0, 80), week(10 * MINUTE, 90), week(20 * MINUTE, 3, '2026-11-16T11:00:00.000Z')]
+    assert.strictEqual(tookOf(readings, [turn(0, 20 * MINUTE, 500)]), 3)
+    // Within a week too, where the last reading rounded down.
+    assert.strictEqual(tookOf([week(0, 0), week(MINUTE, 10), week(2 * MINUTE, 9)], [turn(0, 2 * MINUTE, 500)]), 9)
   })
 
   it('counts of readings far apart only the part the task ran in', () => {
@@ -199,6 +261,34 @@ describe('a task’s usage', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('says a share of its week no more than the week rose, where the reset time read wavers by milliseconds', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const queries = yield* Queries
+      const sql = yield* SqlClient.SqlClient
+      const { task: created } = yield* task()
+      yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
+      yield* ended(created.threadId, 1)
+      yield* say(created.threadId, scenarios.hello)
+      yield* ended(created.threadId, 2)
+      const [span] = yield* sql<{ accountId: string; from: string; to: string }>`
+        SELECT s.account_id, min(coalesce(d.delivered_at, d.requested_at)) AS "from", max(d.ended_at) AS "to"
+        FROM turn_deliveries d JOIN provider_sessions s ON s.id = d.provider_session_id WHERE d.thread_id = ${created.threadId}`
+      const at = (time: string, by: number) => new Date(Date.parse(time) + by).toISOString()
+      const from = Date.parse(span!.from)
+      const between = (part: number) => at(span!.from, (Date.parse(span!.to) - from) * part)
+      // As the person's store kept it on 3 November 2026: the two sources' resets a few milliseconds apart.
+      yield* sql`INSERT INTO plan_usage_weeks ${sql.insert([
+        { accountId: span!.accountId, usedPercent: 23, resetsAt: '2026-11-09T11:00:00.000Z', observedAt: at(span!.from, -1000) },
+        { accountId: span!.accountId, usedPercent: 24, resetsAt: '2026-11-09T11:00:00.023Z', observedAt: between(0.3) },
+        { accountId: span!.accountId, usedPercent: 23, resetsAt: '2026-11-09T11:00:00.000Z', observedAt: between(0.6) },
+        { accountId: span!.accountId, usedPercent: 24, resetsAt: '2026-11-09T10:59:59.867Z', observedAt: at(span!.to, 1000) },
+      ])}`
+      const [line] = (yield* Effect.orDie(queries.thread(created.threadId))).usage ?? []
+      assert.closeTo(line?.took ?? 0, 1, 1e-9)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('keeps each move of an account’s week, and of a quiet stretch where it began and its latest reading', () =>
     Effect.gen(function* () {
       const usage = yield* PlanUsage
@@ -220,10 +310,17 @@ describe('a task’s usage', () => {
       // Still the same: the latest reading moves up, and no row is added for it.
       const quiet = yield* hear(30, 2)
       assert.isAbove(Date.parse(quiet[1]!.observedAt), Date.parse(second))
-      const rows = yield* hear(31, 3)
+      yield* hear(31, 3)
+      // A reading of only a model's week, or of the week with extra usage, is another window: none of it is kept.
+      yield* Effect.sleep('5 millis')
+      yield* usage.heard(accountId, 'claude-code', [
+        { kind: 'weekly', label: 'Opus', model: 'opus', usedPercent: 70, resetsAt: '2026-11-04T00:00:00.000Z' },
+        { kind: 'weekly', label: 'With extra usage', usedPercent: 50, resetsAt: '2026-11-06T00:00:00.000Z' },
+      ])
+      const rows = yield* hear(32, 4)
       assert.deepStrictEqual(
         rows.map((row) => row.usedPercent),
-        [30, 30, 31],
+        [30, 30, 31, 32],
       )
       assert.deepStrictEqual(yield* usage.paidBy(accountId), { paidBy: 'plan', plan: null })
     }).pipe(Effect.provide(runtime())),

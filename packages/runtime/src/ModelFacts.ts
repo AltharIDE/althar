@@ -5,6 +5,8 @@ import type { Fetch } from '@althar/connectors'
 import { knownModelName } from '@althar/contracts'
 import { Context, Effect, Layer } from 'effect'
 
+import { afterOpen, startup } from './startup'
+
 import { RuntimeConfig } from './Config'
 
 /*
@@ -138,18 +140,23 @@ export class ModelFacts extends Context.Service<
       }
       const fetch = options.fetch ?? globalThis.fetch
       yield* Effect.forkIn(
-        Effect.tryPromise(async () => {
-          const response = await fetch(options.url, { signal: AbortSignal.timeout(20_000) })
-          if (!response.ok) throw new Error(`The list of models answered ${response.status}.`)
-          const body: unknown = await response.json()
-          const fresh = factsIn(body)
-          if (fresh.size === 0) throw new Error('The list of models had none.')
-          facts = fresh
-          if (cache !== undefined) {
-            mkdirSync(dirname(cache), { recursive: true })
-            writeFileSync(cache, JSON.stringify(body))
-          }
-        }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not read the list of models; going on without it', cause))),
+        afterOpen(
+          startup(
+            'model-facts-fetch',
+            Effect.tryPromise(async () => {
+              const response = await fetch(options.url, { signal: AbortSignal.timeout(20_000) })
+              if (!response.ok) throw new Error(`The list of models answered ${response.status}.`)
+              const body: unknown = await response.json()
+              const fresh = factsIn(body)
+              if (fresh.size === 0) throw new Error('The list of models had none.')
+              facts = fresh
+              if (cache !== undefined) {
+                mkdirSync(dirname(cache), { recursive: true })
+                writeFileSync(cache, JSON.stringify(body))
+              }
+            }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not read the list of models; going on without it', cause))),
+          ),
+        ),
         scope,
       )
       return ModelFacts.of({ of: (agent, model) => factFor(facts, agent, model) })

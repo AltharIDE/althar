@@ -5,6 +5,7 @@ import { createRequire } from 'node:module'
 import { delimiter, dirname, join } from 'node:path'
 import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt } from './ownTools'
 import { SECRET_PLACES, secretReadRules } from './secrets'
+import { claudeShellFolder } from './shellFolder'
 import { openCodeProviderName, openCodeProviders } from './usageSources'
 
 /*
@@ -311,6 +312,15 @@ export interface AgentDefinition {
    * every command, as before.
    */
   readonly holds?: (role: 'lead' | 'reader', options?: SessionOptions) => SandboxHold | undefined
+  /**
+   * Where a session's shell is now, from its agent's own record, read again
+   * on each call: `home`, the account's folder (`home.variable`), `cwd`, where
+   * the session started. Its shell keeps the folder a `cd` took it to, and a
+   * permission request doesn't say where that is, so without it the rules
+   * read a relative path from where the session started. None where the
+   * agent keeps no such record.
+   */
+  readonly shellFolder?: (home: string, cwd: string, sessionId: string) => () => string | undefined
   /**
    * How it is held as the lead of a review of someone else's pull request
    * (docs/architecture/06), beyond its reader mode and `sessionMeta`.
@@ -943,6 +953,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     contains: claudeSandboxStarts,
     upFront: true,
     holds: claudeHolds,
+    // Each entry of its transcript names the folder its shell is in.
+    shellFolder: claudeShellFolder,
     /*
      * As a review's lead it is held by its session's settings alone (claudeReads, untrusted): every command asks and meets
      * Althar's reader rules, no settings file or hook of the repository's or the person's loads, and offline its web tools are

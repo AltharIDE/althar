@@ -8,6 +8,7 @@ import { LiveDot } from '../../primitives/LiveDot/LiveDot'
 import { NextSteps } from '../../primitives/NextStep/NextStep'
 import { StepTrack, type TrackItem } from '../../primitives/StepTrack/StepTrack'
 import { TaskGlyph } from '../../primitives/TaskGlyph/TaskGlyph'
+import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import b from '../Board/Board.module.css'
 import { CardTitle } from '../Board/CardTitle'
 import s from './BoardCard.module.css'
@@ -28,8 +29,12 @@ import s from './BoardCard.module.css'
 export interface BoardCardText {
   /** A kind's word on the card; a plain task has none. */
   kind: Record<TaskKind, string>
+  /** A kind's word for a task in the person's own checkout (ADR-091): with Local after it, or Local alone. */
+  local: (kind: string) => string
   /** The automation whose run it is. */
   from: (automation: string) => string
+  /** What its work goes into, where it isn't the default branch (ADR-093), for a screen reader: the card shows an arrow. */
+  toward: (branch: string) => string
 }
 
 export const boardCardText: BoardCardText = {
@@ -38,7 +43,9 @@ export const boardCardText: BoardCardText = {
     [TaskKind.Review]: 'Review',
     [TaskKind.Plain]: '',
   },
+  local: (kind) => (kind === '' ? 'Local' : `${kind} · Local`),
   from: (automation) => `From ${automation}`,
+  toward: (branch) => `Toward ${branch}`,
 }
 
 export type BoardCardProps = RootProps<
@@ -50,6 +57,8 @@ export type BoardCardProps = RootProps<
     word: string
     /** What it makes: a change or a review says so; a plain task says nothing. */
     kind?: TaskKind
+    /** It works in the person's own checkout, Local, said with its kind's word (ADR-091). */
+    local?: boolean
     /** How long, or since when: 9m. */
     at?: string
     errands?: readonly string[] | undefined
@@ -75,6 +84,8 @@ export type BoardCardProps = RootProps<
     corner?: ReactNode
     /** The automation whose run it is, by its name: said in a small line, with the automation's mark. */
     from?: string
+    /** The branch its work goes into, where it isn't the default (ADR-093): release/0.8.0, quietly, at its foot. */
+    toward?: string
     /** Open beside the board. */
     current?: boolean
     onOpen?: () => void
@@ -103,6 +114,7 @@ export function BoardCard({
   status = TaskStatus.Running,
   word,
   kind,
+  local = false,
   at,
   title,
   errands,
@@ -113,6 +125,7 @@ export function BoardCard({
   next,
   corner,
   from,
+  toward,
   current,
   onOpen,
   text,
@@ -120,7 +133,8 @@ export function BoardCard({
   ...rest
 }: BoardCardProps) {
   const t = { ...boardCardText, ...text }
-  const named = kind === undefined ? '' : t.kind[kind]
+  const own = kind === undefined ? '' : t.kind[kind]
+  const named = local ? t.local(own) : own
   return (
     <article className={cx(b.card, s.card, s[status], className)} aria-current={current || undefined} {...rest}>
       <div className={b.top}>
@@ -147,6 +161,13 @@ export function BoardCard({
       {track !== undefined && track.length > 0 && <StepTrack steps={track} labels status={status} className={s.track} />}
       {object !== undefined && object !== null && <div className={s.object}>{object}</div>}
       {foot !== undefined && foot !== null && <div className={b.foot}>{foot}</div>}
+      {toward !== undefined && toward !== '' && (
+        <p className={s.toward} title={t.toward(toward)}>
+          <span aria-hidden="true">→</span>
+          <VisuallyHidden>{t.toward(toward)}</VisuallyHidden>
+          <code aria-hidden="true">{toward}</code>
+        </p>
+      )}
       {from !== undefined && from !== '' && (
         <p className={s.from}>
           <Icon name="automation" size={11} />

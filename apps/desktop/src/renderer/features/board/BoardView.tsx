@@ -34,17 +34,19 @@ import {
   unreachable,
   Wait,
 } from '@althar/ui'
-import { type ReactNode, useEffect, useState } from 'react'
+import { Fragment, type ReactNode, useEffect, useState } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
 import { busyWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
-import { callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
+import { localText } from '../../shared/local'
+import { askOf, callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
 import { doingWords, doneHere, factsOf, labelWords, nextWords, readyWordOf, standingOf, standingText } from '../../shared/standing'
 import { afterSteps, isAutomatedStep, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
+import { teamChangeOf, TeamMenu } from '../team/Team'
 import s from './Board.module.css'
 import { type Held, heldOf, holding, type Lanes, type Waiting } from './lanes'
 import type { LineActions } from './useBoard'
@@ -75,6 +77,8 @@ export const text = {
   oldestFirst: 'Back to oldest first',
   /** The quiet divider over work under way held for a usage limit or the connection: it goes on by itself once it can. */
   paused: 'Paused',
+  /** The one over tasks started Local that wait for the checkout: another task's there, or the person's changes (ADR-091). */
+  forLocal: localText.word,
   planned: 'Planned',
   /** Up next while nothing is in it, on a new project or a busy one: how work gets here. */
   upNextEmpty: {
@@ -167,6 +171,13 @@ export interface ClosingPullRequests {
 /** How many of what a task handed back show on its card: a row of pictures, or a few files. */
 const HANDED_SHOWN = 3
 
+/** Starting a plan up next, by its id, and opening a task's team, by the task's id, in the project whose usage the menu says. */
+export interface TeamActions {
+  readonly projectId: string
+  readonly start: (planId: string) => Promise<void>
+  readonly change: (taskId: string) => void
+}
+
 /** What the home's dock holds: a task, by its id, or a call. */
 export type DockTarget = { readonly kind: 'task'; readonly id: string } | { readonly kind: 'call'; readonly id: string }
 
@@ -205,7 +216,13 @@ const kindOf = (task: Pick<BoardTask, 'kind'>): TaskKind => {
 }
 
 /** A kind's word on a row: Change, Review, or none for a plain task. */
-export const kindWordOf = (task: Pick<BoardTask, 'kind'>): string | undefined => boardCardText.kind[kindOf(task)] || undefined
+export const kindWordOf = (task: Pick<BoardTask, 'kind' | 'local'>): string | undefined =>
+  (task.local === true ? boardCardText.local(boardCardText.kind[kindOf(task)]) : boardCardText.kind[kindOf(task)]) || undefined
+
+/** In the person's own checkout, as its kind's word says (ADR-091). */
+const localOf = (task: Pick<BoardTask, 'local'>): Pick<Card, 'local'> => (task.local === true ? { local: true } : {})
+/** Toward a branch other than the default, quietly at its foot (ADR-093). */
+const towardOf = (task: Pick<BoardTask, 'toward'>): Pick<Card, 'toward'> => (task.toward === undefined ? {} : { toward: task.toward })
 
 /** A pull request as its chip shows it: its host's mark, its repository's own name, its number in the host's words, and its size. */
 const pullChip = (change: ChangeSummary) => {
@@ -310,6 +327,8 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
   const beforeWork = work.queued !== null && work.inLine === true
   const base = {
     kind: kindOf(work),
+    ...localOf(work),
+    ...towardOf(work),
     title: work.title,
     ...fromOf(work),
     // Waiting before its first step has had an agent, nothing has run: no clock.
@@ -430,7 +449,7 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
 
 /** A task that waits on a call of the person's: the call's kind, and why, under its title; a permission's command under that. */
 export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null) => string): Card => {
-  const base = { status: TaskStatus.Yours, kind: kindOf(task), title: task.title, ...fromOf(task) }
+  const base = { status: TaskStatus.Yours, kind: kindOf(task), ...localOf(task), ...towardOf(task), title: task.title, ...fromOf(task) }
   // What it asks, or what it wants to do; for a step that needs the person, what stopped it.
   const why =
     call.stuck === null
@@ -461,7 +480,7 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
  * what it handed back, or else its branch, where its lead wrote in the repository: on this Mac, as no pull request is coming.
  */
 export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
-  const base = { status: TaskStatus.Yours, kind: kindOf(work), title: work.title, ...fromOf(work) }
+  const base = { status: TaskStatus.Yours, kind: kindOf(work), ...localOf(work), ...towardOf(work), title: work.title, ...fromOf(work) }
   switch (work.kind) {
     case 'plain': {
       const pictures = (work.handed?.pictures ?? []).flatMap((picture, index) =>
@@ -507,6 +526,7 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
       const after = work.unshipped == null || work.branch === null ? null : { name: work.branch, ...work.unshipped }
       const size = { add: work.unshipped?.add ?? work.changed?.add ?? 0, del: work.unshipped?.del ?? work.changed?.del ?? 0 }
       const branch = work.branch === null || empty(size) ? null : { name: work.branch, ...size }
+      const ask = work.nothingBuilt === true ? askOf(work.summary) : null
       const object =
         change === null ? (
           branch === null ? null : (
@@ -525,6 +545,8 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
         // Handed back (a conflict its lead couldn't resolve) says so first; else commits in no pull request yet; as its header says.
         word: readyWordOf(work, work.change),
         ...(object === null ? {} : { object }),
+        // Nothing built: no accept to press; what its lead leaves to the person, and Done, which settles it where it is, in its corner.
+        ...(work.nothingBuilt === true ? { ...(ask === null ? {} : { why: ask }), corner: settleWaysOf(work, actions) } : {}),
         // Its conflict the person's: not asked of its lead, why, and Resolve now, which asks it anyway; handed back by its lead,
         // why alone, as asking it again asks what it couldn't do, and the task, which the card opens, is where it is settled (DEV-173).
         ...(work.handedBack != null
@@ -593,7 +615,7 @@ const settleWaysOf = (work: BoardTask, actions: CardActions | undefined): ReactN
   return (
     <SettleWays
       {...(takesDone(work) ? { onDone: () => void markDone(work.taskId), doneHint: text.doneHint } : {})}
-      {...(work.phase === 'ready' ? { onKeep: () => void keep(work.taskId), keepHint: text.keepHint } : {})}
+      {...(work.phase === 'ready' && work.kind !== 'change' ? { onKeep: () => void keep(work.taskId), keepHint: text.keepHint } : {})}
       {...(actions?.settling?.has(work.taskId) === true ? { busy: 'done' as const } : {})}
     />
   )
@@ -675,6 +697,7 @@ export function BoardView({
   folds,
   onFoldsChange,
   onTalk,
+  team,
 }: {
   lanes: Lanes
   agents: ReadonlyArray<AgentStatus>
@@ -695,6 +718,12 @@ export function BoardView({
   onFoldsChange?: (folds: BoardFolds) => void
   /** Puts the person in the coordinator's composer, from Up next while the board has nothing on it; without it, Up next says how work gets here and offers nothing to press. */
   onTalk?: () => void
+  /**
+   * Starting a plan up next and changing who does it, from its row: a plan held or on its countdown says Start where its line
+   * was as the person points at it, and its row and a started one's whose first step waits have a menu to change the team.
+   * Without it, a row only opens its task.
+   */
+  team?: TeamActions
 }) {
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
   // Which of Settled's tabs shows, while something is kept for later.
@@ -705,10 +734,16 @@ export function BoardView({
     ...lanes.calls.map((call) => ({ at: call.createdAt, waiting: null, call })),
   ].toSorted((a, b) => a.at.localeCompare(b.at))
 
+  // The plans starting from their rows, by id, until the runtime has answered.
+  const [starting, setStarting] = useState<ReadonlySet<string>>(new Set())
   // While the person points at Up next or Running, or drags in the line, what would move between them stays where it was.
   const [held, setHeld] = useState<Held | null>(null)
   const shown = held === null ? lanes : holding(lanes, held)
   const { continuing, free, paused } = shown
+  // What is paused for a limit or the connection, and, under a divider of its own, what waits for its checkout (ADR-091).
+  const pausedRows = shown.next.slice(continuing + free, continuing + free + paused)
+  const halted = pausedRows.filter((work) => work.waitsForCheckout == null)
+  const forLocal = pausedRows.filter((work) => work.waitsForCheckout != null)
   const pointed = (lane: BoardLane | null) =>
     setHeld((was) => (lane === BoardLane.Next || lane === BoardLane.Running ? (was ?? heldOf(lanes)) : null))
   // Hidden while its screen is kept (`KeptScreens`), with the pointer still on it, nothing says it looked away: it lets go.
@@ -718,7 +753,8 @@ export function BoardView({
     const startsAt = work.plan?.startsAt ?? null
     const kind = kindWordOf(work)
     // Under way, it goes on with its step: a change's, as its card in Running would say it; a plain task or a review just goes on.
-    const goesOn = index < continuing || (index >= continuing + free && index < continuing + free + paused)
+    // Not one that waits for its checkout: nothing of it has begun (ADR-091).
+    const goesOn = index < continuing || (index >= continuing + free && index < continuing + free + paused && work.waitsForCheckout == null)
     const reason =
       index < continuing
         ? work.queued === null
@@ -729,11 +765,13 @@ export function BoardView({
             ? text.startsIn(0)
             : inLineWords(index + 1)
           : index < continuing + free + paused
-            ? work.waits !== null
-              ? waitsWords(name(work.waits.agentId), clock(work.waits.until), undefined, work.waits.left)
-              : work.reconnects != null
-                ? reconnectsWords(work.reconnects, clock)
-                : text.startsIn(0)
+            ? work.waitsForCheckout != null
+              ? localText.after(work.waitsForCheckout)
+              : work.waits !== null
+                ? waitsWords(name(work.waits.agentId), clock(work.waits.until), undefined, work.waits.left)
+                : work.reconnects != null
+                  ? reconnectsWords(work.reconnects, clock)
+                  : text.startsIn(0)
             : startsAt === null
               ? text.held
               : text.startsIn(Math.ceil((new Date(startsAt).getTime() - new Date(now).getTime()) / 1000))
@@ -749,9 +787,40 @@ export function BoardView({
         wait={index < continuing + free + paused || startsAt !== null ? Wait.Workers : Wait.You}
         reason={reason}
         onOpen={() => onOpen(work.threadId)}
+        {...teamOf(work)}
         text={{ task: unnamed }}
       />
     )
+  }
+  // A plan that hasn't begun starts, or changes who does it, from its row; one starting offers Start no more until it has.
+  const teamOf = (work: BoardTask) => {
+    const change = team === undefined ? null : teamChangeOf(work)
+    if (team === undefined || change === null || work.plan === null) return {}
+    const planId = work.plan.id
+    const start =
+      change === 'starts' && !starting.has(planId)
+        ? () => {
+            setStarting((was) => new Set(was).add(planId))
+            void team.start(planId).finally(() =>
+              setStarting((was) => {
+                const next = new Set(was)
+                next.delete(planId)
+                return next
+              }),
+            )
+          }
+        : undefined
+    return {
+      ...(start === undefined ? {} : { onStart: start }),
+      menu: (
+        <TeamMenu
+          projectId={team.projectId}
+          task={work}
+          {...(start === undefined ? {} : { onStart: start })}
+          onChange={() => team.change(work.taskId)}
+        />
+      ),
+    }
   }
 
   return (
@@ -807,11 +876,14 @@ export function BoardView({
             {...(line === undefined ? {} : { onMove: line.move })}
           />
         )}
-        {paused > 0 && <BoardDivider>{text.paused}</BoardDivider>}
-        {paused > 0 && (
-          <BoardList>
-            {shown.next.slice(continuing + free, continuing + free + paused).map((work, index) => nextRow(work, continuing + free + index))}
-          </BoardList>
+        {[halted, forLocal].map(
+          (rows, at) =>
+            rows.length > 0 && (
+              <Fragment key={at === 0 ? 'paused' : 'local'}>
+                <BoardDivider>{at === 0 ? text.paused : text.forLocal}</BoardDivider>
+                <BoardList>{rows.map((work) => nextRow(work, shown.next.indexOf(work)))}</BoardList>
+              </Fragment>
+            ),
         )}
         {continuing + free + paused > 0 && continuing + free + paused < shown.next.length && <BoardDivider>{text.planned}</BoardDivider>}
         {continuing + free + paused < shown.next.length && (

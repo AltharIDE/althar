@@ -1,6 +1,8 @@
 import { Commands, Database, Ledger, type Migration, migrations } from '@althar/persistence-sqlite'
 import { Layer } from 'effect'
 
+import { startupLayer } from './startup'
+
 import { Accounts } from './Accounts'
 import { Artifacts } from './Artifacts'
 import { Automations } from './Automations'
@@ -19,6 +21,7 @@ import { Fetches } from './Fetches'
 import { Launches } from './Launches'
 import { Live } from './Live'
 import { MachineLoad } from './MachineLoad'
+import { Overlaps } from './Overlaps'
 import { PlanUsage } from './PlanUsage'
 import { Permissions } from './Permissions'
 import { Questions } from './Questions'
@@ -76,18 +79,21 @@ export interface RuntimeLayerOptions extends RuntimeOptions {
 export const layer = (options: RuntimeLayerOptions) => {
   const store = Layer.mergeAll(Ledger.layer, Commands.layer).pipe(
     Layer.provideMerge(
-      Database.layer({
-        filename: options.database,
-        ...(options.backups === undefined ? {} : { backups: options.backups }),
-        ...(options.extraMigrations === undefined ? {} : { migrations: [...migrations, ...options.extraMigrations] }),
-      }),
+      startupLayer(
+        'store',
+        Database.layer({
+          filename: options.database,
+          ...(options.backups === undefined ? {} : { backups: options.backups }),
+          ...(options.extraMigrations === undefined ? {} : { migrations: [...migrations, ...options.extraMigrations] }),
+        }),
+      ),
     ),
     Layer.provideMerge(WebCrypto),
   )
   const base = Layer.mergeAll(
-    ToolServer.layer.pipe(Layer.provideMerge(Errands.layer.pipe(Layer.provideMerge(Instance.layer)))),
+    ToolServer.layer.pipe(Layer.provideMerge(Errands.layer.pipe(Layer.provideMerge(startupLayer('instance', Instance.layer))))),
     Live.layer,
-    ModelFacts.layer,
+    startupLayer('modelfacts', ModelFacts.layer),
     Artifacts.layer,
   ).pipe(
     Layer.provideMerge(store),
@@ -103,19 +109,31 @@ export const layer = (options: RuntimeLayerOptions) => {
   // Each project's rules; each agent's accounts, whether each is signed in, and which are out of usage until their reset (ADR-012).
   // The models each agent offers, read from its sessions, or asked of it once: sessions name them to the coordinator.
   // Whether the computer is online, as the app says, and whether an agent's service answers (ADR-060).
-  const connected = Connectivity.layer.pipe(Layer.provideMerge(base))
-  const able = Layer.mergeAll(Limits.layer, Models.layer, PlanUsage.layer).pipe(
+  const connected = startupLayer('connectivity', Connectivity.layer).pipe(Layer.provideMerge(base))
+  const able = Layer.mergeAll(
+    startupLayer('limits', Limits.layer),
+    startupLayer('models', Models.layer),
+    startupLayer('planusage', PlanUsage.layer),
+  ).pipe(
     Layer.provideMerge(
-      SignIns.layer.pipe(Layer.provideMerge(Accounts.layer.pipe(Layer.provideMerge(Policies.layer.pipe(Layer.provideMerge(connected)))))),
+      startupLayer('signins', SignIns.layer).pipe(
+        Layer.provideMerge(
+          startupLayer('accounts', Accounts.layer).pipe(
+            Layer.provideMerge(startupLayer('policies', Policies.layer).pipe(Layer.provideMerge(connected))),
+          ),
+        ),
+      ),
     ),
   )
-  const judging = PermissionJudge.layer.pipe(Layer.provideMerge(able))
+  const judging = startupLayer('permissionjudge', PermissionJudge.layer).pipe(Layer.provideMerge(able))
   // A task's worktrees are set up as they are made, and its lead's first turn waits for them.
   // Runs fetch the branch or pull request they run through the person's connections to code hosts, as leads ask Althar to (ADR-066).
-  const core = Layer.mergeAll(Projects.layer, Sessions.layer, Launches.layer).pipe(
+  const core = Layer.mergeAll(startupLayer('projects', Projects.layer), startupLayer('sessions', Sessions.layer), Launches.layer).pipe(
     Layer.provideMerge(Fetches.layer),
     Layer.provideMerge(
-      Layer.mergeAll(Permissions.layer, Questions.layer, Setups.layer, Connections.layer).pipe(Layer.provideMerge(judging)),
+      Layer.mergeAll(Permissions.layer, Questions.layer, Setups.layer, startupLayer('connections', Connections.layer)).pipe(
+        Layer.provideMerge(judging),
+      ),
     ),
   )
   // How many tasks are at work at once on this machine, and what waits for a place among them; and a task that settles stops all it left running.
@@ -129,17 +147,24 @@ export const layer = (options: RuntimeLayerOptions) => {
   // Runs drive a task's steps; plans start runs when their time comes; the person steers a task's course; the coordinator plans tasks and passes messages on.
   // Finished tasks' folders go after their wait, or when the person cleans up, and come back when needed (ADR-056).
   const work = Layer.mergeAll(Tasks.layer, FolderCleanup.layer).pipe(
-    Layer.provideMerge(Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(shown))))),
+    Layer.provideMerge(Plans.layer.pipe(Layer.provideMerge(startupLayer('runs', Runs.layer).pipe(Layer.provideMerge(shown))))),
   )
   // Signing accounts in inside Althar, with each agent's own login (ADR-012).
-  const signing = AccountSignIns.layer.pipe(Layer.provideMerge(work))
+  const signing = startupLayer('account-signins', AccountSignIns.layer).pipe(Layer.provideMerge(work))
   // Work that starts by itself on a schedule, as tasks and reviews like any other (docs/plans/automations.md).
-  const automating = Automations.layer.pipe(Layer.provideMerge(signing))
+  const automating = startupLayer('automations', Automations.layer).pipe(Layer.provideMerge(signing))
   // How hard this computer works, and each piece of work's part, while a window shows it. Tasks made before search, indexed.
+  // Leads whose work meets another running task's hear of it once (Overlaps.ts).
   // The coordinator merges on the person's word: through the host's queue, or Althar's own line for each branch (ADR-081).
   return MergeLine.layer.pipe(
     Layer.provideMerge(
-      Layer.mergeAll(Coordinator.layer, TaskActions.layer, MachineLoad.layer, fillIndex).pipe(Layer.provideMerge(automating)),
+      Layer.mergeAll(
+        startupLayer('coordinator', Coordinator.layer),
+        TaskActions.layer,
+        MachineLoad.layer,
+        Overlaps.layer,
+        startupLayer('search-index', fillIndex),
+      ).pipe(Layer.provideMerge(automating)),
     ),
   )
 }

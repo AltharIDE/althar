@@ -12,6 +12,7 @@ import {
   RepositoryRole,
   type TaskId,
   type ThreadId,
+  type WorksIn,
 } from '@althar/domain'
 import { bumpRevision, Commands, type CommandIdReused, Ledger, type RevisionConflict, type RowNotFound } from '@althar/persistence-sqlite'
 import { Context, Crypto, Effect, Layer, Option, Schema } from 'effect'
@@ -20,7 +21,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import { postCard } from './cards'
 import { RuntimeConfig } from './Config'
 import { branchFor, conventionsOnBase, ruleOf } from './conventions'
-import { type GitFailed, NotARepository, NotFound, ProjectRefused, RepositoriesNeeded } from './errors'
+import { BranchNotFound, type GitFailed, NotARepository, NotFound, ProjectRefused, RepositoriesNeeded } from './errors'
 import { type Fork, forkOf } from './forks'
 import { makeScratch } from './firstWrite'
 import {
@@ -31,8 +32,11 @@ import {
   currentBranch,
   defaultBranch,
   fetchBranch,
+  git,
+  gitOutcome,
   namedRemotes,
   redactUrl,
+  remoteBranches,
   remoteUrls,
   topLevel,
 } from './git'
@@ -214,6 +218,12 @@ export interface ProjectRepository {
   readonly tasks: number
   /** How each new task's folder of it gets ready (ADR-080); null until a lead records it. */
   readonly setup: { readonly copy: ReadonlyArray<string>; readonly commands: ReadonlyArray<string> } | null
+  /** Its default branch, as its remote said when it was added. */
+  readonly defaultBranch: string
+  /** The branch new tasks work toward there, where it isn't the default (ADR-093); null for the default. */
+  readonly workToward: string | null
+  /** Its remote's branches, as this Mac last fetched them, its default first. */
+  readonly branches: ReadonlyArray<string>
 }
 
 /** The fork a repository's clone is here, read from its remotes; none where it has no clone here, or isn't one. */
@@ -244,6 +254,104 @@ export const freeSlug = (slug: string, taken: ReadonlyArray<string>) => {
   for (let n = 2; ; n += 1) if (!taken.includes(`${slug}-${n}`)) return `${slug}-${n}`
 }
 
+/** A branch as it is named, without `refs/heads/` or the remote it was spelled with. */
+export const branchName = (named: string) =>
+  named
+    .trim()
+    .replace(/^refs\/(heads|remotes\/[^/]+)\//, '')
+    .replace(/^(origin|upstream)\//, '')
+
+/**
+ * Where a task starts in a repository: the branch it works toward, else its
+ * default branch; for a fork whose work goes to the repository it came from,
+ * on that repository, its default branch there unless it works toward
+ * another.
+ */
+export const startOf = (binding: {
+  readonly repository: string
+  readonly base: string | null
+  readonly changeTarget: string | null
+  readonly toward?: string | null
+}) =>
+  Effect.gen(function* () {
+    const upstream =
+      (binding.changeTarget === 'upstream' || binding.changeTarget === 'upstream_branch') && (yield* forkAt(binding.repository)) !== null
+    const toward = binding.toward ?? null
+    return upstream
+      ? { remote: 'upstream', base: toward ?? (yield* defaultBranch(binding.repository, 'upstream')) }
+      : { remote: 'origin', base: toward ?? binding.base ?? 'main' }
+  })
+
+/**
+ * The branch a task's work goes into in a repository (ADR-093): the one asked
+ * for, else, where none was, the project's Work toward there; null for the
+ * default branch of the remote its work starts from (a fork's upstream's,
+ * where its work goes there, needn't be the fork's own), as every task made
+ * before is.
+ */
+export const towardIn = (
+  binding: {
+    readonly repository: string
+    readonly base: string | null
+    readonly changeTarget: string | null
+    readonly workToward: string | null
+  },
+  asked?: string | null,
+) =>
+  Effect.gen(function* () {
+    const branch = branchName((asked === undefined ? binding.workToward : asked) ?? '')
+    if (branch === '') return null
+    const { base } = yield* startOf({ ...binding, toward: null }).pipe(Effect.orElseSucceed(() => ({ base: binding.base ?? 'main' })))
+    return branch === base ? null : branch
+  })
+
+/**
+ * Whether a repository has a branch to work toward: on the remote a task
+ * there starts from, fetched now, else here, else on that remote as last
+ * fetched, as when it can't be reached.
+ */
+export const hasBranch = (repository: string, branch: string, remote = 'origin') =>
+  Effect.gen(function* () {
+    if (!(yield* gitOutcome(repository, 'check-ref-format', '--branch', branch).pipe(Effect.map((one) => one.code === 0)))) return false
+    if (yield* fetchBranch(repository, branch, remote)) {
+      const there = yield* commitOf(repository, `refs/remotes/${remote}/${branch}`).pipe(Effect.option)
+      if (Option.isSome(there)) return true
+      return yield* branchExists(repository, branch)
+    }
+    if (yield* branchExists(repository, branch)) return true
+    return Option.isSome(yield* commitOf(repository, `refs/remotes/${remote}/${branch}`).pipe(Effect.option))
+  }).pipe(Effect.orElseSucceed(() => false))
+
+/**
+ * The branch a task works toward, here as a branch of its own, made from the
+ * remote's where the clone has none, following it as `git switch` would: what
+ * merging here, and looking for conflicts here, go by, as they go by the
+ * default branch. Nothing is checked out, and a branch the clone has stays
+ * as it is.
+ */
+export const towardHere = (repository: string, branch: string, remote = 'origin') =>
+  Effect.gen(function* () {
+    if (yield* branchExists(repository, branch)) return
+    yield* git(repository, 'branch', '--track', branch, `${remote}/${branch}`)
+  }).pipe(Effect.ignore)
+
+/**
+ * The commit a task starts from in a repository: its base as the remote has
+ * it now, fetched first, falling back to the local branch when the remote
+ * can't be reached.
+ */
+export const startCommitOf = (repository: string, base: string, from = 'origin') =>
+  Effect.gen(function* () {
+    const fetched = yield* fetchBranch(repository, base, from)
+    const remote = `${from}/${base}`
+    const fromRemote = fetched ? yield* commitOf(repository, remote).pipe(Effect.option) : Option.none()
+    const baseRef = Option.isSome(fromRemote) ? remote : base
+    const baseCommit = Option.isSome(fromRemote)
+      ? fromRemote.value
+      : yield* commitOf(repository, base).pipe(Effect.catch(() => commitOf(repository, remote)))
+    return { baseRef, baseCommit, fetched }
+  })
+
 /**
  * Adds a task's worktree. The base is the default branch as origin has it now:
  * fetched first, so the task doesn't start from a stale commit (and its pull
@@ -254,7 +362,7 @@ export const freeSlug = (slug: string, taken: ReadonlyArray<string>) => {
  * at that commit, with a scratch folder git ignores, and its branch's name
  * is kept for when its lead first changes the repository.
  */
-const prepareWorktree = (
+export const prepareWorktree = (
   repository: string,
   base: string,
   planned: { readonly worktree: string; readonly branch: string },
@@ -262,13 +370,7 @@ const prepareWorktree = (
   plain = false,
 ) =>
   Effect.gen(function* () {
-    const fetched = yield* fetchBranch(repository, base, from)
-    const remote = `${from}/${base}`
-    const fromRemote = fetched ? yield* commitOf(repository, remote).pipe(Effect.option) : Option.none()
-    const baseRef = Option.isSome(fromRemote) ? remote : base
-    const baseCommit = Option.isSome(fromRemote)
-      ? fromRemote.value
-      : yield* commitOf(repository, base).pipe(Effect.catch(() => commitOf(repository, remote)))
+    const { baseRef, baseCommit, fetched } = yield* startCommitOf(repository, base, from)
     let branch = planned.branch
     let worktree = planned.worktree
     for (let n = 2; (yield* branchExists(repository, branch)) || existsSync(worktree); n += 1) {
@@ -337,6 +439,17 @@ export class Projects extends Context.Service<
       readonly draft?: boolean
       /** The key of the issue it comes from, which its branch carries, so the tracker's own Git integration finds it. */
       readonly issueKey?: string
+      /**
+       * Where it works (ADR-091): Local, its repositories' own checkouts here,
+       * taken as its plan starts, so none is made now; else a worktree of its
+       * own, as before.
+       */
+      readonly worksIn?: WorksIn
+      /**
+       * The branch it works toward (ADR-093), in each of its repositories: it starts from it, and its pull request goes into it.
+       * Without it, the project's Work toward there; null, the default branch.
+       */
+      readonly toward?: string | null
       /** The project's repositories it changes, by name; needed only where it has several. */
       readonly repositories?: ReadonlyArray<string>
       /** What the person asked for, in their own words: what its thread starts with, so it is never lost behind the title. */
@@ -347,7 +460,7 @@ export class Projects extends Context.Service<
       readonly plain?: boolean
       /** The automation's occurrence it is the run of, named in the transaction that makes it, so a restart never makes a second. */
       readonly occurrence?: string
-    }): Effect.Effect<CreatedTask, NotFound | RepositoriesNeeded | GitFailed | Failure>
+    }): Effect.Effect<CreatedTask, NotFound | RepositoriesNeeded | BranchNotFound | GitFailed | Failure>
     /** A project's repositories, as this device has them: each one's branch, remote, role, and the fork it is. */
     repositories(projectId: string): Effect.Effect<ReadonlyArray<ProjectRepository>, NotFound | Failure>
     /** Renames a project. Its slug, and so its worktrees' folders, stay as they were made; its mark stays too. */
@@ -387,7 +500,7 @@ export class Projects extends Context.Service<
     /**
      * Sets a repository's role; for a fork, where its tasks' work goes, which answers the offer to push its branches upstream, as
      * `notNow` does alone (whether the person can push there is the caller's to ask its host); or how each new task's folder of it
-     * gets ready (ADR-080).
+     * gets ready (ADR-080); or the branch new tasks work toward there (ADR-093), which its remote must have, null for its default.
      */
     setRepository(input: {
       readonly projectId: string
@@ -396,8 +509,9 @@ export class Projects extends Context.Service<
       readonly changeTarget?: string
       readonly notNow?: boolean
       readonly setup?: { readonly copy: ReadonlyArray<string>; readonly commands: ReadonlyArray<string> }
+      readonly workToward?: string | null
       readonly commandId?: CommandId
-    }): Effect.Effect<void, NotFound | ProjectRefused | GitFailed | Failure>
+    }): Effect.Effect<void, NotFound | ProjectRefused | BranchNotFound | GitFailed | Failure>
     /**
      * Removes a project from Althar: it leaves the window, its plans stop
      * counting down, its runs end and its calls are withdrawn. Its folders,
@@ -579,17 +693,6 @@ export class Projects extends Context.Service<
           })
         })
 
-      /** Where a task starts in a repository: its default branch, or, for a fork whose work goes to the repository it came from, that repository's. */
-      const startOf = (binding: { readonly repository: string; readonly base: string | null; readonly changeTarget: string | null }) =>
-        Effect.gen(function* () {
-          const upstream =
-            (binding.changeTarget === 'upstream' || binding.changeTarget === 'upstream_branch') &&
-            (yield* forkAt(binding.repository)) !== null
-          return upstream
-            ? { remote: 'upstream', base: yield* defaultBranch(binding.repository, 'upstream') }
-            : { remote: 'origin', base: binding.base ?? 'main' }
-        })
-
       const createTask = (input: {
         readonly envelope: CommandEnvelope
         readonly projectId: string
@@ -602,12 +705,15 @@ export class Projects extends Context.Service<
         readonly requestInputs?: ReadonlyArray<string>
         readonly plain?: boolean
         readonly occurrence?: string
+        readonly worksIn?: WorksIn
+        readonly toward?: string | null
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const commands = yield* Commands
           const { envelope } = input
           const plain = input.plain === true
+          const local = input.worksIn === 'checkout'
           const bindings = yield* sql<{
             projectId: ProjectId
             projectSlug: string
@@ -617,9 +723,10 @@ export class Projects extends Context.Service<
             base: string | null
             repository: string
             changeTarget: string | null
+            workToward: string | null
           }>`
             SELECT p.id AS project_id, p.slug AS project_slug, b.id, b.slug, b.display_name AS name, b.default_base_ref AS base,
-              l.path AS repository, b.change_target
+              l.path AS repository, b.change_target, b.work_toward
             FROM projects p
             JOIN repository_bindings b ON b.project_id = p.id AND b.detached_at IS NULL
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
@@ -635,6 +742,20 @@ export class Projects extends Context.Service<
           if (unknown.length > 0) return yield* new RepositoriesNeeded({ unknown, choices })
           const chosen = bindings.length === 1 ? bindings : bindings.filter((binding) => named.some((name) => matches(binding, name)))
           if (chosen.length === 0) return yield* new RepositoriesNeeded({ unknown: [], choices })
+          // The branch each works toward (ADR-093): one asked for is on the remote it starts from, else the task isn't made.
+          const towards = new Map(
+            yield* Effect.forEach(chosen, (binding) =>
+              Effect.map(towardIn(binding, input.toward), (toward) => [binding.id, toward] as const),
+            ),
+          )
+          if (input.toward != null)
+            for (const binding of chosen) {
+              const toward = towards.get(binding.id) ?? null
+              if (toward === null) continue
+              const { remote } = yield* startOf({ ...binding, toward })
+              if (!(yield* hasBranch(binding.repository, toward, remote)))
+                return yield* new BranchNotFound({ branch: toward, repository: binding.name })
+            }
           // The person's rule for branch names, if any. Without one, each repository's docs are read once the task is made,
           // as its worktree is, so nothing waits on git before the task is there.
           const [rules] = yield* sql<{ pattern: string | null }>`
@@ -675,7 +796,8 @@ export class Projects extends Context.Service<
               yield* sql`INSERT INTO threads ${sql.insert({ id: threadId, projectId: first.projectId, kind: 'task', taskId, createdAt })}`
               // Planned by the rule, else Althar's own until the repository's docs are read.
               const branch = branchFor(rule, { key: input.issueKey ?? null, slug })
-              // A worktree for each repository it changes, side by side in the task's folder (ADR-006).
+              // A worktree for each repository it changes, side by side in the task's folder (ADR-006); Local, its checkout,
+              // waiting to be taken (ADR-091).
               const workspaces: Array<{ id: string; worktree: string; branch: string }> = []
               for (const binding of chosen) {
                 yield* sql`INSERT INTO task_repository_requirements ${sql.insert({
@@ -687,7 +809,7 @@ export class Projects extends Context.Service<
                   baseRef: binding.base,
                 })}`
                 const workspaceId = yield* newId(Ids.workspace)
-                const worktree = join(config.worktreeRoot, first.projectSlug, slug, binding.slug)
+                const worktree = local ? binding.repository : join(config.worktreeRoot, first.projectSlug, slug, binding.slug)
                 yield* sql`INSERT INTO workspaces ${sql.insert({
                   id: workspaceId,
                   projectId: first.projectId,
@@ -696,12 +818,14 @@ export class Projects extends Context.Service<
                   deviceId: instance.deviceId,
                   access: 'write',
                   path: worktree,
-                  baseRef: binding.base ?? 'main',
+                  baseRef: towards.get(binding.id) ?? binding.base ?? 'main',
+                  toward: towards.get(binding.id) ?? null,
                   branch,
                   state: 'preparing',
                   createdAt,
                   // A plain task's has its branch only once its lead changes the repository; any other's as it is made.
                   ...(plain ? {} : { branchedAt: createdAt }),
+                  ...(local ? { kind: 'checkout' } : {}),
                 })}`
                 workspaces.push({ id: workspaceId, worktree, branch })
               }
@@ -725,8 +849,16 @@ export class Projects extends Context.Service<
           })
 
           // The worktrees, after the task is committed: each one marked ready, or failed, once git has finished with it.
-          const planned = yield* sql<{ id: string; bindingId: string; state: string; path: string; branch: string }>`
-            SELECT w.id, w.binding_id, w.state, w.path, w.branch FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+          const planned = yield* sql<{
+            id: string
+            bindingId: string
+            state: string
+            path: string
+            branch: string
+            kind: string | null
+            toward: string | null
+          }>`
+            SELECT w.id, w.binding_id, w.state, w.path, w.branch, w.kind, w.toward FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             WHERE w.task_id = ${created.taskId} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
           const ready: Array<{ worktree: string; branch: string }> = []
           for (const workspace of planned) {
@@ -735,10 +867,18 @@ export class Projects extends Context.Service<
               continue
             }
             const binding = bindings.find((candidate) => candidate.id === workspace.bindingId) ?? first
-            const { remote, base } = yield* startOf(binding)
+            const { remote, base } = yield* startOf({ ...binding, toward: workspace.toward })
+            // Merging here and looking for conflicts here go by the branch it works toward, as by the default branch.
+            if (workspace.toward !== null) yield* towardHere(binding.repository, workspace.toward, remote)
             // Named as the repository's docs say, where the person has no rule: read now, from where the task starts.
             const docs = rule === null ? (yield* conventionsOnBase(binding.repository, base, remote)).branch : null
             const branch = docs === null ? workspace.branch : branchFor(docs.pattern, { key: input.issueKey ?? null, slug: created.slug })
+            // Local, nothing is made now: its checkout is taken as its plan starts, on the branch named now.
+            if (workspace.kind === 'checkout') {
+              if (branch !== workspace.branch) yield* change('workspaces', workspace.id, { branch })
+              ready.push({ worktree: workspace.path, branch })
+              continue
+            }
             const prepared = yield* Effect.exit(
               prepareWorktree(binding.repository, base, { worktree: workspace.path, branch }, remote, plain),
             )
@@ -832,9 +972,11 @@ export class Projects extends Context.Service<
             remotes: string
             tasks: number
             recordedSetup: string | null
+            base: string | null
+            workToward: string | null
           }>`
             SELECT b.id, b.display_name AS name, l.path, b.folder, b.role, b.change_target, b.upstream_offer_at, b.remote_fingerprints AS remotes,
-              b.recorded_setup,
+              b.recorded_setup, b.default_base_ref AS base, b.work_toward,
               (SELECT count(DISTINCT w.task_id) FROM workspaces w JOIN tasks k ON k.id = w.task_id
                 WHERE w.binding_id = b.id AND k.state NOT IN ('done', 'abandoned')) AS tasks
             FROM repository_bindings b
@@ -850,6 +992,13 @@ export class Projects extends Context.Service<
                 () => [],
               )
               const fork = forkOf(named)
+              // What Work toward offers: the branches of the remote its tasks start from, a fork's upstream where its work goes there, with that remote's default.
+              const start =
+                row.path === null
+                  ? { remote: 'origin', base: row.base ?? 'main' }
+                  : yield* startOf({ repository: row.path, base: row.base, changeTarget: row.changeTarget, toward: null }).pipe(
+                      Effect.orElseSucceed(() => ({ remote: 'origin', base: row.base ?? 'main' })),
+                    )
               return {
                 id: row.id,
                 name: row.name,
@@ -871,6 +1020,9 @@ export class Projects extends Context.Service<
                       },
                 tasks: row.tasks,
                 setup: setupShown(row.recordedSetup),
+                defaultBranch: start.base,
+                workToward: row.workToward,
+                branches: row.path === null ? [start.base] : yield* remoteBranches(row.path, start.remote, start.base),
               } satisfies ProjectRepository
             }),
           )
@@ -1054,11 +1206,39 @@ export class Projects extends Context.Service<
         readonly notNow?: boolean
         /** Its setup as the person changed it in the project's settings (ADR-080). */
         readonly setup?: { readonly copy: ReadonlyArray<string>; readonly commands: ReadonlyArray<string> }
+        readonly workToward?: string | null
         readonly commandId?: CommandId
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const binding = yield* bindingOf(input.projectId, input.repositoryId)
+          if (input.workToward !== undefined) {
+            const [bound] = yield* sql<{ base: string | null; changeTarget: string | null; workToward: string | null }>`
+              SELECT default_base_ref AS base, change_target, work_toward FROM repository_bindings WHERE id = ${binding.id}`
+            const workToward = yield* towardIn(
+              { repository: binding.path ?? '', base: bound?.base ?? null, changeTarget: bound?.changeTarget ?? null, workToward: null },
+              input.workToward,
+            )
+            if (workToward !== (bound?.workToward ?? null)) {
+              // A branch its remote has, where new tasks start: else nothing changes.
+              if (workToward !== null) {
+                const { remote } = yield* startOf({
+                  repository: binding.path ?? '',
+                  base: bound?.base ?? null,
+                  changeTarget: bound?.changeTarget ?? null,
+                  toward: workToward,
+                })
+                if (binding.path === null || !(yield* hasBranch(binding.path, workToward, remote)))
+                  return yield* new BranchNotFound({ branch: workToward, repository: binding.name })
+              }
+              yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  yield* sql`UPDATE repository_bindings SET work_toward = ${workToward} WHERE id = ${binding.id}`
+                  yield* changed(input.projectId, 'project.work_toward_set', { repository: binding.name, workToward }, input.commandId)
+                }),
+              )
+            }
+          }
           if (input.setup !== undefined) {
             const tidy = setupOf(input.setup)
             if ('refused' in tidy) return yield* new ProjectRefused({ reason: 'bad_setup' })

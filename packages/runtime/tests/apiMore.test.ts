@@ -62,7 +62,8 @@ const connected = (options: { readonly agents?: Layer.Layer<Agents>; readonly ed
     return { client, grant }
   })
 
-const idle = (thread: { readonly session: ThreadSnapshot['session'] }) => thread.session !== null && !thread.session.turnRunning
+const idle = (thread: { readonly session: ThreadSnapshot['session'] }) =>
+  thread.session !== null && !thread.session.turnRunning && thread.session.turnEndedAt !== null
 
 /** A folder holding a repository for each name, as a project of several opens from. */
 const folderWith = (names: ReadonlyArray<string>) => {

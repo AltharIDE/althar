@@ -15,7 +15,7 @@ import { baseBranch, forkOf, workRemotes } from '../src/forks'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { ask, cards, connect, git, pushByHand, runtimeWith } from './changesSupport'
-import { HOST, hosted, until } from './support'
+import { HOST, hosted, pushLog, until } from './support'
 
 /*
  * Where a fork's tasks' branches go (ADR-085): the fork, until the project
@@ -57,20 +57,19 @@ const forkClone = (
   const upstream = mkdtempSync(join(tmpdir(), 'althar-remote-'))
   git(upstream, 'init', '-q', '--bare', '-b', 'main')
   git(working, 'push', '-q', upstream, 'main')
-  const pushedTo: Array<string> = []
+  // What took a push, not what Althar fetched from: it fetches the branch a pull request goes into to look for conflicts.
+  const pushes = pushLog()
+  pushes.watch(fork, FORK.join('/'))
+  pushes.watch(upstream, UPSTREAM.join('/'))
   const github = makeFakeService({
     ...(options.saysHead === undefined ? {} : { saysHead: options.saysHead }),
     headOf: () => options.headOf?.() ?? (hasBranch(fork) ? git(fork, 'rev-parse', BRANCH) : null),
-    pushUrl: (path) => {
-      const name = path.join('/')
-      pushedTo.push(name)
-      return name === UPSTREAM.join('/') ? upstream : fork
-    },
+    pushUrl: (path) => (path.join('/') === UPSTREAM.join('/') ? upstream : fork),
   })
   github.addRepository(FORK)
   github.addRepository(UPSTREAM, options.upstreamDefault)
   github.letPush(UPSTREAM, options.canPush ?? true)
-  return { working, fork, upstream, pushedTo, github }
+  return { working, fork, upstream, pushedTo: pushes.pushedTo, github }
 }
 
 /** The clone opened as a project, connected, with where its work goes set as `target`. */
@@ -118,7 +117,7 @@ describe('where a fork’s tasks’ branches go', () => {
       const { url } = yield* taskToPullRequest(working)
       assert.strictEqual(url, 'https://github.com/meridian/api/pull/1')
       assert.strictEqual(github.forkOf(1), FORK.join('/'))
-      assert.deepStrictEqual(pushedTo, [FORK.join('/')])
+      assert.deepStrictEqual(pushedTo(), [FORK.join('/')])
       assert.isTrue(hasBranch(fork))
       assert.isFalse(hasBranch(upstream))
     }).pipe(Effect.provide(runtimeWith({ github })))
@@ -134,7 +133,7 @@ describe('where a fork’s tasks’ branches go', () => {
       assert.isNull(github.forkOf(1))
       assert.strictEqual(github.changes[0]?.source, BRANCH)
       assert.strictEqual(github.changes[0]?.target, 'trunk')
-      assert.deepStrictEqual(pushedTo, [UPSTREAM.join('/')])
+      assert.deepStrictEqual(pushedTo(), [UPSTREAM.join('/')])
       assert.isTrue(hasBranch(upstream))
       assert.isFalse(hasBranch(fork))
       // Its next commits go there too.
@@ -158,7 +157,7 @@ describe('where a fork’s tasks’ branches go', () => {
         assert.strictEqual(git(fork, 'log', '-1', '--format=%s', BRANCH), 'One more')
         assert.isFalse(hasBranch(upstream), 'no stray branch for the open pull request')
         assert.lengthOf(github.changes, 1)
-        assert.notInclude(pushedTo, UPSTREAM.join('/'))
+        assert.notInclude(pushedTo(), UPSTREAM.join('/'))
 
         yield* ask(working, `Add a limit. ${TASK}`, pushByHand)
         yield* until(
@@ -250,7 +249,7 @@ describe('a clone whose remotes were renamed by hand', () => {
       // The person renames them: the repository it came from is origin now, and the fork is `fork`.
       git(working, 'remote', 'rename', 'origin', 'fork')
       git(working, 'remote', 'rename', 'upstream', 'origin')
-      assert.deepStrictEqual(pushedTo, [FORK.join('/')])
+      assert.deepStrictEqual(pushedTo(), [FORK.join('/')])
 
       yield* pushOneMore(projectId, taskId, here, 'One more')
       assert.strictEqual(git(fork, 'log', '-1', '--format=%s', BRANCH), 'One more')

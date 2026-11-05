@@ -22,6 +22,76 @@
 .you {
   color: var(--signal);
 }
+.reason {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.reason > svg {
+  flex: none;
+}
+.words {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* one that can start now: its line turns into Start, in the same place and colour, while the row is pointed at or has focus */
+.start {
+  position: relative;
+  z-index: 1;
+  display: none;
+  align-items: center;
+  gap: 6px;
+  margin: -3px 0 -3px -6px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-weight: 560;
+  color: inherit;
+  cursor: pointer;
+}
+.start:hover {
+  background: var(--signal-paper);
+}
+.start:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 1px;
+}
+.next:hover .start,
+.next:focus-within .start {
+  display: inline-flex;
+}
+.next:hover .rest,
+.next:focus-within .rest {
+  display: none;
+}
+
+/* what else it can do, at the line's end, out of sight at rest */
+.menu {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  margin: -6px -4px -6px auto;
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.next:hover .menu,
+.next:focus-within .menu,
+.menu:has([aria-expanded='true']) {
+  opacity: 1;
+}
+@media (hover: none) {
+  .menu {
+    opacity: 1;
+  }
+}
 /* under way already: a word stronger than the rest of the line, as its work is half done */
 .continues {
   color: var(--t-2);

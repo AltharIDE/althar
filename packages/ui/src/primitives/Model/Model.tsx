@@ -24,6 +24,8 @@ export interface ModelInfo {
   note?: string
   /** How it is reached, shown on hover: via Claude Code · work. Who runs a model is a detail; the model is what counts. */
   via?: string
+  /** Where it runs, in people's words (OpenCode Go), only where the same model is offered twice. Shown beside the name in lists, never on a chip. */
+  route?: string
 }
 
 export interface ModelProps {
@@ -41,6 +43,7 @@ export function Model({ model, short, strong, className }: ModelProps) {
     <span className={cx(s.model, strong && s.strong, className)} title={short && model.via === undefined ? model.name : undefined}>
       {model.mark && <BrandMark brand={model.mark} />}
       <span className={s.name}>{short ? model.short : model.name}</span>
+      {!short && model.route !== undefined && <span className={s.route}>{model.route}</span>}
       {model.via !== undefined && <VisuallyHidden>, {model.via}</VisuallyHidden>}
     </span>
   )

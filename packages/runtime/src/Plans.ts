@@ -1,4 +1,4 @@
-import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
+import { type ActorId, Ids, newId, type ProjectId, type WorksIn } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Clock, Context, type Crypto, Duration, Effect, Layer, Queue } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -11,6 +11,7 @@ import { countdownNow } from './plansAndReviews'
 import { Reviews } from './Reviews'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
+import { setToward } from './towards'
 import { type PlanStep, Runs, type TaskEnd } from './Runs'
 
 /*
@@ -47,6 +48,9 @@ export class Plans extends Context.Service<
       readonly here?: boolean
       /** A review of someone else's pull request, its one step its lead (`PlanParameters.reads`). */
       readonly reads?: boolean
+      /** Where it works (ADR-091), and why, where that isn't the project's default (`PlanParameters.worksIn`). */
+      readonly worksIn?: WorksIn
+      readonly worksInWhy?: string | null
     }): Effect.Effect<string, unknown>
     /**
      * Starts a proposed plan now: its first step is under way (`running`), or
@@ -62,7 +66,16 @@ export class Plans extends Context.Service<
      * and what happens when the work is done; or a started one's, while its
      * first step waits for a place among the agents at work here (ADR-032).
      */
-    change(planId: string, steps: ReadonlyArray<PlanStep>, actorId: ActorId, end?: TaskEnd | null): Effect.Effect<void, unknown>
+    change(
+      planId: string,
+      steps: ReadonlyArray<PlanStep>,
+      actorId: ActorId,
+      end?: TaskEnd | null,
+      /** Where it works, until its first step starts (ADR-091); as it was without it. */
+      worksIn?: WorksIn,
+      /** The branch it works toward, until its first step starts (ADR-093); null for the default branch, as it was without it. */
+      toward?: string | null,
+    ): Effect.Effect<void, unknown>
   }
 >()('@althar/runtime/Plans') {
   static readonly layer: Layer.Layer<Plans, never, Store> = Layer.effect(
@@ -125,6 +138,8 @@ export class Plans extends Context.Service<
           end?: TaskEnd | null
           here?: boolean
           reads?: boolean
+          worksIn?: WorksIn
+          worksInWhy?: string | null
         }
 
       /** Whether a plan still counts down. */
@@ -170,6 +185,8 @@ export class Plans extends Context.Service<
                     end: input.end ?? null,
                     ...(input.here === true ? { here: true } : {}),
                     ...(input.reads === true ? { reads: true } : {}),
+                    ...(input.worksIn === undefined ? {} : { worksIn: input.worksIn }),
+                    ...(input.worksInWhy == null || input.worksInWhy.trim() === '' ? {} : { worksInWhy: input.worksInWhy.trim() }),
                   }),
                   proposedByActorId: input.actorId,
                   state: 'proposed',
@@ -260,24 +277,31 @@ export class Plans extends Context.Service<
         start: (planId, actorId) => provide(start(planId, actorId)),
         hold: (planId, actorId) =>
           provide(Effect.asVoid(transition(planId, counting, () => ({ startsAt: null }), 'task_plan.held', actorId))),
-        change: (planId, steps, actorId, end) =>
+        change: (planId, steps, actorId, end, worksIn, toward) =>
           provide(
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
               const changed = (plan: PlanRow) => {
                 const before = parametersOf(plan)
+                const where = worksIn ?? before.worksIn
+                // The person's choice of where it works is theirs: the coordinator's reason for its own no longer says why.
+                const why = worksIn === undefined || worksIn === before.worksIn ? before.worksInWhy : undefined
                 return JSON.stringify({
                   steps,
                   reason: before.reason ?? null,
                   end: end === undefined ? (before.end ?? null) : end,
                   ...(before.here === true ? { here: true } : {}),
                   ...(before.reads === true ? { reads: true } : {}),
+                  ...(where === undefined ? {} : { worksIn: where }),
+                  ...(why == null ? {} : { worksInWhy: why }),
                 })
               }
               const plan = yield* load(planId)
               // A review's lead only reads: an agent that can't be held to that can't take it, whoever picks it.
               if (parametersOf(plan).reads === true) for (const step of steps) if (!step.skipped) yield* reviews.canLead(step.agentId)
               if (plan.state === 'proposed') {
+                // Pointed at another branch first: one the remote doesn't have changes nothing of the plan.
+                if (toward !== undefined) yield* setToward(plan.taskId, toward)
                 yield* transition(
                   planId,
                   (now) => now.state === 'proposed',
@@ -295,6 +319,7 @@ export class Plans extends Context.Service<
                   if (now.state !== 'accepted') return false
                   const parameters = changed(now)
                   if (!(yield* runs.changeWaiting(now.taskId, parameters, actorId))) return false
+                  if (toward !== undefined) yield* setToward(now.taskId, toward)
                   const revision = yield* change('task_plans', planId, { parameters })
                   yield* fact({
                     projectId: now.projectId,
@@ -307,7 +332,11 @@ export class Plans extends Context.Service<
                   return true
                 }),
               )
-              if (done) yield* touchCard(plan.taskId)
+              if (done) {
+                yield* touchCard(plan.taskId)
+                // Moved between a worktree and its checkout as it waits: placed again now (ADR-091).
+                if (worksIn !== undefined) yield* runs.checkoutsMoved
+              }
             }),
           ),
       })

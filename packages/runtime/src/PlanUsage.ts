@@ -1,3 +1,4 @@
+import { afterOpen, startup } from './startup'
 import { homedir } from 'node:os'
 
 import type { AccountUsage, PlanUsage as PlanUsageView, UsageFaultKind } from '@althar/contracts'
@@ -262,14 +263,16 @@ export class PlanUsage extends Context.Service<
         >()
         /*
          * The account's week, kept as it moves (ADR-084): a task's share of it is the rise between two of these, put on the
-         * turns that ran on the account then. The plan's own week, every model's, before a model's own. A week that hasn't
+         * turns that ran on the account then. Only the plan's own week, every model's: a reading that carries only a model's
+         * week, or extra usage's (a rate-limit event near that limit), would put another window in the series. A week that hasn't
          * moved keeps where it started standing still and its latest reading, so a task that runs after a quiet stretch
          * has a reading from just before it.
          */
         const keepWeek = (accountId: string, windows: ReadonlyArray<Dated>) =>
           Effect.gen(function* () {
-            const weekly = windows.filter((window) => window.kind === 'weekly' && window.spend !== true)
-            const week = weekly.find((window) => window.label === undefined && window.model === undefined) ?? weekly[0]
+            const week = windows.find(
+              (window) => window.kind === 'weekly' && window.spend !== true && window.label === undefined && window.model === undefined,
+            )
             if (week === undefined) return
             if (!weeks.has(accountId)) {
               const [last, before] = yield* sql<{ usedPercent: number; resetsAt: string | null; observedAt: string }>`
@@ -657,10 +660,15 @@ export class PlanUsage extends Context.Service<
           // Asked again, it waits for the reading; opened, it answers with what it has, and tells the view again once the accounts are read.
           now: (refresh = false) =>
             refresh
-              ? Effect.andThen(readAll(true), view)
+              ? afterOpen(startup('plan-usage-read', Effect.andThen(readAll(true), view)))
               : Effect.andThen(
                   Effect.forkIn(
-                    Effect.flatMap(readAll(false), (read) => (read > 0 ? told : Effect.void)),
+                    afterOpen(
+                      startup(
+                        'plan-usage-read',
+                        Effect.flatMap(readAll(false), (read) => (read > 0 ? told : Effect.void)),
+                      ),
+                    ),
                     scope,
                   ),
                   view,

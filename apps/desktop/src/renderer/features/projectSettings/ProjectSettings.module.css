@@ -25,3 +25,9 @@
   font-size: 12px;
   line-height: 18px;
 }
+
+/* The branch new tasks work toward (ADR-093): as wide as a release branch's name, cut short past it. */
+.branch {
+  min-width: 140px;
+  max-width: 240px;
+}

@@ -55,7 +55,8 @@ interface Removed {
 /** Whether a folder is a checkout of its own, at its top: one put back by hand, rather than whatever else came to be there. */
 const worktreeAt = (path: string) =>
   git(path, 'rev-parse', '--show-toplevel').pipe(
-    Effect.map((top) => top === realpathSync(path)),
+    // Git says Windows' paths with forward slashes: both read as the file system has them.
+    Effect.map((top) => realpathSync(top) === realpathSync(path)),
     Effect.orElseSucceed(() => false),
   )
 

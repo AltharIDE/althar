@@ -62,6 +62,15 @@ describe('a ready change that goes on by itself (DEV-173)', () => {
     assert.isNull(byItself(change({ checks: running, diverged: { kind: 'rewritten', local: 1, onPullRequest: 1 } })))
   })
 
+  it('is still on its way while the rest run, some failed already, where failures go to its lead', () => {
+    const some = checks({ outcome: 'running', failed: 1, running: 1, failing: ['test'] })
+    assert.strictEqual(byItself(change({ checks: some }), { failuresGo: true }), 'checks_running')
+    // Its lead's tries spent, or nothing to tell, they are the person's; and all done, failed, they are its lead's to fix.
+    assert.isNull(byItself(change({ checks: some }), { failuresGo: false }))
+    assert.isNull(byItself(change({ checks: checks({ outcome: 'failed', failed: 1, failing: ['test'] }) }), { failuresGo: true }))
+    assert.isNull(byItself(change({ checks: some, conflicts: true }), { failuresGo: true }))
+  })
+
   it('is nothing of the sort once its checks are done, or it merged', () => {
     assert.isNull(byItself(change()))
     assert.isNull(byItself(change({ state: 'merged', checks: running })))

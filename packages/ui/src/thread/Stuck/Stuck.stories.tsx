@@ -431,7 +431,7 @@ export const ReviewStalled: Story = {
 export const RoundLimit: Story = {
   args: {
     ...ReviewStalled.args,
-    what: 'Reviewed three times. 2 findings open.',
+    what: 'Reviewed 3 times; the last fixes weren’t reviewed. 2 findings open.',
     primary: 'again',
     text: { ...reviewText, abandon: 'Accept it as it is', abandoned: 'Accepted as it is' },
   },

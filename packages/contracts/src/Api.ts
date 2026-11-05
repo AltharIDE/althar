@@ -56,6 +56,52 @@ export const Cursor = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 export const UsageLimit = Schema.Literals(['move', 'wait', 'ask'])
 export type UsageLimit = typeof UsageLimit.Type
 
+/**
+ * Where a task works (ADR-091): a worktree of its own, or Local, in each of
+ * its repositories' own checkout on this device, where the person works, one
+ * task at a time.
+ */
+export const WorksIn = Schema.Literals(['worktree', 'checkout'])
+export type WorksIn = typeof WorksIn.Type
+
+/** Another task, by its id and title: one that works in a checkout another waits for. */
+export const OtherTask = Schema.Struct({ taskId: Schema.String, title: Schema.String })
+export type OtherTask = typeof OtherTask.Type
+
+/**
+ * What a Local task waits for before it starts (ADR-091): a checkout another
+ * task works in (`taken`, by that task), or the person committing what isn't
+ * committed in it, as they chose (`changes`).
+ */
+export const CheckoutWait = Schema.Union([
+  Schema.Struct({ why: Schema.Literal('taken'), by: OtherTask }),
+  Schema.Struct({ why: Schema.Literal('changes'), repository: Schema.String }),
+])
+export type CheckoutWait = typeof CheckoutWait.Type
+
+/**
+ * What Althar asks before a Local task takes a repository's checkout
+ * (ADR-091): it has changes not committed (`changes`, which files), or is
+ * on a branch of the person's own (`branch`), which it never switches
+ * without asking. `base` is the branch tasks start from.
+ */
+export const CheckoutAsk = Schema.Struct({
+  repository: Schema.String,
+  holdup: Schema.Literals(['changes', 'branch']),
+  files: Schema.Array(Schema.String),
+  branch: Schema.NullOr(Schema.String),
+  base: Schema.String,
+})
+export type CheckoutAsk = typeof CheckoutAsk.Type
+
+/**
+ * The person's answer to a checkout's ask: wait until its changes are
+ * committed, start in a worktree instead, check out the task's branch from
+ * the branch it is on, or start the task from that branch.
+ */
+export const CheckoutAnswer = Schema.Literals(['wait', 'worktree', 'switch', 'from_branch'])
+export type CheckoutAnswer = typeof CheckoutAnswer.Type
+
 export const SignIn = Schema.Literals(['signed_in', 'signed_out', 'unknown'])
 export type SignIn = typeof SignIn.Type
 
@@ -309,12 +355,19 @@ export type FolderWait = typeof FolderWait.Type
  */
 export const COUNTDOWNS = [0, 10, 25, 60] as const
 export const REVIEW_ROUNDS = [1, 2, 3, 5] as const
+/**
+ * What a task does when its rounds of review run out with changes no review has seen: goes on to its ending once the lead has
+ * settled every finding, or asks the person (the stuck card).
+ */
+export const ROUNDS_OUT = ['settled', 'ask'] as const
 
 export const PlansAndReviews = Schema.Struct({
   /** Seconds a proposed plan waits before it starts on its own; 0 starts it at once. */
   countdown: Schema.Literals(COUNTDOWNS),
-  /** Review rounds before a task is left to the person with findings open. */
+  /** Review rounds before the task goes on or is left to the person, as `roundsOut` says. */
   rounds: Schema.Literals(REVIEW_ROUNDS),
+  /** What a task does when its rounds run out and the lead's last fixes were never reviewed. */
+  roundsOut: Schema.Literals(ROUNDS_OUT),
 })
 export type PlansAndReviews = typeof PlansAndReviews.Type
 
@@ -322,7 +375,7 @@ export type PlansAndReviews = typeof PlansAndReviews.Type
 export type PlansAndReviewsChange = { readonly [Key in keyof PlansAndReviews]?: PlansAndReviews[Key] | undefined }
 
 /** Today's values, which a setting keeps until the person changes it. */
-export const PLANS_AND_REVIEWS: PlansAndReviews = { countdown: 25, rounds: 3 }
+export const PLANS_AND_REVIEWS: PlansAndReviews = { countdown: 25, rounds: 3, roundsOut: 'settled' }
 
 /**
  * What a project's rules start from when it is made. A project made earlier keeps its own rules, and each is changed in a
@@ -580,6 +633,12 @@ export const ProjectRepository = Schema.Struct({
   tasks: Schema.Number,
   /** How each new task's folder of it gets ready (ADR-080): the files copied from the checkout here, and the commands; null until a lead records it. */
   setup: Schema.NullOr(RepositorySetup),
+  /** Its default branch, as its remote says: main. */
+  defaultBranch: Schema.optional(Schema.String),
+  /** The branch new tasks work toward there, where it isn't the default (ADR-093): release/0.8.0; null or absent for the default. */
+  workToward: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Its remote's branches, as this Mac last fetched them, its default first: what Work toward offers. */
+  branches: Schema.optional(Schema.Array(Schema.String)),
 })
 export type ProjectRepository = typeof ProjectRepository.Type
 
@@ -749,6 +808,8 @@ export const ProjectRulesView = Schema.Struct({
   commands: Schema.Array(CommandRule),
   /** How a task ends when its plan doesn't say; null: a draft pull request where Althar is connected to the host, else its branch. */
   end: Schema.NullOr(Schema.Literals(['draft', 'ready', 'none'])),
+  /** Where new tasks start: a worktree of their own, or Local, in each repository's checkout here (ADR-091). */
+  worksIn: WorksIn,
   /** Whether a task's lead resolves a conflict with its default branch on its own, without the person asking it. */
   resolveConflicts: Schema.Boolean,
   /** Whether a lead's commits go up to its task's open pull request on their own as its turn ends, whoever has looked (ADR-072). */
@@ -1815,6 +1876,20 @@ export const TaskCard = Schema.Struct({
        * only. Absent where any may.
        */
       agents: Schema.optional(Schema.Array(Schema.String)),
+      /** Where it works (ADR-091); absent for a worktree, as a review's. */
+      worksIn: Schema.optional(WorksIn),
+      /** Why it works where it does, in the coordinator's words, where that isn't the project's default; null otherwise. */
+      worksInWhy: Schema.optional(Schema.NullOr(Schema.String)),
+      /** The task working Local now, which it would wait for there; null where Local is free. */
+      localTaken: Schema.optional(Schema.NullOr(OtherTask)),
+      /** The branch its work goes into, where it isn't the default (ADR-093): release/0.8.0; null or absent for the default. */
+      toward: Schema.optional(Schema.NullOr(Schema.String)),
+      /** Its repository's default branch, which `toward` null means. */
+      defaultBranch: Schema.optional(Schema.String),
+      /** Its repository's branches on the remote, its default first, for the person to point it at another until it starts. */
+      branches: Schema.optional(Schema.Array(Schema.String)),
+      /** That repository, by its id: where a branch named in the list that it doesn't have is made (CreateBranch). */
+      repositoryId: Schema.optional(Schema.String),
     }),
   ),
   /** The issue it came from, and the connection Althar reads it and moves it through, where it has one. */
@@ -1833,6 +1908,8 @@ export const TaskCard = Schema.Struct({
   earlier: Schema.optional(Schema.Array(ChangeSummary)),
   /** Commits after its last pull request merged or closed, in none yet; null or absent where there are none. */
   unshipped: Schema.optional(Schema.NullOr(Unshipped)),
+  /** A change ready that built nothing: no commits on its branch and no pull request open or merged. Absent otherwise. */
+  nothingBuilt: Schema.optional(Schema.Boolean),
   /** The step it is on, by key, while it runs. */
   step: Schema.NullOr(Schema.String),
   /** It runs a round of work after its plan, as the person asked its lead for more (ADR-034). */
@@ -1847,6 +1924,12 @@ export const TaskCard = Schema.Struct({
   leadEffort: Schema.NullOr(Schema.String),
   branch: Schema.NullOr(Schema.String),
   startedAt: Schema.NullOr(Schema.String),
+  /** It works Local, in its repositories' own checkouts here (ADR-091); absent for a worktree. */
+  local: Schema.optional(Schema.Boolean),
+  /** Started Local, it waits before any agent works on it: for another task's checkout, or the person's commit (ADR-091). */
+  waitsForCheckout: Schema.optional(Schema.NullOr(CheckoutWait)),
+  /** The branch its work goes into, where it isn't its repository's default (ADR-093): release/0.8.0; absent for the default. */
+  toward: Schema.optional(Schema.String),
   /** The step is held until an agent's usage limit resets: which agent, and when it is back. */
   waits: Schema.NullOr(HeldForLimit),
   /** The step is held for the connection: absent or null otherwise (ADR-060). */
@@ -2509,7 +2592,7 @@ export type StuckStep = typeof StuckStep.Type
 /** A call waiting on the person: a permission the rules keep for them, a step that needs them, or an agent's question. */
 export const AttentionRequest = Schema.Struct({
   id: Schema.String,
-  kind: Schema.Literals(['permission', 'stuck', 'question']),
+  kind: Schema.Literals(['permission', 'stuck', 'question', 'checkout']),
   /** What the agent wants to do, as it put it. */
   title: Schema.String,
   /** Why it waits for the person: the rule that keeps it for them. */
@@ -2521,6 +2604,8 @@ export const AttentionRequest = Schema.Struct({
   held: Schema.optional(Schema.Boolean),
   /** For a step that needs the person: which, and why. */
   stuck: Schema.NullOr(StuckStep),
+  /** For a Local task's checkout: what Althar asks before it takes it (ADR-091). */
+  checkout: Schema.optional(CheckoutAsk),
   /** For an agent's question: what it asks, field by field; it is answered in the thread, where it was asked. */
   question: Schema.optional(
     Schema.Struct({
@@ -2757,6 +2842,12 @@ export const ThreadSnapshot = Schema.Struct({
     state: Schema.String,
     branch: Schema.NullOr(Schema.String),
     worktree: Schema.NullOr(Schema.String),
+    /** It works Local, its folder the repository's own checkout here (ADR-091); absent for a worktree. */
+    local: Schema.optional(Schema.Boolean),
+    /** Started Local, what it waits for before its lead starts, as its card says. */
+    waitsForCheckout: Schema.optional(Schema.NullOr(CheckoutWait)),
+    /** The branch its work goes into, where it isn't its repository's default (ADR-093): release/0.8.0; absent for the default. */
+    toward: Schema.optional(Schema.String),
     /**
      * Its folder, where it isn't on this computer as it should be: removed once
      * the task finished (ADR-056), or coming back, from its branch, and
@@ -2818,6 +2909,8 @@ export const ThreadSnapshot = Schema.Struct({
     changes: Schema.Array(ChangeSummary),
     /** Commits after its last pull request merged or closed, in none yet: what Open a new pull request opens one with. */
     unshipped: Schema.optional(Schema.NullOr(Unshipped)),
+    /** A change ready that built nothing: no commits on its branch, no pull request open or merged. Absent otherwise. */
+    nothingBuilt: Schema.optional(Schema.Boolean),
     /** The review of its run under way can still be skipped, as the person may (ADR-034). */
     skipReview: Schema.optional(Schema.Boolean),
     /** It runs a round of work after its plan. */
@@ -3369,8 +3462,25 @@ export const Api = RpcGroup.make(
       changeTarget: Schema.optional(ChangeTarget),
       notNow: Schema.optional(Schema.Boolean),
       setup: Schema.optional(RepositorySetup),
+      /** The branch new tasks work toward there (ADR-093); null for its default branch. Tasks made already keep theirs. */
+      workToward: Schema.optional(Schema.NullOr(Schema.String)),
     },
     Schema.Void,
+  ),
+  /**
+   * Makes a branch on the code host, from the remote's default branch, where
+   * the repository's tasks start (ADR-093): a name typed in a branch list
+   * that it didn't have. Never forced: one there already is left as it is.
+   * Answers the branch's name as made.
+   */
+  command(
+    'CreateBranch',
+    {
+      projectId: Schema.String,
+      repositoryId: Schema.String,
+      branch: Schema.String,
+    },
+    Schema.String,
   ),
   call('ListTasks', { projectId: Schema.String }, TaskList),
   /**
@@ -3520,7 +3630,15 @@ export const Api = RpcGroup.make(
   /** Changes who does a planned task's steps, or skips one, before it starts. */
   command(
     'ChangePlan',
-    { planId: Schema.String, steps: Schema.Array(PlanStep), end: Schema.optional(Schema.NullOr(TaskEnd)) },
+    {
+      planId: Schema.String,
+      steps: Schema.Array(PlanStep),
+      end: Schema.optional(Schema.NullOr(TaskEnd)),
+      /** Where it works (ADR-091), until its first step starts; the plan's as it was without it. */
+      worksIn: Schema.optional(WorksIn),
+      /** The branch it works toward (ADR-093), until its first step starts; null for the default branch, absent to leave it. */
+      toward: Schema.optional(Schema.NullOr(Schema.String)),
+    },
     Schema.Void,
   ),
   /** Changes what an issue the coordinator drafted says, before it is filed. */
@@ -3657,6 +3775,7 @@ export const Api = RpcGroup.make(
     {
       countdown: Schema.optional(PlansAndReviews.fields.countdown),
       rounds: Schema.optional(PlansAndReviews.fields.rounds),
+      roundsOut: Schema.optional(PlansAndReviews.fields.roundsOut),
     },
     Schema.Void,
   ),
@@ -3817,6 +3936,8 @@ export const Api = RpcGroup.make(
   ),
   /** The person's answer to an agent's question, field by field: the options picked, and any words of their own. */
   command('AnswerQuestion', { attentionId: Schema.String, answers: Schema.Record(Schema.String, FieldAnswer) }, Schema.Void),
+  /** The person's answer to what Althar asked before a Local task takes a checkout (ADR-091). */
+  command('AnswerCheckout', { attentionId: Schema.String, answer: CheckoutAnswer }, Schema.Void),
   /** The person's answer to a permission; with `always`, it is also kept in the project's rules by that scope, one of those offered. */
   command(
     'Answer',
@@ -3932,6 +4053,8 @@ export const Api = RpcGroup.make(
       alwaysAllow: Schema.optional(Schema.Array(RuleKind)),
       commands: Schema.optional(Schema.Array(CommandRule)),
       end: Schema.optional(Schema.NullOr(Schema.Literals(['draft', 'ready', 'none']))),
+      /** Where new tasks start; tasks under way stay where they are. */
+      worksIn: Schema.optional(WorksIn),
       /** Turned on, the project's tasks that already conflict are resolved now, not at their next conflict. */
       resolveConflicts: Schema.optional(Schema.Boolean),
       /** Turned on, what each open task's lead committed and left waiting goes up now, not at its next turn's end. */

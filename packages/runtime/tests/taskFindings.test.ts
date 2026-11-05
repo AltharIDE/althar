@@ -209,6 +209,18 @@ describe('a task’s findings', () => {
       yield* sql`UPDATE thread_items SET content = json_remove(content, '$.attemptId') WHERE id = ${report?.id ?? ''}`
       assert.strictEqual((yield* queries.findings(task.taskId, report?.id ?? '')).review, attempt?.id)
       assert.isNull((yield* queries.findings(task.taskId, 'item_elsewhere')).review)
+
+      // Where a reviewer wrote the line into the file's name, it is the line, unless it named one too; one unreadable is nowhere.
+      const [heading] = yield* sql<{ id: string }>`SELECT id FROM findings WHERE location LIKE '%README.md%'`
+      const placedAt = (location: string) =>
+        Effect.gen(function* () {
+          yield* sql`UPDATE findings SET location = ${location} WHERE id = ${heading?.id ?? ''}`
+          const found = (yield* queries.findings(task.taskId)).findings.find((one) => one.title === 'The heading names the old project')
+          return [found?.file, found?.line]
+        })
+      assert.deepStrictEqual(yield* placedAt(JSON.stringify({ file: 'README.md:3' })), ['README.md', 3])
+      assert.deepStrictEqual(yield* placedAt(JSON.stringify({ file: 'README.md:9', line: 3 })), ['README.md', 3])
+      assert.deepStrictEqual(yield* placedAt('null'), [null, null])
     }).pipe(Effect.provide(withQueries())),
   )
 })

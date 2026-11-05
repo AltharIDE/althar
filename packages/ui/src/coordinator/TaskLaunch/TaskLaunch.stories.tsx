@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useState } from 'react'
+import { useState, type ComponentProps } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { FROM_231, PLAN_432, PLAN_433 } from '../../fixtures/coordinator'
@@ -10,10 +10,15 @@ import { States } from '../../storybook/States'
 import { threadDecorator } from '../../storybook/ThreadFrame'
 import { Turn } from '../../thread/Turn/Turn'
 import { You } from '../../thread/You/You'
+import { TaskEnd, WorksIn } from '../../foundations/vocabulary'
 import { TaskLaunch, type LaunchPick, type LaunchStep } from './TaskLaunch'
 
 /** The consumer's picker for one agent of a step: the composer's own, bordered. */
-function usePicker(steps: readonly LaunchStep[], setSteps: (s: readonly LaunchStep[]) => void) {
+function usePicker(
+  steps: readonly LaunchStep[],
+  setSteps: (s: readonly LaunchStep[]) => void,
+  room?: ComponentProps<typeof ModelPick>['room'],
+) {
   const prefs = useModelPrefs()
   const [efforts, setEfforts] = useState<Record<string, string>>({})
   return ({ step, agent, k, owner }: LaunchPick) => {
@@ -23,6 +28,7 @@ function usePicker(steps: readonly LaunchStep[], setSteps: (s: readonly LaunchSt
         variant="field"
         placement="below"
         owner={owner}
+        room={room}
         model={agent}
         pinned={prefs.pinned}
         effort={efforts[key] ?? effortFor(agent, prefs.efforts)}
@@ -49,10 +55,11 @@ function Launch({
   plan = PLAN_432,
   wait,
   onStart = () => {},
+  room,
   ...rest
-}: Partial<Parameters<typeof TaskLaunch>[0]> & { plan?: LaunchStep[] }) {
+}: Partial<Parameters<typeof TaskLaunch>[0]> & { plan?: LaunchStep[]; room?: ComponentProps<typeof ModelPick>['room'] }) {
   const [steps, setSteps] = useState<readonly LaunchStep[]>(plan)
-  const picker = usePicker(steps, setSteps)
+  const picker = usePicker(steps, setSteps, room)
   return (
     <TaskLaunch
       task="432"
@@ -161,6 +168,17 @@ export const AReview: Story = {
   },
 }
 
+/** The reviewer's model nearly out: its note sits beside the chip, a quiet aside, and the plan still starts. */
+const reviewerNearly = (left: number): Story => ({
+  render: () => <Launch plan={PLAN_ASKED} room={(x) => (x.runtime === CODEX.runtime ? { left, until: '18:05', account: null } : null)} />,
+  play: async ({ canvasElement }) => {
+    const said = left === 0 ? 'Out · until 18:05' : `${left}% left · until 18:05`
+    await expect(within(canvasElement).getByText(said)).toBeInTheDocument()
+  },
+})
+export const ReviewerNearlyOut: Story = reviewerNearly(4)
+export const ReviewerOut: Story = reviewerNearly(0)
+
 const heldChanged = fn()
 const startedHeld = fn()
 
@@ -204,6 +222,128 @@ export const WaitingForAFreeAgent: Story = {
     await expect(c.queryByRole('button', { name: /Start/ })).toBeNull()
     await expect(c.queryByRole('button', { name: 'Hold' })).toBeNull()
   },
+}
+
+/** Where it works, in its head (ADR-091): Local, the person's own checkout, or a worktree, changeable until it starts. */
+function Placed({ worksIn: start = WorksIn.Local, ...rest }: Partial<Parameters<typeof TaskLaunch>[0]>) {
+  const [worksIn, setWorksIn] = useState(start)
+  return <Launch worksIn={worksIn} onWorksInChange={setWorksIn} {...rest} />
+}
+
+/** Planned Local, the project's default: one line on what it gives up. */
+export const Local: Story = {
+  render: () => <Placed />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('radio', { name: 'Local' })).toBeChecked()
+    await expect(c.getByText('One task at a time; your own edits share it.')).toBeVisible()
+    await userEvent.click(c.getByRole('radio', { name: 'Worktree' }))
+    await expect(c.getByText('Side by side with other tasks. Builds from cold.')).toBeVisible()
+    await userEvent.click(c.getByRole('radio', { name: 'Local' }))
+  },
+}
+
+/** Another task works Local: the coordinator planned this one in a worktree and says why; Local would wait for it. */
+export const LocalTaken: Story = {
+  render: () => <Placed worksIn={WorksIn.Worktree} localTaken="Dark mode for Settings" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Local is taken by Dark mode for Settings. Side by side with other tasks. Builds from cold.')).toBeVisible()
+    await userEvent.click(c.getByRole('radio', { name: 'Local' }))
+    await expect(c.getByText('Waits for Dark mode for Settings.')).toBeVisible()
+    await userEvent.click(c.getByRole('radio', { name: 'Worktree' }))
+  },
+}
+
+const BRANCHES = ['main', 'release/0.8.0', 'release/0.7.x', 'feature/onboarding'] as const
+
+/** What it works toward (ADR-093), after how it ends: the remote's branches, changeable until it starts, and a new one made. */
+function Toward({ toward: start, branches: known = BRANCHES, ...rest }: Partial<Parameters<typeof TaskLaunch>[0]>) {
+  const [toward, setToward] = useState(start)
+  const [branches, setBranches] = useState<readonly string[]>(known)
+  const [worksIn, setWorksIn] = useState(WorksIn.Worktree)
+  return (
+    <Launch
+      worksIn={worksIn}
+      onWorksInChange={setWorksIn}
+      defaultBranch="main"
+      branches={branches}
+      {...(toward === undefined ? {} : { toward })}
+      onTowardChange={setToward}
+      onCreateBranch={(name) => {
+        setBranches((was) => [...was, name])
+        setToward(name)
+      }}
+      {...rest}
+    />
+  )
+}
+
+/** Toward the default branch, as most tasks are: Open a draft PR into main. */
+export const TowardMain: Story = {
+  render: () => <Toward />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('button', { name: 'Works toward: main' })).toBeInTheDocument()
+    await expect(c.getByText('into')).toBeInTheDocument()
+  },
+}
+
+/** Pointed at a release branch, from the coordinator or the person: it starts there and its pull request goes there. */
+export const TowardARelease: Story = {
+  render: () => <Toward toward="release/0.8.0" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('button', { name: 'Works toward: release/0.8.0' })).toBeInTheDocument()
+  },
+}
+export const TowardAReleaseDark: Story = { ...TowardARelease, globals: { theme: 'dark' } }
+
+/** Pushed only, no pull request: the branch it works toward, all the same. */
+export const TowardPushOnly: Story = {
+  render: () => <Toward toward="release/0.8.0" defaultEnd={TaskEnd.PushOnly} />,
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('toward')).toBeInTheDocument()
+  },
+}
+
+/** A branch the remote doesn't have, named in the list and made from main, for this task. */
+export const TowardANewBranch: Story = {
+  render: () => <Toward />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const page = within(document.body)
+    await userEvent.click(c.getByRole('button', { name: 'Works toward: main' }))
+    await userEvent.type(await page.findByRole('combobox', { name: 'Find or name a branch' }), 'hotfix/0.8.1')
+    await userEvent.click(page.getByRole('option', { name: 'Create hotfix/0.8.1 from main' }))
+    await expect(await c.findByRole('button', { name: 'Works toward: hotfix/0.8.1' })).toBeInTheDocument()
+  },
+}
+
+/** A remote with only its default branch: still a list, to make the first release branch from it. */
+export const TowardTheOnlyBranch: Story = {
+  render: () => <Toward branches={['main']} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const page = within(document.body)
+    await userEvent.click(c.getByRole('button', { name: 'Works toward: main' }))
+    await userEvent.type(await page.findByRole('combobox', { name: 'Find or name a branch' }), 'release/0.8.0')
+    await userEvent.click(page.getByRole('option', { name: 'Create release/0.8.0 from main' }))
+    await expect(await c.findByRole('button', { name: 'Works toward: release/0.8.0' })).toBeInTheDocument()
+  },
+}
+
+/** With no row for how it ends, the branch has a row of its own. */
+export const TowardWithNoEnd: Story = {
+  render: () => <Toward toward="release/0.8.0" hideEnd />,
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('button', { name: 'Works toward: release/0.8.0' })).toBeInTheDocument()
+  },
+}
+
+/** Started Local, it waits for the checkout: said where the clock was. */
+export const WaitingForLocal: Story = {
+  render: () => <Placed localTaken="Dark mode for Settings" queued="Waits for Local: Dark mode for Settings is there" />,
 }
 
 /** A runtime is out: its steps wait for the reset, unless you move them. */

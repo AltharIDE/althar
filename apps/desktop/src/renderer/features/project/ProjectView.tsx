@@ -1,3 +1,4 @@
+import { EarlierTurns } from '../../shared/EarlierTurns'
 import { useQuery } from '@tanstack/react-query'
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
 
@@ -11,12 +12,10 @@ import {
   Room,
   TaskFace,
   Thread,
-  ThreadDivider,
   ThreadMeasure,
   ThreadShellProvider,
   ThreadSkeleton,
   ProjectHeader,
-  Running,
   keys,
   modKey,
 } from '@althar/ui'
@@ -34,7 +33,6 @@ import { useModelNames } from '../../shared/modelNames'
 import { PartPending, pendingText } from '../../shared/Pending'
 import { type Choice, runningOn } from '../../shared/models'
 import { usualLead } from '../automations/lead'
-import { runningOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
 import { Runs } from '../runs/Runs'
 import { ago, useNow } from '../../shared/time'
@@ -46,6 +44,7 @@ import { AutomationInThread } from '../automations/AutomationInThread'
 import { AutomationsView } from '../automations/AutomationsView'
 import { useAutomationActions, useAutomations } from '../automations/useAutomations'
 import { BoardView } from '../board/BoardView'
+import { ChangeTeam, teamChangeOf } from '../team/Team'
 import type { SettingsWays } from '../settings/open'
 import { useFolds } from '../board/folds'
 import { useClosePullRequests } from '../board/useClosePullRequests'
@@ -104,9 +103,6 @@ export const text = {
   signIn: 'Sign in again',
   needsAgent: 'No agent is signed in.',
   signOneIn: 'Sign one in',
-  earlier: 'Earlier',
-  showEarlier: 'Show',
-  loadingEarlier: 'Showing…',
   dismiss: 'Dismiss',
   boardFailed: 'Althar couldn’t read the board.',
   olderFailed: 'Althar couldn’t load older tasks.',
@@ -264,7 +260,7 @@ export function ProjectView({
   // Another agent's model, picked while the coordinator runs: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
   const coordinator = model.coordinator
-  // Every run in the project, the tasks' too, each saying where, over the composer.
+  // Every run in the project, the tasks' too: Run's list and its switcher say them.
   const launches = coordinator?.launches ?? []
   const offer = useForkOffer(about ?? '', model.repositories)
   // A running turn says how long it has worked so far; a plan on its countdown, when it starts; a run, how long it has been up.
@@ -302,7 +298,9 @@ export function ProjectView({
     agentName,
     onStart: (planId) => void model.startPlan(planId),
     onHold: (planId) => void model.holdPlan(planId),
-    onChange: (planId, steps, end) => void model.changePlan(planId, steps, end),
+    onChange: (planId, steps, end, worksIn, toward) => void model.changePlan(planId, steps, end, worksIn, toward),
+    onCreateBranch: (planId, steps, end, repositoryId, branch) =>
+      void model.changePlanToNewBranch(planId, steps, end, repositoryId, branch),
     onOpen: onTask,
     onStopBackground: (threadId, id) => void model.stopBackground(threadId, id),
     // Every waiting card has the same holders, so only the newest says them.
@@ -409,25 +407,7 @@ export function ProjectView({
             </>
           ) : null
         }
-        above={
-          (offer.offering !== null || launches.length > 0) && (
-            <>
-              <ForkOffer offer={offer} />
-              {launches.length > 0 && (
-                <Running
-                  processes={runningOf(launches, now, { where: true })}
-                  onStop={(id) => void model.stopLaunch(id)}
-                  onDismiss={(id) => void model.clearLaunch(id)}
-                  // Where it answers opens in the person's browser.
-                  onOpenUrl={(id) => {
-                    const url = launches.find((launch) => launch.id === id)?.url
-                    if (url != null) window.open(url, '_blank')
-                  }}
-                />
-              )}
-            </>
-          )
-        }
+        above={offer.offering !== null && <ForkOffer offer={offer} />}
         onSubmit={(body) => send(body, false)}
         onSendNow={(body) => send(body, true)}
         {...images.props(receiver)}
@@ -463,6 +443,9 @@ export function ProjectView({
     if (room === Room.Board) setRoom(Room.Both)
     requestAnimationFrame(() => voice.inputRef.current?.focus())
   }
+  // The team of a plan up next, open from its row, while it can still change.
+  const [teamFor, setTeamFor] = useState<string | null>(null)
+  const teamTask = teamFor === null || lanes === null ? null : (lanes.next.find((one) => one.taskId === teamFor) ?? null)
   /** The first thing that waits on you, in its task. */
   const openYours = () => {
     const first = lanes === null ? null : firstNeedOf(lanes)
@@ -513,7 +496,7 @@ export function ProjectView({
         trackers,
         open: (url) => window.open(url, '_blank'),
       })}
-      // What the project runs, with no agent, on its default branch (ADR-044).
+      // What the project runs, with no agent, where it is picked to (ADR-090).
       {...(coordinator === null
         ? {}
         : {
@@ -522,12 +505,19 @@ export function ProjectView({
                 projectId={projectId}
                 project={kept.name ?? name}
                 taskId={null}
+                // Its tasks run in their worktrees: those under way with a branch, not a review, which runs nothing of what it reads.
+                tasks={
+                  board.board?.tasks
+                    .filter((task) => task.settledAt === null && task.branch !== null && task.reviewing == null)
+                    .map((task) => ({ id: task.taskId, title: task.title })) ?? null
+                }
                 runnables={coordinator.runnables}
                 launches={coordinator.launches}
                 now={now}
-                onRun={(id) => void model.runProject(null, id)}
+                onRun={(id, taskId) => void model.runProject(taskId, id)}
                 onStop={(id) => void model.stopLaunch(id)}
-                onRunBranch={model.runBranch}
+                onClear={(id) => void model.clearLaunch(id)}
+                onRunRef={model.runRef}
               />
             ),
           })}
@@ -595,15 +585,13 @@ export function ProjectView({
                         className={s.firstConnections}
                       />
                     )}
-                    {coordinator.earlier && (
-                      <ThreadDivider
-                        icon="up"
-                        action={model.loadingEarlier ? text.loadingEarlier : text.showEarlier}
-                        onAction={() => void model.loadEarlier()}
-                      >
-                        {text.earlier}
-                      </ThreadDivider>
-                    )}
+                    <EarlierTurns
+                      key={coordinator.threadId}
+                      earlier={coordinator.earlier}
+                      load={model.loadEarlier}
+                      version={coordinator.items}
+                      loading={model.loadingEarlier}
+                    />
                     {/* The coordinator only reads: what it hands back is pictures, which open in the lightbox; it writes no documents. */}
                     <ThreadShellProvider value={shown.shell}>
                       <ThreadBlocks
@@ -701,8 +689,18 @@ export function ProjectView({
                     folds={folds}
                     onFoldsChange={setFolds}
                     onTalk={talkToCoordinator}
+                    team={{ projectId, start: (planId) => model.startPlan(planId), change: setTeamFor }}
                     {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                   />
+                  {teamFor !== null && (
+                    <ChangeTeam
+                      key={teamFor}
+                      projectId={projectId}
+                      task={teamTask !== null && teamChangeOf(teamTask) !== null ? teamTask : null}
+                      agents={model.agents}
+                      onClose={() => setTeamFor(null)}
+                    />
+                  )}
                 </>
               ) : board.error === null ? (
                 <PartPending label={text.boardReading} />

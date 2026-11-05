@@ -10,9 +10,10 @@ import { backToWork, launch, openFirstProject, projectSettings, startTask, still
 
 /*
  * A conflict is never left without a word (ADR-030), in a real window with
- * the fake agent: a task's branch stops merging with main, the project's
- * leads are told to resolve conflicts from its settings, which then offer to
- * look at every task again; its lead can't resolve it (`[lead:resolve-fails]`),
+ * the fake agent: a task's branch stops merging with main, its project's
+ * leads resolving conflicts as they do unless the person turned it off, and
+ * its settings offering to look at every task again; its lead can't resolve
+ * it (`[lead:resolve-fails]`),
  * and its card and its task say why; its task, which the card opens, with
  * Resolve now, which asks the lead again though nothing moved (DEV-173). The screenshots it takes are this
  * change's own evidence (test-results/conflicts-*.png).
@@ -38,10 +39,9 @@ test('a conflict its lead couldn’t resolve says why on its card and in its tas
     git(repo, 'add', '-A')
     git(repo, 'commit', '-q', '-m', 'Main moves on')
 
-    // Turned on, what already conflicts is looked at now; and every open task can be looked at again from there.
+    // On unless the person turned it off (ADR-092), every open task can be looked at again from there.
     await projectSettings(page, 'General')
     const conflicts = page.getByRole('switch', { name: 'Resolve merge conflicts automatically' })
-    await conflicts.click()
     await expect(conflicts).toBeChecked()
     await page.getByRole('button', { name: 'Look for conflicts now' }).click()
     await expect(page.getByText('Looking…')).toBeVisible()

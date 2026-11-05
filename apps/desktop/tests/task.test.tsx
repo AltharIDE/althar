@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Activity } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { type AgentStatus, ApiError, type LimitCall, type StuckStep, type ThreadSnapshot } from '@althar/contracts'
 import { TaskStatus, TrackStep } from '@althar/ui'
@@ -12,7 +12,7 @@ import { conflictsOf } from '../src/renderer/features/task/Outputs'
 import { elapsedOf, openingFace, statusOf, stepsOf, TaskView, tookOf } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { numberOf, reachOf, reviewedUnfurl } from '../src/renderer/features/task/ReviewCard'
-import { agents, change, changed, fakeClient, fakeHost, items, models, snapshot, status, streamed, usual } from './fixtures'
+import { agents, card, change, changed, fakeClient, fakeHost, items, models, snapshot, status, streamed, usual } from './fixtures'
 import type { ChangedFile } from '@althar/contracts'
 import { clock } from '../src/renderer/shared/time'
 import { reads } from '../src/renderer/data/reads'
@@ -1653,6 +1653,14 @@ describe('a task', () => {
     expect(client.stopTask).toHaveBeenCalledWith('t1')
   })
 
+  it('says first in its menu the branch its work goes into, where it isn’t the default, and not in its bar (ADR-093)', async () => {
+    await taskMenu({ toward: 'release/0.8.0' })
+    expect(screen.getAllByRole('menuitem')[0]?.textContent).toContain('Into release/0.8.0')
+    // Its bar says nothing of it.
+    expect(screen.queryByText('Toward release/0.8.0')).toBeNull()
+    expect(screen.getAllByText('release/0.8.0')).toHaveLength(1)
+  })
+
   it('offers stopping and abandoning in its menu while it works, as the runtime says', async () => {
     const { client, offered } = await taskMenu({})
     expect(offered).toEqual(['Open in Zed', 'Attach a pull request…', 'Stop the task', 'Abandon'])
@@ -1779,6 +1787,56 @@ describe('a task', () => {
     expect(offered).toEqual(['Start now', 'Open in Zed', 'Attach a pull request…', 'Abandon'])
     await userEvent.click(screen.getByRole('menuitem', { name: /Start now/ }))
     await waitFor(() => expect(client.startPlan).toHaveBeenCalledWith('pln1'))
+  })
+
+  it('changes the team of its plan before it begins, from its menu and its composer’s picker, in one dialog', async () => {
+    const held = {
+      ...card({ taskId: 't1', threadId: 'th1', phase: 'held' }),
+      state: 'open',
+      createdAt: '',
+      settledAt: null,
+      changed: null,
+      here: [],
+    }
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({ task: { ...thread().task, phase: 'held', actions: ['start', 'abandon'], planId: 'pln1' }, session: null }),
+      ),
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [held], calls: [], settledTotal: 0 })),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Change the team…/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Team' })
+    expect(within(dialog).getByText('It knows the code.')).toBeTruthy()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Team' })).toBeNull())
+
+    // The composer's picker closes, then opens the same dialog.
+    await userEvent.click(screen.getByRole('button', { name: /^Lead:/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    expect(await screen.findByRole('dialog', { name: 'Team' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'All models' })).toBeNull()
+  })
+
+  it('offers no change of team once its plan has begun', async () => {
+    const begun = {
+      ...card({ taskId: 't1', threadId: 'th1', phase: 'running', step: 'implement' }),
+      state: 'open',
+      createdAt: '',
+      settledAt: null,
+      changed: null,
+      here: [],
+    }
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread({ task: { ...thread().task, phase: 'running', actions: ['stop', 'abandon'] } })),
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [begun], calls: [], settledTotal: 0 })),
+    })
+    withServices(<Task />, client)
+    await waitFor(() => expect(client.getBoard).toHaveBeenCalled())
+    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+    expect(await screen.findByRole('menuitem', { name: /Stop the task/ })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: /Change the team…/ })).toBeNull()
   })
 
   it('marks each of its draft pull requests ready from its menu, in turn', async () => {
@@ -2199,7 +2257,7 @@ describe('a task', () => {
       within(pinned)
         .getAllByRole('radio')
         .map((radio) => radio.textContent),
-    ).toEqual(['Claude Opus, via Claude Codenot pinned', 'Claude Code default, via Claude Code', 'gpt-5.2-codex, via Codex'])
+    ).toEqual(['Claude Opus, via Claude Code', 'Claude Code default, via Claude Code', 'gpt-5.2-codex, via Codex'])
     // High is not what Claude Code is on; the person makes it Opus's.
     expect(screen.getByText(/default Medium/)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Make this default' }))
@@ -2514,10 +2572,10 @@ describe('a task', () => {
     // Out of review rounds: accepted as it is.
     again.unmount()
     vi.mocked(client.getThread).mockImplementation(async () =>
-      thread({ attention: [stuck({ step: 'review', why: 'round_limit', open: 2 })] }),
+      thread({ attention: [stuck({ step: 'review', why: 'round_limit', round: 3, open: 2 })] }),
     )
     withServices(<Task />, client)
-    expect(await screen.findByText(/Reviewed three times\. 2 findings open\./)).toBeTruthy()
+    expect(await screen.findByText(/Reviewed 3 times; the last fixes weren't reviewed\. 2 findings open\./)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Accept it as it is' }))
     await waitFor(() => expect(client.answerStuck).toHaveBeenCalledWith({ attentionId: 'st1', answer: { kind: 'abandon' } }))
   })
@@ -2576,12 +2634,12 @@ describe('a task', () => {
 
   it('says why each step needed the person', () => {
     const at = (why: StuckStep['why'], detail: string | null = null, open = 0) =>
-      stuckWords.what({ step: 'implement', why, detail, agentId: null, round: 0, open }, 'Codex')
+      stuckWords.what({ step: 'implement', why, detail, agentId: null, round: 3, open }, 'Codex')
     expect([at('session_ended'), at('restarted'), at('failed_to_start'), at('round_limit', null, 1), at('usage_limit')]).toEqual([
       'Codex closed before finishing the step.',
       'Althar stopped unexpectedly twice while this step ran.',
       "Codex couldn't start.",
-      'Reviewed three times. 1 finding open.',
+      "Reviewed 3 times; the last fixes weren't reviewed. 1 finding open.",
       'Codex is out of usage.',
     ])
     // A review has no lead to tell: it advises the buttons it has.
@@ -3045,12 +3103,22 @@ describe('a task', () => {
           : { ...newest, items: [items.says('An earlier one.', 'claude-code', 'earlier')], earlier: false },
       ),
     })
+    if (vi.isMockFunction(window.getComputedStyle)) vi.mocked(window.getComputedStyle).mockRestore()
+    const computed = window.getComputedStyle
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
+      const style = computed(element)
+      Object.defineProperty(style, 'overflowY', {
+        value: element.classList.contains('scroll') || element.getAttribute('class')?.includes('scroll_') ? 'auto' : 'visible',
+        configurable: true,
+      })
+      return style
+    })
     withServices(<Task />, client)
     await screen.findByText('The newest.')
-    await userEvent.click(screen.getByRole('button', { name: 'Show' }))
+    scrollEarlier()
     await screen.findByText('An earlier one.')
     expect(client.getThread).toHaveBeenLastCalledWith('th1', { before: newest.items[0]?.sequence, limit: 100 })
-    expect(screen.queryByText('Earlier in this task')).toBeNull()
+    expect(screen.queryByText('Loading…')).toBeNull()
   })
 
   it('says what went wrong, and lets it go', async () => {
@@ -3082,8 +3150,19 @@ describe('a task', () => {
 
   it('reads nothing earlier when it has nothing yet', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => thread({ items: [], earlier: true })) })
+    if (vi.isMockFunction(window.getComputedStyle)) vi.mocked(window.getComputedStyle).mockRestore()
+    const computed = window.getComputedStyle
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
+      const style = computed(element)
+      Object.defineProperty(style, 'overflowY', {
+        value: element.classList.contains('scroll') || element.getAttribute('class')?.includes('scroll_') ? 'auto' : 'visible',
+        configurable: true,
+      })
+      return style
+    })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Show' }))
+    await waitFor(() => expect(document.querySelector('section[data-arrivals]')).not.toBeNull())
+    scrollEarlier()
     // Only the thread, and what it changed as it opened: no page before nothing.
     expect(vi.mocked(client.getThread).mock.calls.filter(([, page]) => page?.before !== undefined)).toEqual([])
   })
@@ -3380,4 +3459,16 @@ describe('the face a task opens on', () => {
     withServices(<Task />, client)
     expect((await screen.findByRole('radio', { name: /Conversation/ })).getAttribute('aria-checked')).toBe('true')
   })
+})
+
+function scrollEarlier() {
+  const thread = document.querySelector<HTMLElement>('section[data-arrivals]')!
+  let box = thread.parentElement!
+  while (!/(auto|scroll)/.test(getComputedStyle(box).overflowY) && box.parentElement) box = box.parentElement
+  Object.defineProperty(box, 'clientHeight', { configurable: true, value: 600 })
+  fireEvent.scroll(box)
+}
+
+afterEach(() => {
+  if (vi.isMockFunction(window.getComputedStyle)) vi.mocked(window.getComputedStyle).mockRestore()
 })

@@ -51,7 +51,16 @@
     of that time the turns ran in counts, because the rest may be use outside
     Althar. A week that stands still keeps the reading where it began and its
     latest one, so a task after a quiet stretch has a reading from just
-    before it. The figure reads as an estimate: "~8% of week".
+    before it. Only the plan's own week is kept, never a model's or extra
+    usage's. A week starts again only when its reset time moves on by a day
+    or more, since Claude's sources give the same reset a few milliseconds
+    apart and a rolling window may shift it by hours; where a reset time is
+    unknown, only when its use drops by more than 5 points. A reading whose
+    reset went back by a day or more is another window's, and is left out.
+    Within a week only a rise past its highest reading yet counts, because
+    the sources round its use differently (24, then 23). A task's share is
+    never more than the week says at its last reading. The
+    figure reads as an estimate: "~8% of week".
   - **Dollars are what the agent said,** kept on the session
     (`provider_sessions.reported_cost`). Where it said nothing, Althar prices
     the turns' tokens at the model's list prices, and prices a cache read

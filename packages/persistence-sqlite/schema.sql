@@ -18,7 +18,7 @@
 -- node_type: deterministic_action, agent, integration, human_decision, condition, bounded_map, join, verification, compensation, subworkflow, bounded_loop
 -- node_state: pending, ready, running, succeeded, failed, skipped, cancelled, uncertain
 -- node_attempt_state: ready, admitted, running, waiting_attention, verifying, succeeded, failed, cancelling, cancelled, uncertain, reconciling, held, superseded
--- hold_reason: usage_limit, agent_unavailable, machine_busy
+-- hold_reason: usage_limit, agent_unavailable, machine_busy, checkout
 -- thread_kind: coordinator, task, step
 -- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival, question, run, issue_draft, setup, push_request, review_draft, issue_changes, automation, pictures, task_ask
 -- input_disposition: after_current, interrupt_and_continue, supersede_pending, cancel_run
@@ -33,7 +33,7 @@
 -- process_state: launching, running, exited, killed, unknown
 -- tool_kind: read, edit, delete, move, search, execute, think, fetch, switch_mode, other
 -- permission_request_state: open, decided, cancelled
--- attention_kind: permission, question, stuck, plan, graph_patch, usage_limit, review_disagreement
+-- attention_kind: permission, question, stuck, plan, graph_patch, usage_limit, review_disagreement, checkout
 -- attention_state: open, answered, expired, withdrawn
 -- finding_severity: blocking, major, minor, nit
 -- finding_state: open, fixed, set_aside, dismissed
@@ -60,6 +60,7 @@
 -- automation_paused_by: person, itself
 -- automation_occurrence_cause: schedule, now
 -- automation_occurrence_state: starting, running, made, nothing, failed, missed, skipped
+-- works_in: worktree, checkout
 
 CREATE TABLE "schema_migrations" (
   migration_id integer PRIMARY KEY NOT NULL,
@@ -130,7 +131,7 @@ CREATE TABLE repository_bindings (
   allowed_subpaths TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(allowed_subpaths)),
   default_base_ref TEXT,
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  detached_at TEXT CHECK (detached_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), folder TEXT, change_target TEXT REFERENCES vocab_change_target (word), run_command TEXT, run_setup TEXT, recorded_setup TEXT, upstream_offer_at TEXT CHECK (upstream_offer_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  detached_at TEXT CHECK (detached_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), folder TEXT, change_target TEXT REFERENCES vocab_change_target (word), run_command TEXT, run_setup TEXT, recorded_setup TEXT, upstream_offer_at TEXT CHECK (upstream_offer_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), work_toward TEXT,
   UNIQUE (project_id, slug),
   UNIQUE (id, project_id)
 ) STRICT;
@@ -306,7 +307,7 @@ CREATE TABLE workspaces (
   state TEXT NOT NULL REFERENCES vocab_workspace_state (word),
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   cleaned_at TEXT CHECK (cleaned_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), setup TEXT CHECK (json_valid(setup)), branched_at TEXT CHECK (branched_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), setup TEXT CHECK (json_valid(setup)), branched_at TEXT CHECK (branched_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), kind TEXT REFERENCES vocab_works_in (word), returns_to TEXT, returned_at TEXT CHECK (returned_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), toward TEXT,
   UNIQUE (task_id, binding_id, device_id),
   FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id),
   FOREIGN KEY (binding_id, project_id) REFERENCES repository_bindings (id, project_id),

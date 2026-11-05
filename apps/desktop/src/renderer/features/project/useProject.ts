@@ -12,6 +12,7 @@ import {
   type TaskEnd,
   type ThreadItem,
   type FieldAnswer,
+  type WorksIn,
 } from '@althar/contracts'
 
 import { messageOf, type RunRef } from '../../data/client'
@@ -56,7 +57,8 @@ export interface ProjectModel {
   /** An action is on its way to the runtime. */
   readonly pending: boolean
   readonly loadingEarlier: boolean
-  readonly loadEarlier: () => Promise<void>
+  /** Rejects on failure; quiet keeps automatic reads from opening the global error notice. */
+  readonly loadEarlier: (quiet?: boolean) => Promise<void>
   /** Says something to the coordinator, which starts it on `agentId` if it isn't running. */
   /** Tells the coordinator something, with any images; a coordinator not running starts as the person chose, when they did. */
   readonly say: (body: string, choice: Choice | null, images?: Outgoing) => Promise<boolean>
@@ -70,8 +72,8 @@ export interface ProjectModel {
   readonly compact: () => Promise<void>
   /** Runs one of the project's runnables with no agent, its default without one: a task's worktree, or with none its default branch. Its card goes in the coordinator's thread. */
   readonly runProject: (taskId?: string | null, runnableId?: string | null, ref?: RunRef) => Promise<void>
-  /** Runs a branch or a pull request, fetched by Althar, in a copy of its own, its card in the coordinator's thread; what went wrong is thrown, for the picker to say. */
-  readonly runBranch: (ref: RunRef) => Promise<void>
+  /** Runs one on a branch or a pull request, fetched by Althar, in a copy of its own, its card in the coordinator's thread; what went wrong is thrown, for its line to say. */
+  readonly runRef: (runnableId: string, ref: RunRef) => Promise<void>
   readonly stopLaunch: (id: string) => Promise<void>
   readonly clearLaunch: (id: string) => Promise<void>
   /** Moves the running coordinator to another agent. */
@@ -85,7 +87,21 @@ export interface ProjectModel {
   readonly holdPlan: (planId: string) => Promise<void>
   /** Stops a command a task's lead left running, which keeps a place the waiting plans wait for. */
   readonly stopBackground: (threadId: string, id: string) => Promise<void>
-  readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null) => Promise<void>
+  readonly changePlan: (
+    planId: string,
+    steps: ReadonlyArray<PlanStep>,
+    end?: TaskEnd | null,
+    worksIn?: WorksIn,
+    toward?: string | null,
+  ) => Promise<void>
+  /** Holds the plan, makes a branch the remote doesn't have from the default branch, then points the plan at it (ADR-093). */
+  readonly changePlanToNewBranch: (
+    planId: string,
+    steps: ReadonlyArray<PlanStep>,
+    end: TaskEnd | null | undefined,
+    repositoryId: string,
+    branch: string,
+  ) => Promise<void>
   readonly fileIssueDraft: (draftId: string) => Promise<void>
   readonly changeIssueDraft: (
     draftId: string,
@@ -243,19 +259,44 @@ export const useProject = (projectId: string): ProjectModel => {
     timer.current ??= setTimeout(readChanged, GATHER)
   })
 
-  const loadEarlier = useCallback(async () => {
-    const first = coordinator?.items[0]
-    if (first === undefined) return
-    setLoadingEarlier(true)
-    try {
-      const page = await client.getCoordinator(projectId, { before: first.sequence, limit: PAGE })
-      setCoordinator((current) => ({ ...current, items: mergeItems(current.items, page.items), earlier: page.earlier }))
-    } catch (failure) {
-      fail(failure)
-    } finally {
-      setLoadingEarlier(false)
-    }
-  }, [client, projectId, coordinator, setCoordinator, fail])
+  const earlierRequest = useRef<{ id: string | undefined; promise: Promise<void> } | null>(null)
+  const loadEarlier = useCallback(
+    (quiet = false) => {
+      if (earlierRequest.current?.id === coordinator?.threadId && earlierRequest.current) {
+        const pending = earlierRequest.current.promise
+        return quiet
+          ? pending
+          : pending.catch((error) => {
+              fail(error)
+              throw error
+            })
+      }
+      const first = coordinator?.items[0]
+      if (first === undefined || !coordinator?.earlier) return Promise.resolve()
+      setLoadingEarlier(true)
+      const request = client
+        .getCoordinator(projectId, { before: first.sequence, limit: PAGE })
+        .then((page) => {
+          setCoordinator((current) =>
+            current.threadId === page.threadId
+              ? { ...current, items: mergeItems(current.items, page.items), earlier: page.earlier }
+              : current,
+          )
+        })
+        .catch((error) => {
+          if (!quiet) fail(error)
+          throw error
+        })
+        .finally(() => {
+          if (earlierRequest.current?.promise !== request) return
+          earlierRequest.current = null
+          setLoadingEarlier(false)
+        })
+      earlierRequest.current = { id: coordinator?.threadId, promise: request }
+      return request
+    },
+    [client, projectId, coordinator, setCoordinator, fail],
+  )
 
   /** Runs an action, says what went wrong if it did, and reads the thread's head again. */
   const act = useCallback(
@@ -361,9 +402,9 @@ export const useProject = (projectId: string): ProjectModel => {
           ? client.runProject(projectId, taskId, threadId, ...(runnableId === null ? [] : [runnableId]))
           : client.runProject(projectId, taskId, threadId, runnableId ?? undefined, ref),
       ),
-    runBranch: async (ref) => {
+    runRef: async (runnableId, ref) => {
       try {
-        await client.runProject(projectId, null, threadId, undefined, ref)
+        await client.runProject(projectId, null, threadId, runnableId, ref)
       } finally {
         await readHead()
       }
@@ -399,7 +440,22 @@ export const useProject = (projectId: string): ProjectModel => {
     startPlan: (planId) => act(() => client.startPlan(planId)),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
     stopBackground: (threadId, id) => act(() => client.stopBackground(threadId, id)),
-    changePlan: (planId, steps, end) => act(() => client.changePlan(planId, steps, end)),
+    changePlan: (planId, steps, end, worksIn, toward) =>
+      act(() =>
+        toward !== undefined
+          ? client.changePlan(planId, steps, end, worksIn, toward)
+          : worksIn === undefined
+            ? client.changePlan(planId, steps, end)
+            : client.changePlan(planId, steps, end, worksIn),
+      ),
+    changePlanToNewBranch: (planId, steps, end, repositoryId, branch) =>
+      act(async () => {
+        // Held first, so its countdown can't start it toward the old branch while the host makes the new one; it then
+        // waits for the person's Start, pointed at it, or, where the host refused it, as it was, saying why.
+        await client.holdPlan(planId)
+        const made = await client.createBranch({ projectId, repositoryId, branch })
+        await client.changePlan(planId, steps, end, undefined, made)
+      }),
     fileIssueDraft: (draftId) => act(() => client.fileIssueDraft(draftId)),
     changeIssueDraft: (draftId, edit) => act(() => client.changeIssueDraft(draftId, edit)),
     discardIssueDraft: (draftId) => act(() => client.discardIssueDraft(draftId)),

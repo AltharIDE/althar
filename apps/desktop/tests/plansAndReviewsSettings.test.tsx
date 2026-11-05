@@ -37,8 +37,13 @@ describe('plans and reviews', () => {
     expect(within(page).getByRole('combobox', { name: 'Start a plan after' }).textContent).toBe('10 seconds')
     await choose(page, 'Rounds of review', '2 rounds')
     expect(client.setPlansAndReviews).toHaveBeenLastCalledWith({ rounds: 2 })
-    await userEvent.click(within(page).getByRole('button', { name: 'Use 25 seconds' }))
+    await userEvent.click(within(page).getByRole('button', { name: 'Default: 25 seconds' }))
     expect(client.setPlansAndReviews).toHaveBeenLastCalledWith({ countdown: 25 })
+    expect(within(page).getByRole('combobox', { name: 'When rounds run out' }).textContent).toBe('Carry on when every finding is settled')
+    await choose(page, 'When rounds run out', 'Ask me')
+    expect(client.setPlansAndReviews).toHaveBeenLastCalledWith({ roundsOut: 'ask' })
+    await userEvent.click(within(page).getByRole('button', { name: 'Default: Carry on when every finding is settled' }))
+    expect(client.setPlansAndReviews).toHaveBeenLastCalledWith({ roundsOut: 'settled' })
   })
 
   it('says a choice couldn’t be kept', async () => {

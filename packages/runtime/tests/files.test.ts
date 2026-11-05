@@ -14,7 +14,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
 import { Api, clientProtocol, emitterPort, MESSAGE_FILES, type ThreadItem, type ThreadSnapshot } from '@althar/contracts'
@@ -264,9 +264,53 @@ describe('files sent with a message', () => {
         assert.strictEqual(yield* refused([{ grant: 'grant_gone' }]), "A file isn't there any more. Add it again.")
         assert.strictEqual(yield* refused([{ kept: 'input_0:1' }]), "A file isn't there any more. Add it again.")
         assert.strictEqual(yield* refused([{ grant: yield* grant(join(from, 'nothing-here')) }]), "Althar couldn't read nothing-here.")
+        // More than a message carries by their bytes together, though each is within its own; a folder of too many files.
+        const parts = yield* Effect.forEach([1, 2, 3], (n) => {
+          const part = join(from, `part-${n}.zip`)
+          writeFileSync(part, '')
+          truncateSync(part, MESSAGE_FILES.bytes - 1)
+          return grant(part)
+        })
+        assert.strictEqual(yield* refused(parts.map((one) => ({ grant: one }))), "A message's files come to at most 100 MB together.")
+        const folder = join(from, 'many')
+        mkdirSync(folder)
+        for (let n = 0; n <= MESSAGE_FILES.entries; n += 1) writeFileSync(join(folder, `${n}.txt`), '')
+        assert.strictEqual(yield* refused([{ grant: yield* grant(folder) }]), 'many holds over 2,000 files.')
         // Nothing was copied for a message refused, nor said.
         assert.isFalse(existsSync(join(worktree, '.althar', 'attachments')))
         assert.lengthOf(messages((yield* client.GetThread({ threadId: task.threadId })).items), 0)
+      }),
+    ),
+  )
+})
+
+describe('files sent with a message, at their edges', () => {
+  it.live('are named apart where several share a name, and refused for a thread that isn’t there', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const setup = yield* connected()
+        const { client, grant } = setup
+        const { task, worktree } = yield* taskWithLead(setup)
+        const logs = yield* Effect.forEach([downloads(), downloads(), downloads()], (folder) =>
+          Effect.map(grant(join(folder, 'build.log')), (one) => ({ grant: one })),
+        )
+        const send = (threadId: string, files: ReadonlyArray<{ readonly grant: string }>) =>
+          client.Send({ commandId: commandId(), threadId, body: 'Look', disposition: 'after_current', files })
+        assert.strictEqual((yield* Effect.flip(send('thr_gone', logs.slice(0, 1)))).message, "That task isn't there any more.")
+        yield* send(task.threadId, logs)
+        const [message] = messages((yield* client.GetThread({ threadId: task.threadId })).items).slice(-1)
+        const content = (message?.content ?? {}) as { readonly files?: ReadonlyArray<{ readonly name: string }> }
+        const files = content.files ?? []
+        assert.deepStrictEqual(
+          files.map((file) => file.name),
+          ['build.log', 'build.log', 'build.log'],
+        )
+        const copied = yield* setup.sql<{ path: string }>`SELECT path FROM user_input_files ORDER BY position`
+        assert.deepStrictEqual(
+          copied.map((row) => basename(row.path)),
+          ['build.log', 'build 2.log', 'build 3.log'],
+        )
+        for (const row of copied) assert.isTrue(row.path.startsWith(join(worktree, '.althar', 'attachments')), row.path)
       }),
     ),
   )

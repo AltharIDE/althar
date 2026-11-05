@@ -1,3 +1,4 @@
+import { afterOpen, startup } from './startup'
 import { execFile, type ExecFileException } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
@@ -6,7 +7,7 @@ import { dirname, join, posix, resolve } from 'node:path'
 
 import type { ChangeTarget } from '@althar/domain'
 import { cleanUp } from '@althar/provider-adapters'
-import { Effect } from 'effect'
+import { Context, Effect } from 'effect'
 
 import { GitFailed } from './errors'
 import { forkOf } from './forks'
@@ -116,6 +117,9 @@ const failedWith = (args: ReadonlyArray<string>, cwd: string, timeout: number, e
   })
 }
 
+/** What every git command in an effect runs with besides, as `untouched` sets it for a folder someone else works in. */
+const Untouched = Context.Reference<Readonly<Record<string, string>>>('@althar/runtime/git/Untouched', { defaultValue: () => ({}) })
+
 const run = (
   timeout: number,
   cwd: string,
@@ -125,26 +129,58 @@ const run = (
   /** What the command reads, for one such as `cat-file --batch-check`. */
   input?: string,
 ): Effect.Effect<string, GitFailed> =>
-  Effect.callback<string, GitFailed>((resume) => {
-    const at = gitIn(cwd, ['-c', 'core.hooksPath=/dev/null', ...args])
-    const child = execFile(
-      'git',
-      [...at.args],
-      {
-        ...(at.cwd === undefined ? {} : { cwd: at.cwd }),
-        timeout,
-        maxBuffer: 16 * 1024 * 1024,
-        windowsHide: true,
-        env: environmentIn(cwd, env),
+  Effect.flatMap(Untouched, (aside) =>
+    Effect.callback<string, GitFailed>((resume) => {
+      const at = gitIn(cwd, ['-c', 'core.hooksPath=/dev/null', ...args])
+      const child = execFile(
+        'git',
+        [...at.args],
+        {
+          ...(at.cwd === undefined ? {} : { cwd: at.cwd }),
+          timeout,
+          maxBuffer: 16 * 1024 * 1024,
+          windowsHide: true,
+          env: environmentIn(cwd, { ...aside, ...env }),
+        },
+        (error, stdout, stderr) =>
+          resume(
+            error === null ? Effect.succeed(trim ? stdout.trim() : stdout) : Effect.fail(failedWith(args, cwd, timeout, error, stderr)),
+          ),
+      )
+      if (input === undefined || child.stdin === null) return
+      // A git that ends before it has read everything fails on its own; the pipe closing under it isn't another failure.
+      child.stdin.on('error', () => undefined)
+      child.stdin.end(input)
+    }),
+  ).pipe((effect) => (args[0] === 'fetch' || args[0] === 'ls-remote' ? afterOpen(startup('repository-fetch', effect)) : effect))
+
+/** A copy of a worktree's index, in a folder of its own: git may refresh the copy as it reads, never the worktree's own. */
+const indexCopy = (cwd: string, args: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const index = resolve(cwd, yield* git(cwd, 'rev-parse', '--git-path', 'index'))
+    return yield* Effect.try({
+      try: () => {
+        const copy = join(mkdtempSync(join(tmpdir(), 'althar-index-')), 'index')
+        if (existsSync(index)) copyFileSync(index, copy)
+        return copy
       },
-      (error, stdout, stderr) =>
-        resume(error === null ? Effect.succeed(trim ? stdout.trim() : stdout) : Effect.fail(failedWith(args, cwd, timeout, error, stderr))),
-    )
-    if (input === undefined || child.stdin === null) return
-    // A git that ends before it has read everything fails on its own; the pipe closing under it isn't another failure.
-    child.stdin.on('error', () => undefined)
-    child.stdin.end(input)
+      catch: (error) => new GitFailed({ args: [...args], cwd, stderr: String(error) }),
+    })
   })
+
+/**
+ * Runs an effect's git commands in a folder someone else is working in,
+ * another task's worktree or the person's checkout, without touching it:
+ * on a copy of its index, which `git diff` would otherwise refresh and write
+ * back under its lock, and with git's optional locks off. What it reads of
+ * the files themselves it only reads. The copy goes once the effect ends.
+ */
+export const untouched = <A, E, R>(cwd: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | GitFailed, R> =>
+  Effect.acquireUseRelease(
+    indexCopy(cwd, ['diff']),
+    (copy) => Effect.provideService(effect, Untouched, { GIT_INDEX_FILE: copy, GIT_OPTIONAL_LOCKS: '0' }),
+    (copy) => cleanUp(dirname(copy), "where another task's worktree was read"),
+  )
 
 /**
  * What a worktree holds, as a tree id: tracked and untracked files alike,
@@ -153,17 +189,7 @@ const run = (
  */
 export const treeOf = (cwd: string): Effect.Effect<string, GitFailed> =>
   Effect.acquireUseRelease(
-    Effect.gen(function* () {
-      const index = resolve(cwd, yield* git(cwd, 'rev-parse', '--git-path', 'index'))
-      return yield* Effect.try({
-        try: () => {
-          const copy = join(mkdtempSync(join(tmpdir(), 'althar-index-')), 'index')
-          if (existsSync(index)) copyFileSync(index, copy)
-          return copy
-        },
-        catch: (error) => new GitFailed({ args: ['add', '-A'], cwd, stderr: String(error) }),
-      })
-    }),
+    indexCopy(cwd, ['add', '-A']),
     (copy) =>
       Effect.andThen(run(60_000, cwd, ['add', '-A'], { GIT_INDEX_FILE: copy }), run(60_000, cwd, ['write-tree'], { GIT_INDEX_FILE: copy })),
     // The index's copy goes as best it can: a folder git still holds a moment after it exits leaves the tree as it was read.
@@ -649,3 +675,17 @@ export const remoteOf = (cwd: string, base: string) =>
     if (followed.code === 0 && names.includes(followed.stdout)) return followed.stdout
     return names.includes('origin') ? 'origin' : names.length === 1 ? (names[0] ?? null) : null
   })
+
+/**
+ * A repository's branches on a remote, as this Mac last fetched them, `first`
+ * first and the rest by name: what Work toward and the plan card offer. None
+ * where git can't say.
+ */
+export const remoteBranches = (repository: string, remote: string, first: string) =>
+  git(repository, 'for-each-ref', '--format=%(refname:lstrip=3)', `refs/remotes/${remote}`).pipe(
+    Effect.map((listed) => {
+      const names = [...new Set(listed.split('\n').filter((name) => name !== '' && name !== 'HEAD'))]
+      return [first, ...names.filter((name) => name !== first).toSorted((a, b) => a.localeCompare(b))]
+    }),
+    Effect.orElseSucceed(() => [first]),
+  )

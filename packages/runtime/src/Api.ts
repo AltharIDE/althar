@@ -47,6 +47,8 @@ import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
 import { Fetches } from './Fetches'
 import { Launches } from './Launches'
+import { LeftBehind } from './LeftBehind'
+import { localTasksIn } from './local'
 import { MachineLoad } from './MachineLoad'
 import { modelRooms } from './modelRooms'
 import { PlanUsage } from './PlanUsage'
@@ -62,6 +64,7 @@ import {
   Policies,
   type ProjectRules,
   resolvesConflicts,
+  worksInOf,
   pushesCommits,
   postsScreenshots,
   ruleSetOf,
@@ -82,6 +85,7 @@ import { timestamp } from './records'
 import { Setups } from './Setups'
 import * as Runtime from './Runtime'
 import { withEdits, workedOutReach } from './sandboxReach'
+import { afterOpen, startup } from './startup'
 import { tallyOf } from './tally'
 import { Coordinator } from './Coordinator'
 import { TaskActions } from './TaskActions'
@@ -98,6 +102,7 @@ import { type InputFile, keepFiles } from './sentFiles'
 import { type InputImage, keepSent } from './sentImages'
 import { anyOf, SignIns } from './SignIns'
 import { expected, words } from './words'
+import { makeBranch } from './newBranch'
 
 /*
  * The runtime's side of the API (`@althar/contracts`): each call runs the
@@ -184,6 +189,7 @@ export const handlers = Api.toLayer(
     const projects = yield* Projects
     const sessions = yield* Sessions
     const launches = yield* Launches
+    const leftBehind = yield* LeftBehind
     const fetches = yield* Fetches
     const machine = yield* MachineLoad
     const planUsage = yield* PlanUsage
@@ -441,6 +447,7 @@ export const handlers = Api.toLayer(
         alwaysAllow: set.allow,
         commands: set.commands,
         end: rules.end ?? null,
+        worksIn: worksInOf(rules),
         resolveConflicts: resolvesConflicts(rules),
         pushCommits: pushesCommits(rules),
         postScreenshots: postsScreenshots(rules),
@@ -612,7 +619,16 @@ export const handlers = Api.toLayer(
     return Api.of({
       Status: ({ recheck }) =>
         Effect.map(
-          api(Effect.forEach(agents.list, (entry) => signIn(entry, recheck === true), { concurrency: 'unbounded' })),
+          api(
+            afterOpen(
+              startup(
+                'agent-checks',
+                Effect.forEach(agents.list, (entry) => startup(`agent-${entry.definition.id}`, signIn(entry, recheck === true)), {
+                  concurrency: 'unbounded',
+                }),
+              ),
+            ),
+          ),
           (statuses) => ({
             apiVersion: API_VERSION,
             appVersion: config.appVersion,
@@ -742,11 +758,19 @@ export const handlers = Api.toLayer(
           api(
             Effect.gen(function* () {
               const said = yield* envelope('project.remove', { projectId }, commandId)
-              const threads = yield* projects.remove(projectId, said.commandId)
-              // Its runs are over, so no step answers an agent going: each one still on it stops, the coordinator too.
-              yield* Effect.forEach(threads, (threadId) => Effect.ignore(sessions.stop(threadId)), { discard: true })
-              // And what it runs stops, with no project left to stop it from.
-              yield* launches.stopAll(projectId)
+              // A checkout its tasks hold stays theirs until all of them has stopped, counted from before it is removed; then it goes back (ADR-091).
+              const local = yield* localTasksIn(projectId).pipe(Effect.provideContext(folderStore))
+              const removing = Effect.gen(function* () {
+                const threads = yield* projects.remove(projectId, said.commandId)
+                // Its runs are over, so no step answers an agent going: each one still on it stops, the coordinator too.
+                yield* Effect.forEach(threads, (threadId) => Effect.ignore(sessions.stop(threadId)), { discard: true })
+                // And what it runs stops, with no project left to stop it from.
+                yield* launches.stopAll(projectId)
+                // What its Local tasks' agents left running in their checkouts, as a server outside their group, stops as a settled task's does.
+                yield* Effect.forEach(local, (taskId) => leftBehind.settled(taskId), { discard: true })
+              })
+              yield* local.reduce((inner, taskId) => leftBehind.stoppingWhile(taskId, inner), removing)
+              if (local.length > 0) yield* runs.checkoutsMoved
             }),
           ),
         ),
@@ -772,14 +796,14 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      SetRepository: ({ commandId, projectId, repositoryId, role, changeTarget, notNow, setup }) =>
+      SetRepository: ({ commandId, projectId, repositoryId, role, changeTarget, notNow, setup, workToward }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
               const said = yield* envelope(
                 'project.set_repository',
-                { projectId, repositoryId, role, changeTarget, notNow, setup },
+                { projectId, repositoryId, role, changeTarget, notNow, setup, workToward },
                 commandId,
               )
               // Its branches go upstream only where its host says now that the person can push there.
@@ -795,8 +819,23 @@ export const handlers = Api.toLayer(
                 ...(changeTarget === undefined ? {} : { changeTarget }),
                 ...(notNow === undefined ? {} : { notNow }),
                 ...(setup === undefined ? {} : { setup }),
+                ...(workToward === undefined ? {} : { workToward }),
                 commandId: said.commandId,
               })
+            }),
+          ),
+        ),
+      CreateBranch: ({ commandId, projectId, repositoryId, branch }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              yield* envelope('project.create_branch', { projectId, repositoryId, branch }, commandId)
+              return yield* makeBranch({ projectId, repositoryId, branch }).pipe(
+                Effect.provideService(SqlClient.SqlClient, sql),
+                Effect.provideService(Instance, instance),
+                Effect.provideService(Connections, connections),
+              )
             }),
           ),
         ),
@@ -1096,36 +1135,39 @@ export const handlers = Api.toLayer(
         ),
       Send: ({ commandId, threadId, body, disposition, images, files, dictated }) =>
         api(
-          Effect.gen(function* () {
-            // Its images and files are read, checked and kept first, outside the command's transaction: one that can't be sent refuses the message.
-            const kept = images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
-            const copied = yield* filesFor(threadId, files)
-            const message = {
-              // The command says its images by their digests, never their bytes, and how many files, never their paths.
-              envelope: yield* envelope(
-                'thread.send',
-                { threadId, body, disposition, ...imagesSaid(kept), ...filesSaid(copied), ...(dictated === true ? { dictated } : {}) },
-                commandId,
-              ),
-              threadId,
-              body,
-              sender,
-              disposition,
-              ...(kept.length === 0 ? {} : { images: kept }),
-              ...(copied.length === 0 ? {} : { files: copied }),
-              ...(dictated === true ? { dictated } : {}),
-            }
-            // What the person says to the coordinator starts it, if it isn't running.
-            const [thread] = yield* sql<{ kind: string; taskId: string | null }>`SELECT kind, task_id FROM threads WHERE id = ${threadId}`
-            if (thread?.kind === 'coordinator') yield* coordinator.say(message)
-            else {
-              // Written to again, a task kept for later is back: what its lead does next ends in Needs you.
-              if (thread?.kind === 'task' && thread.taskId !== null) yield* tasks.bringBack(thread.taskId)
-              yield* sessions.send(message)
-            }
-            // Links in what the person said unfurl on their message, without holding up the reply.
-            yield* Effect.forkDetach(issues.unfurlInput(commandId))
-          }),
+          sessions.accepting(
+            threadId,
+            Effect.gen(function* () {
+              // Its images and files are read, checked and kept first, outside the command's transaction: one that can't be sent refuses the message.
+              const kept = images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
+              const copied = yield* filesFor(threadId, files)
+              const message = {
+                // The command says its images by their digests, never their bytes, and how many files, never their paths.
+                envelope: yield* envelope(
+                  'thread.send',
+                  { threadId, body, disposition, ...imagesSaid(kept), ...filesSaid(copied), ...(dictated === true ? { dictated } : {}) },
+                  commandId,
+                ),
+                threadId,
+                body,
+                sender,
+                disposition,
+                ...(kept.length === 0 ? {} : { images: kept }),
+                ...(copied.length === 0 ? {} : { files: copied }),
+                ...(dictated === true ? { dictated } : {}),
+              }
+              // What the person says to the coordinator starts it, if it isn't running.
+              const [thread] = yield* sql<{ kind: string; taskId: string | null }>`SELECT kind, task_id FROM threads WHERE id = ${threadId}`
+              if (thread?.kind === 'coordinator') yield* coordinator.say(message)
+              else {
+                // Written to again, a task kept for later is back: what its lead does next ends in Needs you.
+                if (thread?.kind === 'task' && thread.taskId !== null) yield* tasks.bringBack(thread.taskId)
+                yield* sessions.send(message)
+              }
+              // Links in what the person said unfurl on their message, without holding up the reply.
+              yield* Effect.forkDetach(issues.unfurlInput(commandId))
+            }),
+          ),
         ),
       TakeBack: ({ commandId, itemId }) =>
         api(
@@ -1169,7 +1211,8 @@ export const handlers = Api.toLayer(
         ),
       StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, instance.personId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
-      ChangePlan: ({ commandId, planId, steps, end }) => once(commandId, api(plans.change(planId, steps, instance.personId, end))),
+      ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
+        once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn, toward))),
       ChangeIssueDraft: ({ commandId, draftId, title, body, labels, priority }) =>
         once(
           commandId,
@@ -1254,6 +1297,15 @@ export const handlers = Api.toLayer(
                 sender,
               })
             }),
+          ),
+        ),
+      AnswerCheckout: ({ commandId, attentionId, answer }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('attention.answer_checkout', { attentionId, answer }, commandId), (said) =>
+              runs.answerCheckout({ envelope: said, attentionId, answer }),
+            ),
           ),
         ),
       HandOverHeld: ({ commandId, taskId, agentId, accountId, model }) => {

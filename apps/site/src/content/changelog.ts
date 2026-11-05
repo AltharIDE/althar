@@ -33,9 +33,48 @@ export const releaseUrl = (version: string) => `${REPO}/releases/tag/v${version}
 /** The releases, newest first. */
 export const RELEASES: readonly Release[] = [
   {
+    version: '0.7.0',
+    date: '2026-11-04',
+    title: 'Reviewed before you see it',
+    changes: [
+      { kind: 'new', text: 'Review findings in the Changes view, at the lines they’re about, with what the lead did about each.' },
+      {
+        kind: 'new',
+        text: 'Review section and seal on pull requests: who reviewed them, in how many passes, and what changed after review.',
+      },
+      { kind: 'new', text: 'Screenshots on pull requests, in one comment kept up to date.' },
+      {
+        kind: 'new',
+        text: 'Welcome and setup on first launch: a short tour, then your agents, a project, and your code host and tracker.',
+      },
+      { kind: 'new', text: 'Usage per task: how much of your plans, or how many dollars, its agents used.' },
+      { kind: 'new', text: 'Tasks in your own checkout, instead of a worktree of their own.' },
+      { kind: 'new', text: 'Mermaid diagrams in threads and documents.' },
+      {
+        kind: 'new',
+        text: 'Coordinator merges, queues and releases: ask it to merge a pull request once it’s green, bring a branch up to date, or tag and publish a release, using the host’s merge queue where there is one.',
+      },
+      { kind: 'new', text: 'Coordinator stops, holds, restarts and settles tasks when you ask.' },
+      { kind: 'new', text: 'Intel Mac build, beside the Apple silicon one.' },
+      { kind: 'new', text: 'Quit confirmation: quitting while work runs says what it will stop.' },
+      { kind: 'new', text: 'Task folder setup: learnt once, repeated for every task.' },
+      { kind: 'new', text: 'New repository for a new project.' },
+      { kind: 'improved', text: 'Conflicts and failed checks go to the lead automatically, now on by default.' },
+      { kind: 'improved', text: 'Fewer cards in Needs you: only what needs a decision from you.' },
+      { kind: 'improved', text: 'Stopped leads restart on a comment or review on their pull request.' },
+      { kind: 'improved', text: 'Run menu that says where each run goes: the default branch, a task, or a pull request.' },
+      { kind: 'improved', text: 'Fewer permission asks for safe git.' },
+      { kind: 'improved', text: 'Syntax highlighting in diffs.' },
+      { kind: 'improved', text: 'OpenCode Go in Plan usage.' },
+      { kind: 'fixed', text: 'Restarting Althar twice no longer pauses the running step.' },
+      { kind: 'fixed', text: 'A stopped task with a green pull request can still be merged.' },
+      { kind: 'fixed', text: 'A conversation Claude Code lost starts afresh.' },
+      { kind: 'fixed', text: 'Jira Cloud on its own domain works.' },
+    ],
+  },
+  {
     version: '0.6.0',
-    /** The day v0.6.0 is tagged (#370): set it when it is. */
-    date: '2026-10-31',
+    date: '2026-10-30',
     title: 'The hours you aren’t watching',
     changes: [
       {

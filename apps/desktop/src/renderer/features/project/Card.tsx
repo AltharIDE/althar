@@ -1,11 +1,12 @@
 import { useState } from 'react'
 
-import type { AgentStatus, ChangeSummary, PlanStep, TaskEnd as End } from '@althar/contracts'
-import { type IssueRefProps, type LaunchStep, TaskCard, TaskEnd, TaskLaunch, TaskStatus } from '@althar/ui'
+import type { AgentStatus, ChangeSummary, PlanStep, TaskEnd as End, WorksIn as Where } from '@althar/contracts'
+import { type IssueRefProps, type LaunchStep, TaskCard, TaskEnd, TaskLaunch, TaskStatus, WorksIn } from '@althar/ui'
 
 import { queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { type NameModel, useEffortNames, useModelNames } from '../../shared/modelNames'
 import { Holders } from '../../shared/Holders'
+import { localText } from '../../shared/local'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { productBrand } from '../../shared/products'
 import { stepIndex, stepNames, stepText } from '../../shared/steps'
@@ -56,7 +57,16 @@ export interface CardActions {
   readonly agentName: (id: string | null) => string
   readonly onStart: (planId: string) => void
   readonly onHold: (planId: string) => void
-  readonly onChange: (planId: string, steps: ReadonlyArray<PlanStep>, end?: End | null) => void
+  readonly onChange: (
+    planId: string,
+    steps: ReadonlyArray<PlanStep>,
+    end?: End | null,
+    worksIn?: Where,
+    /** The branch it works toward (ADR-093); null for the default branch. */
+    toward?: string | null,
+  ) => void
+  /** Makes a branch its list doesn't have, in the plan's repository, and points the plan at it (ADR-093). */
+  readonly onCreateBranch: (planId: string, steps: ReadonlyArray<PlanStep>, end: End | null, repositoryId: string, branch: string) => void
   readonly onOpen: (threadId: string) => void
   /** Stops a command a task's lead left running, from the task that waits for the place it keeps. */
   readonly onStopBackground: (threadId: string, id: string) => void
@@ -67,8 +77,12 @@ export interface CardActions {
 type Plan = NonNullable<TaskCardContent['plan']>
 
 /** The kit's ending, from the plan's. */
-const ENDS: Readonly<Record<End, TaskEnd>> = { draft: TaskEnd.DraftPr, ready: TaskEnd.ReadyPr, none: TaskEnd.PushOnly }
-const endOf = (end: TaskEnd): End => (end === TaskEnd.DraftPr ? 'draft' : end === TaskEnd.ReadyPr ? 'ready' : 'none')
+export const ENDS: Readonly<Record<End, TaskEnd>> = { draft: TaskEnd.DraftPr, ready: TaskEnd.ReadyPr, none: TaskEnd.PushOnly }
+export const endOf = (end: TaskEnd): End => (end === TaskEnd.DraftPr ? 'draft' : end === TaskEnd.ReadyPr ? 'ready' : 'none')
+
+/** The kit's place, from the plan's, and back (ADR-091). */
+const placeOf = (where: Where): WorksIn => (where === 'checkout' ? WorksIn.Local : WorksIn.Worktree)
+const whereOf = (place: WorksIn): Where => (place === WorksIn.Local ? 'checkout' : 'worktree')
 
 /** The issue a task came from, as the kit marks it. */
 const fromOf = (card: TaskCardContent): IssueRefProps | undefined =>
@@ -103,16 +117,33 @@ function PlanCard({
 }) {
   const named = useModelNames()
   // What the person changed shows at once; the runtime's copy replaces it when it comes back.
-  const [shown, setShown] = useState<{ readonly from: Plan; readonly steps: ReadonlyArray<PlanStep>; readonly end: End | null }>({
+  const [shown, setShown] = useState<{
+    readonly from: Plan
+    readonly steps: ReadonlyArray<PlanStep>
+    readonly end: End | null
+    readonly worksIn: Where | undefined
+    readonly toward: string | null
+  }>({
     from: plan,
     steps: plan.steps,
     end: plan.end,
+    worksIn: plan.worksIn,
+    toward: plan.toward ?? null,
   })
   const steps = shown.from === plan ? shown.steps : plan.steps
   const end = shown.from === plan ? shown.end : plan.end
-  const change = (next: ReadonlyArray<PlanStep>, nextEnd: End | null = end) => {
-    setShown({ from: plan, steps: next, end: nextEnd })
-    actions.onChange(plan.id, next, nextEnd)
+  const worksIn = shown.from === plan ? shown.worksIn : plan.worksIn
+  const toward = shown.from === plan ? shown.toward : (plan.toward ?? null)
+  const change = (next: ReadonlyArray<PlanStep>, nextEnd: End | null = end, nextWhere?: Where, nextToward?: string | null) => {
+    setShown({
+      from: plan,
+      steps: next,
+      end: nextEnd,
+      worksIn: nextWhere ?? worksIn,
+      toward: nextToward === undefined ? toward : nextToward,
+    })
+    if (nextToward === undefined) actions.onChange(plan.id, next, nextEnd, nextWhere)
+    else actions.onChange(plan.id, next, nextEnd, nextWhere, nextToward)
   }
   const from = fromOf(card)
   // Only the agents the plan allows: a review's lead only reads, so an agent that can't be held to that isn't offered.
@@ -155,6 +186,33 @@ function PlanCard({
       {...(end === null ? { hideEnd: true } : { end: ENDS[end], onEndChange: (next: TaskEnd) => change(steps, endOf(next)) })}
       // A draft pull request is where tasks end until projects have rules for it, so no rule is named.
       text={{ endByRule: () => '', ruleNote: (_project, note) => note }}
+      // Where it works, until it starts: the coordinator's choice, the person's to change (ADR-091).
+      {...(worksIn === undefined
+        ? {}
+        : {
+            worksIn: placeOf(worksIn),
+            onWorksInChange: (next: WorksIn) => change(steps, end, whereOf(next)),
+            ...(plan.worksInWhy == null || worksIn !== plan.worksIn ? {} : { worksInWhy: plan.worksInWhy }),
+            ...(plan.localTaken == null ? {} : { localTaken: plan.localTaken.title }),
+          })}
+      // What it works toward, until it starts: the project's Work toward or the coordinator's, the person's to change (ADR-093).
+      {...(plan.branches === undefined || plan.defaultBranch === undefined
+        ? {}
+        : {
+            defaultBranch: plan.defaultBranch,
+            branches: plan.branches,
+            toward: toward ?? plan.defaultBranch,
+            onTowardChange: (next: string) => change(steps, end, undefined, next === plan.defaultBranch ? null : next),
+            ...(plan.repositoryId == null
+              ? {}
+              : {
+                  onCreateBranch: (branch: string) => {
+                    // Shown at once, as a branch picked is; the plan moves to it once the remote has it.
+                    setShown({ from: plan, steps, end, worksIn, toward: branch })
+                    actions.onCreateBranch(plan.id, steps, end, plan.repositoryId ?? '', branch)
+                  },
+                }),
+          })}
       onStart={() => actions.onStart(plan.id)}
     />
   )
@@ -184,6 +242,9 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   // Started, its first step waiting for a free agent, the plan can still be changed: it says what it waits for where the clock was.
   if (card.planWaits === true && card.queued !== null && card.plan !== null)
     return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} queued={queuedWords(card.queued)} />
+  // So does one started Local that waits for its checkout (ADR-091).
+  if (card.planWaits === true && card.waitsForCheckout != null && card.plan !== null)
+    return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} queued={localText.waits(card.waitsForCheckout)} />
   // A review has no steps to go through: its lead reads and drafts.
   const steps = stepNames(card.reviewing == null ? (card.plan?.steps ?? []) : [], card.followUp === true)
   const at = stepIndex(steps, card.step)

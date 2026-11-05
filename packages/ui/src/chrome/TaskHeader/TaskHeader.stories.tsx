@@ -167,7 +167,6 @@ export const LongRunCommand: Story = {
             id: 'long',
             command:
               'export PATH="$HOME/.bun/bin:$PATH"; unset ELECTRON_RUN_AS_NODE; P=$(pwd); cd apps/desktop && bun run build && cd "$P" && exec zypak-wrapper electron apps/desktop --no-sandbox',
-            where: 'this task',
             from: 'agent',
           },
         ]}

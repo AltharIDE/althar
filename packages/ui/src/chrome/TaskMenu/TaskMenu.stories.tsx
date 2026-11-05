@@ -79,6 +79,14 @@ export const AllowedByProject: Story = {
   args: { allowEverything: { on: false, project: true, onChange: fn() }, onRules: fn(), defaultOpen: true },
 }
 /** With nothing it can do, there is no menu at all. */
+/** Working toward a release branch rather than the default (ADR-093): the branch first, its name copied when chosen. */
+export const TowardARelease: Story = {
+  args: { toward: 'release/0.8.0', defaultOpen: true },
+  play: async () => {
+    await expect(within(document.body).getByRole('menuitem', { name: 'Into release/0.8.0' })).toBeInTheDocument()
+  },
+}
+export const TowardAReleaseDark: Story = { ...TowardARelease, globals: { theme: 'dark' } }
 export const NothingToDo: Story = { args: { onOpen: undefined, onStop: undefined, onAbandon: undefined } }
 
 const opened = async (canvasElement: HTMLElement) => {

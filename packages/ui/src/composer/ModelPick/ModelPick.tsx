@@ -18,7 +18,6 @@ export interface ModelPickText {
   /** The button's name: whose pick it is, then what it shows. */
   current: (owner: string, model: string, effort: string | null) => string
   pinned: string
-  notPinned: string
   effort: string
   /** The effort in use is the model's default. */
   isDefault: (model: string) => string
@@ -28,6 +27,8 @@ export interface ModelPickText {
   all: string
   /** The row that takes this model off what it was picked for. */
   remove: string
+  /** The row that opens everyone on the work, where the pick is one of several: the lead's, of a plan with a review. */
+  team: string
   /** Going ahead with a pick that asked first, and not. */
   proceed: string
   cancel: string
@@ -37,13 +38,13 @@ export const modelPickText: ModelPickText = {
   label: (owner) => `${owner} model and effort`,
   current: (owner, model, effort) => `${owner}: ${model}${effort ? ` ${effort}` : ''}`,
   pinned: 'Pinned models',
-  notPinned: 'not pinned',
   effort: 'Effort',
   isDefault: (model) => `${model} default`,
   otherDefault: (level) => `default ${level}`,
   makeDefault: 'Make this default',
   all: 'All models',
   remove: 'Remove from this step',
+  team: 'Change the team…',
   proceed: 'Switch',
   cancel: 'Cancel',
 }
@@ -65,6 +66,8 @@ export interface ModelPickProps {
   onBrowse?: () => void
   /** Take this model off what it was picked for, like one of a step's two reviewers. Without it, there is no such row. */
   onRemove?: () => void
+  /** Open everyone on the work, in a dialog the consumer shows: the lead's pick of a plan that hasn't begun. Without it, there is no such row. */
+  onTeam?: () => void
   /** How many models there are in all, on the browse row. */
   count?: number
   /** Whose model this is: Lead, Coordinator, Review. */
@@ -103,6 +106,7 @@ export function ModelPick({
   onMakeDefault,
   onBrowse,
   onRemove,
+  onTeam,
   count,
   owner,
   variant = 'quiet',
@@ -140,6 +144,8 @@ export function ModelPick({
   const list = isPinned(model) ? pinned : [model, ...pinned]
   /* A model with no effort levels gets no control, whatever effort says. */
   const level = model.efforts.length > 0 ? effort : null
+  /* An agent's level called "Default" says nothing about how hard it thinks: the chip leaves it out, the list still has it. */
+  const shownLevel = level !== null && level.toLowerCase() !== 'default' ? level : null
 
   return (
     <>
@@ -155,8 +161,10 @@ export function ModelPick({
         trigger={
           <button type="button" className={cx(s.button, s[variant])} aria-label={t.current(owner, model.short, level)}>
             <Model model={model} short className={s.name} />
-            {level !== null && <span className={s.effort}>{level}</span>}
-            <Icon name="chevronD" size={10} className={s.chev} />
+            <span className={s.tail}>
+              {shownLevel !== null && <span className={s.effort}>{shownLevel}</span>}
+              <Icon name="chevronD" size={10} className={s.chev} />
+            </span>
           </button>
         }
       >
@@ -177,7 +185,6 @@ export function ModelPick({
             return (
               <RadioGroup.Item key={x.id} value={x.id} className={cx(s.option, x.id === model.id && s.current)}>
                 <Model model={x} />
-                {!isPinned(x) && <span className={s.unpinned}>{t.notPinned}</span>}
                 {left !== undefined && <RoomNote room={left} text={roomText} className={s.room} />}
                 <Icon name="check" size={11} className={s.check} />
               </RadioGroup.Item>
@@ -248,6 +255,19 @@ export function ModelPick({
           >
             {t.all}
             {count !== undefined && <span className={s.count}>{count}</span>}
+            <Icon name="chevron" size={10} />
+          </button>
+        )}
+        {onTeam && (
+          <button
+            type="button"
+            className={cx(s.all, s.remove)}
+            onClick={() => {
+              setOpen(false)
+              onTeam()
+            }}
+          >
+            {t.team}
             <Icon name="chevron" size={10} />
           </button>
         )}

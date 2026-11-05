@@ -24,3 +24,8 @@
   flex: none;
   fill: currentColor;
 }
+
+.route {
+  flex: none;
+  color: var(--t-3);
+}

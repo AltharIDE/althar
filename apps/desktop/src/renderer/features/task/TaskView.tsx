@@ -1,7 +1,9 @@
+import { EarlierTurns } from '../../shared/EarlierTurns'
 import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import type { AttentionRequest, TaskAction, ThreadSnapshot } from '@althar/contracts'
 import {
+  CheckoutAsk,
   AbandonTask,
   AttachPullRequest,
   ChangeView,
@@ -29,7 +31,6 @@ import {
   TaskMenu,
   TaskStatus,
   Thread,
-  ThreadDivider,
   ThreadShellProvider,
   ThreadMeasure,
   ThreadSkeleton,
@@ -67,6 +68,8 @@ import { runningOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
 import { Runs } from '../runs/Runs'
 import { PushRequestOf } from '../../shared/PushRequestOf'
+import { localText } from '../../shared/local'
+import { LocalPlace } from '../../shared/LocalPlace'
 import { wayOutText } from '../../shared/WayOut'
 import { listeningText, listeningOf, useHeard, waitOf } from './behind'
 import { ChangesCard } from '../../shared/ChangesCard'
@@ -87,6 +90,7 @@ import { conflictsOf, hasOutputs, hasOutputsToShow, latestOf, Outputs } from './
 import s from './Task.module.css'
 import { OpenFinding } from './Reports'
 import { useChanges } from './useChanges'
+import { ChangeTeam, useTeamed } from '../team/Team'
 import type { TaskModel } from './useTask'
 import { chooseFace, chosenFaces } from './chosenFaces'
 import { REQUEST, taskGraphOf } from './graph'
@@ -165,9 +169,6 @@ export const text = {
   faces: { talk: 'Conversation', out: 'Outputs', graph: 'Graph' } satisfies Record<Face, string>,
   facesKbd: { talk: 'c', out: 'o', graph: 'g' } satisfies Record<Face, string>,
   dismiss: 'Dismiss',
-  earlier: 'Earlier in this task',
-  showEarlier: 'Show',
-  loadingEarlier: 'Showing…',
   files: (count: number) => (count === 1 ? '1 file' : `${count} files`),
   reviewDiff: 'Review the changes',
   diffKey: modKey('D'),
@@ -200,6 +201,9 @@ export const statusOf = (
   // Held for the connection, it carries on by itself once it is back (ADR-060).
   if (snapshot.task.reconnects != null) return { status: TaskStatus.Paused, state: reconnectsWords(snapshot.task.reconnects, clock) }
   if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
+  // Started Local, it waits for its checkout: another task's there, or the person's changes aren't committed (ADR-091).
+  if (snapshot.task.waitsForCheckout != null)
+    return { status: TaskStatus.Queued, state: localText.word, why: localText.waits(snapshot.task.waitsForCheckout) }
   // Its folder coming back from its branch, set up again, before anything it was asked goes on (ADR-056).
   if (snapshot.task.folder === 'returning') return { status: TaskStatus.Running, state: text.returning }
   // A round of work after its plan is its lead following up, as the person asked (ADR-034).
@@ -370,6 +374,9 @@ export function TaskView({
   const [outputOf, setOutputOf] = useState<string | null>(null)
   // Abandoning it asks first, saying what happens to its worktree and branch, and offering to close its pull requests.
   const [abandoning, setAbandoning] = useState(false)
+  // Its plan's team, while nothing of it has begun, as its project's board reads it; and its dialog, open.
+  const teamed = useTeamed(model.snapshot?.project.id ?? null, model.snapshot?.task.id ?? null)
+  const [changingTeam, setChangingTeam] = useState(false)
   // Attaching it to a pull request asks which; then, where its branch isn't based on that one's head, whether to start it there.
   const [attaching, setAttaching] = useState<{
     readonly value: string
@@ -483,7 +490,11 @@ export function TaskView({
       void reveal(itemId, async () => {
         const now = latest.current
         if (now.snapshot?.earlier !== true) return false
-        await now.loadEarlier()
+        try {
+          await now.loadEarlier()
+        } catch {
+          return false
+        }
         return true
       })
     },
@@ -541,11 +552,10 @@ export function TaskView({
   const queue = queueShown(session, model.pending)
   const listening = listeningOf(snapshot)
   const wait = waitOf(snapshot.task, upNextWords)
-  // What its lead left running, and what Althar runs of it itself: one list, each stopped its own way.
-  const running = [...(session?.background ?? []), ...snapshot.task.launches]
-  const launched = new Set(snapshot.task.launches.map((launch) => launch.id))
+  // What its lead left running; what Althar runs of it itself is Run's to say (ADR-090).
+  const left = session?.background ?? []
   // Althar's own runs keep their output in their cards, not here.
-  const leftRunning = runningOf(running, now).map((one) => (launched.has(one.id) ? { ...one, output: false } : one))
+  const leftRunning = runningOf(left, now)
   const outputShown = leftRunning.find((one) => one.id === outputOf)
   const blocks = [
     // What the person asked for opens the thread, in their words, before anything the lead did.
@@ -687,15 +697,23 @@ export function TaskView({
   // Its newest pull request that merged: what a merged task's commits came after.
   const mergedChange = snapshot.task.changes.findLast((one) => one.state === 'merged')
   // A task that finished and isn't a change: Done and Keep for later, beside where it stands; a review only keeps, as it settles
-  // once posted. Anything else is said to its lead. Not while its lead is mid-turn: what it does may still change where it stands.
-  const settleable = !busy && isSettleable({ kind: snapshot.task.kind ?? 'change', phase: snapshot.task.phase ?? '' })
+  // once posted; a change that built nothing only takes Done. Anything else is said to its lead. Not while its lead is mid-turn: what it does may still change where it stands.
+  const settleable =
+    !busy &&
+    isSettleable({ kind: snapshot.task.kind ?? 'change', phase: snapshot.task.phase ?? '', nothingBuilt: snapshot.task.nothingBuilt })
   // Done for a plain task, or a review posted and answered since; one with a draft settles as it is posted.
-  const done = takesDone({ kind: snapshot.task.kind ?? 'change', reviewing: snapshot.task.review })
+  const done = takesDone({
+    kind: snapshot.task.kind ?? 'change',
+    reviewing: snapshot.task.review,
+    nothingBuilt: snapshot.task.nothingBuilt,
+  })
   const settle = settleable ? (
     <SettleWays
       place="header"
       {...(done ? { onDone: () => void model.markDone(), doneHint: boardText.doneHint } : {})}
-      {...(snapshot.task.phase === 'ready' ? { onKeep: () => void model.keep(), keepHint: boardText.keepHint } : {})}
+      {...(snapshot.task.phase === 'ready' && snapshot.task.kind !== 'change'
+        ? { onKeep: () => void model.keep(), keepHint: boardText.keepHint }
+        : {})}
       {...(model.doing === doing.markDone ? { busy: 'done' as const } : model.doing === doing.keep ? { busy: 'keep' as const } : {})}
     />
   ) : null
@@ -722,11 +740,15 @@ export function TaskView({
           now={now}
           onRun={(id) => void model.runProject(id)}
           onStop={(id) => void model.stopLaunch(id)}
+          onClear={(id) => void model.clearLaunch(id)}
         />
       )}
       <TaskMenu
+        // What its work goes into, where it isn't the default branch (ADR-093): first in its menu, out of its bar.
+        {...(snapshot.task.toward === undefined ? {} : { toward: snapshot.task.toward })}
         onRename={() => setRenaming(true)}
         {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
+        {...(teamed === null ? {} : { onChangeTeam: () => setChangingTeam(true) })}
         {...(drafts.length > 0 ? { onMarkReady: () => void model.markAllReady(drafts.map((one) => one.url)) } : {})}
         // A task under way, or drafted, with a worktree, follows a pull request it didn't open, attached by its link (ADR-052); a
         // review reads one only.
@@ -845,12 +867,12 @@ export function TaskView({
             // Behind another in its project's line, it can go first in it from here; what continues keeps its order (ADR-065).
             {...(snapshot.task.front === true ? { onFront: () => void model.moveToFront() } : {})}
             processes={leftRunning}
-            onStop={(id) => void (launched.has(id) ? model.stopLaunch(id) : model.stopBackground(id))}
-            onDismiss={(id) => void (launched.has(id) ? model.clearLaunch(id) : model.clearBackground(id))}
+            onStop={(id) => void model.stopBackground(id)}
+            onDismiss={(id) => void model.clearBackground(id)}
             onOutput={setOutputOf}
             // Where it answers opens in the person's browser.
             onOpenUrl={(id) => {
-              const url = running.find((command) => command.id === id)?.url
+              const url = left.find((command) => command.id === id)?.url
               if (url != null) window.open(url, '_blank')
             }}
             sources={listening}
@@ -872,10 +894,20 @@ export function TaskView({
         meter={contextMeter(session, named, model.compact, { usage: snapshot.usage, heading: text.usageHeading })}
         // Another agent's model hands the task to that agent.
         picker={
-          model.agents.length > 0 &&
-          choice !== null && (
-            <ModelChoice owner={text.lead} agents={model.agents} projectId={snapshot.project.id} value={choice} onChange={choose} />
-          )
+          <>
+            {model.agents.length > 0 && choice !== null && (
+              <ModelChoice
+                owner={text.lead}
+                agents={model.agents}
+                projectId={snapshot.project.id}
+                value={choice}
+                onChange={choose}
+                {...(teamed === null ? {} : { onTeam: () => setChangingTeam(true) })}
+              />
+            )}
+            {/* Where it works, as Codex says it under its composer: Local, in the person's own checkout (ADR-091). */}
+            {snapshot.task.local === true && <LocalPlace path={snapshot.task.worktree} />}
+          </>
         }
       />
     </div>
@@ -1078,15 +1110,13 @@ export function TaskView({
                   )}
                 </div>
               )}
-              {snapshot.earlier && (
-                <ThreadDivider
-                  icon="up"
-                  action={model.loadingEarlier ? text.loadingEarlier : text.showEarlier}
-                  onAction={() => void model.loadEarlier()}
-                >
-                  {text.earlier}
-                </ThreadDivider>
-              )}
+              <EarlierTurns
+                key={snapshot.threadId}
+                earlier={snapshot.earlier}
+                load={model.loadEarlier}
+                version={snapshot.items}
+                loading={model.loadingEarlier}
+              />
               <ThreadShellProvider value={host.shell}>
                 <TaskThread
                   rounds={blocks}
@@ -1174,6 +1204,19 @@ export function TaskView({
                 </div>
               )}
               {snapshot.attention.map((request) => (request.kind === 'stuck' && request.stuck !== null ? stuckCall(request) : null))}
+              {/* Before a Local task takes the person's checkout: its changes not committed, or a branch of theirs (ADR-091). */}
+              {snapshot.attention.map((request) =>
+                request.kind === 'checkout' && request.checkout !== undefined ? (
+                  <CheckoutAsk
+                    key={request.id}
+                    repository={request.checkout.repository}
+                    holdup={request.checkout.holdup}
+                    files={request.checkout.files}
+                    branch={request.checkout.branch}
+                    onAnswer={(answer) => void model.answerCheckout(request.id, answer)}
+                  />
+                ) : null,
+              )}
               {/* Held for a usage limit with nothing asked of the person: another model can carry it on now, or it keeps waiting. */}
               {snapshot.task.waits !== null && snapshot.attention.length === 0 && (
                 <HeldLimit
@@ -1191,6 +1234,9 @@ export function TaskView({
           </TaskFace>
         )}
         {host.lightbox}
+        {changingTeam && (
+          <ChangeTeam projectId={snapshot.project.id} task={teamed} agents={model.agents} onClose={() => setChangingTeam(false)} />
+        )}
         {abandoning && (
           <AbandonTask
             worktree={snapshot.task.worktree === null ? null : shortFolder(snapshot.task.worktree)}

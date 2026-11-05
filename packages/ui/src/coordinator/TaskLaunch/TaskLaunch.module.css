@@ -5,17 +5,36 @@
   box-shadow: inset 0 0 0 1px var(--line-2);
 }
 .head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 12px;
   padding: 14px 16px 10px;
 }
 .kicker {
+  grid-column: 1;
   font-size: 11.5px;
   color: var(--t-3);
 }
 .title {
+  grid-column: 1;
   margin: 3px 0 0;
   font-size: 14px;
   font-weight: 600;
   color: var(--t-1);
+}
+/* Where it works, at the head's end beside the kicker and title (ADR-091). */
+.where {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+/* What the choice gives up, a line across the head under both. */
+.whereLine {
+  grid-column: 1 / -1;
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-3);
 }
 .steps {
   margin: 0;
@@ -118,6 +137,32 @@
 }
 .pick > svg {
   color: var(--t-3);
+}
+/* The branch its work goes into, after how it ends (ADR-093): a choice as that one is, its name in mono, cut short. */
+.end:has(.towardIn) {
+  grid-template-columns: 22px auto auto minmax(0, 1fr);
+}
+.towardIn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.into {
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.branch {
+  min-width: 0;
+  max-width: 240px;
+  margin: 0;
+}
+/* With no row for how it ends, on a row of its own. */
+.toward {
+  grid-template-columns: 22px auto minmax(0, 1fr);
+}
+.toward .branch {
+  justify-self: start;
 }
 
 .foot {

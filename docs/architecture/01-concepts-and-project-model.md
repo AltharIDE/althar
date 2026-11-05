@@ -254,8 +254,9 @@ project again.
 
 ### Existing working copies
 
-An existing clone is an input source, not the default execution workspace.
-Althar prepares a Git worktree per task in a folder it owns,
+An existing clone is an input source, not the default execution workspace,
+unless a task works Local (below). Althar prepares a Git worktree per task in
+a folder it owns,
 `~/Althar/<project>/<task>/<repository>` by default, with a root that can
 be changed per project ([ADR-006](../decisions/006-worktree-per-task.md)).
 Opening the task's folder in an editor shows all its repositories together.
@@ -269,6 +270,17 @@ It never:
   else ([ADR-056](../decisions/056-a-finished-task-s-folder-goes-after-a-wait-and-comes-back-when-needed.md));
 - rewrites remotes;
 - initializes Git without a separate explicit action.
+
+A task may work **Local** instead, in each of its repositories' own clone
+here, where the person works, as a project's default or the coordinator's
+choice for a task ([ADR-091](../decisions/091-a-task-works-local-in-the-person-s-checkout-or-in-a-worktree.md)).
+That relaxes the first rule, and only it: as its first step begins, a Local
+task makes its branch where it starts and checks it out, one task at a time,
+and once it is settled the checkout goes back to the branch it was on. It
+still never switches a checkout with changes not committed, or one on a
+branch of the person's own, without asking them; never stashes, resets or
+cleans; and never removes the checkout or sets it up. Git that would throw
+away what isn't committed there asks, even with everything allowed.
 
 Each new worktree is set up before its lead starts, by Althar itself and
 outside any agent's sandbox: the setup kept for its repository, else the
@@ -503,13 +515,19 @@ The default meanings are intentionally different:
 
 - **Send / after current** appends the input to the durable FIFO.
 - **Interrupt and continue** asks the active turn to stop at the earliest safe
-  boundary, moves this input ahead of ordinary pending input, and then continues
-  the existing task with both its unfinished objective and the new instruction.
+  boundary, then continues the existing task with its unfinished objective and
+  all pending inputs in send order. It never jumps ahead of earlier input.
 - **Supersede pending** explicitly replaces identified, not-yet-started input;
   it does not erase completed history.
 - **Cancel run** terminates the run under its cancellation policy.
 
 An interrupt is never interpreted as “forget what you were doing.”
+
+Messages arriving together form a burst, held until attachment preparation is
+complete and a short quiet interval has passed. The burst is delivered together
+in send order. If any input interrupts, the whole burst is delivered as one
+interruption, including earlier inputs still queued from a previous burst. The
+thread shows the person's messages in that same order.
 
 ### Two acknowledgements
 
@@ -531,8 +549,8 @@ After interruption, the next turn receives:
 - the original task objective and current workflow node;
 - a summary/reference to completed and partially completed work;
 - outstanding verification, cleanup, and follow-up obligations;
-- the interrupting message;
-- any earlier queued inputs in their original order.
+- all queued inputs in send order, under one interruption wrapper for the whole
+  burst.
 
 The scheduler may revise the plan in light of the new message, but unfinished
 work remains pending unless the user explicitly cancels it or the new

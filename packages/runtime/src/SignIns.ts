@@ -1,3 +1,4 @@
+import { afterOpen } from './startup'
 import {
   adapterNode,
   agentVersion,
@@ -128,12 +129,15 @@ export class SignIns extends Context.Service<
           // An agent at a version no session starts on isn't asked either: OpenCode 2's status goes through a service the
           // whole user shares, which answers for whichever account started it and keeps running after.
           // Asked now, as the person may have changed it, but once for the accounts checked together.
-          if (entry.definition.supported !== undefined && unsupportedAt(entry.definition, yield* versionOf(entry, ROUND)) !== null) {
+          if (
+            entry.definition.supported !== undefined &&
+            unsupportedAt(entry.definition, yield* afterOpen(versionOf(entry, ROUND))) !== null
+          ) {
             known.set(of.id, { check: UNKNOWN, at: yield* Clock.currentTimeMillis })
             return UNKNOWN
           }
           yield* accounts.prepare(of)
-          const checked = yield* signInCheck(entry.definition, adapterNode(), accounts.env(of))
+          const checked = yield* afterOpen(signInCheck(entry.definition, adapterNode(), accounts.env(of)))
           // As it stands now, not as it stood when this check began: another may have finished meanwhile and said it.
           const before = known.get(of.id)?.check.status
           known.set(of.id, { check: checked, at: yield* Clock.currentTimeMillis })

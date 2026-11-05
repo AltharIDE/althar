@@ -387,13 +387,18 @@ const standingWords = (task: FoundTask) => {
 }
 
 /** Found tasks as the coordinator's `find_tasks` says them: a line each, and what matched under it. */
-export const foundWords = (text: string, tasks: ReadonlyArray<FoundTask>) =>
+export const foundWords = (
+  text: string,
+  tasks: ReadonlyArray<FoundTask>,
+  more: (task: FoundTask) => string | undefined = () => undefined,
+) =>
   tasks.length === 0
     ? `No task in this project matches “${text.trim()}”.`
     : tasks
         .map((task) => {
           const head = `- ${task.slug}: ${task.title} (${standingWords(task)}${task.pullRequest === null ? '' : `, PR ${task.pullRequest}`}; id ${task.taskId})`
           const matched = task.matched?.map((part) => part.text).join('')
-          return matched === undefined ? head : `${head}\n  “${matched.replace(/\s+/g, ' ').trim()}”`
+          const lines = [head, ...(matched === undefined ? [] : [`  “${matched.replace(/\s+/g, ' ').trim()}”`]), more(task)]
+          return lines.filter((line) => line !== undefined).join('\n')
         })
         .join('\n')

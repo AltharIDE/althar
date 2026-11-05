@@ -4,6 +4,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 
 import {
+  CheckoutAsk,
   AllowedBy,
   AttachedFile,
   AttentionRequest,
@@ -51,7 +52,9 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import { Busy, type Line } from './Busy'
 import { ModelFacts } from './ModelFacts'
 import { PlanUsage } from './PlanUsage'
-import { PlanParameters, planWaits } from './Runs'
+import { checkoutWaitOf, PlanParameters, planWaits } from './Runs'
+import { localTakenFor } from './local'
+import { towardChoicesOf } from './towards'
 import { Agents, RuntimeConfig } from './Config'
 import { backgroundOf, questionTitle } from './Questions'
 import { Changes, STUCK_AFTER } from './Changes'
@@ -253,6 +256,20 @@ const askedOf = (payload: unknown, asker: { readonly agentId?: string | null; re
 const decodeAllowedBy = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(AllowedBy)))
 const decodeLimit = Schema.decodeUnknownOption(LimitCall)
 const decodeChoice = Schema.decodeUnknownOption(LimitChoice)
+/**
+ * What a plan card offers to work toward (ADR-093). Only a proposed plan,
+ * which a hold stops, can have a branch made for it: one accepted and waiting
+ * for a free agent could start while the host makes it, toward the old one,
+ * so it is pointed only at a branch the remote has, which changes at once.
+ */
+const choicesOf = (taskId: string, proposed: boolean) =>
+  Effect.map(towardChoicesOf(taskId), (choices) => {
+    if (choices === null) return {}
+    if (proposed) return choices
+    const { repositoryId: _made, ...rest } = choices
+    return rest
+  })
+
 /** One who could take a held step over, as its hold kept it; one that doesn't read is left out. */
 const choiceOf = (value: unknown) => Option.toArray(decodeChoice(value))
 const decodeAlways = Schema.decodeUnknownOption(AttentionRequest.fields.always)
@@ -319,6 +336,12 @@ const number = (value: unknown, key: string): number | null => {
 const logsShown = (value: unknown): ReadonlyArray<CheckLogShown> =>
   Array.isArray(value) ? value.flatMap((one) => Option.toArray(Schema.decodeUnknownOption(CheckLogShown)(one))) : []
 
+/** What a checkout's ask says at a glance, as a card's headline: on another branch, or with changes not committed (ADR-091). */
+const checkoutTitle = (payload: unknown) =>
+  text(payload, 'holdup') === 'branch'
+    ? `${text(payload, 'repository') || 'Local'} is on another branch`
+    : `${text(payload, 'repository') || 'Local'} has uncommitted changes`
+
 /** A call that waits on the person, as a screen shows it: what was asked, why it waits, and, for a step that needs them, which and why. */
 const callOf = (request: {
   readonly id: string
@@ -333,14 +356,31 @@ const callOf = (request: {
   const command = text(payload, 'command') || null
   return {
     id: request.id,
-    kind: request.kind === 'stuck' ? ('stuck' as const) : request.kind === 'question' ? ('question' as const) : ('permission' as const),
-    title: request.kind === 'question' ? questionTitle(questionOf(payload)) : text(payload, 'title'),
+    kind:
+      request.kind === 'stuck'
+        ? ('stuck' as const)
+        : request.kind === 'question'
+          ? ('question' as const)
+          : request.kind === 'checkout'
+            ? ('checkout' as const)
+            : ('permission' as const),
+    title:
+      request.kind === 'question'
+        ? questionTitle(questionOf(payload))
+        : request.kind === 'checkout'
+          ? checkoutTitle(payload)
+          : text(payload, 'title'),
     reason: text(payload, 'reason'),
     command,
     ...(command === null ? {} : { label: shortCommand(command) }),
     // A permission the rules keep for the person whatever they let through: no "always allow" can answer it.
     ...(request.kind === 'permission' && field(payload, 'held') === true ? { held: true } : {}),
     stuck: request.kind === 'stuck' ? stuckOf(payload) : null,
+    // What Althar asks before a Local task takes a checkout (ADR-091).
+    ...Option.match(request.kind === 'checkout' ? Schema.decodeUnknownOption(CheckoutAsk)(payload) : Option.none(), {
+      onNone: () => ({}),
+      onSome: (checkout) => ({ checkout }),
+    }),
     ...(request.kind === 'question'
       ? { question: askedOf(payload, { agentId: request.askerAgentId ?? null, model: request.askerModel ?? null }) }
       : {}),
@@ -1077,7 +1117,7 @@ export class Queries extends Context.Service<
             state: string
             changeTarget: ChangeTarget | null
           }>`
-            SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS default_branch, b.change_target, w.path, w.branch, w.base_ref, w.base_commit,
+            SELECT b.slug, b.display_name AS name, coalesce(w.toward, b.default_base_ref, w.base_ref) AS default_branch, b.change_target, w.path, w.branch, w.base_ref, w.base_commit,
               w.branched_at IS NOT NULL AS branched, l.path AS root, w.task_id, w.project_id, w.id AS workspace_id, w.state,
               EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL) AS opened
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
@@ -1667,7 +1707,7 @@ export class Queries extends Context.Service<
                           base: string | null
                         }>`
                       SELECT w.path, w.task_id, w.project_id, (SELECT c.head_commit FROM repository_changes c WHERE c.pull_request_url = ${change.url}
-                          ORDER BY c.updated_at DESC LIMIT 1) AS head_commit, coalesce(b.default_base_ref, w.base_ref) AS base
+                          ORDER BY c.updated_at DESC LIMIT 1) AS head_commit, coalesce(w.toward, b.default_base_ref, w.base_ref) AS base
                       FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
                       WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
                       ORDER BY w.id = (SELECT c.workspace_id FROM repository_changes c WHERE c.pull_request_url = ${change.url} LIMIT 1) DESC,
@@ -1943,6 +1983,8 @@ export class Queries extends Context.Service<
             answersWait: number
             turnWaits: number
             runPlan: string | null
+            local: number
+            toward: string | null
           }>`
             SELECT k.project_id, t.id AS thread_id, k.title, k.slug, k.state, k.settled_at, k.kept_at, ${sql.unsafe(SHOWN_BRANCH)},
               p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at, p.proposed_at,
@@ -1964,6 +2006,13 @@ export class Queries extends Context.Service<
                 AND json_extract(x.payload, '$.waitsForPlace') IS NOT NULL) AS answers_wait,
               -- A turn of its lead or reviewer that waits for a place.
               (SELECT count(*) FROM threads h WHERE h.task_id = k.id AND h.waits_for_place IS NOT NULL) AS turn_waits,
+              -- Whether it works Local, in its repositories' own checkouts here (ADR-091).
+              (SELECT count(*) FROM workspaces lw WHERE lw.task_id = k.id AND lw.device_id = ${instance.deviceId} AND lw.kind = 'checkout')
+                AS local,
+              -- The branch its work goes into, where it isn't the default (ADR-093): its first repository's that says one.
+              (SELECT tw.toward FROM workspaces tw JOIN repository_bindings tb ON tb.id = tw.binding_id
+                WHERE tw.task_id = k.id AND tw.device_id = ${instance.deviceId} AND tw.toward IS NOT NULL
+                ORDER BY tb.created_at, tb.rowid LIMIT 1) AS toward,
               (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') + ${sql.unsafe(issueCardsWaiting('k'))} AS waiting,
               (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' LIMIT 1) AS review,
               (SELECT agent_id FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead,
@@ -2005,6 +2054,10 @@ export class Queries extends Context.Service<
           const fixing = task.state === 'open' ? yield* (yield* Changes).fixing(taskId).pipe(Effect.orElseSucceed(() => null)) : null
           const checksRun = (seeing && hands.running) || fixing?.running === true
           const resolving = round?.state === 'resolving' ? round : undefined
+          // Waiting on the checks of the merge a round pushed: under way, the lead asked again should they fail.
+          const roundChecks = round?.state === 'checking'
+          // Conflicting, and about to go to its lead as Althar next looks at it: on its way back to work, not the person's.
+          const due = round?.state === 'due'
           const lead = yield* sessions.running(task.threadId)
           const reviewer = task.review === null ? Option.none() : yield* sessions.running(task.review)
           const working = task.starting > 0 || Option.isSome(lead) || Option.isSome(reviewer)
@@ -2018,8 +2071,12 @@ export class Queries extends Context.Service<
           // Waiting so with none of its agents at work, it is up next (ADR-065): under way, it continues first; before any agent
           // has worked on it, whatever its kind, it is in its project's line.
           const line = queued && task.state !== 'abandoned' ? yield* placeOf(taskId) : null
-          // Held for a usage limit or the connection, none of its agents in a turn, it goes on by itself: up next too.
-          const paused = !queued && !busy && (task.heldFor === 'usage_limit' || task.heldFor === 'agent_unavailable')
+          // Local, its first step held for its checkout: what it waits for, where it isn't the person's answer (ADR-091).
+          const waitsForCheckout = task.heldFor === 'checkout' ? checkoutWaitOf(task.held) : null
+          // Held for a usage limit or the connection, or for its checkout, none of its agents in a turn, it goes on by itself:
+          // up next too.
+          const paused =
+            !queued && !busy && (task.heldFor === 'usage_limit' || task.heldFor === 'agent_unavailable' || waitsForCheckout !== null)
           const unshipped =
             after.length === 0
               ? null
@@ -2051,7 +2108,9 @@ export class Queries extends Context.Service<
           // The first still open, for the person to act on: one merged while another isn't leaves the other. Else its latest.
           const shown = changes.find((candidate) => candidate.state === 'open') ?? changes.at(-1) ?? null
           // Its commits going up on their own, or its checks running with nothing of the person's before them: under way (DEV-173).
-          const going = task.runState === 'succeeded' ? byItself(shown) : null
+          // Some failed while the rest still run, they go to its lead once they end, unless its tries are spent, the lead brought
+          // them to the person, or the person stopped it since (ADR-070).
+          const going = task.runState === 'succeeded' ? byItself(shown, { failuresGo: fixing?.failuresGo === true }) : null
           // Not checks that ran too long, that Althar gave up on as so, or that it can't read (ADR-041): those are the person's. Commits made outside
           // a turn, which nothing pushes, aren't going up (`Changes.pushing`): those are the person's too.
           const goes = going === 'checks_running' && (yield* ranTooLong(taskId, shown?.head ?? null)) ? null : going
@@ -2083,7 +2142,7 @@ export class Queries extends Context.Service<
             // Failing checks its lead is told or at are its lead's, not the person's, while they are (ADR-070, DEV-173): not once a
             // conflict round whose merge they fail on handed them back, its lead not told again.
             const withLead = fixing?.withLead === true && round?.state !== 'handed_back'
-            if (task.runState === 'succeeded') return checksRun || withLead || goes !== null ? 'running' : 'ready'
+            if (task.runState === 'succeeded') return checksRun || withLead || roundChecks || due || goes !== null ? 'running' : 'ready'
             if (task.runState !== null && task.runState !== 'running') return 'stopped'
             // Held for a reset, it carries on on its own: under way, not stopped.
             return (working && !cutShort) || task.held !== null || settingUp || unstarted || between ? 'running' : 'stopped'
@@ -2198,7 +2257,14 @@ export class Queries extends Context.Service<
                             .filter((entry) => entry.definition.reviewing?.outside === true)
                             .map((entry) => entry.definition.id),
                         }
-                      : {}),
+                      : {
+                          // Where it works (ADR-091), why where the coordinator said, and who works Local now, while it can change.
+                          worksIn: text(parameters, 'worksIn') === 'checkout' ? ('checkout' as const) : ('worktree' as const),
+                          worksInWhy: text(parameters, 'worksInWhy') || null,
+                          ...(task.planState === 'proposed' || (yield* planWaits(taskId))
+                            ? { localTaken: yield* localTakenFor(taskId), ...(yield* choicesOf(taskId, task.planState === 'proposed')) }
+                            : { toward: task.toward }),
+                        }),
                   },
             issue:
               issue === null
@@ -2223,11 +2289,15 @@ export class Queries extends Context.Service<
                   ? resolving.checks
                     ? 'checks'
                     : 'conflict'
-                  : seeing || fixing?.open === true
-                    ? busy || !checksRun
-                      ? 'checks'
-                      : 'checks_running'
-                    : goes),
+                  : due
+                    ? 'conflict'
+                    : roundChecks && !busy
+                      ? 'checks_running'
+                      : seeing || fixing?.open === true
+                        ? busy || !checksRun
+                          ? 'checks'
+                          : 'checks_running'
+                        : goes),
             followUp: task.runState === 'running' && task.runPlan === null,
             summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
             lead: task.lead ?? (implement?.agentId || null),
@@ -2236,6 +2306,9 @@ export class Queries extends Context.Service<
             leadEffort,
             branch: task.branch,
             startedAt: task.attemptAt ?? task.runAt ?? task.firstSession,
+            ...(task.local > 0 ? { local: true } : {}),
+            ...(waitsForCheckout === null ? {} : { waitsForCheckout }),
+            ...(task.toward === null ? {} : { toward: task.toward }),
             waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
             ...(task.heldFor === 'agent_unavailable' ? { reconnects: reconnectsOf(task.held) } : {}),
             // A merged task whose lead goes back to work waits its turn too (ADR-034).
@@ -2359,7 +2432,7 @@ export class Queries extends Context.Service<
           // A plain task with no branch yet has nothing of its own in git to size.
           const said =
             (card.phase === 'ready' || atWork) && card.branch !== null
-              ? yield* gitOf(row.id, { changed: card.change === null, here: card.phase === 'ready' })
+              ? yield* gitOf(row.id, { changed: card.change === null || card.change.state === 'closed', here: card.phase === 'ready' })
               : null
           const changed =
             said !== null && card.change === null
@@ -2369,8 +2442,18 @@ export class Queries extends Context.Service<
                   del: said.files.reduce((sum, file) => sum + file.del, 0),
                 }
               : null
+          // A change ready with nothing on its branch and no pull request open or merged: nothing to accept.
+          const nothingBuilt =
+            card.phase === 'ready' &&
+            card.kind === 'change' &&
+            card.unshipped == null &&
+            (card.change === null || card.change.state === 'closed') &&
+            (said === null || (said.commits === 0 && said.files.length === 0)) &&
+            // What Done would settle: the same reading, from git, so the card never offers what Done refuses.
+            (yield* Effect.flatMap(Changes, (changes) => changes.nothingBuilt(row.id)).pipe(Effect.orElseSucceed(() => false)))
           const read = {
             ...card,
+            ...(nothingBuilt ? { nothingBuilt } : {}),
             state: row.state,
             createdAt: row.createdAt,
             settledAt: row.settledAt,
@@ -2868,6 +2951,9 @@ export class Queries extends Context.Service<
               state: head.state,
               branch: head.branch,
               worktree: head.worktree,
+              ...(card?.local === true ? { local: true } : {}),
+              ...(card?.waitsForCheckout == null ? {} : { waitsForCheckout: card.waitsForCheckout }),
+              ...(card?.toward === undefined ? {} : { toward: card.toward }),
               ...(folder === undefined ? {} : { folder }),
               baseRef: head.baseRef,
               phase: card?.phase ?? null,
@@ -2895,6 +2981,16 @@ export class Queries extends Context.Service<
               settledAt: head.settledAt,
               ...links,
               unshipped: card?.unshipped ?? null,
+              // As the board reads it: a ready change whose branch holds nothing and whose pull request, if any, closed.
+              ...(card?.phase === 'ready' &&
+              card.kind === 'change' &&
+              card.unshipped == null &&
+              (card.change === null || card.change.state === 'closed') &&
+              said.commits === 0 &&
+              said.files.length === 0 &&
+              (yield* Effect.flatMap(Changes, (changes) => changes.nothingBuilt(head.taskId)).pipe(Effect.orElseSucceed(() => false)))
+                ? { nothingBuilt: true }
+                : {}),
               skipReview: (reviewing?.left ?? 0) > 0 && card?.step !== 'publish',
               followUp: card?.followUp === true,
               files: said.files,
@@ -2918,7 +3014,8 @@ export class Queries extends Context.Service<
               launches: (yield* launches.ofProject(head.projectId)).filter((launch) => launch.taskId === head.taskId),
               resolveConflicts: {
                 task: head.resolveConflicts === null ? null : head.resolveConflicts === 1,
-                project: head.projectResolves === 1,
+                // On unless the person turned it off (Policies.resolvesConflicts).
+                project: head.projectResolves !== 0,
               },
               allowEverything: { task: head.allowEverything === 1, project: head.projectAllows === 1 },
               review: yield* reviewBriefOf(head.taskId),
