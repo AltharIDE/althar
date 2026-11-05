@@ -150,6 +150,7 @@ const CheckRuns = Schema.Struct({
     }),
   ),
 })
+type CheckRun = (typeof CheckRuns.Type)['check_runs'][number]
 
 /** One check run, with what it reported beyond its title. */
 const CheckRunAnswer = Schema.Struct({
@@ -939,6 +940,15 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       })),
     )
 
+  /** Every page of one of a pull request's lists, from its first page's URL, by ETag as it is asked again: a short page is the last. */
+  const everyHundred = <A>(schema: Schema.Codec<A, unknown>, url: string) =>
+    paged(1, (page) =>
+      Effect.map(http.cached(Schema.Array(schema), page === 1 ? url : `${url}${url.includes('?') ? '&' : '?'}page=${page}`), (items) => ({
+        items,
+        next: items.length < 100 ? undefined : page + 1,
+      })),
+    )
+
   /** What a field of an issue in a repository can be set to: the same for one filed there already as for one about to be. */
   const choicesOf = (owner: string, name: string, field: ChosenField) =>
     Effect.gen(function* () {
@@ -1540,15 +1550,27 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       }),
     checks: (repository, sha) =>
       Effect.gen(function* () {
+        const at = `${repo(repository)}/commits/${encodeURIComponent(sha)}`
         // A fine-grained token is given no check runs, and GitHub refuses them: the commit's statuses are read alone.
-        const runs = yield* http.cached(CheckRuns, `${repo(repository)}/commits/${encodeURIComponent(sha)}/check-runs?per_page=100`).pipe(
+        const runs = yield* paged(1, (page) =>
+          Effect.map(http.cached(CheckRuns, `${at}/check-runs?per_page=100${page === 1 ? '' : `&page=${page}`}`), (answer) => ({
+            items: answer.check_runs,
+            next: answer.check_runs.length < 100 ? undefined : page + 1,
+          })),
+        ).pipe(
           Effect.catchIf(
             (error) => error.reason === 'forbidden',
-            () => Effect.succeed<typeof CheckRuns.Type>({ check_runs: [] }),
+            () => Effect.succeed<ReadonlyArray<CheckRun>>([]),
           ),
         )
-        const statuses = yield* http.cached(CombinedStatus, `${repo(repository)}/commits/${encodeURIComponent(sha)}/status`)
-        const workflows = yield* runs.check_runs.some((run) => run.app?.slug === 'github-actions' && run.check_suite !== undefined)
+        // Every page of the combined status: it holds the latest status GitHub has for each context, a hundred at a time.
+        const statuses = yield* paged(1, (page) =>
+          Effect.map(http.cached(CombinedStatus, `${at}/status?per_page=100${page === 1 ? '' : `&page=${page}`}`), (answer) => ({
+            items: answer.statuses,
+            next: answer.statuses.length < 100 ? undefined : page + 1,
+          })),
+        )
+        const workflows = yield* runs.some((run) => run.app?.slug === 'github-actions' && run.check_suite !== undefined)
           ? http
               .cached(
                 Schema.Struct({
@@ -1558,7 +1580,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
               )
               .pipe(Effect.orElseSucceed(() => ({ workflow_runs: [] })))
           : Effect.succeed({ workflow_runs: [] })
-        const fromRuns: ReadonlyArray<Check> = runs.check_runs.map((run) => ({
+        const fromRuns: ReadonlyArray<Check> = runs.map((run) => ({
           id: `run:${run.id}:${run.app?.slug ?? ''}`,
           name: run.name,
           ...(run.started_at === undefined ? {} : { startedAt: run.started_at }),
@@ -1570,7 +1592,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           url: run.html_url ?? run.details_url ?? null,
           summary: run.output?.title ?? null,
         }))
-        const fromStatuses: ReadonlyArray<Check> = statuses.statuses.map((status) => ({
+        const fromStatuses: ReadonlyArray<Check> = statuses.map((status) => ({
           id: `status:${status.id}`,
           name: status.context,
           state: statusState(status.state),
@@ -1634,14 +1656,12 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
     },
     activity: (repository, number, cursor) =>
       Effect.gen(function* () {
+        const at = `${repo(repository)}/pulls/${number}`
         const since = cursor === null ? '' : `&since=${encodeURIComponent(cursor)}`
         // Asked by ETag: a quiet pull request answers 304, which GitHub doesn't count against the rate limit.
-        const conversation = yield* http.cached(
-          Schema.Array(CommentAnswer),
-          `${repo(repository)}/issues/${number}/comments?per_page=100${since}`,
-        )
-        const lines = yield* http.cached(Schema.Array(CommentAnswer), `${repo(repository)}/pulls/${number}/comments?per_page=100${since}`)
-        const reviews = yield* http.cached(Schema.Array(ReviewAnswer), `${repo(repository)}/pulls/${number}/reviews?per_page=100`)
+        const conversation = yield* everyHundred(CommentAnswer, `${repo(repository)}/issues/${number}/comments?per_page=100${since}`)
+        const lines = yield* everyHundred(CommentAnswer, `${at}/comments?per_page=100${since}`)
+        const reviews = yield* everyHundred(ReviewAnswer, `${at}/reviews?per_page=100`)
         const comments: Comment[] = []
         for (const [rows, inline] of [
           [conversation, false],

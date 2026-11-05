@@ -187,7 +187,7 @@ describe('GitHub answers that leave things out', () => {
           `${REPO}/commits/abc/check-runs?per_page=100`,
           { json: { check_runs: [{ id: 1, name: 'test', status: 'queued', app: { slug: 'github-actions' } }] } },
         ],
-        ['GET', `${REPO}/commits/abc/status`, { json: { statuses: [] } }],
+        ['GET', `${REPO}/commits/abc/status?per_page=100`, { json: { statuses: [] } }],
       ])
       assert.deepStrictEqual(yield* host.checks(repository, 'abc'), [
         { id: 'run:1:github-actions', name: 'test', state: 'queued', url: null, summary: null },
