@@ -1,0 +1,118 @@
+/*
+ * Prototype, D: the cloud sea (D.tsx). The footer's paper, its cobalt for the
+ * sky on the plates, and nothing else; the words as the first screen sets
+ * them, the claim at the left and its lead under its right end.
+ */
+
+.body {
+  --cobalt: #1f35c8;
+  --paper: #f4f2ec;
+  --side: 48px;
+  --gap: 24px;
+  /* The notch tour's words, in the paper's ink. */
+  --edge-words: var(--t-2);
+  --edge-title: var(--t-1);
+  --edge-path: var(--t-3);
+  --edge-faint: var(--t-4);
+  position: relative;
+  background: var(--n-2);
+  color: var(--t-1);
+}
+
+.section { width: min(1180px, 100% - 2 * var(--side)); margin: 0 auto; padding-top: clamp(104px, 12vw, 176px); }
+
+.head { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: var(--gap); align-items: end; }
+.title { grid-column: 1 / span 8; font-size: clamp(42px, 5.2vw, 84px); }
+.title b, .itemTitle b, .endLine b { color: var(--cobalt); }
+.lead { grid-column: 9 / -1; padding-bottom: 0.4em; font-size: 16px; line-height: 1.55; }
+
+/* ---- a plate of sky: cobalt, deepest at its top, a little lighter where the cloud meets it ---- */
+.plate {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  margin-top: 56px;
+  border-radius: 3px;
+  background: linear-gradient(#18299f, var(--cobalt) 44%, #3248d2 68%, #5367da);
+}
+.sea { position: absolute; inset: 0; width: 100%; height: 100%; }
+.picture { position: relative; z-index: 1; width: min(940px, 84%); margin: 0 auto; padding: clamp(48px, 6vw, 84px) 0 clamp(56px, 6vw, 80px); }
+/* The bank in front of the picture's foot: the picture comes down into the cloud. */
+.bank { position: absolute; z-index: 2; left: 0; bottom: 0; width: 100%; height: clamp(110px, 13vw, 180px); pointer-events: none; }
+.grain { position: absolute; inset: 0; z-index: 3; pointer-events: none; background-size: 128px 128px; opacity: 0.42; mix-blend-mode: overlay; }
+
+/* The pictures rise a little out of the cloud as they come up the screen. */
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    .picture { animation: rise linear both; animation-timeline: view(); animation-range: entry 0% cover 42%; }
+  }
+}
+@keyframes rise {
+  from { translate: 0 56px; }
+  to { translate: 0 0; }
+}
+
+.board .picture { width: min(1000px, 88%); }
+.review .picture { width: min(960px, 86%); }
+.tour { margin-top: 56px; }
+
+/* ---- the coordinator: its words at the left, its plate at the right ---- */
+.split { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: var(--gap); align-items: center; }
+.split .head { grid-column: 1 / span 5; display: block; }
+.split .title { font-size: clamp(40px, 4.4vw, 72px); }
+.split .lead { margin-top: 28px; padding: 0; max-width: 24em; }
+.split .plate { grid-column: 6 / -1; margin-top: 0; }
+.talk .picture { width: 86%; padding-top: clamp(44px, 5vw, 72px); }
+
+/* ---- what keeps you in flow: an index ruled on the paper ---- */
+.index { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 64px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--line-2); }
+.item { display: grid; align-content: start; gap: 12px; min-width: 0; padding: 40px 0 44px; border-bottom: 1px solid var(--line-2); }
+.left { padding-right: 40px; }
+.right { padding-left: 40px; border-left: 1px solid var(--line-2); }
+.wide { grid-column: 1 / -1; }
+.drawing { position: relative; margin-bottom: 18px; }
+.drawing > * { width: 100%; }
+.item[data-drawn] .drawing > * { background: #f8f6f1; box-shadow: 0 0 0 1px var(--line-2); border-radius: 3px; }
+.item[data-small] .drawing { max-width: 420px; }
+.wide .drawing > * { max-width: 980px; }
+.itemTitle { margin: 0; font-family: 'Inter Display', var(--display); font-size: 24px; font-weight: 300; line-height: 1.15; letter-spacing: -0.03em; }
+.itemTitle b { font-weight: 680; }
+.itemLead { margin: 0; max-width: 30em; font-size: 15px; line-height: 1.55; color: var(--t-2); text-wrap: pretty; }
+
+/* ---- under the cloud's base: the sky giving way to the footer's paper ---- */
+.end {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  margin-top: clamp(120px, 14vw, 200px);
+  min-height: min(820px, 100svh);
+  display: grid;
+  align-items: center;
+  background: linear-gradient(#18299f, var(--cobalt) 40%, #3a4fcf 60%, #8e9ade 76%, #d9dbea 88%, var(--n-2));
+}
+.base { position: absolute; left: 0; top: 0; width: 100%; height: 46%; }
+.end .grain { z-index: 1; }
+.endWords { position: relative; z-index: 2; display: grid; justify-items: start; gap: 34px; width: min(1180px, 100% - 2 * var(--side)); margin: 0 auto; padding: 200px 0 280px; }
+.endLine { margin: 0; font-family: 'Inter Display', var(--display); font-size: clamp(40px, 4.8vw, 76px); font-weight: 200; line-height: 1; letter-spacing: -0.05em; color: var(--paper); text-wrap: balance; }
+.endLine b { font-weight: 720; letter-spacing: -0.056em; color: #fff; }
+
+/* ---- narrower ---- */
+@media (max-width: 1000px) {
+  .title { grid-column: 1 / -1; }
+  .lead { grid-column: 1 / span 9; margin-top: 24px; padding: 0; }
+  .split { display: block; }
+  .split .plate { margin-top: 48px; }
+}
+@media (max-width: 700px) {
+  .body { --side: 16px; }
+  .section { padding-top: 96px; }
+  .head { padding: 0 4px; }
+  .lead { grid-column: 1 / -1; }
+  .plate { margin-top: 36px; }
+  .picture, .board .picture, .review .picture, .talk .picture, .tour .picture { width: 92%; }
+  .index { grid-template-columns: minmax(0, 1fr); }
+  .left, .right { padding: 32px 0 36px; border-left: 0; }
+  .endWords { padding: 150px 0 220px; }
+  .endLine { font-size: 38px; }
+  .endGet { justify-self: stretch; }
+}

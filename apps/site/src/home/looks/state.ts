@@ -3,18 +3,19 @@ import { useSyncExternalStore } from 'react'
 /*
  * Prototype: which look the homepage's sections wear, A, B, C or as they are
  * today, and which first screen opens the page. The address keeps both
- * (?look=b&hero=chart), so a link opens them again; keys 1 to 4 pick a look,
+ * (?look=b&hero=chart), so a link opens them again; keys 1 to 5 pick a look,
  * ← and → step through them, H steps through the first screens (⇧H back).
  * Swapping a look keeps the section you are reading where it was on the
  * screen.
  */
 
-export type Look = 'A' | 'B' | 'C' | 'Today'
+export type Look = 'A' | 'B' | 'C' | 'D' | 'Today'
 
 export const LOOKS: ReadonlyArray<{ value: Look; name: string }> = [
   { value: 'A', name: 'Flight chart' },
   { value: 'B', name: 'Approach chart' },
   { value: 'C', name: 'Cabin' },
+  { value: 'D', name: 'Cloud sea' },
   { value: 'Today', name: 'Today' },
 ]
 
@@ -108,7 +109,7 @@ export const useHero = () =>
     () => hero,
   )
 
-/** Keys 1 to 4 pick a look, ← and → step through them, H and ⇧H the first screens; never while typing, or on a control that takes the arrows itself. */
+/** Keys 1 to 5 pick a look, ← and → step through them, H and ⇧H the first screens; never while typing, or on a control that takes the arrows itself. */
 export const onKey = (event: KeyboardEvent) => {
   if (event.metaKey || event.ctrlKey || event.altKey) return
   const target = event.target instanceof Element ? event.target : null

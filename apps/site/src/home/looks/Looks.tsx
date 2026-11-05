@@ -10,7 +10,7 @@ import { go, goHero, HEROES, type HeroLook, keepPlace, LOOKS, type Look, onKey, 
 
 /*
  * Prototype, in development only (Home.tsx): the homepage's sections between
- * the Runs on band and the footer, in one of three looks or as they are
+ * the Runs on band and the footer, in one of four looks or as they are
  * today, with a bar along the foot of the window that swaps them in place;
  * and the first screen, today's or a new one (heroes/), swapped from the
  * same bar, which stands at the top of the window while you are on it.
@@ -25,6 +25,7 @@ const load = {
   A: () => import('./A').then((m) => ({ default: m.ChartBody })),
   B: () => import('./B').then((m) => ({ default: m.ApproachBody })),
   C: () => import('./C').then((m) => ({ default: m.CabinBody })),
+  D: () => import('./D').then((m) => ({ default: m.CloudBody })),
 }
 
 const loadHero = {
@@ -52,6 +53,7 @@ const BODIES: Record<Look, ComponentType> = {
   A: lazy(load.A),
   B: lazy(load.B),
   C: lazy(load.C),
+  D: lazy(load.D),
   Today: DesktopBody,
 }
 
