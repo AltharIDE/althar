@@ -1,180 +1,219 @@
-import { CopyButton } from '@althar/ui'
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { CopyButton, LOGO_BORE, LOGO_SECTION } from '@althar/ui'
+import { type CSSProperties, type ReactNode, useLayoutEffect, useRef, useState } from 'react'
 
 import { AGENTS } from '../../../content/agents'
 import { INSTALL } from '../../../content/facts'
-import { HERO } from '../../../content/home'
-import { useHydrated } from '../../../lib/browser'
+import { BRAND, HERO } from '../../../content/home'
 import { cx } from '../../../lib/cx'
 import { AgentMark } from '../../../shared/AgentMark'
 import { Get, OtherMac } from '../../../shared/Close'
 import { useGrain } from '../../../shared/grain'
 import { LightUnder } from '../../../shared/lightUnder'
 import { addDisplay } from '../../display'
-import { altitudeAt, AT, velocityAt } from '../../hero/journey'
 import s from './Night.module.css'
-import { type Framing, makeSky, type Sky } from './night/sky'
+import { type Plate, plate } from './night/plate'
 
 /*
- * Prototype, Night: the first screen seen from orbit, at rest. The night
- * side of the planet curves across the lower part of the frame, towns in
- * gold under faint cloud, the thin cobalt line of the air along its edge,
- * the stars deep over it. Low along the edge, a faint ember wisp where the
- * capsule came through; at the edge's far end, the faintest dawn. The
- * headline stands in the space over the edge, the flight deck's readouts in
- * the top corners, the lead and the console on the night side under it.
+ * Prototype, Orrery: Althar at the middle of the deep night sky as the
+ * system's sun, a small warm light rising from it, and the agents you
+ * already pay for each riding an orbit round it, in fine line, as an
+ * astronomical plate draws them. The words in a band along the foot, under
+ * a hairline rule and the figure's caption: the headline at the left, the
+ * lead and the ways to get it at the right.
  *
- * The view is drawn once on the graphics card (night/sky.ts), and again only
- * when the size changes; without it, or without scripts, the edge as the
- * night pages draw it. It fades in once; then only a few stars twinkle.
+ * Nothing moves. The drawing (night/plate.ts) is worked out for the frame's
+ * size, and again only when the size changes.
  */
 
 addDisplay()
 
-/** The most px the view is drawn in, and the finest: drawn once, but a large screen needn't draw five million. */
-const MOST_PIXELS = 3.2e6
-const FINEST = 2
-/** The width at which the view is framed as a phone's. */
-const PHONE = '(max-width: 760px)'
+/** The width at which the frame is a phone's. */
+const PHONE = 760
+/** Where the picture may start: under the nav and the bar beneath it. */
+const TOP = { wide: 128, phone: 124 }
 
-/** How the camera frames the view: the edge's crest where the stylesheet has it (--edge), the wisp low along it from the left. */
-const frame = (width: number, height: number, phone: boolean): Omit<Framing, 'dpr'> =>
-  phone
-    ? { width, height, edge: 0.49, fov: 66, turn: 0.31, dawn: 1, wisp: { from: 0.0, to: 0.78, under: [14, 22], glow: 1 } }
-    : { width, height, edge: 0.58, fov: 44, turn: 0.31, dawn: 1, wisp: { from: 0.04, to: 0.74, under: [9, 18], glow: 1 } }
+/** "Building software / has never felt so / fast.": the line in two, the last word its own. */
+const WORDS = HERO.title.split(' ')
+const LINES = [WORDS.slice(0, 2).join(' '), WORDS.slice(2).join(' ')] as const
 
-/** The flight deck's readouts, as they read at rest. */
-const km = (n: number, places: number, unit: string) => `${n.toFixed(places)} ${unit}`
-const VELOCITY = km(velocityAt(AT.settled), 3, 'km/s')
-const ALTITUDE = km(altitudeAt(AT.settled), 2, 'km')
+const TONE = ['#fffaf2', '#b9c0ff', '#ffd9b0'] as const
 
-/** Every agent Althar runs, as its mark, named on hover and to a screen reader. */
-function Agents() {
+/** The drawing, behind the words: the stars, the orbits, the sun and its light. */
+function Drawing({ p }: { p: Plate }) {
+  const k = p.sun / 24
   return (
-    <ul className={s.agents} aria-label={HERO.agentsName}>
-      {AGENTS.map((agent) => (
-        <li key={agent.id} title={agent.name}>
-          <AgentMark agent={agent.id} size={17} />
-          <span className={s.sr}>{agent.name}</span>
+    <svg className={s.plate} width={p.w} height={p.h} viewBox={`0 0 ${p.w} ${p.h}`} aria-hidden="true" focusable="false">
+      <defs>
+        <linearGradient id="orrery-light" gradientUnits="userSpaceOnUse" x1="0" y1={p.cy} x2="0" y2={p.cy - p.tall}>
+          <stop offset="0" stopColor="#ffe9cf" stopOpacity="0.8" />
+          <stop offset="0.45" stopColor="#ffe9cf" stopOpacity="0.32" />
+          <stop offset="1" stopColor="#ffe9cf" stopOpacity="0" />
+        </linearGradient>
+        {/* The orbits thin out toward the sides, into the dark. */}
+        <linearGradient id="orrery-fade" x1="0" x2="1" y1="0" y2="0">
+          <stop offset="0" stopColor="#fff" stopOpacity="0.35" />
+          <stop offset="0.22" stopColor="#fff" stopOpacity="1" />
+          <stop offset="0.78" stopColor="#fff" stopOpacity="1" />
+          <stop offset="1" stopColor="#fff" stopOpacity="0.35" />
+        </linearGradient>
+        <mask id="orrery-sides" maskUnits="userSpaceOnUse" x="0" y="0" width={p.w} height={p.h}>
+          <rect width={p.w} height={p.h} fill="url(#orrery-fade)" />
+        </mask>
+        <radialGradient id="orrery-warmth">
+          <stop offset="0" stopColor="#ffd2a0" stopOpacity="0.2" />
+          <stop offset="0.4" stopColor="#ffd2a0" stopOpacity="0.06" />
+          <stop offset="1" stopColor="#ffd2a0" stopOpacity="0" />
+        </radialGradient>
+        {p.bodies.map((b) => (
+          <linearGradient
+            key={b.id}
+            id={`orrery-trail-${b.id}`}
+            gradientUnits="userSpaceOnUse"
+            x1={b.x}
+            y1={b.y}
+            x2={b.trail.x1}
+            y2={b.trail.y1}
+          >
+            <stop offset={(b.size / 2 + 3) / Math.hypot(b.trail.x1 - b.x, b.trail.y1 - b.y)} stopColor="#dfe3ff" stopOpacity="1" />
+            <stop offset="1" stopColor="#dfe3ff" stopOpacity="0" />
+          </linearGradient>
+        ))}
+      </defs>
+      <g>
+        {p.stars.map((star, i) => (
+          <circle key={i} cx={star.x} cy={star.y} r={star.r} fill={TONE[star.tone]} opacity={star.a} />
+        ))}
+      </g>
+      {/* The far halves, behind the sun. */}
+      <g className={s.orbit} mask="url(#orrery-sides)">
+        {p.orbits.map((o, i) => (
+          <path key={i} d={o.far} stroke={o.tone} opacity={o.bright * 0.42} />
+        ))}
+        <path className={s.ticks} d={p.ticks.far} opacity={0.16} />
+      </g>
+      {/* The sun: a little warmth, its light rising, the mark. */}
+      <circle cx={p.cx} cy={p.cy - p.sun * 0.3} r={p.sun * 1.6} fill="url(#orrery-warmth)" />
+      <g stroke="url(#orrery-light)" fill="none">
+        {p.rays.map((r, i) => {
+          // Where it breaks up, on its way from its root to its top.
+          const mx = Math.round((r.x0 + ((r.x1 - r.x0) * (r.y0 - r.mid)) / (r.y0 - r.top)) * 10) / 10
+          return (
+            <g key={i} strokeWidth={r.width}>
+              <path d={`M${r.x0} ${r.y0}L${mx} ${r.mid}`} />
+              <path d={`M${mx} ${r.mid}L${r.x1} ${r.top}`} strokeDasharray={r.dash} />
+            </g>
+          )
+        })}
+      </g>
+      <g transform={`translate(${p.cx - 12 * k} ${p.cy - 14.4 * k}) scale(${k})`}>
+        <path className={s.mark} d={LOGO_SECTION + LOGO_BORE} fillRule="evenodd" />
+        <circle className={s.point} cx="12" cy="14.4" r="0.8" />
+      </g>
+      {/* The near halves, in front of it, and the way each agent came. */}
+      <g className={s.orbit} mask="url(#orrery-sides)">
+        {p.orbits.map((o, i) => (
+          <path key={i} d={o.near} stroke={o.tone} opacity={o.bright} />
+        ))}
+        <path className={s.ticks} d={p.ticks.near} opacity={0.34} />
+      </g>
+      <g fill="none" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round">
+        {p.bodies.map((b) => (
+          <path key={b.id} d={b.trail.d} stroke={`url(#orrery-trail-${b.id})`} opacity={0.7 + 0.3 * b.d} />
+        ))}
+      </g>
+    </svg>
+  )
+}
+
+/** Every agent Althar runs, on its orbit: its mark on a small dark body, its name beside it where there is room. */
+function Bodies({ p }: { p: Plate }) {
+  return (
+    <ul className={s.bodies} aria-label={HERO.agentsName}>
+      {p.bodies.map((b) => (
+        <li
+          key={b.id}
+          className={s.body}
+          data-side={b.side ?? undefined}
+          style={
+            {
+              left: b.x,
+              top: b.y,
+              zIndex: Math.round(10 + 10 * b.d),
+              '--d': b.d,
+              '--size': `${b.size}px`,
+            } as CSSProperties
+          }
+        >
+          <span className={s.disc}>
+            <AgentMark agent={b.id} size={b.mark} />
+          </span>
+          <span className={b.side ? s.name : s.sr}>{b.name}</span>
         </li>
       ))}
     </ul>
   )
 }
 
-/** The first screen, the planet seen from orbit. */
+/** The first screen, as an orrery: Althar at the middle, the agents in orbit round it. */
 export function NightHero({ nav }: { nav?: ReactNode }) {
   const root = useRef<HTMLDivElement>(null)
-  const canvas = useRef<HTMLCanvasElement>(null)
+  const band = useRef<HTMLDivElement>(null)
   const grain = useRef<HTMLDivElement>(null)
-  // How the view is shown: drawn on the canvas, or the stylesheet's edge without the graphics card.
-  const [shown, setShown] = useState<'drawn' | 'flat' | null>(null)
-  const hydrated = useHydrated()
+  const [p, setP] = useState<Plate | null>(null)
 
   useGrain(grain, 11)
 
-  useEffect(() => {
+  // Worked out before the first paint, and again only when the frame or the band changes size.
+  useLayoutEffect(() => {
     const el = root.current
-    const cv = canvas.current
-    if (!el || !cv) return
-    const phone = window.matchMedia(PHONE)
-    let sky: Sky | null = makeSky(cv, {
-      drawn: () => setShown('drawn'),
-      failed: () => {
-        sky = null
-        setShown('flat')
-      },
-    })
-
-    /** Draws the view for the frame's size, if it changed. */
-    let size = ''
-    const draw = () => {
+    const words = band.current
+    if (!el || !words) return
+    let last = ''
+    const measure = () => {
       const w = el.clientWidth
       const h = el.clientHeight
-      const dpr = Math.min(window.devicePixelRatio || 1, FINEST, Math.sqrt(MOST_PIXELS / Math.max(1, w * h)))
-      const next = `${w}x${h}@${dpr.toFixed(3)}${phone.matches ? 'p' : ''}`
-      if (!sky || next === size || w < 10 || h < 10) return
-      size = next
-      sky.draw({ ...frame(w, h, phone.matches), dpr })
+      const foot = words.offsetTop
+      const key = `${w}x${h}:${foot}`
+      if (key === last || w < 10) return
+      last = key
+      const phone = w <= PHONE
+      setP(plate({ w, h, foot, phone, top: phone ? TOP.phone : TOP.wide }))
     }
-
-    // Drawn once the shader is ready; without the graphics card, the stylesheet's edge at once.
-    if (sky) draw()
-    else setShown('flat')
-
-    // Off screen, the stars' twinkling stops (data-away).
-    const io = new IntersectionObserver(([e]) => {
-      if (e?.isIntersecting ?? true) delete el.dataset.away
-      else el.dataset.away = ''
-    })
-    io.observe(el)
-
-    let timer = 0
-    const ro = new ResizeObserver(() => {
-      clearTimeout(timer)
-      timer = window.setTimeout(draw, 120)
-    })
+    measure()
+    const ro = new ResizeObserver(measure)
     ro.observe(el)
-
-    return () => {
-      delete el.dataset.away
-      clearTimeout(timer)
-      io.disconnect()
-      ro.disconnect()
-      sky?.dispose()
-      sky = null
-    }
+    ro.observe(words)
+    return () => ro.disconnect()
   }, [])
 
   return (
-    <div
-      ref={root}
-      className={s.hero}
-      data-ready={hydrated || undefined}
-      data-shown={shown ? '' : undefined}
-      data-drawn={shown === 'drawn' || undefined}
-    >
-      {/* Dark under the nav: it turns to smoked glass over the view. */}
+    <div ref={root} className={s.hero}>
+      {/* Dark under the nav: it turns to smoked glass over the sky. */}
       <LightUnder tone="ink" className={s.under} />
-      <div className={s.view} aria-hidden="true">
-        {/* Without the graphics card, or scripts: the planet's edge as the night pages draw it. */}
-        <div className={s.edge} />
-        <canvas ref={canvas} className={s.canvas} />
-        <div className={s.stars}>
-          <i />
-          <i />
-          <i />
-          <i />
-          <i />
-          <i />
-        </div>
-      </div>
+      <div className={s.sky} aria-hidden="true" />
+      {p && <Drawing p={p} />}
       <div ref={grain} className={s.grain} aria-hidden="true" />
-      <div className={s.vignette} aria-hidden="true" />
-      <div className={s.words}>
+      {p && <Bodies p={p} />}
+      <div ref={band} className={s.band}>
+        <p className={s.caption} aria-hidden="true">
+          <b>Fig. 1</b>
+          <span>{BRAND}</span>
+          <i className={s.rule} />
+          <span>
+            {HERO.agents} <b>{AGENTS.length}</b>
+          </span>
+        </p>
         <h1 className={s.h1}>
-          <span className={s.line}>{HERO.title}</span> <span className={s.fast}>{HERO.last}</span>
+          <span className={s.line}>{LINES[0]}</span> <span className={s.line}>{LINES[1]}</span>{' '}
+          <span className={cx(s.line, s.fast)}>{HERO.last}</span>
         </h1>
-        {/* The flight deck's readouts, at rest. */}
-        <div className={s.hud} aria-hidden="true">
-          <span>
-            <i>{HERO.velocity}</i>
-            <b>{VELOCITY}</b>
-          </span>
-          <span>
-            <i>{HERO.altitude}</i>
-            <b>{ALTITUDE}</b>
-          </span>
-        </div>
-      </div>
-      <footer className={s.deck}>
-        <p className={s.lead}>{HERO.lead}</p>
-        <div className={s.console}>
-          <div className={s.cell}>
-            <span className={s.label}>{HERO.agents}</span>
-            <Agents />
+        <div className={s.side}>
+          <p className={s.lead}>{HERO.lead}</p>
+          <div className={s.ways}>
+            <Get tone="blue" />
+            <OtherMac tone="blue" />
           </div>
-          <div className={cx(s.cell, s.install)}>
+          <div className={s.install}>
             <span className={s.label}>{HERO.install}</span>
             <div className={s.command}>
               <code>
@@ -187,12 +226,8 @@ export function NightHero({ nav }: { nav?: ReactNode }) {
               </span>
             </div>
           </div>
-          <div className={cx(s.cell, s.ways)}>
-            <Get tone="blue" />
-            <OtherMac tone="blue" />
-          </div>
         </div>
-      </footer>
+      </div>
       {nav}
     </div>
   )

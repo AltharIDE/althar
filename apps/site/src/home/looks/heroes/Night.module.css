@@ -1,218 +1,150 @@
-/* Prototype, Night: the planet seen from orbit, at rest. The view drawn once
-   on a canvas (night/sky.ts) behind; the headline in the space over the
-   planet's lit edge, the flight deck's readouts in the top corners, the lead
-   and the console on the night side under it. It fades in once, then
-   nothing moves but a few stars (stopped off screen, data-away, and with
-   reduced motion). */
+/* Prototype, Orrery: Althar at the middle of the night sky, the agents in
+   orbit round it, drawn in fine line (night/plate.ts) as an astronomical
+   plate draws them; the words in a band along the foot under a hairline
+   rule. Nothing here moves: no fades, no keyframes, no transitions but the
+   kit buttons' own. */
 
 .hero {
   position: relative;
   isolation: isolate;
   overflow: hidden;
   height: clamp(640px, 100svh, 1060px);
-  background: #050302;
+  background: #070605;
   color: #fff;
   container-type: size;
-  /* Where the planet's edge crests, from the top: the canvas is framed by the same figure (Night.tsx). */
-  --edge: 58cqh;
-  /* The readouts' and the console's sides. */
-  --side: max(24px, calc(50cqw - 570px));
+  --ground: #070605;
+  --ink-2: #a8a197;
+  --ink-3: #8f887e;
+  --hair: rgba(255, 244, 232, 0.11);
+  --lit: #b4bcff;
+  /* The band's sides: the site's measure. */
+  --side: max(var(--gut), calc(50cqw - 592px));
 }
 
 /* The whole first screen is dark under the nav. */
 .under { top: 0; bottom: 0; }
 
-/* The view: the canvas, or without the graphics card (or scripts) the edge as the night pages draw it; and a few stars the browser keeps twinkling. */
-.view { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
-.canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
-.hero:not([data-drawn]) .canvas { visibility: hidden; }
-
-/* Up out of the dark once drawn, whole. */
-@media (scripting: enabled) {
-  .view { opacity: 0; }
-  .hero[data-shown] .view { opacity: 1; }
-}
-@media (scripting: enabled) and (prefers-reduced-motion: no-preference) {
-  .hero[data-shown] .view { transition: opacity 1.8s var(--ease-out); }
-}
-
-.edge { position: absolute; inset: 0; overflow: hidden; }
-.hero[data-drawn] .edge { display: none; }
-.edge::before {
-  content: '';
-  position: absolute;
-  left: -45%;
-  right: -45%;
-  top: var(--edge);
-  height: 1600px;
-  border-radius: 50%;
-  border-top: 1.5px solid #b4bcff;
-  background: linear-gradient(#060504, #040302 120px);
-  box-shadow:
-    0 -2px 10px -2px rgba(60, 76, 255, 0.9),
-    0 -14px 50px -10px rgba(43, 59, 255, 0.55),
-    0 -60px 160px -30px rgba(43, 59, 255, 0.45);
-}
-
-/* A few stars, high in the sky, each on its own slow clock. */
-.stars i {
-  position: absolute;
-  left: var(--x);
-  top: var(--y);
-  width: 2px;
-  height: 2px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 0 4px rgba(220, 228, 255, 0.8);
-  opacity: 0.55;
-}
-.stars i:nth-child(1) { --x: 11%; --y: 31%; --d: 3.7s; --delay: -1.2s; }
-.stars i:nth-child(2) { --x: 24%; --y: 9%; --d: 5.3s; --delay: -3.1s; width: 1.5px; height: 1.5px; }
-.stars i:nth-child(3) { --x: 83%; --y: 24%; --d: 4.4s; --delay: -0.4s; }
-.stars i:nth-child(4) { --x: 92%; --y: 41%; --d: 6.1s; --delay: -2.2s; width: 1.5px; height: 1.5px; }
-.stars i:nth-child(5) { --x: 67%; --y: 7%; --d: 4.9s; --delay: -4s; width: 1.5px; height: 1.5px; }
-.stars i:nth-child(6) { --x: 5%; --y: 47%; --d: 5.8s; --delay: -1.7s; width: 1.5px; height: 1.5px; }
-@media (prefers-reduced-motion: no-preference) {
-  .stars i { animation: twinkle var(--d) ease-in-out var(--delay) infinite alternate; }
-  .hero[data-away] .stars i { animation-play-state: paused; }
-}
-@keyframes twinkle {
-  0%, 40% { opacity: 0.55; }
-  55% { opacity: 0.15; }
-  70%, 100% { opacity: 0.7; }
-}
-
-/* Film's grain over the whole, still; the corners falling dark as a lens has them, and the foot darker for the lead. */
-.grain, .vignette { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
-.grain { background-size: 128px 128px; opacity: 0.5; mix-blend-mode: overlay; }
-.vignette {
+/* The sky: a breath of warmth round the sun, and at the very foot the faintest cobalt, as the night pages' lit edge; the grain over it, still. */
+.sky, .grain { position: absolute; inset: 0; pointer-events: none; }
+.sky {
+  z-index: 0;
   background:
-    radial-gradient(ellipse 90% 85% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.45) 100%),
-    linear-gradient(transparent 62%, rgba(4, 3, 2, 0.72));
+    radial-gradient(ellipse 34% 30% at 50% 40%, rgba(255, 226, 196, 0.045), transparent 70%),
+    radial-gradient(ellipse 60% 22% at 50% 100%, rgba(43, 59, 255, 0.13), transparent 75%);
 }
+.grain { z-index: 1; background-size: 128px 128px; opacity: 0.45; mix-blend-mode: overlay; }
 
-/* The words: the headline in the space over the edge, the readouts in the top corners. */
-.words { display: contents; }
-.h1 {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  margin: 0;
-  pointer-events: none;
-  font-family: 'Inter Display', var(--display);
-  text-align: center;
-}
-.line, .fast { position: absolute; left: 16px; right: 16px; }
-.line {
-  top: 15.5cqh;
-  font-size: clamp(28px, min(2.9cqw, 4.6cqh), 52px);
-  font-weight: 500;
-  line-height: 1.08;
-  letter-spacing: -0.032em;
-  text-wrap: balance;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5), 0 2px 26px rgba(0, 0, 0, 0.7);
-}
-.fast {
-  top: 21cqh;
-  font-size: min(21cqw, 33cqh);
-  font-weight: 800;
-  line-height: 1;
-  letter-spacing: -0.06em;
-  /* White, with a trace of the fire's warmth still in it. */
-  color: #fff;
-  text-shadow:
-    0 0 1px rgba(255, 214, 170, 0.3),
-    0 0 40px rgba(255, 130, 60, 0.07),
-    0 10px 50px rgba(0, 10, 40, 0.35);
-}
+/* ---- the drawing ---- */
 
-/* The flight deck's readouts, in the top corners, at rest. */
-.hud {
+.plate { position: absolute; top: 0; left: 0; z-index: 2; display: block; pointer-events: none; overflow: hidden; }
+.orbit path { fill: none; stroke-width: 1; }
+.orbit .ticks { stroke: #b4bcff; stroke-width: 0.9; }
+.mark { fill: #fff8ee; }
+.point { fill: #7f8bff; }
+
+/* The bodies: each a small dark disc, ringed, with the agent's mark; nearer is larger (the script) and brighter (--d, 1 nearest to -1 farthest). The disc keeps a little of the dark round it, so the orbit breaks before it touches. */
+.bodies { position: absolute; inset: 0; z-index: 3; margin: 0; padding: 0; list-style: none; pointer-events: none; }
+.body { position: absolute; width: 0; height: 0; }
+.disc {
   position: absolute;
-  z-index: 2;
-  pointer-events: none;
-  display: flex;
-  justify-content: space-between;
+  left: calc(var(--size) / -2);
+  top: calc(var(--size) / -2);
+  display: grid;
+  place-items: center;
+  width: var(--size);
+  height: var(--size);
+  border-radius: 50%;
+  background: #0d0b0a;
+  box-shadow:
+    inset 0 0 0 1px rgba(196, 204, 255, calc(0.34 + 0.14 * var(--d))),
+    0 0 0 3px var(--ground);
+  color: rgba(255, 250, 242, calc(0.8 + 0.18 * var(--d)));
+}
+.name {
+  position: absolute;
+  top: -6px;
+  font: 500 10.5px/12px var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: rgba(255, 248, 240, calc(0.72 + 0.2 * var(--d)));
+  text-shadow: 0 0 3px var(--ground), 0 0 6px var(--ground);
+}
+.body[data-side='right'] .name { left: calc(var(--size) / 2 + 7px); }
+.body[data-side='left'] .name { right: calc(var(--size) / 2 + 7px); }
+
+/* ---- the band: the caption on its rule, the headline at the left, the lead and the ways to get it at the right ---- */
+
+.band {
+  position: absolute;
+  z-index: 4;
   left: var(--side);
   right: var(--side);
-  top: clamp(76px, 10.5cqh, 104px);
-}
-.hud span { display: grid; gap: 7px; }
-.hud span:last-child { justify-items: end; text-align: right; }
-.hud i, .label { font: 500 10px/1 var(--font-label); font-style: normal; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 248, 240, 0.62); }
-.hud i { color: rgba(255, 248, 240, 0.72); }
-.hud b { min-width: 9ch; font: 500 15px/1 var(--mono); font-variant-numeric: tabular-nums; color: #fff; }
-
-/* The lead and the console under it, on the night side. */
-.deck {
-  position: absolute;
-  z-index: 2;
-  left: 50%;
-  bottom: clamp(18px, 3cqh, 32px);
-  width: min(1160px, calc(100cqw - 32px));
-  transform: translateX(-50%);
+  bottom: clamp(30px, 5cqh, 56px);
   display: grid;
-  justify-items: center;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 470px);
+  grid-template-areas: 'caption caption' 'head side';
+  align-items: start;
+  column-gap: 64px;
+}
+
+/* The figure's caption along a hairline, as the flight log's stamps run. */
+.caption {
+  grid-area: caption;
+  display: flex;
+  align-items: center;
   gap: 14px;
-  text-align: center;
+  margin: 0 0 clamp(26px, 4cqh, 40px);
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink-3);
 }
-.lead { max-width: 44em; margin: 0; font-size: 14px; line-height: 1.55; letter-spacing: -0.006em; text-wrap: pretty; color: rgba(255, 248, 240, 0.86); text-shadow: 0 1px 14px rgba(0, 0, 0, 0.9); }
+.caption b { font-weight: 500; color: var(--lit); }
+.rule { flex: 1; min-width: 12px; height: 1px; background: var(--hair); }
 
-/* The console: the agents, the install and the download, side by side on smoked glass. */
-.console {
-  display: grid;
-  grid-auto-flow: column;
-  border-radius: 14px;
-  background: rgba(12, 9, 7, 0.6);
-  -webkit-backdrop-filter: blur(14px) saturate(1.2);
-  backdrop-filter: blur(14px) saturate(1.2);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14), 0 20px 50px rgba(0, 0, 0, 0.35);
+.h1 {
+  grid-area: head;
+  margin: 0;
+  font-family: 'Inter Display', var(--display);
+  font-size: clamp(46px, min(5.3cqw, 8.3cqh), 88px);
+  font-weight: 300;
+  line-height: 0.98;
+  letter-spacing: -0.045em;
+  color: #fff;
 }
-.cell { display: grid; align-content: center; justify-items: start; gap: 10px; padding: 14px 20px; }
-.cell + .cell { border-left: 1px solid rgba(255, 255, 255, 0.1); }
-.ways { justify-items: center; }
-.cell.ways > div { flex-wrap: nowrap; }
-.cell.ways > p { margin: 0; }
-.agents { display: flex; gap: 10px; margin: 0; padding: 0; list-style: none; color: rgba(255, 248, 240, 0.9); }
-.agents li { display: grid; place-items: center; width: 18px; height: 18px; }
-.command { display: flex; align-items: center; gap: 4px; padding: 3px 3px 3px 12px; border-radius: 8px; background: rgba(255, 255, 255, 0.06); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); }
+.line { display: block; }
+/* "fast.", set apart by its weight alone, as the footer's statement sets its middle line. */
+.fast { font-weight: 640; letter-spacing: -0.05em; }
+
+.side { grid-area: side; display: grid; justify-items: start; }
+.lead { max-width: 31em; margin: 0 0 24px; font-size: 15px; line-height: 1.55; letter-spacing: -0.006em; text-wrap: pretty; color: rgba(255, 248, 240, 0.74); }
+.ways > p { margin-top: 8px; }
+
+.install { display: flex; align-items: center; gap: 14px; margin-top: 14px; }
+.label { font: 500 10.5px/1 var(--mono); letter-spacing: 0.13em; text-transform: uppercase; color: var(--ink-3); }
+.command { display: flex; align-items: center; gap: 4px; padding: 3px 3px 3px 12px; border-radius: 8px; box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.16); }
 .command code { font: 13px/1 var(--mono); color: rgba(255, 248, 240, 0.92); white-space: nowrap; }
 .command code span { color: rgba(255, 248, 240, 0.45); }
 .command button { width: 26px; padding: 0; justify-content: center; color: rgba(255, 248, 240, 0.6); }
 .command button:hover { color: #fff; }
 .command button span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
-/* Arriving once, softly: the headline, the readouts, then the lead and the console. With reduced motion, there at once. */
-@media (prefers-reduced-motion: no-preference) {
-  .line, .fast, .hud, .deck { animation: arrive 1.2s var(--ease-out) var(--after, 0ms) both; }
-  .line { --after: 150ms; }
-  .fast { --after: 300ms; }
-  .hud { --after: 600ms; }
-  .deck { --after: 700ms; }
-}
-@keyframes arrive {
-  from { opacity: 0; translate: 0 10px; }
-}
-
-/* Narrower than the three side by side need, the download takes a row of its own under the agents and the install. */
-@media (max-width: 1200px) {
-  .console { grid-auto-flow: row; grid-template-columns: auto auto; }
-  .cell.ways { grid-column: 1 / -1; border-left: 0; border-top: 1px solid rgba(255, 255, 255, 0.1); }
-}
+/* ---- a phone: the orrery smaller and higher, the words stacked under it ---- */
 
 @media (max-width: 760px) {
-  .hero { --edge: 49cqh; --side: 18px; }
-  .edge::before { left: -90%; right: -90%; }
-  .line { top: 17cqh; font-size: clamp(26px, 7.4cqw, 32px); }
-  .fast { top: 24cqh; font-size: 30cqw; }
-  /* No room for the readouts under the nav, and no installing from a phone: the agents over the download, as today's first screen has it. */
-  .hud, .install { display: none; }
-  .console { width: 100%; max-width: 440px; grid-template-columns: 1fr; }
-  .cell { justify-items: center; }
-  .cell.ways { justify-items: stretch; padding: 12px; }
+  .hero { --side: 18px; }
+  .band { bottom: 22px; grid-template-columns: minmax(0, 1fr); grid-template-areas: 'caption' 'head' 'side'; }
+  .caption { margin-bottom: 22px; }
+  .caption > span:nth-of-type(1) { display: none; }
+  .h1 { margin: 0 0 18px; font-size: clamp(38px, 11cqw, 46px); line-height: 1; }
+  .lead { margin-bottom: 20px; font-size: 15px; }
+  .side, .ways { justify-items: stretch; }
   .ways > div { display: grid; gap: 8px; }
   .ways > div a { justify-content: center; height: 48px; padding: 0 16px; border-radius: 10px; font-size: 15px; }
-  .ways > div a:first-child { box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 8px 24px -8px rgba(0, 0, 0, 0.6); }
-  .ways > div a:last-child { background: rgba(255, 255, 255, 0.07); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18); }
+  /* No installing from a phone. */
+  .install { display: none; }
 }
