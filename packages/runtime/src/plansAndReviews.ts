@@ -26,13 +26,14 @@ import { timestamp } from './records'
 
 const COUNTDOWN = 'plan_countdown_seconds'
 const ROUNDS = 'review_rounds'
+const ROUNDS_OUT = 'review_rounds_out'
 
 const PERMISSIONS = 'new_project_permissions'
 const USAGE_LIMIT = 'new_project_usage_limit'
 const ROTATE = 'new_project_rotate_accounts'
 const END = 'new_project_end'
 
-const ALL = [COUNTDOWN, ROUNDS, PERMISSIONS, USAGE_LIMIT, ROTATE, END] as const
+const ALL = [COUNTDOWN, ROUNDS, ROUNDS_OUT, PERMISSIONS, USAGE_LIMIT, ROTATE, END] as const
 
 const rowsOf = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -56,6 +57,7 @@ const ROUND_CHOICES: ReadonlyArray<PlansAndReviews['rounds']> = [1, 2, 3, 5]
 export const plansAndReviewsOf = Effect.map(rowsOf, (kept): PlansAndReviews => ({
   countdown: numberOf(kept.get(COUNTDOWN), COUNTDOWNS, PLANS_AND_REVIEWS.countdown),
   rounds: numberOf(kept.get(ROUNDS), ROUND_CHOICES, PLANS_AND_REVIEWS.rounds),
+  roundsOut: choiceOf(kept.get(ROUNDS_OUT), ['settled', 'ask'], PLANS_AND_REVIEWS.roundsOut),
 }))
 
 /** How long a proposed plan waits now before it starts on its own. */
@@ -63,6 +65,9 @@ export const countdownNow = Effect.map(plansAndReviewsOf, (settings) => Duration
 
 /** How many rounds of review a task has now. */
 export const roundsNow = Effect.map(plansAndReviewsOf, (settings) => settings.rounds)
+
+/** What a task does now when its rounds of review run out with the lead's last fixes never reviewed. */
+export const roundsOutNow = Effect.map(plansAndReviewsOf, (settings) => settings.roundsOut)
 
 /** What the rules of a project made now start with. */
 export const newProjectDefaultsOf = Effect.map(rowsOf, (kept): NewProjectDefaults => ({
@@ -89,6 +94,7 @@ export const setPlansAndReviews = (change: PlansAndReviewsChange) =>
   Effect.gen(function* () {
     if (change.countdown !== undefined) yield* keep(COUNTDOWN, unlessDefault(change.countdown, PLANS_AND_REVIEWS.countdown))
     if (change.rounds !== undefined) yield* keep(ROUNDS, unlessDefault(change.rounds, PLANS_AND_REVIEWS.rounds))
+    if (change.roundsOut !== undefined) yield* keep(ROUNDS_OUT, unlessDefault(change.roundsOut, PLANS_AND_REVIEWS.roundsOut))
   })
 
 /** Changes what the rules of projects made from now on start with; what isn't given stays. */

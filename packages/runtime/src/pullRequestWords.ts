@@ -111,11 +111,15 @@ export const bodyOf = (input: {
   readonly credit?: boolean
   /** The automation whose run opened it, which it is signed with whatever the credit: nobody watched it being made. */
   readonly automation?: string | null
-  /** The review the change had: its seal, where one shows, and the folded section. */
-  readonly review?: { readonly seal: string | null; readonly details: string } | null
+  /**
+   * The review the change had: its seal, where one shows, the folded section, and, where the task went on with fixes no review
+   * read, the plain note saying so, which stays whatever the person chose to show of the review.
+   */
+  readonly review?: { readonly seal: string | null; readonly details: string | null; readonly note?: string | null } | null
 }) => {
   const parts: Array<string> = []
   if (input.review?.seal != null) parts.push(input.review.seal)
+  if (input.review?.note != null) parts.push(input.review.note)
   const plain = said(input.built) ?? said(input.lead)
   const template = input.template ?? null
   const written = said(input.written)
@@ -129,7 +133,7 @@ export const bodyOf = (input: {
     parts.push(untick(placed ?? template).trim())
     if (placed === null && plain !== null) parts.push(`### Summary\n\n${plain}`)
   }
-  if (input.review != null) parts.push(input.review.details)
+  if (input.review?.details != null) parts.push(input.review.details)
   if (input.issue !== null) {
     const named = input.issue.sameHost ? input.issue.key : `[${input.issue.key}](${input.issue.url})`
     parts.push(input.issue.partOf === true ? `Part of ${named}` : `Issue: ${named}`)
