@@ -32,12 +32,16 @@ const load = {
 const loadHero = {
   Chart: () => import('./heroes/Chart').then((m) => ({ default: m.ChartHero })),
   Night: () => import('./heroes/Night').then((m) => ({ default: m.NightHero })),
+  Cloud: () => import('./heroes/Cloud').then((m) => ({ default: m.CloudHero })),
+  Dither: () => import('./heroes/Dither').then((m) => ({ default: m.DitherHero })),
 }
 
 const FIRST: Record<HeroLook, ComponentType<{ nav?: ReactNode }>> = {
   Today: Hero,
   Chart: lazy(loadHero.Chart),
   Night: lazy(loadHero.Night),
+  Cloud: lazy(loadHero.Cloud),
+  Dither: lazy(loadHero.Dither),
 }
 
 /** The first screen, today's or a new one; until a new one has loaded, the dark at today's height. */

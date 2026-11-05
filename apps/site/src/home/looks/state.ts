@@ -25,12 +25,14 @@ const lookOf = (word: string | null): Look | undefined => LOOKS.find((one) => on
 let look: Look = lookOf(new URLSearchParams(window.location.search).get('look')) ?? 'A'
 const listeners = new Set<() => void>()
 
-export type HeroLook = 'Today' | 'Chart' | 'Night'
+export type HeroLook = 'Today' | 'Night' | 'Chart' | 'Cloud' | 'Dither'
 
 export const HEROES: ReadonlyArray<{ value: HeroLook; name: string }> = [
   { value: 'Today', name: 'Today' },
-  { value: 'Chart', name: 'Chart' },
   { value: 'Night', name: 'Night' },
+  { value: 'Chart', name: 'Chart' },
+  { value: 'Cloud', name: 'Cloud' },
+  { value: 'Dither', name: 'Dither' },
 ]
 
 const heroOf = (word: string | null): HeroLook | undefined => HEROES.find((one) => one.value.toLowerCase() === word?.toLowerCase())?.value
