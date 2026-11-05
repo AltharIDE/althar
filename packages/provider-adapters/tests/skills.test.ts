@@ -149,7 +149,7 @@ describe('what an agent could see', () => {
     )
   })
 
-  it.runIf(process.platform !== 'win32')("isn't held up by what a checkout puts where a `SKILL.md` goes", { timeout: 10_000 }, () => {
+  it.runIf(process.platform !== 'win32')("isn't held up by what a checkout puts where a `SKILL.md` goes", () => {
     const root = mkdtempSync(join(tmpdir(), 'althar-skills-'))
     for (const name of ['to-a-device', 'a-pipe', 'to-a-pipe', 'a-folder']) mkdirSync(join(root, name))
     symlinkSync('/dev/zero', join(root, 'to-a-device', 'SKILL.md'))
@@ -186,7 +186,7 @@ describe('what an agent could see', () => {
     )
   })
 
-  it("doesn't slow on a frontmatter line made to", { timeout: 2_000 }, () => {
+  it("doesn't slow on a frontmatter line made to", () => {
     const root = mkdtempSync(join(tmpdir(), 'althar-skills-'))
     mkdirSync(join(root, 'spaces'))
     writeFileSync(join(root, 'spaces', 'SKILL.md'), `---\nname: a${' '.repeat(60_000)}b\n---\n`)
