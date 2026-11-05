@@ -49,12 +49,11 @@ export const startRoute = createRoute({
   path: '/',
   component: Start,
   pendingComponent: HomePending,
-  // The projects and the agents, and, once there are projects, the home. Only what the window has never read waits: a
+  // The projects and, once there are projects, the home. Agents fill in afterwards. Only what the window has never read waits: a
   // home the person has been on shows at once, and what changed since is read behind it.
   loader: ({ context: { client, cache } }) => {
     const read = reads(client)
     return readFirst(
-      held(cache, read.status()),
       held(cache, read.projects()).then(() => {
         if ((cache.getQueryData(read.projects().queryKey)?.projects.length ?? 0) > 0) return held(cache, read.home())
       }),

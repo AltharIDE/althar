@@ -5,7 +5,7 @@ import { makeRouter } from '../router'
 import { connect } from './client'
 import { follow } from './feed'
 import { onModelsRead, readModelsAhead } from './models'
-import { makeQueryClient, reads, recheckStatus } from './reads'
+import { makeQueryClient, reads } from './reads'
 import type { Host, Services } from './services'
 
 /*
@@ -19,19 +19,29 @@ import type { Host, Services } from './services'
  */
 
 export const openWindow = async (port: DomMessagePort, host: Host) => {
-  const client = await connect(port)
+  host.startup?.('open-window-start')
+  const began = performance.now()
+  const timed = async <A>(stage: string, read: () => Promise<A>): Promise<A> => {
+    host.startup?.(`${stage}-start`)
+    const at = performance.now()
+    try {
+      return await read()
+    } finally {
+      host.startup?.(stage, Math.round(performance.now() - at))
+    }
+  }
+  const client = await timed('client-created', () => connect(port))
   const cache = makeQueryClient()
   const read = reads(client)
   // Watched from where the projects were read: nothing after is missed. Unread, from now.
-  const listed = await cache.fetchQuery(read.projects()).catch(() => null)
+  const listed = await timed('first-projects', () => cache.fetchQuery(read.projects()).catch(() => null))
   const feed = follow(client, cache, listed?.cursor)
   const services: Services = { client, host, cache, feed }
   const router = makeRouter({ client, cache })
-  void recheckStatus(client, cache).catch(() => undefined)
-  readModelsAhead(client)
   // Each model's room follows from which agents are signed in and which models are offered.
   onModelsRead(client, () => void cache.invalidateQueries({ queryKey: ['modelRooms'] }))
-  await router.load()
+  await timed('first-route', () => router.load())
+  host.startup?.('open-window-resolved', Math.round(performance.now() - began))
 
   const kept = tabsStoreOf(client).get().kept
   const known = new Set(listed?.projects.map((project) => project.id) ?? [])
@@ -44,6 +54,14 @@ export const openWindow = async (port: DomMessagePort, host: Host) => {
           ? router.preloadRoute({ to: '/threads/$threadId', params: { threadId: place.threadId } })
           : router.preloadRoute({ to: '/projects/$projectId', params: { projectId } })
       })
-  setTimeout(() => void Promise.allSettled(readAhead()), 0)
-  return { services, router }
+  let started = false
+  const afterOpen = () => {
+    if (started) return
+    started = true
+    // Join a mounted screen's status read instead of starting a second set of cold CLIs.
+    void cache.fetchQuery(read.status()).catch(() => undefined)
+    readModelsAhead(client)
+    void Promise.allSettled(readAhead())
+  }
+  return { services, router, afterOpen, hasProjects: (listed?.projects.length ?? 0) > 0 }
 }
