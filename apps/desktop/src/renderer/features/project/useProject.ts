@@ -12,6 +12,7 @@ import {
   type TaskEnd,
   type ThreadItem,
   type FieldAnswer,
+  type WorksIn,
 } from '@althar/contracts'
 
 import { messageOf, type RunRef } from '../../data/client'
@@ -70,8 +71,8 @@ export interface ProjectModel {
   readonly compact: () => Promise<void>
   /** Runs one of the project's runnables with no agent, its default without one: a task's worktree, or with none its default branch. Its card goes in the coordinator's thread. */
   readonly runProject: (taskId?: string | null, runnableId?: string | null, ref?: RunRef) => Promise<void>
-  /** Runs a branch or a pull request, fetched by Althar, in a copy of its own, its card in the coordinator's thread; what went wrong is thrown, for the picker to say. */
-  readonly runBranch: (ref: RunRef) => Promise<void>
+  /** Runs one on a branch or a pull request, fetched by Althar, in a copy of its own, its card in the coordinator's thread; what went wrong is thrown, for its line to say. */
+  readonly runRef: (runnableId: string, ref: RunRef) => Promise<void>
   readonly stopLaunch: (id: string) => Promise<void>
   readonly clearLaunch: (id: string) => Promise<void>
   /** Moves the running coordinator to another agent. */
@@ -85,7 +86,7 @@ export interface ProjectModel {
   readonly holdPlan: (planId: string) => Promise<void>
   /** Stops a command a task's lead left running, which keeps a place the waiting plans wait for. */
   readonly stopBackground: (threadId: string, id: string) => Promise<void>
-  readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null) => Promise<void>
+  readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null, worksIn?: WorksIn) => Promise<void>
   readonly fileIssueDraft: (draftId: string) => Promise<void>
   readonly changeIssueDraft: (
     draftId: string,
@@ -94,6 +95,8 @@ export interface ProjectModel {
   readonly discardIssueDraft: (draftId: string) => Promise<void>
   readonly applyIssueChanges: (changesId: string) => Promise<void>
   readonly discardIssueChanges: (changesId: string) => Promise<void>
+  /** From an issue card: issues filed and changed at once from now on, or each on a card first, said to the coordinator. */
+  readonly preferIssueCards: (atOnce: boolean) => Promise<void>
   readonly dismissError: () => void
 }
 
@@ -359,9 +362,9 @@ export const useProject = (projectId: string): ProjectModel => {
           ? client.runProject(projectId, taskId, threadId, ...(runnableId === null ? [] : [runnableId]))
           : client.runProject(projectId, taskId, threadId, runnableId ?? undefined, ref),
       ),
-    runBranch: async (ref) => {
+    runRef: async (runnableId, ref) => {
       try {
-        await client.runProject(projectId, null, threadId, undefined, ref)
+        await client.runProject(projectId, null, threadId, runnableId, ref)
       } finally {
         await readHead()
       }
@@ -397,12 +400,14 @@ export const useProject = (projectId: string): ProjectModel => {
     startPlan: (planId) => act(() => client.startPlan(planId)),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
     stopBackground: (threadId, id) => act(() => client.stopBackground(threadId, id)),
-    changePlan: (planId, steps, end) => act(() => client.changePlan(planId, steps, end)),
+    changePlan: (planId, steps, end, worksIn) =>
+      act(() => (worksIn === undefined ? client.changePlan(planId, steps, end) : client.changePlan(planId, steps, end, worksIn))),
     fileIssueDraft: (draftId) => act(() => client.fileIssueDraft(draftId)),
     changeIssueDraft: (draftId, edit) => act(() => client.changeIssueDraft(draftId, edit)),
     discardIssueDraft: (draftId) => act(() => client.discardIssueDraft(draftId)),
     applyIssueChanges: (changesId) => act(() => client.applyIssueChanges(changesId)),
     discardIssueChanges: (changesId) => act(() => client.discardIssueChanges(changesId)),
+    preferIssueCards: (atOnce) => act(() => (threadId === null ? Promise.resolve() : client.preferIssueCards(threadId, atOnce))),
     dismissError: () => setError(null),
   }
 }

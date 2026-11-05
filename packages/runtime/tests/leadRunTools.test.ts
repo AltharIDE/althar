@@ -20,7 +20,7 @@ import { callTool, callToolWhole, items, listTools, repository, runtime, until }
  * What a lead does outside its sandbox through Althar, rather than around it:
  * its worktree's setup run again, as when the worktree was made (ADR-023);
  * the project run in its worktree and stopped, as the run the person sees in
- * the Running pill (ADR-044); and a screenshot of a page on this computer,
+ * Run's list (ADR-044, ADR-090); and a screenshot of a page on this computer,
  * which the coordinator takes too.
  */
 
@@ -204,7 +204,7 @@ describe('run_project and stop_project, for a lead', () => {
       const ended = yield* callTool(lead, 'run_project', {})
       assert.match(
         ended,
-        /in your worktree ended at once, with exit code 1\. Its last lines:\n\nError: Cannot find module vite\n\nFix what stopped it/,
+        /in your worktree ended at once, with exit code 1\. Its last lines, stdout and stderr:\n\nError: Cannot find module vite\n\nFix what stopped it/,
       )
       assert.strictEqual(yield* callTool({ ...lead, taskId: null }, 'run_project', {}), 'This tool is for a task’s lead.')
       assert.strictEqual(yield* callTool({ ...lead, taskId: null }, 'stop_project', {}), 'This tool is for a task’s lead.')

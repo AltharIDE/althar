@@ -5,18 +5,22 @@ import { PlanGauge } from '@althar/ui'
 
 import { keys } from '../../data/reads'
 import { useServices } from '../../data/services'
+import { useSettingsWays } from '../settings/open'
 import { usePlan } from './usePlan'
 
 /**
  * Plan usage in the window's bar, after CPU and memory, once any agent's
  * plan has been read: the gauge, and its peek, opened by a click or by ⌘U
  * (Control-U off a Mac), which the bar holds. Opening it reads every account
- * again, each at most once a minute, as the runtime keeps to.
+ * again, each at most once a minute, as the runtime keeps to. An agent a
+ * sign-in stops is signed in again from its row: its tab in Settings, with
+ * its sign-in started.
  */
 export function PlanBar({ open, onOpenChange }: { readonly open: boolean; readonly onOpenChange: (open: boolean) => void }) {
   const { client } = useServices()
   const cache = useQueryClient()
   const { agents } = usePlan()
+  const ways = useSettingsWays()
   useEffect(() => {
     if (!open) return
     client.getPlanUsage({ refresh: true }).then(
@@ -31,5 +35,15 @@ export function PlanBar({ open, onOpenChange }: { readonly open: boolean; readon
     if (none && open) onOpenChange(false)
   }, [none, open, onOpenChange])
   if (none) return null
-  return <PlanGauge agents={agents} open={open} onOpenChange={onOpenChange} />
+  return (
+    <PlanGauge
+      agents={agents}
+      open={open}
+      onOpenChange={onOpenChange}
+      onSignIn={(agentId) => {
+        onOpenChange(false)
+        ways.signIn(agentId)
+      }}
+    />
+  )
 }

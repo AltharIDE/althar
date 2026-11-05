@@ -41,6 +41,56 @@ export const EveryState: Story = {
   },
 }
 
+/** An agent that reaches several providers, each with a sign-in of its own: each says how it is paid for, in place of the account's one word. */
+export const Providers: Story = {
+  args: {
+    agent: 'OpenCode',
+    accounts: [
+      {
+        id: 'acc_usual',
+        name: 'Personal',
+        place: { kind: 'usual' },
+        state: { kind: 'ready', paid: 'key' },
+        providers: [
+          { name: 'OpenCode Go', paid: 'plan' },
+          { name: 'OpenCode Zen', paid: 'key' },
+        ],
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('OpenCode Go')).toBeInTheDocument()
+    await expect(c.getByText('on a plan')).toBeInTheDocument()
+    await expect(c.getByText('per use')).toBeInTheDocument()
+  },
+}
+
+/** One provider refused work lately, though the account is signed in: it is the button that signs it in, the other as it is. */
+export const AProviderRefused: Story = {
+  args: {
+    agent: 'OpenCode',
+    accounts: [
+      {
+        id: 'acc_usual',
+        name: 'Personal',
+        place: { kind: 'usual' },
+        state: { kind: 'ready', paid: 'key' },
+        providers: [
+          { name: 'OpenCode Go', paid: 'plan', refused: true },
+          { name: 'OpenCode Zen', paid: 'key' },
+        ],
+      },
+    ],
+  },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('OpenCode Zen')).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'OpenCode Go: sign in again' }))
+    await expect(args.onSignIn).toHaveBeenCalledWith('acc_usual')
+  },
+}
+
 /** The agent's usual sign-in alone: no word on the order, which only matters with two. */
 export const OnlyTheUsual: Story = {
   args: { accounts: ACCOUNTS.slice(0, 1) },

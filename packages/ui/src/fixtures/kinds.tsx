@@ -57,6 +57,16 @@ export const CHANGE_READY: Card = {
   ),
 }
 
+/** A change its lead finished with nothing on its branch and no pull request: what it leaves to the person, and Done in its corner. */
+export const CHANGE_NOTHING_BUILT: Card = {
+  status: TaskStatus.Yours,
+  word: 'Nothing built',
+  kind: TaskKind.Change,
+  at: '8m',
+  title: 'Plan usage shows what’s left on OpenCode Zen',
+  why: 'Zen has no balance API: which of the three ways do you want?',
+}
+
 /** Its pull request in its branch's merge queue: every step done, none on, and its host merges it once the queue's checks pass. */
 export const CHANGE_IN_MERGE_QUEUE: Card = {
   status: TaskStatus.Running,
@@ -237,6 +247,7 @@ export const KIND_CARDS: ReadonlyArray<{ readonly id: string; readonly card: Car
   { id: 'review running', card: REVIEW_RUNNING },
   { id: 'plain working', card: PLAIN_WORKING },
   { id: 'change ready', card: CHANGE_READY },
+  { id: 'change, nothing built', card: CHANGE_NOTHING_BUILT },
   { id: 'change in the merge queue', card: CHANGE_IN_MERGE_QUEUE },
   { id: 'change checks running', card: CHANGE_CHECKS_RUNNING },
   { id: 'merge conflict', card: CHANGE_CONFLICT },

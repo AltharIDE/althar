@@ -3,6 +3,7 @@ import { doing, type Doing } from './actions'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
+  type CheckoutAnswer,
   ApiError,
   type AgentStatus,
   type AlwaysScope,
@@ -153,6 +154,8 @@ export interface TaskModel {
   /** Answers a step that needs the person. */
   /** Whether it went through: a stuck step whose answer didn't is answerable again. */
   readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<boolean>
+  /** The person's answer to what Althar asked before a Local task takes their checkout (ADR-091). */
+  readonly answerCheckout: (attentionId: string, answer: CheckoutAnswer) => Promise<void>
   /** Hands its step held for a usage limit to another agent, on the account and model picked, rather than waiting for the reset. */
   readonly handOverHeld: (to: { readonly agentId: string; readonly accountId?: string; readonly model?: string }) => Promise<void>
   /** Answers an agent's question: what went wrong, in words, or null when it went through. */
@@ -218,6 +221,10 @@ export interface TaskModel {
   /** Applies changes to the task's issue its lead or Althar proposed, or throws them away. */
   readonly applyIssueChanges: (changesId: string) => Promise<void>
   readonly discardIssueChanges: (changesId: string) => Promise<void>
+  /** From an issue card: issues filed and changed at once from now on, or each on a card first, said to the coordinator and the lead. */
+  readonly preferIssueCards: (atOnce: boolean) => Promise<void>
+  /** Whether the task does only part of its issue, so its merge comments on it and leaves it open. */
+  readonly setIssuePart: (partOf: boolean) => Promise<void>
   /** Stops a command its lead left running. */
   readonly stopBackground: (id: string) => Promise<void>
   /** Stops a command another task's lead left running, which keeps a place this task waits for. */
@@ -636,6 +643,7 @@ export const useTask = (threadId: string): TaskModel => {
       )
       return through
     },
+    answerCheckout: (attentionId, answer) => act(() => client.answerCheckout({ attentionId, answer })),
     handOverHeld: (to) => onTask((taskId) => client.handOverHeld({ taskId, ...to })),
     answerQuestion: (attentionId, answers) =>
       client.answerQuestion({ attentionId, answers }).then(
@@ -732,6 +740,8 @@ export const useTask = (threadId: string): TaskModel => {
     discardIssueDraft: (draftId) => act(() => client.discardIssueDraft(draftId)),
     applyIssueChanges: (changesId) => act(() => client.applyIssueChanges(changesId)),
     discardIssueChanges: (changesId) => act(() => client.discardIssueChanges(changesId)),
+    preferIssueCards: (atOnce) => act(() => client.preferIssueCards(threadId, atOnce)),
+    setIssuePart: (partOf) => onTask((taskId) => client.setTaskIssuePart(taskId, partOf)),
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
     stopHolding: (holder, id) => act(() => client.stopBackground(holder, id)),
     moveToFront: () => onTask((taskId) => client.moveInLine(taskId, 0)),

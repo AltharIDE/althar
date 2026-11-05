@@ -21,6 +21,7 @@ import { Live } from './Live'
 import { change, fact, timestamp } from './records'
 import { shortCommand } from './rules'
 import { lineOf, type RunCommand, runOf, type Script, scriptsIn, setupIn } from './runCommand'
+import { endedHow, installedAsLocked, runSpec } from './runProcess'
 import { shotOf, shotWords, VIEWPORT } from './screenshots'
 import { Setups } from './Setups'
 import { type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
@@ -107,7 +108,8 @@ interface Launch {
   /** The end of what it printed on stderr alone. */
   stderr: () => string
   url: string | null
-  ended: { readonly at: string; readonly code: number | null } | null
+  /** How it ended by itself: its exit code, or the signal that killed it. */
+  ended: { readonly at: string; readonly code: number | null; readonly signal: string | null } | null
   /** It was stopped, not ended by itself. */
   stopped: boolean
 }
@@ -271,7 +273,7 @@ export class Launches extends Context.Service<
         label: launch.name ?? shortCommand(launch.command),
         url: launch.url,
         startedAt: launch.startedAt,
-        ended: launch.ended,
+        ended: launch.ended === null ? null : { at: launch.ended.at, code: launch.ended.code },
       })
       const ofProject = (projectId: string) => [...launches.values()].filter((launch) => launch.projectId === projectId).map(shown)
       const told = (projectId: string) => live.publish({ _tag: 'Launches', projectId, launches: ofProject(projectId) })
@@ -395,7 +397,10 @@ export class Launches extends Context.Service<
           const busy = [...launches.values()].some(
             (launch) => launch.taskId === null && launch.branch === null && launch.bindingId === binding.id && launch.ended === null,
           )
-          if (!busy || !existsSync(path)) yield* freshCopy(binding.repository, path, binding.base ?? 'main')
+          if (!busy || !existsSync(path)) {
+            yield* freshCopy(binding.repository, path, binding.base ?? 'main')
+            yield* installedAsLocked(path)
+          }
           return path
         })
 
@@ -415,7 +420,8 @@ export class Launches extends Context.Service<
           launch.ended === null
             ? null
             : {
-                ...launch.ended,
+                at: launch.ended.at,
+                code: launch.ended.code,
                 stopped: launch.stopped,
                 last: launch.stopped ? null : endingLine(launch.printed, launch.ended.code, launch.stderr()),
               },
@@ -429,11 +435,11 @@ export class Launches extends Context.Service<
             )
 
       /** Reads what a run prints, now and then, until it says where it answers, ends, or a while goes by. */
-      const watchServing = (launch: Launch, stderr: () => string) =>
+      const watchServing = (launch: Launch) =>
         Effect.gen(function* () {
           for (let tries = 0; tries < SERVING_TRIES; tries += 1) {
             if (launch.url !== null || launch.ended !== null || !launches.has(launch.id)) return
-            const url = servingAt(`${launch.printed}\n${stderr()}`)
+            const url = servingAt(launch.printed)
             if (url !== null) {
               launch.url = url
               yield* toldCard(launch)
@@ -624,12 +630,7 @@ export class Launches extends Context.Service<
             const { id, run, folder, binding } = input
             const line = lineOf(run)
             // Whose work it is, in its environment, so all it starts is counted as that work's however it runs (MachineLoad.ts).
-            const env = { [WORK]: workOf({ kind: 'run', projectId: input.projectId, taskId: input.taskId }) }
-            const spec =
-              process.platform === 'win32'
-                ? // The line as it is: cmd.exe takes off the outer quotes (/s).
-                  { command: 'cmd.exe', args: ['/d', '/s', '/c', `"${line}"`], verbatim: true as const, env }
-                : { command: '/bin/sh', args: ['-c', line], env }
+            const spec = runSpec(line, { [WORK]: workOf({ kind: 'run', projectId: input.projectId, taskId: input.taskId }) })
             // Recorded before it is spawned, so a crash in between leaves a trace to reconcile.
             yield* sql`INSERT INTO processes ${sql.insert({
               id,
@@ -647,7 +648,13 @@ export class Launches extends Context.Service<
             // Its copy goes once its process group has: the scope's finalizers run last added first.
             const copy = input.copy
             if (copy !== null) yield* Scope.addFinalizer(scope, removeCopy(copy))
-            const owned = yield* spawnOwned(spec, folder).pipe(
+            // What it writes to stderr is what it printed too, as a terminal shows both: a run that fails mostly says why there.
+            const printed = { early: '', to: undefined as Launch | undefined }
+            const print = (text: string) => {
+              if (printed.to === undefined) printed.early = printedMore(printed.early, text)
+              else printed.to.printed = printedMore(printed.to.printed, text)
+            }
+            const owned = yield* spawnOwned(spec, folder, { stderr: print }).pipe(
               Scope.provide(scope),
               Effect.tapError(() =>
                 Effect.andThen(
@@ -679,12 +686,13 @@ export class Launches extends Context.Service<
               scope,
               pid: owned.pid,
               card: null,
-              printed: '',
+              printed: printed.early,
               stderr: owned.stderrTail,
               url: null,
               ended: null,
               stopped: false,
             }
+            printed.to = launch
             launches.set(id, launch)
             // Its card goes in the thread it was asked for in; a run doesn't wait on its card.
             if (input.threadId !== null)
@@ -701,12 +709,12 @@ export class Launches extends Context.Service<
                 for (;;) {
                   const { done, value } = await reader.read().catch(() => ({ done: true, value: undefined }))
                   if (done || value === undefined) return
-                  launch.printed = printedMore(launch.printed, decoder.decode(value, { stream: true }))
+                  print(decoder.decode(value, { stream: true }))
                 }
               }),
               scope,
             )
-            yield* Effect.forkIn(watchServing(launch, owned.stderrTail), scope)
+            yield* Effect.forkIn(watchServing(launch), scope)
             // Ended by itself, it stays, to say how, and anything it left behind is stopped with its group.
             yield* Effect.forkIn(
               provide(
@@ -714,7 +722,7 @@ export class Launches extends Context.Service<
                   const exit = yield* Deferred.await(owned.exited)
                   if (!launches.has(id)) return
                   const at = yield* timestamp
-                  launch.ended = { at, code: exit.code }
+                  launch.ended = { at, code: exit.code, signal: exit.signal }
                   yield* change('processes', id, { state: 'exited', exitCode: exit.code, signal: exit.signal, endedAt: at })
                   yield* toldCard(launch)
                   yield* told(input.projectId)
@@ -840,7 +848,7 @@ export class Launches extends Context.Service<
               yield* Scope.close(launch.scope, Exit.void)
               const at = yield* timestamp
               yield* change('processes', id, { state: 'killed', endedAt: at })
-              launch.ended = { at, code: null }
+              launch.ended = { at, code: null, signal: null }
               launch.stopped = true
               yield* toldCard(launch)
             }
@@ -1204,7 +1212,7 @@ export class Launches extends Context.Service<
             yield* Effect.sleep(Duration.millis(250))
           }
         })
-      const lastLines = (printed: string) => uncoloured(printed).trimEnd().split('\n').slice(-LAST_LINES).join('\n') || '(nothing)'
+      const lastLines = (printed: string) => uncoloured(printed).trimEnd().split('\n').slice(-LAST_LINES).join('\n') || null
 
       /** The project's runnable an agent names, by its name or its command; its default without one. */
       const namedRun = (projectId: string, run: string | undefined) =>
@@ -1246,10 +1254,16 @@ export class Launches extends Context.Service<
               ? where
               : `a copy of ${started.branch}${commit === null ? '' : ` at ${commit.slice(0, 12)}`}, fetched just now`
           const running = `Running \`${started.command}\` in ${place}`
-          if (launch?.ended != null)
-            return `\`${started.command}\` in ${place} ended at once${launch.ended.code === null ? '' : `, with exit code ${launch.ended.code}`}. Its last lines:\n\n${lastLines(launch.printed)}\n\n${after.quiet}`
+          if (launch?.ended != null) {
+            const ended = `\`${started.command}\` in ${place} ended at once${endedHow(launch.ended)}`
+            const last = lastLines(launch.printed)
+            // Said as it is, so whoever reads it knows nothing was cut off.
+            return last === null
+              ? `${ended}, and printed nothing, on stdout or stderr.\n\n${after.quiet}`
+              : `${ended}. Its last lines, stdout and stderr:\n\n${last}\n\n${after.quiet}`
+          }
           if (launch?.url != null) return `${running}, at ${launch.url}. ${after.answering}`
-          return `${running}. It hasn't said where it answers yet; the person sees it in the Running pill, with its address once it says, and stops it there.`
+          return `${running}. It hasn't said where it answers yet; the person sees it in Run’s list, with its address once it says, and stops it there.`
         })
 
       const runTool: Tool = {
@@ -1297,7 +1311,7 @@ export class Launches extends Context.Service<
                   task === undefined ? 'a fresh copy of the default branch' : `${task.slug}'s worktree`,
                   {
                     answering:
-                      "Give the person that address as a link, with the page on it they'd want, if one; they can open and stop it from the Running pill too.",
+                      "Give the person that address as a link, with the page on it they'd want, if one; they can open and stop it from Run’s list too.",
                     quiet:
                       'Tell the person why, in a sentence; if how it runs is wrong, keep how with set_run_command or keep_run and run it again.',
                   },
@@ -1310,14 +1324,14 @@ export class Launches extends Context.Service<
       /*
        * A lead runs the project in its own worktree, as the coordinator runs a
        * task's: the same run, with its card in the task's thread and in the
-       * Running pill, which the person opens and stops as any other. It stops
+       * task's Run list, which the person opens and stops as any other. It stops
        * only its task's runs.
        */
       const LeadAsked = Schema.Struct({ run: Schema.optional(Schema.String), repository: Schema.optional(Schema.String) })
       const leadRunTool: Tool = {
         name: 'run_project',
         description:
-          'Runs the project in your worktree, outside your sandbox, as Althar runs it for the person: its default run command, or with run the one of the things it runs by that name (Storybook), after its setup. Use it rather than starting a dev server yourself: it answers on localhost as it would, and the person sees it in the Running pill over the composer, with where it answers, and can open or stop it there. It returns once it says where it answers, or ends, with its last lines if it did; a run of it already going is the one returned. It stays running until you stop it with stop_project, or the person stops it: stop it once you no longer need it. In a task of several repositories, say which, as repository.',
+          'Runs the project in your worktree, outside your sandbox, as Althar runs it for the person: its default run command, or with run the one of the things it runs by that name (Storybook), after its setup. Use it rather than starting a dev server yourself: it answers on localhost as it would, and the person sees it in Run’s list, in the task’s bar or on the project’s front, with where it answers, and can open or stop it there. It returns once it says where it answers, or ends, with its last lines if it did; a run of it already going is the one returned. It stays running until you stop it with stop_project, or the person stops it: stop it once you no longer need it. In a task of several repositories, say which, as repository.',
         input: {
           type: 'object',
           properties: {
@@ -1351,7 +1365,7 @@ export class Launches extends Context.Service<
       const stopTool: Tool = {
         name: 'stop_project',
         description:
-          "Stops what you ran with run_project in your worktree, or the person ran there: with run, the one by that name or command; without, each of the task's runs. It goes from the Running pill. What runs from the default branch, or another task's worktree, isn't yours to stop.",
+          "Stops what you ran with run_project in your worktree, or the person ran there: with run, the one by that name or command; without, each of the task's runs. It goes from Run’s list. What runs from the default branch, or another task's worktree, isn't yours to stop.",
         input: { type: 'object', properties: { run: { type: 'string' } } },
         call: (input, access) =>
           said(

@@ -57,7 +57,7 @@ export interface FileDiff {
  */
 const LINES_SHOWN = 4_000
 const WHOLE_LINES = 20_000
-const READ_AT_MOST = 2 * 1024 * 1024
+export const READ_AT_MOST = 2 * 1024 * 1024
 const NEW_FILES_COUNTED = 50
 
 /** Whether bytes look like a binary file: git's own test, a NUL early on. */
@@ -77,14 +77,14 @@ const reader = (output: string) => {
 }
 
 /** What a new file nobody has added yet holds, as git would add it: a file's text, or that it is binary; a link's target; or nothing git adds. */
-type NewFile =
+export type NewFile =
   | { readonly kind: 'text'; readonly text: string }
   | { readonly kind: 'binary' }
   | { readonly kind: 'link'; readonly target: string }
   | { readonly kind: 'other' }
 
 /** Reads a new file as git would add it, without following a link, and without waiting on anything that isn't a file. */
-const newFile = (worktree: string, path: string, read: boolean): Effect.Effect<NewFile> =>
+export const newFile = (worktree: string, path: string, read: boolean): Effect.Effect<NewFile> =>
   Effect.promise(async (): Promise<NewFile> => {
     const at = join(worktree, path)
     const stats = await lstat(at)
@@ -355,4 +355,36 @@ export const fileDiff = (worktree: string, base: string, path: string, head?: st
     if (whole !== null && !whole.truncated) return { file: known, ...whole }
     // Too long to read whole: its hunks, as git gives them, so every change is there.
     return { file: known, ...parseDiff(yield* diff('-U3')) }
+  })
+
+/**
+ * A file the task left as it was, every line of it unchanged, as a review's
+ * finding may name one (a caller the change missed, a test it didn't
+ * update): only one git tracks, read from the worktree without following a
+ * link, and never one inside it that climbs out.
+ */
+export const unchangedFileDiff = (worktree: string, path: string): Effect.Effect<FileDiff, unknown> =>
+  Effect.gen(function* () {
+    if (path === '' || path.startsWith('/') || path.split('/').includes('..')) return yield* new NotFound({ kind: 'file', id: path })
+    const tracked = split(yield* git(worktree, '--literal-pathspecs', 'ls-files', '-z', '--', path))
+    if (!tracked.includes(path)) return yield* new NotFound({ kind: 'file', id: path })
+    const content = yield* newFile(worktree, path, true)
+    const file: ChangedFile = {
+      path,
+      from: null,
+      status: 'modified',
+      add: 0,
+      del: 0,
+      binary: content.kind === 'binary',
+      uncommitted: false,
+    }
+    if (content.kind !== 'text' && content.kind !== 'link') return { file, lines: [], truncated: false }
+    const text = content.kind === 'link' ? content.target : content.text
+    const all = text === '' ? [] : (text.endsWith('\n') ? text.slice(0, -1) : text).split('\n')
+    const shown = all.slice(0, WHOLE_LINES)
+    return {
+      file,
+      lines: shown.map((line, at) => ({ kind: 'context', old: at + 1, new: at + 1, text: line }) as const),
+      truncated: shown.length < all.length,
+    }
   })

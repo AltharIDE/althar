@@ -220,8 +220,8 @@ describe('what agents hand back', () => {
         kind: 'edit',
         status: 'completed',
         content: [
-          { _tag: 'Diff', path: '/w/docs/plan.md', created: true, change: 'c1' },
-          { _tag: 'Diff', path: '/w/src/a.ts', created: false, change: 'c2' },
+          { _tag: 'Diff', path: join(where.folder, 'docs', 'plan.md'), created: true, change: 'c1' },
+          { _tag: 'Diff', path: join(where.folder, 'src', 'a.ts'), created: false, change: 'c2' },
         ],
       })
       // OpenCode's write: its whole content in its input, and no diff.
@@ -231,7 +231,7 @@ describe('what agents hand back', () => {
         title: 'docs/notes.md',
         kind: 'edit',
         status: 'completed',
-        rawInput: { filePath: '/w/docs/notes.md', content: '# Notes' },
+        rawInput: { filePath: join(where.folder, 'docs', 'notes.md'), content: '# Notes' },
       })
       yield* record.record({
         _tag: 'ToolCall',
@@ -239,15 +239,25 @@ describe('what agents hand back', () => {
         title: 'Edit README.md',
         kind: 'edit',
         status: 'completed',
-        rawInput: { file_path: '/w/README.md', old_string: 'a', new_string: 'b', content: 'x' },
+        rawInput: { file_path: join(where.folder, 'README.md'), old_string: 'a', new_string: 'b', content: 'x' },
+      })
+      // The agent's own memory, outside where it works: not handed back.
+      yield* record.record({
+        _tag: 'ToolCall',
+        toolCallId: 'memory',
+        title: 'Write memory',
+        kind: 'edit',
+        status: 'completed',
+        rawInput: { file_path: '/Users/me/.claude/projects/-app/memory/note.md', content: '# Note' },
       })
       const paths = (toolCallId: string) =>
         Effect.map(toolItem(where.threadId, toolCallId), (content) =>
           ((content?.files ?? []) as ReadonlyArray<Record<string, unknown>>).map((file) => [file.path, file.how]),
         )
-      assert.deepStrictEqual(yield* paths('made'), [['/w/docs/plan.md', 'wrote']])
-      assert.deepStrictEqual(yield* paths('whole'), [['/w/docs/notes.md', 'wrote']])
+      assert.deepStrictEqual(yield* paths('made'), [[join(where.folder, 'docs', 'plan.md'), 'wrote']])
+      assert.deepStrictEqual(yield* paths('whole'), [[join(where.folder, 'docs', 'notes.md'), 'wrote']])
       assert.deepStrictEqual(yield* paths('edit'), [])
+      assert.deepStrictEqual(yield* paths('memory'), [])
     }).pipe(Effect.provide(runtime())),
   )
 })

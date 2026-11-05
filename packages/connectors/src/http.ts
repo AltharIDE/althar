@@ -22,9 +22,49 @@ export interface HttpOptions {
   /** Headers every call carries, such as the API's version. */
   readonly headers?: Readonly<Record<string, string>>
   readonly timeout?: Duration.Input
+  /** Whether the service leaves an answer of 304 out of what it counts against the account: GitHub does. */
+  readonly freeWhenUnchanged?: boolean
+}
+
+/**
+ * What a service lets an account ask of it, as far as Althar knows: the
+ * requests it counted against the account since this connection began, and,
+ * where the service says so in its headers, how many it allows an hour,
+ * how many are left and when that renews. A 304 isn't counted where the
+ * service doesn't count one (GitHub's), so asking "anything new?" costs
+ * nothing.
+ */
+export interface Allowance {
+  readonly counted: number
+  readonly limit?: number
+  readonly remaining?: number
+  /** When the allowance renews, as ISO 8601. */
+  readonly resetAt?: string
+}
+
+/** The numbers a service's rate-limit headers carry, under either of the names services use. */
+export const allowanceHeaders = (headers: Headers, now: number): Omit<Allowance, 'counted'> => {
+  const number = (...names: ReadonlyArray<string>) => {
+    for (const name of names) {
+      const value = headers.get(name)
+      if (value !== null && value.trim() !== '' && Number.isFinite(Number(value))) return Number(value)
+    }
+    return undefined
+  }
+  const limit = number('x-ratelimit-limit', 'ratelimit-limit')
+  const remaining = number('x-ratelimit-remaining', 'ratelimit-remaining')
+  const reset = number('x-ratelimit-reset', 'ratelimit-reset')
+  return {
+    ...(limit === undefined ? {} : { limit }),
+    ...(remaining === undefined ? {} : { remaining }),
+    // A time in seconds since the epoch (GitHub's, GitLab's), or the seconds left (Bitbucket's).
+    ...(reset === undefined ? {} : { resetAt: new Date(reset < 1_000_000_000 ? now + reset * 1000 : reset * 1000).toISOString() }),
+  }
 }
 
 export interface Http {
+  /** What the service has let this connection ask of it so far. */
+  allowance(): Allowance
   /** A JSON call, its answer read by `schema`. */
   json<A>(schema: Schema.Codec<A, unknown>, method: string, url: string, body?: unknown): Effect.Effect<A, ConnectorFailed>
   /** A POST of bytes, such as a picture, of their type; its JSON answer read by `schema`. */
@@ -260,6 +300,13 @@ export const makeHttp = (options: HttpOptions): Http => {
     }
   }
 
+  /** What the service has counted, and last said of its allowance. */
+  let allowance: Allowance = { counted: 0 }
+  const meter = (status: number, headers: Headers, now: number) => {
+    const free = status === 304 && options.freeWhenUnchanged === true
+    allowance = { ...allowance, counted: allowance.counted + (free ? 0 : 1), ...allowanceHeaders(headers, now) }
+  }
+
   const invalid = (detail: string) => new ConnectorFailed({ product, reason: 'invalid_response', message: detail.slice(0, MESSAGE_KEPT) })
 
   /**
@@ -307,6 +354,7 @@ export const makeHttp = (options: HttpOptions): Http => {
           }),
         catch: (error) => new ConnectorFailed({ product, reason: 'unreachable', message: String(error).slice(0, MESSAGE_KEPT) }),
       })
+      meter(response.status, response.headers, yield* Clock.currentTimeMillis)
       let body = yield* Effect.tryPromise({
         try: async () => {
           const limit = init.maxBytes ?? 16 * 1024 * 1024
@@ -411,6 +459,7 @@ export const makeHttp = (options: HttpOptions): Http => {
     })
 
   return {
+    allowance: () => allowance,
     json: (schema, method, url, body) =>
       call(method, url, { body }).pipe(
         Effect.flatMap(success),

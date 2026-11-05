@@ -13,7 +13,7 @@ import { Context, Duration, Effect, Layer } from 'effect'
 import { RpcClient } from 'effect/rpc'
 import { until } from '@althar/testing/effect'
 
-import { connection, services } from '../src/Api'
+import { connection, services, text } from '../src/Api'
 import { type AgentEntry, Agents, type RuntimeOptions } from '../src/Config'
 import { Folders } from '../src/Folders'
 import { Secrets } from '../src/Secrets'
@@ -181,6 +181,29 @@ describe('a file moved in one of a task’s several repositories, through the AP
         assert.deepInclude(moved, { path: 'web/DOCS.md', from: 'web/README.md' })
         const diff = yield* client.GetFileDiff({ taskId: task.id, path: 'web/DOCS.md' })
         assert.deepInclude(diff.file, { path: 'web/DOCS.md', from: 'web/README.md', status: 'renamed' })
+      }),
+    ),
+  )
+})
+
+describe('an issue card’s Always file at once and Always ask first, through the API', () => {
+  it.live('say it to the coordinator as the person, for it to keep as a note', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const path = folderWith(['api'])
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(join(path, 'api')) })
+        const { threadId } = yield* client.GetCoordinator({ projectId: project.id })
+        yield* client.PreferIssueCards({ commandId: commandId(), threadId, atOnce: true })
+        yield* client.PreferIssueCards({ commandId: commandId(), threadId, atOnce: false })
+        const said = yield* until(
+          client.GetCoordinator({ projectId: project.id }),
+          (snapshot) => snapshot.items.filter((item) => item.kind === 'user_message').length >= 2,
+        )
+        assert.deepStrictEqual(said.items.flatMap((item) => (item.kind === 'user_message' ? [item.content.text] : [])).slice(0, 2), [
+          text.issuesAtOnce,
+          text.issuesAskFirst,
+        ])
       }),
     ),
   )

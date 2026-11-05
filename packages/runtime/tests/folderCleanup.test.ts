@@ -458,6 +458,32 @@ describe('a task whose folder was removed', () => {
   )
 })
 
+describe('a removed folder put back', () => {
+  it.live('takes a checkout put back by hand as its own, without copying over it or refusing it', () =>
+    Effect.gen(function* () {
+      const task = yield* finished('done', 4)
+      yield* (yield* FolderCleanup).sweep
+      assert.isFalse(existsSync(task.worktree))
+      // The person puts a checkout of their own where the folder was: it is a worktree at its top, so it stays as it is.
+      mkdirSync(task.worktree, { recursive: true })
+      git(task.worktree, 'init', '-q')
+      assert.isTrue(yield* bringBack(task.taskId, yield* person))
+      assert.strictEqual((yield* stateOf(task.workspaceId))?.state, 'ready')
+    }).pipe(Effect.provide(withCleanup())),
+  )
+
+  it.live('brings a folder back detached at its kept commit where its branch is gone', () =>
+    Effect.gen(function* () {
+      const task = yield* finished('done', 4)
+      yield* (yield* FolderCleanup).sweep
+      git(task.root, 'branch', '-D', task.branch)
+      assert.isTrue(yield* bringBack(task.taskId, yield* person))
+      assert.strictEqual(git(task.worktree, 'rev-parse', '--abbrev-ref', 'HEAD'), 'HEAD')
+      assert.strictEqual(git(task.worktree, 'rev-parse', 'HEAD'), task.head)
+    }).pipe(Effect.provide(withCleanup())),
+  )
+})
+
 describe('a task of several repositories whose folders were removed', () => {
   it.live('reads a document from the repository it is in, removed or not', () =>
     Effect.gen(function* () {

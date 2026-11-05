@@ -82,6 +82,27 @@ describe('accounts in settings', () => {
     expect(accountEntry({ ...usual('acc_4', 'unknown') }, now).state).toEqual({ kind: 'ready' })
   })
 
+  it('says Go and Zen each in its own state, the one that refused work lately as its button, and no provider it can’t place', () => {
+    const providers = [
+      { id: 'opencode-go', name: 'OpenCode Go', refusedAt: '2026-11-02T20:43:44.187Z', pays: 'plan' as const },
+      { id: 'anthropic', name: 'Anthropic', refusedAt: null },
+      { id: 'opencode', name: 'OpenCode Zen', refusedAt: null, pays: 'key' as const },
+    ]
+    expect(accountEntry({ ...usual('acc_5', 'signed_in'), providers })).toMatchObject({
+      providers: [
+        { name: 'OpenCode Go', paid: 'plan', refused: true },
+        { name: 'OpenCode Zen', paid: 'key' },
+      ],
+      state: { kind: 'ready' },
+    })
+    expect(accountEntry({ ...usual('acc_5', 'signed_in'), providers })).not.toHaveProperty('who')
+    // A fresh Go key puts it right: Go is on its plan again, nothing to sign in to.
+    expect(accountEntry({ ...usual('acc_5', 'signed_in'), providers: [{ ...providers[0]!, refusedAt: null }] }).providers).toEqual([
+      { name: 'OpenCode Go', paid: 'plan' },
+    ])
+    expect(accountEntry({ ...usual('acc_5', 'signed_in'), providers: [providers[1]!] })).not.toHaveProperty('providers')
+  })
+
   it('offers no second account for an agent whose sign-in every folder shares', async () => {
     const one: Status = {
       apiVersion: 1,
@@ -500,7 +521,7 @@ describe('the start', () => {
     seenTheTour()
     withServices(<Start onProject={onProject} />, client, fakeHost())
     await toTheProject()
-    await userEvent.click(await screen.findByRole('button', { name: /Add a folder/ }))
+    await userEvent.click(await screen.findByRole('button', { name: /Choose a folder/ }))
     await userEvent.click(await screen.findByRole('button', { name: /Make the project/ }))
     // The projects are read again with it in them, and the welcome stays: where its code is, then a tracker.
     const hosts = await screen.findByRole('list', { name: 'Code hosts' })
@@ -672,7 +693,7 @@ describe('the start', () => {
     seenTheTour()
     withServices(<Start onProject={onProject} />, client, host)
     await toTheProject()
-    await userEvent.click(await screen.findByRole('button', { name: /Add a folder/ }))
+    await userEvent.click(await screen.findByRole('button', { name: /Choose a folder/ }))
     const list = screen.getByRole('list', { name: 'Repositories for the project' })
     expect(within(list).getByRole('checkbox', { name: /api/ }).getAttribute('aria-checked')).toBe('true')
     expect(within(list).getByRole('checkbox', { name: /web/ }).getAttribute('aria-checked')).toBe('true')
@@ -795,9 +816,9 @@ describe('the start', () => {
     await screen.findByRole('heading', { name: 'Your first project' })
     fireEvent.keyDown(window, { key: 'Enter', metaKey: true })
     expect(await screen.findByText('Tick a repository, or add a folder.')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: /Add a folder/ }))
+    await userEvent.click(screen.getByRole('button', { name: /Choose a folder/ }))
     expect(await screen.findByText('There’s no git repository in empty.')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: /Add a folder/ }))
+    await userEvent.click(screen.getByRole('button', { name: /Choose a folder/ }))
     expect(await screen.findByText('That folder isn’t there any more.')).toBeTruthy()
     const list = screen.getByRole('list', { name: 'Repositories for the project' })
     fireEvent.drop(list, { dataTransfer: { types: ['Files'], files: [new File([], 'notes.txt')] } })
@@ -823,10 +844,10 @@ describe('the start', () => {
     expect(screen.getByRole('heading', { name: 'Your agents', level: 1 })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Skip' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Back' })).toBeNull()
-    expect(screen.getByText('None on this Mac yet')).toBeTruthy()
+    expect(screen.getByText('None found.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Continue without one' }))
     expect(await screen.findByText('None found in the usual places.')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: /Add a folder/ }))
+    await userEvent.click(screen.getByRole('button', { name: /Choose a folder/ }))
     expect(client.readFolder).not.toHaveBeenCalled()
   })
 

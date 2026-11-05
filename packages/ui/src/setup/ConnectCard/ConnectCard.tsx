@@ -1,9 +1,10 @@
-import { type ReactNode, useEffect, useRef } from 'react'
+import { type ReactNode, useEffect, useLayoutEffect, useRef } from 'react'
 
 import type { Brand } from '../../foundations/brands/brands'
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { BrandChip, BrandMark } from '../../foundations/Marks/Marks'
 import { cx } from '../../lib/cx'
+import { MOTION, reducedMotion } from '../../lib/motion'
 import type { RootProps } from '../../lib/props'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
@@ -17,7 +18,12 @@ import s from './ConnectCard.module.css'
  * connection can do, with a tick on the mark once it is connected. What a
  * step asks is the consumer's, made of the card's parts (ConnectParts). As
  * a step replaces the one before, the heading takes the focus that went
- * with it, so a screen reader says where the walk is.
+ * with it, so a screen reader says where the walk is, and the step fades in.
+ *
+ * On its own, as a sign-in is, its head is centred under a large mark. Set
+ * in something that has a left edge already, a card or a page, it starts
+ * there (`align="start"`): a small mark beside a heading, and no room of its
+ * own round it, so what it asks lines up with what is over and under it.
  */
 
 export interface ConnectCardText {
@@ -47,6 +53,8 @@ export type ConnectCardProps = RootProps<
     done?: boolean
     /** A quiet note at its foot, under a hairline: where what is given is kept. */
     foot?: ReactNode
+    /** Centred, on its own; or from the left edge of what it is set in. */
+    align?: 'centre' | 'start'
     /** What the step asks. */
     children?: ReactNode
     text?: Partial<ConnectCardText>
@@ -65,23 +73,42 @@ export function ConnectCard({
   pager,
   done = false,
   foot,
+  align = 'centre',
   children,
   text,
   className,
   ...rest
 }: ConnectCardProps) {
   const t = { ...connectCardText, ...text }
+  const card = useRef<HTMLDivElement>(null)
   const heading = useRef<HTMLHeadingElement>(null)
   const at = pager?.at
+  const start = align === 'start'
   // A step replaced the one that had focus: the heading takes it, and says where the walk is.
   useEffect(() => {
     if (focusLost()) heading.current?.focus()
   }, [title, at])
+  // A step replaced the one before: it fades in where it is, before it is first drawn.
+  const step = `${title}|${at ?? ''}`
+  const shown = useRef(step)
+  useLayoutEffect(() => {
+    if (shown.current === step) return
+    shown.current = step
+    const el = card.current
+    if (!el || reducedMotion() || typeof el.animate !== 'function') return
+    el.animate(
+      [
+        { opacity: 0, transform: 'translateY(4px)' },
+        { opacity: 1, transform: 'none' },
+      ],
+      MOTION.enter,
+    )
+  }, [step])
   return (
-    <div className={cx(s.card, className)} {...rest}>
+    <div ref={card} className={cx(s.card, start && s.start, className)} data-align={start ? 'start' : undefined} {...rest}>
       <div className={cx(s.top, pager !== undefined && s.stepped)}>
         <span className={s.chipWrap}>
-          <BrandChip brand={brand} size={pager === undefined ? 52 : 40} className={s.chip} />
+          <BrandChip brand={brand} size={start ? 32 : pager === undefined ? 52 : 40} className={s.chip} />
           {done && (
             <span className={s.tick}>
               <Icon name="check" size={10} />

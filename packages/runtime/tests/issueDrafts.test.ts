@@ -17,7 +17,7 @@ import { Coordinator } from '../src/Coordinator'
 import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
 import { NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
-import { DraftClosed, DraftUntitled, IssueDrafts, refusedDraft } from '../src/IssueDrafts'
+import { DraftClosed, DraftUntitled, IssueDrafts, labelsLeftOff, refusedDraft } from '../src/IssueDrafts'
 import { Issues } from '../src/Issues'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -86,6 +86,97 @@ const MERIDIAN = { id: 'team-1', key: 'MER', name: 'Meridian' }
 const PLATFORM = { id: 'team-2', key: 'PLT', name: 'Platform' }
 
 describe('issue drafts', () => {
+  it.live('are drafted with every field their tracker has, read against where they go, and say what they left off', () => {
+    const linear = linearWith(MERIDIAN)
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { projectId, access } = yield* project()
+      const instance = yield* Instance
+      const said = yield* callTool(access, 'draft_issue', {
+        title: 'Refund receipts',
+        labels: ['payments', 'nonesuch'],
+        project: 'Q4 launch',
+        milestone: 'Beta',
+        cycle: 'current',
+        assignee: 'sam',
+        estimate: 3,
+        due: '2026-11-30',
+        type: 'Bug',
+      })
+      assert.strictEqual(
+        said,
+        "Drafted the issue “Refund receipts” on Linear, in Meridian. Left off: Althar can’t set its type on Linear: Linear has no issue types: a label says what kind it is. “nonesuch”: Linear makes no label it hasn’t. It has: bug, docs, payments. Nothing is filed until the person files it from its card, where they can change it or discard it; they see it there, so there's no need to repeat it. You'll hear what they decide.",
+      )
+      const [card] = yield* cardsOf(projectId)
+      assert.deepStrictEqual(card?.labels, ['payments'])
+      assert.deepStrictEqual(card?.fields, [
+        { field: 'assignee', to: 'Sam Rivera' },
+        { field: 'project', to: 'Q4 launch' },
+        { field: 'milestone', to: 'Beta' },
+        { field: 'cycle', to: 'Cycle 12' },
+        { field: 'estimate', to: '3' },
+        { field: 'due', to: '2026-11-30' },
+      ])
+      // Linear takes them all as it files one: nothing is left for after.
+      yield* (yield* IssueDrafts).file(card?.draftId ?? '', instance.personId)
+      const [filed] = linear.created
+      assert.deepStrictEqual(
+        filed && {
+          project: filed.project?.name,
+          milestone: filed.milestone?.name,
+          cycle: filed.cycle,
+          assignees: filed.assignees.map((person) => person.login),
+          estimate: filed.estimate,
+          due: filed.due,
+        },
+        { project: 'Q4 launch', milestone: 'Beta', cycle: 'Cycle 12', assignees: ['sam'], estimate: 3, due: '2026-11-30' },
+      )
+      assert.lengthOf(linear.issueChanges, 0)
+    }).pipe(Effect.provide(withQueries({ linear })))
+  })
+
+  it.live('are filed at once where the agent says so, what create can’t take set right after, and its card the record', () => {
+    // A tracker that files an issue with its assignee alone: its status and milestone are set as soon as it is filed.
+    const linear = makeFakeService({ product: 'linear', creates: ['assignee'] })
+    linear.addContainer(MERIDIAN)
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { projectId, access } = yield* project()
+      const said = yield* callTool(access, 'draft_issue', {
+        title: 'Refund receipts',
+        status: 'In Progress',
+        milestone: 'Beta',
+        file_now: true,
+      })
+      assert.match(
+        said,
+        /^Filed the issue “Refund receipts” on Linear, in Meridian, as MER-1: \S+\. Its card in this thread is the record of it\.$/,
+      )
+      assert.deepStrictEqual(
+        linear.issueChanges.map((one) => [one.ref, Object.keys(one.change)]),
+        [['MER-1', ['status', 'milestone']]],
+      )
+      const now = yield* linear.issue('MER-1')
+      assert.deepStrictEqual([now.status.name, now.milestone?.name], ['In Progress', 'Beta'])
+      const [card] = yield* cardsOf(projectId)
+      assert.deepStrictEqual([card?.state, card?.direct, card?.issue?.key, card?.leftOff], ['filed', true, 'MER-1', []])
+
+      // What the tracker refuses after it has filed one leaves it filed, and is said.
+      linear.failNext('update', 'forbidden')
+      const again = yield* callTool(access, 'draft_issue', { title: 'Refund emails', status: 'Done', file_now: true })
+      assert.include(again, 'as MER-2')
+      assert.include(again, 'Linear left off: status not set: The fake update failed (forbidden)')
+      const [, second] = yield* cardsOf(projectId)
+      assert.deepStrictEqual([second?.state, second?.leftOff], ['filed', ['status not set: The fake update failed (forbidden)']])
+      assert.strictEqual((yield* linear.issue('MER-2')).status.name, 'Todo')
+    }).pipe(Effect.provide(withQueries({ linear })))
+  })
+
+  it('take a label Jira kept with hyphens for its spaces as the one asked for, not left off', () => {
+    assert.deepStrictEqual(labelsLeftOff('jira_cloud', ['needs test', 'docs', 'gone'], ['needs-test', 'docs']), ['gone'])
+    assert.deepStrictEqual(labelsLeftOff('github', ['needs test'], ['needs-test']), ['needs test'])
+  })
+
   it.live('are a card the coordinator drafts, filed only when the person says, then told to the coordinator', () => {
     const linear = linearWith(MERIDIAN)
     return Effect.gen(function* () {
@@ -118,6 +209,9 @@ describe('issue drafts', () => {
         state: 'pending',
         error: null,
         issue: null,
+        fields: [],
+        direct: false,
+        leftOff: [],
       })
       // Asked again with the same title, unsure the first worked, it is the same draft.
       yield* callTool(access, 'draft_issue', { title: 'refunds skip the rate limiter' })
@@ -743,12 +837,11 @@ describe('issue drafts', () => {
         const drafts = yield* IssueDrafts
         const instance = yield* Instance
         const { projectId, task, lead } = yield* led('Add a retry')
-        // The lead can look for duplicates and draft; a reviewer only reads.
+        // The lead can look for duplicates and draft; a reviewer only reads and finds.
         assert.includeMembers(yield* listTools(lead), ['draft_issue', 'find_issues', 'read_issue'])
         const reviewer = yield* listTools({ ...lead, role: 'reviewer' })
-        assert.includeMembers(reviewer, ['read_issue'])
+        assert.includeMembers(reviewer, ['read_issue', 'find_issues'])
         assert.notInclude(reviewer, 'draft_issue')
-        assert.notInclude(reviewer, 'find_issues')
 
         // What the project says waits, less the calls open on it: what the lead's drafts add.
         const waitingOnDrafts = Effect.gen(function* () {

@@ -9,12 +9,15 @@ import {
   type EndpointRead,
   majorOf,
   noReadingOf,
+  OPENCODE_GO,
   openCodeCannotList,
   planPairOf,
   readAgentUsage,
   readOpenCodeCredentials,
+  readOpenCodeGoUsage,
   resolveOpenCodeCredential,
   type UsageAccount,
+  usagePairs,
   usageReader,
   type UsageRead,
   type UsageSource,
@@ -45,7 +48,10 @@ import { SignIns } from './SignIns'
  * - Kimi Code and Grok Build: their providers' usage endpoints, with the
  *   account's own sign-in.
  * - OpenCode: its own listing of the account's sign-ins tells plan from key
- *   per provider; no plan's provider is read, and each says why.
+ *   per provider. OpenCode Go, a plan with limits, is read from OpenCode's
+ *   own server in the account's home, through its OpenCode Console sign-in;
+ *   without one it is shown connected, unread. No other plan's provider is
+ *   read, and each says why.
  * - The others report no usage anyone can read, and say so calmly
  *   (`usageSources.ts`). Their limits are still recognised when they hit.
  * - An API key has no plan window, and says so.
@@ -77,6 +83,8 @@ export interface PlanUsageOptions {
   readonly readEndpoint?: (sourceId: string, account: UsageAccount, now: () => Date) => Promise<EndpointRead>
   /** How an OpenCode account's sign-ins are listed. */
   readonly readCredentials?: (agent: AgentDefinition, home: Readonly<Record<string, string>>) => Promise<CredentialsRead>
+  /** How OpenCode's own server is asked for an account's OpenCode Go limits. */
+  readonly readGoUsage?: (agent: AgentDefinition, home: Readonly<Record<string, string>>) => Promise<UsageRead>
   /** How often accounts are read on their own while the runtime runs: five minutes. Zero turns it off. */
   readonly every?: Duration.Duration
   /** How long a reading is kept before another is taken: a minute. */
@@ -98,6 +106,8 @@ interface Held {
   readonly paidBy?: 'plan' | 'key'
   /** Why it has no reading, where the agent reports none anyone can read: said calmly, not a fault. */
   readonly noReading?: string
+  /** For an agent whose providers each have a sign-in (OpenCode): how each listed is paid, unknown where Althar can't tell. */
+  readonly providers?: Readonly<Record<string, 'plan' | 'key' | 'unknown'>>
 }
 
 const keyOf = (window: UsageWindow) => (window.label === undefined ? window.kind : `${window.kind}:${window.label}`)
@@ -148,6 +158,21 @@ export class PlanUsage extends Context.Service<
     readonly now: (refresh?: boolean) => Effect.Effect<PlanUsageView, Failure>
     /** The windows Claude Code's adapter reported on a session of the account, from one event. */
     readonly heard: (accountId: string, agentId: string, windows: ReadonlyArray<UsageWindow>) => Effect.Effect<void, never>
+    /**
+     * How the account is paid for and its plan's name, as last read, without asking again: null where nothing was read of it
+     * yet. For an agent whose providers each have a sign-in (OpenCode), how each listed is paid too, as its listing was last
+     * read this run (none before it is); and why
+     * a plan has no reading, where it reports none.
+     */
+    readonly paidBy: (accountId: string) => Effect.Effect<
+      {
+        readonly paidBy: 'plan' | 'key'
+        readonly plan: string | null
+        readonly providers?: Readonly<Record<string, 'plan' | 'key' | 'unknown'>>
+        readonly noReading?: string
+      } | null,
+      Failure
+    >
   }
 >()('@althar/runtime/PlanUsage') {
   static readonly layer: Layer.Layer<PlanUsage, never, SqlClient.SqlClient | Agents | Accounts | SignIns | Live | RuntimeConfig> =
@@ -171,6 +196,10 @@ export class PlanUsage extends Context.Service<
           options.readCredentials ??
           ((agent: AgentDefinition, home: Readonly<Record<string, string>>) =>
             readOpenCodeCredentials(agent, { node: adapterNode(), home }))
+        const readGoUsage =
+          options.readGoUsage ??
+          ((agent: AgentDefinition, home: Readonly<Record<string, string>>) =>
+            readOpenCodeGoUsage(agent, { node: adapterNode(), home, now: nowAsDate }))
         const readVersion = options.readVersion ?? ((agent: AgentDefinition) => Effect.runPromise(agentVersion(agent, adapterNode())))
         const readEndpoint = options.readEndpoint ?? usageReader.read
         const versions = new Map<string, string | undefined>()
@@ -226,9 +255,64 @@ export class PlanUsage extends Context.Service<
           hydrated = true
         })
 
+        /* Each account's week as last kept in plan_usage_weeks, read from the store once. */
+        const weeks = new Map<
+          string,
+          { readonly usedPercent: number; readonly resetsAt: string | null; readonly observedAt: string; readonly repeat: boolean } | null
+        >()
+        /*
+         * The account's week, kept as it moves (ADR-084): a task's share of it is the rise between two of these, put on the
+         * turns that ran on the account then. Only the plan's own week, every model's: a reading that carries only a model's
+         * week, or extra usage's (a rate-limit event near that limit), would put another window in the series. A week that hasn't
+         * moved keeps where it started standing still and its latest reading, so a task that runs after a quiet stretch
+         * has a reading from just before it.
+         */
+        const keepWeek = (accountId: string, windows: ReadonlyArray<Dated>) =>
+          Effect.gen(function* () {
+            const week = windows.find(
+              (window) => window.kind === 'weekly' && window.spend !== true && window.label === undefined && window.model === undefined,
+            )
+            if (week === undefined) return
+            if (!weeks.has(accountId)) {
+              const [last, before] = yield* sql<{ usedPercent: number; resetsAt: string | null; observedAt: string }>`
+                SELECT used_percent, resets_at, observed_at FROM plan_usage_weeks WHERE account_id = ${accountId}
+                ORDER BY observed_at DESC LIMIT 2`
+              weeks.set(
+                accountId,
+                last === undefined
+                  ? null
+                  : {
+                      ...last,
+                      repeat: before !== undefined && before.usedPercent === last.usedPercent && before.resetsAt === last.resetsAt,
+                    },
+              )
+            }
+            const last = weeks.get(accountId)
+            const resetsAt = week.resetsAt ?? null
+            const observed = Date.parse(week.observedAt)
+            if (!Number.isFinite(observed)) return
+            const observedAt = new Date(observed).toISOString()
+            if (last != null && observedAt <= last.observedAt) return
+            const same = last != null && last.usedPercent === week.usedPercent && last.resetsAt === resetsAt
+            weeks.set(accountId, { usedPercent: week.usedPercent, resetsAt, observedAt, repeat: same })
+            // Standing still since a reading that already repeats the one before: that one moves up to now.
+            if (same && last.repeat)
+              return yield* sql`
+              UPDATE plan_usage_weeks SET observed_at = ${observedAt} WHERE account_id = ${accountId} AND observed_at = ${last.observedAt}`
+            yield* sql`
+            INSERT INTO plan_usage_weeks ${sql.insert({
+              accountId,
+              usedPercent: week.usedPercent,
+              resetsAt,
+              observedAt,
+            })}
+            ON CONFLICT (account_id, observed_at) DO UPDATE SET used_percent = excluded.used_percent, resets_at = excluded.resets_at`
+          })
+
         const keep = (accountId: string, next: Held) =>
           Effect.gen(function* () {
             held.set(accountId, next)
+            if (next.paidBy !== 'key') yield* keepWeek(accountId, next.windows)
             // A key has no windows: one read while it was on a plan no longer steers work, nor says it is on one (SignIns).
             if (next.paidBy === 'key') return yield* sql`DELETE FROM plan_usage_readings WHERE account_id = ${accountId}`
             if (next.source === null || next.observedAt === null || next.windows.length === 0) return
@@ -402,6 +486,48 @@ export class PlanUsage extends Context.Service<
               if (cannotList !== null) return yield* keep(account.id, fault('cannot_classify', cannotList))
               const listed = yield* Effect.promise(() => readCredentials(definition, env))
               if (listed.kind === 'failed') return yield* keep(account.id, fault('cannot_classify', listed.message))
+              // How each provider is paid, for what a task used of it (Spending): a turn is priced by the provider it ran on.
+              // A provider with sign-ins paid two ways, or one Althar can't classify, is unknown: never taken for a key.
+              const providers: Record<string, 'plan' | 'key' | 'unknown'> = {}
+              for (const { provider, pays } of listed.credentials)
+                providers[provider] = providers[provider] === undefined || providers[provider] === pays ? pays : 'unknown'
+              // OpenCode Go is the account's plan where it has Go's key, or its OpenCode Console sign-in reads Go's limits.
+              const go = listed.credentials.some((credential) => credential.provider === 'opencode-go')
+              const asked =
+                go || listed.credentials.some((credential) => credential.provider === 'opencode')
+                  ? yield* Effect.promise(() => readGoUsage(definition, env))
+                  : ({ kind: 'none' } as const)
+              // Go refused its key lately, or OpenCode says it needs signing in, and nothing has put it right since: its models
+              // need it signed in again first, though its key may be gone from the listing.
+              const refused = ((yield* signIns.providers(account, check)) ?? []).some(
+                (row) => row.id === 'opencode-go' && row.refusedAt !== null,
+              )
+              if (go || refused || asked.kind === 'usage') {
+                const again = refused ? { kind: 'sign_in_again' as const, message: `${OPENCODE_GO} needs signing in again.` } : null
+                const onGo = { agentId: definition.id, plan: OPENCODE_GO, paidBy: 'plan' as const, providers }
+                if (asked.kind === 'usage')
+                  return yield* keep(account.id, {
+                    ...onGo,
+                    source: asked.usage.source,
+                    windows: dated(asked.usage.windows, asked.usage.observedAt),
+                    observedAt: asked.usage.observedAt,
+                    fault: again,
+                  })
+                if (asked.kind === 'failed') {
+                  const failed = fault('unreachable', asked.message)
+                  // Never read before: why is all there is to show, as for one connected and unread.
+                  const why = failed.windows.length === 0 ? { noReading: asked.message } : {}
+                  return yield* keep(account.id, { ...failed, ...onGo, ...why, fault: again ?? failed.fault })
+                }
+                // Connected, its usage unread: OpenCode reads it only through a Console sign-in.
+                const pair = usagePairs.find((one) => one.agent === 'opencode' && one.provider === 'opencode-go')
+                return yield* keep(account.id, {
+                  ...key,
+                  ...onGo,
+                  fault: again,
+                  noReading: (pair === undefined ? null : noReadingOf(pair)) ?? `${OPENCODE_GO}’s usage can’t be read.`,
+                })
+              }
               // A key needs nothing. A plan says why it has no reading, or that its sign-in isn't one Althar knows.
               let unknown: string | undefined
               let unread: string | undefined
@@ -411,8 +537,11 @@ export class PlanUsage extends Context.Service<
                   unknown ??= `OpenCode has a ${credential.provider} sign-in whose usage Althar cannot read yet.`
                 else if (credential.pays === 'plan') unread ??= noReadingOf(resolved.pair) ?? undefined
               }
-              if (unknown !== undefined) return yield* keep(account.id, { ...fault('cannot_classify', unknown), paidBy: 'plan' })
-              return yield* keep(account.id, unread === undefined ? key : { ...key, paidBy: 'plan', noReading: unread })
+              if (unknown !== undefined) return yield* keep(account.id, { ...fault('cannot_classify', unknown), paidBy: 'plan', providers })
+              return yield* keep(
+                account.id,
+                unread === undefined ? { ...key, providers } : { ...key, paidBy: 'plan', noReading: unread, providers },
+              )
             }
             if (check.paidBy === 'key') return yield* keep(account.id, key)
             const pair = planPairOf(definition.id)
@@ -515,6 +644,18 @@ export class PlanUsage extends Context.Service<
           )
 
         return PlanUsage.of({
+          paidBy: (accountId) =>
+            Effect.map(hydrate, () => {
+              const one = held.get(accountId)
+              const paidBy = one?.paidBy ?? (one?.source != null ? 'plan' : null)
+              if (one === undefined || paidBy === null) return null
+              return {
+                paidBy,
+                plan: paidBy === 'plan' ? one.plan : null,
+                ...(one.providers === undefined ? {} : { providers: one.providers }),
+                ...(one.noReading === undefined ? {} : { noReading: one.noReading }),
+              }
+            }),
           // Asked again, it waits for the reading; opened, it answers with what it has, and tells the view again once the accounts are read.
           now: (refresh = false) =>
             refresh

@@ -3,6 +3,7 @@
 - **Status:** Proposed
 - **Date:** 2026-10-19
 - **Amended:** 2026-10-31 ([ADR-081](081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md), to build for 0.7.0): a message the person writes to the coordinator, or to a task's lead in its thread, in the window or on a paired device, is their word for what can't be undone that the agent works out from it, in the turn it started, posting a review included; a message over the socket never is. Answering a permission request and widening what agents may do stay the window's press.
+- **Amended:** 2026-11-03 ([ADR-086](086-the-coordinator-moves-a-task-on-the-person-s-word-or-asks-on-a-card.md)): the same message is their word for stopping, holding, restarting and settling a task, resuming or running an automation, and starting an attached task from its pull request's head; in any other turn the coordinator asks on a card, which the person presses.
 - **Owner:** Repository maintainers
 - **Context:** ADR-003 put the runtime in a utility process, to revisit "when
   work must outlive the app and a daemon is needed". The command line,

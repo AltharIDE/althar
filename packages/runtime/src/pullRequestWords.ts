@@ -101,7 +101,8 @@ export const bodyOf = (input: {
   readonly built?: string | null
   /** The lead's last step summary, where it never said what the task built. */
   readonly lead: string | null
-  readonly issue: { readonly key: string; readonly url: string; readonly sameHost: boolean } | null
+  /** The issue it came from; `partOf` where it does only part of it, said in the words trackers read as not closing it. */
+  readonly issue: { readonly key: string; readonly url: string; readonly sameHost: boolean; readonly partOf?: boolean } | null
   /** The repository's template, if it has one. */
   readonly template?: string | null
   /** The description the lead wrote for the pull request: in the template, where there is one. */
@@ -129,8 +130,10 @@ export const bodyOf = (input: {
     if (placed === null && plain !== null) parts.push(`### Summary\n\n${plain}`)
   }
   if (input.review != null) parts.push(input.review.details)
-  if (input.issue !== null)
-    parts.push(input.issue.sameHost ? `Issue: ${input.issue.key}` : `Issue: [${input.issue.key}](${input.issue.url})`)
+  if (input.issue !== null) {
+    const named = input.issue.sameHost ? input.issue.key : `[${input.issue.key}](${input.issue.url})`
+    parts.push(input.issue.partOf === true ? `Part of ${named}` : `Issue: ${named}`)
+  }
   if (input.automation !== undefined && input.automation !== null)
     parts.push(`Opened by [Althar](https://github.com/AltharIDE/althar)’s ${nameInLine(input.automation)}.`)
   else if (input.credit !== false) parts.push('Opened by [Althar](https://github.com/AltharIDE/althar).')
@@ -260,6 +263,25 @@ export const unsettledLine = (failing: ReadonlyArray<string>, how: 'ended' | 'go
 
 /** Why the checks that fail on a change are the person's, as its card says, where its lead spent its tries and said nothing more. */
 export const spentLine = (failing: ReadonlyArray<string>, tries: number) => `${failingWords(failing)} after ${tries} fixes.`
+
+/** Why the checks on a change are the person's though none failed, as its card says: Althar gave up on seeing them through. */
+export const gaveUpLine = (how: string) =>
+  how === 'stuck'
+    ? 'The checks ran too long for Althar to see them through. Tell the lead what to do.'
+    : 'Althar can’t read the checks to see them through. Tell the lead what to do.'
+
+/**
+ * Why the checks that fail on a change are the person's, as its card says, where they were taken from Althar's hands since they
+ * failed: the person stopped or interrupted its lead, or Althar gave up on checks that ran too long or that it couldn't read.
+ */
+export const stoppedLine = (failing: ReadonlyArray<string>, how: string) =>
+  `${failingWords(failing)}, ${
+    how === 'stuck'
+      ? 'and the checks ran too long for Althar to see through.'
+      : how === 'unreadable'
+        ? "and Althar can't read the checks to see them through."
+        : `and you ${how === 'interrupted' ? 'interrupted' : 'stopped'} the lead.`
+  } Tell it what to do.`
 
 /** Checks that still fail: the one by its name, or how many. */
 const failingWords = (failing: ReadonlyArray<string>) =>

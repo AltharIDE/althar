@@ -111,6 +111,11 @@ describe('what Althar writes about a pull request', () => {
     // Althar's credit turned off, it doesn't sign the description either.
     assert.strictEqual(bodyOf({ lead: 'Adds a retry.', issue: null, credit: false }), 'Adds a retry.')
     assert.strictEqual(bodyOf({ lead: '', issue: { key: '#12', url: 'u', sameHost: true } }), `Issue: #12\n\n${credit}`)
+    // A task that does only part of its issue says so, in the words trackers read as not closing it.
+    assert.strictEqual(
+      bodyOf({ lead: '', issue: { key: 'MER-231', url: 'https://linear.app/m/issue/MER-231', sameHost: false, partOf: true } }),
+      `Part of [MER-231](https://linear.app/m/issue/MER-231)\n\n${credit}`,
+    )
     // The lead's description is the body, above the issue's link: not what the task built, which is the person's.
     assert.strictEqual(
       bodyOf({

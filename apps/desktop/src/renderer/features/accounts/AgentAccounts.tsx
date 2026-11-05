@@ -17,10 +17,28 @@ import type { AccountSignInModel } from './useAccountSignIn'
  * tool signed in.
  */
 
+/**
+ * The providers within the agent the line says, each in its own state: one paid a way Althar knows (OpenCode Go on a plan,
+ * Zen per use), and any that refused work lately, as the button that signs it in. None where none is either.
+ */
+const providersOf = (account: AccountStatus): Pick<AccountEntry, 'providers'> => {
+  const said = (account.providers ?? []).filter((provider) => provider.refusedAt !== null || provider.pays !== undefined)
+  if (said.length === 0) return {}
+  return {
+    providers: said.map((provider) => ({
+      name: provider.name,
+      ...(provider.pays === undefined ? {} : { paid: provider.pays }),
+      ...(provider.refusedAt === null ? {} : { refused: true }),
+    })),
+  }
+}
+
 /** An account, as a line of the kit's list of an agent's accounts. */
 export const accountEntry = (account: AccountStatus, now: Date = new Date()): AccountEntry => ({
   id: account.id,
   name: account.name,
+  // Each provider within the agent in its own state, one that refused work lately as the line's button.
+  ...providersOf(account),
   place:
     account.home === null
       ? { kind: 'usual' }

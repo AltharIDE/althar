@@ -131,10 +131,17 @@ provisional.
 | `rerun_check` | Runs a failed check on a pull request of the project's, or on the default branch's latest commit, once more: the one named, or each that failed. GitHub's Actions job, GitLab's pipeline job, Bitbucket Cloud's pipeline whole on the same commit; Bitbucket Data Center's builds are another service's, so it says whose and links the build ([ADR-081](../decisions/081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md)) | Command, undone in a step |
 | `read_default_branch_checks` | The checks on a repository's default branch's latest commit, with the end of the first failed ones' logs | Read |
 | `mark_ready`, `close_pull_request`, `reopen_pull_request` | Marks ready, closes unmerged, or opens again a pull request Althar opened, by its number or link. Each can be taken back in a step. Bitbucket Cloud can't reopen a declined one, so closing there waits for the person's word, and is refused until that is built; a pull request a person opened is theirs | Command, undone in a step |
+| `update_branch` | Merges the pull request's target branch into its branch, at the head just read, on any of the project's pull requests: GitHub's update-branch, and on GitLab and both Bitbucket editions a merge in a copy of Althar's own, pushed plainly. A merge commit, never a rebase or a forced push. A conflict stops and names the files; a branch pushed to meanwhile is left as it is; a fork's branch the account can't push to is left for its author, whom only the person's word asks ([ADR-081](../decisions/081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md)) | Command, undone in a step |
 | `reply_on_pull_request` | Replies, signed as from Althar, in a thread or a pull request's conversation: on one Althar opened, or whose author is the connected account or one of the repository's own people. An outside author's waits for the person's word, since the notification can't be taken back | Command, undone in a step |
+| `push_tag` | Tags the commit the person's words name, or the default branch's latest, on any of the project's hosts; made by Althar, never forced. A tag already on that commit is done; one on another commit is refused unless they asked to move it; deleting one is asked for too ([ADR-081](../decisions/081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md#a-release)) | Asked-for |
+| `read_release` | A tag's release as its host has it (GitHub's draft or published one, GitLab's release, Bitbucket's tag and Downloads), and the CI runs on the tag, with what each waits on and whose press it is, linked | Read |
+| `approve_release_run` | Approves what a run on a tag waits on: GitHub's environment, GitLab's deployment approval or manual job. Where the account can't, or only the person can (Bitbucket's manual steps), it does nothing and says so with the host's button | Asked-for |
+| `publish_release` | Publishes a tag's release as its host does: GitHub's draft made public, GitLab's release made, Bitbucket Cloud's files put in Downloads from the project's repository; Data Center's tag is the release | Asked-for |
+| `rerun_failed_jobs` | Runs the failed jobs of a tag's newest failed run again: GitHub's and GitLab's jobs, Bitbucket Cloud's pipeline whole | Command, undone in a step |
+| `read_release_steps` | How one of the project's repositories says it is released, from its CI files and release docs, to say as a line a step and keep as a project note | Read |
 | `draft_task` | Creates a task in draft, with its repositories and intent: a title of a few words (at most 60 characters), and what the person last said to it kept as what they asked for, which the task's thread opens with and its lead reads | Command |
-| `read_issue`, `find_issues` | An issue on a connected tracker or in the project's repository, and the person's open ones | Read |
-| `draft_issue` | Drafts an issue on a connected tracker, as a card the person files, changes or discards; nothing is filed on its word ([06](06-integrations-and-skills.md#drafting-issues)) | Command |
+| `read_issue`, `find_issues` | An issue on a connected tracker or in the project's repository, with who has it, its fields and latest comments; and issues found by words, tracker, where, state or a run of keys, the person's open ones without ([06](06-integrations-and-skills.md#finding-and-reading-issues)) | Read |
+| `draft_issue` | Drafts an issue on a connected tracker with every field it has, as a card the person files, changes or discards; or files it at once where the project's notes say so or the person just did, its card the receipt ([06](06-integrations-and-skills.md#drafting-issues)) | Command |
 | `list_models` | The models it can use now, by maker, with their scores and each one's efforts: the ids a step takes, the one it starts at by itself, and the person's default where they set one | Query |
 | `propose_plan` | Steps, a model per step and, where it matters, an effort that model offers, optional steps. An effort it doesn't offer is refused with the ones it does; left out, the step starts at the person's default for the model, or else the model's own | Command |
 | `start_task` | Drafts a mini task and starts it at once: one lead, at an effort as `propose_plan` takes one, no review, nothing outside the project when it is done; a plain task (a quick task), with no branch until its lead changes the repository, and then one that stays on this Mac | Command |
@@ -143,7 +150,8 @@ provisional.
 | `list_automations` | The project's automations on this computer: when each runs, what each run does, where it stands, and how its last run went ([ADR-061](../decisions/061-automations-start-ordinary-tasks-on-a-schedule.md)) | Read |
 | `propose_automation`, `change_automation` | An automation as the person asked for it, or a change to one: a name, the prompt each run is asked, days and a time or every hour, the lead, and what each run ends in (nothing, a draft or ready pull request, or reviews of each new pull request). Each on a card in its thread; nothing runs until the person turns it on, and a change that reaches further needs them to turn it on again, with Undo | Command |
 | `pause_automation` | Pauses one when the person says, since it only stops | Command |
-| `resume_automation`, `run_automation_now` | A small card the person presses, since both spend their plan and the coordinator reads text from outside | Command |
+| `resume_automation`, `run_automation_now` | At once in a turn the person's message started, with a line in the thread; otherwise a small card the person presses, since both spend their plan and the coordinator reads text from outside ([ADR-086](../decisions/086-the-coordinator-moves-a-task-on-the-person-s-word-or-asks-on-a-card.md)) | Command |
+| `stop_task`, `hold_task`, `restart_task`, `settle_task` | The person's own buttons on a task, by its slug: Stop (or with `turn`, only its lead's turn), Hold a plan counting down, Start, Resume or Reopen, and done, keep for later or discard (done and keep only for a task that isn't a change). In a turn the person's message started, at once, with a line quoting their words in the coordinator's thread and the task's; in any other, a `task_ask` card with one button that does it as their press, and Not now. Discarding keeps the worktree and branch (ADR-056). `TaskActions.ts` ([ADR-086](../decisions/086-the-coordinator-moves-a-task-on-the-person-s-word-or-asks-on-a-card.md)) | Command |
 | `rename_task` | Gives a task another title, as the person can, where its title no longer says what it does; its slug and branch stay, and what the person asked stays in its thread | Command |
 | `make_it_a_change` | A lead's, not the coordinator's: offered only on a quick task not made a change yet, and refused, with why, on any other. Called when the person asks to turn what the lead made into a real thing: a title for what it does now, a reviewer named as `propose_plan` names one (none only where the person said so), and a pull request, a draft or ready for review. Makes its branch where it has none; renames the task and gives its plan, and the run under way, the review and the ending, or opens a round with them where its last run had ended; its thread and the coordinator's news say so. The lead's next `finish_step` goes through the review, then the pull request opens ([ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md)) | Command |
 | `run_project` | Runs the project with no agent, its default or one of what it runs by name: the default branch in a copy of its own, or a task's worktree (ADR-023, ADR-044) | Command |
@@ -172,7 +180,70 @@ review's lead doesn't have it: its draft is what it hands the person.
 
 The same server serves every session. The read tools are how a lead, a step,
 or an agent that took over a task reads the record its brief left out. Command
-tools are granted per role; a lead gets none of the coordinator's.
+tools are granted per role; a lead gets none of the coordinator's commands,
+and reads the project's other tasks as below.
+
+## What a lead sees of other tasks
+
+Two tasks often touch the same code. Rather than the coordinator telling
+each lead by hand to read the other's branch, every task's lead, and the
+reviewer of a task's change, sees the project's other tasks, read-only.
+They get the coordinator's own read tools, which say more of each task's
+work to them, and one more:
+
+| Tool | What a lead reads |
+|---|---|
+| `list_tasks`, `find_tasks` | As the coordinator does, and under each task: whether it is the lead's own, where it works (Local, in the person's checkout, or a worktree), its branch, and, for an open task, the files it changes now, uncommitted ones too |
+| `read_task` | Its brief (title and description), where it stands, its plan, what it built and couldn't show working, its branch and folder, each step's report, its pull request, and what its review found |
+| `read_thread` | Its thread, the person's messages included, the latest part first, then further back a page at a time |
+| `read_task_diff` | Its change against where its branch started, as it stands in its folder now, uncommitted work and new files nobody has added included; all of it or the paths asked for, with the list of files first and a long diff a page at a time. A new file is read up to 2 MiB, as the Changes view reads one, and a longer one says so |
+
+Only tasks of the same project are found (`taskOf` reads by project). Nothing
+among these tools messages another lead, changes another task or writes in
+another folder: leads still talk to each other only through the coordinator.
+A review of someone else's pull request isn't given them, since its lead
+reads that pull request's untrusted words and reaches the web, and so reads
+none of the person's work in progress.
+
+The runtime reads another task's folder on the lead's behalf, outside the
+lead's sandbox (`otherTasks.ts`), so the sandbox needn't widen to reach
+another worktree. It reads without disturbing whoever works there: every git
+command runs on a copy of that folder's index with git's optional locks off
+(`untouched` in `git.ts`), because `git diff` and `git status` refresh the
+index as they read and write it back under its lock. Files themselves are
+only read. A Local task's checkout is read as it stands only while the task
+holds it and it is on the task's branch: the person's own edits there show
+with it, and once they switch it away, only the branch's commits are read.
+A task whose folder was removed is read from its branch's commits too.
+
+Leads whose work meets get a heads-up (`Overlaps.ts`). When a lead's edit
+or command ends, or a lead's turn starts or ends, Althar compares
+the paths in its change with those of the project's other running tasks (open,
+with a lead's session here). For each task changing a file it changes too,
+the lead is told once which task and which files, and to read that task's work
+before going on, and the other lead is told the same. A lead is told only while
+it is still in a turn as it is told, at work on the task. One between turns
+isn't woken for it: it hears of the overlap as its next turn starts.
+What was told is kept in the record (`task.overlap_noticed`, for each pair
+and direction), so further edits and later launches say nothing more. Looks
+run one at a time, and a task asking again while it waits is looked at once.
+
+```mermaid
+sequenceDiagram
+  participant A as Lead A (in a turn)
+  participant R as Runtime
+  participant B as Lead B (in a turn)
+  A->>R: edit ends (live event)
+  R->>R: A's and B's changes, read untouched
+  R-->>A: Heads-up: B changes README.md too
+  R-->>B: Heads-up: A changes README.md too
+  R->>R: keep task.overlap_noticed for both directions
+  A->>R: read_task_diff B
+  R-->>A: B's diff, uncommitted work included
+```
+
+Each lead's brief says these tools exist, and to read another task's work
+before changing code it changes, and where the brief names another task.
 
 ## Conversation and context
 
@@ -357,5 +428,83 @@ That receipt is failed and permits retry after another fresh read. Every other
 A lost answer or `{ pending: true, answer }` stays uncertain. Only a read proving it done confirms it; only `absent`, positive
 proof it neither happened nor remains in flight, permits another attempt.
 A confirmed receipt repairs an interrupted completion and its chat line
-without acting again. Host-specific reads and acting tools are later parts
-of ADR-081; this foundation is shared by every host and agent.
+without acting again. This foundation is shared by every host and agent; the
+first acting tool on it is the merge, below.
+
+## Merging on the person's word
+
+`merge_pull_request` (`MergeLine.ts`) merges any of the project's pull
+requests, in any of its repositories, at the head the coordinator read and
+in a way the repository allows. Every merge is an errand kept from the
+person's message, with one step, `merge`, so "merge it once it's green" and
+"merge it" are the same call:
+
+- **The host's own queue** (GitHub's merge queue on the branch, Bitbucket
+  Cloud's, GitLab's merge trains): the step puts it there at its head, and
+  it is done once a read shows it merged. There is no slot of Althar's.
+  Bitbucket Cloud's merge call is what puts one in its queue, and takes no
+  head, so the head is read just before. A queue that sends one back for a conflict hands it to the task's lead
+  rather than putting it in again.
+- **Everywhere else, Althar's line:** one slot for each repository and
+  branch, in the order the person asked; their "merge it now" (`now`) goes
+  first and waits only for a merge already in flight. The step that holds
+  the slot is brought up to date with the branch's head, by a merge, and
+  waits for green there; then it merges, with auto-merge as its merge where
+  the host has it (GitLab, Data Center from 8.15). It holds the slot until a
+  read shows the merge landed; the next starts from the branch's new head.
+  A step whose checks fail, whose merge conflicts, or that Althar can't
+  bring up to date (a protected branch, an account that may not push), steps
+  out of line until they pass or its head or the branch moves; a conflict or
+  a refused push is said to the task's lead.
+  A merge the host refuses (a review it needs, a merge check) pauses its
+  errand, said so, and the next goes ahead. A branch is brought up to date
+  three times at most, someone else writing to the target in between, then
+  its errand pauses for the person.
+- **Althar's sweep** (every 30 seconds, and at once after a merge call) does
+  only what can be undone: it brings the slot's branch up to date by a merge,
+  the connectors' `updateBranch` that `update_branch` uses too (GitHub's
+  update-branch; elsewhere a merge in a copy of Althar's own, pushed plainly,
+  never forced; where it can't, a fork the account may not push to, a push
+  or the host's own update refused,
+  the step steps out of line and it is said, once, to the lead too; a host
+  that didn't answer is tried again after a few minutes, and only said). For each step that can't be undone, a merge or a
+  queue, or settling one that landed, closed or moved, it wakes the
+  coordinator with news naming the errand and step, and the coordinator's
+  turn takes it through `Errands.execute`, which reads again before it acts.
+- **Who moved a head:** the very head Althar's update made, as read back
+  after it, or one the task's lead pushed, carries the errand on; anyone
+  else's push ends it, even one on top of Althar's update, as the person
+  asked to merge what they saw.
+- **A branch it merged into** is watched for an hour after: a failed check at
+  its head is said in the chat and heard as news, "Main is red", which is how
+  a write by someone else between the last read and a merge landing shows.
+- **What it keeps:** the errands, and the line's own notes (what each step
+  did, what it said) as observations of subject `merge_line`, so a restart
+  keeps the line. What each server supports is read when first used, kept
+  for an hour, and read again once a call is refused.
+- `leave_queue`, under the project's lock, pauses a pull request's errand in
+  Althar's line, takes it out of the host's queue or train (Bitbucket
+  Cloud's too), and turns its auto-merge off: it can be undone, so it needs
+  no word. Where the host won't, it says so, with the link.
+
+```mermaid
+sequenceDiagram
+  participant P as Person
+  participant C as Coordinator
+  participant L as Merge line
+  participant H as Host
+  P->>C: "Merge #12 and #14 once they're green"
+  C->>L: merge_pull_request(#12, head, message)
+  L->>L: keep errand, read: first in line, green, up to date
+  L->>H: merge (or auto-merge, or enqueue)
+  C->>L: merge_pull_request(#14, head, message)
+  L-->>C: 2nd in line, behind #12
+  H-->>L: sweep reads #12 merged, main moved
+  L->>C: news: errand #12, step merge
+  C->>L: merge_pull_request(errand, step): done
+  L->>H: sweep brings #14 up to date (a merge)
+  H-->>L: green at the new head
+  L->>C: news: errand #14, step merge
+  C->>L: merge_pull_request(errand, step)
+  L->>H: merge #14 at the head that went green
+```

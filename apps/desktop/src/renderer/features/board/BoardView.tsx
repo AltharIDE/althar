@@ -34,11 +34,12 @@ import {
   unreachable,
   Wait,
 } from '@althar/ui'
-import { type ReactNode, useEffect, useState } from 'react'
+import { Fragment, type ReactNode, useEffect, useState } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
 import { busyWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
-import { callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
+import { localText } from '../../shared/local'
+import { askOf, callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
 import { doingWords, doneHere, factsOf, labelWords, nextWords, readyWordOf, standingOf, standingText } from '../../shared/standing'
@@ -76,6 +77,8 @@ export const text = {
   oldestFirst: 'Back to oldest first',
   /** The quiet divider over work under way held for a usage limit or the connection: it goes on by itself once it can. */
   paused: 'Paused',
+  /** The one over tasks started Local that wait for the checkout: another task's there, or the person's changes (ADR-091). */
+  forLocal: localText.word,
   planned: 'Planned',
   /** Up next while nothing is in it, on a new project or a busy one: how work gets here. */
   upNextEmpty: {
@@ -213,7 +216,11 @@ const kindOf = (task: Pick<BoardTask, 'kind'>): TaskKind => {
 }
 
 /** A kind's word on a row: Change, Review, or none for a plain task. */
-export const kindWordOf = (task: Pick<BoardTask, 'kind'>): string | undefined => boardCardText.kind[kindOf(task)] || undefined
+export const kindWordOf = (task: Pick<BoardTask, 'kind' | 'local'>): string | undefined =>
+  (task.local === true ? boardCardText.local(boardCardText.kind[kindOf(task)]) : boardCardText.kind[kindOf(task)]) || undefined
+
+/** In the person's own checkout, as its kind's word says (ADR-091). */
+const localOf = (task: Pick<BoardTask, 'local'>): Pick<Card, 'local'> => (task.local === true ? { local: true } : {})
 
 /** A pull request as its chip shows it: its host's mark, its repository's own name, its number in the host's words, and its size. */
 const pullChip = (change: ChangeSummary) => {
@@ -318,6 +325,7 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
   const beforeWork = work.queued !== null && work.inLine === true
   const base = {
     kind: kindOf(work),
+    ...localOf(work),
     title: work.title,
     ...fromOf(work),
     // Waiting before its first step has had an agent, nothing has run: no clock.
@@ -438,7 +446,7 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
 
 /** A task that waits on a call of the person's: the call's kind, and why, under its title; a permission's command under that. */
 export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null) => string): Card => {
-  const base = { status: TaskStatus.Yours, kind: kindOf(task), title: task.title, ...fromOf(task) }
+  const base = { status: TaskStatus.Yours, kind: kindOf(task), ...localOf(task), title: task.title, ...fromOf(task) }
   // What it asks, or what it wants to do; for a step that needs the person, what stopped it.
   const why =
     call.stuck === null
@@ -469,7 +477,7 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
  * what it handed back, or else its branch, where its lead wrote in the repository: on this Mac, as no pull request is coming.
  */
 export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
-  const base = { status: TaskStatus.Yours, kind: kindOf(work), title: work.title, ...fromOf(work) }
+  const base = { status: TaskStatus.Yours, kind: kindOf(work), ...localOf(work), title: work.title, ...fromOf(work) }
   switch (work.kind) {
     case 'plain': {
       const pictures = (work.handed?.pictures ?? []).flatMap((picture, index) =>
@@ -515,6 +523,7 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
       const after = work.unshipped == null || work.branch === null ? null : { name: work.branch, ...work.unshipped }
       const size = { add: work.unshipped?.add ?? work.changed?.add ?? 0, del: work.unshipped?.del ?? work.changed?.del ?? 0 }
       const branch = work.branch === null || empty(size) ? null : { name: work.branch, ...size }
+      const ask = work.nothingBuilt === true ? askOf(work.summary) : null
       const object =
         change === null ? (
           branch === null ? null : (
@@ -533,6 +542,8 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
         // Handed back (a conflict its lead couldn't resolve) says so first; else commits in no pull request yet; as its header says.
         word: readyWordOf(work, work.change),
         ...(object === null ? {} : { object }),
+        // Nothing built: no accept to press; what its lead leaves to the person, and Done, which settles it where it is, in its corner.
+        ...(work.nothingBuilt === true ? { ...(ask === null ? {} : { why: ask }), corner: settleWaysOf(work, actions) } : {}),
         // Its conflict the person's: not asked of its lead, why, and Resolve now, which asks it anyway; handed back by its lead,
         // why alone, as asking it again asks what it couldn't do, and the task, which the card opens, is where it is settled (DEV-173).
         ...(work.handedBack != null
@@ -601,7 +612,7 @@ const settleWaysOf = (work: BoardTask, actions: CardActions | undefined): ReactN
   return (
     <SettleWays
       {...(takesDone(work) ? { onDone: () => void markDone(work.taskId), doneHint: text.doneHint } : {})}
-      {...(work.phase === 'ready' ? { onKeep: () => void keep(work.taskId), keepHint: text.keepHint } : {})}
+      {...(work.phase === 'ready' && work.kind !== 'change' ? { onKeep: () => void keep(work.taskId), keepHint: text.keepHint } : {})}
       {...(actions?.settling?.has(work.taskId) === true ? { busy: 'done' as const } : {})}
     />
   )
@@ -726,6 +737,10 @@ export function BoardView({
   const [held, setHeld] = useState<Held | null>(null)
   const shown = held === null ? lanes : holding(lanes, held)
   const { continuing, free, paused } = shown
+  // What is paused for a limit or the connection, and, under a divider of its own, what waits for its checkout (ADR-091).
+  const pausedRows = shown.next.slice(continuing + free, continuing + free + paused)
+  const halted = pausedRows.filter((work) => work.waitsForCheckout == null)
+  const forLocal = pausedRows.filter((work) => work.waitsForCheckout != null)
   const pointed = (lane: BoardLane | null) =>
     setHeld((was) => (lane === BoardLane.Next || lane === BoardLane.Running ? (was ?? heldOf(lanes)) : null))
   // Hidden while its screen is kept (`KeptScreens`), with the pointer still on it, nothing says it looked away: it lets go.
@@ -735,7 +750,8 @@ export function BoardView({
     const startsAt = work.plan?.startsAt ?? null
     const kind = kindWordOf(work)
     // Under way, it goes on with its step: a change's, as its card in Running would say it; a plain task or a review just goes on.
-    const goesOn = index < continuing || (index >= continuing + free && index < continuing + free + paused)
+    // Not one that waits for its checkout: nothing of it has begun (ADR-091).
+    const goesOn = index < continuing || (index >= continuing + free && index < continuing + free + paused && work.waitsForCheckout == null)
     const reason =
       index < continuing
         ? work.queued === null
@@ -746,11 +762,13 @@ export function BoardView({
             ? text.startsIn(0)
             : inLineWords(index + 1)
           : index < continuing + free + paused
-            ? work.waits !== null
-              ? waitsWords(name(work.waits.agentId), clock(work.waits.until), undefined, work.waits.left)
-              : work.reconnects != null
-                ? reconnectsWords(work.reconnects, clock)
-                : text.startsIn(0)
+            ? work.waitsForCheckout != null
+              ? localText.after(work.waitsForCheckout)
+              : work.waits !== null
+                ? waitsWords(name(work.waits.agentId), clock(work.waits.until), undefined, work.waits.left)
+                : work.reconnects != null
+                  ? reconnectsWords(work.reconnects, clock)
+                  : text.startsIn(0)
             : startsAt === null
               ? text.held
               : text.startsIn(Math.ceil((new Date(startsAt).getTime() - new Date(now).getTime()) / 1000))
@@ -855,11 +873,14 @@ export function BoardView({
             {...(line === undefined ? {} : { onMove: line.move })}
           />
         )}
-        {paused > 0 && <BoardDivider>{text.paused}</BoardDivider>}
-        {paused > 0 && (
-          <BoardList>
-            {shown.next.slice(continuing + free, continuing + free + paused).map((work, index) => nextRow(work, continuing + free + index))}
-          </BoardList>
+        {[halted, forLocal].map(
+          (rows, at) =>
+            rows.length > 0 && (
+              <Fragment key={at === 0 ? 'paused' : 'local'}>
+                <BoardDivider>{at === 0 ? text.paused : text.forLocal}</BoardDivider>
+                <BoardList>{rows.map((work) => nextRow(work, shown.next.indexOf(work)))}</BoardList>
+              </Fragment>
+            ),
         )}
         {continuing + free + paused > 0 && continuing + free + paused < shown.next.length && <BoardDivider>{text.planned}</BoardDivider>}
         {continuing + free + paused < shown.next.length && (

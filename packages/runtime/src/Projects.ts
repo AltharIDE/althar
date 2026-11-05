@@ -12,6 +12,7 @@ import {
   RepositoryRole,
   type TaskId,
   type ThreadId,
+  type WorksIn,
 } from '@althar/domain'
 import { bumpRevision, Commands, type CommandIdReused, Ledger, type RevisionConflict, type RowNotFound } from '@althar/persistence-sqlite'
 import { Context, Crypto, Effect, Layer, Option, Schema } from 'effect'
@@ -37,6 +38,7 @@ import {
   topLevel,
 } from './git'
 import { Instance } from './Instance'
+import { seedRules } from './Policies'
 import { linkTask } from './automated'
 import { change, fact, timestamp } from './records'
 import { indexTask } from './Search'
@@ -243,6 +245,33 @@ export const freeSlug = (slug: string, taken: ReadonlyArray<string>) => {
   for (let n = 2; ; n += 1) if (!taken.includes(`${slug}-${n}`)) return `${slug}-${n}`
 }
 
+/** Where a task starts in a repository: its default branch, or, for a fork whose work goes to the repository it came from, that repository's. */
+export const startOf = (binding: { readonly repository: string; readonly base: string | null; readonly changeTarget: string | null }) =>
+  Effect.gen(function* () {
+    const upstream =
+      (binding.changeTarget === 'upstream' || binding.changeTarget === 'upstream_branch') && (yield* forkAt(binding.repository)) !== null
+    return upstream
+      ? { remote: 'upstream', base: yield* defaultBranch(binding.repository, 'upstream') }
+      : { remote: 'origin', base: binding.base ?? 'main' }
+  })
+
+/**
+ * The commit a task starts from in a repository: its base as the remote has
+ * it now, fetched first, falling back to the local branch when the remote
+ * can't be reached.
+ */
+export const startCommitOf = (repository: string, base: string, from = 'origin') =>
+  Effect.gen(function* () {
+    const fetched = yield* fetchBranch(repository, base, from)
+    const remote = `${from}/${base}`
+    const fromRemote = fetched ? yield* commitOf(repository, remote).pipe(Effect.option) : Option.none()
+    const baseRef = Option.isSome(fromRemote) ? remote : base
+    const baseCommit = Option.isSome(fromRemote)
+      ? fromRemote.value
+      : yield* commitOf(repository, base).pipe(Effect.catch(() => commitOf(repository, remote)))
+    return { baseRef, baseCommit, fetched }
+  })
+
 /**
  * Adds a task's worktree. The base is the default branch as origin has it now:
  * fetched first, so the task doesn't start from a stale commit (and its pull
@@ -253,7 +282,7 @@ export const freeSlug = (slug: string, taken: ReadonlyArray<string>) => {
  * at that commit, with a scratch folder git ignores, and its branch's name
  * is kept for when its lead first changes the repository.
  */
-const prepareWorktree = (
+export const prepareWorktree = (
   repository: string,
   base: string,
   planned: { readonly worktree: string; readonly branch: string },
@@ -261,13 +290,7 @@ const prepareWorktree = (
   plain = false,
 ) =>
   Effect.gen(function* () {
-    const fetched = yield* fetchBranch(repository, base, from)
-    const remote = `${from}/${base}`
-    const fromRemote = fetched ? yield* commitOf(repository, remote).pipe(Effect.option) : Option.none()
-    const baseRef = Option.isSome(fromRemote) ? remote : base
-    const baseCommit = Option.isSome(fromRemote)
-      ? fromRemote.value
-      : yield* commitOf(repository, base).pipe(Effect.catch(() => commitOf(repository, remote)))
+    const { baseRef, baseCommit, fetched } = yield* startCommitOf(repository, base, from)
     let branch = planned.branch
     let worktree = planned.worktree
     for (let n = 2; (yield* branchExists(repository, branch)) || existsSync(worktree); n += 1) {
@@ -336,6 +359,12 @@ export class Projects extends Context.Service<
       readonly draft?: boolean
       /** The key of the issue it comes from, which its branch carries, so the tracker's own Git integration finds it. */
       readonly issueKey?: string
+      /**
+       * Where it works (ADR-091): Local, its repositories' own checkouts here,
+       * taken as its plan starts, so none is made now; else a worktree of its
+       * own, as before.
+       */
+      readonly worksIn?: WorksIn
       /** The project's repositories it changes, by name; needed only where it has several. */
       readonly repositories?: ReadonlyArray<string>
       /** What the person asked for, in their own words: what its thread starts with, so it is never lost behind the title. */
@@ -551,6 +580,8 @@ export class Projects extends Context.Service<
               }
               const coordinatorThreadId = yield* newId(Ids.thread)
               yield* sql`INSERT INTO threads ${sql.insert({ id: coordinatorThreadId, projectId, kind: 'coordinator', ownerActorId: instance.personId, createdAt })}`
+              // Its rules start from what the person chose for new projects; a project made earlier keeps its own.
+              yield* seedRules(projectId)
               yield* fact({
                 projectId,
                 aggregateType: 'project',
@@ -576,17 +607,6 @@ export class Projects extends Context.Service<
           })
         })
 
-      /** Where a task starts in a repository: its default branch, or, for a fork whose work goes to the repository it came from, that repository's. */
-      const startOf = (binding: { readonly repository: string; readonly base: string | null; readonly changeTarget: string | null }) =>
-        Effect.gen(function* () {
-          const upstream =
-            (binding.changeTarget === 'upstream' || binding.changeTarget === 'upstream_branch') &&
-            (yield* forkAt(binding.repository)) !== null
-          return upstream
-            ? { remote: 'upstream', base: yield* defaultBranch(binding.repository, 'upstream') }
-            : { remote: 'origin', base: binding.base ?? 'main' }
-        })
-
       const createTask = (input: {
         readonly envelope: CommandEnvelope
         readonly projectId: string
@@ -599,12 +619,14 @@ export class Projects extends Context.Service<
         readonly requestInputs?: ReadonlyArray<string>
         readonly plain?: boolean
         readonly occurrence?: string
+        readonly worksIn?: WorksIn
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const commands = yield* Commands
           const { envelope } = input
           const plain = input.plain === true
+          const local = input.worksIn === 'checkout'
           const bindings = yield* sql<{
             projectId: ProjectId
             projectSlug: string
@@ -672,7 +694,8 @@ export class Projects extends Context.Service<
               yield* sql`INSERT INTO threads ${sql.insert({ id: threadId, projectId: first.projectId, kind: 'task', taskId, createdAt })}`
               // Planned by the rule, else Althar's own until the repository's docs are read.
               const branch = branchFor(rule, { key: input.issueKey ?? null, slug })
-              // A worktree for each repository it changes, side by side in the task's folder (ADR-006).
+              // A worktree for each repository it changes, side by side in the task's folder (ADR-006); Local, its checkout,
+              // waiting to be taken (ADR-091).
               const workspaces: Array<{ id: string; worktree: string; branch: string }> = []
               for (const binding of chosen) {
                 yield* sql`INSERT INTO task_repository_requirements ${sql.insert({
@@ -684,7 +707,7 @@ export class Projects extends Context.Service<
                   baseRef: binding.base,
                 })}`
                 const workspaceId = yield* newId(Ids.workspace)
-                const worktree = join(config.worktreeRoot, first.projectSlug, slug, binding.slug)
+                const worktree = local ? binding.repository : join(config.worktreeRoot, first.projectSlug, slug, binding.slug)
                 yield* sql`INSERT INTO workspaces ${sql.insert({
                   id: workspaceId,
                   projectId: first.projectId,
@@ -699,6 +722,7 @@ export class Projects extends Context.Service<
                   createdAt,
                   // A plain task's has its branch only once its lead changes the repository; any other's as it is made.
                   ...(plain ? {} : { branchedAt: createdAt }),
+                  ...(local ? { kind: 'checkout' } : {}),
                 })}`
                 workspaces.push({ id: workspaceId, worktree, branch })
               }
@@ -722,8 +746,8 @@ export class Projects extends Context.Service<
           })
 
           // The worktrees, after the task is committed: each one marked ready, or failed, once git has finished with it.
-          const planned = yield* sql<{ id: string; bindingId: string; state: string; path: string; branch: string }>`
-            SELECT w.id, w.binding_id, w.state, w.path, w.branch FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+          const planned = yield* sql<{ id: string; bindingId: string; state: string; path: string; branch: string; kind: string | null }>`
+            SELECT w.id, w.binding_id, w.state, w.path, w.branch, w.kind FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             WHERE w.task_id = ${created.taskId} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
           const ready: Array<{ worktree: string; branch: string }> = []
           for (const workspace of planned) {
@@ -736,6 +760,12 @@ export class Projects extends Context.Service<
             // Named as the repository's docs say, where the person has no rule: read now, from where the task starts.
             const docs = rule === null ? (yield* conventionsOnBase(binding.repository, base, remote)).branch : null
             const branch = docs === null ? workspace.branch : branchFor(docs.pattern, { key: input.issueKey ?? null, slug: created.slug })
+            // Local, nothing is made now: its checkout is taken as its plan starts, on the branch named now.
+            if (workspace.kind === 'checkout') {
+              if (branch !== workspace.branch) yield* change('workspaces', workspace.id, { branch })
+              ready.push({ worktree: workspace.path, branch })
+              continue
+            }
             const prepared = yield* Effect.exit(
               prepareWorktree(binding.repository, base, { worktree: workspace.path, branch }, remote, plain),
             )

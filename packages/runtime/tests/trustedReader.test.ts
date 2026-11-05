@@ -85,7 +85,26 @@ describe('the coordinator, a trusted reader in its own copies', () => {
       'n=3; echo $((n+8))',
       'c=$(git rev-list --count HEAD); echo $((c - 1))',
       'n=$(wc -l < src/rules.ts); echo $((n / 2))',
+      // Each way of keeping only digits: a count, tr's, and grep's own, anchored or matching only.
+      'n=$(git ls-files | wc -l); sed -n "${n}p" notes.md',
+      'n=$(git log -1 --format=%s | tr -cd 0-9); echo $((n + 1))',
+      "n=$(git log -1 --format=%s | tr -dc '[:digit:]'); echo $((n + 1))",
+      "n=$(git describe --tags | grep -x '[0-9][0-9]*'); echo $((n + 1))",
+      "n=$(git describe --tags | grep -E '^[0-9]+$'); echo $((n + 1))",
+      "n=$(git log --format=%h | sort -n | tail -1 | grep -o '[[:digit:]][[:digit:]]*'); echo $((n + 1))",
       'echo $(( (2 + 3) * 4 > 10 ? 1 : 0 ))',
+      // Variables as the shell expands them: never inside $'…' or after a backslash; in a group, an until, a for's list.
+      `x=src; echo $'$x is \\' here'; ls "\${x}"`,
+      'echo \\$x; ls',
+      'x=api; echo "$ $x"',
+      'x=src; { ls "$x"; }',
+      'x=src; until test -d "$x"; do ls; done',
+      'x=api; for r in "$x" web; do git -C "$r" status; done',
+      'x=api && ls "$x"',
+      'n=3; for i in $((n+1)) 2; do echo $i; done',
+      'x=api; if test -d "$x"; then ls "$x"; fi; ls "$x"',
+      'x=api; ls "$x" | wc -l; y=$x; ls "$y"',
+      'for f in; do ls; done',
     ])
       assert.strictEqual(coordinator(command), 'allowed', command)
   })
@@ -103,6 +122,26 @@ describe('the coordinator, a trusted reader in its own copies', () => {
     assert.include(coordinator('x=rm; $x -r src'), 'It would write to src')
     assert.include(coordinator('for f in -p --output=out.txt; do git log "$f"; done'), '`git log --output=out.txt` writes')
     assert.include(coordinator('x=$(cat flags.txt); git log $x'), 'could start with a dash')
+    // What runs a command of its own, sets a variable as it expands, or has a shell read more than its script.
+    assert.include(coordinator('diff <(git show HEAD:a) b'), 'A process substitution')
+    assert.include(coordinator('ls; (cd src; ls)'), 'Parentheses start a subshell')
+    assert.include(coordinator('echo ${X:=rm}'), 'An expansion such as `${X:=…}`')
+    assert.include(coordinator('bash -i -c "ls"'), '`bash -i` has the shell read or run more than its script')
+    assert.include(coordinator('./bin/bash -c ls'), "runs what that folder holds, not the system's `bash`")
+    assert.include(coordinator('bash -c "ls" > out.txt'), 'It would write to out.txt')
+    assert.include(coordinator('bash -c "rm -rf src"'), 'It would write to src')
+    assert.include(coordinator('x=1 > out.txt'), 'It would write to out.txt')
+    assert.include(coordinator('s=$(cat x); sed "$s" notes.md'), '`sed` would run what a command printed as its script')
+    // What may print more than digits is no number: a count of a file it names, a pattern that keeps a +, or anything after.
+    for (const command of [
+      'n=$(wc -l notes.md); echo $((n + 1))',
+      "n=$(git describe | grep '[0-9]+'); echo $((n + 1))",
+      "n=$(git describe | grep -v '[0-9]+'); echo $((n + 1))",
+      "n=$(git describe | grep -o '[0-9]*'); echo $((n + 1))",
+      'n=$(git describe | tr -d 0-9); echo $((n + 1))',
+      "n=$(git describe | grep -o '[0-9][0-9]*' | sed 's/1/x/'); echo $((n + 1))",
+    ])
+      assert.notStrictEqual(coordinator(command), 'allowed', command)
     assert.include(coordinator('x=$(cat flags.txt); git log "$x"'), 'could start with a dash')
     assert.include(coordinator('read x < cmd.txt; $x'), "can't be the command to run")
     assert.include(coordinator('for d in ~/.ssh; do cat "$d/id_ed25519"; done'), '~/.ssh')

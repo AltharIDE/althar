@@ -228,10 +228,10 @@ describe('the issue tool', () => {
       const lead = { role: 'lead' as const, projectId: project.projectId as ProjectId, threadId: 't', sessionId: 's', taskId: 'x' }
       assert.strictEqual(
         yield* callTool(lead, 'read_issue', { issue: 'MER-231' }),
-        'MER-231: Rate-limit refunds\n\nTodo, in MER. https://linear.app/fake/issue/MER-231/rate-limit-refunds\n\nNo description.',
+        'MER-231: Rate-limit refunds\n\nTodo, High priority, in MER. https://linear.app/fake/issue/MER-231/rate-limit-refunds\n\nAssigned to You.\n\nNo description.\n\nNo comments.',
       )
-      assert.match(yield* callTool(lead, 'read_issue', { issue: 3 }), /can’t read that issue/)
-      // The coordinator reads it with its priority.
+      assert.match(yield* callTool(lead, 'read_issue', { issue: 3 }), /couldn't read that: Expected string/)
+      // The coordinator reads it the same.
       const coordinator = {
         role: 'coordinator' as const,
         projectId: project.projectId as ProjectId,
@@ -241,7 +241,7 @@ describe('the issue tool', () => {
       }
       assert.strictEqual(
         yield* callTool(coordinator, 'read_issue', { issue: 'MER-231' }),
-        'MER-231: Rate-limit refunds\n\nTodo, High priority, in MER. https://linear.app/fake/issue/MER-231/rate-limit-refunds\n\nNo description.',
+        'MER-231: Rate-limit refunds\n\nTodo, High priority, in MER. https://linear.app/fake/issue/MER-231/rate-limit-refunds\n\nAssigned to You.\n\nNo description.\n\nNo comments.',
       )
       const changes = yield* Changes
       assert.isNull(yield* changes.endFor('proj_00000000000000000000000000000000'))

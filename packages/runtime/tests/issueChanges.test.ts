@@ -2,6 +2,7 @@ import type { IssueChangesCard } from '@althar/contracts'
 import { ConnectorFailed } from '@althar/connectors'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import { Ids, newId, type ProjectId } from '@althar/domain'
+import { migrations } from '@althar/persistence-sqlite'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -12,6 +13,7 @@ import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
 import { Instance } from '../src/Instance'
 import { ChangesClosed, IssueChanges } from '../src/IssueChanges'
 import { Issues } from '../src/Issues'
+import { notesOf } from '../src/notes'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -77,6 +79,12 @@ const led = (projectId: ProjectId, access: ToolAccess, title: string, issue?: st
     const [task] = yield* sql<{ id: string; threadId: string }>`
       SELECT k.id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.title = ${title}`
     if (task === undefined) return assert.fail('no task')
+    // Its lead has started, so Althar has already looked for the issue its task came from to move it to In Progress: a
+    // task with none attaches its issue after, and one attached before that look is the one a task starts to move.
+    yield* until(
+      sql<{ n: number }>`SELECT count(*) AS n FROM turn_deliveries WHERE thread_id = ${task.threadId}`,
+      (rows) => (rows[0]?.n ?? 0) > 0,
+    )
     if (issue !== undefined) yield* (yield* Issues).attach({ projectId, taskId: task.id, issue })
     const lead: ToolAccess = { role: 'lead', projectId, threadId: task.threadId, sessionId: 'lead-session', taskId: task.id }
     return { task, lead }
@@ -154,7 +162,7 @@ describe('changes to issues', () => {
             'MER-232',
             {
               priority: 'low',
-              assignee: { id: 'user-sam', name: 'Sam Rivera', also: ['sam'] },
+              assignee: { add: [{ id: 'user-sam', name: 'Sam Rivera', also: ['sam'] }], remove: [] },
               labels: { add: [{ id: 'label-bug', name: 'bug' }], remove: [] },
             },
           ],
@@ -173,7 +181,7 @@ describe('changes to issues', () => {
     }).pipe(Effect.provide(withQueries({ linear: tracker })))
   })
 
-  it.live('read each name against the tracker, and refuse what it hasn’t, can’t change, or has already', () => {
+  it.live('read each name against the tracker, change what they can, and say what they couldn’t or was so already', () => {
     const tracker = linear()
     const github = makeFakeService({ product: 'github' })
     github.addRepository(['meridian', 'api'])
@@ -185,29 +193,29 @@ describe('changes to issues', () => {
       const change = (one: Record<string, unknown>) => callTool(access, 'change_issues', { changes: [one] })
       assert.strictEqual(
         yield* change({ issue: 'MER-231', status: 'Shipped' }),
-        'MER-231 on Linear has no status called “Shipped”. It has: Backlog, Todo, In Progress, In Review, Done, Canceled.',
+        'Nothing changed. no status called “Shipped”. It has: Backlog, Todo, In Progress, In Review, Done, Canceled.'.replace(
+          'Nothing changed. ',
+          'Nothing changed. MER-231: ',
+        ),
       )
       // A name it begins is enough, where only one begins so.
       assert.match(yield* change({ issue: 'MER-231', status: 'in rev' }), /^Proposed MER-231: status to In Review\./)
       assert.strictEqual(
-        yield* change({ issue: 'MER-231', add_labels: ['nonesuch'] }),
-        'MER-231 on Linear has no label called “nonesuch”. It has: bug, docs, payments.',
-      )
-      assert.strictEqual(
         yield* change({ issue: 'MER-231', priority: 'soonish' }),
         'A priority is one of urgent, high, medium, low or none, not “soonish”.',
       )
-      assert.match(
+      // What is so already is left off and said: nothing to change is no card.
+      assert.strictEqual(
         yield* change({ issue: 'MER-231', status: 'Todo', priority: 'high' }),
-        /^MER-231 is already as asked: Todo, High priority/,
+        'Nothing changed. Already so: MER-231: status Todo; MER-231: High priority.',
       )
       assert.strictEqual(
         yield* change({ issue: 'https://github.com/meridian/api/issues/12', priority: 'low' }),
-        "Althar can’t change priority on GitHub: GitHub's issues have no priority.",
+        "Nothing changed. #12: Althar can’t set its priority on GitHub: GitHub's issues have no priority.",
       )
       assert.strictEqual(
         yield* change({ issue: 'NOPE-1', status: 'Done' }),
-        'Althar can’t find NOPE-1 on a connected tracker, or in the project’s repository.',
+        'Nothing changed. Althar can’t find NOPE-1 on a connected tracker, or in the project’s repository.',
       )
       assert.strictEqual(
         yield* callTool(access, 'change_issues', {
@@ -218,21 +226,147 @@ describe('changes to issues', () => {
         }),
         'Name each issue once, with everything that changes on it.',
       )
-      // Only the one that read right is a card.
-      assert.lengthOf(yield* cardsIn(threadId), 1)
+      // Never all or nothing: a label it hasn't and an issue it can't find leave what reads right to go ahead, and are said.
+      assert.strictEqual(
+        yield* callTool(access, 'change_issues', {
+          changes: [
+            { issue: 'MER-231', priority: 'low', add_labels: ['nonesuch'] },
+            { issue: 'NOPE-1', status: 'Done' },
+          ],
+        }),
+        "Proposed MER-231: priority to Low. Nothing changes until the person applies it from its card in this thread, or discards it; they see it there, so there's no need to repeat it. You'll hear what they decide. Not changed: MER-231: no label called “nonesuch”. It has: bug, docs, payments. Althar can’t find NOPE-1 on a connected tracker, or in the project’s repository.",
+      )
+      // Only those that read right are cards.
+      assert.lengthOf(yield* cardsIn(threadId), 2)
       assert.lengthOf(tracker.issueChanges, 0)
     }).pipe(Effect.provide(withQueries({ linear: tracker, github })))
   })
 
-  it.live('apply at once, as a line, where the project lets changes through; and a comment always does', () => {
+  it.live('kept the person’s “Change issues without asking” as a note, once the switch went', () => {
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId } = yield* project()
+      const other = yield* project()
+      yield* (yield* Policies).current(other.projectId)
+      // The switch, on, as a revision before it went kept it.
+      yield* (yield* Policies).current(projectId)
+      yield* sql`UPDATE policies SET rules = json_set(rules, '$.changeIssues', json('true')) WHERE project_id = ${projectId}`
+      // A revision that has the switch still reads: it is nothing now.
+      assert.notProperty((yield* (yield* Policies).current(projectId)).rules, 'changeIssues')
+      const fields = migrations.find((migration) => migration.key === '0057_issue_fields') ?? assert.fail('no migration')
+      for (const statement of fields.statements.filter((each) => each.startsWith('INSERT INTO project_notes'))) yield* sql.unsafe(statement)
+      const notes = yield* notesOf(projectId)
+      assert.deepStrictEqual(
+        notes.map((note) => [note.body, note.keptBy]),
+        [['Change issues at once, without a card to apply first.', 'person']],
+      )
+      assert.lengthOf(yield* notesOf(other.projectId), 0)
+    }).pipe(Effect.provide(withQueries({})))
+  })
+
+  it.live('add and take off people without replacing the others, and set a milestone and a description', () => {
+    const github = makeFakeService({ product: 'github' })
+    github.addRepository(['meridian', 'api'])
+    github.addIssue({ ref: 'meridian/api#12', title: 'Docs are stale' })
+    return Effect.gen(function* () {
+      yield* connect('github')
+      const { access } = yield* project()
+      const said = yield* callTool(access, 'change_issues', {
+        changes: [
+          { issue: 'https://github.com/meridian/api/issues/12', assignee: 'sam', milestone: 'Beta', description: 'Now with steps.' },
+        ],
+        at_once: true,
+      })
+      assert.strictEqual(
+        said,
+        'Done: #12: assignees +Sam Rivera, milestone to Beta, its description rewritten. The thread shows it as a line.',
+      )
+      const issue = yield* github.issue('meridian/api#12')
+      // The person had it already: Sam is added beside them, not in their place.
+      assert.deepStrictEqual(
+        issue.assignees.map((person) => person.login),
+        ['you', 'sam'],
+      )
+      assert.deepStrictEqual([issue.milestone?.name, issue.body], ['Beta', 'Now with steps.'])
+      assert.strictEqual(
+        yield* callTool(access, 'change_issues', {
+          changes: [{ issue: 'https://github.com/meridian/api/issues/12', unassign: ['me'] }],
+          at_once: true,
+        }),
+        'Done: #12: assignees −You. The thread shows it as a line.',
+      )
+      assert.deepStrictEqual(
+        (yield* github.issue('meridian/api#12')).assignees.map((person) => person.login),
+        ['sam'],
+      )
+    }).pipe(Effect.provide(withQueries({ github })))
+  })
+
+  it.live('take a Linear milestone only from the project it goes in, never moving it to another', () => {
     const tracker = linear()
     return Effect.gen(function* () {
       yield* connect('linear')
-      const { projectId, threadId, access } = yield* project()
+      const { access } = yield* project()
+      const said = yield* callTool(access, 'change_issues', {
+        changes: [{ issue: 'MER-231', project: 'Payments v2', milestone: 'Beta' }],
+        at_once: true,
+      })
+      assert.include(said, 'MER-231: no milestone called “Beta” in its project. It has: Design')
+      assert.deepStrictEqual(
+        tracker.issueChanges.map((one) => one.change.milestone),
+        [undefined],
+      )
+    }).pipe(Effect.provide(withQueries({ linear: tracker })))
+  })
+
+  it.live('apply and discard a card kept before every field: its one assignee is added, a code host’s project is its milestone', () => {
+    const github = makeFakeService({ product: 'github' })
+    github.addRepository(['meridian', 'api'])
+    github.addIssue({ ref: 'meridian/api#12', title: 'Docs are stale' })
+    github.addIssue({ ref: 'meridian/api#13', title: 'Logs are noisy' })
+    return Effect.gen(function* () {
+      yield* connect('github')
+      const { threadId, access } = yield* project()
+      const changes = yield* IssueChanges
       const instance = yield* Instance
-      yield* (yield* Policies).set(projectId, { changeIssues: true }, instance.personId)
+      const sql = yield* SqlClient.SqlClient
+      const propose = (issue: string) =>
+        callTool(access, 'change_issues', { changes: [{ issue: `https://github.com/meridian/api/issues/${issue}`, title: 'Renamed' }] })
+      yield* propose('12')
+      yield* propose('13')
+      // As an earlier version kept them: an assignee in place of the others, a milestone said as project, no assignees kind.
+      const rows = yield* sql<{ id: string; changes: string }>`SELECT id, changes FROM issue_changes ORDER BY created_at, id`
+      for (const row of rows) {
+        const old = (JSON.parse(row.changes) as ReadonlyArray<Record<string, unknown>>).map((entry) => ({
+          ...entry,
+          assignees: undefined,
+          change: { assignee: { id: 'user-sam', name: 'Sam Rivera' }, project: { id: 'milestone-beta', name: 'Beta' } },
+        }))
+        yield* sql`UPDATE issue_changes SET changes = ${JSON.stringify(old)} WHERE id = ${row.id}`
+      }
+      const [first, second] = yield* cardsIn(threadId)
+      const applied = yield* changes.apply(first?.changesId ?? '', instance.personId)
+      assert.strictEqual(applied.state, 'applied')
+      assert.deepStrictEqual(applied.issues[0]?.changes, [
+        { field: 'assignees', add: ['Sam Rivera'], remove: [] },
+        { field: 'milestone', to: 'Beta' },
+      ])
+      const issue = yield* github.issue('meridian/api#12')
+      assert.deepStrictEqual([issue.assignees.map((person) => person.login), issue.milestone?.name], [['you', 'sam'], 'Beta'])
+      yield* changes.discard(second?.changesId ?? '', instance.personId)
+      const [discarded] = yield* sql<{ state: string }>`SELECT state FROM issue_changes WHERE id = ${second?.changesId ?? ''}`
+      assert.strictEqual(discarded?.state, 'discarded')
+    }).pipe(Effect.provide(withQueries({ github })))
+  })
+
+  it.live('apply at once, as a line, where the agent says so by the person’s note; and a comment always does', () => {
+    const tracker = linear()
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { threadId, access } = yield* project()
+      const instance = yield* Instance
       assert.strictEqual(
-        yield* callTool(access, 'change_issues', { changes: [{ issue: 'MER-231', close: true }] }),
+        yield* callTool(access, 'change_issues', { changes: [{ issue: 'MER-231', close: true }], at_once: true }),
         'Done: MER-231: closed. The thread shows it as a line.',
       )
       assert.deepStrictEqual((yield* tracker.issue('MER-231')).status.name, 'Done')
@@ -251,7 +385,7 @@ describe('changes to issues', () => {
       // A failure says why, and the card can be applied again: a change made twice changes nothing more.
       tracker.failNext('update', 'forbidden')
       assert.match(
-        yield* callTool(access, 'change_issues', { changes: [{ issue: 'MER-232', priority: 'urgent' }] }),
+        yield* callTool(access, 'change_issues', { changes: [{ issue: 'MER-232', priority: 'urgent' }], at_once: true }),
         /^Tried MER-232: priority to Urgent, and not all of it applied: MER-232: Linear says this account may not change it: The fake update failed/,
       )
       const failed = (yield* cardsIn(threadId))[2]
@@ -259,6 +393,32 @@ describe('changes to issues', () => {
       const again = yield* (yield* IssueChanges).apply(failed?.changesId ?? '', instance.personId)
       assert.strictEqual(again.state, 'applied')
       assert.strictEqual((yield* tracker.issue('MER-232')).priority?.level, 'urgent')
+      // What can't be asked: no issue, one named twice, an empty comment, or a comment on no issue.
+      assert.include(yield* callTool(access, 'change_issues', { changes: [], at_once: true }), 'Name at least one issue to change.')
+      assert.include(
+        yield* callTool(access, 'change_issues', {
+          changes: [
+            { issue: 'MER-232', priority: 'low' },
+            { issue: 'MER-232', close: true },
+          ],
+          at_once: true,
+        }),
+        'Name each issue once',
+      )
+      assert.include(yield* callTool(access, 'comment_on_issue', { issue: 'MER-232', body: '  ' }), 'Write the comment: it is empty.')
+      assert.include(yield* callTool(access, 'comment_on_issue', { body: 'Fixed.' }), 'Say which issue, by its key or link, as issue.')
+      // Each way a tracker refuses is said in words the person can act on.
+      for (const [reason, said] of [
+        ['not_found', 'Linear doesn’t have it any more, or this account can’t see it.'],
+        ['rate_limited', 'Linear asks Althar to wait before trying again.'],
+        ['rejected', 'The fake update failed (rejected)'],
+        ['unreachable', 'Its answer was lost, so it may have changed on Linear. Applying again is safe.'],
+      ] as const) {
+        tracker.failNext('update', reason)
+        // A priority it hasn't, so there is always something to change.
+        const priority = (yield* tracker.issue('MER-232')).priority?.level === 'low' ? 'high' : 'low'
+        assert.include(yield* callTool(access, 'change_issues', { changes: [{ issue: 'MER-232', priority }], at_once: true }), said, reason)
+      }
     }).pipe(Effect.provide(withQueries({ linear: tracker })))
   })
 
@@ -317,10 +477,21 @@ describe('changes to issues', () => {
       yield* callTool(access, 'change_issues', { changes: [{ issue: 'MER-232', priority: 'low' }] })
       const [done, low] = yield* cardsIn(threadId)
       yield* changes.apply(done?.changesId ?? '', instance.personId)
+      // One Althar offered, with why, as it does of a pull request merged.
+      yield* sql`UPDATE issue_changes SET proposed_by = 'althar', note = 'its pull request merged' WHERE id = ${low?.changesId ?? ''}`
       yield* changes.discard(low?.changesId ?? '', instance.personId)
+      // One the tracker turns down.
+      yield* callTool(access, 'change_issues', { changes: [{ issue: 'MER-232', status: 'Done' }] })
+      const failing = (yield* cardsIn(threadId)).at(-1)
+      tracker.failNext('update', 'rejected')
+      yield* changes.apply(failing?.changesId ?? '', instance.personId)
       const news = (yield* coordinatorNews(threadId, projectId, yield* modelNamer)) ?? ''
       assert.include(news, '- Your change to issues is applied: MER-231: status to Done.')
-      assert.include(news, '- The person discarded your change to issues: MER-232: priority to Low. Nothing changed.')
+      assert.include(
+        news,
+        "- The person discarded Althar's change (its pull request merged) to issues: MER-232: priority to Low. Nothing changed.",
+      )
+      assert.match(news, /- Your change to issues didn't all apply: .* The person can apply it again from its card\./)
     }).pipe(Effect.provide(withQueries({ linear: tracker })))
   })
 
@@ -401,6 +572,56 @@ describe('changes to issues', () => {
       }).pipe(Effect.provide(withQueries({ linear: tracker })))
     })
 
+    it.live('change and comment on its own issue, those its task filed, and those the person named to it; no other', () => {
+      const tracker = linear()
+      tracker.addContainer({ id: 'team-1', key: 'MER', name: 'Meridian' })
+      tracker.addIssue({ ref: 'MER-240', title: 'Refund emails' })
+      tracker.addIssue({ ref: 'MER-241', title: 'Someone else’s' })
+      return Effect.gen(function* () {
+        yield* connect('linear')
+        const sql = yield* SqlClient.SqlClient
+        const instance = yield* Instance
+        const { projectId, access } = yield* project()
+        const { task, lead } = yield* led(projectId, access, 'Rate-limit refunds', 'MER-231')
+        // One it files, at once as the person's note says: its card is the record, and the issue is the task's to keep up to date.
+        assert.match(
+          yield* callTool(lead, 'draft_issue', { title: 'Refund receipts', file_now: true }),
+          /^Filed the issue “Refund receipts” on Linear, in Meridian, as MER-1: /,
+        )
+        assert.match(yield* callTool(lead, 'change_issue', { issue: 'MER-1', priority: 'low' }), /^Proposed MER-1: priority to Low\./)
+        // One the person named to it, in its thread: past any the lead's brief takes as it starts meanwhile.
+        yield* sql`INSERT INTO user_inputs ${sql.insert({
+          id: yield* newId(Ids.userInput),
+          projectId,
+          threadId: task.threadId,
+          sequence: 1000,
+          commandId: `cmd_${'a'.repeat(32)}`,
+          disposition: 'after_current',
+          body: 'While you are there, MER-240 needs the same fix.',
+          authorActorId: instance.personId,
+          state: 'delivered',
+          acceptedAt: new Date().toISOString(),
+        })}`
+        assert.match(
+          yield* callTool(lead, 'change_issue', { issue: 'mer-240', status: 'In Progress', at_once: true }),
+          /^Done: MER-240: status to In Progress\./,
+        )
+        assert.strictEqual(
+          yield* callTool(lead, 'comment_on_issue', { issue: 'MER-240', body: 'Fixed alongside MER-231.' }),
+          'Commented on MER-240. The thread shows it as a line.',
+        )
+        // Any other waits on a card for the person, never at once.
+        const changed = yield* callTool(lead, 'change_issue', { issue: 'MER-241', status: 'Done', at_once: true })
+        assert.match(changed, /^MER-241 isn’t this task’s issue, one it filed, or one the person named to it, so it waits on a card/)
+        assert.include(changed, 'Proposed MER-241: status to Done.')
+        const commented = yield* callTool(lead, 'comment_on_issue', { issue: 'MER-241', body: 'Hi.' })
+        assert.match(commented, /^MER-241 isn’t this task’s issue/)
+        assert.include(commented, 'waits on its card in this thread until the person posts it')
+        assert.deepStrictEqual(tracker.issueComments('MER-241'), [])
+        assert.strictEqual((yield* tracker.issue('MER-241')).status.name, 'Todo')
+      }).pipe(Effect.provide(withQueries({ linear: tracker })))
+    })
+
     it.live('have no issue to change where the task didn’t come from one', () => {
       const tracker = linear()
       return Effect.gen(function* () {
@@ -461,7 +682,7 @@ describe('changes to issues', () => {
         const changes = yield* IssueChanges
         const instance = yield* Instance
         const { task } = yield* led(projectId, access, 'Rate-limit refunds', 'MER-231')
-        yield* (yield* Policies).set(projectId, { moveIssues: false, changeIssues: true }, instance.personId)
+        yield* (yield* Policies).set(projectId, { moveIssues: false }, instance.personId)
         yield* changes.followPullRequest(task.id, 'opened', pr(12))
         yield* changes.followPullRequest(task.id, 'merged', pr(12))
         assert.lengthOf(yield* cardsIn(task.threadId), 0)
@@ -478,13 +699,40 @@ describe('changes to issues', () => {
         const changes = yield* IssueChanges
         const instance = yield* Instance
         const { task } = yield* led(projectId, access, 'Rate-limit refunds', 'MER-231')
+        // Where the issue stands before the move: a plain task starting may have moved it to In Progress already, as it does
+        // once its issue is attached, and the refused move must leave it exactly there.
+        const before = (yield* tracker.issue('MER-231')).status.name
         tracker.failNext('update', 'forbidden')
         yield* changes.followPullRequest(task.id, 'merged', pr(12))
         const [card] = yield* cardsIn(threadId)
         assert.strictEqual(card?.state, 'failed')
         assert.match(card?.issues[0]?.error ?? '', /may not change it/)
-        assert.strictEqual((yield* tracker.issue('MER-231')).status.name, 'Todo')
+        assert.strictEqual((yield* tracker.issue('MER-231')).status.name, before)
         yield* changes.apply(card?.changesId ?? '', instance.personId)
+        assert.strictEqual((yield* tracker.issue('MER-231')).status.category, 'done')
+      }).pipe(Effect.provide(withQueries({ linear: tracker })))
+    })
+
+    it.live('comment with what landed, and leave the issue open, where the task did only part of it', () => {
+      const tracker = linear()
+      return Effect.gen(function* () {
+        yield* connect('linear')
+        const { projectId, threadId, access } = yield* project()
+        const changes = yield* IssueChanges
+        const { task } = yield* led(projectId, access, 'Rate-limit refunds', 'MER-231')
+        yield* (yield* Issues).setPart(task.id, true)
+        yield* changes.followPullRequest(task.id, 'merged', pr(12))
+        assert.deepStrictEqual(tracker.issueComments('MER-231'), [
+          'Part of this landed in [PR #12](https://github.com/meridian/api/pull/12), merged:\n\nRate-limit refunds',
+        ])
+        assert.notStrictEqual((yield* tracker.issue('MER-231')).status.category, 'done')
+        assert.deepStrictEqual(
+          (yield* cardsIn(threadId)).map((card) => [card.state, card.issues[0]?.changes[0]?.field]),
+          [['applied', 'comment']],
+        )
+        // Taken back, its next merge closes it, as one the task did whole.
+        yield* (yield* Issues).setPart(task.id, false)
+        yield* changes.followPullRequest(task.id, 'merged', pr(13))
         assert.strictEqual((yield* tracker.issue('MER-231')).status.category, 'done')
       }).pipe(Effect.provide(withQueries({ linear: tracker })))
     })

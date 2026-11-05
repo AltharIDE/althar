@@ -1,3 +1,5 @@
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
@@ -76,6 +78,66 @@ describe('reading sign-in status', () => {
     assert.isUndefined(read('OpenCode Go       default                     stored\n', 0))
   })
 
+  it('reads the sign-ins 2.2.5 lists after `auth login --standalone`: Go and Zen keys, one Zen asks to reconnect', () => {
+    const { read, providers } = agents.opencode.signIn
+    // Seen 3 November 2026, made with fake keys in a home of its own: a Zen key is listed under OpenCode Console, with a status.
+    const listed = [
+      { id: 'opencode-go', name: 'OpenCode Go', connections: [{ type: 'credential', id: 'cred_go', label: 'Go key', method: 'key' }] },
+      {
+        id: 'opencode',
+        name: 'OpenCode Console',
+        connections: [
+          {
+            type: 'credential',
+            id: 'cred_zen',
+            label: 'Zen key',
+            method: 'key',
+            status: { status: 'needs_auth', message: 'Reconnect OpenCode Console to continue' },
+          },
+        ],
+      },
+    ]
+    assert.isTrue(read(JSON.stringify(listed, null, 2) + '\n', 0))
+    // Zen is what the person knows it as; each is paid as its provider is, Go on a plan; Zen says it needs signing in again.
+    assert.deepStrictEqual(providers?.read(JSON.stringify(listed, null, 2)), [
+      { id: 'opencode-go', name: 'OpenCode Go', connections: 'cred_go', pays: 'plan' },
+      { id: 'opencode', name: 'OpenCode Zen', connections: 'cred_zen', pays: 'key', needsSignIn: true },
+    ])
+    // One working connection beside it is enough.
+    const another = { type: 'credential', id: 'cred_zen2', label: 'Zen key 2', method: 'key' }
+    const [, zen] = listed
+    const both = [listed[0], { ...zen, connections: [...zen!.connections, another] }]
+    assert.notProperty(providers?.read(JSON.stringify(both))[1], 'needsSignIn')
+    // A provider no longer listed keeps the name the person knows it by.
+    assert.strictEqual(providers?.name?.('opencode-go'), 'OpenCode Go')
+    assert.deepStrictEqual(providers?.plans, ['opencode-go'])
+  })
+
+  it('signs in where it is checked: in the home the line names, not the background service’s', () => {
+    // 2.x's `auth login` without --standalone hands the key to its background service, which keeps it in the home it started in.
+    assert.strictEqual(agents.opencode.signIn.login, 'opencode auth login --standalone')
+    assert.includeMembers([...(agents.opencode.signIn.status?.('node').args ?? [])], ['--standalone'])
+    assert.includeMembers([...(agents.opencode.signIn.credentials?.('node').args ?? [])], ['--standalone'])
+  })
+
+  it('lists the providers OpenCode has a sign-in for, and the provider a model goes through', () => {
+    const providers = agents.opencode.signIn.providers
+    assert.isDefined(providers)
+    const listing = [
+      { id: 'opencode-go', name: 'OpenCode Go', connections: [{ type: 'credential', id: 'cred_b', label: 'default', method: 'key' }] },
+      { id: 'anthropic', name: 'Anthropic', connections: [{ type: 'credential', id: 'cred_a', label: 'default', method: 'oauth' }] },
+      { id: 'google', name: 'Google', connections: [] },
+    ]
+    assert.deepStrictEqual(providers?.read(JSON.stringify(listing, null, 2)), [
+      { id: 'opencode-go', name: 'OpenCode Go', connections: 'cred_b', pays: 'plan' },
+      { id: 'anthropic', name: 'Anthropic', connections: 'cred_a' },
+    ])
+    // 1.x prints a count only: no providers, not an error.
+    assert.deepStrictEqual(providers?.read('2 credentials'), [])
+    assert.strictEqual(providers?.of('opencode-go/deepseek-v4.1-flash'), 'opencode-go')
+    assert.isUndefined(providers?.of('big-pickle'))
+  })
+
   it('signs an account out with the agent’s own command, in its home, where the agent has one', () =>
     Effect.runPromise(
       Effect.gen(function* () {
@@ -107,7 +169,7 @@ describe('reading sign-in status', () => {
       [
         'claude auth login',
         'codex login',
-        'opencode auth login',
+        'opencode auth login --standalone',
         'copilot login',
         'junie',
         'grok login',
@@ -220,6 +282,49 @@ describe('signInStatus', () => {
       const bare: AgentDefinition = { ...old, signIn: withoutFallback }
       assert.strictEqual((yield* signInCheck(bare)).status, 'unknown')
       assert.deepStrictEqual(agents.opencode.signIn.statusFallback?.('node').args, ['auth', 'list'])
+    }),
+  )
+
+  it.live('asks OpenCode again where its private server didn’t start in time, rather than falling back to another home', () =>
+    Effect.gen(function* () {
+      // Fails the first time as 2.2.5 does while it loads the person's plugins, then lists a Go key.
+      const tries = join(mkdtempSync(join(tmpdir(), 'althar-started-')), 'tries')
+      const script = `const fs = require('fs'); const n = fs.existsSync(${JSON.stringify(tries)}) ? 1 : 0; fs.writeFileSync(${JSON.stringify(tries)}, 'x')
+if (n === 0) { console.error('Location plugins did not finish activating'); process.exit(1) }
+console.log(JSON.stringify([{ id: 'opencode-go', name: 'OpenCode Go', connections: [{ type: 'credential', id: 'c', method: 'key' }] }]))`
+      const starting: AgentDefinition = {
+        ...agents.opencode,
+        signIn: {
+          ...agents.opencode.signIn,
+          status: () => ({ command: 'bun', args: ['-e', script] }),
+          statusFallback: () => ({ command: 'bun', args: ['-e', "console.log('OpenCode Go  default  stored')"] }),
+        },
+      }
+      assert.strictEqual((yield* signInCheck(starting)).status, 'signed_in')
+      // One that never starts is asked no more than twice again, then falls back as before.
+      const never: AgentDefinition = {
+        ...starting,
+        signIn: {
+          ...starting.signIn,
+          status: () => ({ command: 'bun', args: ['-e', "console.error('Location plugins did not finish activating'); process.exit(1)"] }),
+        },
+      }
+      assert.strictEqual((yield* signInCheck(never)).status, 'unknown')
+      assert.isTrue(agents.opencode.notStarted?.('Location plugins did not finish activating\n'))
+      assert.isFalse(agents.opencode.notStarted?.('Unknown argument: standalone'))
+    }),
+  )
+
+  it.live('doesn’t fall back where 2.x answered with no sign-ins: the plain command answers for another home', () =>
+    Effect.gen(function* () {
+      // An account's own home with nothing in it yet; without --standalone the background service would list the usual home's.
+      const script = "console.log(process.argv.includes('json') ? '[]' : '2 credentials')"
+      const spec = (...extra: string[]) => ({ command: 'bun', args: ['-e', script, ...extra] })
+      const empty: AgentDefinition = {
+        ...agents.opencode,
+        signIn: { ...agents.opencode.signIn, status: () => spec('json'), statusFallback: () => spec() },
+      }
+      assert.strictEqual((yield* signInCheck(empty)).status, 'unknown')
     }),
   )
 

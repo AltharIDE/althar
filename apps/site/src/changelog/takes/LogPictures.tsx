@@ -1,5 +1,6 @@
-import { Brand, BrandMark, Icon, Logo, planPeekText, reportProblemText, runButtonText } from '@althar/ui'
-import type { CSSProperties, ReactNode } from 'react'
+import { Brand, BrandMark, Icon, Logo, planPeekText, reportProblemText } from '@althar/ui'
+import { sealSvg } from '@althar/ui/seal'
+import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react'
 
 import { Agent, AGENTS } from '../../content/agents'
 import { Fragment } from '../../home/bodies/desktop/Fragment'
@@ -307,8 +308,18 @@ const RUNS = [
   { name: 'storybook', command: 'pnpm storybook' },
 ] as const
 
+/** The Run button's words as 0.3.0 said them: the picture is of that release, not of Run now. */
+const RUN_THEN = {
+  run: (label: string) => `Run ${label}`,
+  label: 'What it runs',
+  resting: 'Not running',
+  add: 'Add something to run…',
+  edit: 'Edit the list…',
+  note: 'Checked ones are running. Pick one to start or stop it.',
+}
+
 function Run() {
-  const t = runButtonText
+  const t = RUN_THEN
   return (
     <Frame
       label="Run, split: a press runs web, and its list starts or stops each thing the project runs: web and the API running, the worker and Storybook not"
@@ -602,7 +613,210 @@ function Automations() {
   )
 }
 
+/* ---- 0.7.0: a review read three times, its findings at their lines, and the seal ---- */
+
+/** A line of the diff: its number, added or taken out, and its code in runs of one colour. */
+interface DiffLine {
+  no: number
+  sign?: '+' | '-'
+  code: readonly (string | readonly [kind: 'k' | 'f' | 's', text: string])[]
+}
+
+const DIFF: readonly DiffLine[] = [
+  { no: 38, code: [['k', 'export async function '], ['f', 'refund'], '(req: RefundRequest) {'] },
+  { no: 39, code: ['  ', ['k', 'const '], 'key = req.headers[', ['s', "'idempotency-key'"], ']'] },
+  { no: 40, sign: '-', code: ['  ', ['k', 'const '], 'prior = ', ['k', 'await '], 'refunds.', ['f', 'find'], '(key)'] },
+  { no: 40, sign: '+', code: ['  ', ['k', 'const '], 'prior = ', ['k', 'await '], 'refunds.', ['f', 'find'], '(req.partner, key)'] },
+  { no: 41, sign: '+', code: ['  ', ['k', 'if '], '(prior) ', ['k', 'return '], ['f', 'conflict'], '(prior)'] },
+  { no: 42, code: ['  ', ['k', 'const '], 'refund = ', ['k', 'await '], 'stripe.refunds.', ['f', 'create'], '({'] },
+  { no: 43, sign: '+', code: ['    idempotencyKey: key,'] },
+  { no: 44, code: ['    amount: req.amount,'] },
+  { no: 45, code: ['  })'] },
+  { no: 46, sign: '+', code: ['  ', ['k', 'await '], 'refunds.', ['f', 'save'], '(req.partner, key, refund)'] },
+  { no: 47, code: ['  ', ['k', 'return '], ['f', 'ok'], '(refund)'] },
+]
+
+/** The two findings, each under the line it is about, and what the lead did. */
+const NOTES = [
+  {
+    after: 4,
+    weight: 'Major',
+    heavy: true,
+    title: 'A reused key with a new amount still gets the first refund',
+    claim: 'A partner that changes the amount on a retry is told it succeeded.',
+    state: 'Fixed',
+    answer: ['Compares the amount too, and answers 422 when it differs.', '3f2a1c4'],
+  },
+  {
+    after: 9,
+    weight: 'Minor',
+    heavy: false,
+    title: 'Two retries at once can both miss find() and save twice',
+    claim: 'Nothing stops the second save.',
+    state: 'Kept',
+    answer: ['The unique index on partner and key refuses the second.', null],
+  },
+] as const
+
+const SEAL = `data:image/svg+xml,${encodeURIComponent(sealSvg('ring', { model: 'Opus 5.5', sha: '3f2a1c4', passes: 3, date: '2026-11-04' }, 'dark'))}`
+
+/*
+ * The beats, by when each starts, in ms of a loop: the first pass reads the
+ * change and raises two findings; the second sees one fixed and one kept;
+ * the third finds nothing left, and the pull request takes its seal. Then
+ * it holds, and clears for the next loop.
+ */
+const BEATS = [0, 1300, 2100, 3400, 4300, 5100, 6400, 7900, 13600] as const
+const LOOP = 14400
+const SEALED = 7
+const SCANS: readonly number[] = [0, 3, 6]
+
+/** The beat it is on: it plays only while on screen, in a shown tab, with motion allowed; otherwise it rests sealed. */
+function useBeat(ref: { readonly current: HTMLElement | null }): number {
+  const [beat, setBeat] = useState(SEALED)
+  useEffect(() => {
+    const el = ref.current
+    if (el === null) return
+    const still = matchMedia('(prefers-reduced-motion: reduce)')
+    // It starts where the drawing rests, sealed, so nothing jumps when it wakes.
+    let t: number = BEATS[SEALED]
+    let since = 0
+    let timer = 0
+    let seen = false
+    const step = () => {
+      const now = performance.now()
+      t = (t + now - since) % LOOP
+      since = now
+      const at = BEATS.findLastIndex((start) => start <= t)
+      setBeat(at)
+      timer = window.setTimeout(step, (BEATS[at + 1] ?? LOOP) - t + 1)
+    }
+    const sync = () => {
+      window.clearTimeout(timer)
+      if (seen && !document.hidden && !still.matches) {
+        since = performance.now()
+        step()
+      } else if (still.matches) setBeat(SEALED)
+    }
+    const io = new IntersectionObserver((seen_) => {
+      seen = seen_.at(-1)?.isIntersecting ?? false
+      sync()
+    })
+    io.observe(el)
+    document.addEventListener('visibilitychange', sync)
+    still.addEventListener('change', sync)
+    return () => {
+      window.clearTimeout(timer)
+      io.disconnect()
+      document.removeEventListener('visibilitychange', sync)
+      still.removeEventListener('change', sync)
+    }
+  }, [ref])
+  return beat
+}
+
+function Findings() {
+  const ref = useRef<HTMLDivElement>(null)
+  const beat = useBeat(ref)
+  const out = beat === BEATS.length - 1
+  const pass = beat < 3 || out ? 1 : beat < 6 ? 2 : 3
+  const shown = (from: number) => beat >= from && !out
+  const notes = [
+    { ...NOTES[0], shown: shown(1), settled: shown(4) },
+    { ...NOTES[1], shown: shown(2), settled: shown(5) },
+  ]
+  const sealed = shown(SEALED)
+  return (
+    <Frame
+      label="A review read in three passes: two findings at their lines, one fixed in 3f2a1c4 and one kept with the lead’s reason, and the pull request sealed, reviewed by Opus 5.5 in 3 passes"
+      w={62}
+      n={32}
+      foot
+      className={p.reviewed7}
+    >
+      <div ref={ref} className={p.rvStage} data-sealed={sealed}>
+        <div className={cx(p.win, p.rvWin)}>
+          <Bar>
+            <Tabs />
+          </Bar>
+          <div className={p.rvHead}>
+            <code>src/refunds/idempotency.ts</code>
+            <span className={p.diff}>
+              <ins>+5</ins> <del>−1</del>
+            </span>
+            <span className={p.rvPass}>
+              <span className={p.mk}>
+                <AgentMark agent={Agent.Claude} size={13} />
+              </span>
+              <span key={pass} className={p.rvPassWords}>
+                {sealed ? 'Opus 5.5 · nothing left to change' : `Opus 5.5 · pass ${pass} of 3`}
+              </span>
+            </span>
+          </div>
+          <div className={p.rvCode}>
+            {SCANS.includes(beat) && <i key={beat} className={p.rvScan} />}
+            {DIFF.map((line, i) => (
+              <div key={i} className={p.rvRows}>
+                <div className={p.rvLine} data-sign={line.sign}>
+                  <span className={p.rvNo}>{line.no}</span>
+                  <span className={p.rvSign}>{line.sign ?? ''}</span>
+                  <code>
+                    {line.code.map((run, j) =>
+                      typeof run === 'string' ? (
+                        run
+                      ) : (
+                        <span key={j} className={p[run[0]]}>
+                          {run[1]}
+                        </span>
+                      ),
+                    )}
+                  </code>
+                </div>
+                {notes
+                  .filter((note) => note.after === i)
+                  .map((note) => (
+                    <div key={note.title} className={p.rvFold} data-shown={note.shown}>
+                      <div className={p.rvNote} data-settled={note.settled}>
+                        <span className={p.rvNoteHead}>
+                          <span className={note.heavy && !note.settled ? p.rvHeavy : p.rvWeight}>{note.weight}</span>
+                          <b>{note.title}</b>
+                          <span className={p.rvState} data-fixed={note.state === 'Fixed'}>
+                            {note.state === 'Fixed' && <Icon name="check" size={11} />}
+                            {note.state}
+                          </span>
+                        </span>
+                        <span className={p.rvSay}>
+                          <span className={p.rvClaim}>{note.claim}</span>
+                          <span className={p.rvAnswer}>
+                            {note.answer[0]}
+                            {note.answer[1] !== null && <code>{note.answer[1]}</code>}
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className={p.rvPr} data-shown={sealed}>
+          <span className={p.rvPrWords}>
+            <span className={p.rvOpen}>
+              <Icon name="pr" size={12} />
+              Open
+            </span>
+            <b>Return 409 when a refund key is reused</b>
+            <span className={p.rvPrLine}>Reviewed by Opus 5.5 in 3 passes, at 3f2a1c4</span>
+          </span>
+          <img className={p.rvSeal} src={SEAL} alt="" />
+        </div>
+      </div>
+    </Frame>
+  )
+}
+
 const PICTURES: Record<Picture, () => ReactNode> = {
+  findings: Findings,
   plans: Plans,
   windows: Windows,
   reviewer: Reviewer,

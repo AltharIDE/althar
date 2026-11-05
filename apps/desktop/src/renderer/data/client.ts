@@ -1,4 +1,6 @@
 import {
+  type CheckoutAnswer,
+  type WorksIn,
   type AccountSignInState,
   type AccountStatus,
   type AgentModels,
@@ -35,12 +37,15 @@ import {
   type DomMessagePort,
   domPort,
   type FileDiff,
+  type TaskFindings,
   type FolderHeld,
   type FolderReading,
   type MadeRepository,
   type PlacedRepository,
   type FoldersFreed,
   type FolderWait,
+  type PlansAndReviewsChange,
+  type NewProjectDefaultsChange,
   type IssueList,
   type Load,
   type ModelRoom,
@@ -151,8 +156,10 @@ export interface Client {
   readonly readBackgroundOutput: (threadId: string, id: string) => Promise<OutputText>
   /** A markdown document an agent in a thread wrote, as it is now in the task's worktree. */
   readonly readDocument: (threadId: string, path: string) => Promise<DocumentText>
-  /** One file a task changed, as a diff from its base to its worktree. */
-  readonly getFileDiff: (taskId: string, path: string) => Promise<FileDiff>
+  /** One file a task changed, as a diff from its base to its worktree; with `untouched`, one it left as it was, every line unchanged. */
+  readonly getFileDiff: (taskId: string, path: string, untouched?: boolean) => Promise<FileDiff>
+  /** What the reviews of a task's run found, each where it is in the change now: the run of the review reported in `review`, else the latest. */
+  readonly getTaskFindings: (taskId: string, review?: string) => Promise<TaskFindings>
   /** What the names in a thread's messages name where its agent works, each message by its item where it has one. */
   readonly findCode: (
     threadId: string,
@@ -199,6 +206,10 @@ export interface Client {
   readonly setAgentsAtOnce: (count: number | null) => Promise<void>
   /** When finished tasks' folders go from now on (ADR-056). */
   readonly setFolderWait: (wait: FolderWait) => Promise<void>
+  /** How long work goes on alone, from the next plan, round or look at a running turn; what isn't given stays. */
+  readonly setPlansAndReviews: (change: PlansAndReviewsChange) => Promise<void>
+  /** What the rules of projects made from now on start with; what isn't given stays. */
+  readonly setNewProjectDefaults: (change: NewProjectDefaultsChange) => Promise<void>
   /** Finished tasks' folders on this computer, with the disk they are on. */
   readonly getTaskFolders: () => Promise<TaskFolders>
   /** Removes every finished task's folder nothing holds; what it freed, measured after. */
@@ -233,6 +244,8 @@ export interface Client {
   readonly pauseAutomation: (automationId: string) => Promise<void>
   /** Runs an automation once now, with every limit a run has, whether it is on or not yet; `itemId`, from the coordinator's card asking it. */
   readonly runAutomationNow: (automationId: string, itemId?: string) => Promise<void>
+  /** Answers the coordinator's card asking to stop, hold, restart or settle a task: yes does it. */
+  readonly answerTaskAsk: (itemId: string, yes: boolean) => Promise<void>
   /** Deletes an automation: nothing of it starts again. The tasks its runs made stay. */
   readonly deleteAutomation: (automationId: string) => Promise<void>
   /** Puts back what the coordinator changed an automation from, as its card in the thread shows it. */
@@ -316,7 +329,8 @@ export interface Client {
   }) => Promise<TaskSummary>
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
-  readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null) => Promise<void>
+  /** Changes a plan before its first step starts: who does its steps, how it ends, and where it works (ADR-091). */
+  readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null, worksIn?: WorksIn) => Promise<void>
   /** Changes what an issue the coordinator drafted says, before it is filed. */
   readonly changeIssueDraft: (
     draftId: string,
@@ -328,6 +342,10 @@ export interface Client {
   /** Applies changes to issues, or what of them didn't apply, again: their card says how it went. */
   readonly applyIssueChanges: (changesId: string) => Promise<void>
   readonly discardIssueChanges: (changesId: string) => Promise<void>
+  /** Says to the coordinator, as the person, that issues are filed and changed at once from now on, or wait on a card first: from an issue card in a thread. */
+  readonly preferIssueCards: (threadId: string, atOnce: boolean) => Promise<void>
+  /** Whether a task does only part of its issue, so its merge comments on it and leaves it open. */
+  readonly setTaskIssuePart: (taskId: string, partOf: boolean) => Promise<void>
   /** Changes a review the lead drafted, before it is posted: its verdict, its summary, which comments are kept and what they say. */
   readonly changeReviewDraft: (
     draftId: string,
@@ -516,6 +534,8 @@ export interface Client {
   readonly getRunnableRefs: (projectId: string, text?: string) => Promise<ReadonlyArray<OfferedRefs>>
   /** The person's answer to a step that needs them. */
   readonly answerStuck: (input: { readonly attentionId: string; readonly answer: StuckAnswer }) => Promise<void>
+  /** The person's answer to what Althar asked before a Local task takes their checkout (ADR-091). */
+  readonly answerCheckout: (input: { readonly attentionId: string; readonly answer: CheckoutAnswer }) => Promise<void>
   /** Hands the task's step held for a usage limit to an agent, on the account and model picked, rather than waiting for the reset. */
   readonly handOverHeld: (input: {
     readonly taskId: string
@@ -542,13 +562,13 @@ export interface Start {
 }
 
 /**
- * Tell a step's agent what to do, hand the step to an agent (on an account
- * and model, where one was picked), wait for a usage limit's reset, or
+ * Tell a step's agent what to do, hand the step to an agent (on an account,
+ * model and effort, where one was picked), wait for a usage limit's reset, or
  * abandon it.
  */
 export type StuckAnswer =
   | { readonly kind: 'tell'; readonly note: string }
-  | { readonly kind: 'retry'; readonly agentId: string; readonly accountId?: string; readonly model?: string }
+  | { readonly kind: 'retry'; readonly agentId: string; readonly accountId?: string; readonly model?: string; readonly effort?: string }
   | { readonly kind: 'wait' }
   | { readonly kind: 'abandon' }
 
@@ -636,7 +656,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     readOutput: (threadId, itemId) => settle(api.ReadOutput({ threadId, itemId })),
     readBackgroundOutput: (threadId, id) => settle(api.ReadBackgroundOutput({ threadId, id })),
     readDocument: (threadId, path) => settle(api.ReadDocument({ threadId, path })),
-    getFileDiff: (taskId, path) => settle(api.GetFileDiff({ taskId, path })),
+    getFileDiff: (taskId, path, untouched) => settle(api.GetFileDiff({ taskId, path, ...(untouched === true ? { untouched } : {}) })),
+    getTaskFindings: (taskId, review) => settle(api.GetTaskFindings({ taskId, ...(review === undefined ? {} : { review }) })),
     findCode: (threadId, messages) => settle(api.FindCode({ threadId, messages })),
     readCode: (threadId, path, at = {}) =>
       settle(
@@ -678,11 +699,14 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     runAutomationNow: (automationId, itemId) =>
       command((commandId) => api.RunAutomationNow({ commandId, automationId, ...(itemId === undefined ? {} : { itemId }) })),
     deleteAutomation: (automationId) => command((commandId) => api.DeleteAutomation({ commandId, automationId })),
+    answerTaskAsk: (itemId, yes) => command((commandId) => api.AnswerTaskAsk({ commandId, itemId, yes })),
     undoAutomationChange: (itemId) => command((commandId) => api.UndoAutomationChange({ commandId, itemId })),
     setAutomationPostsReviews: (automationId, on) => command((commandId) => api.SetAutomationPostsReviews({ commandId, automationId, on })),
     setAutomationsPaused: (paused) => command((commandId) => api.SetAutomationsPaused({ commandId, paused })),
     setAgentsAtOnce: (count) => command((commandId) => api.SetAgentsAtOnce({ commandId, count })),
     setFolderWait: (wait) => command((commandId) => api.SetFolderWait({ commandId, wait })),
+    setPlansAndReviews: (change) => command((commandId) => api.SetPlansAndReviews({ commandId, ...change })),
+    setNewProjectDefaults: (change) => command((commandId) => api.SetNewProjectDefaults({ commandId, ...change })),
     getTaskFolders: () => settle(api.GetTaskFolders({})),
     cleanUpFolders: () => command((commandId) => api.CleanUpFolders({ commandId })),
     removeTaskFolder: (taskId, seen) => command((commandId) => api.RemoveTaskFolder({ commandId, taskId, seen })),
@@ -711,13 +735,17 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     startTask: (input) => command((commandId) => api.StartTask({ commandId, ...input })),
     startPlan: (planId) => command((commandId) => api.StartPlan({ commandId, planId })),
     holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
-    changePlan: (planId, steps, end) =>
-      command((commandId) => api.ChangePlan({ commandId, planId, steps, ...(end === undefined ? {} : { end }) })),
+    changePlan: (planId, steps, end, worksIn) =>
+      command((commandId) =>
+        api.ChangePlan({ commandId, planId, steps, ...(end === undefined ? {} : { end }), ...(worksIn === undefined ? {} : { worksIn }) }),
+      ),
     changeIssueDraft: (draftId, edit) => command((commandId) => api.ChangeIssueDraft({ commandId, draftId, ...edit })),
     fileIssueDraft: (draftId) => command((commandId) => api.FileIssueDraft({ commandId, draftId })),
     discardIssueDraft: (draftId) => command((commandId) => api.DiscardIssueDraft({ commandId, draftId })),
     applyIssueChanges: (changesId) => command((commandId) => api.ApplyIssueChanges({ commandId, changesId })),
     discardIssueChanges: (changesId) => command((commandId) => api.DiscardIssueChanges({ commandId, changesId })),
+    preferIssueCards: (threadId, atOnce) => command((commandId) => api.PreferIssueCards({ commandId, threadId, atOnce })),
+    setTaskIssuePart: (taskId, partOf) => command((commandId) => api.SetTaskIssuePart({ commandId, taskId, partOf })),
     changeReviewDraft: (draftId, edit) => command((commandId) => api.ChangeReviewDraft({ commandId, draftId, ...edit })),
     postReviewDraft: (draftId) => command((commandId) => api.PostReviewDraft({ commandId, draftId })),
     discardReviewDraft: (draftId) => command((commandId) => api.DiscardReviewDraft({ commandId, draftId })),
@@ -807,6 +835,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     stopLaunch: (id) => command((commandId) => api.StopLaunch({ commandId, id })),
     clearLaunch: (id) => command((commandId) => api.ClearLaunch({ commandId, id })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
+    answerCheckout: (input) => command((commandId) => api.AnswerCheckout({ commandId, ...input })),
     handOverHeld: (input) => command((commandId) => api.HandOverHeld({ commandId, ...input })),
     watch: (listener, since, onWatching) => {
       let cursor = since

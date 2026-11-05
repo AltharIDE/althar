@@ -12,7 +12,7 @@ test('keeps the project web switch across views and shows its privacy trade-off'
   const { electronApp, page } = await launch(home)
   try {
     await openFirstProject(electronApp, page, repository(home))
-    await projectSettings(page, 'General')
+    await projectSettings(page, 'Rules')
     const toggle = page.getByRole('switch', { name: 'Leads can reach the web' })
     await expect(toggle).toBeChecked()
     await expect(page.getByText(/Pages could steer a lead into sending private code in a URL/)).toBeVisible()
@@ -21,8 +21,8 @@ test('keeps the project web switch across views and shows its privacy trade-off'
     await row.screenshot({ path: 'test-results/web-reach-on-light.png', scale: 'css' })
     await toggle.click()
     await expect(toggle).not.toBeChecked()
-    await projectSettings(page, 'Rules')
     await projectSettings(page, 'General')
+    await projectSettings(page, 'Rules')
     await expect(toggle).not.toBeChecked()
     await page.emulateMedia({ colorScheme: 'dark' })
     await still(page)

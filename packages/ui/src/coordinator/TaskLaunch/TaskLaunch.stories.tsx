@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useState } from 'react'
+import { useState, type ComponentProps } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { FROM_231, PLAN_432, PLAN_433 } from '../../fixtures/coordinator'
@@ -10,10 +10,15 @@ import { States } from '../../storybook/States'
 import { threadDecorator } from '../../storybook/ThreadFrame'
 import { Turn } from '../../thread/Turn/Turn'
 import { You } from '../../thread/You/You'
+import { WorksIn } from '../../foundations/vocabulary'
 import { TaskLaunch, type LaunchPick, type LaunchStep } from './TaskLaunch'
 
 /** The consumer's picker for one agent of a step: the composer's own, bordered. */
-function usePicker(steps: readonly LaunchStep[], setSteps: (s: readonly LaunchStep[]) => void) {
+function usePicker(
+  steps: readonly LaunchStep[],
+  setSteps: (s: readonly LaunchStep[]) => void,
+  room?: ComponentProps<typeof ModelPick>['room'],
+) {
   const prefs = useModelPrefs()
   const [efforts, setEfforts] = useState<Record<string, string>>({})
   return ({ step, agent, k, owner }: LaunchPick) => {
@@ -23,6 +28,7 @@ function usePicker(steps: readonly LaunchStep[], setSteps: (s: readonly LaunchSt
         variant="field"
         placement="below"
         owner={owner}
+        room={room}
         model={agent}
         pinned={prefs.pinned}
         effort={efforts[key] ?? effortFor(agent, prefs.efforts)}
@@ -49,10 +55,11 @@ function Launch({
   plan = PLAN_432,
   wait,
   onStart = () => {},
+  room,
   ...rest
-}: Partial<Parameters<typeof TaskLaunch>[0]> & { plan?: LaunchStep[] }) {
+}: Partial<Parameters<typeof TaskLaunch>[0]> & { plan?: LaunchStep[]; room?: ComponentProps<typeof ModelPick>['room'] }) {
   const [steps, setSteps] = useState<readonly LaunchStep[]>(plan)
-  const picker = usePicker(steps, setSteps)
+  const picker = usePicker(steps, setSteps, room)
   return (
     <TaskLaunch
       task="432"
@@ -161,6 +168,17 @@ export const AReview: Story = {
   },
 }
 
+/** The reviewer's model nearly out: its note sits beside the chip, a quiet aside, and the plan still starts. */
+const reviewerNearly = (left: number): Story => ({
+  render: () => <Launch plan={PLAN_ASKED} room={(x) => (x.runtime === CODEX.runtime ? { left, until: '18:05', account: null } : null)} />,
+  play: async ({ canvasElement }) => {
+    const said = left === 0 ? 'Out · until 18:05' : `${left}% left · until 18:05`
+    await expect(within(canvasElement).getByText(said)).toBeInTheDocument()
+  },
+})
+export const ReviewerNearlyOut: Story = reviewerNearly(4)
+export const ReviewerOut: Story = reviewerNearly(0)
+
 const heldChanged = fn()
 const startedHeld = fn()
 
@@ -204,6 +222,42 @@ export const WaitingForAFreeAgent: Story = {
     await expect(c.queryByRole('button', { name: /Start/ })).toBeNull()
     await expect(c.queryByRole('button', { name: 'Hold' })).toBeNull()
   },
+}
+
+/** Where it works, in its head (ADR-091): Local, the person's own checkout, or a worktree, changeable until it starts. */
+function Placed({ worksIn: start = WorksIn.Local, ...rest }: Partial<Parameters<typeof TaskLaunch>[0]>) {
+  const [worksIn, setWorksIn] = useState(start)
+  return <Launch worksIn={worksIn} onWorksInChange={setWorksIn} {...rest} />
+}
+
+/** Planned Local, the project's default: one line on what it gives up. */
+export const Local: Story = {
+  render: () => <Placed />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('radio', { name: 'Local' })).toBeChecked()
+    await expect(c.getByText('One task at a time; your own edits share it.')).toBeVisible()
+    await userEvent.click(c.getByRole('radio', { name: 'Worktree' }))
+    await expect(c.getByText('Side by side with other tasks. Builds from cold.')).toBeVisible()
+    await userEvent.click(c.getByRole('radio', { name: 'Local' }))
+  },
+}
+
+/** Another task works Local: the coordinator planned this one in a worktree and says why; Local would wait for it. */
+export const LocalTaken: Story = {
+  render: () => <Placed worksIn={WorksIn.Worktree} localTaken="Dark mode for Settings" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Local is taken by Dark mode for Settings. Side by side with other tasks. Builds from cold.')).toBeVisible()
+    await userEvent.click(c.getByRole('radio', { name: 'Local' }))
+    await expect(c.getByText('Waits for Dark mode for Settings.')).toBeVisible()
+    await userEvent.click(c.getByRole('radio', { name: 'Worktree' }))
+  },
+}
+
+/** Started Local, it waits for the checkout: said where the clock was. */
+export const WaitingForLocal: Story = {
+  render: () => <Placed localTaken="Dark mode for Settings" queued="Waits for Local: Dark mode for Settings is there" />,
 }
 
 /** A runtime is out: its steps wait for the reset, unless you move them. */

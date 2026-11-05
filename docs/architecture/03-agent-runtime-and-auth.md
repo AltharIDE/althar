@@ -433,7 +433,11 @@ in two layers:
    failure that ends a turn comes on the prompt's response, the turn
    `end_turn` like any other; a warning while the agent retries by itself
    comes on a `session_info_update`. Every failure is one of `usage_limit`,
-   `context_full` (start a new session from a brief), `transient` (a lost
+   `context_full` (start a new session from a brief), `session_lost` (the
+   agent no longer has the session, as Claude Code's adapter answers
+   "Resource not found", -32002, for one whose process died: what the turn
+   was given goes to a fresh session briefed from the record, and where none
+   can start, the turn fails saying so, and Try again starts one), `transient` (a lost
    connection, a short rate limit, an overloaded or failing service: waited
    out while offline, and retried after a pause, ADR-060), `auth_required`,
    `invalid_request` or `unknown`.
@@ -472,8 +476,12 @@ in two layers:
      home; ChatGPT's `wham/usage` where it can't answer.
    - Kimi Code and Grok Build: their providers' usage URLs.
    - OpenCode: plan or key is told per provider from its own
-     `opencode auth list --standalone --format json` (2.x; 1.x can't say);
-     its plan sign-ins are kept in its own database, and not read.
+     `opencode auth list --standalone --format json` (2.x; 1.x can't say).
+     OpenCode Go, a plan with limits, is read from OpenCode's own
+     `opencode api --standalone experimental.usage.limits` in the account's
+     home, through its OpenCode Console sign-in; Althar reads the answer,
+     never the sign-in. With Go's key alone it is connected, unread. Its
+     other plan sign-ins are kept in its own database, and not read.
    - Copilot, Junie, Mistral Vibe, Qwen Code and Antigravity give their usage
      to no other app; each says why, calmly, rather than as a fault.
 
@@ -998,9 +1006,13 @@ the line plainly is one, is refused; what Althar can't read is refused too
 where Never lists what the boundary doesn't stop (a deploy, a named
 command); a command it asks about asks; and no one reads the keychain or
 git's stored passwords where the words show it, whose service a Mac's
-sandbox still reaches (ADR-071's trade-off). With everything allowed, a
-command the agent asks to run outside that Althar can't read is refused,
-saying to run it inside (`decideLeaving`). Where nothing holds a session (Windows, a Flatpak,
+sandbox still reaches (ADR-071's trade-off). What crosses meets the rules
+as any request does: with everything allowed, what Althar can't read goes
+ahead, and only what they read as irreversible asks
+([ADR-089](../decisions/089-the-asks-and-refusals-left-are-what-can-t-be-undone.md)).
+A lead's line is read from the folder its shell is in, where its agent
+records it (Claude Code's transcript, `shellFolder`), not from the
+worktree's top. Where nothing holds a session (Windows, a Flatpak,
 Codex, OpenCode, a review's lead), every request meets the rules below.
 
 **Git stops what can't be undone, wherever it comes from.** Every lead's
@@ -1009,7 +1021,11 @@ words for a pass (`guardHolds`), takes its hooks from a folder of Althar's, by t
 (`core.hooksPath`, `pushGuard.ts`): `pre-push` stops a push to a default
 branch, a push over commits the remote has that this one doesn't, and
 deleting a branch that isn't the task's; `reference-transaction` stops
-deleting such a branch here, or moving one so it loses commits. It says
+deleting such a branch here, or moving one, where its commits are on no
+other ref. The hooks act only in the task's own repositories
+(`ALTHAR_GUARD_REPOSITORIES`, by the git folder their worktrees share) and
+on pushes to their remotes, so a scratch repository a lead makes in its
+temp folder is its own. It says
 what it stopped and to run it plainly outside the sandbox, so Althar asks;
 once the person allows a request the rules read as one of these, the
 session has a two-minute pass naming those git commands, with the

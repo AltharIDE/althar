@@ -6,14 +6,21 @@ import { ConnectorFailed } from './errors'
 import { makeHttp, paged } from './http'
 import {
   type Account,
+  cantChange,
+  cantFind,
   type Choice,
+  type ChosenField,
   type Container,
   type Issue,
   type IssueChange,
+  type IssueComment,
+  type IssueQuery,
   leftAsItIs,
+  oneAssignee,
   type Priority,
   type StatusCategory,
   type Tracker,
+  type TrackerCapabilities,
   unstarted,
 } from './model'
 import { type Answer, answered, probe, readAs, refusalOf, stopped, UNREADABLE, UNSAID } from './probe'
@@ -31,6 +38,7 @@ const IssueFields = `
     assignee { id name displayName }
     labels { nodes { name } }
     team { key name }
+    project { id name } projectMilestone { id name } cycle { number name } parent { identifier title } dueDate estimate
   }`
 
 const LinearIssue = Schema.Struct({
@@ -48,6 +56,12 @@ const LinearIssue = Schema.Struct({
   ),
   labels: Schema.optional(Schema.Struct({ nodes: Schema.Array(Schema.Struct({ name: Schema.String })) })),
   team: Schema.optional(Schema.NullOr(Schema.Struct({ key: Schema.String, name: Schema.String }))),
+  project: Schema.optional(Schema.NullOr(Schema.Struct({ id: Schema.String, name: Schema.String }))),
+  projectMilestone: Schema.optional(Schema.NullOr(Schema.Struct({ id: Schema.String, name: Schema.String }))),
+  cycle: Schema.optional(Schema.NullOr(Schema.Struct({ number: Schema.Number, name: Schema.optional(Schema.NullOr(Schema.String)) }))),
+  parent: Schema.optional(Schema.NullOr(Schema.Struct({ identifier: Schema.String, title: Schema.String }))),
+  dueDate: Schema.optional(Schema.NullOr(Schema.String)),
+  estimate: Schema.optional(Schema.NullOr(Schema.Number)),
 })
 type LinearIssue = typeof LinearIssue.Type
 
@@ -107,7 +121,132 @@ const issueOf = (issue: LinearIssue): Issue => {
     labels: issue.labels?.nodes.map((label) => label.name) ?? [],
     container: issue.team == null ? null : issue.team.name,
     updatedAt: issue.updatedAt,
+    // Linear has no issue type or components: those are left absent, not none.
+    project: issue.project == null ? null : { id: issue.project.id, name: issue.project.name },
+    milestone: issue.projectMilestone == null ? null : { id: issue.projectMilestone.id, name: issue.projectMilestone.name },
+    cycle: issue.cycle == null ? null : (issue.cycle.name ?? `Cycle ${issue.cycle.number}`),
+    parent: issue.parent == null ? null : { key: issue.parent.identifier, title: issue.parent.title },
+    due: issue.dueDate ?? null,
+    estimate: issue.estimate ?? null,
   }
+}
+
+/** A comment as Linear gives one: its author is null where an integration wrote it. */
+const LinearComment = Schema.Struct({
+  body: Schema.String,
+  createdAt: Schema.String,
+  user: Schema.optional(
+    Schema.NullOr(Schema.Struct({ id: Schema.String, name: Schema.String, displayName: Schema.optional(Schema.String) })),
+  ),
+})
+
+const commentOf = (comment: typeof LinearComment.Type): IssueComment => ({
+  author:
+    comment.user == null
+      ? null
+      : { id: comment.user.id, login: comment.user.displayName ?? comment.user.name, name: comment.user.name, bot: false },
+  body: comment.body,
+  at: comment.createdAt,
+})
+
+/** The most Linear gives to a page: a search asking for more is held to it. */
+const MOST = 250
+
+/** A state type for each category, as Linear names them. */
+const STATE_TYPES: Readonly<Record<StatusCategory, string>> = {
+  triage: 'triage',
+  backlog: 'backlog',
+  todo: 'unstarted',
+  started: 'started',
+  done: 'completed',
+  cancelled: 'canceled',
+}
+
+/** A key as Linear's, its team's key and its number: MER-231, in any case. Anything else is no Linear issue's. */
+const keyPartsOf = (typed: string): { readonly team: string; readonly number: number } | undefined => {
+  const [, team, number] = /^([A-Z][A-Z0-9]*)-(\d+)$/i.exec(typed.trim()) ?? []
+  return team === undefined || number === undefined ? undefined : { team: team.toUpperCase(), number: Number(number) }
+}
+
+/** The issues of keys, by team: one clause for each team's numbers. */
+const keysClause = (keys: ReadonlyArray<{ readonly team: string; readonly number: number }>) => {
+  const byTeam = new Map<string, Array<number>>()
+  for (const key of keys) byTeam.set(key.team, [...new Set([...(byTeam.get(key.team) ?? []), key.number])])
+  return { or: [...byTeam].map(([team, numbers]) => ({ team: { key: { eqIgnoreCase: team } }, number: { in: numbers } })) }
+}
+
+/** A moment or a day, ISO 8601, as a moment in UTC: a day is from its start. One that doesn't read goes as it is. */
+const momentOf = (since: string) => {
+  const at = Date.parse(since.trim())
+  return Number.isNaN(at) ? since : new Date(at).toISOString()
+}
+
+/** A cycle by its words: the one under way, a number, or a name. */
+const cycleClause = (cycle: string) => {
+  const typed = cycle.trim()
+  if (typed.toLowerCase() === 'current') return { isActive: { eq: true } }
+  return /^\d+$/.test(typed) ? { number: { eq: Number(typed) } } : { name: { eqIgnoreCase: typed } }
+}
+
+/**
+ * A query as Linear's `IssueFilter` takes it, each narrowing a clause of an
+ * `and`: none narrows nothing. Null where nothing can be found: keys none of
+ * which is a Linear key, or a parent that isn't one.
+ */
+export const filterOf = (query: IssueQuery): Readonly<Record<string, unknown>> | null => {
+  const text = query.text?.trim() ?? ''
+  const keys = (query.keys ?? []).flatMap((key) => keyPartsOf(key) ?? [])
+  if (query.keys !== undefined && query.keys.length > 0 && keys.length === 0) return null
+  const parent = query.parent === undefined ? undefined : keyPartsOf(query.parent)
+  if (query.parent !== undefined && parent === undefined) return null
+  const names = query.status?.names ?? []
+  const categories = query.status?.categories ?? []
+  const assignee = typeof query.assignee === 'string' ? query.assignee.trim().replace(/^@/, '') : undefined
+  const clauses: ReadonlyArray<Readonly<Record<string, unknown>>> = [
+    ...(query.container === undefined ? [] : [{ team: { id: { eq: query.container } } }]),
+    ...(query.state === 'all' ? [] : [{ state: { type: { [query.state === 'open' ? 'nin' : 'in']: ['completed', 'canceled'] } } }]),
+    ...(query.mine === true ? [{ assignee: { isMe: { eq: true } } }] : []),
+    // Every word, each in its title or its description.
+    ...text
+      .split(/\s+/)
+      .filter((word) => word !== '')
+      .map((word) => ({ or: [{ title: { containsIgnoreCase: word } }, { description: { containsIgnoreCase: word } }] })),
+    ...(query.labels ?? []).map((label) => ({ labels: { some: { name: { eqIgnoreCase: label.trim() } } } })),
+    ...(names.length + categories.length === 0
+      ? []
+      : [
+          {
+            or: [
+              ...names.map((name) => ({ state: { name: { eqIgnoreCase: name.trim() } } })),
+              ...(categories.length === 0 ? [] : [{ state: { type: { in: [...new Set(categories.map((one) => STATE_TYPES[one]))] } } }]),
+            ],
+          },
+        ]),
+    ...(query.project === undefined ? [] : [{ project: { name: { eqIgnoreCase: query.project.trim() } } }]),
+    ...(query.milestone === undefined ? [] : [{ projectMilestone: { name: { eqIgnoreCase: query.milestone.trim() } } }]),
+    ...(query.cycle === undefined ? [] : [{ cycle: cycleClause(query.cycle) }]),
+    ...(query.assignee === null ? [{ assignee: { null: true } }] : []),
+    ...(assignee === undefined
+      ? []
+      : [
+          {
+            assignee: {
+              or: [
+                { name: { containsIgnoreCase: assignee } },
+                { displayName: { eqIgnoreCase: assignee } },
+                { email: { eqIgnoreCase: assignee } },
+              ],
+            },
+          },
+        ]),
+    ...(query.priority === undefined || query.priority.length === 0
+      ? []
+      : [{ priority: { in: [...new Set(query.priority.map(priorityNumber))] } }]),
+    ...(parent === undefined ? [] : [{ parent: { team: { key: { eqIgnoreCase: parent.team } }, number: { eq: parent.number } } }]),
+    ...(query.updatedSince === undefined ? [] : [{ updatedAt: { gte: momentOf(query.updatedSince) } }]),
+    ...(keys.length === 0 ? [] : [keysClause(keys)]),
+  ]
+  return clauses.length === 0 ? {} : { and: clauses }
 }
 
 const Success = Schema.Struct({ success: Schema.Boolean })
@@ -154,30 +293,134 @@ const Member = Schema.Struct({
 
 const Project = Schema.Struct({ id: Schema.String, name: Schema.String })
 
-/** An issue's team, with its id and one of its lists, as `items`: each asked for only when a change needs it. */
-const TeamOf = <A>(node: Schema.Codec<A, unknown>) =>
-  Schema.Struct({ issue: Schema.Struct({ team: Schema.Struct({ id: Schema.String, items: Connection(node) }) }) })
+/** A project with its milestones, which an issue can be put in only with it. */
+const ProjectMilestones = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  projectMilestones: Schema.Struct({ nodes: Schema.Array(Project) }),
+})
 
-/** Each of a team's lists Althar reads: how many to a page, and what of each. */
+/** A team's cycle: its number, and its name where it has one. */
+const Cycle = Schema.Struct({
+  id: Schema.String,
+  number: Schema.Number,
+  name: Schema.optional(Schema.NullOr(Schema.String)),
+  isActive: Schema.optional(Schema.Boolean),
+  isNext: Schema.optional(Schema.Boolean),
+})
+
+/** One of a team's lists, as `items`: each asked for only when a change needs it. */
+const Items = <A>(node: Schema.Codec<A, unknown>) => Schema.Struct({ items: Connection(node) })
+
+/** Each of a team's lists Althar reads: which, how many to a page, narrowed how, and what of each. */
 const LISTS = {
-  states: { first: 100, fields: 'id name type position' },
-  members: { first: 250, fields: 'id name displayName email active' },
-  projects: { first: 100, fields: 'id name' },
+  states: { list: 'states', first: 100, filter: '', fields: 'id name type position' },
+  members: { list: 'members', first: 250, filter: '', fields: 'id name displayName email active' },
+  projects: { list: 'projects', first: 100, filter: '', fields: 'id name' },
+  // Fewer to a page: Linear counts each project's milestones against a query's bound.
+  milestones: { list: 'projects', first: 50, filter: '', fields: 'id name projectMilestones(first: 50) { nodes { id name } }' },
+  // Those not past: the one under way, and those to come.
+  cycles: { list: 'cycles', first: 100, filter: ', filter: { isPast: { eq: false } }', fields: 'id number name isActive isNext' },
 } as const
+
+/** Which team's lists to read: an issue's, by its id, or a team's own, before an issue is filed in it. */
+type TeamOfIssue = { readonly issue: string } | { readonly team: string }
 
 /** A key as Linear writes it, however it was typed: mer-231 is MER-231. Anything else goes as it is. */
 const keyOf = (ref: string) => (/^[A-Z][A-Z0-9]*-\d+$/i.test(ref) ? ref.toUpperCase() : ref)
 
-/** What Linear changes of an issue: every field the model has. */
-const CHANGES = ['status', 'close', 'priority', 'assignee', 'labels', 'project', 'title'] as const
+/** What Linear changes of an issue: every field it has. It has no issue type or components. */
+const CHANGES = [
+  'status',
+  'close',
+  'priority',
+  'assignee',
+  'labels',
+  'project',
+  'milestone',
+  'cycle',
+  'parent',
+  'estimate',
+  'due',
+  'title',
+  'description',
+] as const
 
-/** A change as Linear's `IssueUpdateInput` takes it, closed into `closedInto` where it closes without a status of its own. */
-export const changeInput = (change: IssueChange, closedInto?: string): Readonly<Record<string, unknown>> => ({
+/** What of them Linear's `IssueCreateInput` sets as it files one. */
+const CREATES = ['status', 'assignee', 'project', 'milestone', 'cycle', 'parent', 'estimate', 'due'] as const
+
+/** What Linear does as a tracker: one person to an issue, and a search its `IssueFilter` narrows by every filter. */
+export const LINEAR_TRACKING: TrackerCapabilities = {
+  links: true,
+  starts: true,
+  changes: CHANGES,
+  creates: CREATES,
+  assignees: 'one',
+  finds: {
+    text: 'search',
+    labels: 'search',
+    status: 'search',
+    project: 'search',
+    milestone: 'search',
+    cycle: 'search',
+    assignee: 'search',
+    priority: 'search',
+    parent: 'search',
+    updatedSince: 'search',
+    keys: 'search',
+  },
+}
+
+/**
+ * Who a change leaves an issue assigned to, as Linear's one `assigneeId`:
+ * the one added in place of whoever had it; none where it takes off the one
+ * who has it, or everyone; and nothing said where it takes off someone else.
+ */
+const assigneeInput = (change: IssueChange['assignee'], assigned: ReadonlyArray<string>): Readonly<Record<string, unknown>> => {
+  if (change === undefined) return {}
+  const added = oneAssignee(change)
+  if (added !== null) return { assigneeId: added.id }
+  return change === null || change.remove.some((person) => assigned.includes(person.id)) ? { assigneeId: null } : {}
+}
+
+/**
+ * The fields a filing and a change both set, as Linear's inputs take them.
+ * A milestone is in one project: given without a project, it puts the issue
+ * in its own, as Linear would refuse it in another or none.
+ */
+const fieldsInput = (change: IssueChange, assigned: ReadonlyArray<string>): Readonly<Record<string, unknown>> => ({
+  ...(change.status === undefined ? {} : { stateId: change.status.id }),
+  ...assigneeInput(change.assignee, assigned),
+  ...(change.project !== undefined
+    ? { projectId: change.project?.id ?? null }
+    : change.milestone?.in === undefined
+      ? {}
+      : { projectId: change.milestone.in }),
+  ...(change.milestone === undefined ? {} : { projectMilestoneId: change.milestone?.id ?? null }),
+  ...(change.cycle === undefined ? {} : { cycleId: change.cycle?.id ?? null }),
+  ...(change.parent === undefined ? {} : { parentId: change.parent?.id ?? null }),
+  ...(change.estimate === undefined ? {} : { estimate: change.estimate }),
+  ...(change.due === undefined ? {} : { dueDate: change.due }),
+})
+
+/** What an issue is filed with beside its title, body, labels and priority: what is set, as there is nothing yet to take off. */
+export const createInput = (fields: IssueChange = {}): Readonly<Record<string, unknown>> =>
+  Object.fromEntries(Object.entries(fieldsInput(fields, [])).filter(([, value]) => value !== null))
+
+/**
+ * A change as Linear's `IssueUpdateInput` takes it, to an issue assigned to
+ * those `assigned` names by id; closed into `closedInto` where it closes
+ * without a status of its own.
+ */
+export const changeInput = (
+  change: IssueChange,
+  options: { readonly assigned?: ReadonlyArray<string>; readonly closedInto?: string } = {},
+): Readonly<Record<string, unknown>> => ({
   ...(change.title === undefined ? {} : { title: change.title }),
-  ...(change.status !== undefined ? { stateId: change.status.id } : closedInto === undefined ? {} : { stateId: closedInto }),
+  ...(change.description === undefined ? {} : { description: change.description }),
+  ...(change.status === undefined && options.closedInto !== undefined ? { stateId: options.closedInto } : {}),
   ...(change.priority === undefined ? {} : { priority: priorityNumber(change.priority) }),
-  ...(change.assignee === undefined ? {} : { assigneeId: change.assignee?.id ?? null }),
-  ...(change.project === undefined ? {} : { projectId: change.project?.id ?? null }),
+  ...fieldsInput(change, options.assigned ?? []),
   ...(change.labels === undefined || change.labels.add.length === 0 ? {} : { addedLabelIds: change.labels.add.map((label) => label.id) }),
   ...(change.labels === undefined || change.labels.remove.length === 0
     ? {}
@@ -215,49 +458,62 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
       ({ issue }) => issueOf(issue),
     )
 
-  /** One of an issue's team's lists (its states, its people, its projects), page by page. */
-  const ofTeam = <A>(issue: Issue, node: Schema.Codec<A, unknown>, list: keyof typeof LISTS) =>
-    paged<A, string | null>(null, (after) =>
-      Effect.map(
-        http.graphql(
-          TeamOf(node),
-          url,
-          `query($id: String!, $after: String) { issue(id: $id) { team { id items: ${list}(first: ${LISTS[list].first}, after: $after) { nodes { ${LISTS[list].fields} } pageInfo { hasNextPage endCursor } } } } }`,
-          { id: issue.id, after },
-        ),
-        ({ issue: found }) => pageOf(found.team.items),
-      ),
-    )
+  /** One of a team's lists (its states, its people, its projects, its cycles), page by page: an issue's team's, in the one query. */
+  const ofTeam = <A>(of: TeamOfIssue, node: Schema.Codec<A, unknown>, which: keyof typeof LISTS) =>
+    paged<A, string | null>(null, (after) => {
+      const { list, first, filter, fields } = LISTS[which]
+      const items = `items: ${list}(first: ${first}, after: $after${filter}) { nodes { ${fields} } pageInfo { hasNextPage endCursor } }`
+      return 'issue' in of
+        ? Effect.map(
+            http.graphql(
+              Schema.Struct({ issue: Schema.Struct({ team: Items(node) }) }),
+              url,
+              `query($id: String!, $after: String) { issue(id: $id) { team { ${items} } } }`,
+              { id: of.issue, after },
+            ),
+            ({ issue: found }) => pageOf(found.team.items),
+          )
+        : Effect.map(
+            http.graphql(Schema.Struct({ team: Items(node) }), url, `query($id: String!, $after: String) { team(id: $id) { ${items} } }`, {
+              id: of.team,
+              after,
+            }),
+            ({ team }) => pageOf(team.items),
+          )
+    })
 
-  /** An issue's team, by its id. */
-  const teamOf = (issue: Issue) =>
-    Effect.map(
-      http.graphql(
-        Schema.Struct({ issue: Schema.Struct({ team: Schema.Struct({ id: Schema.String }) }) }),
-        url,
-        'query($id: String!) { issue(id: $id) { team { id } } }',
-        { id: issue.id },
-      ),
-      ({ issue: found }) => found.team.id,
-    )
+  /** A team's id: its own, or an issue's team's, asked of Linear. */
+  const teamOf = (of: TeamOfIssue) =>
+    'team' in of
+      ? Effect.succeed(of.team)
+      : Effect.map(
+          http.graphql(
+            Schema.Struct({ issue: Schema.Struct({ team: Schema.Struct({ id: Schema.String }) }) }),
+            url,
+            'query($id: String!) { issue(id: $id) { team { id } } }',
+            { id: of.issue },
+          ),
+          ({ issue: found }) => found.team.id,
+        )
 
-  /** An issue's team's states, in their order on its board. */
-  const states = (issue: Issue) => Effect.map(ofTeam(issue, State, 'states'), (all) => all.toSorted((a, b) => a.position - b.position))
+  /** A team's states, in their order on its board. */
+  const states = (of: TeamOfIssue) => Effect.map(ofTeam(of, State, 'states'), (all) => all.toSorted((a, b) => a.position - b.position))
 
-  const choices: Tracker['choices'] = (issue, field) => {
+  /** What a field can be set to for an issue in a team: the same whether the issue is filed yet or not. */
+  const choicesOf = (of: TeamOfIssue, field: ChosenField): Effect.Effect<ReadonlyArray<Choice>, ConnectorFailed> => {
     switch (field) {
       case 'status':
-        return Effect.map(states(issue), (all) => all.map((state): Choice => ({ id: state.id, name: state.name })))
+        return Effect.map(states(of), (all) => all.map((state): Choice => ({ id: state.id, name: state.name })))
       // Its team's and the workspace's; a group only holds labels.
       case 'labels':
         return Effect.gen(function* () {
-          return (yield* teamLabels(yield* teamOf(issue)))
+          return (yield* teamLabels(yield* teamOf(of)))
             .filter((label) => label.isGroup !== true)
             .map((label): Choice => ({ id: label.id, name: label.name }))
         })
       // Its team's people, still active: who Linear lets it be assigned to.
       case 'assignee':
-        return Effect.map(ofTeam(issue, Member, 'members'), (items) =>
+        return Effect.map(ofTeam(of, Member, 'members'), (items) =>
           items
             .filter((member) => member.active !== false)
             .map((member): Choice => ({
@@ -267,9 +523,36 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
             })),
         )
       case 'project':
-        return Effect.map(ofTeam(issue, Project, 'projects'), (items) =>
+        return Effect.map(ofTeam(of, Project, 'projects'), (items) =>
           items.map((project): Choice => ({ id: project.id, name: project.name })),
         )
+      // Each of its team's projects' milestones, in the project it puts the issue in, by both names as Linear shows them together.
+      case 'milestone':
+        return Effect.map(ofTeam(of, ProjectMilestones, 'milestones'), (projects) =>
+          projects.flatMap((project) =>
+            project.projectMilestones.nodes.map((milestone): Choice => ({
+              id: milestone.id,
+              name: milestone.name,
+              in: project.id,
+              also: [`${project.name} / ${milestone.name}`],
+            })),
+          ),
+        )
+      // Its team's cycles not past, by number as well as name, and the one under way and the next by those words.
+      case 'cycle':
+        return Effect.map(ofTeam(of, Cycle, 'cycles'), (cycles) =>
+          cycles
+            .toSorted((a, b) => a.number - b.number)
+            .map((cycle): Choice => ({
+              id: cycle.id,
+              name: cycle.name ?? `Cycle ${cycle.number}`,
+              also: [String(cycle.number), ...(cycle.isActive === true ? ['current'] : []), ...(cycle.isNext === true ? ['next'] : [])],
+            })),
+        )
+      case 'type':
+        return Effect.fail(cantChange(product, field, 'Linear has no issue types: a label says what kind it is'))
+      case 'components':
+        return Effect.fail(cantChange(product, field, 'Linear has no components: a label or a project says what part it is in'))
     }
   }
 
@@ -277,14 +560,20 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
     Effect.gen(function* () {
       // Closed is done: its team's first completed state, by its place on the board.
       const closing = wanted.close === true && wanted.status === undefined
-      const closedInto = closing ? (yield* states(issue)).find((state) => state.type === 'completed') : undefined
+      const closedInto = closing ? (yield* states({ issue: issue.id })).find((state) => state.type === 'completed') : undefined
       if (closing && closedInto === undefined)
         return yield* new ConnectorFailed({ product, reason: 'rejected', message: 'Its team has no completed state' })
       const { issueUpdate } = yield* http.graphql(
         Schema.Struct({ issueUpdate: Schema.Struct({ success: Schema.Boolean, issue: Schema.optional(Schema.NullOr(LinearIssue)) }) }),
         url,
         `mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success issue { ...IssueFields } } } ${IssueFields}`,
-        { id: issue.id, input: changeInput(wanted, closedInto?.id) },
+        {
+          id: issue.id,
+          input: changeInput(wanted, {
+            assigned: issue.assignees.map((person) => person.id),
+            ...(closedInto === undefined ? {} : { closedInto: closedInto.id }),
+          }),
+        },
       )
       if (!issueUpdate.success) return yield* new ConnectorFailed({ product, reason: 'rejected', message: 'Linear did not change it' })
       // Changed, by Linear's word: read again where it didn't say how it stands now.
@@ -293,7 +582,7 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
 
   return {
     product,
-    capabilities: { links: true, starts: true, changes: CHANGES },
+    capabilities: LINEAR_TRACKING,
     account,
     issue: read,
     // Into the team's first started state, by its position on the board: In Progress, before In Review.
@@ -331,6 +620,34 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
           { first: options.limit ?? 50 },
         ),
         ({ viewer }) => viewer.assignedIssues.nodes.map(issueOf),
+      ),
+    // Keys none of which is Linear's (#12) find nothing, unasked.
+    find: (query) =>
+      Effect.gen(function* () {
+        if (query.parent !== undefined && keyPartsOf(query.parent) === undefined)
+          return yield* cantFind(product, `A parent is a Linear issue's key, such as MER-231: ${query.parent} isn't one`)
+        const filter = filterOf(query)
+        if (filter === null) return { issues: [], next: null }
+        const { issues } = yield* http.graphql(
+          Schema.Struct({ issues: Connection(LinearIssue) }),
+          url,
+          `query($first: Int!, $after: String, $filter: IssueFilter) {
+            issues(first: $first, after: $after, orderBy: updatedAt, filter: $filter) { nodes { ...IssueFields } pageInfo { hasNextPage endCursor } }
+          } ${IssueFields}`,
+          { first: Math.min(query.limit, MOST), after: query.cursor, filter },
+        )
+        return { issues: issues.nodes.map(issueOf), next: issues.pageInfo.hasNextPage ? (issues.pageInfo.endCursor ?? null) : null }
+      }),
+    // Its latest, as Linear lists them newest first, put back in the order they were written.
+    comments: (issue, limit) =>
+      Effect.map(
+        http.graphql(
+          Schema.Struct({ issue: Schema.Struct({ comments: Schema.Struct({ nodes: Schema.Array(LinearComment) }) }) }),
+          url,
+          'query($id: String!, $first: Int!) { issue(id: $id) { comments(first: $first, orderBy: createdAt) { nodes { body createdAt user { id name displayName } } } } }',
+          { id: issue.id, first: Math.min(limit, MOST) },
+        ),
+        ({ issue: found }) => found.comments.nodes.toSorted((a, b) => a.createdAt.localeCompare(b.createdAt)).map(commentOf),
       ),
     // Linear says whether it took each: one it says it didn't is refused, never taken as done.
     comment: (issue, body) =>
@@ -390,6 +707,7 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
               description: issue.body,
               ...(labelIds.length === 0 ? {} : { labelIds }),
               ...(issue.priority === undefined || issue.priority === 'none' ? {} : { priority: priorityNumber(issue.priority) }),
+              ...createInput(issue.fields),
             },
           },
         )
@@ -400,7 +718,8 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
           return yield* new ConnectorFailed({ product, reason: 'invalid_response', message: 'Linear filed the issue without saying which' })
         return issueOf(issueCreate.issue)
       }),
-    choices,
+    choices: (issue, field) => choicesOf({ issue: issue.id }, field),
+    choicesIn: (team, field) => choicesOf({ team }, field),
     update: changeIssue,
   }
 }

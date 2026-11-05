@@ -7,17 +7,26 @@ import { makeHttp, paged } from './http'
 import { AdfNode, adfOf, markdownOfAdf, markdownOfWiki, wikiOf } from './jiraText'
 import {
   cantChange,
+  cantFind,
   type Account,
   type Choice,
   type Container,
   type Issue,
+  type IssueChange,
+  type IssueComment,
   type IssueField,
+  issueMatches,
+  type IssuePage,
+  type IssueQuery,
   leftAsItIs,
+  oneAssignee,
   type Person,
   type Priority,
   type StatusCategory,
   type Tracker,
+  type TrackerCapabilities,
   unchangeable,
+  unfindable,
   unstarted,
 } from './model'
 import { type Answer, answered, failedOf, probe, readAs, refusalOf, serverLine, stopped, UNREADABLE } from './probe'
@@ -36,7 +45,8 @@ import { type Answer, answered, failedOf, probe, readAs, refusalOf, serverLine, 
 type Edition = 'jira_cloud' | 'jira_dc'
 
 /** The fields an issue is read with. */
-const FIELDS = 'summary,description,status,priority,assignee,labels,project,updated,resolution'
+const FIELDS =
+  'summary,description,status,priority,assignee,labels,project,updated,resolution,fixVersions,components,parent,issuetype,duedate'
 
 /** Someone on Jira Cloud, by account id; on Data Center, by user name and key. */
 const User = Schema.Union([
@@ -50,13 +60,18 @@ const User = Schema.Union([
 ])
 type User = typeof User.Type
 
+/** Text as each edition writes it: ADF on Cloud, wiki markup on Data Center. */
+const Text = Schema.Union([Schema.String, AdfNode])
+
+/** One of a project's versions or components, by its id and name. */
+const Named = Schema.Struct({ id: Schema.String, name: Schema.String })
+
 const IssueAnswer = Schema.Struct({
   id: Schema.String,
   key: Schema.String,
   fields: Schema.Struct({
     summary: Schema.String,
-    // ADF on Cloud, wiki markup on Data Center.
-    description: Schema.optional(Schema.NullOr(Schema.Union([Schema.String, AdfNode]))),
+    description: Schema.optional(Schema.NullOr(Text)),
     status: Schema.Struct({ name: Schema.String, statusCategory: Schema.optional(Schema.Struct({ key: Schema.String })) }),
     priority: Schema.optional(Schema.NullOr(Schema.Struct({ name: Schema.String }))),
     assignee: Schema.optional(Schema.NullOr(User)),
@@ -64,9 +79,27 @@ const IssueAnswer = Schema.Struct({
     project: Schema.optional(Schema.Struct({ key: Schema.String, name: Schema.String })),
     updated: Schema.String,
     resolution: Schema.optional(Schema.NullOr(Schema.Struct({ name: Schema.String }))),
+    fixVersions: Schema.optional(Schema.NullOr(Schema.Array(Named))),
+    components: Schema.optional(Schema.NullOr(Schema.Array(Schema.Struct({ name: Schema.String })))),
+    parent: Schema.optional(
+      Schema.NullOr(
+        Schema.Struct({ key: Schema.String, fields: Schema.optional(Schema.Struct({ summary: Schema.optional(Schema.String) })) }),
+      ),
+    ),
+    issuetype: Schema.optional(Schema.NullOr(Schema.Struct({ name: Schema.String }))),
+    duedate: Schema.optional(Schema.NullOr(Schema.String)),
   }),
 })
 type IssueAnswer = typeof IssueAnswer.Type
+
+/** A page of a search: Cloud's says the token to read on from, and whether it is the last; Data Center's where it starts, of how many. */
+const SearchAnswer = Schema.Struct({
+  issues: Schema.Array(IssueAnswer),
+  nextPageToken: Schema.optional(Schema.NullOr(Schema.String)),
+  isLast: Schema.optional(Schema.Boolean),
+  startAt: Schema.optional(Schema.Number),
+  total: Schema.optional(Schema.Number),
+})
 
 /** Resolutions that close an issue without its work done: Won't Do, Duplicate, Cannot Reproduce and their kind. */
 const UNDONE =
@@ -168,14 +201,94 @@ const Transitions = Schema.Struct({
   ),
 })
 
+/** A project's statuses, by each of its issue types. */
+const ProjectStatuses = Schema.Array(Schema.Struct({ statuses: Schema.Array(Schema.Struct({ name: Schema.String })) }))
+
+/** One of a project's versions: those released or archived are no fix version for new work. */
+const Version = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  released: Schema.optional(Schema.Boolean),
+  archived: Schema.optional(Schema.Boolean),
+})
+
+/** A page of an issue's comments, each its author, its body as the edition writes it, and when it was written. */
+const Comments = Schema.Struct({
+  comments: Schema.Array(
+    Schema.Struct({ author: Schema.optional(Schema.NullOr(User)), body: Schema.optional(Schema.NullOr(Text)), created: Schema.String }),
+  ),
+})
+
 /** The type an issue Althar files is: a Task where the project has one, or else its first that isn't a sub-task, which needs a parent. */
 const issueTypeOf = (types: typeof IssueTypes.Type) => {
   const all = types.issueTypes ?? types.values ?? []
   return all.find((type) => type.subtask !== true && /^task$/i.test(type.name)) ?? all.find((type) => type.subtask !== true)
 }
 
-/** What Jira changes of an issue: all but a project, which an issue is filed in and moved between only by Jira's own move. */
-const CHANGES: ReadonlyArray<IssueField> = ['status', 'close', 'priority', 'assignee', 'labels', 'title']
+/** Why Jira, or Althar on it, can't change a field it has no way to here. */
+const CANT: Partial<Record<IssueField, string>> = {
+  project: 'Jira moves an issue to another project only by its own Move',
+  cycle: 'Jira’s sprints belong to its boards: Althar can’t set one yet',
+  estimate: 'Jira’s story points are a field each site names: Althar can’t set them yet',
+}
+
+/**
+ * What Jira changes of an issue, and what of it an issue is filed with: all
+ * but its project, sprint and story points; its status only after, as its
+ * workflow moves it. An issue has one assignee.
+ */
+export const JIRA_TRACKING: TrackerCapabilities = {
+  links: true,
+  starts: true,
+  changes: [
+    'status',
+    'close',
+    'priority',
+    'assignee',
+    'labels',
+    'milestone',
+    'parent',
+    'type',
+    'components',
+    'due',
+    'title',
+    'description',
+  ],
+  creates: ['assignee', 'milestone', 'parent', 'type', 'components', 'due'],
+  assignees: 'one',
+  // JQL narrows by all but a project, which is where a Jira issue lives (its container); a cycle is its sprint.
+  finds: {
+    text: 'search',
+    labels: 'search',
+    status: 'search',
+    milestone: 'search',
+    cycle: 'search',
+    assignee: 'search',
+    priority: 'search',
+    parent: 'search',
+    updatedSince: 'search',
+    keys: 'search',
+  },
+}
+const CAPABILITIES = JIRA_TRACKING
+
+/** The refusal of a field Jira can't change here, in words an agent can pass on. */
+const refusalFor = (product: Edition, field: IssueField) => cantChange(product, field, CANT[field] ?? 'Jira has no such field')
+
+/**
+ * Who an issue of one assignee has after a change: the one added, in place
+ * of whoever had it; none where it takes everyone off, or takes off the one
+ * who has it; undefined where it leaves it as it is, taking off someone who
+ * hasn't it. A Data Center choice is by user name, which a person is by
+ * login.
+ */
+const assignedAfter = (issue: Issue, change: IssueChange['assignee']): Choice | null | undefined => {
+  if (change === undefined) return undefined
+  const one = oneAssignee(change)
+  if (change === null || one !== null) return one
+  const now = issue.assignees[0]
+  return now !== undefined && change.remove.some((who) => who.id === now.id || who.id === now.login) ? null : undefined
+}
 
 /** One of a site's priorities. */
 const PriorityAnswer = Schema.Struct({ id: Schema.String, name: Schema.String })
@@ -196,8 +309,112 @@ const PROJECTS_PAGE = 100
 /** Two names alike, in any case. */
 const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
 
+/** Names once each, in any case, as first given. */
+const once = (names: ReadonlyArray<string>) => {
+  const seen = new Set<string>()
+  return names.filter((name) => {
+    const key = name.toLowerCase()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 /** A JQL string, quoted. */
 const quoted = (text: string) => `"${text.replace(/["\\]/g, '\\$&')}"`
+
+/** The project an issue is in, by its key: PROJ-123 is in PROJ. Jira's project keys have no hyphen. */
+const projectOf = (issue: Issue) => issue.ref.slice(0, Math.max(0, issue.ref.lastIndexOf('-')))
+
+/** A key as Jira writes it, upper-cased: PROJ-123, in any case. Anything else is no Jira issue's. */
+const jiraKeyOf = (typed: string) => {
+  const key = typed.trim().toUpperCase()
+  return /^[A-Z][A-Z0-9_]*-\d+$/.test(key) ? key : undefined
+}
+
+/** The status category each category is in, by Jira's name: it has no other three, so a backlog is To Do, and cancelled Done. */
+const STATUS_CATEGORIES: Readonly<Record<StatusCategory, string>> = {
+  triage: 'To Do',
+  backlog: 'To Do',
+  todo: 'To Do',
+  started: 'In Progress',
+  done: 'Done',
+  cancelled: 'Done',
+}
+
+/** A list of names, quoted, for `in`. */
+const listOf = (names: ReadonlyArray<string>) => `(${[...new Set(names)].map(quoted).join(', ')})`
+
+/** Clauses either of which will do. */
+const either = (clauses: ReadonlyArray<string>) => (clauses.length === 1 ? (clauses[0] ?? '') : `(${clauses.join(' OR ')})`)
+
+/** A moment or a day as JQL compares them, in UTC: a day as it is, a moment to its minute. One that doesn't read goes as typed. */
+const jqlTimeOf = (since: string) => {
+  const typed = since.trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(typed)) return typed
+  const at = Date.parse(typed)
+  return Number.isNaN(at) ? typed : new Date(at).toISOString().slice(0, 16).replace('T', ' ')
+}
+
+/** What a query's JQL needs found first: the people its assignee was found to be, by id; the site's priorities, by name. */
+export interface Found {
+  readonly people: ReadonlyArray<string>
+  readonly priorities: ReadonlyArray<string>
+}
+
+/**
+ * A search's JQL, as a query narrows it, each filter a clause, newest change
+ * first. Cloud refuses a search that narrows nothing, so one that doesn't
+ * asks for every issue in a project. Null where nothing can be found: keys
+ * none of which is a Jira key, an assignee found to be nobody, levels of
+ * priority the site has none of.
+ */
+export const jqlFor = (query: IssueQuery, found: Found = { people: [], priorities: [] }): string | null => {
+  const text = query.text?.trim() ?? ''
+  const keys = (query.keys ?? []).flatMap((key) => jiraKeyOf(key) ?? [])
+  if (query.keys !== undefined && query.keys.length > 0 && keys.length === 0) return null
+  if (typeof query.assignee === 'string' && found.people.length === 0) return null
+  const parent = query.parent === undefined ? undefined : jiraKeyOf(query.parent)
+  if (query.parent !== undefined && parent === undefined) return null
+  const names = query.status?.names ?? []
+  const categories = query.status?.categories ?? []
+  const levels = query.priority ?? []
+  const priorities = found.priorities.filter((name) => levels.includes(levelOf(name)))
+  const priority = [
+    ...(priorities.length === 0 ? [] : [`priority in ${listOf(priorities)}`]),
+    ...(levels.includes('none') ? ['priority is EMPTY'] : []),
+  ]
+  if (levels.length > 0 && priority.length === 0) return null
+  const clauses = [
+    ...(query.container === undefined ? [] : [`project = ${quoted(query.container)}`]),
+    ...(query.state === 'open' ? ['statusCategory != Done'] : query.state === 'closed' ? ['statusCategory = Done'] : []),
+    ...(query.mine === true ? ['assignee = currentUser()'] : []),
+    ...(text === '' ? [] : [`text ~ ${quoted(text)}`]),
+    ...(query.labels ?? []).map((label) => `labels = ${quoted(label.trim())}`),
+    ...(names.length + categories.length === 0
+      ? []
+      : [
+          either([
+            ...(names.length === 0 ? [] : [`status in ${listOf(names.map((name) => name.trim()))}`]),
+            ...(categories.length === 0 ? [] : [`statusCategory in ${listOf(categories.map((one) => STATUS_CATEGORIES[one]))}`]),
+          ]),
+        ]),
+    ...(query.milestone === undefined ? [] : [`fixVersion = ${quoted(query.milestone.trim())}`]),
+    ...(query.cycle === undefined
+      ? []
+      : [same(query.cycle, 'current') ? 'sprint in openSprints()' : `sprint = ${quoted(query.cycle.trim())}`]),
+    ...(query.assignee === null
+      ? ['assignee is EMPTY']
+      : typeof query.assignee === 'string'
+        ? [`assignee in ${listOf(found.people)}`]
+        : []),
+    ...(priority.length === 0 ? [] : [either(priority)]),
+    ...(parent === undefined ? [] : [`parent = ${parent}`]),
+    ...(query.updatedSince === undefined ? [] : [`updated >= ${quoted(jqlTimeOf(query.updatedSince))}`]),
+    ...(keys.length === 0 ? [] : [`key in (${[...new Set(keys)].join(', ')})`]),
+  ]
+  return `${clauses.length === 0 ? 'project IS NOT EMPTY' : clauses.join(' AND ')} ORDER BY updated DESC`
+}
 
 const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
   const cloud = product === 'jira_cloud'
@@ -252,15 +469,24 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
           ),
     )
 
+  /** Text as Markdown, from either edition's. */
+  const markdownOf = (text: typeof Text.Type | null | undefined) => {
+    const given = text ?? ''
+    return typeof given === 'string' ? markdownOfWiki(given) : markdownOfAdf(given)
+  }
+
+  /** Markdown as the edition writes text. */
+  const textOf = (markdown: string) => (cloud ? adfOf(markdown) : wikiOf(markdown))
+
   const issueOf = (answer: IssueAnswer): Issue => {
     const { fields } = answer
-    const description = fields.description ?? ''
+    const version = fields.fixVersions?.[0]
     return {
       id: answer.id,
       ref: answer.key,
       key: answer.key,
       title: fields.summary,
-      body: typeof description === 'string' ? markdownOfWiki(description) : markdownOfAdf(description),
+      body: markdownOf(fields.description),
       url: `${site}/browse/${answer.key}`,
       status: {
         name: fields.status.name,
@@ -271,10 +497,17 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
       labels: fields.labels ?? [],
       container: fields.project?.name ?? null,
       updatedAt: isoOf(fields.updated),
+      // Its first fix version is its milestone: Jira lets an issue have several.
+      milestone: version === undefined ? null : { id: version.id, name: version.name },
+      parent: fields.parent == null ? null : { key: fields.parent.key, title: fields.parent.fields?.summary ?? fields.parent.key },
+      type: fields.issuetype?.name ?? null,
+      due: fields.duedate ?? null,
+      components: (fields.components ?? []).map((component) => component.name),
     }
   }
 
   const issuePath = (key: string) => `/issue/${encodeURIComponent(key)}`
+  const projectPath = (key: string) => `/project/${encodeURIComponent(key)}`
 
   const account: Effect.Effect<Account, ConnectorFailed> = Effect.map(
     call((root) => http.json(User, 'GET', `${root}/myself`)),
@@ -288,8 +521,60 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
       issueOf,
     )
 
+  /**
+   * A page of the issues a search's JQL finds, to a limit, by each edition's
+   * search, from where the page before stopped: Cloud's by the token it
+   * gave, Data Center's by the offset of the next.
+   */
+  const search = (jql: string, limit: number, cursor?: string): Effect.Effect<IssuePage, ConnectorFailed> => {
+    const startAt = cursor === undefined ? 0 : Math.max(0, Number.parseInt(cursor, 10) || 0)
+    const from = cloud
+      ? cursor === undefined
+        ? ''
+        : `&nextPageToken=${encodeURIComponent(cursor)}`
+      : startAt === 0
+        ? ''
+        : `&startAt=${startAt}`
+    const query = `jql=${encodeURIComponent(jql)}&maxResults=${limit}&fields=${FIELDS}${from}`
+    return Effect.map(
+      call((root) => http.json(SearchAnswer, 'GET', `${root}/${cloud ? 'search/jql' : 'search'}?${query}`)),
+      (answer) => {
+        const to = (answer.startAt ?? startAt) + answer.issues.length
+        return {
+          issues: answer.issues.map(issueOf),
+          next: cloud
+            ? answer.isLast === true
+              ? null
+              : (answer.nextPageToken ?? null)
+            : answer.total !== undefined && answer.issues.length > 0 && to < answer.total
+              ? String(to)
+              : null,
+        }
+      },
+    )
+  }
+
+  /** The people a name finds, by Cloud's account id or Data Center's user name. */
+  const peopleNamed = (name: string) =>
+    Effect.map(
+      call((root) =>
+        http.json(
+          Schema.Array(User),
+          'GET',
+          cloud
+            ? `${root}/user/search?query=${encodeURIComponent(name)}&maxResults=10`
+            : `${root}/user/search?username=${encodeURIComponent(name)}`,
+        ),
+      ),
+      (users) => users.map((user) => ('accountId' in user ? user.accountId : user.name)),
+    )
+
   /** The site's priorities, as it lists them. */
   const priorities = call((root) => http.json(Schema.Array(PriorityAnswer), 'GET', `${root}/priority`))
+
+  /** The types of issue a project files, as it lists them. */
+  const typesIn = (project: string) =>
+    call((root) => http.json(IssueTypes, 'GET', `${root}/issue/createmeta/${encodeURIComponent(project)}/issuetypes`))
 
   /** The transitions its workflow offers an issue now, those it marks unavailable left out. */
   const transitionsOf = (issue: Issue) =>
@@ -298,86 +583,136 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
       ({ transitions }) => transitions.filter((each) => each.isAvailable !== false),
     )
 
+  /** Those an issue can be assigned to that a name finds, where `where` is an issue (`issueKey=`) or a project (`project=`). */
+  const assignable = (where: string, wanted: string | undefined) => {
+    const query =
+      wanted === undefined || wanted.trim() === '' ? '' : `&${cloud ? 'query' : 'username'}=${encodeURIComponent(wanted.trim())}`
+    return Effect.map(
+      call((root) => http.json(Schema.Array(User), 'GET', `${root}/user/assignable/search?${where}&maxResults=50${query}`)),
+      (users) =>
+        users.map((user): Choice => {
+          const person = personOf(user)
+          const email = 'accountId' in user ? user.emailAddress : undefined
+          return {
+            id: 'accountId' in user ? user.accountId : user.name,
+            name: person.name ?? person.login,
+            also: [person.login, ...(email === undefined ? [] : [email])],
+          }
+        }),
+    )
+  }
+
+  /** Jira makes any label it is given: the one wanted, as Jira can hold it, and those given. */
+  const labelsWith = (labels: ReadonlyArray<string>, wanted: string | undefined) => {
+    const asked = wanted === undefined ? '' : jiraLabelOf(wanted)
+    return [...new Set([...labels, ...(asked === '' ? [] : [asked])])].map((label): Choice => ({ id: label, name: label }))
+  }
+
+  const choicesIn: Tracker['choicesIn'] = (project, field, wanted) => {
+    const at = projectPath(project)
+    switch (field) {
+      // Any its issues of any type can be in, once each.
+      case 'status':
+        return Effect.map(
+          call((root) => http.json(ProjectStatuses, 'GET', `${root}${at}/statuses`)),
+          (types) => once(types.flatMap((type) => type.statuses.map((status) => status.name))).map((name): Choice => ({ id: name, name })),
+        )
+      case 'labels':
+        return Effect.succeed(labelsWith([], wanted))
+      case 'assignee':
+        return assignable(`project=${encodeURIComponent(project)}`, wanted)
+      // Its fix versions still to come: those released or archived are done with.
+      case 'milestone':
+        return Effect.map(
+          call((root) => http.json(Schema.Array(Version), 'GET', `${root}${at}/versions`)),
+          (versions) =>
+            versions
+              .filter((version) => version.released !== true && version.archived !== true)
+              .map((version): Choice => ({ id: version.id, name: version.name })),
+        )
+      case 'components':
+        return Effect.map(
+          call((root) => http.json(Schema.Array(Named), 'GET', `${root}${at}/components`)),
+          (components) => components.map((component): Choice => ({ id: component.id, name: component.name })),
+        )
+      // Sub-tasks are left out: one needs a parent to be filed under, and an issue becomes one only by Jira's own Move.
+      case 'type':
+        return Effect.map(typesIn(project), (types) =>
+          (types.issueTypes ?? types.values ?? [])
+            .filter((type) => type.subtask !== true)
+            .map((type): Choice => ({ id: type.id, name: type.name })),
+        )
+      case 'project':
+      case 'cycle':
+        return Effect.fail(refusalFor(product, field))
+    }
+  }
+
   const choices: Tracker['choices'] = (issue, field, wanted) => {
     switch (field) {
       // Where its workflow lets it go from where it is, by the status each transition goes into; and where it is.
       case 'status':
-        return Effect.map(transitionsOf(issue), (transitions) => {
-          const names = [issue.status.name, ...transitions.map((each) => each.to.name)]
-          return [...new Map(names.map((name) => [name.toLowerCase(), name])).values()].map((name): Choice => ({ id: name, name }))
-        })
-      // Jira makes any label it is given: the one wanted, as Jira can hold it, and those the issue has.
-      case 'labels': {
-        const asked = wanted === undefined ? '' : jiraLabelOf(wanted)
-        return Effect.succeed(
-          [...new Set([...issue.labels, ...(asked === '' ? [] : [asked])])].map((label): Choice => ({ id: label, name: label })),
+        return Effect.map(transitionsOf(issue), (transitions) =>
+          once([issue.status.name, ...transitions.map((each) => each.to.name)]).map((name): Choice => ({ id: name, name })),
         )
-      }
+      case 'labels':
+        return Effect.succeed(labelsWith(issue.labels, wanted))
       // Jira finds people by a name rather than listing them: those the issue can be assigned to.
-      case 'assignee': {
-        const query =
-          wanted === undefined || wanted.trim() === '' ? '' : `&${cloud ? 'query' : 'username'}=${encodeURIComponent(wanted.trim())}`
-        return Effect.map(
-          call((root) =>
-            http.json(
-              Schema.Array(User),
-              'GET',
-              `${root}/user/assignable/search?issueKey=${encodeURIComponent(issue.ref)}&maxResults=50${query}`,
-            ),
-          ),
-          (users) =>
-            users.map((user): Choice => {
-              const person = personOf(user)
-              const email = 'accountId' in user ? user.emailAddress : undefined
-              return {
-                id: 'accountId' in user ? user.accountId : user.name,
-                name: person.name ?? person.login,
-                also: [person.login, ...(email === undefined ? [] : [email])],
-              }
-            }),
-        )
-      }
-      case 'project':
-        return Effect.fail(cantChange(product, 'project', 'Jira moves an issue to another project only by its own Move'))
+      case 'assignee':
+        return assignable(`issueKey=${encodeURIComponent(issue.ref)}`, wanted)
+      // As its project's, by its key.
+      default:
+        return choicesIn(projectOf(issue), field, wanted)
     }
   }
 
+  /** Someone, by Cloud's account id or Data Center's user name. */
+  const userOf = (id: string | null) => (cloud ? { accountId: id } : { name: id })
+
   const changeIssue: Tracker['update'] = (issue, wanted) =>
     Effect.gen(function* () {
-      const refused = unchangeable({ links: true, starts: true, changes: CHANGES }, wanted)
-      if (refused !== undefined) return yield* cantChange(product, refused, 'Jira moves an issue to another project only by its own Move')
+      const refused = unchangeable(CAPABILITIES, wanted)
+      if (refused !== undefined) return yield* refusalFor(product, refused)
       const path = issuePath(issue.ref)
       if (wanted.priority === 'none')
         return yield* new ConnectorFailed({ product, reason: 'rejected', message: 'A Jira issue always has a priority: name one' })
       const priority = wanted.priority === undefined ? undefined : priorityFor(yield* priorities, wanted.priority)
       if (wanted.priority !== undefined && priority === undefined)
         return yield* new ConnectorFailed({ product, reason: 'rejected', message: `This site has no ${wanted.priority} priority` })
-      // Its title and priority are set, and its labels added and taken off, in one edit.
+      // Jira's edit fails taking the parent off one that has none, so one read as having none is left as it is.
+      const parent = wanted.parent === undefined || (wanted.parent === null && issue.parent === null) ? undefined : wanted.parent
+      // Its fields are set, and its labels and fix version added and taken off, in one edit: null clears a field, none of its versions its milestone.
       const fields = {
         ...(wanted.title === undefined ? {} : { summary: wanted.title }),
         ...(priority === undefined ? {} : { priority: { id: priority.id } }),
+        ...(wanted.description === undefined ? {} : { description: wanted.description.trim() === '' ? null : textOf(wanted.description) }),
+        ...(wanted.due === undefined ? {} : { duedate: wanted.due }),
+        ...(wanted.milestone === null ? { fixVersions: [] } : {}),
+        ...(wanted.components === undefined ? {} : { components: wanted.components.map((component) => ({ id: component.id })) }),
+        ...(parent === undefined ? {} : { parent: parent === null ? null : { key: parent.key } }),
+        ...(wanted.type === undefined ? {} : { issuetype: { id: wanted.type.id } }),
       }
       const labels = [
         ...(wanted.labels?.add ?? []).map((label) => ({ add: label.id })),
         ...(wanted.labels?.remove ?? []).map((label) => ({ remove: label.id })),
       ]
-      if (Object.keys(fields).length > 0 || labels.length > 0)
+      // A fix version is added beside those the issue has: an issue may be in several releases.
+      const versions = wanted.milestone == null ? [] : [{ add: { id: wanted.milestone.id } }]
+      const update = {
+        ...(labels.length === 0 ? {} : { labels }),
+        ...(versions.length === 0 ? {} : { fixVersions: versions }),
+      }
+      if (Object.keys(fields).length > 0 || Object.keys(update).length > 0)
         yield* call((root) =>
           http.json(Schema.Unknown, 'PUT', `${root}${path}`, {
             ...(Object.keys(fields).length === 0 ? {} : { fields }),
-            ...(labels.length === 0 ? {} : { update: { labels } }),
+            ...(Object.keys(update).length === 0 ? {} : { update }),
           }),
         )
-      // Someone, by Cloud's account id or Data Center's user name; none takes the assignee off.
-      if (wanted.assignee !== undefined)
-        yield* call((root) =>
-          http.json(
-            Schema.Unknown,
-            'PUT',
-            `${root}${path}/assignee`,
-            cloud ? { accountId: wanted.assignee?.id ?? null } : { name: wanted.assignee?.id ?? null },
-          ),
-        )
+      // Its one assignee, in place of whoever had it; none takes them off.
+      const assignee = assignedAfter(issue, wanted.assignee)
+      if (assignee !== undefined)
+        yield* call((root) => http.json(Schema.Unknown, 'PUT', `${root}${path}/assignee`, userOf(assignee?.id ?? null)))
       // A status, by the transition its workflow offers into it now; closed, by one into Done's category, Done itself first.
       if (wanted.status !== undefined || wanted.close === true) {
         const target = wanted.status?.name
@@ -402,30 +737,101 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
       return yield* read(issue.ref)
     })
 
+  /**
+   * A page of what a query finds, by JQL, from where the page before
+   * stopped. Jira's status categories are three: a backlog is told from to
+   * do, and cancelled from done, after its search, so a page can hold fewer.
+   * Jira refuses a search naming a key it hasn't: each is read on its own,
+   * and those it has searched for again.
+   */
+  const find: Tracker['find'] = (query) =>
+    Effect.gen(function* () {
+      const [refused] = unfindable(CAPABILITIES, query)
+      if (refused !== undefined)
+        return yield* cantFind(
+          product,
+          refused === 'project'
+            ? 'A Jira project is where its issues live: find in it as the container'
+            : `Jira can't narrow a search by ${refused}`,
+        )
+      if (query.parent !== undefined && jiraKeyOf(query.parent) === undefined)
+        return yield* cantFind(product, `A parent is a Jira issue's key, such as PROJ-123: ${query.parent} isn't one`)
+      const none: IssuePage = { issues: [], next: null }
+      const keys = (query.keys ?? []).flatMap((key) => jiraKeyOf(key) ?? [])
+      if (query.keys !== undefined && query.keys.length > 0 && keys.length === 0) return none
+      const named = typeof query.assignee === 'string' ? query.assignee.trim().replace(/^@/, '') : ''
+      const found: Found = {
+        people: named === '' ? [] : yield* peopleNamed(named),
+        priorities: (query.priority ?? []).some((level) => level !== 'none') ? (yield* priorities).map((one) => one.name) : [],
+      }
+      const jql = jqlFor(query, found)
+      if (jql === null) return none
+      const page = yield* search(jql, query.limit, query.cursor).pipe(
+        Effect.catchIf(
+          (error) => keys.length > 0 && error.reason === 'rejected' && error.status === 400,
+          () =>
+            Effect.gen(function* () {
+              const there = yield* Effect.forEach(
+                keys,
+                (key) =>
+                  read(key).pipe(
+                    Effect.map((issue) => [issue.key]),
+                    Effect.catchIf(
+                      (error) => error.reason === 'not_found',
+                      () => Effect.succeed([]),
+                    ),
+                  ),
+                { concurrency: 4 },
+              )
+              const again = there.flat().length === 0 ? null : jqlFor({ ...query, keys: there.flat() }, found)
+              return again === null ? none : yield* search(again, query.limit, query.cursor)
+            }),
+        ),
+      )
+      const status = query.status
+      return status === undefined && query.updatedSince === undefined
+        ? page
+        : {
+            issues: page.issues.filter((issue) =>
+              issueMatches(issue, {
+                state: 'all',
+                ...(status === undefined ? {} : { status }),
+                ...(query.updatedSince === undefined ? {} : { updatedSince: query.updatedSince }),
+              }),
+            ),
+            next: page.next,
+          }
+    })
+
   return {
     product,
-    capabilities: { links: true, starts: true, changes: CHANGES },
+    capabilities: CAPABILITIES,
     account,
     issue: read,
-    mine: (options = {}) => {
-      const jql = [
-        'assignee = currentUser() AND statusCategory != Done',
-        ...(options.container === undefined ? [] : [`project = ${quoted(options.container)}`]),
-      ].join(' AND ')
-      const query = `jql=${encodeURIComponent(`${jql} ORDER BY updated DESC`)}&maxResults=${options.limit ?? 50}&fields=${FIELDS}`
-      return Effect.map(
-        call((root) =>
-          http.json(Schema.Struct({ issues: Schema.Array(IssueAnswer) }), 'GET', `${root}/${cloud ? 'search/jql' : 'search'}?${query}`),
-        ),
-        ({ issues }) => issues.map(issueOf),
-      )
-    },
-    comment: (issue, body) =>
-      Effect.asVoid(
-        call((root) =>
-          http.json(Schema.Unknown, 'POST', `${root}${issuePath(issue.ref)}/comment`, { body: cloud ? adfOf(body) : wikiOf(body) }),
-        ),
+    mine: (options = {}) =>
+      search(
+        [
+          'assignee = currentUser() AND statusCategory != Done',
+          ...(options.container === undefined ? [] : [`project = ${quoted(options.container)}`]),
+        ].join(' AND ') + ' ORDER BY updated DESC',
+        options.limit ?? 50,
+      ).pipe(Effect.map(({ issues }) => issues)),
+    find,
+    // The latest first, as Jira pages them, so the latest are those within the limit; then oldest first.
+    comments: (issue, limit) =>
+      Effect.map(
+        call((root) => http.json(Comments, 'GET', `${root}${issuePath(issue.ref)}/comment?orderBy=-created&maxResults=${limit}`)),
+        ({ comments }) =>
+          comments
+            .map((comment): IssueComment => ({
+              author: comment.author == null ? null : personOf(comment.author),
+              body: markdownOf(comment.body),
+              at: isoOf(comment.created),
+            }))
+            .reverse(),
       ),
+    comment: (issue, body) =>
+      Effect.asVoid(call((root) => http.json(Schema.Unknown, 'POST', `${root}${issuePath(issue.ref)}/comment`, { body: textOf(body) }))),
     // A remote link, by the link as its global id: linking the same pull request again changes the one link.
     link: (issue, link) =>
       Effect.asVoid(
@@ -473,9 +879,9 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
       ),
     create: (project, draft) =>
       Effect.gen(function* () {
-        const type = issueTypeOf(
-          yield* call((root) => http.json(IssueTypes, 'GET', `${root}/issue/createmeta/${encodeURIComponent(project)}/issuetypes`)),
-        )
+        const given = draft.fields ?? {}
+        // The type chosen, or else the one Althar files.
+        const type = given.type ?? issueTypeOf(yield* typesIn(project))
         if (type === undefined)
           return yield* new ConnectorFailed({
             product,
@@ -488,11 +894,20 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
           draft.priority === undefined || draft.priority === 'none'
             ? undefined
             : priorityFor(yield* priorities.pipe(Effect.orElseSucceed(() => [])), draft.priority)
+        // What else it is filed with, of what `creates` holds; none given leaves the project's default.
+        const assignee = given.assignee === undefined ? null : oneAssignee(given.assignee)
         const fields = {
           project: { key: project },
           issuetype: { id: type.id },
           summary: draft.title,
-          ...(draft.body === '' ? {} : { description: cloud ? adfOf(draft.body) : wikiOf(draft.body) }),
+          ...(draft.body === '' ? {} : { description: textOf(draft.body) }),
+          ...(assignee === null ? {} : { assignee: userOf(assignee.id) }),
+          ...(given.milestone == null ? {} : { fixVersions: [{ id: given.milestone.id }] }),
+          ...(given.components === undefined || given.components.length === 0
+            ? {}
+            : { components: given.components.map((component) => ({ id: component.id })) }),
+          ...(given.parent == null ? {} : { parent: { key: given.parent.key } }),
+          ...(given.due == null ? {} : { duedate: given.due }),
         }
         // What was filed, with the labels it was filed with, and its priority where it was given one.
         const file = (sent: ReadonlyArray<string>, prioritised: boolean) =>
@@ -538,6 +953,7 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
         )
       }),
     choices,
+    choicesIn,
     update: changeIssue,
   }
 }

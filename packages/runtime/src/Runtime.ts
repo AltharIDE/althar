@@ -19,6 +19,7 @@ import { Fetches } from './Fetches'
 import { Launches } from './Launches'
 import { Live } from './Live'
 import { MachineLoad } from './MachineLoad'
+import { Overlaps } from './Overlaps'
 import { PlanUsage } from './PlanUsage'
 import { Permissions } from './Permissions'
 import { Questions } from './Questions'
@@ -26,6 +27,7 @@ import { PermissionJudge } from './PermissionJudge'
 import { Policies } from './Policies'
 import { Projects } from './Projects'
 import { Coordinator } from './Coordinator'
+import { TaskActions } from './TaskActions'
 import { Plans } from './Plans'
 import { Reviews } from './Reviews'
 import { Runs } from './Runs'
@@ -42,6 +44,7 @@ import { ModelFacts } from './ModelFacts'
 import { Models } from './Models'
 import { SignIns } from './SignIns'
 import { Errands } from './Errands'
+import { MergeLine } from './MergeLine'
 import { ToolServer } from './ToolServer'
 
 export interface RuntimeLayerOptions extends RuntimeOptions {
@@ -134,7 +137,15 @@ export const layer = (options: RuntimeLayerOptions) => {
   // Work that starts by itself on a schedule, as tasks and reviews like any other (docs/plans/automations.md).
   const automating = Automations.layer.pipe(Layer.provideMerge(signing))
   // How hard this computer works, and each piece of work's part, while a window shows it. Tasks made before search, indexed.
-  return Layer.mergeAll(Coordinator.layer, MachineLoad.layer, fillIndex).pipe(Layer.provideMerge(automating))
+  // Leads whose work meets another running task's hear of it once (Overlaps.ts).
+  // The coordinator merges on the person's word: through the host's queue, or Althar's own line for each branch (ADR-081).
+  return MergeLine.layer.pipe(
+    Layer.provideMerge(
+      Layer.mergeAll(Coordinator.layer, TaskActions.layer, MachineLoad.layer, Overlaps.layer, fillIndex).pipe(
+        Layer.provideMerge(automating),
+      ),
+    ),
+  )
 }
 
 export { envelope } from './envelope'

@@ -44,6 +44,7 @@ import { NotConnected } from '../src/Connections'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { Folders } from '../src/Folders'
+import { listProcesses, marksOf, WORK } from '../src/machine'
 import { itemOf, stuckOf } from '../src/Queries'
 import { agentSaid, summarize, words } from '../src/words'
 import { type AgentEntry, Agents, Connectors, type RuntimeOptions } from '../src/Config'
@@ -1074,6 +1075,15 @@ describe('finished tasks’ folders, through the API', () => {
         assert.strictEqual((yield* client.GetSettings({})).folderWait, 'smart')
         yield* client.SetFolderWait({ commandId: commandId(), wait: 'never' })
         assert.strictEqual((yield* client.GetSettings({})).folderWait, 'never')
+        // How long work goes on alone, and what new projects start with: today's until changed, and a change leaves the rest.
+        const before = yield* client.GetSettings({})
+        assert.deepStrictEqual(before.plansAndReviews, { countdown: 25, rounds: 3 })
+        assert.deepStrictEqual(before.newProjects, { permissions: 'rules', usageLimit: 'move', rotateAccounts: false, end: 'draft' })
+        yield* client.SetPlansAndReviews({ commandId: commandId(), countdown: 10, rounds: 2 })
+        yield* client.SetNewProjectDefaults({ commandId: commandId(), usageLimit: 'wait', rotateAccounts: true })
+        const after = yield* client.GetSettings({})
+        assert.deepStrictEqual(after.plansAndReviews, { countdown: 10, rounds: 2 })
+        assert.deepStrictEqual(after.newProjects, { permissions: 'rules', usageLimit: 'wait', rotateAccounts: true, end: 'draft' })
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Add a retry' })
         const worktree = (yield* client.GetThread({ threadId: task.threadId })).task.worktree ?? ''
@@ -1153,7 +1163,8 @@ describe('project rules, through the API', () => {
           alwaysAllow: [],
           commands: [],
           end: null,
-          resolveConflicts: false,
+          worksIn: 'worktree',
+          resolveConflicts: true,
           pushCommits: true,
           postScreenshots: false,
           leadsReachWeb: true,
@@ -1163,7 +1174,6 @@ describe('project rules, through the API', () => {
           branchPattern: null,
           titlePattern: null,
           moveIssues: true,
-          changeIssues: false,
           // A repository with no packages, on no host: only what every lead runs outside its sandbox.
           sandbox: {
             commands: ['ps', 'env -i'],
@@ -1185,7 +1195,7 @@ describe('project rules, through the API', () => {
           never: ['force-push'],
           commands: [{ pattern: 'terraform *', decision: 'ask' }],
           end: 'ready',
-          resolveConflicts: true,
+          resolveConflicts: false,
           leadsReachWeb: false,
           usageLimit: 'wait',
           rotateAccounts: true,
@@ -1208,7 +1218,7 @@ describe('project rules, through the API', () => {
             ['force-push'],
             [{ pattern: 'terraform *', decision: 'ask' }],
             'ready',
-            true,
+            false,
             false,
             'wait',
             true,
@@ -1233,7 +1243,7 @@ describe('project rules, through the API', () => {
         const back = yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, end: null, onlyAccounts: null })
         assert.deepStrictEqual(
           [back.end, back.onlyAccounts, back.rotateAccounts, back.never, back.resolveConflicts],
-          [null, null, true, ['force-push'], true],
+          [null, null, true, ['force-push'], false],
         )
         assert.deepStrictEqual(yield* client.GetProjectRules({ projectId: project.id }), back)
         // Allow everything is a switch over the mode (ADR-043): the mode is kept under it, and holds again once it is off.
@@ -1699,6 +1709,70 @@ describe('a project’s menu, through the API', () => {
       }),
     ),
   )
+
+  it.live.skipIf(process.platform === 'win32')(
+    'removes a project whose task works Local: its checkout goes back to its branch once its lead, and the server it left, have stopped',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          // Its lead stays in its turn until the removal stops it.
+          const { client, grant } = yield* connected({ countdown: Duration.minutes(5), agents: fakeAgents({ holds: holds() }) })
+          const root = repository()
+          const branchOf = Effect.sync(() => execFileSync('git', ['-C', root, 'branch', '--show-current'], { encoding: 'utf8' }).trim())
+          const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(root) })
+          yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, worksIn: 'checkout' })
+          const coordinator = yield* client.GetCoordinator({ projectId: project.id })
+          yield* client.Send({
+            commandId: commandId(),
+            threadId: coordinator.threadId,
+            body: 'Add docs. [coordinator:plan] [coordinator:plan-no-review] [lead:slowly]',
+            disposition: 'after_current',
+          })
+          const planned = yield* until(client.GetCoordinator({ projectId: project.id, limit: 50 }), (snapshot) =>
+            snapshot.items.some((item) => item.kind === 'task' && item.content.plan !== null && item.content.phase === 'planned'),
+          )
+          const card = planned.items.find((item) => item.kind === 'task' && item.content.phase === 'planned')
+          const [planId, threadId, taskId] =
+            card?.kind === 'task' ? [card.content.plan?.id ?? '', card.content.threadId, card.content.taskId] : ['', '', '']
+          yield* client.StartPlan({ commandId: commandId(), planId })
+          // Its lead at work in the person's checkout, on the task's branch.
+          yield* until(client.GetThread({ threadId }), (thread) => thread.session?.turnRunning === true)
+          const taken = yield* branchOf
+          assert.notStrictEqual(taken, 'main')
+          // And a server its lead started, gone from its group to run on its own from the checkout, as `npm run dev &` does.
+          const marked = Effect.gen(function* () {
+            const listing = yield* listProcesses()
+            const marks = listing === null ? new Map<number, string>() : yield* marksOf()([...listing.keys()])
+            return [...marks].flatMap(([pid, work]) => (work === `task:${taskId}` ? [pid] : []))
+          })
+          const server = yield* Effect.acquireRelease(
+            Effect.sync(() => {
+              // Started by a shell that exits at once, so it is in no tree of Althar's.
+              const serve = `"${process.execPath}" -e "setInterval(() => {}, 1000)" >/dev/null 2>&1 & echo $!`
+              const pid = execFileSync('/bin/sh', ['-c', serve], { cwd: root, env: { ...process.env, [WORK]: `task:${taskId}` } })
+              return Number(pid.toString().trim())
+            }),
+            // Stopped by then, unless the test failed.
+            (pid) =>
+              Effect.sync(() => {
+                try {
+                  process.kill(pid, 'SIGKILL')
+                } catch {}
+              }),
+          )
+          yield* until(marked, (pids) => pids.includes(server))
+
+          yield* client.RemoveProject({ commandId: commandId(), projectId: project.id })
+          yield* until(branchOf, (on) => on === 'main', 'the checkout goes back to main')
+          // Not before the server has stopped.
+          assert.deepStrictEqual(yield* marked, [])
+          // The task's branch stays, with what was on it; the same folder, added again, is free to work in.
+          assert.strictEqual(execFileSync('git', ['-C', root, 'branch', '--list', taken], { encoding: 'utf8' }).trim(), taken)
+          const again = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(root) })
+          assert.notStrictEqual(again.id, project.id)
+        }),
+      ),
+  )
 })
 
 describe('a fork’s branches upstream, through the API', () => {
@@ -1883,7 +1957,7 @@ describe('the coordinator, through the API', () => {
           commandId: commandId(),
           projectId: project.id,
           title: 'Retry',
-          description: '[lead:finish]',
+          description: '[lead:commit] [lead:make-change] [lead:finish]',
           steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
         })
         const both = yield* until(
@@ -1907,7 +1981,7 @@ describe('the coordinator, through the API', () => {
           ['Which partners still call v1', 'ready'],
           ['Retry', 'ready'],
         ])
-        // Kept for later, the plain task is out of Needs you; a change can't be kept, nor marked done.
+        // Kept for later, the plain task is out of Needs you; a change with work on it can't be kept, nor marked done.
         yield* client.KeepTaskForLater({ commandId: commandId(), taskId: question?.taskId ?? '' })
         yield* client.KeepTaskForLater({ commandId: commandId(), taskId: change.id })
         yield* client.MarkTaskDone({ commandId: commandId(), taskId: change.id })
@@ -1933,6 +2007,8 @@ describe('the coordinator, through the API', () => {
         const { client, grant } = yield* connected()
         const root = repository()
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(root) })
+        // The person turned it off, as it is on unless they do.
+        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, resolveConflicts: false })
         const task = yield* client.StartTask({
           commandId: commandId(),
           projectId: project.id,
@@ -1977,6 +2053,8 @@ describe('the coordinator, through the API', () => {
         const { client, grant, store } = yield* connected()
         const root = repository()
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(root) })
+        // The project leaves conflicts to the person, so the task turning it on is what asks its lead.
+        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, resolveConflicts: false })
         const task = yield* client.StartTask({
           commandId: commandId(),
           projectId: project.id,
@@ -2671,6 +2749,8 @@ describe('words', () => {
     assert.strictEqual(failed('usage_limit'), "The agent's usage limit is reached.")
     assert.strictEqual(failed('usage_limit', '15:00'), "The agent's usage limit is reached until 15:00.")
     assert.strictEqual(failed('context_full'), "The agent's context is full.")
+    // Claude Code's "Resource not found", for a session its adapter had dropped: what happened, never the bare words.
+    assert.strictEqual(failed('session_lost'), 'The agent had lost this conversation.')
     assert.strictEqual(failed('unknown'), 'Something odd.')
     assert.strictEqual(
       agentSaid(new OptionUnavailable({ configId: 'model', value: 'huge', available: [] })),
@@ -2731,6 +2811,12 @@ describe('steps that need the person', () => {
     for (const why of ['no_report', 'session_ended', 'restarted', 'transient', 'signed_out']) assert.strictEqual(stuckOf({ why }).why, why)
     // A service that kept failing keeps its name, for the call to say whose.
     assert.strictEqual(stuckOf({ why: 'transient', service: 'Anthropic' }).service, 'Anthropic')
+    // A sign-in one provider within the agent refused keeps the model and the provider, for the call to name them.
+    assert.deepInclude(stuckOf({ why: 'signed_out', model: 'opencode-go/deepseek-v4.1-flash', provider: 'opencode-go' }), {
+      model: 'opencode-go/deepseek-v4.1-flash',
+      provider: 'opencode-go',
+    })
+    assert.notProperty(stuckOf({ why: 'signed_out' }), 'provider')
     assert.strictEqual(stuckOf({ step: 'review' }).step, 'review')
     assert.deepStrictEqual(stuckOf({}), { step: 'implement', why: 'failed_to_start', detail: null, agentId: null, round: 0, open: 0 })
   })

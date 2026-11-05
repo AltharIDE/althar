@@ -78,7 +78,7 @@
 .wrap .said {
   flex: 0 1 auto;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 .note {
   min-width: 0;
