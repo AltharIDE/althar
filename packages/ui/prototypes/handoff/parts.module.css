@@ -368,7 +368,9 @@
   padding: 14px 18px 16px;
   border-radius: var(--r-lg);
   background: var(--paper-plain);
-  box-shadow: inset 0 0 0 1px var(--line-2), var(--lift-card);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
 }
 .handoff > .checks {
   align-items: flex-start;
