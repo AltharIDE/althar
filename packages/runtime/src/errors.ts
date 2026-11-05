@@ -4,12 +4,14 @@ import { Schema } from 'effect'
  * A git command failed: what git wrote to stderr, never the command line in
  * its place. Where it wrote nothing, how it ended says why: its exit code, the
  * signal that stopped it, or that it ran past its time and Althar stopped it
- * (`timedOut`, after `timeout` milliseconds).
+ * (`timedOut`, after `timeout` milliseconds). `reason` is for a process or
+ * output limit Althar itself stopped, never something git wrote.
  */
 export class GitFailed extends Schema.TaggedError<GitFailed>()('GitFailed', {
   args: Schema.Array(Schema.String),
   cwd: Schema.String,
   stderr: Schema.String,
+  reason: Schema.optional(Schema.String),
   code: Schema.optional(Schema.Number),
   signal: Schema.optional(Schema.String),
   timedOut: Schema.optional(Schema.Boolean),
@@ -227,12 +229,14 @@ export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused'
   ]),
   /** The branch it follows: origin/main. */
   remote: Schema.String,
-  /** What the remote said, for one it refused: its one line. */
+  /** What the remote said, for one it refused. */
   said: Schema.optional(Schema.String),
   /** The code host the remote is on, by name, where Althar knows it: GitLab. */
   host: Schema.optional(Schema.String),
-  /** All git said, for a quiet Details: never the sentence itself. */
+  /** All git said and how it ended, for a quiet Details. */
   detail: Schema.optional(Schema.String),
+  /** For `protected`, the project's Repository files switches that are off and would let them go. */
+  needs: Schema.optional(Schema.Array(Schema.Literals(['writeSkills', 'writeOpenSpec', 'pushProtected']))),
 }) {}
 
 /**
@@ -323,6 +327,8 @@ export class CliUnanswered extends Schema.TaggedError<CliUnanswered>()('CliUnans
   message: Schema.String,
 }) {}
 
+/** A skills store operation that couldn't be done, in words for the person, is `@althar/skills`' own `SkillRefused`. */
+export { SkillRefused } from '@althar/skills'
 /**
  * A task's screenshots can't go in a comment on its pull request as asked
  * (ADR-077): its host takes no pictures, there are none to post, or a

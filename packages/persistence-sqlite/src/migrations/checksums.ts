@@ -66,4 +66,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0060_finding_titles': 'e205614f007c5232164f727e6084a2b5210d2f473145cb1f62282dc8ee7930b1',
   '0061_local_tasks': '6d52f601596ca2a31fec9c3b298e1cfd6e9a580a5bfc9dca2aa37e691776a460',
   '0062_work_toward': 'ce459d3d048ce41ef1c73f100e69f05febb6ad016ec3607a3651f3a37985f068',
+  '0063_skills': 'ac2b8ba12660d4a876e22c87ae030f75ab3c93dcd6596ed57835feb4a2923ae2',
 }

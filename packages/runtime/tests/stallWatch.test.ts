@@ -1,4 +1,5 @@
 import type { SessionEvent } from '@althar/provider-adapters'
+import { until } from '@althar/testing/effect'
 import { assert, describe, it } from '@effect/vitest'
 
 import type { LiveEvent } from '../src/Live'

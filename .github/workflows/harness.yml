@@ -15,6 +15,7 @@ on:
         'packages/persistence-sqlite/**',
         'packages/provider-adapters/**',
         'packages/runtime/**',
+        'packages/skills/**',
         'apps/cli/**',
         'package.json',
         'bun.lock',
