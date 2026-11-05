@@ -196,6 +196,7 @@ export const boot = () => {
     opening: {
       review: review === undefined ? null : Number(review) - 1,
       top: params.get('scroll') === 'top',
+      end: params.get('scroll') === 'end',
     },
   })
   // Opened at the thread's start, for a screenshot of it scrolled back: once the thread has followed its end.

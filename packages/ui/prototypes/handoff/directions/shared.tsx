@@ -46,11 +46,12 @@ const scrollerOf = (from: HTMLElement): HTMLElement | null => {
 
 /**
  * Opens the thread with this at its top, once, as the task opens: after the thread has followed its end. With `start`, at
- * the thread's start instead; with ?scroll=top, every take opens there, for a screenshot of it scrolled back.
+ * the thread's start instead; with ?scroll=top or end, every take opens there, for a screenshot of it scrolled.
  */
 export const useOpenAt = (ref: RefObject<HTMLElement | null>, { gap = 20, start = false }: { gap?: number; start?: boolean } = {}) => {
   useEffect(() => {
-    if (proto.get().opening.top) return
+    const { top, end } = proto.get().opening
+    if (top || end) return
     let done = false
     const place = () => {
       const el = ref.current

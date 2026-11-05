@@ -165,9 +165,11 @@
   bottom: 44px;
   z-index: 2;
   background: var(--paper);
+  /* the page's own colour under it, down to the composer, so the thread doesn't show between them */
   box-shadow:
     inset 0 0 0 1px var(--line-2),
-    var(--lift-pop);
+    var(--lift-pop),
+    0 44px 0 0 var(--n-2);
 }
 .docked .askWhy,
 .docked .askCode {

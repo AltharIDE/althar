@@ -460,7 +460,7 @@ const longItems: ThreadItem[] = [
     step: 'settle',
     round: 1,
     summary:
-      'Fixed the probe’s retry and renamed `stepGapMs`. Left the reviewer warm between rounds, behind `ALTHAR_WARM_REVIEWER`: keeping it costs 1–2 GB a task, dropping it about 40s a round, and that’s the person’s to choose.',
+      'Fixed the probe’s retry and renamed `stepGapMs`. Left the reviewer warm between rounds, behind `ALTHAR_WARM_REVIEWER`: keeping it costs 1–2 GB a task, dropping it about 40s a round, and that’s yours to choose.',
     built: BUILT_LATEST,
     evidence: [
       run(
