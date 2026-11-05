@@ -59,7 +59,8 @@ const connected = Effect.gen(function* () {
   return { client, grant }
 })
 
-const idle = (thread: { readonly session: ThreadSnapshot['session'] }) => thread.session !== null && !thread.session.turnRunning
+const idle = (thread: { readonly session: ThreadSnapshot['session'] }) =>
+  thread.session !== null && !thread.session.turnRunning && thread.session.turnEndedAt !== null
 
 /** What a call that can't be done says, as the window shows it. */
 const refused = <A, E>(effect: Effect.Effect<A, E>) =>

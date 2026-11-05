@@ -515,13 +515,19 @@ The default meanings are intentionally different:
 
 - **Send / after current** appends the input to the durable FIFO.
 - **Interrupt and continue** asks the active turn to stop at the earliest safe
-  boundary, moves this input ahead of ordinary pending input, and then continues
-  the existing task with both its unfinished objective and the new instruction.
+  boundary, then continues the existing task with its unfinished objective and
+  all pending inputs in send order. It never jumps ahead of earlier input.
 - **Supersede pending** explicitly replaces identified, not-yet-started input;
   it does not erase completed history.
 - **Cancel run** terminates the run under its cancellation policy.
 
 An interrupt is never interpreted as “forget what you were doing.”
+
+Messages arriving together form a burst, held until attachment preparation is
+complete and a short quiet interval has passed. The burst is delivered together
+in send order. If any input interrupts, the whole burst is delivered as one
+interruption, including earlier inputs still queued from a previous burst. The
+thread shows the person's messages in that same order.
 
 ### Two acknowledgements
 
@@ -543,8 +549,8 @@ After interruption, the next turn receives:
 - the original task objective and current workflow node;
 - a summary/reference to completed and partially completed work;
 - outstanding verification, cleanup, and follow-up obligations;
-- the interrupting message;
-- any earlier queued inputs in their original order.
+- all queued inputs in send order, under one interruption wrapper for the whole
+  burst.
 
 The scheduler may revise the plan in light of the new message, but unfinished
 work remains pending unless the user explicitly cancels it or the new
