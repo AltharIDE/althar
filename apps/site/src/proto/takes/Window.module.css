@@ -1,0 +1,141 @@
+/* PROTOTYPE. C: The window. The first screen pinned, its window a display. */
+
+.window { position: relative; background: var(--n-2); }
+
+/* A screen and a little more of scrolling for each step, and the screen the cabin stands in. */
+.track { position: relative; height: calc(var(--steps) * 115svh + 100svh); background: #050302; }
+.pin { position: sticky; top: 0; height: 100svh; overflow: hidden; isolation: isolate; }
+/* The camera leans in from the window's middle. */
+.pin > div:first-child { transform-origin: 50% 36%; }
+
+/* ---- the display, behind the glass: the window's box, from the photograph's own measure ---- */
+.display {
+  --power: 0;
+  --sweep: 0;
+  position: absolute;
+  z-index: 0;
+  left: calc(var(--px) + var(--wx) * var(--u));
+  top: calc(var(--py) + var(--wy) * var(--u));
+  width: calc(var(--ww) * var(--u));
+  height: calc(var(--wh) * var(--u));
+  overflow: hidden;
+  container-type: size;
+  /* The glass darkened over the sky, the screen's light rising in it. */
+  background:
+    radial-gradient(ellipse 60% 70% at 50% 46%, rgba(40, 52, 160, calc(0.32 * var(--power))), transparent 75%),
+    rgba(3, 4, 12, calc(0.9 * min(1, var(--power) * 1.6)));
+  /* Coming on: a line of light, opening top and bottom. */
+  clip-path: inset(calc(50% * (1 - min(1, var(--power) * 1.25)) - 1px) 0 round 2px);
+}
+/* The line itself, bright as it opens, gone once it is open. */
+.display::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  z-index: 2;
+  height: 2px;
+  margin-top: -1px;
+  background: #dfe3ff;
+  box-shadow: 0 0 24px 6px rgba(120, 140, 255, 0.9);
+  opacity: calc(1 - var(--power) * 1.6);
+  pointer-events: none;
+}
+/* The glass's scanlines and its sheen, over the picture, faint; and the channel's sweep as it changes. */
+.display::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background:
+    linear-gradient(180deg, transparent calc(var(--sweep-at, 0) * 100% - 12%), rgba(190, 200, 255, calc(0.5 * var(--sweep))) calc(var(--sweep-at, 0) * 100%), transparent calc(var(--sweep-at, 0) * 100% + 2%)),
+    repeating-linear-gradient(180deg, transparent 0 2px, rgba(170, 180, 255, 0.035) 2px 3px),
+    linear-gradient(115deg, rgba(255, 255, 255, 0.05), transparent 35%);
+  pointer-events: none;
+}
+
+.feed {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(84cqw, calc(80cqh * var(--ar)));
+  transform: translate(-50%, -50%);
+}
+.feed > * { max-width: none !important; margin: 0 !important; padding: 0 !important; }
+.feed [class*='menuNote'] { display: none; }
+
+/* The display's light on the cabin, through the photograph's own shape. */
+.lit {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  mix-blend-mode: screen;
+  mask: var(--mask) 0 0 / 100% 100%;
+  -webkit-mask: var(--mask) 0 0 / 100% 100%;
+  background: radial-gradient(ellipse 72% 70% at 50% 34%, rgba(95, 110, 255, 0.55), rgba(70, 80, 240, 0.22) 45%, rgba(60, 76, 255, 0) 78%);
+  pointer-events: none;
+}
+
+/* ---- the claim, on the dark under the window, where the console was ---- */
+.head {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(70px, 9vh, 96px);
+  z-index: 3;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  width: min(980px, calc(100% - 2 * var(--gut)));
+  translate: -50% 0;
+  text-align: center;
+  color: #fff;
+  opacity: 0;
+  transition: opacity 260ms var(--ease);
+  pointer-events: none;
+}
+.head[data-on] { opacity: 1; transition-duration: 600ms; }
+.mark { display: inline-flex; align-items: baseline; gap: 12px; font: 500 11px/1 var(--font-label); letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 248, 240, 0.6); }
+.mark span { font: 500 13px/1 var(--mono); letter-spacing: 0; color: #aeb6ff; text-shadow: 0 0 16px rgba(60, 76, 255, 0.8); }
+.headline {
+  font-family: 'Inter Display', var(--display);
+  font-size: clamp(30px, 3.4vw, 50px);
+  font-weight: 200;
+  line-height: 1;
+  letter-spacing: -0.05em;
+  text-wrap: balance;
+  text-shadow: 0 2px 30px rgba(0, 0, 0, 0.8);
+}
+.headline b { font-weight: 720; letter-spacing: -0.056em; }
+.headline br { content: ''; }
+.headline br::after { content: ' '; }
+.lead { max-width: 600px; font-size: 15px; line-height: 1.5; color: rgba(255, 248, 240, 0.78); text-shadow: 0 1px 14px rgba(0, 0, 0, 0.9); text-wrap: pretty; }
+
+/* ---- down through the cloud, onto the ground ---- */
+.landing { position: relative; padding-bottom: 40px; background: var(--n-2); }
+/* The cabin's dark above, the paper below: the cloud covers where they meet. */
+.through { background: linear-gradient(#050302 40%, var(--n-2) 40.1%); }
+.cloud {
+  height: clamp(420px, 70vh, 760px);
+  background: #050302 50% 70% / cover no-repeat;
+  -webkit-mask-image: linear-gradient(transparent, #000 26%, #000 55%, transparent 98%);
+  mask-image: linear-gradient(transparent, #000 26%, #000 55%, transparent 98%);
+}
+.ground { display: grid; justify-items: center; gap: 20px; max-width: 1040px; margin: -20px auto 0; padding: 0 var(--gut); text-align: center; }
+.title { font-size: clamp(40px, 5.4vw, 80px); }
+.groundLead { color: var(--t-2); }
+.end { display: grid; justify-items: center; gap: 26px; max-width: 1040px; margin: 150px auto 0; padding: 0 var(--gut); text-align: center; }
+.endTitle { font-size: clamp(34px, 4.2vw, 60px); color: #1f35c8; }
+.get { display: grid; justify-items: center; }
+.get a:first-of-type { background: #1f35c8; --os-belly: #1f35c8; }
+.get a:last-of-type { color: #1f35c8; box-shadow: inset 0 0 0 1px rgba(31, 53, 200, 0.35); }
+/* One ending: the footer keeps its links and its landscape. */
+.window footer h2 { display: none; }
+.window footer > div { padding-top: 56px; }
+
+@media (max-width: 760px) {
+  .head { bottom: 64px; }
+  .headline { font-size: 28px; }
+  .lead { font-size: 14px; }
+  .feed { width: min(76cqw, calc(92cqh * var(--ar))); }
+}

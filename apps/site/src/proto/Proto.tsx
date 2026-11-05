@@ -6,16 +6,18 @@ import { Hero } from '../home/Hero'
 import { Footer } from '../shared/footer/Footer'
 import { Nav, NavSpace } from '../shared/Nav'
 import s from './Proto.module.css'
-import { Descent } from './takes/Descent'
-import { NightSide } from './takes/NightSide'
-import { Plan } from './takes/Plan'
+import { Control } from './takes/Control'
+import { Warp } from './takes/Warp'
+import { Window } from './takes/Window'
 
 /*
  * PROTOTYPE, in development only, deleted once a direction is picked: the
- * developer page's flow, in takes. The first screen is the same in each and
- * stays where it is (its opening plays once); what follows it swaps in
+ * developer page's flow, in takes. What follows the first screen swaps in
  * place, from the bar along the bottom or by key: A, B, C, and N for the
- * page as it is now. ← and → step through them. `?take=` holds one.
+ * page as it is now. ← and → step through them. `?take=` holds one. Most
+ * takes follow the shared first screen, which stays mounted as they swap
+ * (its opening plays once); a take that needs the first screen inside its
+ * own scene brings its own.
  */
 
 function Now() {
@@ -28,10 +30,10 @@ function Now() {
   )
 }
 
-const TAKES: ReadonlyArray<{ key: string; name: string; Page: ComponentType }> = [
-  { key: 'a', name: 'Descent', Page: Descent },
-  { key: 'b', name: 'Flight plan', Page: Plan },
-  { key: 'c', name: 'Night side', Page: NightSide },
+const TAKES: ReadonlyArray<{ key: string; name: string; Page: ComponentType; ownHero?: boolean }> = [
+  { key: 'a', name: 'Warp', Page: Warp },
+  { key: 'b', name: 'Mission control', Page: Control },
+  { key: 'c', name: 'The window', Page: Window, ownHero: true },
   { key: 'n', name: 'Now', Page: Now },
 ]
 
@@ -63,11 +65,11 @@ export function Proto() {
     return () => window.removeEventListener('keydown', onKey)
   }, [take])
 
-  const { Page } = TAKES.find((x) => x.key === take) ?? TAKES[0]!
+  const { Page, ownHero } = TAKES.find((x) => x.key === take) ?? TAKES[0]!
   return (
     <div className={s.page} id="top">
       <Nav opening />
-      <Hero nav={<NavSpace />} />
+      {!ownHero && <Hero nav={<NavSpace />} />}
       <Page key={take} />
       <nav className={s.bar} aria-label="Takes">
         {TAKES.map((x) => (

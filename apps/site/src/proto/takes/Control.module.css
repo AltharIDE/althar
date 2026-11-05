@@ -1,0 +1,147 @@
+/* PROTOTYPE. B: Mission control. A wall of screens, and a camera flown by scrolling. */
+
+.control { position: relative; background: var(--n-2); }
+
+/* A screen and a fifth of scrolling from each stop to the next. */
+.track { position: relative; height: calc(var(--stops, 7) * 120svh + 100svh); background: #06070a; }
+.stage {
+  position: sticky;
+  top: 0;
+  height: 100svh;
+  overflow: hidden;
+  isolation: isolate;
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 45%, rgba(43, 59, 255, 0.1), transparent 70%),
+    radial-gradient(ellipse 120% 60% at 50% 120%, rgba(255, 140, 60, 0.06), transparent 70%),
+    #06070a;
+}
+.stage > .under { top: 0; bottom: 0; }
+
+/* The wall, at its own size: the camera scales and moves it. */
+.world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: grid;
+  grid-template-columns: 1600px 980px 1320px;
+  grid-template-areas: 'independent coordinator flow' 'review edge flow';
+  align-items: start;
+  gap: 90px 80px;
+  padding: 0;
+  transform-origin: 0 0;
+  /* The floor's grid, faint, so the wall stands somewhere. */
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.07) 1.5px, transparent 2px) 0 0 / 60px 60px;
+}
+.independent { grid-area: independent; }
+.coordinator { grid-area: coordinator; }
+.review { grid-area: review; }
+.edge { grid-area: edge; }
+.flow { grid-area: flow; }
+
+/* ---- a screen: its bezel's label, then the glass ---- */
+.screen {
+  position: relative;
+  border-radius: 34px;
+  padding: 0 14px 14px;
+  background: linear-gradient(#17171d, #0e0e13);
+  box-shadow:
+    inset 0 0 0 1.5px rgba(255, 255, 255, 0.08),
+    inset 0 2px 0 rgba(255, 255, 255, 0.06),
+    0 40px 120px -20px rgba(0, 0, 0, 0.8),
+    0 0 160px -30px rgba(60, 76, 255, 0.4);
+  transition: opacity 500ms var(--ease), filter 500ms var(--ease);
+}
+/* Close up on one, the others step back into the dark. */
+.world[data-close] .screen:not([data-on]) { opacity: 0.35; filter: saturate(0.6); }
+
+.bezel { display: flex; align-items: center; gap: 16px; height: 64px; padding: 0 16px; font: 500 20px/1 var(--font-label); letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255, 248, 240, 0.5); }
+.no { font: 500 22px/1 var(--mono); letter-spacing: 0; color: #aeb6ff; text-shadow: 0 0 20px rgba(60, 76, 255, 0.9); }
+.name { flex: 1; color: rgba(255, 248, 240, 0.72); }
+.live { display: inline-flex; align-items: center; gap: 10px; font-size: 16px; color: rgba(255, 248, 240, 0.5); }
+.live::before {
+  content: '';
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #6b78ff;
+  box-shadow: 0 0 14px 2px rgba(60, 76, 255, 0.9);
+  animation: live 2.4s ease-in-out infinite;
+}
+@keyframes live {
+  50% { opacity: 0.35; }
+}
+
+.glass {
+  position: relative;
+  overflow: hidden;
+  border-radius: 22px;
+  padding: 56px 0 64px;
+  background:
+    radial-gradient(ellipse 80% 50% at 50% 0%, rgba(80, 100, 255, 0.1), transparent 70%),
+    #0b0b10;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07), inset 0 0 80px rgba(0, 0, 0, 0.6);
+}
+/* The glass's sheen, over all of it. */
+.glass::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(125deg, rgba(255, 255, 255, 0.05), transparent 30%);
+  pointer-events: none;
+}
+.head { display: grid; gap: 18px; padding: 0 64px; }
+.title {
+  font-family: 'Inter Display', var(--display);
+  font-size: 76px;
+  font-weight: 200;
+  line-height: 0.98;
+  letter-spacing: -0.05em;
+  color: #fff;
+  text-wrap: balance;
+}
+.title b { font-weight: 720; letter-spacing: -0.056em; }
+.lead { max-width: 760px; font-size: 25px; line-height: 1.45; letter-spacing: -0.01em; color: rgba(255, 248, 240, 0.66); text-wrap: pretty; }
+
+.feed { margin-top: 8px; }
+/* The pictures as they are, without the page's own room around them. */
+.feed > * { max-width: none !important; margin-left: 0 !important; margin-right: 0 !important; }
+.feed [class*='menuNote'] { display: none; }
+.coordinator .feed > * { padding: 0 48px !important; }
+.flow .feed > * { padding: 0 48px !important; }
+
+/* ---- the channels, low at the left: where the camera is, and a way to any screen ---- */
+.channels { position: absolute; left: 24px; bottom: 22px; display: flex; gap: 2px; padding: 4px; border-radius: 999px; background: rgba(12, 12, 18, 0.7); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); backdrop-filter: blur(12px); }
+.channels button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  font: 500 12px/1 var(--font);
+  color: rgba(255, 248, 240, 0.55);
+  cursor: pointer;
+  transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+.channels button i { font: 500 10.5px/1 var(--mono); font-style: normal; color: rgba(174, 182, 255, 0.7); }
+.channels button:hover { color: #fff; }
+.channels button[data-on] { color: #fff; background: rgba(255, 255, 255, 0.1); }
+
+@media (max-width: 1500px) {
+  .channels { bottom: auto; top: 76px; left: 50%; translate: -50% 0; }
+}
+@media (max-width: 700px) {
+  .world { grid-template-columns: 440px; grid-template-areas: 'independent' 'coordinator' 'review' 'edge' 'flow'; gap: 60px; }
+  .screen { border-radius: 22px; padding: 0 8px 8px; }
+  .bezel { height: 40px; font-size: 12px; gap: 10px; }
+  .no { font-size: 13px; }
+  .live { font-size: 11px; }
+  .glass { padding: 28px 0 32px; border-radius: 14px; }
+  .head { padding: 0 20px; gap: 10px; }
+  .title { font-size: 34px; }
+  .lead { font-size: 14.5px; }
+  .coordinator .feed > *, .flow .feed > * { padding: 0 12px !important; }
+  .channels { display: none; }
+}
