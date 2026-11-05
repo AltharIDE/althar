@@ -95,7 +95,8 @@ describe('schema', () => {
     ),
   )
 
-  it.effect('lets one runtime at a time open a file', () =>
+  // Live: the SQLite client retries switching a held file to WAL until its busy timeout, on Effect's clock.
+  it.live('lets one runtime at a time open a file', () =>
     withFile((filename) =>
       Effect.gen(function* () {
         const open = Effect.gen(function* () {
