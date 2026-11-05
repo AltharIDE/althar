@@ -16,7 +16,7 @@ import { Instance } from '../src/Instance'
 import { Launches } from '../src/Launches'
 import { coordinatorFolder, freshCopy } from '../src/coordinatorFolder'
 import { place, spotsOf } from '../src/local'
-import { Projects } from '../src/Projects'
+import { hasBranch, Projects, towardHere } from '../src/Projects'
 import { guardHolds, guardStopIn } from '../src/pushGuard'
 import { Queries } from '../src/Queries'
 import { timestamp } from '../src/records'
@@ -24,7 +24,7 @@ import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import type { ToolAccess } from '../src/ToolServer'
 import { makeBranch } from '../src/newBranch'
-import { setToward } from '../src/towards'
+import { setToward, towardChoicesOf } from '../src/towards'
 import { ask, cards, connect, git, runtimeWith, tipOf } from './changesSupport'
 import { conflictsIn, given, hostOf, moveMainOn, runtimeWith as conflictsRuntime, taskBranch, titled } from './conflictsSupport'
 import { callTool, fakeConnectors, HOST, hosted, launches, repository, runtime, until } from './support'
@@ -503,6 +503,47 @@ describe('the coordinator’s release branches', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('refuses a name git won’t take or a start it can’t find, and starts a branch from a tag or a commit', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    const main = git(bare, 'rev-parse', 'main')
+    git(bare, 'tag', 'v0.7.0', main)
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const { projectId } = yield* opened(working)
+      const coordinator = yield* coordinatorOf(projectId)
+      const word = yield* turn(coordinator, 'Make a branch')
+      for (const branch of ['', '-x', 'a b', 'a..b', 'release/'])
+        assert.include(yield* callTool(coordinator, 'create_branch', { branch, message: word }), "isn't a name git takes for a branch")
+      assert.include(
+        yield* callTool(coordinator, 'create_branch', { branch: RELEASE, from: '-x', message: word }),
+        "isn't a branch, a tag or a commit",
+      )
+      assert.include(
+        yield* callTool(coordinator, 'create_branch', { branch: RELEASE, from: 'nope', message: word }),
+        'has no branch, tag or commit nope',
+      )
+      assert.include(
+        yield* callTool(coordinator, 'create_branch', { branch: RELEASE, from: 'deadbeef', message: word }),
+        'has no branch, tag or commit',
+      )
+
+      const fromTag = yield* turn(coordinator, 'Make release/0.7.x from v0.7.0')
+      assert.include(
+        yield* callTool(coordinator, 'create_branch', { branch: 'release/0.7.x', from: 'v0.7.0', message: fromTag }),
+        'Made release/0.7.x',
+      )
+      assert.strictEqual(git(bare, 'rev-parse', 'refs/heads/release/0.7.x'), main)
+      const fromCommit = yield* turn(coordinator, 'Make release/0.6.x from that commit')
+      assert.include(
+        yield* callTool(coordinator, 'create_branch', { branch: 'release/0.6.x', from: main, message: fromCommit }),
+        'Made release/0.6.x',
+      )
+      assert.strictEqual(git(bare, 'rev-parse', 'refs/heads/release/0.6.x'), main)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('never moves a release branch made there while it was making it, even one behind where it was going', () => {
     const { working, bare } = hosted()
     git(working, '-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-q', '--allow-empty', '-m', 'On')
@@ -528,6 +569,38 @@ describe('the coordinator’s release branches', () => {
       )
       assert.strictEqual(git(bare, 'rev-parse', RELEASE), behind)
     }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+})
+
+describe('pointing a task at the branch it already works toward', () => {
+  it.live('changes nothing, and a task nobody has offers no branches', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const { projectId } = yield* opened(root)
+      const plain = yield* drafted(projectId, 'Fix the login')
+      yield* setToward(plain.taskId, null)
+      assert.strictEqual((yield* workspacesOf(plain.taskId))[0]?.toward, null)
+      assert.isNull(yield* towardChoicesOf('task_nobody'))
+      assert.isNotNull(yield* towardChoicesOf(plain.taskId))
+    }).pipe(Effect.provide(planning()))
+  })
+})
+
+describe('the branches a repository has to work toward', () => {
+  it.live('are the ones git takes the name of that are here or on the remote, and one is made here from the remote’s', () => {
+    const working = repository()
+    return Effect.gen(function* () {
+      assert.isTrue(yield* hasBranch(working, 'main'))
+      assert.isFalse(yield* hasBranch(working, 'nope'))
+      assert.isFalse(yield* hasBranch(working, 'a b'))
+      // Not on a remote this clone has, it is the branch here that counts.
+      branchOff(working)
+      assert.isTrue(yield* hasBranch(working, RELEASE, 'nowhere'))
+      // A branch the clone has stays as it is; one it hasn't, the remote hasn't either, and nothing is made.
+      yield* towardHere(working, RELEASE)
+      yield* towardHere(working, 'release/9.9.9')
+      assert.isFalse(yield* hasBranch(working, 'release/9.9.9'))
+    })
   })
 })
 
@@ -615,6 +688,39 @@ describe('a branch the person can’t make from a branch list', () => {
       const { projectId, repositoryId } = yield* opened(working)
       assert.strictEqual(yield* makeBranch({ projectId, repositoryId, branch: 'refs/heads/release/2.1.0' }), 'release/2.1.0')
       assert.notStrictEqual(git(bare, 'rev-parse', 'release/2.1.0'), '')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('says so where the repository has no clone here, the host has no such repository, or its branches can’t be read', () => {
+    const { working, bare } = hosted()
+    const missing = makeFakeService({ pushUrl: () => bare })
+    const unreadable = makeFakeService({ pushUrl: () => join(bare, 'not-there.git') })
+    unreadable.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const { projectId, repositoryId } = yield* opened(working)
+      const said = function* (branch: string) {
+        const refused = yield* Effect.flip(makeBranch({ projectId, repositoryId, branch }))
+        assert.strictEqual(refused._tag, 'BranchRefused')
+        return message(refused)
+      }
+      assert.include(yield* said('release/3.0.0'), 'couldn’t reach')
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`DELETE FROM repository_locations WHERE binding_id = ${repositoryId}`
+      assert.include(yield* said('release/3.0.0'), 'has no clone on this computer')
+    }).pipe(Effect.provide(runtimeWith({ github: missing })))
+  })
+
+  it.live('says so where the host’s branches can’t be read', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => join(bare, 'not-there.git') })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const { projectId, repositoryId } = yield* opened(working)
+      const refused = yield* Effect.flip(makeBranch({ projectId, repositoryId, branch: 'release/3.0.0' }))
+      assert.strictEqual(refused._tag, 'BranchRefused')
+      assert.include(message(refused), 'to read its branches')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 })
