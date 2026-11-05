@@ -1,0 +1,124 @@
+/* Prototype, B: engraved. The sections' sky as a line engraving in the footer's cobalt on its paper; the app's pictures as plates tipped in. */
+
+.body {
+  /* The footer's ink, on the page's paper; the engraving reads both. */
+  --ink: #1f35c8;
+  --plate-paper: var(--n-2);
+  --rule: rgba(31, 53, 200, 0.24);
+  position: relative;
+  isolation: isolate;
+  overflow-x: clip;
+  background: var(--n-2);
+  /* The pictures on their plates: a fine rule where the picture meets its paper, no fall. */
+  --board-frame: 0 0 0 1px var(--rule);
+  --talk-frame: 0 0 0 1px var(--rule);
+  --review-mask: none;
+  --review-radius: 6px;
+  --review-frame: none;
+  --bezel-fall: 0 0 0 1px var(--rule);
+  --scene-frame: 0 0 0 1px var(--rule);
+  --edge-words: var(--t-2);
+  --edge-title: var(--ink);
+  --edge-path: var(--t-3);
+  --edge-faint: var(--t-4);
+}
+
+/* The engraving's tiles, laid into the page behind everything (b/useEngraving.ts). */
+.plates { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
+.plates canvas { position: absolute; left: 0; width: 100%; display: block; }
+/* The night, down to the planet's edge: the nav is smoked glass over it. */
+.night { position: absolute; top: 0; left: 0; right: 0; height: var(--night, 0px); overflow: hidden; pointer-events: none; }
+.under { top: 0; }
+
+.wrap { max-width: 1344px; margin: 0 auto; padding: 0 var(--gut); }
+.scene { position: relative; padding-top: 220px; }
+.first { padding-top: 250px; }
+
+/* ---- a claim, in the footer's voice: cobalt, light with its heavy words ---- */
+.head { display: grid; gap: 22px; justify-items: start; width: fit-content; max-width: 100%; }
+.title { color: var(--ink); }
+.lead { max-width: 30em; color: var(--t-2); }
+
+/* ---- a plate: the picture on its paper, inside a cobalt rule and a finer one within ---- */
+.plate { position: relative; }
+.mat { position: relative; padding: 16px; background: var(--n-2); box-shadow: 0 0 0 1px var(--ink); }
+.mat::after { content: ''; position: absolute; inset: 5px; border: 0.5px solid var(--rule); pointer-events: none; }
+/* The picture's own place in the page, given over to the plate. */
+.mat > * { max-width: none !important; margin: 0 !important; padding: 0 !important; }
+
+/* ---- the first: the claim cut out of the night, the board standing on the planet's edge ---- */
+.cartouche { padding: 0; }
+.board { max-width: 1240px; margin: 84px auto 0; padding: 0 var(--gut); }
+
+/* ---- the coordinator: its words at the left, the conversation beside them ---- */
+.split { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); align-items: center; gap: 64px; }
+.split .title { font-size: clamp(40px, 5vw, 76px); }
+.talk { width: 100%; max-width: calc(min(760px, (100svh - 170px) * 760 / 720) + 32px); justify-self: end; }
+
+/* ---- the review: the claim across, its lead beside it at the right, the plate under ---- */
+.wide { display: grid; grid-template-columns: auto minmax(0, 22em); align-items: end; gap: 28px 64px; width: auto; }
+.wide .lead { padding-bottom: 0.6em; }
+.review { max-width: 1160px; margin: 72px auto 0; padding: 0 var(--gut); }
+
+/* ---- what keeps you in flow: a book's page of figures, two columns, uneven ---- */
+.figures {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 0 56px;
+  margin: 150px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.figure { display: grid; align-content: start; gap: 22px; min-width: 0; }
+.caption { display: grid; gap: 8px; max-width: 34em; }
+.figTitle { margin: 0; font-family: 'Inter Display', var(--display); font-size: clamp(22px, 2vw, 28px); font-weight: 300; line-height: 1.08; letter-spacing: -0.035em; color: var(--ink); text-wrap: balance; }
+.figTitle b { font-weight: 700; letter-spacing: -0.04em; }
+.figLead { margin: 0; font-size: 14.5px; line-height: 1.5; color: var(--t-2); text-wrap: pretty; }
+.figure .mat { padding: 12px; }
+/* A drawing on its own ground, dark or light, as the bento gives it. */
+.figure[data-tone='dark'] .mat > * { background: #0e0b09; }
+.figure[data-tone='light'] .mat > * { background: #f8f6f1; }
+.accounts { grid-column: 1 / span 7; }
+.away { grid-column: 9 / span 4; align-self: end; }
+.automations { grid-column: 1 / span 5; margin-top: 120px; }
+.conflicts { grid-column: 7 / span 6; margin-top: 200px; }
+.home { grid-column: 2 / span 10; margin-top: 140px; }
+.worktrees { grid-column: 1 / span 6; margin-top: 140px; }
+.workspaces { grid-column: 8 / span 5; margin-top: 260px; }
+
+/* ---- the notch ---- */
+.tour > * { margin-top: 64px; }
+
+/* ---- the download, the altar's light rising into the open sky beside it ---- */
+.end { position: relative; padding: 260px 0 220px; }
+.glow { position: absolute; top: 0; pointer-events: none; }
+.endWords { display: grid; gap: 30px; justify-items: start; width: fit-content; }
+.endLine { margin: 0; font-family: 'Inter Display', var(--display); font-size: clamp(30px, 3.4vw, 46px); font-weight: 200; line-height: 1.04; letter-spacing: -0.045em; color: var(--ink); }
+.endLine b { font-weight: 700; letter-spacing: -0.045em; }
+.endGet > p { margin: 0; }
+
+@media (max-width: 1100px) {
+  .split { grid-template-columns: minmax(0, 1fr); gap: 56px; }
+  .talk { justify-self: center; }
+  .wide { grid-template-columns: minmax(0, 1fr); }
+  .figures { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 32px; }
+  .figure { grid-column: auto; margin-top: 72px; align-self: start; }
+  .home { grid-column: 1 / -1; }
+}
+@media (max-width: 700px) {
+  .scene { padding-top: 150px; }
+  /* The night has the width above the claim. */
+  .first { padding-top: 250px; }
+  .mat { padding: 8px; }
+  .mat::after { inset: 3px; }
+  .board { margin-top: 48px; padding: 0 12px; }
+  .review { margin-top: 44px; padding: 0 12px; }
+  .figures { grid-template-columns: minmax(0, 1fr); margin-top: 40px; }
+  .figure, .home { grid-column: auto; margin-top: 64px; }
+  .figure .mat { padding: 8px; }
+  .end { padding: 170px 0 150px; }
+  .endGet { justify-self: stretch; }
+  .endGet > div { display: grid; gap: 10px; }
+  .endGet > div > a { justify-content: center; height: 50px; }
+  .endGet > p { text-align: center; }
+}
