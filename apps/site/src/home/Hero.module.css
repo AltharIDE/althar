@@ -1,13 +1,8 @@
 /* The first screen, an orrery (Hero.tsx): Althar at the middle of the
-   night sky, a solid floating there (hero/Sun.module.css), the agents in
-   orbit round it, drawn in fine line (hero/plate.ts) as an astronomical
-   plate draws them; the words in a band along the foot under a hairline
-   rule. The script turns the system; here the drawing fades up once it is
-   measured, and the sun's broken light drifts upward, but not with reduced
-   motion, nor while the first screen is off screen (data-off). In depth,
-   within the drawing: the sky, the far halves (0), the bodies behind the sun
-   (5 to 9), its light and the sun (10), the near halves (11), the bodies in
-   front (12 to 16); over it, the words (20). */
+   night sky, the system drawn over it (hero/Orrery.module.css); the words
+   in a band along the foot under a hairline rule. The script turns the
+   system; here the drawing fades up once it is measured. In depth: the
+   sky, the grain, the drawing (2); over it, the words (20). */
 
 .hero {
   position: relative;
@@ -17,7 +12,6 @@
   background: #070605;
   color: #fff;
   container-type: size;
-  --ground: #070605;
   --ink-2: #a8a197;
   --ink-3: #8f887e;
   --hair: rgba(255, 244, 232, 0.11);
@@ -42,53 +36,9 @@
 /* ---- the drawing ---- */
 
 /* Up out of the dark once the script has measured the frame; at once for a look at one frame. Only coming up fades: dark is dark at once, so a page styled before its stylesheet arrives never shows the drawing fading out. */
-.drawing { position: absolute; inset: 0; z-index: 2; pointer-events: none; opacity: 0; }
+.drawing { z-index: 2; opacity: 0; }
 .hero[data-drawn] .drawing { opacity: 1; transition: opacity 900ms var(--ease-out); }
 .hero[data-frame] .drawing { transition: none; }
-
-.layer { position: absolute; top: 0; left: 0; z-index: 0; display: block; overflow: hidden; }
-.light { z-index: 10; }
-.before { z-index: 11; }
-/* Above where it breaks up, the light drifts upward, a dash at a time. */
-@media (prefers-reduced-motion: no-preference) {
-  .hero:not([data-still]) .rise { animation: rise calc(var(--len) * 0.11s) linear infinite; }
-  .hero[data-off] .rise { animation-play-state: paused; }
-}
-@keyframes rise { to { stroke-dashoffset: calc(var(--len) * -1px); } }
-.orbit path { fill: none; stroke-width: 1; }
-.orbit .ticks { stroke: #b4bcff; stroke-width: 0.9; }
-
-/* The bodies: each a small dark disc, ringed, with the agent's mark; nearer is larger and brighter (--d, 1 nearest to -1 farthest), each placed, sized and stacked by the script; until it is, the drawing is still dark, but screen readers have the list. The disc keeps a little of the dark round it, so the orbit breaks before it touches. The list makes no layer of its own, so its bodies go behind the sun and in front of it. */
-.bodies { position: absolute; inset: 0; margin: 0; padding: 0; list-style: none; }
-.body { --d: 1; position: absolute; left: 0; top: 0; width: 0; height: 0; will-change: transform; }
-.disc {
-  position: absolute;
-  left: calc(var(--size) / -2);
-  top: calc(var(--size) / -2);
-  display: grid;
-  place-items: center;
-  width: var(--size);
-  height: var(--size);
-  border-radius: 50%;
-  background: #0d0b0a;
-  box-shadow:
-    inset 0 0 0 1px rgba(196, 204, 255, calc(0.34 + 0.14 * var(--d))),
-    0 0 0 3px var(--ground);
-  color: rgba(255, 250, 242, calc(0.8 + 0.18 * var(--d)));
-}
-.name {
-  position: absolute;
-  top: -6px;
-  left: 0;
-  font: 500 10.5px/12px var(--mono);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  color: rgba(255, 248, 240, calc(0.72 + 0.2 * var(--d)));
-  text-shadow: 0 0 3px var(--ground), 0 0 6px var(--ground);
-  opacity: 0;
-}
-.name[data-side='left'] { left: auto; right: 0; }
 
 /* ---- the band: the caption on its rule, the headline at the left, the lead and the ways to get it at the right ---- */
 

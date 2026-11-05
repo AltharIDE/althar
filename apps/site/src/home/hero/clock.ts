@@ -17,6 +17,9 @@ export interface Clock {
   on(draw: (t: number, dt: number) => void): () => void
 }
 
+/** A clock held at second `t`, which never moves: for a picture of one moment, as the link previews are. */
+export const heldAt = (t: number): Clock => ({ t, on: () => () => {} })
+
 /** The longest a frame counts for: after a stall, or a tab coming back, the system moves on smoothly rather than leaping. */
 const LONGEST = 0.1
 
