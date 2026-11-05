@@ -1253,6 +1253,12 @@ const itemFields = {
   sequence: Schema.Number,
   /** Which agent said it, for what agents say. */
   agentId: Schema.NullOr(Schema.String),
+  /**
+   * The model its turn ran on, as the runtime recorded it when the turn was given (DEV-154): a session's own
+   * model is what it is on now, so a round read after a switch would otherwise take the new model's name.
+   * Absent for what no agent wrote, and for threads from before the runtime kept it.
+   */
+  model: Schema.optional(Schema.NullOr(Schema.String)),
   createdAt: Schema.String,
 }
 
@@ -1570,6 +1576,12 @@ export const StepResultItem = Schema.Struct({
     descriptions: Schema.optional(Schema.Record(Schema.String, Schema.String)),
     /** Who reported it, for a review. */
     agentId: Schema.NullOr(Schema.String),
+    /**
+     * The model its step ran on, as the runtime recorded it when it reported (DEV-154): a session's own model is
+     * what it is on now, so a round read after a switch would otherwise take the new model's name. Absent for
+     * reports from before the runtime kept it.
+     */
+    model: Schema.optional(Schema.NullOr(Schema.String)),
   }),
 })
 

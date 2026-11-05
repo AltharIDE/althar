@@ -36,6 +36,7 @@ const round = (id: string, text: string, files: ReadonlyArray<HandedFile> = []):
   kind: 'round',
   id,
   agentId: 'claude-code',
+  model: null,
   at: '5 min ago',
   ack: null,
   work: null,
