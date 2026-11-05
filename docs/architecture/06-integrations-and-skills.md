@@ -1192,10 +1192,10 @@ Codex and a person's own OpenCode run out on the device, with the device's home,
 and read those same folders there. Claude Code and a copy of OpenCode Althar
 downloaded run inside: the four folders are in the sandbox read-only at the same
 paths, so Claude Code's home (`claude-usual` under the profile) links them. A
-downloaded OpenCode takes its config home from the sandbox, so it doesn't read
-`~/.config/opencode/skills`. Codex older than those reads only its home's
-`skills`, but only a Flatpak runs the person's own, and the adapter can't open a
-session on one as old as 0.92 anyway.
+downloaded OpenCode takes its config home from the sandbox, so Althar names
+`~/.config/opencode/skills` to it by its `skills.paths` setting. Codex older
+than those reads only its home's `skills`, but only a Flatpak runs the person's
+own, and the adapter can't open a session on one as old as 0.92 anyway.
 
 What each says:
 

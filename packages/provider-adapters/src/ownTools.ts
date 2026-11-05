@@ -20,6 +20,8 @@ export interface StartingAt {
   readonly env: Readonly<Record<string, string | undefined>>
   readonly homeDir: string
   readonly cwd: string
+  /** Inside a Flatpak's sandbox, not out on the device: `inFlatpakSandbox`. */
+  readonly inSandbox?: boolean
 }
 
 const read = (path: string) => {

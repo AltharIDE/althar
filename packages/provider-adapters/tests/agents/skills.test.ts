@@ -117,13 +117,13 @@ describe('the real agents find the skills', () => {
   })
 
   const opencode = locate('opencode', { bundled: null, kept: null })
-  it.skipIf(opencode === null)('OpenCode: all of its folders, in what it offers its model', { timeout: 90_000 }, async () => {
-    const { home, repository } = fixture()
-    const expected = skillsIn(agents.opencode.skillFolders?.({ env: {}, homeDir: home, cwd: repository }) ?? [])
-      .map(({ name }) => name)
-      .toSorted()
-    expect(expected).toEqual(['person-agents', 'person-claude', 'person-opencode', 'repo-agents', 'repo-claude', 'repo-opencode'])
 
+  /** What OpenCode offers a stand-in model, started with this environment and this config. */
+  const offeredByOpenCode = async (
+    repository: string,
+    env: Readonly<Record<string, string>>,
+    own: Readonly<Record<string, unknown>> = {},
+  ) => {
     const http = await import('node:http')
     const offered: Array<string> = []
     const server = http.createServer((request, response) => {
@@ -143,6 +143,7 @@ describe('the real agents find the skills', () => {
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
     const { port } = server.address() as { readonly port: number }
     const config = {
+      ...own,
       provider: {
         stub: {
           npm: '@ai-sdk/openai-compatible',
@@ -155,7 +156,7 @@ describe('the real agents find the skills', () => {
     }
     const child = spawn(opencode?.command ?? 'opencode', ['acp'], {
       cwd: repository,
-      env: withEnv({ HOME: home, OPENCODE_CONFIG_CONTENT: JSON.stringify(config) }),
+      env: withEnv({ ...env, OPENCODE_CONFIG_CONTENT: JSON.stringify(config) }),
       stdio: ['pipe', 'pipe', 'inherit'],
     })
     const stream = acp.ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>)
@@ -172,7 +173,29 @@ describe('the real agents find the skills', () => {
       child.kill()
       server.close()
     }
-    const said = offered.join('\n')
+    return offered.join('\n')
+  }
+
+  it.skipIf(opencode === null)('OpenCode: all of its folders, in what it offers its model', { timeout: 90_000 }, async () => {
+    const { home, repository } = fixture()
+    const expected = skillsIn(agents.opencode.skillFolders?.({ env: {}, homeDir: home, cwd: repository }) ?? [])
+      .map(({ name }) => name)
+      .toSorted()
+    expect(expected).toEqual(['person-agents', 'person-claude', 'person-opencode', 'repo-agents', 'repo-claude', 'repo-opencode'])
+    const said = await offeredByOpenCode(repository, { HOME: home })
     for (const name of expected) expect(said).toContain(name)
   })
+
+  it.skipIf(opencode === null)(
+    'OpenCode inside a Flatpak: the person’s config folder, named to it as its config home is the app’s',
+    { timeout: 120_000 },
+    async () => {
+      const { home, repository } = fixture()
+      const env = { HOME: home, XDG_CONFIG_HOME: join(home, '.var', 'app', 'dev.althar.app', 'config') }
+      const configOf = (inSandbox: boolean) =>
+        JSON.parse(agents.opencode.withoutOwnTools?.({ env, homeDir: home, cwd: repository, inSandbox }).OPENCODE_CONFIG_CONTENT ?? '{}')
+      expect(await offeredByOpenCode(repository, env, configOf(false))).not.toContain('person-opencode')
+      expect(await offeredByOpenCode(repository, env, configOf(true))).toContain('person-opencode')
+    },
+  )
 })

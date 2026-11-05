@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -105,8 +106,30 @@ describe('what an agent could see', () => {
         .toSorted(),
       ['config-home', 'nested', 'person-agents', 'person-claude', 'repo-agents', 'repo-claude', 'repo-opencode'],
     )
-    // Where XDG_CONFIG_HOME says, as OpenCode takes it; a Flatpak's own, for a copy that runs inside.
+    // Where XDG_CONFIG_HOME says, as OpenCode takes it.
     assert.isTrue(agents.opencode.skillFolders?.({ env: { XDG_CONFIG_HOME: '/x' }, homeDir: home, cwd }).includes('/x/opencode/skills'))
+  })
+
+  it("names the person's config folder to an OpenCode inside a Flatpak, whose config home is the app's", () => {
+    const home = mkdtempSync(join(tmpdir(), 'althar-skills-home-'))
+    skill(join(home, '.config', 'opencode', 'skills'), 'person-opencode')
+    const env = { XDG_CONFIG_HOME: join(home, 'app-config') }
+    const skillsConfig = (inSandbox: boolean) =>
+      JSON.parse(agents.opencode.withoutOwnTools?.({ env, homeDir: home, cwd: home, inSandbox }).OPENCODE_CONFIG_CONTENT ?? '{}').skills
+    const shown = (inSandbox: boolean) =>
+      skillsIn(agents.opencode.skillFolders?.({ env, homeDir: home, cwd: home, inSandbox }) ?? []).map(({ name }) => name)
+    assert.deepStrictEqual(skillsConfig(true), { paths: [join(home, '.config', 'opencode', 'skills')] })
+    assert.deepStrictEqual(shown(true), ['person-opencode'])
+    // Out on the device it reads that folder itself, and may be a version that refuses the setting.
+    assert.isUndefined(skillsConfig(false))
+    assert.deepStrictEqual(shown(false), [])
+  })
+
+  it('keeps that setting through what a session and a review change of its config', () => {
+    const own = agents.opencode.withoutOwnTools?.({ env: {}, homeDir: '/h', cwd: '/h', inSandbox: true }) ?? {}
+    const paths = { paths: ['/h/.config/opencode/skills'] }
+    assert.deepStrictEqual(JSON.parse(agents.opencode.reviewing?.env?.(own).OPENCODE_CONFIG_CONTENT ?? '{}').skills, paths)
+    assert.deepStrictEqual(JSON.parse(agents.opencode.sessionEnv?.(own, { web: false }).OPENCODE_CONFIG_CONTENT ?? '{}').skills, paths)
   })
 
   it('reads a skill by the name in its frontmatter, and leaves out what an agent would', () => {
@@ -124,6 +147,50 @@ describe('what an agent could see', () => {
         .toSorted(),
       ['its-name', 'plain'],
     )
+  })
+
+  it.runIf(process.platform !== 'win32')("isn't held up by what a checkout puts where a `SKILL.md` goes", { timeout: 10_000 }, () => {
+    const root = mkdtempSync(join(tmpdir(), 'althar-skills-'))
+    for (const name of ['to-a-device', 'a-pipe', 'to-a-pipe', 'a-folder']) mkdirSync(join(root, name))
+    symlinkSync('/dev/zero', join(root, 'to-a-device', 'SKILL.md'))
+    execFileSync('mkfifo', [join(root, 'a-pipe', 'SKILL.md')])
+    symlinkSync(join(root, 'a-pipe', 'SKILL.md'), join(root, 'to-a-pipe', 'SKILL.md'))
+    mkdirSync(join(root, 'a-folder', 'SKILL.md'))
+    skill(root, 'plain')
+    assert.deepStrictEqual(
+      skillsIn([root]).map(({ name }) => name),
+      ['plain'],
+    )
+  })
+
+  it.runIf(process.platform !== 'win32')('reads only the top of a `SKILL.md`, however big, and takes a link to one', () => {
+    const root = mkdtempSync(join(tmpdir(), 'althar-skills-'))
+    mkdirSync(join(root, 'huge'))
+    const huge = join(root, 'huge', 'SKILL.md')
+    writeFileSync(huge, '---\nname: huge\n---\n')
+    truncateSync(huge, 3 * 1024 ** 3)
+    mkdirSync(join(root, 'late'))
+    writeFileSync(join(root, 'late', 'SKILL.md'), `---\ndescription: ${'x'.repeat(1024 ** 2)}\nname: late\n---\n`)
+    // How a dotfiles manager keeps a person's skills.
+    skill(join(root, 'kept'), 'linked')
+    mkdirSync(join(root, 'linked'))
+    symlinkSync(join(root, 'kept', 'linked', 'SKILL.md'), join(root, 'linked', 'SKILL.md'))
+    assert.deepStrictEqual(
+      skillsIn([root])
+        .map(({ name, path }) => ({ name, path }))
+        .toSorted((a, b) => a.name.localeCompare(b.name)),
+      [
+        { name: 'huge', path: huge },
+        { name: 'linked', path: join(root, 'linked', 'SKILL.md') },
+      ],
+    )
+  })
+
+  it("doesn't slow on a frontmatter line made to", { timeout: 2_000 }, () => {
+    const root = mkdtempSync(join(tmpdir(), 'althar-skills-'))
+    mkdirSync(join(root, 'spaces'))
+    writeFileSync(join(root, 'spaces', 'SKILL.md'), `---\nname: a${' '.repeat(60_000)}b\n---\n`)
+    assert.lengthOf(skillsIn([root]), 1)
   })
 })
 

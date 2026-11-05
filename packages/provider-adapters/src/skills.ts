@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs'
+import { closeSync, constants, fstatSync, openSync, readdirSync, readSync } from 'node:fs'
 import { join } from 'node:path'
 
 /*
@@ -68,8 +68,34 @@ export const skillLoadedBy = (update: {
 /** The name in a `SKILL.md`'s frontmatter, which an agent loads a skill by; without one, it loads none. */
 const nameIn = (skill: string): string | undefined => {
   const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(skill)?.[1]
-  const name = frontmatter === undefined ? undefined : /^name:[ \t]*(.+?)[ \t]*$/m.exec(frontmatter)?.[1]?.replace(/^(["'])(.*)\1$/, '$2')
+  const name =
+    frontmatter === undefined
+      ? undefined
+      : /^name:(.*)$/m
+          .exec(frontmatter)?.[1]
+          ?.trim()
+          .replace(/^(["'])(.*)\1$/, '$2')
   return name === '' ? undefined : name
+}
+
+/** More than a frontmatter's `name` and `description` come to, as it is at the top of the file. */
+const TOP_OF_A_SKILL = 64 * 1024
+
+/**
+ * The top of a `SKILL.md`, if it is a file: a checkout decides what is there, and a link to a
+ * device or a pipe would hold up the runtime, which reads it synchronously, for good. A link
+ * to a file is how a dotfiles manager keeps a person's, and what an agent would read.
+ */
+const topOf = (path: string): string | undefined => {
+  // Not held up opening a pipe. Windows has neither that flag nor those pipes.
+  const file = openSync(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0))
+  try {
+    if (!fstatSync(file).isFile()) return undefined
+    const top = Buffer.alloc(TOP_OF_A_SKILL)
+    return top.toString('utf8', 0, readSync(file, top, 0, TOP_OF_A_SKILL, 0))
+  } finally {
+    closeSync(file)
+  }
 }
 
 /** The skills in these folders, each a folder with a `SKILL.md` in it: the first of a name, as folders may repeat one. */
@@ -85,7 +111,8 @@ export const skillsIn = (folders: ReadonlyArray<string>): ReadonlyArray<SeenSkil
     for (const entry of names) {
       const path = join(folder, entry, 'SKILL.md')
       try {
-        const name = nameIn(readFileSync(path, 'utf8'))
+        const top = topOf(path)
+        const name = top === undefined ? undefined : nameIn(top)
         if (name !== undefined && !found.has(name)) found.set(name, { name, path })
       } catch {
         // Not a skill: a file, or a folder with none in it.

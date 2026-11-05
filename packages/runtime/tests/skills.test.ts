@@ -3,7 +3,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { ProjectId } from '@althar/domain'
-import type { SessionEvent } from '@althar/provider-adapters'
+import { agents, type SessionEvent } from '@althar/provider-adapters'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -144,6 +144,73 @@ describe('what a lead could see', () => {
       }).pipe(Effect.provide(runtime(':memory:', {}, { agents })))
     }),
   )
+})
+
+describe('an OpenCode in a Flatpak', () => {
+  const configOf = (out: boolean) => {
+    const definition = agents.opencode
+    const transport = Agents.fromRegistry((entry) =>
+      entry.id !== definition.id
+        ? entry
+        : { ...entry, launch: (node) => ({ ...entry.launch(node), ...(out ? { onDevice: () => ({ command: 'out', args: [] }) } : {}) }) },
+    ).list.find((entry) => entry.definition.id === definition.id)?.transport
+    const made = transport?.(tmpdir())
+    return made?._tag === 'Process' ? JSON.parse(made.spec.env?.OPENCODE_CONFIG_CONTENT ?? '{}') : undefined
+  }
+
+  it.live("has the person's folder read for what it could see, where it runs inside", () => {
+    const before = process.env.FLATPAK_ID
+    const asked: Array<boolean | undefined> = []
+    const reading = (entry: AgentEntry): AgentEntry => ({
+      ...entry,
+      definition: {
+        ...entry.definition,
+        skillFolders: ({ inSandbox }) => {
+          asked.push(inSandbox)
+          return []
+        },
+      },
+    })
+    const fake = Layer.effect(
+      Agents,
+      Effect.gen(function* () {
+        const all = yield* Agents
+        return Agents.of({ list: all.list.map(reading), get: (id) => Effect.map(all.get(id), reading) })
+      }),
+    ).pipe(Layer.provide(fakeAgents()))
+    return Effect.gen(function* () {
+      process.env.FLATPAK_ID = 'dev.althar.app'
+      const { task: created } = yield* task()
+      yield* (yield* Sessions).start({ threadId: created.threadId, agentId: 'opencode' })
+      yield* until(
+        Effect.sync(() => asked),
+        (seen) => seen.length > 0,
+      )
+      assert.deepStrictEqual(asked, [true])
+    }).pipe(
+      Effect.provide(runtime(':memory:', {}, { agents: fake })),
+      Effect.ensuring(
+        Effect.sync(() => {
+          if (before === undefined) delete process.env.FLATPAK_ID
+          else process.env.FLATPAK_ID = before
+        }),
+      ),
+    )
+  })
+
+  it("is told of the person's folder where it runs inside, and only there", () => {
+    const before = process.env.FLATPAK_ID
+    process.env.FLATPAK_ID = 'dev.althar.app'
+    try {
+      assert.deepStrictEqual(configOf(false).skills, { paths: [join(homedir(), '.config', 'opencode', 'skills')] })
+      assert.isUndefined(configOf(true).skills)
+      delete process.env.FLATPAK_ID
+      assert.isUndefined(configOf(false).skills)
+    } finally {
+      if (before === undefined) delete process.env.FLATPAK_ID
+      else process.env.FLATPAK_ID = before
+    }
+  })
 })
 
 describe('a skill loaded', () => {

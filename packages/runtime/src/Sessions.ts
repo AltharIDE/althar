@@ -14,6 +14,7 @@ import {
   type AgentSession,
   connect,
   type ConfigOption,
+  inFlatpakSandbox,
   type PermissionDecision,
   type PermissionRequest,
   type Question,
@@ -2482,15 +2483,17 @@ export class Sessions extends Context.Service<
           // A turn that already started records itself; between turns, this one does.
           running.recording ??= between
           // An agent that doesn't say what it could see: read where it reads, out on the device as a Flatpak's home is the device's by path (ADR-027). A review's lead loads none of the repository's.
+          const launched = definition.launch(adapterNode())
           if (thread.role === 'task' && thread.review === null && definition.skillFolders !== undefined)
             yield* between
               .record({
                 _tag: 'SkillsSeen',
                 skills: skillsIn(
                   definition.skillFolders({
-                    env: definition.launch(adapterNode()).onDevice === undefined ? process.env : {},
+                    env: launched.onDevice === undefined ? process.env : {},
                     homeDir: homedir(),
                     cwd: thread.cwd,
+                    inSandbox: inFlatpakSandbox(launched),
                   }),
                 ),
               })
