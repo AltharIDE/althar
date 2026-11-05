@@ -4,11 +4,13 @@ import { altitudeAt, AT, velocityAt } from '../../../hero/journey'
  * The re-entry, plotted: a cross-section of the air over the planet, drawn
  * about its centre far below the first screen. The ground is the limb, a
  * great arc low on the sheet; the air's heights are arcs about the same
- * centre; the capsule's path runs through them by the journey's own clock,
- * its height the altimeter's (altitudeAt) and its distance along the planet
- * what its speed has carried it (velocityAt, summed). So the path is today's
- * readouts, drawn: a long shallow run high in the air while it is fast, then
- * the turn down once it has shed its speed, coming to rest at 38 km.
+ * centre; the capsule's path runs through them from where today's
+ * altimeter starts, the entry interface, to where it comes to rest. Its
+ * shape is today's readouts, summed: the height lost against the way flown
+ * downrange at the speed it was going is near a parabola, long and shallow
+ * while it is fast, then turning down once it has shed its speed, and
+ * falling straight at rest. That parabola is what is drawn, so the path
+ * bends rather than breaks.
  */
 
 /** The heights drawn as arcs, in km, top down; the ground is the limb. */
@@ -20,20 +22,13 @@ export const ENTRY_KM = altitudeAt(AT.open)
 export const REST_KM = altitudeAt(AT.settled)
 export const REST_SPEED = velocityAt(AT.settled)
 
-/** How far downrange the capsule has come by second `t`, summed once in small steps; as a share of the whole run. */
-const rangeAt = (() => {
-  const step = 1 / 240
-  const n = Math.ceil(AT.settled / step)
-  const table = new Float64Array(n + 1)
-  for (let i = 1; i <= n; i++) table[i] = table[i - 1]! + velocityAt((i - 0.5) * step) * step
-  const total = table[n]!
-  return (t: number) => {
-    const x = Math.min(Math.max(t, 0), AT.settled) / step
-    const i = Math.min(Math.floor(x), n - 1)
-    const f = x - i
-    return (table[i]! * (1 - f) + table[i + 1]! * f) / total
-  }
-})()
+/**
+ * The share of the way downrange flown by the time a share `a` of the height
+ * is lost: 1 − (1 − a)^n. Fitted to the readouts (n near 2.5 lands on them
+ * within a few hundredths); a little under, the turn is eased out over the
+ * last stretch, where the readouts crowd it into a few pixels.
+ */
+const SHAPE = 2.1
 
 /** Where the plot stands on the sheet, in px. */
 export interface Frame {
@@ -50,8 +45,8 @@ export interface Frame {
   radius: number
 }
 
-/** Samples along the path, by the clock. */
-const SAMPLES = 480
+/** Samples along the path. */
+const SAMPLES = 240
 
 export interface Plot {
   frame: Frame
@@ -63,9 +58,8 @@ export interface Plot {
   yAt: (km: number, x: number) => number
   /** The band under the ground, `depth` px deep, from x `a` to x `b`. */
   band: (depth: number, a: number, b: number) => string
-  /** The path flown, and its length. */
+  /** The path flown. */
   d: string
-  length: number
   /** Where it sets off and where it rests. */
   entry: { x: number; y: number }
   rest: { x: number; y: number }
@@ -99,26 +93,22 @@ export function plot(frame: Frame): Plot {
   const phi0 = Math.asin((frame.from - cx) / radius(ENTRY_KM))
   const phi1 = Math.asin((frame.to - cx) / radius(REST_KM))
   let d = ''
-  let length = 0
-  let px = 0
-  let py = 0
+  let x = 0
+  let y = 0
   for (let i = 0; i <= SAMPLES; i++) {
-    const t = (i / SAMPLES) * AT.settled
-    const phi = phi0 + (phi1 - phi0) * rangeAt(t) ** SHAPE
-    const rr = radius(altitudeAt(t))
-    const x = cx + rr * Math.sin(phi)
-    const y = cy - rr * Math.cos(phi)
-    if (i > 0) length += Math.hypot(x - px, y - py)
+    const a = i / SAMPLES
+    const phi = phi0 + (phi1 - phi0) * (1 - (1 - a) ** SHAPE)
+    const rr = radius(ENTRY_KM + (REST_KM - ENTRY_KM) * a)
+    x = cx + rr * Math.sin(phi)
+    y = cy - rr * Math.cos(phi)
     d += `${i ? 'L' : 'M'}${f(x)} ${f(y)}`
-    px = x
-    py = y
   }
   const entry = { x: frame.from, y: yAt(ENTRY_KM, frame.from) }
-  const rest = { x: px, y: py }
+  const rest = { x, y }
   // Straight down to the ground, toward the planet's centre.
   const toCentre = Math.atan2(cy - rest.y, cx - rest.x)
   const fall = Math.hypot(cx - rest.x, cy - rest.y) - r
   const down = `M${f(rest.x)} ${f(rest.y)}L${f(rest.x + fall * Math.cos(toCentre))} ${f(rest.y + fall * Math.sin(toCentre))}`
 
-  return { frame, k, arc, yAt, band, d, length, entry, rest, down }
+  return { frame, k, arc, yAt, band, d, entry, rest, down }
 }

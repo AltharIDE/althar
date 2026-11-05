@@ -12,6 +12,7 @@
   --spine: 148px;
   --l: 252px;
   --r: 88px;
+  --gap: 32px;
   position: relative;
   isolation: isolate;
   overflow: hidden;
@@ -20,7 +21,7 @@
   color: var(--t-1);
 }
 @media (min-width: 1440px) {
-  .hero { --spine: 196px; --l: max(300px, round(down, (100vw - 1280px) / 2, 1px)); --r: 112px; }
+  .hero { --spine: 196px; --l: max(300px, round(down, (100vw - 1280px) / 2, 1px)); --r: 112px; --gap: 40px; }
 }
 
 /* Where the scale's line stands, for the plot to measure. */
@@ -83,10 +84,21 @@
 .speed b { font: 600 13px/1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
 .speed i { color: var(--ink-2); opacity: 1; }
 
-/* ---- the headline, the lead and the console ---- */
-.words { position: absolute; z-index: 1; left: var(--l); right: var(--r); top: clamp(108px, 15svh, 168px); }
+/* ---- the headline with its lead at the right, on its foot, as the sections' heads have theirs; the console standing on the ground ---- */
+.words {
+  position: absolute;
+  z-index: 1;
+  left: var(--l);
+  right: var(--r);
+  top: clamp(116px, 15.5svh, 172px);
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  column-gap: var(--gap);
+  align-items: end;
+  max-width: 1280px;
+}
 .h1 {
-  max-width: 12.5em;
+  grid-column: 1 / span 9;
   margin: 0;
   font-family: 'Inter Display', var(--display);
   font-size: clamp(44px, 6.3vw, 100px);
@@ -98,18 +110,19 @@
 }
 .fast { font-weight: 720; letter-spacing: -0.056em; color: var(--fire-type); }
 
-.deck { position: absolute; z-index: 1; left: var(--l); right: var(--r); bottom: clamp(20px, 3.6svh, 40px); display: grid; justify-items: start; gap: 18px; }
-.lead { max-width: 40em; margin: 0; font-size: 15.5px; line-height: 1.5; letter-spacing: -0.01em; color: var(--t-2); text-wrap: pretty; }
+.lead { grid-column: 10 / span 3; margin: 0; padding-bottom: 0.4em; font-size: 15.5px; line-height: 1.5; letter-spacing: -0.01em; color: var(--t-2); text-wrap: pretty; }
 
-/* The console as the chart's title block: hairline cells on the paper. */
-.console { display: grid; grid-auto-flow: column; border: 1px solid var(--ink); background: var(--n-2); }
-.cell { display: grid; align-content: center; justify-items: start; gap: 9px; padding: 13px 18px; }
+/* The console as the chart's title block, its left edge on the scale's line: hairline cells on the paper. */
+.deck { position: absolute; z-index: 1; left: var(--spine); right: var(--r); bottom: clamp(20px, 3.6svh, 40px); display: grid; }
+.console { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; border: 1px solid var(--ink); background: var(--n-2); }
+.cell { display: grid; align-content: center; justify-items: start; gap: 9px; padding: 13px 16px; }
 .cell + .cell { border-left: 1px solid var(--ink); }
 .label { font: 500 10px/1 var(--font-label); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); }
-.agents { display: flex; gap: 9px; margin: 0; padding: 0; list-style: none; color: var(--ink); }
+.agents { display: flex; gap: 8px; margin: 0; padding: 0; list-style: none; color: var(--ink); }
 .agents li { display: grid; place-items: center; width: 18px; height: 18px; }
+.install { justify-items: stretch; }
 .command { display: flex; align-items: center; gap: 4px; padding: 3px 3px 3px 11px; border-radius: 4px; box-shadow: inset 0 0 0 1px var(--ink-3); }
-.command code { font: 13px/1 var(--mono); color: var(--t-1); white-space: nowrap; }
+.command code { flex: 1; font: 12.5px/1 var(--mono); color: var(--t-1); white-space: nowrap; }
 .command code span { color: var(--ink-2); }
 /* The copy button, quiet until pointed at; its word only read out, so the console keeps its width. */
 .command button { width: 26px; padding: 0; justify-content: center; color: var(--ink-2); }
@@ -118,7 +131,7 @@
 /* The download in the chart's cobalt rather than a heavy black, GitHub a hairline; the other Mac's build close under them. */
 .ways { justify-items: start; }
 .cell.ways > div { flex-wrap: nowrap; gap: 10px; }
-.cell.ways > div > a { padding: 11px 16px; border-radius: 6px; }
+.cell.ways > div > a { padding: 10px 14px; border-radius: 6px; font-size: 14px; }
 .cell.ways > div > a:first-child { background: var(--ink); color: #fff; --os-belly: var(--ink); }
 .cell.ways > div > a:last-child { box-shadow: inset 0 0 0 1px var(--ink-3); color: var(--ink); }
 .cell.ways > p { margin: 0; }
@@ -131,25 +144,29 @@
 .hero:not([data-laid]) :is(.plot, .needle, .speed) { opacity: 0; }
 
 /* ---- narrower: the download under the agents and the install ---- */
-@media (max-width: 1279px) {
-  .console { grid-auto-flow: row; grid-template-columns: auto auto; }
+@media (max-width: 1259px) {
+  .console { grid-template-columns: auto minmax(0, 1fr); }
   .cell.ways { grid-column: 1 / -1; grid-auto-flow: column; align-items: center; justify-content: start; gap: 16px; border-left: 0; border-top: 1px solid var(--ink); }
 }
+/* No room for the lead beside the headline: under it; the scale a slim tape at the window's edge, the needle at its right. */
 @media (max-width: 1099px) {
-  .hero { --spine: 20px; --l: 76px; --r: var(--gut); }
+  .hero { --spine: 20px; --l: 76px; --r: var(--gut); --gap: 24px; }
+  .h1 { grid-column: 1 / -1; }
+  .lead { grid-column: 1 / span 8; margin-top: 22px; padding: 0; }
+  .deck { left: var(--l); }
   .needle { width: 50px; height: 24px; margin: -12px 0 0 15px; padding: 6px 5px 0 0; box-shadow: 0 0 0 3px var(--n-2); }
   .needle::after { right: auto; left: -6px; border-width: 5px 6px 5px 0; border-color: transparent var(--ink) transparent transparent; }
   .needle b { font-size: 11px; }
   .needle i { display: none; }
 }
-/* A phone: no scale; the headline, the plot, the lead, and the agents over the download, a thumb's height each. */
+/* A phone: no scale; the headline and the lead, the plot, and the agents over the download, a thumb's height each. */
 @media (max-width: 700px) {
   .hero { --spine: 0px; --l: var(--gut); --r: var(--gut); }
   .needle { display: none; }
-  .words { top: 132px; }
+  .words { top: 128px; display: block; }
   .h1 { font-size: clamp(38px, 11.4vw, 48px); line-height: 1; }
-  .deck { bottom: 16px; gap: 16px; }
-  .lead { font-size: 15px; }
+  .lead { margin-top: 16px; font-size: 15px; }
+  .deck { left: var(--gut); right: var(--gut); bottom: 16px; }
   .install { display: none; }
   .console { width: 100%; grid-template-columns: 1fr; }
   .cell { justify-items: center; }

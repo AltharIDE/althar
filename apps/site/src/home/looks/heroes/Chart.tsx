@@ -35,15 +35,16 @@ function lay(el: HTMLElement, probe: HTMLElement, words: HTMLElement, deck: HTML
   const phone = w <= 700
   const spine = phone ? 0 : probe.offsetLeft
   const l = words.offsetLeft
-  const top = words.offsetTop + words.offsetHeight + (phone ? 40 : 56)
+  const top = words.offsetTop + words.offsetHeight + (phone ? 44 : 64)
   // The ground's crest, so the limb clears the lead and the console all the way along them.
   const parts = [...deck.children] as HTMLElement[]
   const deckLeft = deck.offsetLeft
   const deckRight = deckLeft + Math.max(...parts.map((p) => p.offsetLeft + p.offsetWidth))
-  const centre = (spine + w) / 2
-  const radius = Math.max((w - spine) * (phone ? 2.4 : 1.9), 900)
+  // The planet's centre a little right of the plot's middle, so the path, coming in from the right, falls all the way.
+  const centre = spine + (w - spine) * (phone ? 0.6 : 0.58)
+  const radius = Math.max((w - spine) * (phone ? 3 : 4.5), 1200)
   const dip = (x: number) => radius - Math.sqrt(Math.max(0, radius * radius - (x - centre) ** 2))
-  const ground = deck.offsetTop - (phone ? 26 : 34) - HATCH - Math.max(dip(deckLeft), dip(deckRight))
+  const ground = deck.offsetTop - (phone ? 24 : 28) - HATCH - Math.max(dip(deckLeft), dip(deckRight))
   return plot({
     w,
     h,
@@ -89,7 +90,6 @@ export function ChartHero({ nav }: { nav?: ReactNode }) {
   const words = useRef<HTMLDivElement>(null)
   const deck = useRef<HTMLElement>(null)
   const flown = useRef<SVGPathElement>(null)
-  const capsule = useRef<SVGGElement>(null)
   const [p, setPlot] = useState<Plot | null>(null)
   const drawn = useRef(false)
   const id = useId().replace(/:/g, '')
@@ -218,7 +218,7 @@ export function ChartHero({ nav }: { nav?: ReactNode }) {
           </text>
           {/* The capsule at rest, and a leader out to its speed. */}
           <path className={s.reading} d={`M${(p.rest.x + 10).toFixed(1)} ${Math.round(p.rest.y) + 0.5}h16`} data-after="" />
-          <g ref={capsule} className={s.capsule} transform={`translate(${p.rest.x.toFixed(1)} ${p.rest.y.toFixed(1)})`} data-after="">
+          <g className={s.capsule} transform={`translate(${p.rest.x.toFixed(1)} ${p.rest.y.toFixed(1)})`} data-after="">
             <circle r="10" className={s.halo} />
             <circle r="4.5" />
           </g>
@@ -241,9 +241,9 @@ export function ChartHero({ nav }: { nav?: ReactNode }) {
         <h1 className={s.h1}>
           {HERO.title} <span className={s.fast}>{HERO.last}</span>
         </h1>
+        <p className={s.lead}>{HERO.lead}</p>
       </div>
       <footer ref={deck} className={s.deck}>
-        <p className={s.lead}>{HERO.lead}</p>
         <div className={s.console}>
           <div className={s.cell}>
             <span className={s.label}>{HERO.agents}</span>
