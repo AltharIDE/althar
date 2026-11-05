@@ -103,6 +103,25 @@ describe("a lead's git", () => {
     assert.include(moved.said, "moving feature/unmerged so it loses commits can't be undone")
   })
 
+  it('stops a push to the branch its work goes into, as to the default branch', () => {
+    const { work } = repository()
+    const toward = {
+      ...env,
+      ...guardEnv({
+        sessionId,
+        taskBranch: 'althar/retry',
+        defaultBranches: ['main'],
+        towards: ['feature/other', 'feature/other'],
+        count: 0,
+        at,
+      }),
+    }
+    const pushed = spawnSync('git', ['push', 'origin', 'althar/retry:feature/other'], { cwd: work, env: toward, encoding: 'utf8' })
+    assert.notStrictEqual(pushed.status, 0)
+    assert.strictEqual(guardStopIn(`${pushed.stdout}${pushed.stderr}`), 'default-branch')
+    assert.include(`${pushed.stdout}${pushed.stderr}`, 'work goes into')
+  })
+
   it('stops them from a script, a loop or $(…) as from a plain command', () => {
     const { work } = repository()
     const script = run(

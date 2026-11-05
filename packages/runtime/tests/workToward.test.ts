@@ -574,3 +574,47 @@ describe('a branch the person makes from a branch list', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 })
+
+describe('a branch the person can’t make from a branch list', () => {
+  const message = (error: object) => ('message' in error && typeof error.message === 'string' ? error.message : '')
+
+  it.live(
+    'is refused in words, and is not made, for a name git or Althar won’t take, a repository it doesn’t know, or a host not connected',
+    () => {
+      const { working, bare } = hosted()
+      const github = makeFakeService({ pushUrl: () => bare })
+      github.addRepository(['meridian', 'api'])
+      return Effect.gen(function* () {
+        const { projectId, repositoryId } = yield* opened(working)
+
+        // A repository the project doesn't have.
+        assert.strictEqual((yield* Effect.flip(makeBranch({ projectId, repositoryId: 'nope', branch: 'release/2.0.0' })))._tag, 'NotFound')
+
+        // Nothing, or a name that reads as an option, is no branch name.
+        for (const branch of ['', '   ', '-f', '--force']) {
+          const refused = yield* Effect.flip(makeBranch({ projectId, repositoryId, branch }))
+          assert.strictEqual(refused._tag, 'BranchRefused')
+          assert.include(message(refused), 'can’t be called')
+        }
+
+        // With no sign-in to the code host, it says to connect, and makes nothing.
+        const unconnected = yield* Effect.flip(makeBranch({ projectId, repositoryId, branch: 'refs/heads/release/2.0.0' }))
+        assert.strictEqual(unconnected._tag, 'BranchRefused')
+        assert.include(message(unconnected), 'Connect it in Settings')
+        assert.strictEqual(spawnSync('git', ['rev-parse', '--verify', '-q', 'refs/heads/release/2.0.0'], { cwd: bare }).status, 1)
+      }).pipe(Effect.provide(runtimeWith({ github })))
+    },
+  )
+
+  it.live('takes a refs/heads/ name as the branch it names', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const { projectId, repositoryId } = yield* opened(working)
+      assert.strictEqual(yield* makeBranch({ projectId, repositoryId, branch: 'refs/heads/release/2.1.0' }), 'release/2.1.0')
+      assert.notStrictEqual(git(bare, 'rev-parse', 'release/2.1.0'), '')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+})
