@@ -1,0 +1,195 @@
+/* Prototype, A: the night side. The planet from orbit held behind the sections (a/orbit.ts), the claims set over it as a film's titles, the app's pictures seen on the way; dawn at the download, washing into the footer's paper. */
+
+.body {
+  position: relative;
+  isolation: isolate;
+  overflow-x: clip;
+  color: #fff;
+  background: #010102;
+  /* How tall the plain paper between the view and the footer is. */
+  --wash: 8svh;
+  /* The first screen's soft dark under white words, so they read where they cross the lit edge or the towns; nothing shows on the black. */
+  --under-title: 0 1px 3px rgba(20, 6, 0, 0.5), 0 2px 26px rgba(20, 6, 0, 0.7);
+  --under-words: 0 1px 3px rgba(0, 0, 0, 0.55), 0 1px 14px rgba(0, 0, 0, 0.8);
+  --warm: rgba(255, 248, 240, 0.74);
+  --rim: rgba(255, 255, 255, 0.14);
+  /* The pictures float in the dark: a fine light rim, a long fall into the night, a cool line under them where the planet's edge lights them. */
+  --board-frame: 0 0 0 1px var(--rim), 0 1px 0 0.5px rgba(150, 165, 255, 0.28), 0 70px 160px -10px rgba(0, 0, 0, 0.95);
+  --talk-frame: 0 0 0 1px var(--rim), 0 1px 0 0.5px rgba(150, 165, 255, 0.28), 0 60px 140px -10px rgba(0, 0, 0, 0.95);
+  --bezel-fall: 0 1px 0 0.5px rgba(150, 165, 255, 0.22), 0 80px 180px rgba(0, 0, 0, 0.95);
+  --scene-frame: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 50px 120px rgba(0, 0, 0, 0.9);
+}
+.under { top: 0; bottom: calc(var(--wash) + 24svh); }
+.night { position: relative; }
+
+/* ---- the view: held to the window while the sections pass over it ---- */
+.track { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
+.view { position: sticky; top: 0; height: 100svh; overflow: hidden; }
+.canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+/* The first screen's film grain, its own faint specks laid over as they are. */
+.grain { position: absolute; inset: 0; background-size: 128px 128px; opacity: 0.4; }
+/* Without the graphics card: the edge as the other pages draw it. */
+.limb { display: none; }
+.view[data-flat] .canvas { display: none; }
+.view[data-flat] .limb {
+  display: block;
+  position: absolute;
+  left: -45%;
+  right: -45%;
+  top: 66%;
+  height: 1600px;
+  border-radius: 50%;
+  border-top: 1.5px solid #b4bcff;
+  background: #020203;
+  box-shadow: 0 -2px 10px -2px rgba(60, 76, 255, 0.9), 0 -14px 50px -10px rgba(43, 59, 255, 0.55), 0 -60px 160px -30px rgba(43, 59, 255, 0.45);
+}
+
+/* ---- the grid every section is set on ---- */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  column-gap: 32px;
+  max-width: 1344px;
+  margin: 0 auto;
+  padding: 0 var(--gut);
+}
+.scene { position: relative; padding-top: 260px; }
+.opening { padding-top: 190px; }
+
+/* ---- a claim, as a film's title over its shot: white, large, at the left; its lead warm under it ---- */
+.head { display: grid; align-content: start; gap: 26px; }
+.title { color: #fff; text-shadow: var(--under-title); }
+.big { font-size: clamp(48px, 7.4vw, 112px); }
+.lead { max-width: 30em; color: var(--warm); text-shadow: var(--under-words); }
+/* The notch tour's own words, white on the night, given the same. */
+.tour [class*='EdgeTour-module__menuWords'] { text-shadow: var(--under-words); }
+.tour [class*='EdgeTour-module__menuTitle'] { text-shadow: var(--under-title); }
+
+/* A picture of the app, given the room its section sets; its own wrapper's measure set aside. */
+.picture > * { max-width: none; margin: 0; padding: 0; }
+
+/* The board: the claim at the left, over the board, the window's full width under it. */
+.openingHead { grid-column: 1 / span 9; }
+.openingHead .lead { max-width: 27em; }
+.board { grid-column: 1 / -1; margin-top: 96px; }
+
+/* The coordinator: its claim at the left, the conversation beside it, never taller than the window. */
+.split { align-items: center; }
+.splitHead { grid-column: 1 / span 5; }
+.talk { grid-column: 6 / -1; }
+.talk > * { max-width: min(100%, calc((100svh - 150px) * 760 / 720)); margin-left: auto; }
+
+/* The review: its claim at the right, over the drawing, which melts into the night at its edges. */
+.rightHead { grid-column: 7 / -1; }
+.review { grid-column: 1 / -1; margin-top: 72px; }
+.review > * { max-width: 1180px; margin: 0 auto; }
+
+/* The notch: the claim at the left, its lead beside it at the right, on one line's foot. */
+.wideHead { grid-column: 1 / -1; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); column-gap: 32px; align-items: end; }
+.wideHead .lead { padding-bottom: 0.5em; }
+.tour { grid-column: 1 / -1; margin-top: 80px; }
+.tour > * { margin: 0 auto; }
+
+/* ---- what keeps you in flow: things passing in the dark, large and small, offset ---- */
+.flowHead { grid-column: 1 / span 8; }
+.passing {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  column-gap: 32px;
+  row-gap: 150px;
+  max-width: 1344px;
+  margin: 120px auto 0;
+  padding: 0 var(--gut);
+  list-style: none;
+}
+.thing { display: flex; flex-direction: column; gap: 26px; min-width: 0; }
+.words { display: grid; gap: 10px; max-width: 30em; }
+.thingTitle { margin: 0; font-family: 'Inter Display', var(--display); font-size: clamp(24px, 2.3vw, 34px); font-weight: 300; line-height: 1.06; letter-spacing: -0.035em; color: #fff; text-wrap: balance; text-shadow: var(--under-title); }
+.thingTitle b { font-weight: 700; letter-spacing: -0.04em; }
+.thingLead { margin: 0; font-size: 15px; line-height: 1.55; color: rgba(255, 248, 240, 0.7); text-wrap: pretty; text-shadow: var(--under-words); }
+.pic > * { width: 100%; }
+
+/* A drawing melts into the night: its dark ground fades out at every edge, so it never shows as a box. */
+.thing[data-kind='drawn'] .pic > * {
+  mask-image: linear-gradient(to right, transparent, #000 15%, #000 85%, transparent), linear-gradient(transparent, #000 13%, #000 86%, transparent);
+  mask-composite: intersect;
+}
+/* A piece of the app is a lit pane too: its frame's paper shadow traded for the rim. */
+.thing[data-kind='piece'] [class*='Bento-module__card'],
+.thing[data-kind='piece'] [class*='Bento-module__window'] { box-shadow: 0 0 0 1px var(--rim), 0 1px 0 0.5px rgba(150, 165, 255, 0.24), 0 50px 120px rgba(0, 0, 0, 0.9); }
+
+/* Every plan: large at the left, its words beside it at the foot. */
+.fAccounts { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: end; }
+.fAccounts .pic { grid-column: 1 / span 8; }
+.fAccounts .words { grid-column: 9 / -1; padding-bottom: 6%; }
+/* While you're away: small, set in; work that starts itself beside it, lower. */
+.fAway { grid-column: 2 / span 4; align-self: start; padding-top: 40px; }
+.fAutomations { grid-column: 7 / -1; margin-top: 180px; }
+/* Conflicts: its words at the left, the drawing large at the right. */
+.fConflicts { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; }
+.fConflicts .words { grid-column: 1 / span 3; grid-row: 1; }
+.fConflicts .pic { grid-column: 4 / span 8; grid-row: 1; }
+/* One home: the window's width, its words over it. */
+.fHome { grid-column: 1 / -1; flex-direction: column-reverse; }
+.fHome .pic { max-width: 1120px; width: 100%; margin: 0 auto; }
+.fHome .words { max-width: 34em; }
+/* Ten at once, and every workspace: a pair, the second lower. */
+.fWorktrees { grid-column: 1 / span 6; }
+.fWorkspaces { grid-column: 7 / -1; margin-top: 200px; }
+
+/* ---- the end: dawn; the last line large in the middle, the download under it, the sun breaking under them ---- */
+.end { position: relative; padding: 46svh var(--gut) 84svh; }
+.dawn { display: grid; justify-items: center; gap: 40px; text-align: center; }
+.endLine { margin: 0; font-family: 'Inter Display', var(--display); font-size: clamp(44px, 6.8vw, 104px); font-weight: 200; line-height: 1; letter-spacing: -0.05em; color: #fff; text-wrap: balance; text-shadow: var(--under-title); }
+.endLine b { font-weight: 700; letter-spacing: -0.055em; }
+.endGet { display: grid; justify-items: center; gap: 12px; }
+.endGet > p { margin: 0; text-shadow: var(--under-words); }
+
+/* The wash: the dawn's warm light coming up over the planet and becoming the paper. */
+.wash {
+  position: relative;
+  height: var(--wash);
+  background: var(--n-2);
+}
+
+@media (max-width: 1100px) {
+  .openingHead { grid-column: 1 / -1; }
+  .splitHead, .talk { grid-column: 1 / -1; }
+  .talk { margin-top: 64px; }
+  .talk > * { margin: 0 auto; }
+  .rightHead { grid-column: 4 / -1; }
+  .passing { row-gap: 110px; }
+  .fAccounts .pic, .fAccounts .words { grid-column: 1 / -1; }
+  .fAccounts .words { grid-row: 2; padding: 0; }
+  .fAway { grid-column: 1 / span 5; }
+  .fAutomations { grid-column: 6 / -1; margin-top: 100px; }
+  .fConflicts .words { grid-column: 1 / -1; grid-row: 2; }
+  .fConflicts .pic { grid-column: 1 / -1; grid-row: 1; }
+  .fWorktrees { grid-column: 1 / span 6; }
+  .fWorkspaces { grid-column: 7 / -1; margin-top: 120px; }
+}
+
+@media (max-width: 700px) {
+  .body { --wash: 6svh; }
+  .grid, .passing { grid-template-columns: minmax(0, 1fr); column-gap: 0; }
+  .grid > *, .passing > * { grid-column: 1 / -1 !important; }
+  .scene { padding-top: 150px; }
+  .opening { padding-top: 120px; }
+  .head { gap: 18px; }
+  .big { font-size: clamp(44px, 12.4vw, 60px); }
+  .board, .review, .tour { margin-top: 48px; }
+  .talk { margin-top: 44px; }
+  .rightHead { grid-column: 1 / -1; }
+  .wideHead { grid-template-columns: minmax(0, 1fr); row-gap: 18px; }
+  .passing { row-gap: 88px; margin-top: 72px; }
+  .thing, .fAway, .fAutomations, .fWorktrees, .fWorkspaces { margin-top: 0; padding-top: 0; }
+  .fAccounts, .fConflicts { display: flex; flex-direction: column; }
+  .fHome { flex-direction: column-reverse; }
+  .thing { gap: 20px; }
+  .end { padding: 34svh var(--gut) 76svh; }
+  .endLine { font-size: clamp(38px, 11vw, 52px); }
+  .endGet { justify-items: stretch; width: 100%; }
+  .endGet > div { display: grid; gap: 10px; }
+  .endGet > div > a { justify-content: center; height: 50px; }
+  .endGet > p { text-align: center; }
+}
