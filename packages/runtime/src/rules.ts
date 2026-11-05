@@ -525,14 +525,21 @@ const quoteWord = (word: string) => (/^[\w@%+=:,./-]+$/.test(word) ? word : `'${
 
 /**
  * The host a sandbox's network request is for (Claude Code's
- * `SandboxNetworkAccess`), or none: its raw input names a host and no
- * command. A host is never read as a shell command, however it is spelled
- * (a port, an underscore); a line that does name a command is read as one.
+ * `SandboxNetworkAccess`), or none. Its raw input names a host and no
+ * command, and the request's title is that host: claude-agent-acp's
+ * presentation gives a network request the host as its subject
+ * (permissions/presentation.ts), where a tool that merely takes a `host`
+ * argument keeps its own title and is read as what it says it does. A host is
+ * never read as a shell command, however it is spelled (a port, an
+ * underscore); a line that does name a command is read as one.
  */
 const networkHostOf = (request: PermissionRequest): string | undefined => {
+  if (request.kind !== 'execute' && request.kind !== 'other') return undefined
   if (commandIn(request.rawInput) !== undefined) return undefined
   const host = field(request.rawInput, 'host')
-  return typeof host === 'string' && host.trim() !== '' ? host.trim() : undefined
+  if (typeof host !== 'string') return undefined
+  const name = host.trim()
+  return name !== '' && request.title.trim() === name ? name : undefined
 }
 
 const PATH_KEYS = ['file_path', 'filePath', 'path', 'notebook_path', 'old_path', 'new_path', 'destination', 'source', 'target']

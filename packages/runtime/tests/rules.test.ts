@@ -389,6 +389,29 @@ describe('the always-ask list', () => {
       assert.deepStrictEqual(host(name), { verdict: 'allow' }, name)
     // None of the command kinds is what a host does, even one the project never allows.
     assert.strictEqual(host('release-assets.githubusercontent.com', { project: { ...MVP_RULES, never: ['deploy'] } }).verdict, 'allow')
+    assert.deepStrictEqual(host('release-assets.githubusercontent.com', { project: { ...MVP_RULES, mode: 'allow', never: ['deploy'] } }), {
+      verdict: 'allow',
+    })
+    // Nor is it what the coordinator is asked to judge as a deploy.
+    assert.strictEqual(
+      host('release-assets.githubusercontent.com', {
+        project: { ...MVP_RULES, mode: 'coordinator', ask: ['deploy'], never: [], allow: [], commands: [] },
+      }).verdict,
+      'judge',
+    )
+  })
+
+  it('reads a tool that only takes a host argument by its title, not as a network request', () => {
+    const host = 'release-assets.githubusercontent.com'
+    // The title is what the tool does; a deploy still asks, though the input names a host.
+    assert.deepStrictEqual(decide(request({ kind: 'other', title: 'deploy_to_host', rawInput: { host } }), context), {
+      verdict: 'ask',
+      reason: 'Deploying or publishing always asks.',
+      held: true,
+    })
+    assert.strictEqual(decide(request({ kind: 'other', title: 'npm publish', rawInput: { host } }), context).verdict, 'ask')
+    // And an always-allow keeps the tool, not the host.
+    assert.strictEqual(alwaysOf(request({ kind: 'other', title: 'ssh_exec', rawInput: { host } }), context).command, 'ssh_exec')
   })
 
   it('still refuses a host the person’s rules never allow', () => {
