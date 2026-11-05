@@ -788,6 +788,42 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
   const repo = (repository: Repository | ReadonlyArray<string>) =>
     `${api}/repos/${('path' in repository ? repository.path : repository).map(encodeURIComponent).join('/')}`
 
+  // Kept within this connection, so answers never cross hosts or credentials.
+  const permissions = new Map<string, { at: number; member: boolean }>()
+  let warnedPermissions = false
+  const writerOf = (repository: Repository, user: User | null, association: string | undefined) =>
+    Effect.gen(function* () {
+      if (memberOf(association)) return true
+      if (user === null) return false
+      const key = `${repo(repository)}/${user.login}`.toLowerCase()
+      const now = yield* Clock.currentTimeMillis
+      const kept = permissions.get(key)
+      if (kept !== undefined && now - kept.at < 60_000) return kept.member
+      const member = yield* http
+        .json(
+          Schema.Struct({ permission: Schema.String }),
+          'GET',
+          `${repo(repository)}/collaborators/${encodeURIComponent(user.login)}/permission`,
+        )
+        .pipe(
+          Effect.map((answer) => ['admin', 'maintain', 'write'].includes(answer.permission)),
+          Effect.catchTag('ConnectorFailed', (error) => {
+            if (error.status !== 403 && error.status !== 404) return Effect.fail(error)
+            return Effect.gen(function* () {
+              if (!warnedPermissions) {
+                warnedPermissions = true
+                yield* Effect.logWarning('GitHub repository permissions are unreadable; falling back to author association')
+              }
+              return false
+            })
+          }),
+        )
+      // Discard expired entries as new authors arrive, keeping the cache bounded by recent activity.
+      for (const [oldKey, value] of permissions) if (now - value.at >= 60_000) permissions.delete(oldKey)
+      permissions.set(key, { at: now, member })
+      return member
+    })
+
   const account: Effect.Effect<Account, ConnectorFailed> = Effect.map(http.json(User, 'GET', `${api}/user`), (user) => ({
     id: String(user.id),
     login: user.login,
@@ -1607,25 +1643,32 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         )
         const lines = yield* http.cached(Schema.Array(CommentAnswer), `${repo(repository)}/pulls/${number}/comments?per_page=100${since}`)
         const reviews = yield* http.cached(Schema.Array(ReviewAnswer), `${repo(repository)}/pulls/${number}/reviews?per_page=100`)
-        const comments = [...conversation.map((comment) => commentOf(comment, false)), ...lines.map((comment) => commentOf(comment, true))]
-        const reviewed = reviews.flatMap((review): ReadonlyArray<Review> => {
+        const comments: Comment[] = []
+        for (const [rows, inline] of [
+          [conversation, false],
+          [lines, true],
+        ] as const) {
+          for (const row of rows) {
+            comments.push({ ...commentOf(row, inline), member: yield* writerOf(repository, row.user, row.author_association) })
+          }
+        }
+        const reviewed: Review[] = []
+        for (const review of reviews) {
           const verdict = verdictOf(review.state)
           const at = review.submitted_at
-          if (verdict === undefined || at == null || (cursor !== null && at < cursor)) return []
+          if (verdict === undefined || at == null || (cursor !== null && at < cursor)) continue
           // A "commented" review is its line comments, which come as comments; its own body only when it has one.
-          if (verdict === 'commented' && (review.body ?? '') === '') return []
-          return [
-            {
-              id: String(review.id),
-              author: personOf(review.user),
-              member: memberOf(review.author_association),
-              verdict,
-              body: review.body ?? '',
-              at,
-              url: review.html_url ?? null,
-            },
-          ]
-        })
+          if (verdict === 'commented' && (review.body ?? '') === '') continue
+          reviewed.push({
+            id: String(review.id),
+            author: personOf(review.user),
+            member: yield* writerOf(repository, review.user, review.author_association),
+            verdict,
+            body: review.body ?? '',
+            at,
+            url: review.html_url ?? null,
+          })
+        }
         const all = [...comments.map((comment) => comment.at), ...reviewed.map((review) => review.at)]
         const next = all.reduce((latest, at) => (at > latest ? at : latest), cursor ?? '')
         const byTime = <T extends { readonly at: string }>(items: ReadonlyArray<T>) => items.toSorted((a, b) => (a.at < b.at ? -1 : 1))
