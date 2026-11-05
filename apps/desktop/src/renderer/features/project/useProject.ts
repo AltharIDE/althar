@@ -57,7 +57,8 @@ export interface ProjectModel {
   /** An action is on its way to the runtime. */
   readonly pending: boolean
   readonly loadingEarlier: boolean
-  readonly loadEarlier: () => Promise<void>
+  /** Rejects on failure; quiet keeps automatic reads from opening the global error notice. */
+  readonly loadEarlier: (quiet?: boolean) => Promise<void>
   /** Says something to the coordinator, which starts it on `agentId` if it isn't running. */
   /** Tells the coordinator something, with any images; a coordinator not running starts as the person chose, when they did. */
   readonly say: (body: string, choice: Choice | null, images?: Outgoing) => Promise<boolean>
@@ -244,19 +245,44 @@ export const useProject = (projectId: string): ProjectModel => {
     timer.current ??= setTimeout(readChanged, GATHER)
   })
 
-  const loadEarlier = useCallback(async () => {
-    const first = coordinator?.items[0]
-    if (first === undefined) return
-    setLoadingEarlier(true)
-    try {
-      const page = await client.getCoordinator(projectId, { before: first.sequence, limit: PAGE })
-      setCoordinator((current) => ({ ...current, items: mergeItems(current.items, page.items), earlier: page.earlier }))
-    } catch (failure) {
-      fail(failure)
-    } finally {
-      setLoadingEarlier(false)
-    }
-  }, [client, projectId, coordinator, setCoordinator, fail])
+  const earlierRequest = useRef<{ id: string | undefined; promise: Promise<void> } | null>(null)
+  const loadEarlier = useCallback(
+    (quiet = false) => {
+      if (earlierRequest.current?.id === coordinator?.threadId && earlierRequest.current) {
+        const pending = earlierRequest.current.promise
+        return quiet
+          ? pending
+          : pending.catch((error) => {
+              fail(error)
+              throw error
+            })
+      }
+      const first = coordinator?.items[0]
+      if (first === undefined || !coordinator?.earlier) return Promise.resolve()
+      setLoadingEarlier(true)
+      const request = client
+        .getCoordinator(projectId, { before: first.sequence, limit: PAGE })
+        .then((page) => {
+          setCoordinator((current) =>
+            current.threadId === page.threadId
+              ? { ...current, items: mergeItems(current.items, page.items), earlier: page.earlier }
+              : current,
+          )
+        })
+        .catch((error) => {
+          if (!quiet) fail(error)
+          throw error
+        })
+        .finally(() => {
+          if (earlierRequest.current?.promise !== request) return
+          earlierRequest.current = null
+          setLoadingEarlier(false)
+        })
+      earlierRequest.current = { id: coordinator?.threadId, promise: request }
+      return request
+    },
+    [client, projectId, coordinator, setCoordinator, fail],
+  )
 
   /** Runs an action, says what went wrong if it did, and reads the thread's head again. */
   const act = useCallback(

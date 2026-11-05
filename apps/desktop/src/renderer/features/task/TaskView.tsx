@@ -1,3 +1,4 @@
+import { EarlierTurns } from '../../shared/EarlierTurns'
 import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import type { AttentionRequest, TaskAction, ThreadSnapshot } from '@althar/contracts'
@@ -30,7 +31,6 @@ import {
   TaskMenu,
   TaskStatus,
   Thread,
-  ThreadDivider,
   ThreadShellProvider,
   ThreadMeasure,
   ThreadSkeleton,
@@ -169,9 +169,6 @@ export const text = {
   faces: { talk: 'Conversation', out: 'Outputs', graph: 'Graph' } satisfies Record<Face, string>,
   facesKbd: { talk: 'c', out: 'o', graph: 'g' } satisfies Record<Face, string>,
   dismiss: 'Dismiss',
-  earlier: 'Earlier in this task',
-  showEarlier: 'Show',
-  loadingEarlier: 'Showing…',
   files: (count: number) => (count === 1 ? '1 file' : `${count} files`),
   reviewDiff: 'Review the changes',
   diffKey: modKey('D'),
@@ -493,7 +490,11 @@ export function TaskView({
       void reveal(itemId, async () => {
         const now = latest.current
         if (now.snapshot?.earlier !== true) return false
-        await now.loadEarlier()
+        try {
+          await now.loadEarlier()
+        } catch {
+          return false
+        }
         return true
       })
     },
@@ -1107,15 +1108,13 @@ export function TaskView({
                   )}
                 </div>
               )}
-              {snapshot.earlier && (
-                <ThreadDivider
-                  icon="up"
-                  action={model.loadingEarlier ? text.loadingEarlier : text.showEarlier}
-                  onAction={() => void model.loadEarlier()}
-                >
-                  {text.earlier}
-                </ThreadDivider>
-              )}
+              <EarlierTurns
+                key={snapshot.threadId}
+                earlier={snapshot.earlier}
+                load={model.loadEarlier}
+                version={snapshot.items}
+                loading={model.loadingEarlier}
+              />
               <ThreadShellProvider value={host.shell}>
                 <TaskThread
                   rounds={blocks}

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Activity } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { type AgentStatus, ApiError, type LimitCall, type StuckStep, type ThreadSnapshot } from '@althar/contracts'
 import { TaskStatus, TrackStep } from '@althar/ui'
@@ -3095,12 +3095,22 @@ describe('a task', () => {
           : { ...newest, items: [items.says('An earlier one.', 'claude-code', 'earlier')], earlier: false },
       ),
     })
+    if (vi.isMockFunction(window.getComputedStyle)) vi.mocked(window.getComputedStyle).mockRestore()
+    const computed = window.getComputedStyle
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
+      const style = computed(element)
+      Object.defineProperty(style, 'overflowY', {
+        value: element.classList.contains('scroll') || element.getAttribute('class')?.includes('scroll_') ? 'auto' : 'visible',
+        configurable: true,
+      })
+      return style
+    })
     withServices(<Task />, client)
     await screen.findByText('The newest.')
-    await userEvent.click(screen.getByRole('button', { name: 'Show' }))
+    scrollEarlier()
     await screen.findByText('An earlier one.')
     expect(client.getThread).toHaveBeenLastCalledWith('th1', { before: newest.items[0]?.sequence, limit: 100 })
-    expect(screen.queryByText('Earlier in this task')).toBeNull()
+    expect(screen.queryByText('Loading…')).toBeNull()
   })
 
   it('says what went wrong, and lets it go', async () => {
@@ -3132,8 +3142,19 @@ describe('a task', () => {
 
   it('reads nothing earlier when it has nothing yet', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => thread({ items: [], earlier: true })) })
+    if (vi.isMockFunction(window.getComputedStyle)) vi.mocked(window.getComputedStyle).mockRestore()
+    const computed = window.getComputedStyle
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
+      const style = computed(element)
+      Object.defineProperty(style, 'overflowY', {
+        value: element.classList.contains('scroll') || element.getAttribute('class')?.includes('scroll_') ? 'auto' : 'visible',
+        configurable: true,
+      })
+      return style
+    })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Show' }))
+    await waitFor(() => expect(document.querySelector('section[data-arrivals]')).not.toBeNull())
+    scrollEarlier()
     // Only the thread, and what it changed as it opened: no page before nothing.
     expect(vi.mocked(client.getThread).mock.calls.filter(([, page]) => page?.before !== undefined)).toEqual([])
   })
@@ -3430,4 +3451,16 @@ describe('the face a task opens on', () => {
     withServices(<Task />, client)
     expect((await screen.findByRole('radio', { name: /Conversation/ })).getAttribute('aria-checked')).toBe('true')
   })
+})
+
+function scrollEarlier() {
+  const thread = document.querySelector<HTMLElement>('section[data-arrivals]')!
+  let box = thread.parentElement!
+  while (!/(auto|scroll)/.test(getComputedStyle(box).overflowY) && box.parentElement) box = box.parentElement
+  Object.defineProperty(box, 'clientHeight', { configurable: true, value: 600 })
+  fireEvent.scroll(box)
+}
+
+afterEach(() => {
+  if (vi.isMockFunction(window.getComputedStyle)) vi.mocked(window.getComputedStyle).mockRestore()
 })

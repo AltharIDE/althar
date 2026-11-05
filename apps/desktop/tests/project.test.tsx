@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError, type CoordinatorSnapshot, type ThreadItem } from '@althar/contracts'
 import { Room } from '@althar/ui'
@@ -938,8 +938,19 @@ describe('the Talk room', () => {
           : coordinatorSnapshot({ items: [items.says('The oldest.')], earlier: false }),
       ),
     })
+    if (vi.isMockFunction(window.getComputedStyle)) vi.mocked(window.getComputedStyle).mockRestore()
+    const computed = window.getComputedStyle
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
+      const style = computed(element)
+      Object.defineProperty(style, 'overflowY', {
+        value: element.classList.contains('scroll') || element.getAttribute('class')?.includes('scroll_') ? 'auto' : 'visible',
+        configurable: true,
+      })
+      return style
+    })
     withServices(<Project room={Room.Talk} />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Show' }))
+    await screen.findByText('The newest.')
+    scrollEarlier()
     expect(await screen.findByText('The oldest.')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Show' })).toBeNull()
   })
@@ -981,11 +992,21 @@ describe('what can go wrong', () => {
       ),
       holdPlan: vi.fn(async () => Promise.reject(new ApiError({ reason: 'NotFound', message: "That plan isn't there any more." }))),
     })
+    if (vi.isMockFunction(window.getComputedStyle)) vi.mocked(window.getComputedStyle).mockRestore()
+    const computed = window.getComputedStyle
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
+      const style = computed(element)
+      Object.defineProperty(style, 'overflowY', {
+        value: element.classList.contains('scroll') || element.getAttribute('class')?.includes('scroll_') ? 'auto' : 'visible',
+        configurable: true,
+      })
+      return style
+    })
     withServices(<Project room={Room.Talk} />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Hold' }))
     expect(await screen.findByText("That plan isn't there any more.")).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Show' }))
-    expect(await screen.findByText('Gone.')).toBeTruthy()
+    scrollEarlier()
+    expect(await screen.findByRole('button', { name: 'Retry' })).toBeTruthy()
   })
 })
 
@@ -1000,4 +1021,16 @@ describe('a send to the coordinator that fails', () => {
     expect(screen.queryByText('Plan it', { selector: 'p' })).toBeNull()
     expect((box as HTMLTextAreaElement).value).toBe('Plan it')
   })
+})
+
+function scrollEarlier() {
+  const thread = document.querySelector<HTMLElement>('section[data-arrivals]')!
+  let box = thread.parentElement!
+  while (!/(auto|scroll)/.test(getComputedStyle(box).overflowY) && box.parentElement) box = box.parentElement
+  Object.defineProperty(box, 'clientHeight', { configurable: true, value: 600 })
+  fireEvent.scroll(box)
+}
+
+afterEach(() => {
+  if (vi.isMockFunction(window.getComputedStyle)) vi.mocked(window.getComputedStyle).mockRestore()
 })
