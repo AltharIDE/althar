@@ -416,7 +416,11 @@ const isFolder = (path: string) => {
 
 /** Why a request may not go ahead because it reads or writes where the person keeps a secret, or nothing. */
 const secretReason = (request: PermissionRequest, cwd?: string, system: System = systemOf()): string | undefined => {
-  const command = request.kind === 'execute' || request.kind === 'other' ? (commandIn(request.rawInput) ?? request.title) : undefined
+  // A sandbox's network request names a host, not a command: nothing in it runs.
+  const command =
+    (request.kind === 'execute' || request.kind === 'other') && networkHostOf(request) === undefined
+      ? (commandIn(request.rawInput) ?? request.title)
+      : undefined
   if (command !== undefined && secretCommandReason(command, cwd, system) !== undefined) return SECRETS_REFUSED
   const { paths } = system
   return pathsOf(request).some(
@@ -518,6 +522,18 @@ export const commandIn = (rawInput: unknown): string | undefined => {
 }
 
 const quoteWord = (word: string) => (/^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`)
+
+/**
+ * The host a sandbox's network request is for (Claude Code's
+ * `SandboxNetworkAccess`), or none: its raw input names a host and no
+ * command. A host is never read as a shell command, however it is spelled
+ * (a port, an underscore); a line that does name a command is read as one.
+ */
+const networkHostOf = (request: PermissionRequest): string | undefined => {
+  if (commandIn(request.rawInput) !== undefined) return undefined
+  const host = field(request.rawInput, 'host')
+  return typeof host === 'string' && host.trim() !== '' ? host.trim() : undefined
+}
 
 const PATH_KEYS = ['file_path', 'filePath', 'path', 'notebook_path', 'old_path', 'new_path', 'destination', 'source', 'target']
 
@@ -2118,18 +2134,13 @@ const RUNNERS = ['make', 'just', 'task', 'rake', 'mage']
 
 const DEPLOY_WORD = /^(deploy|publish|release)([:._-]|$)/
 
-/** A word that reads as a host's name, as a sandbox's network request gives it, not a script's: `release-assets.githubusercontent.com`. */
-const hostName = (word: string) =>
-  /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/i.test(word) && !/\.(sh|bash|zsh|py|js|mjs|cjs|ts|rb|pl|ps1)$/i.test(word)
-
 /** Whether a command deploys or publishes, as its program and subcommand say. */
 const deploys = (words: ReadonlyArray<string>): boolean => {
   const [first = '', ...rest] = words
   const program = first.slice(first.lastIndexOf('/') + 1)
   const [sub = '', next = ''] = rest.filter((word) => !word.startsWith('-'))
-  // A script named for it: `./deploy.sh`, `scripts/release`. Not a host a network request is for, alone, which is no
-  // script: `release-assets.githubusercontent.com`, where Electron downloads its build from.
-  if (DEPLOY_WORD.test(program) && program !== 'release' && !(rest.length === 0 && hostName(first))) return true
+  // A script named for it: `./deploy.sh`, `scripts/release`.
+  if (DEPLOY_WORD.test(program) && program !== 'release') return true
   if (DEPLOYERS[program]?.test(sub) === true) return true
   if (program === 'vercel' && rest.includes('--prod')) return true
   if (program === 'gh' && sub === 'release' && next === 'create') return true
@@ -3027,7 +3038,7 @@ const allowedBy = (
       ? kinds.flatMap((each) => (each.rule === 'unclear' ? [] : [{ kind: each.rule }]))
       : undefined
   if (request.kind !== 'execute' && request.kind !== 'other') return byKinds(found)
-  const text = commandOf(request)
+  const text = networkHostOf(request) ?? commandOf(request)
   const { commands, opaque } = eachCommand(text, context)
   if (opaque) return undefined
   const whole = rules.find((rule) => exactly(rule) && rule.pattern === text.trim())
@@ -3121,7 +3132,11 @@ export const readsWeb = (command: string): boolean => {
 
 /** What the rules keep for the person in a request, whatever the project says of it: every kind it is, and why. */
 const keptOf = (request: PermissionRequest, context: RuleContext): ReadonlyArray<Kept> => {
-  if (request.kind === 'execute' || request.kind === 'other') return commandKinds(commandOf(request), context)
+  if (request.kind === 'execute' || request.kind === 'other') {
+    // A network request names a host: none of the command kinds (a deploy, a push) are what it does.
+    if (networkHostOf(request) !== undefined) return []
+    return commandKinds(commandOf(request), context)
+  }
   const paths = pathsOf(request)
   // A `.env` file the task doesn't own, read or changed: the person's checkout's, say.
   const envs = paths.filter(envFile)
@@ -3167,6 +3182,8 @@ const lastingOf = (request: PermissionRequest, context: RuleContext): Kept | und
   const lasting = (kinds: ReadonlyArray<Kept>) =>
     kinds.find((each) => each.irreversible === true && each.rule !== 'unclear' && each.blind !== true)
   if (request.kind !== 'execute' && request.kind !== 'other') return lasting(keptOf(request, context))
+  // A host is no command, so none of what a command could do that can't be undone.
+  if (networkHostOf(request) !== undefined) return undefined
   return lasting(commandKinds(withoutQuotedHeredocs(commandOf(request), takesScript), context))
 }
 
@@ -3208,9 +3225,15 @@ const LOOKS: ReadonlyArray<PermissionRequest['kind']> = ['read', 'search', 'thin
 export const decide = (request: PermissionRequest, context: RuleContext): Verdict => {
   const project = context.project ?? MVP_RULES
   const system = systemOf(context)
+  const network = networkHostOf(request)
+  // A network request meets the person's named rules by its host, as a command meets them by its words.
   const named =
-    request.kind === 'execute' || request.kind === 'other' ? commandRule(commandOf(request), project.commands, system) : undefined
-  if (request.kind === 'execute' || request.kind === 'other') {
+    network !== undefined
+      ? commandRule(network, project.commands, system)
+      : request.kind === 'execute' || request.kind === 'other'
+        ? commandRule(commandOf(request), project.commands, system)
+        : undefined
+  if (network === undefined && (request.kind === 'execute' || request.kind === 'other')) {
     // A code host is reached through Althar: `gh` and `glab` only look, and no one reads credentials, wherever they are in the command.
     const refused = lineReadings(commandOf(request), system)
       .flatMap((line) => line.commands.flatMap((words) => readings(unwrap(words))))
@@ -3261,7 +3284,10 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
   if (floor !== undefined) return ask(floor.reason, false)
   // Reads, and changes to the task's own files, go through, as they would in any agent's sandbox.
   const ownFiles = CHANGES.includes(request.kind) && found.length === 0
-  const routine = LOOKS.includes(request.kind) || ownFiles || (project.web === true && found.length === 0 && readsWeb(commandOf(request)))
+  const routine =
+    LOOKS.includes(request.kind) ||
+    ownFiles ||
+    (network === undefined && project.web === true && found.length === 0 && readsWeb(commandOf(request)))
   const reason =
     asked?.reason ??
     (everyRunAnswered(project) && !routine
@@ -3482,7 +3508,8 @@ export type TallyKind = (typeof TALLY_KINDS)[number]
  */
 export const tallyKindOf = (request: PermissionRequest, context: RuleContext): TallyKind => {
   const system = systemOf(context)
-  const runs = request.kind === 'execute' || request.kind === 'other'
+  const network = networkHostOf(request)
+  const runs = (request.kind === 'execute' || request.kind === 'other') && network === undefined
   if (runs) {
     const words = lineReadings(commandOf(request), system).flatMap((line) => line.commands.flatMap((each) => readings(unwrap(each))))
     if (words.some((each) => credentialReason(each) !== undefined || deviceBridgeReason(each) !== undefined)) return 'credentials'
@@ -3490,7 +3517,13 @@ export const tallyKindOf = (request: PermissionRequest, context: RuleContext): T
   }
   if (secretOf(request, context, system) !== undefined) return 'credentials'
   const project = context.project ?? MVP_RULES
-  if (runs && commandRule(commandOf(request), project.commands, system) !== undefined) return 'command'
+  const named =
+    network !== undefined
+      ? commandRule(network, project.commands, system)
+      : runs
+        ? commandRule(commandOf(request), project.commands, system)
+        : undefined
+  if (named !== undefined) return 'command'
   const found = keptOf(request, context)
   const firmest = found.find((each) => each.irreversible === true) ?? found.find((each) => each.floor === true) ?? found[0]
   return firmest?.rule ?? 'other'
@@ -3594,7 +3627,7 @@ const prefixOf = (words: ReadonlyArray<string>): string | null => {
 export const alwaysOf = (request: PermissionRequest, context: RuleContext): Always => {
   const project = context.project ?? MVP_RULES
   const runs = request.kind === 'execute' || request.kind === 'other'
-  const text = runs ? commandOf(request).trim() : ''
+  const text = networkHostOf(request) ?? (runs ? commandOf(request).trim() : '')
   const command = text !== '' && text.length <= COMMAND_KEPT ? text : null
   const found = keptOf(request, context)
   const kind = found.flatMap((each) => (each.rule === 'unclear' ? [] : [each.rule]))[0] ?? null

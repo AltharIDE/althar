@@ -375,11 +375,39 @@ describe('the always-ask list', () => {
     assert.strictEqual(decide(request({ kind: 'other', title: 'Terminal', rawInput: { cmd: 'npm publish' } }), context).verdict, 'ask')
   })
 
-  it('reads a sandbox’s network request by its host, never as a release script', () => {
-    const host = (name: string) => decide(request({ kind: 'other', title: name, rawInput: { host: name } }), context)
-    // Where Electron downloads its build from.
-    assert.notInclude(JSON.stringify(host('release-assets.githubusercontent.com')), 'Deploying or publishing')
-    assert.notInclude(JSON.stringify(host('deploy.example.com')), 'Deploying or publishing')
+  it('allows a sandbox’s network request by its host under the first rules, never as a release script', () => {
+    const host = (name: string, overrides: Partial<RuleContext> = {}) =>
+      decide(request({ kind: 'other', title: name, rawInput: { host: name } }), { ...context, ...overrides })
+    // Where Electron downloads its build from, with the host as a sandbox may spell it.
+    for (const name of [
+      'release-assets.githubusercontent.com',
+      'release-assets.example.com:443',
+      'release_assets.example.com',
+      'deploy.example.com',
+      'publish.localhost:3000',
+    ])
+      assert.deepStrictEqual(host(name), { verdict: 'allow' }, name)
+    // None of the command kinds is what a host does, even one the project never allows.
+    assert.strictEqual(host('release-assets.githubusercontent.com', { project: { ...MVP_RULES, never: ['deploy'] } }).verdict, 'allow')
+  })
+
+  it('still refuses a host the person’s rules never allow', () => {
+    const name = 'release-assets.githubusercontent.com'
+    const project: ProjectRuleSet = { ...MVP_RULES, commands: [{ pattern: name, decision: 'never' }] }
+    assert.deepStrictEqual(decide(request({ kind: 'other', title: name, rawInput: { host: name } }), { ...context, project }), {
+      verdict: 'deny',
+      reason: `The project's rules never allow \`${name}\`.`,
+    })
+  })
+
+  it('still reads a real command that publishes or releases, even where it names a host', () => {
+    assert.deepStrictEqual(run('npm publish'), {
+      verdict: 'ask',
+      reason: 'Tearing down, deleting or publishing always asks: once it is gone or published, it can’t be taken back.',
+      held: true,
+    })
+    assert.strictEqual(run('gh release create v1').verdict, 'deny')
+    assert.strictEqual(run('npm publish --registry https://release-assets.githubusercontent.com').verdict, 'ask')
   })
 })
 
