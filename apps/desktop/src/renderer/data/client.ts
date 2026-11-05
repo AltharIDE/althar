@@ -330,7 +330,14 @@ export interface Client {
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
   /** Changes a plan before its first step starts: who does its steps, how it ends, and where it works (ADR-091). */
-  readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null, worksIn?: WorksIn) => Promise<void>
+  readonly changePlan: (
+    planId: string,
+    steps: ReadonlyArray<PlanStep>,
+    end?: TaskEnd | null,
+    worksIn?: WorksIn,
+    /** The branch it works toward (ADR-093), until it starts; null for the default branch. */
+    toward?: string | null,
+  ) => Promise<void>
   /** Changes what an issue the coordinator drafted says, before it is filed. */
   readonly changeIssueDraft: (
     draftId: string,
@@ -407,7 +414,11 @@ export interface Client {
     /** Answers the offer to push a fork's branches upstream with no. */
     readonly notNow?: boolean
     readonly setup?: RepositorySetup
+    /** The branch new tasks work toward there (ADR-093); null for its default branch. */
+    readonly workToward?: string | null
   }) => Promise<void>
+  /** Makes a branch on the code host from the default branch, where a repository's tasks start (ADR-093); answers its name as made. */
+  readonly createBranch: (input: { readonly projectId: string; readonly repositoryId: string; readonly branch: string }) => Promise<string>
   readonly getProjectRules: (projectId: string) => Promise<ProjectRulesView>
   /** A project's notes, oldest first: the decisions its coordinator keeps. */
   readonly getProjectNotes: (projectId: string) => Promise<ReadonlyArray<ProjectNote>>
@@ -735,9 +746,16 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     startTask: (input) => command((commandId) => api.StartTask({ commandId, ...input })),
     startPlan: (planId) => command((commandId) => api.StartPlan({ commandId, planId })),
     holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
-    changePlan: (planId, steps, end, worksIn) =>
+    changePlan: (planId, steps, end, worksIn, toward) =>
       command((commandId) =>
-        api.ChangePlan({ commandId, planId, steps, ...(end === undefined ? {} : { end }), ...(worksIn === undefined ? {} : { worksIn }) }),
+        api.ChangePlan({
+          commandId,
+          planId,
+          steps,
+          ...(end === undefined ? {} : { end }),
+          ...(worksIn === undefined ? {} : { worksIn }),
+          ...(toward === undefined ? {} : { toward }),
+        }),
       ),
     changeIssueDraft: (draftId, edit) => command((commandId) => api.ChangeIssueDraft({ commandId, draftId, ...edit })),
     fileIssueDraft: (draftId) => command((commandId) => api.FileIssueDraft({ commandId, draftId })),
@@ -778,6 +796,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     addRepositories: (projectId, grant) => command((commandId) => api.AddRepositories({ commandId, projectId, grant })),
     leaveOutRepository: (projectId, repositoryId) => command((commandId) => api.LeaveOutRepository({ commandId, projectId, repositoryId })),
     setRepository: (input) => command((commandId) => api.SetRepository({ commandId, ...input })),
+    createBranch: (input) => command((commandId) => api.CreateBranch({ commandId, ...input })),
     getProjectRules: (projectId) => settle(api.GetProjectRules({ projectId })),
     getProjectNotes: (projectId) => settle(api.GetProjectNotes({ projectId })),
     dropProjectNote: (projectId, noteId) => command((commandId) => api.DropProjectNote({ commandId, projectId, noteId })),

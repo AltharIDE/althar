@@ -631,6 +631,12 @@ export const ProjectRepository = Schema.Struct({
   tasks: Schema.Number,
   /** How each new task's folder of it gets ready (ADR-080): the files copied from the checkout here, and the commands; null until a lead records it. */
   setup: Schema.NullOr(RepositorySetup),
+  /** Its default branch, as its remote says: main. */
+  defaultBranch: Schema.optional(Schema.String),
+  /** The branch new tasks work toward there, where it isn't the default (ADR-093): release/0.8.0; null or absent for the default. */
+  workToward: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Its remote's branches, as this Mac last fetched them, its default first: what Work toward offers. */
+  branches: Schema.optional(Schema.Array(Schema.String)),
 })
 export type ProjectRepository = typeof ProjectRepository.Type
 
@@ -1874,6 +1880,14 @@ export const TaskCard = Schema.Struct({
       worksInWhy: Schema.optional(Schema.NullOr(Schema.String)),
       /** The task working Local now, which it would wait for there; null where Local is free. */
       localTaken: Schema.optional(Schema.NullOr(OtherTask)),
+      /** The branch its work goes into, where it isn't the default (ADR-093): release/0.8.0; null or absent for the default. */
+      toward: Schema.optional(Schema.NullOr(Schema.String)),
+      /** Its repository's default branch, which `toward` null means. */
+      defaultBranch: Schema.optional(Schema.String),
+      /** Its repository's branches on the remote, its default first, for the person to point it at another until it starts. */
+      branches: Schema.optional(Schema.Array(Schema.String)),
+      /** That repository, by its id: where a branch named in the list that it doesn't have is made (CreateBranch). */
+      repositoryId: Schema.optional(Schema.String),
     }),
   ),
   /** The issue it came from, and the connection Althar reads it and moves it through, where it has one. */
@@ -1912,6 +1926,8 @@ export const TaskCard = Schema.Struct({
   local: Schema.optional(Schema.Boolean),
   /** Started Local, it waits before any agent works on it: for another task's checkout, or the person's commit (ADR-091). */
   waitsForCheckout: Schema.optional(Schema.NullOr(CheckoutWait)),
+  /** The branch its work goes into, where it isn't its repository's default (ADR-093): release/0.8.0; absent for the default. */
+  toward: Schema.optional(Schema.String),
   /** The step is held until an agent's usage limit resets: which agent, and when it is back. */
   waits: Schema.NullOr(HeldForLimit),
   /** The step is held for the connection: absent or null otherwise (ADR-060). */
@@ -2828,6 +2844,8 @@ export const ThreadSnapshot = Schema.Struct({
     local: Schema.optional(Schema.Boolean),
     /** Started Local, what it waits for before its lead starts, as its card says. */
     waitsForCheckout: Schema.optional(Schema.NullOr(CheckoutWait)),
+    /** The branch its work goes into, where it isn't its repository's default (ADR-093): release/0.8.0; absent for the default. */
+    toward: Schema.optional(Schema.String),
     /**
      * Its folder, where it isn't on this computer as it should be: removed once
      * the task finished (ADR-056), or coming back, from its branch, and
@@ -3442,8 +3460,25 @@ export const Api = RpcGroup.make(
       changeTarget: Schema.optional(ChangeTarget),
       notNow: Schema.optional(Schema.Boolean),
       setup: Schema.optional(RepositorySetup),
+      /** The branch new tasks work toward there (ADR-093); null for its default branch. Tasks made already keep theirs. */
+      workToward: Schema.optional(Schema.NullOr(Schema.String)),
     },
     Schema.Void,
+  ),
+  /**
+   * Makes a branch on the code host, from the remote's default branch, where
+   * the repository's tasks start (ADR-093): a name typed in a branch list
+   * that it didn't have. Never forced: one there already is left as it is.
+   * Answers the branch's name as made.
+   */
+  command(
+    'CreateBranch',
+    {
+      projectId: Schema.String,
+      repositoryId: Schema.String,
+      branch: Schema.String,
+    },
+    Schema.String,
   ),
   call('ListTasks', { projectId: Schema.String }, TaskList),
   /**
@@ -3599,6 +3634,8 @@ export const Api = RpcGroup.make(
       end: Schema.optional(Schema.NullOr(TaskEnd)),
       /** Where it works (ADR-091), until its first step starts; the plan's as it was without it. */
       worksIn: Schema.optional(WorksIn),
+      /** The branch it works toward (ADR-093), until its first step starts; null for the default branch, absent to leave it. */
+      toward: Schema.optional(Schema.NullOr(Schema.String)),
     },
     Schema.Void,
   ),

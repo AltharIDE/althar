@@ -744,6 +744,8 @@ export function TaskView({
         />
       )}
       <TaskMenu
+        // What its work goes into, where it isn't the default branch (ADR-093): first in its menu, out of its bar.
+        {...(snapshot.task.toward === undefined ? {} : { toward: snapshot.task.toward })}
         onRename={() => setRenaming(true)}
         {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
         {...(teamed === null ? {} : { onChangeTeam: () => setChangingTeam(true) })}

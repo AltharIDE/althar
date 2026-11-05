@@ -221,6 +221,8 @@ export const kindWordOf = (task: Pick<BoardTask, 'kind' | 'local'>): string | un
 
 /** In the person's own checkout, as its kind's word says (ADR-091). */
 const localOf = (task: Pick<BoardTask, 'local'>): Pick<Card, 'local'> => (task.local === true ? { local: true } : {})
+/** Toward a branch other than the default, quietly at its foot (ADR-093). */
+const towardOf = (task: Pick<BoardTask, 'toward'>): Pick<Card, 'toward'> => (task.toward === undefined ? {} : { toward: task.toward })
 
 /** A pull request as its chip shows it: its host's mark, its repository's own name, its number in the host's words, and its size. */
 const pullChip = (change: ChangeSummary) => {
@@ -326,6 +328,7 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
   const base = {
     kind: kindOf(work),
     ...localOf(work),
+    ...towardOf(work),
     title: work.title,
     ...fromOf(work),
     // Waiting before its first step has had an agent, nothing has run: no clock.
@@ -446,7 +449,7 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
 
 /** A task that waits on a call of the person's: the call's kind, and why, under its title; a permission's command under that. */
 export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null) => string): Card => {
-  const base = { status: TaskStatus.Yours, kind: kindOf(task), ...localOf(task), title: task.title, ...fromOf(task) }
+  const base = { status: TaskStatus.Yours, kind: kindOf(task), ...localOf(task), ...towardOf(task), title: task.title, ...fromOf(task) }
   // What it asks, or what it wants to do; for a step that needs the person, what stopped it.
   const why =
     call.stuck === null
@@ -477,7 +480,7 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
  * what it handed back, or else its branch, where its lead wrote in the repository: on this Mac, as no pull request is coming.
  */
 export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
-  const base = { status: TaskStatus.Yours, kind: kindOf(work), ...localOf(work), title: work.title, ...fromOf(work) }
+  const base = { status: TaskStatus.Yours, kind: kindOf(work), ...localOf(work), ...towardOf(work), title: work.title, ...fromOf(work) }
   switch (work.kind) {
     case 'plain': {
       const pictures = (work.handed?.pictures ?? []).flatMap((picture, index) =>

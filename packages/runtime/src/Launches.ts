@@ -9,6 +9,7 @@ import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
 import { copyAt, freshCopy } from './coordinatorFolder'
+import { startOf } from './Projects'
 import { bringBackThen } from './bringBack'
 import { thisDevice } from './device'
 import { Fetches, type Wanted } from './Fetches'
@@ -133,7 +134,12 @@ interface Binding {
   readonly id: string
   readonly slug: string
   readonly name: string
+  /** The branch the project works toward there (ADR-093), its default branch unless it says: what a run with no task runs a copy of. */
   readonly base: string | null
+  /** Its default branch, where its work goes, and the branch it works toward: where a run with no task starts, as its tasks do. */
+  readonly defaultBase: string | null
+  readonly changeTarget: string | null
+  readonly workToward: string | null
   readonly within: string | null
   readonly repository: string
   readonly runCommand: string | null
@@ -282,7 +288,8 @@ export class Launches extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           return yield* sql<Binding>`
-            SELECT b.id, b.slug, b.display_name AS name, b.default_base_ref AS base, b.folder AS within,
+            SELECT b.id, b.slug, b.display_name AS name, coalesce(b.work_toward, b.default_base_ref) AS base,
+              b.default_base_ref AS default_base, b.change_target, b.work_toward, b.folder AS within,
               l.path AS repository, b.run_command, b.run_setup
             FROM repository_bindings b
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
@@ -387,6 +394,11 @@ export class Launches extends Context.Service<
        * fresh as a run starts, unless something of the repository runs from it
        * now, which a fresh copy would change under it.
        */
+      /**
+       * The branch each repository's run copy was made of, by binding: what a run there runs, which stays as it was while
+       * one runs there, even where the project's Work toward has moved since (ADR-093).
+       */
+      const copiedOf = new Map<string, string>()
       const runCopy = (projectId: string, binding: Binding) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -398,10 +410,18 @@ export class Launches extends Context.Service<
             (launch) => launch.taskId === null && launch.branch === null && launch.bindingId === binding.id && launch.ended === null,
           )
           if (!busy || !existsSync(path)) {
-            yield* freshCopy(binding.repository, path, binding.base ?? 'main')
+            const { remote, base } = yield* startOf({
+              repository: binding.repository,
+              base: binding.defaultBase,
+              changeTarget: binding.changeTarget,
+              toward: binding.workToward,
+            })
+            yield* freshCopy(binding.repository, path, base, binding.repository, remote)
             yield* installedAsLocked(path)
+            // The branch the copy is of, as resolved: a fork's upstream's default, where its work goes there, needn't be named as its own.
+            copiedOf.set(binding.id, base)
           }
-          return path
+          return { path, branch: copiedOf.get(binding.id) ?? binding.base ?? 'main' }
         })
 
       /** A run's card as its thread keeps it: what it runs, where it answers, and how it ended, with its last line. */
@@ -560,10 +580,8 @@ export class Launches extends Context.Service<
                       )
                         launches.delete(ended.id)
                     const { binding } = chosen
-                    const at =
-                      input.taskId === null
-                        ? yield* runCopy(input.projectId, binding)
-                        : (places.find((place) => place.binding.id === binding.id)?.root ?? '')
+                    const copy = input.taskId === null ? yield* runCopy(input.projectId, binding) : null
+                    const at = copy?.path ?? places.find((place) => place.binding.id === binding.id)?.root ?? ''
                     const folder = within(binding, at)
                     const run = runOfKept(chosen.kept, binding, at)
                     if (run === null)
@@ -571,7 +589,7 @@ export class Launches extends Context.Service<
                         why: 'unknown',
                         message: `Althar can't tell how ${binding.name} runs: it has no dev, start or serve script, Procfile or Makefile target. Ask the coordinator to keep how it runs.`,
                       })
-                    // Where it runs, in words: what the task is, or the default branch it is a copy of.
+                    // Where it runs, in words: what the task is, or the branch its copy is of, which may be the one before Work toward moved.
                     const [task] =
                       input.taskId === null ? [] : yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${input.taskId}`
                     return yield* launchIn({
@@ -583,7 +601,7 @@ export class Launches extends Context.Service<
                       binding,
                       run,
                       folder,
-                      where: task?.title ?? binding.base ?? 'main',
+                      where: task?.title ?? copy?.branch ?? binding.base ?? 'main',
                       branch: null,
                       copy: null,
                     })
@@ -1269,7 +1287,7 @@ export class Launches extends Context.Service<
       const runTool: Tool = {
         name: 'run_project',
         description:
-          "Runs the project for the person, with no agent: Althar starts its default run command itself, or with run the one of its runnables by that name, after its setup, and shows it over the composer, with where it answers once it says. Without task, branch or pull_request, in a fresh copy of the default branch. With task, in that task's worktree, to see what it built. With branch (its name on the remote) or pull_request (its number or link), in a throwaway copy of it that Althar fetches from the code host itself, with its own sign-in, so it needs nothing pulled or checked out: when the person asks to start, run, try or see a branch or a pull request, even one not pulled yet, use this rather than starting a task. An unknown branch is refused, with the names like it. It stays running until the person stops it; a branch's copy goes when it stops. In a project of several repositories, say which, as repository.",
+          "Runs the project for the person, with no agent: Althar starts its default run command itself, or with run the one of its runnables by that name, after its setup, and shows it over the composer, with where it answers once it says. Without task, branch or pull_request, in a fresh copy of the branch the project works toward: its default branch, unless its Work toward says another. With task, in that task's worktree, to see what it built. With branch (its name on the remote) or pull_request (its number or link), in a throwaway copy of it that Althar fetches from the code host itself, with its own sign-in, so it needs nothing pulled or checked out: when the person asks to start, run, try or see a branch or a pull request, even one not pulled yet, use this rather than starting a task. An unknown branch is refused, with the names like it. It stays running until the person stops it; a branch's copy goes when it stops. In a project of several repositories, say which, as repository.",
         input: {
           type: 'object',
           properties: {
@@ -1304,11 +1322,17 @@ export class Launches extends Context.Service<
                         SELECT id, slug FROM tasks WHERE project_id = ${access.projectId} AND (id = ${asked.task} OR slug = ${asked.task})`
                 if (asked.task !== undefined && task === undefined)
                   return yield* new ToolRefused({ message: `This project has no task ${asked.task}. list_tasks shows them.` })
+                // A copy of the branch the project works toward, where it says one (ADR-093); its default branch's otherwise.
+                const [toward] = yield* sql<{ branch: string }>`
+                  SELECT work_toward AS branch FROM repository_bindings
+                  WHERE project_id = ${access.projectId} AND detached_at IS NULL AND work_toward IS NOT NULL ORDER BY created_at, rowid`
                 return yield* runFor(
                   access,
                   task,
                   { ...asked, ...(ref === undefined ? {} : { ref }) },
-                  task === undefined ? 'a fresh copy of the default branch' : `${task.slug}'s worktree`,
+                  task === undefined
+                    ? `a fresh copy of ${toward === undefined ? 'the default branch' : toward.branch}`
+                    : `${task.slug}'s worktree`,
                   {
                     answering:
                       "Give the person that address as a link, with the page on it they'd want, if one; they can open and stop it from Run’s list too.",

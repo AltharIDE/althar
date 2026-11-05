@@ -3,6 +3,7 @@ import { type KeyboardEvent, useId, useRef, useState } from 'react'
 import { Icon } from '../../foundations/Icon/Icon'
 import { useControlled } from '../../lib/controlled'
 import { cx } from '../../lib/cx'
+import { branchNameable } from '../../primitives/BranchSelect/BranchSelect'
 import { Button } from '../../primitives/Button/Button'
 import { Popover } from '../../primitives/Popover/Popover'
 import { Spinner } from '../../primitives/Spinner/Spinner'
@@ -15,7 +16,8 @@ import s from './RunPlace.module.css'
  * remote has, which Althar fetches as it runs (ADR-066). Picked, it stays
  * until another is. It opens on a field: what the remote has is asked as it
  * opens, so it's fresh; a pull request's number typed that the list doesn't
- * have is still offered; the arrows move, Enter picks, Escape closes. Each
+ * have is still offered, and, where the consumer can make one, a branch's
+ * name that no branch has; the arrows move, Enter picks, Escape closes. Each
  * place says, quietly, what runs there, and a failure there in red, so a run
  * left going is found where it runs.
  */
@@ -80,6 +82,9 @@ export interface RunPlaceText {
   typed: (number: number) => string
   draft: string
   fork: string
+  /** A name typed that no branch has, to make: Create release/0.9.0; quieter, where it starts. */
+  create: string
+  from: (branch: string) => string
 }
 
 export const runPlaceText: RunPlaceText = {
@@ -95,6 +100,8 @@ export const runPlaceText: RunPlaceText = {
   typed: (number) => `Pull request #${number}`,
   draft: 'Draft',
   fork: 'From a fork',
+  create: 'Create',
+  from: (branch) => `from ${branch}`,
 }
 
 export interface RunPlaceProps {
@@ -104,8 +111,16 @@ export interface RunPlaceProps {
   places: readonly RunPlace[]
   /** What the remote has to run on, pull requests first; null while Althar asks it. */
   remote: readonly BranchChoice[] | null
-  /** Why it lists less than it might: the remote out of reach, or no connection to list pull requests. */
+  /** A line at its foot: why it lists less than it might, as the remote out of reach; or what picking a branch does. */
   note?: string
+  /**
+   * Makes a branch the remote doesn't have, from `createFrom`: a row, last,
+   * for a name typed that no branch has; one for each of `repositories`
+   * where the project has several, with the repository's name.
+   */
+  onCreate?: (branch: string, repository?: string) => void
+  createFrom?: string
+  repositories?: readonly string[]
   /** What is typed is being searched on the host, past the pull requests listed. */
   searching?: boolean
   query?: string
@@ -166,6 +181,9 @@ export function RunPlacePicker({
   defaultQuery = '',
   onQueryChange,
   onPick,
+  onCreate,
+  createFrom,
+  repositories,
   open,
   defaultOpen,
   onOpenChange,
@@ -198,14 +216,26 @@ export function RunPlacePicker({
         defaultQuery={defaultQuery}
         {...(onQueryChange === undefined ? {} : { onQueryChange })}
         onPick={(place) => {
-          onPick(place)
+          // A row to make a branch makes it; any other picks where Run runs.
+          const made = madeOf(place)
+          if (made !== null) onCreate?.(made.branch, made.repository)
+          else onPick(place)
           setOpened(false)
         }}
+        creates={onCreate === undefined ? [] : (repositories ?? [undefined])}
+        {...(createFrom === undefined ? {} : { createFrom })}
         t={t}
       />
     </Popover>
   )
 }
+
+/** The rows that make a branch, among the places: keyed apart, so none is ever a place Run runs. */
+const MADE = 'new:'
+const madeOf = (place: RunPlace) =>
+  place.key.startsWith(MADE) && place.choice?.kind === 'branch'
+    ? { branch: place.choice.branch, ...(place.choice.repository === undefined ? {} : { repository: place.choice.repository }) }
+    : null
 
 /** The open picker: a field, then the places it finds, grouped. */
 function Places({
@@ -218,10 +248,18 @@ function Places({
   defaultQuery,
   onQueryChange,
   onPick,
+  creates,
+  createFrom,
   t,
-}: Omit<RunPlaceProps, 'open' | 'defaultOpen' | 'onOpenChange' | 'text' | 'defaultQuery' | 'searching'> & {
+}: Omit<
+  RunPlaceProps,
+  'open' | 'defaultOpen' | 'onOpenChange' | 'text' | 'defaultQuery' | 'searching' | 'onCreate' | 'repositories' | 'createFrom'
+> & {
   defaultQuery: string
   searching: boolean
+  /** Each repository a typed name is offered to be made in; undefined for the project's one. */
+  creates: readonly (string | undefined)[]
+  createFrom?: string
   t: RunPlaceText
 }) {
   const [words, setWords] = useControlled(query, defaultQuery, onQueryChange)
@@ -238,11 +276,23 @@ function Places({
   const known = places.filter(fits)
   // What the remote has, past what is listed already.
   const fresh = (remote === null ? [] : found(remote, words, t)).map(placeOf).filter((place) => !places.some((one) => sameRef(one, place)))
+  // A name typed that no branch has, where git takes it: offered to be made, last.
+  const name = words.trim()
+  const named = (place: RunPlace) => place.choice?.kind === 'branch' && place.choice.branch === name
+  const made: RunPlace[] =
+    remote === null || !branchNameable(name) || [...places, ...fresh].some(named)
+      ? []
+      : creates.map((repository) => ({
+          key: `${MADE}${repository ?? ''}:${name}`,
+          kind: 'branch',
+          label: name,
+          choice: { kind: 'branch', branch: name, ...(repository === undefined ? {} : { repository }) },
+        }))
   const groups: { label: string | null; places: RunPlace[] }[] = [
     { label: null, places: known.filter((place) => place.kind === 'main') },
     { label: t.tasks, places: known.filter((place) => place.kind === 'task') },
     { label: t.pulls, places: [...known, ...fresh].filter((place) => place.kind === 'pull') },
-    { label: t.branches, places: [...known, ...fresh].filter((place) => place.kind === 'branch') },
+    { label: t.branches, places: [...[...known, ...fresh].filter((place) => place.kind === 'branch'), ...made] },
   ].filter((group) => group.places.length > 0)
   const rows = groups.flatMap((group) => group.places)
   const at = Math.min(active, Math.max(rows.length - 1, 0))
@@ -278,6 +328,7 @@ function Places({
                   { text: choice.fork === true ? t.fork : undefined },
                 ]
               : []),
+            { text: madeOf(place) === null || createFrom === undefined ? undefined : t.from(createFrom) },
             { text: choice.repository },
           ].filter((part): part is { text: string; mono?: boolean } => part.text !== undefined && part.text !== '')
     return (
@@ -295,7 +346,7 @@ function Places({
         onClick={() => onPick(place)}
       >
         <span className={s.check}>{place.key === current.key && <Icon name="check" size={12} />}</span>
-        <Icon name={glyphOf(place.kind)} size={13} className={s.glyph} />
+        <Icon name={madeOf(place) === null ? glyphOf(place.kind) : 'plus'} size={13} className={s.glyph} />
         <span className={s.main}>
           <span className={s.head}>
             {place.kind === 'pull' ? (
@@ -303,6 +354,10 @@ function Places({
                 <span className={s.title}>{place.detail ?? place.label}</span>
                 <span className={s.number}>{place.label}</span>
               </>
+            ) : madeOf(place) !== null ? (
+              <span className={s.title}>
+                {t.create} <span className={s.mono}>{place.label}</span>
+              </span>
             ) : (
               <span className={cx(s.title, (place.kind === 'main' || place.kind === 'branch') && s.mono)}>{place.label}</span>
             )}

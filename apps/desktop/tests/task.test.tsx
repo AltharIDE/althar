@@ -1653,6 +1653,14 @@ describe('a task', () => {
     expect(client.stopTask).toHaveBeenCalledWith('t1')
   })
 
+  it('says first in its menu the branch its work goes into, where it isn’t the default, and not in its bar (ADR-093)', async () => {
+    await taskMenu({ toward: 'release/0.8.0' })
+    expect(screen.getAllByRole('menuitem')[0]?.textContent).toContain('Into release/0.8.0')
+    // Its bar says nothing of it.
+    expect(screen.queryByText('Toward release/0.8.0')).toBeNull()
+    expect(screen.getAllByText('release/0.8.0')).toHaveLength(1)
+  })
+
   it('offers stopping and abandoning in its menu while it works, as the runtime says', async () => {
     const { client, offered } = await taskMenu({})
     expect(offered).toEqual(['Open in Zed', 'Attach a pull request…', 'Stop the task', 'Abandon'])

@@ -242,14 +242,18 @@ export const rerunChecks = (projectId: string, input: unknown) =>
 
 // ---- The default branch's checks -------------------------------------------
 
-const BaseAsked = Schema.Struct({ repository: Schema.optional(Schema.NullOr(Schema.String)) })
+const BaseAsked = Schema.Struct({
+  repository: Schema.optional(Schema.NullOr(Schema.String)),
+  branch: Schema.optional(Schema.NullOr(Schema.String)),
+})
 
 const LOGS = 2
 
 /**
- * The checks on the latest commit of a repository's default branch, with the
- * end of the logs of the first that failed: to tell a failure that is a
- * change's from one that is broken already.
+ * The checks on the latest commit of a repository's default branch, or of
+ * the branch named, as one a project works toward (ADR-093), with the end of
+ * the logs of the first that failed: to tell a failure that is a change's
+ * from one that is broken already.
  */
 export const readDefaultBranchChecks = (projectId: string, input: unknown) =>
   Effect.gen(function* () {
@@ -257,7 +261,7 @@ export const readDefaultBranchChecks = (projectId: string, input: unknown) =>
       Effect.mapError((error) => refused(`Althar couldn't read that: ${error.message}`)),
     )
     const { host, repository } = yield* repositoryOf(projectId, asked.repository)
-    const base = repository.defaultBranch
+    const base = asked.branch?.trim() || repository.defaultBranch
     const all = yield* viaHost(host.checks(repository, base))
     const sum = checksOf(base, all)
     const logs = yield* Effect.forEach(all.filter((check) => check.state === 'failed').slice(0, LOGS), (check) =>

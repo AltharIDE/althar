@@ -8,6 +8,7 @@ import {
   ApiError,
   type BoardTask,
   type ConnectionSummary,
+  type ProjectRepository,
   type ProjectSummary,
   type ProjectTracker,
   type RepositorySetup,
@@ -198,6 +199,56 @@ describe('a project’s settings', () => {
       'placeholder',
       'The first task’s lead fills this in.',
     )
+  })
+
+  it('sets the branch new tasks work toward in each repository, its default marked, and says why one didn’t hold', async () => {
+    let kept: ReadonlyArray<ProjectRepository> = repositories.map((each) => ({
+      ...each,
+      defaultBranch: 'main',
+      workToward: null,
+      branches: ['main', 'release/0.8.0'],
+    }))
+    const setRepository = vi.fn(async (input: { repositoryId: string; workToward?: string | null }) => {
+      if (input.workToward === 'release/0.8.0' && input.repositoryId === 'repo_web')
+        throw new ApiError({ reason: 'BranchNotFound', message: 'meridian-web has no branch release/0.8.0, on its remote or here.' })
+      kept = kept.map((each) => (each.id === input.repositoryId ? { ...each, workToward: input.workToward ?? null } : each))
+    })
+    windowAt('/projects/p1?room=settings&section=general', { setRepository, getRepositories: vi.fn(async () => kept) })
+    await userEvent.click(await screen.findByRole('button', { name: 'Work toward in meridian-api: main' }))
+    expect(screen.getByRole('option', { name: 'main default' }).getAttribute('aria-selected')).toBe('true')
+    await userEvent.click(screen.getByRole('option', { name: 'release/0.8.0' }))
+    await waitFor(() =>
+      expect(setRepository).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: 'repo_api', workToward: 'release/0.8.0' }),
+    )
+    // Back to the default is null: the default branch, as before.
+    await userEvent.click(await screen.findByRole('button', { name: 'Work toward in meridian-api: release/0.8.0' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'main default' }))
+    await waitFor(() => expect(setRepository).toHaveBeenLastCalledWith({ projectId: 'p1', repositoryId: 'repo_api', workToward: null }))
+    // One that didn't hold goes back, and says why at its row.
+    await userEvent.click(screen.getByRole('button', { name: 'Work toward in meridian-web: main' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'release/0.8.0' }))
+    expect(await screen.findByText('meridian-web has no branch release/0.8.0, on its remote or here.')).toBeTruthy()
+    expect(await screen.findByRole('button', { name: 'Work toward in meridian-web: main' })).toBeTruthy()
+  })
+
+  it('makes a branch typed that the remote doesn’t have, from the default branch, and works toward it', async () => {
+    let kept: ReadonlyArray<ProjectRepository> = [{ ...repositories[0]!, defaultBranch: 'main', workToward: null, branches: ['main'] }]
+    const createBranch = vi.fn(async ({ branch }: { branch: string }) => {
+      kept = kept.map((each) => ({ ...each, branches: [...(each.branches ?? []), branch] }))
+      return branch
+    })
+    const setRepository = vi.fn(async (input: { repositoryId: string; workToward?: string | null }) => {
+      kept = kept.map((each) => (each.id === input.repositoryId ? { ...each, workToward: input.workToward ?? null } : each))
+    })
+    windowAt('/projects/p1?room=settings&section=general', { createBranch, setRepository, getRepositories: vi.fn(async () => kept) })
+    await userEvent.click(await screen.findByRole('button', { name: 'Work toward: main' }))
+    await userEvent.type(screen.getByRole('combobox', { name: 'Find or name a branch' }), 'release/0.9.0{Enter}')
+    // Shown at once, while it is made.
+    expect(await screen.findByRole('button', { name: 'Work toward: release/0.9.0' })).toBeTruthy()
+    await waitFor(() =>
+      expect(setRepository).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: kept[0]!.id, workToward: 'release/0.9.0' }),
+    )
+    expect(createBranch).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: kept[0]!.id, branch: 'release/0.9.0' })
   })
 
   it('sends a repository’s changes to its setup one after another, and shows the newest until it is kept', async () => {

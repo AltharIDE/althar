@@ -182,7 +182,7 @@ export const holdsFix = (bare: string, sha: string) => {
 }
 
 /** The task's branch where the host has it: the one branch of Althar's there, whatever the task is called. */
-const taskBranch = (bare: string) => {
+export const taskBranch = (bare: string) => {
   try {
     return git(bare, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/althar/').split('\n')[0] || null
   } catch {
@@ -204,6 +204,8 @@ export const hostOf = (
     readonly waitsFor?: (method: string) => Effect.Effect<void>
     /** What the host says of conflicts instead of working it out, as a host out of date does. */
     readonly says?: () => boolean | undefined
+    /** The branch the pull request goes into, where it isn't main (ADR-093). */
+    readonly into?: string
   } = {},
 ) => {
   const tip = () => {
@@ -222,7 +224,7 @@ export const hostOf = (
       if (said !== undefined) return said
       const branch = taskBranch(bare)
       if (branch === null || tip() === null) return undefined
-      const conflicts = conflictsIn(bare, 'main', branch)
+      const conflicts = conflictsIn(bare, more.into ?? 'main', branch)
       if (conflicts) conflicting()
       return conflicts
     },
