@@ -6,9 +6,9 @@ import { Crypto, Effect, Schema } from 'effect'
  * in a log, and cannot be passed where another kind is expected.
  */
 
-const kind = <const B extends string>(prefix: string, brand: B) => ({
+const kind = <const B extends string>(prefix: string, brand: Parameters<typeof Schema.brand<B>>[0]) => ({
   prefix,
-  schema: Schema.String.check(Schema.isPattern(new RegExp(`^${prefix}_[0-9a-f]{32}$`))).pipe(Schema.brand(brand)),
+  schema: Schema.String.check(Schema.isPattern(new RegExp(`^${prefix}_[0-9a-f]{32}$`))).pipe(Schema.brand<B>(brand)),
 })
 
 export const Ids = {
@@ -177,6 +177,6 @@ export const newId = <S extends Schema.Top & { make(input: string): S['Type'] }>
 ): Effect.Effect<S['Type'], never, Crypto.Crypto> =>
   Effect.gen(function* () {
     const crypto = yield* Crypto.Crypto
-    const uuid = yield* Effect.orDie(crypto.randomUUIDv7)
+    const uuid = yield* Effect.orDie(crypto.randomUUIDv7())
     return definition.schema.make(`${definition.prefix}_${uuid.replaceAll('-', '')}`)
   })
