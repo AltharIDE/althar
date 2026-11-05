@@ -104,7 +104,7 @@ export function plot(frame: Frame): Plot {
   let py = 0
   for (let i = 0; i <= SAMPLES; i++) {
     const t = (i / SAMPLES) * AT.settled
-    const phi = phi0 + (phi1 - phi0) * rangeAt(t)
+    const phi = phi0 + (phi1 - phi0) * rangeAt(t) ** SHAPE
     const rr = radius(altitudeAt(t))
     const x = cx + rr * Math.sin(phi)
     const y = cy - rr * Math.cos(phi)

@@ -161,7 +161,7 @@ vec3 night(vec3 n, float foot, float near, out float cloud) {
   float urban = land * smoothstep(0.38, 0.64, fbm(n * 11.0 + 1.3, 4, foot * 11.0));
   urban *= 0.45 + 0.55 * smoothstep(0.35, 0.7, fbm(n * 34.0 + 5.1, 3, foot * 34.0));
   float lights = 0.0;
-  float many = mix(0.5, 1.6, near);
+  float many = mix(0.5, 1.25, near);
   lights += towns(n, 260.0, 1.6 * many, foot, urban) * 2.8;
   lights += towns(n, 620.0, 1.6 * many, foot, urban) * 1.3;
   lights += towns(n, 1400.0, 1.4 * many, foot, urban) * 0.7;
@@ -279,7 +279,7 @@ void main() {
     vec3 lights = night(m, foot, near, cloud);
     // The longer the way through the air, the dimmer and redder.
     vec3 trans = exp(-vec3(0.025, 0.06, 0.14) / slant);
-    col = vec3(0.0009, 0.0008, 0.0008) + lights * mix(0.1, 0.3, near) * trans;
+    col = vec3(0.0009, 0.0008, 0.0008) + lights * mix(0.09, 0.22, near) * trans;
     // The cloud, faint under the moon.
     col += vec3(0.55, 0.62, 0.8) * cloud * 0.003 * (0.35 + 0.65 * trans.g);
     // The air's own faint glow, just inside the edge.
