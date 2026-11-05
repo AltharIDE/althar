@@ -101,6 +101,7 @@ import { type InputFile, keepFiles } from './sentFiles'
 import { type InputImage, keepSent } from './sentImages'
 import { anyOf, SignIns } from './SignIns'
 import { expected, words } from './words'
+import { makeBranch } from './newBranch'
 
 /*
  * The runtime's side of the API (`@althar/contracts`): each call runs the
@@ -808,6 +809,20 @@ export const handlers = Api.toLayer(
                 ...(workToward === undefined ? {} : { workToward }),
                 commandId: said.commandId,
               })
+            }),
+          ),
+        ),
+      CreateBranch: ({ commandId, projectId, repositoryId, branch }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              yield* envelope('project.create_branch', { projectId, repositoryId, branch }, commandId)
+              return yield* makeBranch({ projectId, repositoryId, branch }).pipe(
+                Effect.provideService(SqlClient.SqlClient, sql),
+                Effect.provideService(Instance, instance),
+                Effect.provideService(Connections, connections),
+              )
             }),
           ),
         ),

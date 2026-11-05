@@ -42,6 +42,11 @@ export class BranchNotFound extends Schema.TaggedError<BranchNotFound>()('Branch
   repository: Schema.String,
 }) {}
 
+/** A branch the person asked Althar to make that it couldn't (ADR-093): why, in words for them. */
+export class BranchRefused extends Schema.TaggedError<BranchRefused>()('BranchRefused', {
+  message: Schema.String,
+}) {}
+
 /**
  * A change to a project that can't be made: a name that is empty, the
  * project's last repository left out (a task needs one to work in), a role

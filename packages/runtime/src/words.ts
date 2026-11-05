@@ -180,6 +180,8 @@ export const words = (
       }
       case 'BranchNotFound':
         return `${text(error, 'repository')} has no branch ${text(error, 'branch')}, on its remote or here.`
+      case 'BranchRefused':
+        return text(error, 'message')
       case 'ProjectRefused':
         return projectRefused[text(error, 'reason') as ProjectRefused['reason']] ?? "Althar can't change the project that way."
       case 'NotFound':
@@ -527,6 +529,7 @@ export const expected = new Set([
   'NotARepository',
   'RepositoriesNeeded',
   'BranchNotFound',
+  'BranchRefused',
   'RepositoryRefused',
   'ProjectRefused',
   'DocumentRefused',

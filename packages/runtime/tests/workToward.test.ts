@@ -23,6 +23,7 @@ import { timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import type { ToolAccess } from '../src/ToolServer'
+import { makeBranch } from '../src/newBranch'
 import { setToward } from '../src/towards'
 import { ask, cards, connect, git, runtimeWith, tipOf } from './changesSupport'
 import { conflictsIn, given, hostOf, moveMainOn, runtimeWith as conflictsRuntime, taskBranch, titled } from './conflictsSupport'
@@ -526,6 +527,38 @@ describe('the coordinator’s release branches', () => {
         'made while Althar was making it',
       )
       assert.strictEqual(git(bare, 'rev-parse', RELEASE), behind)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+})
+
+describe('a branch the person makes from a branch list', () => {
+  it.live('is made on the host from its default branch, never moves one there already, and is then a branch to work toward', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    const main = git(bare, 'rev-parse', 'main')
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const { projectId, repositoryId } = yield* opened(working)
+      assert.strictEqual(yield* makeBranch({ projectId, repositoryId, branch: ' release/0.9.0 ' }), 'release/0.9.0')
+      assert.strictEqual(git(bare, 'rev-parse', 'release/0.9.0'), main)
+      // The branch lists have it, and new tasks can work toward it.
+      const [listed] = yield* (yield* Projects).repositories(projectId)
+      assert.include(listed?.branches ?? [], 'release/0.9.0')
+      yield* (yield* Projects).setRepository({ projectId, repositoryId, workToward: 'release/0.9.0' })
+      assert.strictEqual((yield* (yield* Projects).repositories(projectId))[0]?.workToward, 'release/0.9.0')
+
+      // One there already, elsewhere, is left where it is, and is the one the person gets.
+      const elsewhere = git(bare, '-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit-tree', '-m', 'Elsewhere', `${main}^{tree}`)
+      git(bare, 'update-ref', 'refs/heads/release/0.7.1', elsewhere)
+      assert.strictEqual(yield* makeBranch({ projectId, repositoryId, branch: 'release/0.7.1' }), 'release/0.7.1')
+      assert.strictEqual(git(bare, 'rev-parse', 'release/0.7.1'), elsewhere)
+      assert.strictEqual(git(working, 'rev-parse', 'refs/remotes/origin/release/0.7.1'), elsewhere)
+
+      // A name git doesn't take is refused in words for the person, and nothing is pushed.
+      const refused = yield* Effect.flip(makeBranch({ projectId, repositoryId, branch: 'my branch' }))
+      assert.strictEqual(refused._tag, 'BranchRefused')
+      assert.include('message' in refused ? refused.message : '', 'can’t be called')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 })

@@ -3456,6 +3456,21 @@ export const Api = RpcGroup.make(
     },
     Schema.Void,
   ),
+  /**
+   * Makes a branch on the code host, from the remote's default branch, where
+   * the repository's tasks start (ADR-093): a name typed in a branch list
+   * that it didn't have. Never forced: one there already is left as it is.
+   * Answers the branch's name as made.
+   */
+  command(
+    'CreateBranch',
+    {
+      projectId: Schema.String,
+      repositoryId: Schema.String,
+      branch: Schema.String,
+    },
+    Schema.String,
+  ),
   call('ListTasks', { projectId: Schema.String }, TaskList),
   /**
    * Finds tasks by what they were about: their titles, what the person asked,
