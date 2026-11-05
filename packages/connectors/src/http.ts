@@ -102,19 +102,26 @@ export interface Page<A, At> {
   readonly next: At | undefined
 }
 
-/** A listing, page after page from `first`, for at most `PAGES_FOLLOWED` pages. */
+/**
+ * A listing, page after page from `first`, for at most `limit` pages. The
+ * bound keeps one pathological list, such as a pull request with thousands of
+ * comments, from stalling a read; a listing with more is said to be left
+ * partly unread, rather than look whole.
+ */
 export const paged = <A, At>(
   first: At,
   page: (at: At) => Effect.Effect<Page<A, At>, ConnectorFailed>,
+  limit = PAGES_FOLLOWED,
 ): Effect.Effect<ReadonlyArray<A>, ConnectorFailed> =>
   Effect.gen(function* () {
     const all: Array<A> = []
     let at: At | undefined = first
-    for (let read = 0; read < PAGES_FOLLOWED && at !== undefined; read++) {
+    for (let read = 0; read < limit && at !== undefined; read++) {
       const { items, next }: Page<A, At> = yield* page(at)
       all.push(...items)
       at = next
     }
+    if (at !== undefined) yield* Effect.logWarning(`A listing still had pages after ${limit}: the rest was left unread`)
     return all
   })
 
