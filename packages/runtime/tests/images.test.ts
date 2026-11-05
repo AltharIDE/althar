@@ -5,14 +5,14 @@ import { join } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
 import { Api, clientProtocol, emitterPort, type ThreadItem, type ThreadSnapshot } from '@althar/contracts'
-import { type FakeAgentOptions, SCREENSHOT_PNG } from '@althar/provider-adapters/testing'
+import { type FakeAgentOptions, scenarios, SCREENSHOT_PNG } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Context, Effect, Layer } from 'effect'
+import { Context, Deferred, Effect, Fiber, Layer } from 'effect'
 import { RpcClient } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 import { until } from '@althar/testing/effect'
 
-import { artifactPath } from '../src/Artifacts'
+import { Artifacts, artifactPath } from '../src/Artifacts'
 import { connection, services } from '../src/Api'
 import { Folders } from '../src/Folders'
 import { DICTATED, promptFor } from '../src/Sessions'
@@ -44,6 +44,7 @@ const connected = (
     readonly database?: string
     readonly artifactsRoot?: string
     readonly each?: Readonly<Record<string, FakeAgentOptions>>
+    readonly beforePut?: Effect.Effect<void>
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -62,13 +63,22 @@ const connected = (
         artifactsRoot: options.artifactsRoot ?? mkdtempSync(join(tmpdir(), 'althar-artifacts-')),
       }),
     )
+    const artifacts = Context.get(context, Artifacts)
+    const beforePut = options.beforePut
+    const serving =
+      beforePut === undefined
+        ? context
+        : Context.add(context, Artifacts, {
+            ...artifacts,
+            put: (bytes) => Effect.andThen(beforePut, artifacts.put(bytes)),
+          })
     yield* Effect.forkScoped(
       Layer.launch(
         connection(
           emitterPort(channel.port1, (data) => data),
           { kind: 'window' },
         ),
-      ).pipe(Effect.provideContext(context)),
+      ).pipe(Effect.provideContext(serving)),
     )
     const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))
     const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
@@ -92,6 +102,95 @@ const taskWithLead = (setup: Effect.Success<ReturnType<typeof connected>>, agent
   })
 
 describe('images sent with a message', () => {
+  for (const role of ['coordinator', 'lead'] as const) {
+    for (const interruptFirst of [true, false]) {
+      it.live(
+        `delivers a mixed mid-turn burst to the ${role} together in send order, including a slow image (${interruptFirst ? 'interrupt first' : 'queue first'})`,
+        () =>
+          Effect.scoped(
+            Effect.gen(function* () {
+              const preparing = yield* Deferred.make<void>()
+              const release = yield* Deferred.make<void>()
+              const setup = yield* connected({ beforePut: Effect.andThen(Deferred.succeed(preparing, undefined), Deferred.await(release)) })
+              const { client, sql } = setup
+              const { project, task } = yield* taskWithLead(setup)
+              const threadId = role === 'lead' ? task.threadId : (yield* client.GetCoordinator({ projectId: project.id })).threadId
+              const snapshot = Effect.gen(function* () {
+                return role === 'lead' ? yield* client.GetThread({ threadId }) : yield* client.GetCoordinator({ projectId: project.id })
+              })
+              if (role === 'coordinator') {
+                yield* client.Send({ commandId: commandId(), threadId, body: 'hello', disposition: 'after_current' })
+                yield* until(snapshot, (thread) => thread.session !== null && !thread.session.turnRunning && said(thread.items).length > 0)
+              }
+              const earlier = role === 'coordinator' ? ['hello', scenarios.slow] : [scenarios.slow]
+              yield* client.Send({ commandId: commandId(), threadId, body: scenarios.slow, disposition: 'after_current' })
+              yield* until(snapshot, (thread) => said(thread.items).includes('Starting'))
+
+              const first = yield* Effect.forkScoped(
+                client.Send({
+                  commandId: commandId(),
+                  threadId,
+                  body: 'this screen is slow',
+                  disposition: interruptFirst ? 'interrupt_and_continue' : 'after_current',
+                  images: [png],
+                }),
+              )
+              yield* Deferred.await(preparing)
+              const second = yield* Effect.forkScoped(
+                client.Send({
+                  commandId: commandId(),
+                  threadId,
+                  body: 'half a minute sometimes',
+                  disposition: interruptFirst ? 'after_current' : 'interrupt_and_continue',
+                }),
+              )
+              yield* Effect.yieldNow
+              const third = yield* Effect.forkScoped(
+                client.Send({
+                  commandId: commandId(),
+                  threadId,
+                  body: 'on first opening',
+                  disposition: interruptFirst ? 'interrupt_and_continue' : 'after_current',
+                }),
+              )
+              // A later request can be served while preparation holds the sends, but none can overtake the image.
+              const held = yield* snapshot
+              assert.deepStrictEqual(
+                messages(held.items).map((item) => item.content.text),
+                earlier,
+              )
+              yield* Deferred.succeed(release, undefined)
+              yield* Fiber.join(first)
+              yield* Fiber.join(second)
+              yield* Fiber.join(third)
+              const bodies = ['this screen is slow', 'half a minute sometimes', 'on first opening']
+              const expected = `The person interrupted your last turn to say:\n\n${bodies.join('\n\n')}\n\nTake it into account, and carry on with the task.`
+              const thread = yield* until(snapshot, (value) => said(value.items).some((text) => text.includes(expected)))
+              assert.deepStrictEqual(
+                messages(thread.items).map((item) => item.content.text),
+                [...earlier, ...bodies],
+              )
+              const delivered = yield* sql<{ body: string; deliveryId: string; position: number; prompt: string }>`
+          SELECT i.body, di.delivery_id, di.position, d.prompt FROM user_inputs i
+          JOIN turn_delivery_inputs di ON di.user_input_id = i.id JOIN turn_deliveries d ON d.id = di.delivery_id
+          WHERE i.thread_id = ${threadId} AND i.body IN ${sql.in(bodies)} ORDER BY di.position`
+              assert.deepStrictEqual(
+                delivered.map((row) => [row.body, row.position]),
+                bodies.map((body, index) => [body, index + 1]),
+              )
+              assert.strictEqual(new Set(delivered.map((row) => row.deliveryId)).size, 1)
+              assert.strictEqual(delivered[0]?.prompt, expected)
+              assert.include(said(thread.items).join('\n'), `saw images: image/png ${PNG.length} B`)
+              const [interrupted] = yield* sql<{ state: string }>`SELECT d.state FROM turn_deliveries d
+          JOIN turn_delivery_inputs di ON di.delivery_id = d.id JOIN user_inputs i ON i.id = di.user_input_id
+          WHERE i.thread_id = ${threadId} AND i.body = ${scenarios.slow}`
+              assert.strictEqual(interrupted?.state, 'interrupted')
+            }),
+          ),
+      )
+    }
+  }
+
   it.live('go to the agent as image blocks after its words, and show on the message, kept in the store by their digests', () =>
     Effect.scoped(
       Effect.gen(function* () {

@@ -1106,36 +1106,39 @@ export const handlers = Api.toLayer(
         ),
       Send: ({ commandId, threadId, body, disposition, images, files, dictated }) =>
         api(
-          Effect.gen(function* () {
-            // Its images and files are read, checked and kept first, outside the command's transaction: one that can't be sent refuses the message.
-            const kept = images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
-            const copied = yield* filesFor(threadId, files)
-            const message = {
-              // The command says its images by their digests, never their bytes, and how many files, never their paths.
-              envelope: yield* envelope(
-                'thread.send',
-                { threadId, body, disposition, ...imagesSaid(kept), ...filesSaid(copied), ...(dictated === true ? { dictated } : {}) },
-                commandId,
-              ),
-              threadId,
-              body,
-              sender,
-              disposition,
-              ...(kept.length === 0 ? {} : { images: kept }),
-              ...(copied.length === 0 ? {} : { files: copied }),
-              ...(dictated === true ? { dictated } : {}),
-            }
-            // What the person says to the coordinator starts it, if it isn't running.
-            const [thread] = yield* sql<{ kind: string; taskId: string | null }>`SELECT kind, task_id FROM threads WHERE id = ${threadId}`
-            if (thread?.kind === 'coordinator') yield* coordinator.say(message)
-            else {
-              // Written to again, a task kept for later is back: what its lead does next ends in Needs you.
-              if (thread?.kind === 'task' && thread.taskId !== null) yield* tasks.bringBack(thread.taskId)
-              yield* sessions.send(message)
-            }
-            // Links in what the person said unfurl on their message, without holding up the reply.
-            yield* Effect.forkDetach(issues.unfurlInput(commandId))
-          }),
+          sessions.accepting(
+            threadId,
+            Effect.gen(function* () {
+              // Its images and files are read, checked and kept first, outside the command's transaction: one that can't be sent refuses the message.
+              const kept = images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
+              const copied = yield* filesFor(threadId, files)
+              const message = {
+                // The command says its images by their digests, never their bytes, and how many files, never their paths.
+                envelope: yield* envelope(
+                  'thread.send',
+                  { threadId, body, disposition, ...imagesSaid(kept), ...filesSaid(copied), ...(dictated === true ? { dictated } : {}) },
+                  commandId,
+                ),
+                threadId,
+                body,
+                sender,
+                disposition,
+                ...(kept.length === 0 ? {} : { images: kept }),
+                ...(copied.length === 0 ? {} : { files: copied }),
+                ...(dictated === true ? { dictated } : {}),
+              }
+              // What the person says to the coordinator starts it, if it isn't running.
+              const [thread] = yield* sql<{ kind: string; taskId: string | null }>`SELECT kind, task_id FROM threads WHERE id = ${threadId}`
+              if (thread?.kind === 'coordinator') yield* coordinator.say(message)
+              else {
+                // Written to again, a task kept for later is back: what its lead does next ends in Needs you.
+                if (thread?.kind === 'task' && thread.taskId !== null) yield* tasks.bringBack(thread.taskId)
+                yield* sessions.send(message)
+              }
+              // Links in what the person said unfurl on their message, without holding up the reply.
+              yield* Effect.forkDetach(issues.unfurlInput(commandId))
+            }),
+          ),
         ),
       TakeBack: ({ commandId, itemId }) =>
         api(
