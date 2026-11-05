@@ -487,7 +487,7 @@ describe('the Talk room', () => {
     // One step, which reviews, with why; nothing to pick for when it is done.
     const lead = await screen.findByRole('button', { name: /^Lead for this task: / })
     expect(screen.getByText('Review')).toBeTruthy()
-    expect(screen.getByText('Strong at reading.')).toBeTruthy()
+    expect(screen.queryByText('Strong at reading.')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Skip' })).toBeNull()
     expect(screen.queryByText('When the work is done')).toBeNull()
     // Codex can't be held to reading only, so it isn't offered.
