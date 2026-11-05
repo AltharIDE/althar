@@ -118,23 +118,24 @@
 /* Its right edge on the lead's, as far as the sheet's measure. */
 .deck { position: absolute; z-index: 1; left: var(--spine); width: calc(min(100% - var(--r), var(--l) + 1280px) - var(--spine)); bottom: clamp(20px, 3.6svh, 40px); display: grid; }
 .console { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; border: 1px solid var(--ink); background: var(--n-2); }
-.cell { display: grid; align-content: center; justify-items: start; gap: 9px; padding: 13px 16px; }
+/* Each cell's label along the block's top, what it holds centred under it, so the marks and the command line up. */
+.cell { display: grid; grid-template-rows: auto 1fr; align-items: center; justify-items: start; gap: 9px; padding: 13px 15px; }
 .cell + .cell { border-left: 1px solid var(--ink); }
 .label { font: 500 10px/1 var(--font-label); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); }
-.agents { display: flex; gap: 8px; margin: 0; padding: 0; list-style: none; color: var(--ink); }
+.agents { display: flex; gap: 7px; margin: 0; padding: 0; list-style: none; color: var(--ink); }
 .agents li { display: grid; place-items: center; width: 18px; height: 18px; }
 .install { justify-items: stretch; }
 .command { display: flex; align-items: center; gap: 4px; padding: 3px 3px 3px 11px; border-radius: 4px; box-shadow: inset 0 0 0 1px var(--ink-3); }
-.command code { flex: 1; font: 12.5px/1 var(--mono); color: var(--t-1); white-space: nowrap; }
+.command code { flex: 1; font: 12.5px/1 var(--mono); letter-spacing: -0.01em; color: var(--t-1); white-space: nowrap; }
 .command code span { color: var(--ink-2); }
 /* The copy button, quiet until pointed at; its word only read out, so the console keeps its width. */
 .command button { width: 26px; padding: 0; justify-content: center; color: var(--ink-2); }
 .command button:hover { color: var(--ink); }
 .command button span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* The download in the chart's cobalt rather than a heavy black, GitHub a hairline; the other Mac's build close under them. */
-.ways { justify-items: start; }
-.cell.ways > div { flex-wrap: nowrap; gap: 10px; }
-.cell.ways > div > a { padding: 10px 14px; border-radius: 6px; font-size: 14px; }
+.ways { grid-template-rows: none; align-content: center; justify-items: start; }
+.cell.ways > div { flex-wrap: nowrap; gap: 8px; }
+.cell.ways > div > a { padding: 10px 13px; border-radius: 6px; font-size: 14px; }
 .cell.ways > div > a:first-child { background: var(--ink); color: #fff; --os-belly: var(--ink); }
 .cell.ways > div > a:last-child { box-shadow: inset 0 0 0 1px var(--ink-3); color: var(--ink); }
 .cell.ways > p { margin: 0; }
@@ -147,7 +148,7 @@
 .hero:not([data-laid]) :is(.plot, .needle, .speed) { opacity: 0; }
 
 /* ---- narrower: the download under the agents and the install ---- */
-@media (max-width: 1259px) {
+@media (max-width: 1279px) {
   .console { grid-template-columns: auto minmax(0, 1fr); }
   .cell.ways { grid-column: 1 / -1; grid-auto-flow: column; align-items: center; justify-content: start; gap: 16px; border-left: 0; border-top: 1px solid var(--ink); }
 }
