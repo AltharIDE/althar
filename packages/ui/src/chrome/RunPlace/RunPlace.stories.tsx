@@ -126,3 +126,15 @@ export const CreatingInOneOfSeveral: Story = {
     await expect(args.onCreate).toHaveBeenCalledWith('release/2.5', 'web')
   },
 }
+
+/** Open on a name the remote doesn't have, the foot saying what a branch picked here does. */
+export const CreateOffered: Story = {
+  args: {
+    onCreate: fn(),
+    createFrom: 'main',
+    defaultOpen: true,
+    defaultQuery: 'release/2.5',
+    note: 'A branch picked here is what new tasks work toward too. A task or pull request is only where Run runs.',
+  },
+}
+export const CreateOfferedDark: Story = { ...CreateOffered, globals: { theme: 'dark' } }
