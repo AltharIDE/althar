@@ -56,8 +56,12 @@ function Drawing({ p }: { p: Plate }) {
           <stop offset="0.78" stopColor="#fff" stopOpacity="1" />
           <stop offset="1" stopColor="#fff" stopOpacity="0.35" />
         </linearGradient>
+        {/* ...and break round the names. */}
         <mask id="orrery-sides" maskUnits="userSpaceOnUse" x="0" y="0" width={p.w} height={p.h}>
           <rect width={p.w} height={p.h} fill="url(#orrery-fade)" />
+          {p.names.map((n, i) => (
+            <rect key={i} x={n.l - 5} y={n.t - 3} width={n.r - n.l + 8} height={n.b - n.t + 6} rx="3" fill="#000" />
+          ))}
         </mask>
         <radialGradient id="orrery-warmth">
           <stop offset="0" stopColor="#ffd2a0" stopOpacity="0.2" />
@@ -116,7 +120,7 @@ function Drawing({ p }: { p: Plate }) {
         ))}
         <path className={s.ticks} d={p.ticks.near} opacity={0.34} />
       </g>
-      <g fill="none" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round">
+      <g fill="none" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" mask="url(#orrery-sides)">
         {p.bodies.map((b) => (
           <path key={b.id} d={b.trail.d} stroke={`url(#orrery-trail-${b.id})`} opacity={0.7 + 0.3 * b.d} />
         ))}

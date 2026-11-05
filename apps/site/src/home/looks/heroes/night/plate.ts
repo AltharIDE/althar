@@ -126,6 +126,8 @@ export interface Plate {
   tall: number
   /** The graduations along one orbit: near and far. */
   ticks: { near: string; far: string }
+  /** Where the names are set: the lines break round them, as a drawn chart's do. */
+  names: Box[]
 }
 
 const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x))
@@ -142,9 +144,9 @@ const NEAR = 1.12
 
 /** The name's width, in px: JetBrains Mono's advance (0.6em) and the label's tracking (0.12em), at 10.5px. */
 const LABEL = { size: 10.5, advance: 0.72, height: 12, gap: 7 }
-const labelWidth = (name: string) => name.length * LABEL.size * LABEL.advance - LABEL.size * 0.12
+const labelWidth = (name: string) => name.length * LABEL.size * LABEL.advance
 
-interface Box {
+export interface Box {
   l: number
   t: number
   r: number
@@ -228,6 +230,7 @@ export function plate(f: Frame): Plate {
   ]
   const discs: Box[] = bodies.map((b) => ({ l: b.x - b.size / 2, t: b.y - b.size / 2, r: b.x + b.size / 2, b: b.y + b.size / 2 }))
   const order = [...bodies].sort((a, b) => b.d - a.d)
+  const names: Box[] = []
   for (const b of order) {
     const lw = labelWidth(b.name)
     const out: 'left' | 'right' = b.x < cx ? 'left' : 'right'
@@ -245,6 +248,7 @@ export function plate(f: Frame): Plate {
       if (discs.some((k, i) => bodies[i] !== b && meets(k, bx, 6))) continue
       b.side = side
       kept.push(bx)
+      names.push(bx)
       break
     }
   }
@@ -264,7 +268,8 @@ export function plate(f: Frame): Plate {
     else ticks.far += seg
   }
 
-  return { w, h, cx, cy, orbits, bodies, stars: starsOf(w, h, f.foot, cx, cy, sun), sun, rays, tall, ticks }
+  const stars = starsOf(w, h, f.foot, cx, cy, sun).filter((s) => !names.some((n) => meets(n, { l: s.x, t: s.y, r: s.x, b: s.y }, 4)))
+  return { w, h, cx, cy, orbits, bodies, stars, sun, rays, tall, ticks, names }
 }
 
 /**

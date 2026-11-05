@@ -108,7 +108,7 @@
   grid-area: head;
   margin: 0;
   font-family: 'Inter Display', var(--display);
-  font-size: clamp(46px, min(5.3cqw, 8.3cqh), 88px);
+  font-size: clamp(46px, min(5.3cqw, 8.3cqh), 78px);
   font-weight: 300;
   line-height: 0.98;
   letter-spacing: -0.045em;
