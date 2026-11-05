@@ -22,7 +22,7 @@
     "verify": "bun run check && bun run test"
   },
   "dependencies": {
-    "effect": "4.0.0-rc.118"
+    "effect": "4.0.7"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",
