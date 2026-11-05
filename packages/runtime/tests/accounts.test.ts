@@ -145,6 +145,8 @@ describe('accounts', () => {
       const config = yield* RuntimeConfig
       const definition = (yield* (yield* Agents).get('claude-code')).definition
       const usual = definition.home.usual({}, '')
+      // The usual folder is the whole file's: the person's skills in it are this test's alone.
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(join(usual, 'skills'), { recursive: true, force: true })))
       mkdirSync(join(usual, 'skills', 'mine'), { recursive: true })
       const [account] = yield* accounts.of('claude-code')
       if (account === undefined) return assert.fail('Claude Code has its usual account')
