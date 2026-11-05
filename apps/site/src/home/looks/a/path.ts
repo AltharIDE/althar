@@ -1,5 +1,5 @@
 /*
- * Prototype, C: the descent's path through the chart. It runs down a lane
+ * Prototype, A: the descent's path through the chart. It runs down a lane
  * beside the sheets, crosses the page in a long S between one sheet and the
  * next, from the left lane to the right and back, and at the end flares onto
  * the zero line, level as it touches down. Its height on the page is its

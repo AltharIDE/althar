@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
-import c from '../C.module.css'
+import c from '../A.module.css'
 import { type Path, plot } from './path'
 
 /*
- * Prototype, C: the chart drawn under the sheets. Down the left margin, the
+ * Prototype, A: the chart drawn under the sheets. Down the left margin, the
  * altitude scale: the first screen's 38 km at the top of the sections, the
  * ground at the download's rule, a tick every 100 m, every kilometre
  * labelled, every five a large numeral. Its needle is held in the middle of

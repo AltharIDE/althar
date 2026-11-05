@@ -19,9 +19,9 @@ import { go, keepPlace, LOOKS, type Look, onKey, useLook } from './state'
  */
 
 const load = {
-  A: () => import('./A').then((m) => ({ default: m.NightBody })),
-  B: () => import('./B').then((m) => ({ default: m.EngravedBody })),
-  C: () => import('./C').then((m) => ({ default: m.ChartBody })),
+  A: () => import('./A').then((m) => ({ default: m.ChartBody })),
+  B: () => import('./B').then((m) => ({ default: m.ApproachBody })),
+  C: () => import('./C').then((m) => ({ default: m.CabinBody })),
 }
 
 const BODIES: Record<Look, ComponentType> = {

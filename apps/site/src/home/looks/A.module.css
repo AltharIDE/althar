@@ -1,194 +1,326 @@
-/* Prototype, A: the night side. The planet from orbit held behind the sections (a/orbit.ts), the claims set over it as a film's titles, the app's pictures seen on the way; dawn at the download, washing into the footer's paper. */
+/* Prototype, A: the flight chart. The page's paper in the footer's cobalt: the altitude scale down the left margin, the descent's path through the sheets, the pictures mounted as exhibits. */
 
 .body {
+  /* The footer's cobalt, and its tints for the finer lines. */
+  --ink: #1f35c8;
+  --ink-2: rgba(31, 53, 200, 0.62);
+  --ink-3: rgba(31, 53, 200, 0.34);
+  --ink-4: rgba(31, 53, 200, 0.24);
+  /* The scale's line, the sheets' left edge and their least right margin, all on whole pixels so every rule stays crisp; the scale's numerals. */
+  --spine: 148px;
+  --l: 252px;
+  --r: 88px;
+  --num: 96px;
+  --gap: 32px;
+  --chart-wide: 1;
   position: relative;
   isolation: isolate;
   overflow-x: clip;
+  padding-top: 200px;
+  background: var(--n-2);
+  /* The app's pictures, mounted flat on the paper: a hairline and a short soft fall. */
+  --board-frame: 0 0 0 1px rgba(20, 20, 28, 0.12), 0 30px 60px -32px rgba(40, 30, 10, 0.3);
+  --talk-frame: 0 0 0 1px rgba(20, 20, 28, 0.12), 0 30px 60px -32px rgba(40, 30, 10, 0.3);
+  --review-mask: none;
+  --review-radius: 12px;
+  --review-frame: 0 30px 60px -30px rgba(40, 30, 10, 0.4);
+  --bezel-fall: 0 40px 80px -40px rgba(40, 30, 10, 0.5);
+  --scene-frame: 0 0 0 1px rgba(20, 20, 28, 0.12), 0 30px 60px -32px rgba(40, 30, 10, 0.3);
+  --edge-words: var(--t-2);
+  --edge-title: var(--t-1);
+  --edge-path: var(--t-3);
+  --edge-faint: var(--t-4);
+}
+@media (min-width: 1440px) {
+  .body { --spine: 196px; --l: max(300px, round(down, (100vw - 1280px) / 2, 1px)); --r: 112px; --num: 124px; --gap: 40px; }
+}
+
+/* ---- the chart under the sheets: the scale, its figures and needle, and the path ---- */
+.chart { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+.plot { position: absolute; left: 0; top: 0; overflow: visible; }
+.ticks path { fill: none; stroke-width: 1; }
+.spineLine { stroke: var(--ink); }
+.ticks path[data-kind='0'] { stroke: var(--ink-4); }
+.ticks path[data-kind='1'] { stroke: var(--ink-3); }
+.ticks path[data-kind='2'] { stroke: var(--ink-2); }
+.ticks path[data-kind='3'] { stroke: var(--ink); }
+
+/* The scale's figures, at the left of its line: every kilometre small, every five large. */
+.tape { position: absolute; left: var(--spine); width: 0; }
+.km, .numeral { position: absolute; right: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.km { translate: 0 -50%; font: 500 10px/1 var(--mono); color: var(--ink-2); }
+.numeral { right: 16px; translate: 0 -52%; font-family: 'Inter Display', var(--display); font-size: var(--num); font-weight: 200; line-height: 1; letter-spacing: -0.055em; color: var(--ink); }
+
+/* The needle: held in the window's middle, at the left of the scale's line, pointing at it, the tape's figures passing under it. */
+.needle {
+  position: sticky;
+  top: calc(50svh - 17px);
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 5px;
+  width: 96px;
+  height: 34px;
+  margin-left: -108px;
+  padding: 10px 11px 0 0;
+  border-radius: 3px;
+  background: var(--ink);
   color: #fff;
-  background: #010102;
-  /* How tall the plain paper between the view and the footer is. */
-  --wash: 8svh;
-  /* The first screen's soft dark under white words, so they read where they cross the lit edge or the towns; nothing shows on the black. */
-  --under-title: 0 1px 3px rgba(20, 6, 0, 0.5), 0 2px 26px rgba(20, 6, 0, 0.7);
-  --under-words: 0 1px 3px rgba(0, 0, 0, 0.55), 0 1px 14px rgba(0, 0, 0, 0.8);
-  --warm: rgba(255, 248, 240, 0.74);
-  --rim: rgba(255, 255, 255, 0.14);
-  /* The pictures float in the dark: a fine light rim, a long fall into the night, a cool line under them where the planet's edge lights them. */
-  --board-frame: 0 0 0 1px var(--rim), 0 1px 0 0.5px rgba(150, 165, 255, 0.28), 0 70px 160px -10px rgba(0, 0, 0, 0.95);
-  --talk-frame: 0 0 0 1px var(--rim), 0 1px 0 0.5px rgba(150, 165, 255, 0.28), 0 60px 140px -10px rgba(0, 0, 0, 0.95);
-  --bezel-fall: 0 1px 0 0.5px rgba(150, 165, 255, 0.22), 0 80px 180px rgba(0, 0, 0, 0.95);
-  --scene-frame: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 50px 120px rgba(0, 0, 0, 0.9);
+  box-shadow: 0 0 0 4px var(--n-2);
 }
-.under { top: 0; bottom: calc(var(--wash) + 24svh); }
-.night { position: relative; }
+.needle::after { content: ''; position: absolute; top: 50%; right: -7px; translate: 0 -50%; border-style: solid; border-width: 6px 0 6px 7px; border-color: transparent transparent transparent var(--ink); }
+.needle b { min-width: 5ch; font: 600 15px/1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; text-align: right; }
+.needle i { font: 500 9px/1 var(--font-label); font-style: normal; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.78; }
 
-/* ---- the view: held to the window while the sections pass over it ---- */
-.track { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
-.view { position: sticky; top: 0; height: 100svh; overflow: hidden; }
-.canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
-/* The first screen's film grain, its own faint specks laid over as they are. */
-.grain { position: absolute; inset: 0; background-size: 128px 128px; opacity: 0.4; }
-/* Without the graphics card: the edge as the other pages draw it. */
-.limb { display: none; }
-.view[data-flat] .canvas { display: none; }
-.view[data-flat] .limb {
-  display: block;
+/* The path: planned below the needle, a fine dotted line; flown above it, solid. Its stations where it crosses a sheet's rule, and its touchdown. */
+.planned { fill: none; stroke: var(--ink-2); stroke-width: 1.25; stroke-dasharray: 0.5 5.5; stroke-linecap: round; }
+.flown { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-linecap: round; }
+.station path, .touchdown path { fill: none; stroke: var(--ink); stroke-width: 1; }
+.station circle { fill: var(--n-2); stroke: var(--ink); stroke-width: 1.25; }
+.touchdown circle { fill: var(--ink); }
+/* The capsule, riding the path at the needle's height: the first screen's fire. */
+.capsule circle { fill: #ff6d2a; }
+.capsule .halo { fill: rgba(255, 140, 60, 0.2); }
+@media (prefers-reduced-motion: reduce) {
+  .capsule { display: none; }
+}
+
+/* ---- a sheet: its graduated top rule from the scale's line to the window's edge, then its words and what it shows ---- */
+.sheet { position: relative; z-index: 1; padding-bottom: 300px; }
+.rule {
+  height: 14px;
+  margin-left: var(--spine);
+  border-top: 1px solid var(--ink);
+  /* A tick every 8px, longer every 40 and 80, counted from the sheet's left edge. */
+  background:
+    linear-gradient(to right, var(--ink) 1px, transparent 1px) calc(var(--l) - var(--spine)) 0 / 80px 13px repeat-x,
+    linear-gradient(to right, var(--ink-2) 1px, transparent 1px) calc(var(--l) - var(--spine)) 0 / 40px 8px repeat-x,
+    linear-gradient(to right, var(--ink-3) 1px, transparent 1px) calc(var(--l) - var(--spine)) 0 / 8px 4px repeat-x;
+}
+.box { position: relative; max-width: 1280px; margin: 0 var(--r) 0 var(--l); }
+
+/* The title block, hanging from the rule at the sheet's right edge. */
+.block {
   position: absolute;
-  left: -45%;
-  right: -45%;
-  top: 66%;
-  height: 1600px;
-  border-radius: 50%;
-  border-top: 1.5px solid #b4bcff;
-  background: #020203;
-  box-shadow: 0 -2px 10px -2px rgba(60, 76, 255, 0.9), 0 -14px 50px -10px rgba(43, 59, 255, 0.55), 0 -60px 160px -30px rgba(43, 59, 255, 0.45);
+  top: -15px;
+  right: 0;
+  display: flex;
+  border: 1px solid var(--ink);
+  background: var(--n-2);
+  font: 500 10.5px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  white-space: nowrap;
 }
+.block > span { display: flex; align-items: baseline; gap: 3px; padding: 8px 10px 7px; }
+.block > span + span { border-left: 1px solid var(--ink); }
+.block b { font-weight: 600; }
+.block [data-span] { min-width: 9ch; text-align: right; }
+.block i { font-style: normal; color: var(--ink-2); }
 
-/* ---- the grid every section is set on ---- */
-.grid {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  column-gap: 32px;
-  max-width: 1344px;
-  margin: 0 auto;
-  padding: 0 var(--gut);
+/* Its number, its claim with the words that matter in the cobalt, and its lead at the right, on its foot. */
+.head { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: var(--gap); align-items: end; padding-top: 72px; }
+.no {
+  grid-column: 1 / span 2;
+  align-self: start;
+  margin-top: 0.04em;
+  font-family: 'Inter Display', var(--display);
+  font-size: clamp(56px, 5.4vw, 92px);
+  font-weight: 200;
+  line-height: 0.86;
+  letter-spacing: -0.05em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
 }
-.scene { position: relative; padding-top: 260px; }
-.opening { padding-top: 190px; }
+.head .title { grid-column: 3 / span 7; font-size: clamp(44px, 5.1vw, 88px); }
+.head .title b, .endLine b, .partTitle b { color: var(--ink); }
+.head .lead { grid-column: 10 / span 3; padding-bottom: 0.35em; font-size: 15.5px; line-height: 1.5; }
 
-/* ---- a claim, as a film's title over its shot: white, large, at the left; its lead warm under it ---- */
-.head { display: grid; align-content: start; gap: 26px; }
-.title { color: #fff; text-shadow: var(--under-title); }
-.big { font-size: clamp(48px, 7.4vw, 112px); }
-.lead { max-width: 30em; color: var(--warm); text-shadow: var(--under-words); }
-/* The notch tour's own words, white on the night, given the same. */
-.tour [class*='EdgeTour-module__menuWords'] { text-shadow: var(--under-words); }
-.tour [class*='EdgeTour-module__menuTitle'] { text-shadow: var(--under-title); }
-
-/* A picture of the app, given the room its section sets; its own wrapper's measure set aside. */
-.picture > * { max-width: none; margin: 0; padding: 0; }
-
-/* The board: the claim at the left, over the board, the window's full width under it. */
-.openingHead { grid-column: 1 / span 9; }
-.openingHead .lead { max-width: 27em; }
-.board { grid-column: 1 / -1; margin-top: 96px; }
-
-/* The coordinator: its claim at the left, the conversation beside it, never taller than the window. */
-.split { align-items: center; }
-.splitHead { grid-column: 1 / span 5; }
-.talk { grid-column: 6 / -1; }
-.talk > * { max-width: min(100%, calc((100svh - 150px) * 760 / 720)); margin-left: auto; }
-
-/* The review: its claim at the right, over the drawing, which melts into the night at its edges. */
-.rightHead { grid-column: 7 / -1; }
-.review { grid-column: 1 / -1; margin-top: 72px; }
-.review > * { max-width: 1180px; margin: 0 auto; }
-
-/* The notch: the claim at the left, its lead beside it at the right, on one line's foot. */
-.wideHead { grid-column: 1 / -1; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); column-gap: 32px; align-items: end; }
-.wideHead .lead { padding-bottom: 0.5em; }
-.tour { grid-column: 1 / -1; margin-top: 80px; }
-.tour > * { margin: 0 auto; }
-
-/* ---- what keeps you in flow: things passing in the dark, large and small, offset ---- */
-.flowHead { grid-column: 1 / span 8; }
-.passing {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  column-gap: 32px;
-  row-gap: 150px;
-  max-width: 1344px;
-  margin: 120px auto 0;
-  padding: 0 var(--gut);
-  list-style: none;
+/* ---- an exhibit: a picture of the app, inside crop marks, its width dimensioned over it, its figure under it ---- */
+.exhibit { position: relative; margin: 120px 0 0; }
+/* The picture's own place in the page, given over to the mount. */
+.exhibit .mount > * { max-width: none; margin: 0; padding: 0; }
+.mount { position: relative; }
+/* Crop marks at the foot's corners, and at the head's sides; the dimension's extension lines are the head's upright ones. */
+.mount::after {
+  content: '';
+  position: absolute;
+  inset: -22px;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--ink), var(--ink)) 0 22px / 13px 1px no-repeat,
+    linear-gradient(var(--ink), var(--ink)) 100% 22px / 13px 1px no-repeat,
+    linear-gradient(var(--ink), var(--ink)) 0 calc(100% - 22px) / 13px 1px no-repeat,
+    linear-gradient(var(--ink), var(--ink)) 22px 100% / 1px 13px no-repeat,
+    linear-gradient(var(--ink), var(--ink)) 100% calc(100% - 22px) / 13px 1px no-repeat,
+    linear-gradient(var(--ink), var(--ink)) calc(100% - 22px) 100% / 1px 13px no-repeat;
 }
-.thing { display: flex; flex-direction: column; gap: 26px; min-width: 0; }
-.words { display: grid; gap: 10px; max-width: 30em; }
-.thingTitle { margin: 0; font-family: 'Inter Display', var(--display); font-size: clamp(24px, 2.3vw, 34px); font-weight: 300; line-height: 1.06; letter-spacing: -0.035em; color: #fff; text-wrap: balance; text-shadow: var(--under-title); }
-.thingTitle b { font-weight: 700; letter-spacing: -0.04em; }
-.thingLead { margin: 0; font-size: 15px; line-height: 1.55; color: rgba(255, 248, 240, 0.7); text-wrap: pretty; text-shadow: var(--under-words); }
-.pic > * { width: 100%; }
-
-/* A drawing melts into the night: its dark ground fades out at every edge, so it never shows as a box. */
-.thing[data-kind='drawn'] .pic > * {
-  mask-image: linear-gradient(to right, transparent, #000 15%, #000 85%, transparent), linear-gradient(transparent, #000 13%, #000 86%, transparent);
-  mask-composite: intersect;
+/* The dimension: extension lines up from the picture's corners, the line between them with its arrowheads, the width on it. */
+.dim { position: absolute; left: 0; right: 0; top: -52px; height: 40px; border-left: 1px solid var(--ink); border-right: 1px solid var(--ink); }
+.dim::before { content: ''; position: absolute; left: 0; right: 0; top: 9px; height: 1px; background: var(--ink); }
+.arrowL, .arrowR { position: absolute; top: 6px; width: 9px; height: 7px; fill: var(--ink); }
+.arrowL { left: 0; }
+.arrowR { right: 0; }
+.dim span {
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  translate: -50% 0;
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 0 10px;
+  background: var(--n-2);
+  font: 500 11px/15px var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
 }
-/* A piece of the app is a lit pane too: its frame's paper shadow traded for the rim. */
-.thing[data-kind='piece'] [class*='Bento-module__card'],
-.thing[data-kind='piece'] [class*='Bento-module__window'] { box-shadow: 0 0 0 1px var(--rim), 0 1px 0 0.5px rgba(150, 165, 255, 0.24), 0 50px 120px rgba(0, 0, 0, 0.9); }
+.dim span b { min-width: 4ch; font-weight: 600; text-align: right; }
+.dim span i { font-style: normal; color: var(--ink-2); }
+/* The figure's number, by the foot's left crop mark. */
+.fig { position: absolute; left: 14px; top: calc(100% + 15px); font: 500 10.5px/1 var(--mono); font-variant-numeric: tabular-nums; color: var(--ink); }
+.fig i { font-style: normal; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); }
 
-/* Every plan: large at the left, its words beside it at the foot. */
-.fAccounts { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: end; }
-.fAccounts .pic { grid-column: 1 / span 8; }
-.fAccounts .words { grid-column: 9 / -1; padding-bottom: 6%; }
-/* While you're away: small, set in; work that starts itself beside it, lower. */
-.fAway { grid-column: 2 / span 4; align-self: start; padding-top: 40px; }
-.fAutomations { grid-column: 7 / -1; margin-top: 180px; }
-/* Conflicts: its words at the left, the drawing large at the right. */
-.fConflicts { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; }
-.fConflicts .words { grid-column: 1 / span 3; grid-row: 1; }
-.fConflicts .pic { grid-column: 4 / span 8; grid-row: 1; }
-/* One home: the window's width, its words over it. */
-.fHome { grid-column: 1 / -1; flex-direction: column-reverse; }
-.fHome .pic { max-width: 1120px; width: 100%; margin: 0 auto; }
-.fHome .words { max-width: 34em; }
-/* Ten at once, and every workspace: a pair, the second lower. */
-.fWorktrees { grid-column: 1 / span 6; }
-.fWorkspaces { grid-column: 7 / -1; margin-top: 200px; }
+/* The review at its own measure. */
+.review { max-width: 1064px; }
 
-/* ---- the end: dawn; the last line large in the middle, the download under it, the sun breaking under them ---- */
-.end { position: relative; padding: 46svh var(--gut) 84svh; }
-.dawn { display: grid; justify-items: center; gap: 40px; text-align: center; }
-.endLine { margin: 0; font-family: 'Inter Display', var(--display); font-size: clamp(44px, 6.8vw, 104px); font-weight: 200; line-height: 1; letter-spacing: -0.05em; color: #fff; text-wrap: balance; text-shadow: var(--under-title); }
-.endLine b { font-weight: 700; letter-spacing: -0.055em; }
-.endGet { display: grid; justify-items: center; gap: 12px; }
-.endGet > p { margin: 0; text-shadow: var(--under-words); }
+/* ---- the coordinator: its words at the left, the conversation mounted beside them ---- */
+.split .box { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: var(--gap); align-items: start; }
+.split .head { grid-column: 1 / span 5; grid-template-columns: minmax(0, 1fr); row-gap: 28px; align-items: start; }
+.split .no, .split .head .title, .split .head .lead { grid-column: 1; }
+.split .head .title { font-size: clamp(40px, 4.4vw, 76px); }
+.split .head .lead { max-width: 24em; padding: 0; font-size: 16.5px; }
+.split .talk { grid-column: 6 / span 7; margin-top: 136px; }
+/* The conversation keeps its own measure, never taller than the window. */
+.talk { max-width: min(784px, (100svh - 150px) * 760 / 720); justify-self: end; width: 100%; }
 
-/* The wash: the dawn's warm light coming up over the planet and becoming the paper. */
-.wash {
+/* ---- what keeps you in flow: a parts sheet, ruled cells to the window's edges, each part with its balloon ---- */
+.parts { position: relative; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); margin: 112px 0 0; padding: 0; list-style: none; }
+/* The sheet's last rule, under the last row. */
+.parts::after { content: ''; position: absolute; left: calc(var(--spine) - var(--l)); right: -100vw; bottom: 0; height: 1px; background: var(--ink-3); }
+.part {
   position: relative;
-  height: var(--wash);
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  grid-template-rows: auto minmax(34px, 1fr) auto;
+  column-gap: 14px;
+  min-width: 0;
+  padding: 30px 30px 44px;
+}
+.span2 { grid-column: span 2; }
+.span3 { grid-column: span 3; }
+.span4 { grid-column: span 4; }
+.span6 { grid-column: span 6; }
+/* A row's rule, from the scale's line to the window's edge, drawn by its first part; between parts side by side, an upright. */
+.part:is(:nth-child(1), :nth-child(3), :nth-child(5), :nth-child(6))::before { content: ''; position: absolute; top: 0; left: calc(var(--spine) - var(--l)); right: -100vw; height: 1px; background: var(--ink-3); }
+.part:is(:nth-child(2), :nth-child(4), :nth-child(7))::after { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 1px; background: var(--ink-3); }
+/* A row's first part starts at the sheet's edge, its last ends at it. */
+.part:is(:nth-child(1), :nth-child(3), :nth-child(5), :nth-child(6)) { padding-left: 0; }
+.part:is(:nth-child(2), :nth-child(4), :nth-child(5), :nth-child(7)) { padding-right: 0; }
+/* A register mark where the rules cross. */
+.cross {
+  position: absolute;
+  z-index: 1;
+  top: -6px;
+  left: -6px;
+  width: 13px;
+  height: 13px;
+  background: linear-gradient(var(--ink), var(--ink)) 6px 0 / 1px 100% no-repeat, linear-gradient(var(--ink), var(--ink)) 0 6px / 100% 1px no-repeat;
+}
+.part:is(:nth-child(1), :nth-child(3), :nth-child(5), :nth-child(6)) .cross { display: none; }
+/* The balloon: the part's numeral in a ring, its leader down to the piece. */
+.balloon {
+  grid-area: 1 / 1;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  font: 600 12px/1 var(--mono);
+  color: var(--ink);
   background: var(--n-2);
 }
+.partHead { grid-area: 1 / 2; display: grid; gap: 8px; padding-top: 3px; }
+.partTitle { margin: 0; font-family: 'Inter Display', var(--display); font-size: clamp(24px, 2.1vw, 30px); font-weight: 300; line-height: 1.06; letter-spacing: -0.035em; color: var(--t-1); text-wrap: balance; }
+.partTitle b { font-weight: 700; letter-spacing: -0.04em; }
+.partLead { max-width: 34em; margin: 0; font-size: 14.5px; line-height: 1.5; color: var(--t-2); text-wrap: pretty; }
+/* The leader, from under the balloon down to the piece's top edge, ending on it in a dot. */
+.leader { grid-area: 1 / 1 / 3 / 2; justify-self: center; position: relative; width: 1px; margin: 36px 0 0; background: var(--ink-2); }
+.leader::after { content: ''; position: absolute; left: -2px; bottom: -2.5px; width: 5px; height: 5px; border-radius: 50%; background: var(--ink); }
+.piece { position: relative; grid-area: 3 / 1 / 4 / 3; display: grid; place-items: center; }
+.piece > * { width: 100%; }
+/* A drawing on its own light ground, framed by a hairline. */
+.part[data-drawn] .piece > * { overflow: hidden; border-radius: 10px; background: #f8f6f1; box-shadow: 0 0 0 1px rgba(20, 20, 28, 0.1); }
+.span6 .piece > * { max-width: 1000px; }
 
-@media (max-width: 1100px) {
-  .openingHead { grid-column: 1 / -1; }
-  .splitHead, .talk { grid-column: 1 / -1; }
-  .talk { margin-top: 64px; }
-  .talk > * { margin: 0 auto; }
-  .rightHead { grid-column: 4 / -1; }
-  .passing { row-gap: 110px; }
-  .fAccounts .pic, .fAccounts .words { grid-column: 1 / -1; }
-  .fAccounts .words { grid-row: 2; padding: 0; }
-  .fAway { grid-column: 1 / span 5; }
-  .fAutomations { grid-column: 6 / -1; margin-top: 100px; }
-  .fConflicts .words { grid-column: 1 / -1; grid-row: 2; }
-  .fConflicts .pic { grid-column: 1 / -1; grid-row: 1; }
-  .fWorktrees { grid-column: 1 / span 6; }
-  .fWorkspaces { grid-column: 7 / -1; margin-top: 120px; }
+/* ---- where you are: the notch, on the paper, as large as the window's height lets the screen be seen whole ---- */
+/* The menu bar's words beside its corner of a screen, in the room the scale's margin leaves them. */
+.tour { max-width: min(100%, calc((100svh - 130px) * 1.6 + 20px)); --menu-gap: 48px; --menu-title: clamp(30px, 2.9vw, 56px); }
+
+/* ---- the ground: the scale's zero, hatched under as a drawing's ground is; the last line and the download standing on it ---- */
+.end { position: relative; z-index: 1; }
+.zero {
+  height: 14px;
+  margin-left: var(--spine);
+  border-top: 2px solid var(--ink);
+  background: repeating-linear-gradient(-45deg, var(--ink-3) 0 1px, transparent 1px 7px);
 }
+.endRow { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 22px 40px; max-width: 1280px; margin: 0 var(--r) 0 var(--l); padding: 48px 0 64px; }
+.endLine { margin: 0; font-family: 'Inter Display', var(--display); font-size: clamp(30px, 3vw, 46px); font-weight: 300; line-height: 1.06; letter-spacing: -0.035em; color: var(--t-1); }
+.endLine b { font-weight: 680; letter-spacing: -0.04em; }
+.endGet > p { margin: 10px 0 0; }
+.phoneBreak { display: inline; }
 
+/* ---- narrower: no room for the path; the scale a slim tape at the window's edge, its kilometres labelled ---- */
+@media (max-width: 1099px) {
+  .body { --chart-wide: 0; --spine: 20px; --l: 76px; --r: var(--gut); --gap: 24px; }
+  .numeral { display: none; }
+  .km { right: auto; left: 18px; }
+  .tape > .km:nth-child(5n + 1) { font-weight: 700; color: var(--ink); }
+  .needle { width: 50px; height: 24px; margin-left: 15px; padding: 6px 5px 0 0; box-shadow: 0 0 0 3px var(--n-2); }
+  .needle::after { right: auto; left: -6px; border-width: 5px 6px 5px 0; border-color: transparent var(--ink) transparent transparent; }
+  .needle b { font-size: 11px; }
+  .needle i { display: none; }
+  .head .title { grid-column: 3 / -1; }
+  .head .lead { grid-column: 3 / span 8; grid-row: 2; margin-top: 24px; }
+  .split .box { display: block; }
+  .split .head { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+  .split .no { grid-column: 1 / span 2; }
+  .split .head .title, .split .head .lead { grid-column: 3 / -1; }
+  .split .talk { margin-top: 120px; }
+  .parts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .span2, .span3, .span4 { grid-column: span 1; }
+  .span6 { grid-column: span 2; }
+  .part { padding: 26px 22px 36px; }
+  .part:nth-child(n) { padding-left: 22px; padding-right: 22px; }
+  .part:nth-child(odd):not(:nth-child(5)), .part:nth-child(6) { padding-left: 0; }
+  .part:nth-child(even), .part:nth-child(5) { padding-right: 0; }
+}
 @media (max-width: 700px) {
-  .body { --wash: 6svh; }
-  .grid, .passing { grid-template-columns: minmax(0, 1fr); column-gap: 0; }
-  .grid > *, .passing > * { grid-column: 1 / -1 !important; }
-  .scene { padding-top: 150px; }
-  .opening { padding-top: 120px; }
-  .head { gap: 18px; }
-  .big { font-size: clamp(44px, 12.4vw, 60px); }
-  .board, .review, .tour { margin-top: 48px; }
-  .talk { margin-top: 44px; }
-  .rightHead { grid-column: 1 / -1; }
-  .wideHead { grid-template-columns: minmax(0, 1fr); row-gap: 18px; }
-  .passing { row-gap: 88px; margin-top: 72px; }
-  .thing, .fAway, .fAutomations, .fWorktrees, .fWorkspaces { margin-top: 0; padding-top: 0; }
-  .fAccounts, .fConflicts { display: flex; flex-direction: column; }
-  .fHome { flex-direction: column-reverse; }
-  .thing { gap: 20px; }
-  .end { padding: 34svh var(--gut) 76svh; }
-  .endLine { font-size: clamp(38px, 11vw, 52px); }
-  .endGet { justify-items: stretch; width: 100%; }
+  .body { --spine: 6px; --l: var(--gut); --r: var(--gut); padding-top: 96px; }
+  .tape { display: none; }
+  .sheet { padding-bottom: 120px; }
+  .head { grid-template-columns: minmax(0, 1fr); row-gap: 18px; padding-top: 44px; }
+  .split .head { grid-template-columns: minmax(0, 1fr); }
+  .no, .head .title, .head .lead, .split .no, .split .head .title, .split .head .lead { grid-column: 1; grid-row: auto; margin: 0; }
+  .no { font-size: 48px; }
+  .head .lead { font-size: 15.5px; }
+  .block { top: -15px; }
+  .exhibit { margin-top: 88px; }
+  .split .talk { margin-top: 88px; }
+  .mount::after { inset: -16px; background-size: 10px 1px, 10px 1px, 10px 1px, 1px 10px, 10px 1px, 1px 10px; background-position: 0 16px, 100% 16px, 0 calc(100% - 16px), 16px 100%, 100% calc(100% - 16px), calc(100% - 16px) 100%; }
+  .dim { top: -40px; height: 30px; }
+  .parts { grid-template-columns: minmax(0, 1fr); margin-top: 72px; }
+  .span2, .span3, .span4, .span6 { grid-column: auto; }
+  .part:nth-child(n) { padding: 24px 0 32px; }
+  .part::before { content: ''; position: absolute; top: 0; left: calc(var(--spine) - var(--l)); right: -100vw; height: 1px; background: var(--ink-3); }
+  .part::after { display: none; }
+  .cross { display: none; }
+  .zero { margin-left: 0; }
+  .endRow { flex-direction: column; align-items: stretch; padding: 36px 0 48px; }
+  .endLine { font-size: 30px; line-height: 1.08; }
+  .phoneBreak { display: inline; }
   .endGet > div { display: grid; gap: 10px; }
   .endGet > div > a { justify-content: center; height: 50px; }
   .endGet > p { text-align: center; }
