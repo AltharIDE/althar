@@ -1,5 +1,5 @@
 import { CopyButton } from '@althar/ui'
-import { type ReactNode, useId, useLayoutEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 
 import { AGENTS } from '../../../content/agents'
 import { INSTALL } from '../../../content/facts'
@@ -94,6 +94,7 @@ export function ChartHero({ nav }: { nav?: ReactNode }) {
   const flown = useRef<SVGPathElement>(null)
   const [p, setPlot] = useState<Plot | null>(null)
   const drawn = useRef(false)
+  const runs = useRef<Animation[]>([])
   const id = useId().replace(/:/g, '')
 
   // The plot for the size, again whenever it changes, and once the type is in.
@@ -129,7 +130,8 @@ export function ChartHero({ nav }: { nav?: ReactNode }) {
     }
   }, [])
 
-  // Once laid, the picture comes in: the path drawing itself from the entry to rest, then the capsule; only the first time, and only where motion is welcome.
+  // Once laid, the picture comes in: the path drawing itself from the entry to rest, then the capsule; only the first time, and only where motion is welcome. Laid again as the type comes in, it carries on.
+  useEffect(() => () => runs.current.forEach((run) => run.cancel()), [])
   useLayoutEffect(() => {
     const el = root.current
     if (!p || !el || drawn.current) return
@@ -143,10 +145,9 @@ export function ChartHero({ nav }: { nav?: ReactNode }) {
     }
     el.dataset.laid = ''
     const path = flown.current
-    const runs: Animation[] = []
     if (path) {
       const length = path.getTotalLength()
-      runs.push(
+      runs.current.push(
         path.animate([{ strokeDasharray: `0 ${length + 10}` }, { strokeDasharray: `${length} ${length + 10}` }], {
           duration: 2200,
           delay: 250,
@@ -156,8 +157,9 @@ export function ChartHero({ nav }: { nav?: ReactNode }) {
       )
     }
     for (const one of el.querySelectorAll('[data-after]'))
-      runs.push(one.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 500, delay: 2100, easing: 'ease-out', fill: 'backwards' }))
-    return () => runs.forEach((run) => run.cancel())
+      runs.current.push(
+        one.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 500, delay: 2100, easing: 'ease-out', fill: 'backwards' }),
+      )
   }, [p])
 
   const w = p?.frame.w ?? 0
