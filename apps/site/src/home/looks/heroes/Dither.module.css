@@ -1,197 +1,132 @@
-/* Prototype: the first screen on the person's dithered band of light. The
-   night is the picture's own top, carried up the screen as plain colour; the
-   picture stands on the foot, full width (wider on a phone, its bright end
-   kept in view). The words stand in the night: the readouts in the top
-   corners, the headline, the lead and the console under it, all above the
-   band's brightest. */
+/* Prototype: the first screen as one sweep of light. The canvas fills the
+   box: the night in the upper left, the light below a diagonal edge, which
+   runs through the pin at --edge-angle (dither/streak.ts). The words stand in
+   the night, white; the download in the light's far corner, ink. The
+   headline's last word steps down across the edge and is cut by it. */
 
 .hero {
   position: relative;
   isolation: isolate;
   overflow: hidden;
   height: clamp(640px, 100svh, 1060px);
-  /* The picture's night, exactly, so the field carries on above it without a seam. */
-  background: #000003;
+  background: #000002;
   color: #fff;
   container-type: size;
+  /* Read by the script: the edge's angle in degrees, the hue at the left and right edges, a dot's side in CSS px. */
+  --edge-angle: 30;
+  --hue-left: -0.05;
+  --hue-right: 1.08;
+  --cell: 4;
+  --ink: #0d0a16;
 }
 
 /* The whole first screen is dark under the nav. */
 .under { top: 0; bottom: 0; }
 
-/* The band of light: the picture, on the foot, rising into the frame by the script's transform. */
-.field {
+.light { position: absolute; inset: 0; z-index: -1; display: block; width: 100%; height: 100%; }
+
+/*
+ * The night's words: the headline, its last word dropped a line and stepped
+ * out to the right, and the lead in that line's room at the left, its first
+ * line's capitals level with the top of the last word's lower case.
+ */
+.words {
+  --size: clamp(80px, min(7.5cqw, 12cqh), 132px);
   position: absolute;
-  z-index: -1;
-  left: var(--left, 0px);
-  bottom: 0;
-  width: var(--width, 100cqw);
-  aspect-ratio: 1672 / 941;
-  transform-origin: 50% 100%;
-  will-change: transform;
-}
-.hero[data-settled] .field { will-change: auto; }
-.afloat, .light { position: absolute; inset: 0; }
-.band, .warm { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
-/* The heat on the band: its own picture turned to embers, over it while the fire lasts. */
-.warm { opacity: 0; filter: sepia(1) saturate(3.2) hue-rotate(-28deg) brightness(0.9); }
-.light, .warm, .flash { will-change: opacity; }
-.hero[data-settled] :is(.light, .warm, .flash) { will-change: auto; }
-/* The fire breaking: the band too bright for a moment, and fading. */
-.flash {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  pointer-events: none;
-  background: radial-gradient(ellipse 60% 55% at 72% 88%, rgba(255, 250, 245, 0.95), rgba(255, 232, 220, 0.4) 40%, rgba(255, 225, 210, 0) 75%);
-  mix-blend-mode: screen;
-}
-
-/* At rest, the browser keeps the band gently afloat: rising and settling a little, as the capsule sways under its parachutes. */
-@media (prefers-reduced-motion: no-preference) {
-  .hero[data-settled] .afloat { animation: afloat 19s ease-in-out infinite alternate; }
-  .hero[data-away] .afloat { animation-play-state: paused; }
-}
-@keyframes afloat { to { translate: 0 -1.6%; scale: 1.012; } }
-
-/* Up out of the dark as it sets off (--dark, from the script). */
-.curtain { position: absolute; inset: 0; z-index: 3; background: #000; opacity: 0; pointer-events: none; }
-@media (scripting: enabled) { .curtain { opacity: var(--dark, 1); } }
-
-/* The words wait for the capsule to set off; crawlers read them in the HTML all the same. */
-@media (scripting: enabled) { .hero:not([data-begun]) :is(.column, .hud) { visibility: hidden; } }
-
-/* The headline, the lead and the console, one column down the night. */
-.column {
-  position: absolute;
-  z-index: 2;
-  left: 0;
-  right: 0;
-  top: clamp(104px, 15cqh, 150px);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 0 16px;
-  pointer-events: none;
+  left: clamp(24px, 5cqw, 112px);
+  top: clamp(136px, 19cqh, 200px);
 }
 .h1 {
-  display: grid;
-  justify-items: center;
   margin: 0;
   font-family: 'Inter Display', var(--display);
-  text-align: center;
-  will-change: transform;
-}
-.hero[data-settled] .h1 { will-change: auto; }
-.line {
-  display: block;
-  font-size: clamp(26px, 4.1cqw, 52px);
-  font-weight: 500;
-  line-height: 1.08;
-  letter-spacing: -0.032em;
-  text-wrap: balance;
-  text-shadow: 0 1px 3px rgba(0, 0, 8, 0.5), 0 2px 26px rgba(0, 0, 8, 0.7);
-}
-.fast {
-  display: block;
-  font-size: clamp(96px, min(17cqw, 26cqh), 236px);
+  font-size: var(--size);
   font-weight: 800;
-  line-height: 0.92;
-  letter-spacing: -0.06em;
-  /* Forged at the heat's height: ember orange and glowing (--cool 0), cooling to white (--cool 1); its edges always sharp. */
-  color: color-mix(in srgb, #fff calc(var(--cool, 1) * 100%), #ff6d2a);
-  text-shadow:
-    0 0 calc((1 - var(--cool, 1)) * 12px) rgba(255, 140, 60, calc(1 - var(--cool, 1))),
-    0 0 calc((1 - var(--cool, 1)) * 40px) rgba(255, 90, 20, calc((1 - var(--cool, 1)) * 0.75)),
-    0 2px 4px rgba(0, 0, 8, calc(0.15 + 0.3 * var(--cool, 1))),
-    0 10px 50px rgba(0, 0, 20, 0.35);
-  /* Slammed in at its height, settling (--punch from 1 to 0). */
-  transform: scale(calc(1 + 0.06 * var(--punch, 0)));
-  transform-origin: 50% 60%;
+  line-height: 0.9;
+  letter-spacing: -0.05em;
+  white-space: nowrap;
 }
-/* Each word rises out of its own mask; the padding keeps ascenders and descenders whole, and the margins give the room back. */
-.mask { display: inline-block; overflow: hidden; vertical-align: top; padding: 0.1em 0.08em 0.2em; margin: -0.1em -0.08em -0.2em; }
-.word { display: inline-block; transform-origin: 0 100%; }
+.narrow { display: none; }
 
-/* The flight deck's readouts, in the top corners, ticking with the clock; the figures keep their width as they change. */
-.hud {
+/*
+ * The last word, a line down from the end of the line before; the edge cuts
+ * it, white in the night and ink in the light (--turn and --cut from the
+ * script, a hard stop on its box). The padding keeps the glyphs inside the
+ * box the gradient paints, and the margins give it back.
+ */
+.fast {
+  position: relative;
+  top: 0.9em;
+  display: inline-block;
+  padding: 0.12em 0.06em 0.22em;
+  margin: -0.12em -0.06em -0.22em;
+  background: linear-gradient(var(--turn, 90deg), #fff var(--cut, 300vw), var(--ink) var(--cut, 300vw));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+@media (forced-colors: active) {
+  .fast { background: none; -webkit-text-fill-color: currentColor; color: CanvasText; }
+}
+
+/* Where the edge crosses: in the last word on a wide screen, under the lead on a phone. */
+.pin { position: absolute; width: 0; height: 0; }
+.pinWide { left: 44%; top: 56%; }
+.pinNarrow { display: none; }
+
+.lead {
+  max-width: 26em;
+  margin: calc(var(--size) * 0.265 - 0.4em) 0 0;
+  font-size: clamp(16px, 1.25cqw, 19px);
+  line-height: 1.5;
+  letter-spacing: -0.008em;
+  text-wrap: pretty;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+/* The light's far corner: the agents, the install and the download, in ink, one block with every row its width. */
+.corner {
   position: absolute;
-  z-index: 2;
-  pointer-events: none;
-  display: flex;
-  justify-content: space-between;
-  left: max(24px, calc(50cqw - 520px));
-  right: max(24px, calc(50cqw - 520px));
-  top: clamp(80px, 11cqh, 104px);
-  will-change: transform;
-}
-.hero[data-settled] .hud { will-change: auto; }
-.hud span { display: grid; gap: 5px; }
-.hud span:last-child { justify-items: end; text-align: right; }
-.hud i, .label { font: 500 10px/1 var(--font-label); font-style: normal; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 248, 240, 0.62); }
-.hud i { color: rgba(255, 248, 240, 0.8); }
-.hud b { min-width: 9ch; font: 500 15px/1 var(--mono); font-variant-numeric: tabular-nums; color: #fff; }
-
-/* The lead and the console under the headline, still while the camera shakes. */
-.deck {
+  right: clamp(24px, 5cqw, 112px);
+  bottom: clamp(28px, 5.5cqh, 64px);
   display: grid;
-  justify-items: center;
-  gap: 14px;
-  width: min(1160px, 100%);
-  margin-top: clamp(18px, 4cqh, 40px);
-  text-align: center;
-  pointer-events: auto;
+  width: max-content;
+  gap: 18px;
+  color: var(--ink);
 }
-.lead { max-width: 44em; margin: 0; font-size: 14px; line-height: 1.55; letter-spacing: -0.006em; text-wrap: pretty; color: rgba(255, 248, 240, 0.86); }
-
-/* The console: the agents, the install and the download, side by side on smoked glass. */
-.console {
-  display: grid;
-  grid-auto-flow: column;
-  border-radius: 14px;
-  background: rgba(10, 9, 14, 0.55);
-  -webkit-backdrop-filter: blur(14px) saturate(1.2);
-  backdrop-filter: blur(14px) saturate(1.2);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14), 0 20px 50px rgba(0, 0, 0, 0.35);
-}
-.cell { display: grid; align-content: center; justify-items: start; gap: 10px; padding: 14px 20px; }
-.cell + .cell { border-left: 1px solid rgba(255, 255, 255, 0.1); }
-.ways { justify-items: center; }
-/* The download and GitHub keep to one line. */
-.cell.ways > div { flex-wrap: nowrap; }
-/* The other Mac's build, close under the download: the cell's gap is its margin. */
-.cell.ways > p { margin: 0; }
-.agents { display: flex; gap: 10px; margin: 0; padding: 0; list-style: none; color: rgba(255, 248, 240, 0.9); }
+.agents { display: flex; justify-content: space-between; margin: 0; padding: 0; list-style: none; }
 .agents li { display: grid; place-items: center; width: 18px; height: 18px; }
-.command { display: flex; align-items: center; gap: 4px; padding: 3px 3px 3px 12px; border-radius: 8px; background: rgba(255, 255, 255, 0.06); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); }
-.command code { font: 13px/1 var(--mono); color: rgba(255, 248, 240, 0.92); white-space: nowrap; }
-.command code span { color: rgba(255, 248, 240, 0.45); }
-/* The copy button, quiet until pointed at; once it has copied, its word is only read out, so the console keeps its width. */
-.command button { width: 26px; padding: 0; justify-content: center; color: rgba(255, 248, 240, 0.6); }
-.command button:hover { color: #fff; }
+.command { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.command code { font: 500 14px/1 var(--mono); white-space: nowrap; }
+.command code span { opacity: 0.6; }
+.command button { width: 28px; padding: 0; justify-content: center; color: var(--ink); }
+/* Once it has copied, its word is only read out, so the line keeps its width. */
 .command button span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.ways { display: grid; }
+.ways > div { flex-wrap: nowrap; }
+.ways > div > a { flex: 1 1 auto; justify-content: center; }
+/* The download in the block's ink; the repository's button outlined in it rather than the kit's faint line, so it holds on the light. */
+.ways > div > a:first-child { background: var(--ink); --os-belly: var(--ink); }
+.ways > div > a:last-child { color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--ink); }
+.ways > p { margin-top: 8px; text-align: right; }
+.ways > p a { color: var(--ink); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
-/* Narrower than the three side by side need, the download takes a row of its own under the agents and the install. */
-@media (max-width: 1200px) {
-  .console { grid-auto-flow: row; grid-template-columns: auto auto; }
-  .cell.ways { grid-column: 1 / -1; border-left: 0; border-top: 1px solid rgba(255, 255, 255, 0.1); }
-}
-
+/* A phone: the headline in four lines and the lead in the dark top, the edge under them, steeper, and the light across the foot with the download in it. */
 @media (max-width: 760px) {
-  /* The band larger than the screen is wide, its bright end at the right edge. */
-  .field { --width: max(100cqw, 104cqh); --left: calc(100cqw - var(--width)); }
-  .column { top: 124px; }
-  .line { font-size: clamp(26px, 7.4vw, 32px); }
-  .fast { font-size: 30vw; }
-  /* No room for the readouts, and no installing from a phone: the agents over the download. */
-  .hud, .install { display: none; }
-  .console { width: 100%; max-width: 440px; grid-template-columns: 1fr; }
-  .cell { justify-items: center; }
-  /* The download and GitHub as the console's full width, a thumb's height each: the download lit, GitHub on the glass. */
-  .cell.ways { justify-items: stretch; padding: 12px; }
+  .hero { --edge-angle: 31; --hue-left: 0.4; --hue-right: 1.12; --cell: 3; }
+  .wide { display: none; }
+  .narrow { display: inline; }
+  .words { --size: clamp(40px, 14.2cqw, 60px); left: 20px; right: 20px; top: 122px; }
+  .fast { top: 0; }
+  .pinWide { display: none; }
+  .pinNarrow { display: block; right: 0; top: calc(100% + 24px); }
+  .lead { max-width: none; margin-top: 16px; font-size: 15px; }
+  /* No installing from a phone: the download, its buttons a thumb's height and the width of the screen, and the agents under it, where the light is deepest. */
+  .corner { left: 20px; right: 20px; bottom: 18px; width: auto; gap: 16px; }
+  .agents { order: 1; }
+  .command { display: none; }
   .ways > div { display: grid; gap: 8px; }
-  .ways > div a { justify-content: center; height: 48px; padding: 0 16px; border-radius: 10px; font-size: 15px; }
-  .ways > div a:first-child { box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 8px 24px -8px rgba(0, 0, 0, 0.6); }
-  .ways > div a:last-child { background: rgba(255, 255, 255, 0.07); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18); }
+  .ways > div > a { height: 48px; font-size: 15px; }
+  .ways > p { margin-top: 4px; text-align: center; }
 }

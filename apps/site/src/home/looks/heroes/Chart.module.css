@@ -1,182 +1,89 @@
-/* Prototype: the first screen as the flight chart's first plate. The paper in the chart's cobalt, as look A has it: the headline over the plot, the re-entry plotted on the air's heights down to the planet's limb, the altitude scale down the margin where the sections' scale runs, the lead and the console standing on the ground. A still picture: the path draws itself once, and nothing moves after. */
+/* Prototype: the first screen as a descent. The flight chart's paper in look A's cobalt: the altitude scale down the margin where the sections' scale runs, the air's layers as arcs about the planet, the capsule's path through them, and the headline hanging from it in three pieces, each larger than the last, "fast." at the foot. The title block under the level part of the path. Still: nothing moves. */
 
 .hero {
-  /* The chart's cobalt and its tints for the finer lines (A.module.css); the capsule's fire, and a deeper cut of it that reads as type on the paper. */
+  /* The chart's cobalt and its tints for the finer lines (A.module.css); a deeper cobalt for the small words, so they read at AA; the capsule's fire as type. */
   --ink: #1f35c8;
   --ink-2: rgba(31, 53, 200, 0.62);
   --ink-3: rgba(31, 53, 200, 0.34);
   --ink-4: rgba(31, 53, 200, 0.22);
-  --fire: #ff6d2a;
+  --ink-words: #3a4bc9;
   --fire-type: #e2501b;
-  /* The scale's line, the sheet's left edge and its least right margin, as the sections have them. */
+  /* The scale's line and the sheet's right margin, as the sections have them; the sheet's left edge just off the scale; the room under the nav and the bar; the block's foot. */
   --spine: 148px;
-  --l: 252px;
+  --l: calc(var(--spine) + 40px);
   --r: 88px;
-  --gap: 32px;
+  --top: 128px;
+  --foot: clamp(28px, 5.5cqh, 64px);
+  --bw: clamp(380px, 33cqw, 520px);
   position: relative;
   isolation: isolate;
   overflow: hidden;
+  container-type: size;
   height: clamp(640px, 100svh, 1060px);
   background: var(--n-2);
   color: var(--t-1);
 }
 @media (min-width: 1440px) {
-  .hero { --spine: 196px; --l: max(300px, round(down, (100vw - 1280px) / 2, 1px)); --r: 112px; --gap: 40px; }
+  .hero { --spine: 196px; --l: calc(var(--spine) + 48px); --r: 112px; }
 }
 
-/* Where the scale's line stands, for the plot to measure. */
+/* Where the scale's line stands, for the plate to measure. */
 .probe { position: absolute; left: var(--spine); top: 0; width: 0; height: 0; }
 
-/* ---- the plot: the air's heights, the ground, the scale and the path ---- */
-.plot { position: absolute; left: 0; top: 0; z-index: 0; overflow: visible; pointer-events: none; }
+/* ---- the plate: the air's arcs and their names, the scale, the path and its stations ---- */
+.plate { position: absolute; left: 0; top: 0; z-index: 0; overflow: visible; pointer-events: none; }
 .arcs path { fill: none; stroke: var(--ink-4); stroke-width: 1; stroke-dasharray: 3 5; }
+.note { font: 500 10px/1 var(--mono); letter-spacing: 0.12em; fill: var(--ink-words); }
 .spine { fill: none; stroke: var(--ink); stroke-width: 1; }
 .ticks path { fill: none; stroke-width: 1; }
 .ticks path[data-kind='0'] { stroke: var(--ink-3); }
 .ticks path[data-kind='1'] { stroke: var(--ink-2); }
 .ticks path[data-kind='2'] { stroke: var(--ink); }
-.km { font: 500 10px/1 var(--mono); font-variant-numeric: tabular-nums; fill: var(--ink-2); }
-/* The ground: the limb, hatched under as a drawing's ground is. */
-.limb { fill: none; stroke: var(--ink); stroke-width: 2; }
-.hatch { fill: url(#chart-hatch); }
-.hatchLine { stroke: var(--ink-3); stroke-width: 1; }
-/* The path flown, solid; the rest of the way down, still to fly, a fine dotted line; where it entered the air, a station. */
+.km { font: 500 10px/1 var(--mono); font-variant-numeric: tabular-nums; fill: var(--ink-words); }
 .flown { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.planned { fill: none; stroke: var(--ink-2); stroke-width: 1.25; stroke-dasharray: 0.5 5.5; stroke-linecap: round; }
-.reading { fill: none; stroke: var(--ink); stroke-width: 1; }
-.station path { fill: none; stroke: var(--ink); stroke-width: 1; }
-.station circle, .cross { fill: var(--n-2); stroke: var(--ink); stroke-width: 1.25; }
-.note { font: 500 10px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; fill: var(--ink-2); }
-/* The capsule, at rest: the fire, as the sections' chart has it. */
-.capsule circle { fill: var(--fire); }
-.capsule .halo { fill: rgba(255, 140, 60, 0.2); }
+.leader { fill: none; stroke: var(--ink-2); stroke-width: 1; }
+.station { fill: var(--n-2); stroke: var(--ink); stroke-width: 1.25; }
+.reading { font: 500 11px/1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: 0.06em; fill: var(--ink); }
 
-/* ---- the readouts, as the chart's annotations: the altimeter's needle on the scale, the speed beside the capsule ---- */
-.needle {
-  position: absolute;
-  z-index: 1;
-  display: flex;
-  align-items: baseline;
-  justify-content: flex-end;
-  gap: 5px;
-  width: 96px;
-  height: 34px;
-  margin: -17px 0 0 -108px;
-  padding: 10px 11px 0 0;
-  border-radius: 3px;
-  background: var(--ink);
-  color: #fff;
-  box-shadow: 0 0 0 4px var(--n-2);
-}
-.needle::after { content: ''; position: absolute; top: 50%; right: -7px; translate: 0 -50%; border-style: solid; border-width: 6px 0 6px 7px; border-color: transparent transparent transparent var(--ink); }
-.needle b { min-width: 5ch; font: 600 15px/1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; text-align: right; }
-.needle i, .speed i { font: 500 9px/1 var(--font-label); font-style: normal; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.78; }
-.speed {
-  position: absolute;
-  z-index: 1;
-  display: flex;
-  align-items: baseline;
-  gap: 5px;
-  margin: -6px 0 0 30px;
-  color: var(--ink);
-  white-space: nowrap;
-}
-.speed b { font: 600 13px/1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
-.speed i { color: var(--ink-2); opacity: 1; }
-/* Its height too, where there is no scale to read it on. */
-.alt { display: none; }
+/* ---- the headline, in three pieces hung from the path ---- */
+.h1 { position: absolute; inset: 0; z-index: 1; margin: 0; font-family: 'Inter Display', var(--display); color: var(--t-1); pointer-events: none; }
+.one, .two, .three { position: absolute; left: 0; top: 0; line-height: 1; white-space: nowrap; pointer-events: auto; }
+.hero:not([data-laid]) :is(.one, .two, .three) { visibility: hidden; }
+/* Where each piece's baseline is, for the plate to measure. */
+.base { display: inline-block; width: 0; height: 0; vertical-align: baseline; }
+.one { font-size: min(2.5cqw, 4cqh); font-weight: 420; letter-spacing: -0.022em; }
+.two { font-size: min(4.5cqw, 7.25cqh); font-weight: 300; letter-spacing: -0.036em; }
+.three { font-size: min(15.6cqw, 25cqh); font-weight: 780; letter-spacing: -0.056em; color: var(--fire-type); }
 
-/* ---- the headline with its lead at the right, on its foot, as the sections' heads have theirs; the console standing on the ground ---- */
-.words {
+/* ---- the title block, as a drawing's: hairline cells on the paper ---- */
+.block {
   position: absolute;
   z-index: 1;
   left: var(--l);
-  right: var(--r);
-  top: clamp(116px, 15.5svh, 172px);
+  bottom: var(--foot);
+  width: var(--bw);
   display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  column-gap: var(--gap);
-  align-items: end;
-  max-width: 1280px;
+  border: 1px solid var(--ink);
+  background: var(--n-2);
 }
-.h1 {
-  grid-column: 1 / span 9;
-  margin: 0;
-  font-family: 'Inter Display', var(--display);
-  font-size: clamp(44px, 6.3vw, 100px);
-  font-weight: 200;
-  line-height: 0.98;
-  letter-spacing: -0.05em;
-  color: var(--t-1);
-  text-wrap: balance;
-}
-.fast { font-weight: 720; letter-spacing: -0.056em; color: var(--fire-type); }
-
-.lead { grid-column: 10 / span 3; margin: 0; padding-bottom: 0.4em; font-size: 15.5px; line-height: 1.5; letter-spacing: -0.01em; color: var(--t-2); text-wrap: pretty; }
-
-/* The console as the chart's title block, its left edge on the scale's line: hairline cells on the paper. */
-/* Its right edge on the lead's, as far as the sheet's measure. */
-.deck { position: absolute; z-index: 1; left: var(--spine); width: calc(min(100% - var(--r), var(--l) + 1280px) - var(--spine)); bottom: clamp(20px, 3.6svh, 40px); display: grid; }
-.console { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; border: 1px solid var(--ink); background: var(--n-2); }
-/* Each cell's label along the block's top, what it holds centred under it, so the marks and the command line up. */
-.cell { display: grid; grid-template-rows: auto 1fr; align-items: center; justify-items: start; gap: 9px; padding: 13px 15px; }
-.cell + .cell { border-left: 1px solid var(--ink); }
-.label { font: 500 10px/1 var(--font-label); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); }
-.agents { display: flex; gap: 7px; margin: 0; padding: 0; list-style: none; color: var(--ink); }
-.agents li { display: grid; place-items: center; width: 18px; height: 18px; }
-.install { justify-items: stretch; }
-.command { display: flex; align-items: center; gap: 4px; padding: 3px 3px 3px 11px; border-radius: 4px; box-shadow: inset 0 0 0 1px var(--ink-3); }
-.command code { flex: 1; font: 12.5px/1 var(--mono); letter-spacing: -0.01em; color: var(--t-1); white-space: nowrap; }
-.command code span { color: var(--ink-2); }
-/* The copy button, quiet until pointed at; its word only read out, so the console keeps its width. */
-.command button { width: 26px; padding: 0; justify-content: center; color: var(--ink-2); }
+.lead { margin: 0; padding: 15px 18px 16px; font-size: 15px; line-height: 1.5; letter-spacing: -0.01em; color: var(--t-2); text-wrap: pretty; }
+.ways { padding: 14px 18px 4px; border-top: 1px solid var(--ink); }
+.ways > div { flex-wrap: nowrap; gap: 8px; }
+.ways > div > a { padding: 10px 14px; border-radius: 6px; font-size: 14px; }
+.ways > div > a:first-child { background: var(--ink); color: #fff; --os-belly: var(--ink); }
+.ways > div > a:last-child { box-shadow: inset 0 0 0 1px var(--ink-3); color: var(--ink); }
+.ways > p { margin: 8px 0 0; }
+.ways > p a { color: var(--ink-words); }
+.ways > p a:hover { color: var(--ink); }
+.row { display: grid; grid-template-columns: 80px minmax(0, 1fr); align-items: center; min-height: 44px; border-top: 1px solid var(--ink); }
+.label { display: flex; align-items: center; align-self: stretch; padding: 0 14px; border-right: 1px solid var(--ink); font: 500 10px/1 var(--font-label); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-words); }
+.command { display: flex; align-items: center; gap: 4px; padding: 0 6px 0 14px; }
+.command code { flex: 1; font: 12px/1 var(--mono); letter-spacing: -0.01em; color: var(--t-1); white-space: nowrap; }
+.command code span { color: var(--ink-words); }
+/* The copy button, quiet until pointed at; its word only read out, so the block keeps its width. */
+.command button { width: 28px; padding: 0; justify-content: center; color: var(--ink-2); }
 .command button:hover { color: var(--ink); }
 .command button span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-/* The download in the chart's cobalt rather than a heavy black, GitHub a hairline; the other Mac's build close under them. */
-.ways { grid-template-rows: none; align-content: center; justify-items: start; }
-.cell.ways > div { flex-wrap: nowrap; gap: 8px; }
-.cell.ways > div > a { padding: 10px 13px; border-radius: 6px; font-size: 14px; }
-.cell.ways > div > a:first-child { background: var(--ink); color: #fff; --os-belly: var(--ink); }
-.cell.ways > div > a:last-child { box-shadow: inset 0 0 0 1px var(--ink-3); color: var(--ink); }
-.cell.ways > p { margin: 0; }
-.cell.ways > p a { color: var(--ink-2); }
-.cell.ways > p a:hover { color: var(--ink); }
+.agents { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0 14px; list-style: none; color: var(--ink); }
+.agents li { display: grid; place-items: center; width: 18px; height: 18px; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-
-/* ---- the still picture coming in: the plot fades in and the path draws itself once (Chart.tsx); with reduced motion, it only fades ---- */
-.plot, .needle, .speed { transition: opacity var(--in, 600ms) ease-out; }
-.hero:not([data-laid]) :is(.plot, .needle, .speed) { opacity: 0; }
-
-/* ---- narrower: the download under the agents and the install ---- */
-@media (max-width: 1279px) {
-  .console { grid-template-columns: auto minmax(0, 1fr); }
-  .cell.ways { grid-column: 1 / -1; grid-auto-flow: column; align-items: center; justify-content: start; gap: 16px; border-left: 0; border-top: 1px solid var(--ink); }
-}
-/* No room for the lead beside the headline: under it; the scale a slim tape at the window's edge, the needle at its right. */
-@media (max-width: 1099px) {
-  .hero { --spine: 20px; --l: 76px; --r: var(--gut); --gap: 24px; }
-  .h1 { grid-column: 1 / -1; }
-  .lead { grid-column: 1 / span 8; margin-top: 22px; padding: 0; }
-  .deck { left: var(--l); width: auto; right: var(--r); }
-  .needle { width: 50px; height: 24px; margin: -12px 0 0 15px; padding: 6px 5px 0 0; box-shadow: 0 0 0 3px var(--n-2); }
-  .needle::after { right: auto; left: -6px; border-width: 5px 6px 5px 0; border-color: transparent var(--ink) transparent transparent; }
-  .needle b { font-size: 11px; }
-  .needle i { display: none; }
-}
-/* A phone: no scale; the headline and the lead, the plot, and the agents over the download, a thumb's height each. */
-@media (max-width: 700px) {
-  .hero { --spine: 0px; --l: var(--gut); --r: var(--gut); }
-  .needle { display: none; }
-  .alt { display: contents; }
-  .words { top: 128px; display: block; }
-  .h1 { font-size: clamp(38px, 11.4vw, 48px); line-height: 1; }
-  .lead { margin-top: 16px; font-size: 15px; }
-  .deck { left: var(--gut); right: var(--gut); width: auto; bottom: 16px; }
-  .install { display: none; }
-  .console { width: 100%; grid-template-columns: 1fr; }
-  .cell { justify-items: center; }
-  .cell.ways { grid-auto-flow: row; justify-content: stretch; justify-items: stretch; padding: 12px; border-top: 1px solid var(--ink); }
-  .cell.ways > div { display: grid; gap: 8px; }
-  .cell.ways > div > a { justify-content: center; height: 48px; padding: 0 16px; font-size: 15px; }
-  .cell.ways > p { text-align: center; }
-}
