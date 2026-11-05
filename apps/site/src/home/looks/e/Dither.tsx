@@ -45,7 +45,8 @@ const BAYER = (() => {
   return m.map((row) => row.map((v) => (v + 0.5) / 64))
 })()
 
-const clamp = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
+/** Between 0 and 1; nothing that isn't a number gets past it. */
+const clamp = (v: number) => (v > 1 ? 1 : v > 0 ? v : 0)
 
 function draw(canvas: HTMLCanvasElement, field: Field, w: number, h: number) {
   // Coarse enough to read as dots: four pixels a cell, three on a phone.
@@ -128,7 +129,8 @@ export function limb({
   ember?: number
 }): Field {
   const edge = (x: number, w: number, h: number) => {
-    const u = x / w
+    // The last column of dots can stand a little past the box's edge.
+    const u = clamp(x / w)
     return h * (from > to ? from - (from - to) * u ** bend : to - (to - from) * (1 - u) ** bend)
   }
   return {
