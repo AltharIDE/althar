@@ -185,6 +185,10 @@ export const words = (
           ? `The project has no repository called ${unknown.join(' or ')}. It has ${choices}.`
           : `Say which of the project's repositories the task changes: ${choices}.`
       }
+      case 'BranchNotFound':
+        return `${text(error, 'repository')} has no branch ${text(error, 'branch')}, on its remote or here.`
+      case 'BranchRefused':
+        return text(error, 'message')
       case 'ProjectRefused':
         return projectRefused[text(error, 'reason') as ProjectRefused['reason']] ?? "Althar can't change the project that way."
       case 'NotFound':
@@ -550,6 +554,8 @@ export const expected = new Set([
   'NotAnIssue',
   'NotARepository',
   'RepositoriesNeeded',
+  'BranchNotFound',
+  'BranchRefused',
   'RepositoryRefused',
   'ProjectRefused',
   'DocumentRefused',

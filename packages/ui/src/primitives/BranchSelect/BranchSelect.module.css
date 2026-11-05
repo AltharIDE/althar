@@ -1,0 +1,89 @@
+/* The button: as Select's, the branch in mono, cut short with its whole on hover. */
+.trigger {
+  composes: trigger from '../Select/Select.module.css';
+}
+.quiet {
+  composes: quiet from '../Select/Select.module.css';
+}
+.filled {
+  composes: filled from '../Select/Select.module.css';
+}
+.button {
+  min-width: 0;
+  max-width: 260px;
+}
+.value {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chev {
+  composes: chev from '../Select/Select.module.css';
+}
+
+/* The list: a field, the branches, and a line under them. */
+.list {
+  min-width: max(var(--radix-popover-trigger-width), 280px);
+  max-width: 360px;
+}
+.find {
+  composes: find from '../Select/Select.module.css';
+}
+.options {
+  composes: options from '../Select/Select.module.css';
+}
+.item {
+  composes: item from '../Select/Select.module.css';
+  min-width: 0;
+  cursor: pointer;
+}
+.item[data-active] {
+  background: var(--hover-paper);
+}
+.item[aria-disabled='true'] {
+  cursor: default;
+}
+.name {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.item[aria-selected='true'] .name {
+  font-weight: 600;
+}
+.hint {
+  flex: none;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.check {
+  composes: check from '../Select/Select.module.css';
+}
+.create {
+  color: var(--t-2);
+}
+.create > svg {
+  flex: none;
+  color: var(--t-3);
+}
+.verb {
+  flex: none;
+}
+.none {
+  composes: none from '../Select/Select.module.css';
+  margin: 0;
+}
+.note {
+  margin: 0;
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--t-3);
+}

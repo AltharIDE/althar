@@ -11,6 +11,7 @@ import { countdownNow } from './plansAndReviews'
 import { Reviews } from './Reviews'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
+import { setToward } from './towards'
 import { type PlanStep, Runs, type TaskEnd } from './Runs'
 
 /*
@@ -72,6 +73,8 @@ export class Plans extends Context.Service<
       end?: TaskEnd | null,
       /** Where it works, until its first step starts (ADR-091); as it was without it. */
       worksIn?: WorksIn,
+      /** The branch it works toward, until its first step starts (ADR-093); null for the default branch, as it was without it. */
+      toward?: string | null,
     ): Effect.Effect<void, unknown>
   }
 >()('@althar/runtime/Plans') {
@@ -274,7 +277,7 @@ export class Plans extends Context.Service<
         start: (planId, actorId) => provide(start(planId, actorId)),
         hold: (planId, actorId) =>
           provide(Effect.asVoid(transition(planId, counting, () => ({ startsAt: null }), 'task_plan.held', actorId))),
-        change: (planId, steps, actorId, end, worksIn) =>
+        change: (planId, steps, actorId, end, worksIn, toward) =>
           provide(
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
@@ -297,6 +300,8 @@ export class Plans extends Context.Service<
               // A review's lead only reads: an agent that can't be held to that can't take it, whoever picks it.
               if (parametersOf(plan).reads === true) for (const step of steps) if (!step.skipped) yield* reviews.canLead(step.agentId)
               if (plan.state === 'proposed') {
+                // Pointed at another branch first: one the remote doesn't have changes nothing of the plan.
+                if (toward !== undefined) yield* setToward(plan.taskId, toward)
                 yield* transition(
                   planId,
                   (now) => now.state === 'proposed',
@@ -314,6 +319,7 @@ export class Plans extends Context.Service<
                   if (now.state !== 'accepted') return false
                   const parameters = changed(now)
                   if (!(yield* runs.changeWaiting(now.taskId, parameters, actorId))) return false
+                  if (toward !== undefined) yield* setToward(now.taskId, toward)
                   const revision = yield* change('task_plans', planId, { parameters })
                   yield* fact({
                     projectId: now.projectId,

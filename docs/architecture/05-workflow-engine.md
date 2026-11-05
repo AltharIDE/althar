@@ -714,8 +714,11 @@ changes code. Later steps, such as review, receive its result.
 
 **Review and settling loop, within a bound.** After a review, the lead settles
 the findings. If settling changed code, verification and review run again, up
-to a bound (3 rounds unless Settings' Plans and reviews say 1, 2 or 5). Past the bound, the task is Stuck, with the
-findings still open.
+to a bound (3 rounds unless Settings' Plans and reviews say 1, 2 or 5). Past the bound, with changes no review has
+read, Settings' "When rounds run out" decides. By default the task goes on to its ending once the lead has settled every
+finding (fixed, or set aside with a reason); a finding left open makes it Stuck, as "Ask me" does for any task out of
+rounds. A task that goes on says in its thread and its pull request that the last fixes weren't reviewed, and carries no
+review seal; merging stays the person's word.
 
 **A later review round builds on the earlier ones.** The reviewer in round 2
 or later is briefed on every earlier round: its findings, and how each was

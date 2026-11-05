@@ -31,6 +31,8 @@ interface Place {
   readonly branch: string
   readonly baseRef: string | null
   readonly baseCommit: string | null
+  /** The branch its work goes into, where it isn't the default (ADR-093). */
+  readonly toward: string | null
   readonly branched: number
   /** `checkout` for a Local task, in the person's own checkout; null for a worktree of its own. */
   readonly kind: string | null
@@ -52,6 +54,9 @@ export interface RepositoryChange {
   readonly name: string
   readonly path: string
   readonly branch: string
+  /** The ref its branch started from, such as origin/release/0.8.0, and the branch its work goes into, null for the default (ADR-093). */
+  readonly startedFrom: string | null
+  readonly toward: string | null
   readonly from: ReadFrom
   /** The folder git read it in: its own, or the repository's where its own is gone; null where nothing was read. */
   readonly readIn: string | null
@@ -72,7 +77,7 @@ const placesOf = (taskId: string) =>
     const sql = yield* SqlClient.SqlClient
     const instance = yield* Instance
     return yield* sql<Place>`
-      SELECT b.slug, b.display_name AS name, w.path, w.branch, w.base_ref, w.base_commit, w.branched_at IS NOT NULL AS branched,
+      SELECT b.slug, b.display_name AS name, w.path, w.branch, w.base_ref, w.base_commit, w.toward, w.branched_at IS NOT NULL AS branched,
         w.kind, w.state, w.returned_at, l.path AS root
       FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
       LEFT JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
@@ -82,7 +87,14 @@ const placesOf = (taskId: string) =>
 /** What a task changed in one repository: from its folder as it stands where it is there and its own, else from its branch. */
 const changeIn = (place: Place): Effect.Effect<RepositoryChange, unknown> =>
   Effect.gen(function* () {
-    const about = { slug: place.slug, name: place.name, path: place.path, branch: place.branch }
+    const about = {
+      slug: place.slug,
+      name: place.name,
+      path: place.path,
+      branch: place.branch,
+      startedFrom: place.baseRef,
+      toward: place.toward,
+    }
     const nothing = (why: 'unbranched' | 'unstarted'): RepositoryChange => ({
       ...about,
       from: { kind: 'nothing', why },
@@ -140,17 +152,16 @@ export const shownPath = (change: TaskChange, repository: RepositoryChange, path
 
 /** The paths two changes both touch, in the same repositories, as the first names them. */
 export const sharedPaths = (mine: TaskChange, theirs: TaskChange): ReadonlyArray<string> => {
-  const key = (slug: string, path: string) => `${slug}\u0000${path}`
+  // Only where both go into the same branch (ADR-093): work into release/0.8.0 and work into main don't conflict.
+  const key = (repository: RepositoryChange, path: string) => `${repository.slug}\u0000${repository.toward ?? ''}\u0000${path}`
   const touched = new Set(
     theirs.repositories.flatMap((repository) =>
-      repository.files.flatMap((file) => [file.path, ...(file.from === null ? [] : [file.from])].map((path) => key(repository.slug, path))),
+      repository.files.flatMap((file) => [file.path, ...(file.from === null ? [] : [file.from])].map((path) => key(repository, path))),
     ),
   )
   const shared = mine.repositories.flatMap((repository) =>
     repository.files
-      .filter(
-        (file) => touched.has(key(repository.slug, file.path)) || (file.from !== null && touched.has(key(repository.slug, file.from))),
-      )
+      .filter((file) => touched.has(key(repository, file.path)) || (file.from !== null && touched.has(key(repository, file.from))))
       .map((file) => shownPath(mine, repository, file.path)),
   )
   return [...new Set(shared)].toSorted()
@@ -178,7 +189,10 @@ const fileLine = (shown: string, file: ChangedFile, from: string | null) =>
 
 /** Where a repository's change was read from, in words, for the head of a diff. */
 const fromWords = (repository: RepositoryChange) => {
-  const base = repository.base === null ? '' : ` against ${repository.base.slice(0, 12)}, where its branch started from its default branch`
+  const base =
+    repository.base === null
+      ? ''
+      : ` against ${repository.base.slice(0, 12)}, where its branch started from ${repository.startedFrom ?? repository.toward ?? 'its default branch'}`
   switch (repository.from.kind) {
     case 'folder':
       return repository.from.local

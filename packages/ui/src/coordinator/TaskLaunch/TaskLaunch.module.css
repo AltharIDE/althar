@@ -138,6 +138,32 @@
 .pick > svg {
   color: var(--t-3);
 }
+/* The branch its work goes into, after how it ends (ADR-093): a choice as that one is, its name in mono, cut short. */
+.end:has(.towardIn) {
+  grid-template-columns: 22px auto auto minmax(0, 1fr);
+}
+.towardIn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.into {
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.branch {
+  min-width: 0;
+  max-width: 240px;
+  margin: 0;
+}
+/* With no row for how it ends, on a row of its own. */
+.toward {
+  grid-template-columns: 22px auto minmax(0, 1fr);
+}
+.toward .branch {
+  justify-self: start;
+}
 
 .foot {
   position: relative;

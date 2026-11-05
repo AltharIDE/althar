@@ -474,6 +474,47 @@ describe('what a project runs', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('keeps a run’s copy, and says its branch, while Work toward moves; the next run once none runs there takes the new one', () =>
+    Effect.gen(function* () {
+      const launches = yield* Launches
+      const projects = yield* Projects
+      const instance = yield* Instance
+      const path = twoServers()
+      // release/0.8.0 answers elsewhere, so which copy runs shows in where it answers.
+      git(path, 'switch', '-q', '-c', 'release/0.8.0')
+      writeFileSync(join(path, 'storybook.js'), SERVE_TOO.replace('6199', '6299'))
+      git(path, 'commit', '-q', '-am', 'Release')
+      git(path, 'switch', '-q', 'main')
+      git(path, 'remote', 'add', 'origin', 'https://github.test/meridian/api.git')
+      git(path, 'update-ref', 'refs/remotes/origin/main', 'main')
+      git(path, 'update-ref', 'refs/remotes/origin/release/0.8.0', 'release/0.8.0')
+      git(path, 'branch', '-q', '-D', 'release/0.8.0')
+      const { projectId } = yield* open(path)
+      const storybook = yield* launches.keepRunnable({
+        projectId,
+        name: 'Storybook',
+        command: 'npm run storybook',
+        actorId: instance.personId,
+      })
+      const dev = yield* launches.start({ projectId, taskId: null, threadId: null })
+      assert.strictEqual(dev.where, 'main')
+      const [binding] = yield* projects.repositories(projectId)
+      yield* projects.setRepository({ projectId, repositoryId: binding?.id ?? '', workToward: 'release/0.8.0' })
+      // The dev server still runs from main's copy: Storybook, started beside it, runs there too, and says so.
+      const book = yield* launches.start({ projectId, taskId: null, runnableId: storybook.id, threadId: null })
+      assert.strictEqual(book.where, 'main')
+      const both = yield* until(launches.ofProject(projectId), (all) => all.length === 2 && all.every((one) => one.url !== null))
+      assert.strictEqual(both.find((one) => one.id === book.id)?.url, 'http://localhost:6199/')
+      // With nothing running there, the next run copies release/0.8.0 afresh, and says that.
+      for (const running of yield* launches.ofProject(projectId)) yield* launches.stop(running.id)
+      const again = yield* launches.start({ projectId, taskId: null, runnableId: storybook.id, threadId: null })
+      assert.strictEqual(again.where, 'release/0.8.0')
+      const [serving] = yield* until(launches.ofProject(projectId), (all) => all[0]?.url != null)
+      assert.strictEqual(serving?.url, 'http://localhost:6299/')
+      yield* launches.stop(again.id)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('runs one in a task’s worktree, as the task’s screen lists it, with its repository’s setup first', () =>
     Effect.gen(function* () {
       const launches = yield* Launches

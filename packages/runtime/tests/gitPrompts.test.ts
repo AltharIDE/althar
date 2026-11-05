@@ -155,7 +155,7 @@ describe.runIf(linux)('git over SSH with nobody to answer', () => {
       setEnv({ PATH: `${at.bin}:${process.env.PATH ?? ''}` })
       const copy = join(at.home, 'worktrees', 'meridian', '.coordinator', 'meridian')
       const started = Date.now()
-      yield* freshCopy(at.repository, copy, 'main', at.repository, 1_000)
+      yield* freshCopy(at.repository, copy, 'main', at.repository, 'origin', 1_000)
       expect(Date.now() - started).toBeLessThan(5_000)
       assert.strictEqual(run(copy, 'log', '-1', '--format=%s'), 'Start')
     }).pipe(onTestClock),

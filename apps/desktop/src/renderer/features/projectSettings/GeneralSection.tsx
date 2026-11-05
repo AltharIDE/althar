@@ -1,6 +1,7 @@
-import type { ProjectInk as Inks, WorksIn } from '@althar/contracts'
+import type { ProjectInk as Inks, ProjectRepository, WorksIn } from '@althar/contracts'
 import type { ReactNode } from 'react'
 import {
+  BranchSelect,
   LinkButton,
   ProjectIdentity,
   type ProjectInk,
@@ -19,10 +20,12 @@ import { contractInk, kitInk } from '../../shared/inks'
 import s from './ProjectSettings.module.css'
 import { HEADING } from './sections'
 import type { ProjectSettingsModel, RuleSwitch } from './useProjectSettings'
+import { useWorkToward } from '../../shared/useWorkToward'
 
 /*
  * What a project is, and how its tasks work: its name and the ink its mark
- * is drawn in, changed in place; then where new tasks start (ADR-091), and
+ * is drawn in, changed in place; then where new tasks start (ADR-091), the
+ * branch they work toward in each repository (ADR-093), and
  * the switches every task follows, each with one line on when it acts. One
  * that didn't hold says why under it. Whether skill and OpenSpec files a task
  * commits may stay in its repositories' commits, and be pushed, are three
@@ -38,6 +41,14 @@ export const text = {
     worktree: 'Worktree',
     /** One line for both, which stays put as the choice flips: what each gives up. */
     line: 'Local works in your own checkout, with your builds, simulators and services: one task at a time, beside your own edits. A worktree gives each task a copy of its own, side by side, that builds from cold.',
+  },
+  workToward: {
+    title: 'Work toward',
+    /** In a project of several repositories, one row each. */
+    titleIn: (repository: string) => `Work toward in ${repository}`,
+    line: 'New tasks start from this branch, and their pull requests go into it. Run runs it too.',
+    /** Under its list: what changing it leaves as it is. */
+    keeps: 'Tasks already made keep theirs. A name it doesn’t have is made from the default branch.',
   },
   conflicts: {
     title: 'Resolve merge conflicts automatically',
@@ -97,7 +108,53 @@ interface Shown {
   readonly set: (on: boolean) => void
 }
 
-export function GeneralSection({ model, seed }: { model: ProjectSettingsModel; seed: string }) {
+/** A repository as Work toward reads it: its default branch, the branch kept, and the remote's branches. */
+type Toward = Pick<ProjectRepository, 'id' | 'name' | 'defaultBranch' | 'workToward' | 'branches'>
+
+/** The branch a repository's new tasks work toward: a row each, its default first in the list. */
+function WorkToward({ projectId, repositories }: { projectId: string; repositories: ReadonlyArray<Toward> }) {
+  const toward = useWorkToward(projectId)
+  return repositories.map((repository) => {
+    const fallback = repository.defaultBranch ?? 'main'
+    const branches = repository.branches ?? [fallback]
+    const shown = toward.shown(repository.id, repository.workToward ?? null) ?? fallback
+    const title = repositories.length > 1 ? text.workToward.titleIn(repository.name) : text.workToward.title
+    return (
+      <SettingRow
+        key={repository.id}
+        title={title}
+        note={
+          <SwitchNote line={text.workToward.line} failed={toward.failed?.repositoryId === repository.id ? toward.failed.message : null} />
+        }
+      >
+        {() => (
+          <BranchSelect
+            label={title}
+            variant="filled"
+            value={shown}
+            branches={branches}
+            defaultBranch={fallback}
+            onChange={(next) => toward.change(repository.id, next === fallback ? null : next)}
+            onCreate={(name) => toward.create(repository.id, name)}
+            note={text.workToward.keeps}
+            className={s.branch}
+          />
+        )}
+      </SettingRow>
+    )
+  })
+}
+
+export function GeneralSection({
+  model,
+  seed,
+  repositories,
+}: {
+  model: ProjectSettingsModel
+  seed: string
+  /** Its repositories, for what new tasks work toward in each; null until they are read. */
+  repositories?: ReadonlyArray<Toward> | null
+}) {
   const name = model.name ?? ''
   const rules = model.rules
   // Another project's ink says whose it is, and can still be chosen.
@@ -147,6 +204,7 @@ export function GeneralSection({ model, seed }: { model: ProjectSettingsModel; s
                 )}
               </SettingRow>
             )}
+            {repositories != null && repositories.length > 0 && <WorkToward projectId={seed} repositories={repositories} />}
             {switches.map((one) => (
               <SettingSwitch
                 key={one.rule}

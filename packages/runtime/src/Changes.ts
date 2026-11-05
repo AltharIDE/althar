@@ -49,7 +49,7 @@ import { ChecksAsked, inspectChecks } from './readChecks'
 import { logForLead, logPage, readLog } from './checkLogs'
 import { Agents, RuntimeConfig } from './Config'
 import { Models } from './Models'
-import { detailsOf, reviewRecordOf, reviewSeal, sealOf, type SessionNamer } from './pullRequestReview'
+import { detailsOf, reviewRecordOf, reviewSeal, sealOf, unreviewedNote, unreviewedOf, type SessionNamer } from './pullRequestReview'
 import { Connections, NotConnected } from './Connections'
 import {
   ATTEMPTS,
@@ -311,6 +311,8 @@ interface PublishRow {
   readonly bindingId: string
   readonly remotes: string
   readonly defaultBase: string | null
+  /** The branch its work goes into, where it isn't the default (ADR-093): on the repository it opens on, a fork's upstream too. */
+  readonly toward: string | null
   /** For a fork: where its pull requests open, the repository it was forked from or the fork itself. */
   readonly changeTarget: ChangeTarget | null
 }
@@ -1039,7 +1041,7 @@ export class Changes extends Context.Service<
         issue: { readonly key: string; readonly url: string; readonly sameHost: boolean; readonly partOf?: boolean } | null,
         repository: { readonly slug: string; readonly template: string | null },
         since: string | null = null,
-        review: { readonly seal: string | null; readonly details: string } | null = null,
+        review: { readonly seal: string | null; readonly details: string | null; readonly note?: string | null } | null = null,
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -1076,8 +1078,9 @@ export class Changes extends Context.Service<
       /**
        * What the pull request says of the review its change had, where the
        * person has it on and the run had one: the folded section, and the
-       * seal where the host shows one (pullRequestReview.ts). Nothing it
-       * can't read holds the pull request up: it opens without it.
+       * seal where the host shows one (pullRequestReview.ts); and, whatever
+       * the person has on, a note where the task went on with fixes no review
+       * read. Nothing it can't read holds the pull request up: it opens without it.
        */
       const reviewFor = (input: {
         readonly runId: string
@@ -1088,10 +1091,17 @@ export class Changes extends Context.Service<
       }) =>
         Effect.gen(function* () {
           const setting = yield* reviewSeal
-          if (!setting.on) return null
-          const record = yield* reviewRecordOf({ ...input, named: yield* sessionNamer, sent: memory.recall })
-          if (record === null) return null
-          return { seal: input.github ? sealOf(setting.style, record) : null, details: detailsOf(record) }
+          // A task that went on with fixes no review read says so, whatever the person chose to show of the review.
+          const unreviewed = yield* unreviewedOf(input.runId)
+          // The fold and seal are optional: a failure to read them leaves the note, which is not.
+          const record = !setting.on
+            ? null
+            : yield* reviewRecordOf({ ...input, named: yield* sessionNamer, sent: memory.recall }).pipe(
+                Effect.catchCause((cause) => Effect.as(Effect.logWarning('The pull request opens without its review record', cause), null)),
+              )
+          const note = unreviewed ? unreviewedNote(record?.passes ?? null) : null
+          if (record === null) return note === null ? null : { seal: null, details: null, note }
+          return { seal: input.github ? sealOf(setting.style, record) : null, details: detailsOf(record), note }
         }).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('The pull request opens without its review', cause), null)))
 
       /** The hosts of a project's repositories, or of those a task changes, the first first: null for each on none Althar knows. */
@@ -1147,7 +1157,8 @@ export class Changes extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const tasks = yield* sql<PublishRow>`
             SELECT k.title, b.display_name AS name, b.slug, t.id AS thread_id, w.id AS workspace_id, w.path, w.branch, w.base_commit, w.base_ref, b.id AS binding_id,
-              w.branched_at IS NOT NULL AS branched, b.remote_fingerprints AS remotes, b.default_base_ref AS default_base, b.change_target
+              w.branched_at IS NOT NULL AS branched, b.remote_fingerprints AS remotes, coalesce(w.toward, b.default_base_ref) AS default_base, b.change_target,
+              w.toward
             FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
             JOIN workspaces w ON w.task_id = k.id AND w.device_id = ${instance.deviceId} AND w.access = 'write'
             JOIN repository_bindings b ON b.id = w.binding_id
@@ -1363,16 +1374,17 @@ export class Changes extends Context.Service<
           // The repository as its host names it, not as the remote spells it: Bitbucket Data Center's has `scm/` in front.
           const path = repository.path
           const pushTarget = yield* host.pushTarget(own)
-          // The branch it started from, on the repository it opens on; into the one a fork came from, from a task made before it
-          // was chosen, that repository's default.
+          // The branch it works toward (ADR-093), else the branch it started from, on the repository it opens on; into the one a
+          // fork came from, from a task made before it was chosen, that repository's default.
           const target =
-            fork === null || !samePath(repository.path, fork.upstream.path)
+            task.toward ??
+            (fork === null || !samePath(repository.path, fork.upstream.path)
               ? baseBranch(task.baseRef ?? '', task.baseRef != null && (yield* branchExists(task.path, task.baseRef))) ||
                 task.defaultBase ||
                 repository.defaultBranch
               : task.baseRef?.startsWith('upstream/') === true
                 ? task.baseRef.slice('upstream/'.length)
-                : repository.defaultBranch
+                : repository.defaultBranch)
           // Never onto a default branch, wherever the branch goes (ADR-071): a task's branch is its own.
           if (task.branch === own.defaultBranch || (from === undefined && task.branch === target))
             return yield* new PushRefused({ taskId: input.taskId, why: 'protected', remote: `${own.path.join('/')}/${task.branch}` })
@@ -2039,7 +2051,7 @@ export class Changes extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [workspace] = yield* sql<{ path: string; branch: string; base: string; baseCommit: string | null; threadId: string }>`
-            SELECT w.path, w.branch, coalesce(b.default_base_ref, w.base_ref) AS base, w.base_commit,
+            SELECT w.path, w.branch, coalesce(w.toward, b.default_base_ref, w.base_ref) AS base, w.base_commit,
               (SELECT t.id FROM threads t WHERE t.task_id = w.task_id AND t.kind = 'task') AS thread_id
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
@@ -2628,7 +2640,7 @@ export class Changes extends Context.Service<
         Effect.flatMap(
           SqlClient.SqlClient,
           (sql) => sql<HereRow>`
-            SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.branch,
+            SELECT b.slug, b.display_name AS name, coalesce(w.toward, b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.branch,
               EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL) AS opened
             FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
@@ -2809,7 +2821,7 @@ export class Changes extends Context.Service<
             branch: string
             changeTarget: ChangeTarget | null
           }>`
-            SELECT coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.branch, b.change_target
+            SELECT coalesce(w.toward, b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.branch, b.change_target
             FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
@@ -2872,7 +2884,7 @@ export class Changes extends Context.Service<
             remotes: string
             changeTarget: ChangeTarget | null
           }>`
-            SELECT b.slug, coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.branch, w.base_commit,
+            SELECT b.slug, coalesce(w.toward, b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.branch, w.base_commit,
               b.remote_fingerprints AS remotes, b.change_target
             FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
@@ -2933,7 +2945,7 @@ export class Changes extends Context.Service<
             SELECT k.project_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${taskId}`
           if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
           const repositories = yield* sql<{ base: string; root: string; worktree: string; baseCommit: string | null; remotes: string }>`
-            SELECT coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.base_commit,
+            SELECT coalesce(w.toward, b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.base_commit,
               b.remote_fingerprints AS remotes
             FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
@@ -3004,7 +3016,7 @@ export class Changes extends Context.Service<
           )
           const tag = asked.tag.trim().replace(/^refs\/tags\//, '')
           const repositories = yield* sql<{ slug: string; base: string; root: string; worktree: string }>`
-            SELECT b.slug, coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree
+            SELECT b.slug, coalesce(w.toward, b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree
             FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
@@ -3779,7 +3791,7 @@ export class Changes extends Context.Service<
                   const branch =
                     workspace === undefined ? null : yield* commitOf(workspace.path, 'HEAD').pipe(Effect.orElseSucceed(() => null))
                   yield* heard(link, 'checks_told', `told:${sum.sha}${reran?.again ?? ''}`, { sha: sum.sha, branch })
-                  forLead.push(checksForLeadAlone(sum, name, logs, FIX_ROUNDS - fixing.failed + 1, repository.defaultBranch))
+                  forLead.push(checksForLeadAlone(sum, name, logs, FIX_ROUNDS - fixing.failed + 1, now.target || repository.defaultBranch))
                   failedNow = { failing: sum.failing, logs }
                 } else if (
                   fixing !== null &&
@@ -4162,7 +4174,7 @@ export class Changes extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const repositories = yield* sql<ShippingRow>`
             SELECT w.id AS workspace_id, w.path, w.branch, w.base_commit, w.base_ref, b.display_name AS name, b.slug,
-              b.remote_fingerprints AS remotes, b.default_base_ref AS default_base, c.head_commit AS sent, c.branch AS change_branch, l.id AS link_id, l.product,
+              b.remote_fingerprints AS remotes, coalesce(w.toward, b.default_base_ref) AS default_base, c.head_commit AS sent, c.branch AS change_branch, l.id AS link_id, l.product,
               l.snapshot, l.listening, l.created_at AS opened_at
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             LEFT JOIN repository_changes c ON c.id = (SELECT id FROM repository_changes WHERE workspace_id = w.id
@@ -4220,7 +4232,7 @@ export class Changes extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const repositories = yield* sql<{ name: string; path: string; base: string; root: string; opened: number }>`
-            SELECT b.display_name AS name, w.path, coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root,
+            SELECT b.display_name AS name, w.path, coalesce(w.toward, b.default_base_ref, w.base_ref) AS base, l.path AS root,
               EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL) AS opened
             FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
@@ -5682,7 +5694,7 @@ export class Changes extends Context.Service<
           if (ahead.kind === 'unknown') return `Althar can't tell what ${name} has`
           const { host, repository } = yield* current(taskId, snapshot.url)
           const onto = sourceOf(snapshot, branch)
-          if (onto === repository.defaultBranch) return `${name} is from ${onto}`
+          if (onto === repository.defaultBranch || onto === snapshot.target) return `${name} is from ${onto}`
           const tip = yield* remoteTip(path, yield* pushTargetOf(taskId, host, repository, path, { ...snapshot, source: onto }), onto)
           const sent = yield* sentTo(link.projectId, snapshot.url)
           const there = tip ?? snapshot.headSha
@@ -6317,10 +6329,10 @@ export class Changes extends Context.Service<
       })
 
       /**
-       * The checks on the latest commit of the default branch the task's pull
-       * request goes into (ADR-070), with the ends of the failed ones' logs:
-       * for the lead to tell a failure of its change's from one that is broken
-       * there already.
+       * The checks on the latest commit of the branch the task's pull request
+       * goes into (ADR-070): the default branch, or the one it works toward
+       * (ADR-093), with the ends of the failed ones' logs: for the lead to tell
+       * a failure of its change's from one that is broken there already.
        */
       const readBaseChecks = (taskId: string, input: unknown) =>
         Effect.gen(function* () {
@@ -6328,7 +6340,7 @@ export class Changes extends Context.Service<
             Effect.mapError((error) => new ToolRefused({ message: `Althar couldn't read that: ${error.message}` })),
           )
           const { snapshot, host, repository } = yield* namedIn(taskId, asked.pull_request)
-          const base = repository.defaultBranch
+          const base = snapshot.target ?? repository.defaultBranch
           const workspace = yield* worktreeOf(taskId, snapshot.url)
           const tip = workspace === undefined ? null : yield* remoteTip(workspace.path, yield* host.pushTarget(repository), base)
           if (tip === null) return `Althar couldn't find which commit ${base} is on in ${repository.path.join('/')}.`

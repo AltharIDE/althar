@@ -136,6 +136,7 @@ url=
 tab=$(printf '\t')
 task=\${ALTHAR_TASK_BRANCH:-}
 defaults=" \${ALTHAR_DEFAULT_BRANCHES:-} "
+towards=" \${ALTHAR_TOWARD_BRANCHES:-} "
 how='${HOW.replaceAll("'", "'\\''")}'
 # Only the task's own repositories, by the git folder their worktrees share, and pushes to their remotes from anywhere; where
 # git can't say which repository this is, it is guarded.
@@ -175,6 +176,7 @@ case "$hook" in
     while read -r local_ref local_sha remote_ref remote_sha; do
       case "$remote_ref" in refs/heads/*) ;; *) continue ;; esac
       branch=\${remote_ref#refs/heads/}
+      case "$towards" in *" $branch "*) stop default-branch "a push to $branch, the branch the task's work goes into, can't be undone from the task." ;; esac
       case "$defaults" in *" $branch "*) stop default-branch "a push to $branch, the default branch, can't be undone from the task." ;; esac
       if zero "$local_sha"; then
         [ "$branch" = "$task" ] && continue
@@ -290,6 +292,8 @@ export const guardEnv = (input: {
   readonly sessionId: string
   readonly taskBranch: string | null
   readonly defaultBranches: ReadonlyArray<string>
+  /** The branches its work goes into where they aren't the default (ADR-093): stopped as the default is, and said so. */
+  readonly towards?: ReadonlyArray<string>
   readonly repositories?: ReadonlyArray<string>
   readonly count: number
   readonly at?: Guard
@@ -303,6 +307,7 @@ export const guardEnv = (input: {
     [`GIT_CONFIG_VALUE_${input.count}`]: at.hooks,
     ALTHAR_TASK_BRANCH: input.taskBranch ?? '',
     ALTHAR_DEFAULT_BRANCHES: [...new Set(input.defaultBranches)].join(' '),
+    ...(input.towards === undefined || input.towards.length === 0 ? {} : { ALTHAR_TOWARD_BRANCHES: [...new Set(input.towards)].join(' ') }),
     ALTHAR_GUARD_PASS: passOf(input.sessionId, at),
     ...(guarded.length === 0 ? {} : { ALTHAR_GUARD_REPOSITORIES: guarded.join('\n'), ALTHAR_GUARD_REMOTES: remotes.join('\n') }),
   }

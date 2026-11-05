@@ -1,3 +1,4 @@
+import { EarlierTurns } from '../../shared/EarlierTurns'
 import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import type { AttentionRequest, TaskAction, ThreadSnapshot } from '@althar/contracts'
@@ -30,7 +31,6 @@ import {
   TaskMenu,
   TaskStatus,
   Thread,
-  ThreadDivider,
   ThreadShellProvider,
   ThreadMeasure,
   ThreadSkeleton,
@@ -90,6 +90,7 @@ import { conflictsOf, hasOutputs, hasOutputsToShow, latestOf, Outputs } from './
 import s from './Task.module.css'
 import { OpenFinding } from './Reports'
 import { useChanges } from './useChanges'
+import { ChangeTeam, useTeamed } from '../team/Team'
 import type { TaskModel } from './useTask'
 import { chooseFace, chosenFaces } from './chosenFaces'
 import { REQUEST, taskGraphOf } from './graph'
@@ -168,9 +169,6 @@ export const text = {
   faces: { talk: 'Conversation', out: 'Outputs', graph: 'Graph' } satisfies Record<Face, string>,
   facesKbd: { talk: 'c', out: 'o', graph: 'g' } satisfies Record<Face, string>,
   dismiss: 'Dismiss',
-  earlier: 'Earlier in this task',
-  showEarlier: 'Show',
-  loadingEarlier: 'Showing…',
   files: (count: number) => (count === 1 ? '1 file' : `${count} files`),
   reviewDiff: 'Review the changes',
   diffKey: modKey('D'),
@@ -376,6 +374,9 @@ export function TaskView({
   const [outputOf, setOutputOf] = useState<string | null>(null)
   // Abandoning it asks first, saying what happens to its worktree and branch, and offering to close its pull requests.
   const [abandoning, setAbandoning] = useState(false)
+  // Its plan's team, while nothing of it has begun, as its project's board reads it; and its dialog, open.
+  const teamed = useTeamed(model.snapshot?.project.id ?? null, model.snapshot?.task.id ?? null)
+  const [changingTeam, setChangingTeam] = useState(false)
   // Attaching it to a pull request asks which; then, where its branch isn't based on that one's head, whether to start it there.
   const [attaching, setAttaching] = useState<{
     readonly value: string
@@ -489,7 +490,11 @@ export function TaskView({
       void reveal(itemId, async () => {
         const now = latest.current
         if (now.snapshot?.earlier !== true) return false
-        await now.loadEarlier()
+        try {
+          await now.loadEarlier()
+        } catch {
+          return false
+        }
         return true
       })
     },
@@ -739,8 +744,11 @@ export function TaskView({
         />
       )}
       <TaskMenu
+        // What its work goes into, where it isn't the default branch (ADR-093): first in its menu, out of its bar.
+        {...(snapshot.task.toward === undefined ? {} : { toward: snapshot.task.toward })}
         onRename={() => setRenaming(true)}
         {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
+        {...(teamed === null ? {} : { onChangeTeam: () => setChangingTeam(true) })}
         {...(drafts.length > 0 ? { onMarkReady: () => void model.markAllReady(drafts.map((one) => one.url)) } : {})}
         // A task under way, or drafted, with a worktree, follows a pull request it didn't open, attached by its link (ADR-052); a
         // review reads one only.
@@ -888,7 +896,14 @@ export function TaskView({
         picker={
           <>
             {model.agents.length > 0 && choice !== null && (
-              <ModelChoice owner={text.lead} agents={model.agents} projectId={snapshot.project.id} value={choice} onChange={choose} />
+              <ModelChoice
+                owner={text.lead}
+                agents={model.agents}
+                projectId={snapshot.project.id}
+                value={choice}
+                onChange={choose}
+                {...(teamed === null ? {} : { onTeam: () => setChangingTeam(true) })}
+              />
             )}
             {/* Where it works, as Codex says it under its composer: Local, in the person's own checkout (ADR-091). */}
             {snapshot.task.local === true && <LocalPlace path={snapshot.task.worktree} />}
@@ -1095,15 +1110,13 @@ export function TaskView({
                   )}
                 </div>
               )}
-              {snapshot.earlier && (
-                <ThreadDivider
-                  icon="up"
-                  action={model.loadingEarlier ? text.loadingEarlier : text.showEarlier}
-                  onAction={() => void model.loadEarlier()}
-                >
-                  {text.earlier}
-                </ThreadDivider>
-              )}
+              <EarlierTurns
+                key={snapshot.threadId}
+                earlier={snapshot.earlier}
+                load={model.loadEarlier}
+                version={snapshot.items}
+                loading={model.loadingEarlier}
+              />
               <ThreadShellProvider value={host.shell}>
                 <TaskThread
                   rounds={blocks}
@@ -1221,6 +1234,9 @@ export function TaskView({
           </TaskFace>
         )}
         {host.lightbox}
+        {changingTeam && (
+          <ChangeTeam projectId={snapshot.project.id} task={teamed} agents={model.agents} onClose={() => setChangingTeam(false)} />
+        )}
         {abandoning && (
           <AbandonTask
             worktree={snapshot.task.worktree === null ? null : shortFolder(snapshot.task.worktree)}
