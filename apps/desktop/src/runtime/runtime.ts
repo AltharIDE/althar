@@ -130,10 +130,9 @@ const fetchNow = appFetchOf(net)
 const appFetch: Fetch = async (input, init) => {
   await opened
   return Effect.runPromise(
-    startup(
-      'network-fetch',
-      Effect.tryPromise(() => fetchNow(input, init)),
-    ).pipe(Effect.provide(Logger.layer([stdoutLogger]))),
+    startup('network-fetch', Effect.tryPromise({ try: () => fetchNow(input, init), catch: (error) => error })).pipe(
+      Effect.provide(Logger.layer([stdoutLogger])),
+    ),
   )
 }
 
