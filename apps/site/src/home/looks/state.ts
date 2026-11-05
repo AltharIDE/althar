@@ -2,9 +2,11 @@ import { useSyncExternalStore } from 'react'
 
 /*
  * Prototype: which look the homepage's sections wear, A, B, C or as they are
- * today. The address keeps it (?look=b), so a link opens it again; keys 1 to
- * 4 pick one, ← and → step through them. Swapping keeps the section you are
- * reading where it was on the screen.
+ * today, and which first screen opens the page. The address keeps both
+ * (?look=b&hero=chart), so a link opens them again; keys 1 to 4 pick a look,
+ * ← and → step through them, H steps through the first screens (⇧H back).
+ * Swapping a look keeps the section you are reading where it was on the
+ * screen.
  */
 
 export type Look = 'A' | 'B' | 'C' | 'Today'
@@ -20,6 +22,25 @@ const lookOf = (word: string | null): Look | undefined => LOOKS.find((one) => on
 
 let look: Look = lookOf(new URLSearchParams(window.location.search).get('look')) ?? 'A'
 const listeners = new Set<() => void>()
+
+export type HeroLook = 'Today' | 'Chart' | 'Night'
+
+export const HEROES: ReadonlyArray<{ value: HeroLook; name: string }> = [
+  { value: 'Today', name: 'Today' },
+  { value: 'Chart', name: 'Chart' },
+  { value: 'Night', name: 'Night' },
+]
+
+const heroOf = (word: string | null): HeroLook | undefined => HEROES.find((one) => one.value.toLowerCase() === word?.toLowerCase())?.value
+
+let hero: HeroLook = heroOf(new URLSearchParams(window.location.search).get('hero')) ?? 'Today'
+
+/** The address, with `key` set to `value`. */
+const keep = (key: string, value: string) => {
+  const params = new URLSearchParams(window.location.search)
+  params.set(key, value)
+  window.history.replaceState(window.history.state, '', `${window.location.pathname}?${params.toString()}${window.location.hash}`)
+}
 
 /** The sections whose place on the screen a swap keeps, top to bottom. */
 const PLACES = ['independent', 'coordinator', 'review', 'flow', 'edge', 'end'] as const
@@ -56,9 +77,15 @@ export const go = (next: Look) => {
   if (next === look) return
   held = placeNow()
   look = next
-  const params = new URLSearchParams(window.location.search)
-  params.set('look', next.toLowerCase())
-  window.history.replaceState(window.history.state, '', `${window.location.pathname}?${params.toString()}${window.location.hash}`)
+  keep('look', next.toLowerCase())
+  for (const on of listeners) on()
+}
+
+/** Opens the page on another first screen; it is the same height as the others, so nothing below it moves. */
+export const goHero = (next: HeroLook) => {
+  if (next === hero) return
+  hero = next
+  keep('hero', next.toLowerCase())
   for (const on of listeners) on()
 }
 
@@ -74,11 +101,25 @@ export const useLook = () =>
     () => look,
   )
 
-/** Keys 1 to 4 pick a look, ← and → step through them; never while typing, or on a control that takes the arrows itself. */
+export const useHero = () =>
+  useSyncExternalStore(
+    subscribe,
+    () => hero,
+    () => hero,
+  )
+
+/** Keys 1 to 4 pick a look, ← and → step through them, H and ⇧H the first screens; never while typing, or on a control that takes the arrows itself. */
 export const onKey = (event: KeyboardEvent) => {
-  if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
+  if (event.metaKey || event.ctrlKey || event.altKey) return
   const target = event.target instanceof Element ? event.target : null
   if (target?.closest('input, textarea, select, [contenteditable], [role=menu], [role=dialog], [role=listbox]')) return
+  if (event.key === 'h' || event.key === 'H') {
+    const at = HEROES.findIndex((one) => one.value === hero)
+    const step = event.shiftKey ? HEROES.length - 1 : 1
+    event.preventDefault()
+    return goHero(HEROES[(at + step) % HEROES.length]!.value)
+  }
+  if (event.shiftKey) return
   if (event.key.startsWith('Arrow') && target?.closest('[role=radiogroup], [role=tablist]')) return
   const at = LOOKS.findIndex((one) => one.value === look)
   const picked =

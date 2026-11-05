@@ -15,12 +15,20 @@ import { Hero } from './Hero'
 
 /** Prototype: in development, the product's sections wear one of three looks, swapped in place (looks/). Never in the build. */
 const Looks = import.meta.env.DEV ? lazy(() => import('./looks/Looks')) : null
+/** Prototype: in development, the first screen is today's or one of the new ones, swapped from the same bar. */
+const FirstScreen = import.meta.env.DEV ? lazy(() => import('./looks/Looks').then((m) => ({ default: m.FirstScreen }))) : null
 
 export function Home() {
   return (
     <div className={s.page} id="top">
       <Nav opening />
-      <Hero nav={<NavSpace />} />
+      {FirstScreen ? (
+        <Suspense fallback={<div style={{ height: 'clamp(640px, 100svh, 1060px)', background: '#050302' }} />}>
+          <FirstScreen nav={<NavSpace />} />
+        </Suspense>
+      ) : (
+        <Hero nav={<NavSpace />} />
+      )}
       <RunsOn />
       {Looks ? (
         <Suspense fallback={null}>
