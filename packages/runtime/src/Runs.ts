@@ -45,7 +45,8 @@ import { type CheckoutConsent, type CheckoutSeen, checkoutsHeld, giveBackSpot, p
 import { quickIn } from './kinds'
 import { capitalized, Limits, lowWords, NEARLY_OUT, type Out, outStep, outWords, type Room, whenWords } from './Limits'
 import { Live, type LiveEvent } from './Live'
-import { roundsNow } from './plansAndReviews'
+import { roundsNow, roundsOutNow } from './plansAndReviews'
+import { unreviewedLine } from './pullRequestReview'
 import { Policies, usageLimitOf } from './Policies'
 import { conventionsAt } from './conventions'
 import { commitOf, commitsAhead, git, treeOf, uncommittedFiles } from './git'
@@ -1426,6 +1427,16 @@ export class Runs extends Context.Service<
           return yield* sql<{ id: string; severity: Finding['severity']; location: string; claim: string; title: string | null }>`
             SELECT f.id, f.severity, f.location, f.claim, f.title FROM findings f JOIN node_attempts a ON a.id = f.review_attempt_id
             JOIN nodes n ON n.id = a.node_id WHERE n.execution_id = ${run.executionId} AND f.state = 'open' ORDER BY f.created_at`
+        })
+
+      /** The run's findings that one settle set aside without giving a reason. */
+      const unexplained = (run: RunRow, attemptId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          return yield* sql<{ id: string; severity: Finding['severity']; location: string; claim: string; title: string | null }>`
+            SELECT f.id, f.severity, f.location, f.claim, f.title FROM findings f JOIN node_attempts a ON a.id = f.review_attempt_id
+            JOIN nodes n ON n.id = a.node_id WHERE n.execution_id = ${run.executionId} AND f.state = 'set_aside'
+            AND f.settled_in_attempt_id = ${attemptId} AND (f.response IS NULL OR trim(f.response) = '') ORDER BY f.created_at`
         })
 
       /** The run's open findings, as the lead is told to settle them. */
@@ -3630,8 +3641,17 @@ export class Runs extends Context.Service<
             yield* review(current, attempt.iteration + 1, summary)
             return 'Althar has your summary. The review looks again.'
           }
-          // Out of rounds, with changes no review has seen: that isn't ready, it's the person's call (05: Stuck, findings open).
+          // Out of rounds, with changes no review has seen: that isn't ready. It goes on to its ending where the person's setting says
+          // it may, once every finding is settled; else it's their call (05: Stuck, findings open).
           if (workAfter !== workBefore) {
+            // Unsettled: still open, or set aside by this settle with no word why (a decline is deliberate only when explained).
+            const left = [...(yield* openFindings(current)), ...(yield* unexplained(current, attempt.id))]
+            const carry = yield* roundsOutNow
+            if (carry === 'settled' && left.length === 0) {
+              yield* carriedOn(current, attempt.id, attempt.iteration + 1, summary)
+              yield* conclude(current)
+              return 'Althar has your summary. That was the last round of review; the task goes on to its end with the last fixes not reviewed again, and the person decides on any merge.'
+            }
             const { review: reviewer } = yield* stepsOf(current)
             yield* stuck(current, null, {
               step: 'review',
@@ -3639,7 +3659,7 @@ export class Runs extends Context.Service<
               detail: summary,
               agentId: reviewer?.agentId ?? null,
               round: attempt.iteration + 1,
-              open: (yield* openFindings(current)).length,
+              open: left.length,
             })
             return 'Althar has your summary. That was the last round of review, so the person decides what comes next.'
           }
@@ -3677,6 +3697,20 @@ export class Runs extends Context.Service<
             { id: itemId },
           )
           return `Althar shows ${pictures.length === 1 ? 'it' : `the ${pictures.length}`} in the thread now, each with its caption, and keeps ${pictures.length === 1 ? 'it' : 'them'}: don't list ${pictures.length === 1 ? 'it' : 'them'} again in what you say.`
+        })
+
+      /**
+       * The task goes on after its rounds of review ran out, the lead's last fixes never read by a reviewer: the settle that made
+       * them says so (the pull request tells it, pullRequestReview.ts), and the thread does.
+       */
+      const carriedOn = (run: RunRow, attemptId: string, reviews: number, summary: string) =>
+        Effect.gen(function* () {
+          yield* change('node_attempts', attemptId, { output: JSON.stringify({ summary, unreviewed: 1 }) })
+          yield* addItem({ projectId: run.projectId, threadId: run.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: unreviewedLine(reviews),
+          })
         })
 
       /** Records what the lead did about each of the run's open findings it names: fixed, or set aside with its reason. */

@@ -20,11 +20,11 @@
         "@althar/domain": "workspace:*",
         "@althar/provider-adapters": "workspace:*",
         "@althar/runtime": "workspace:*",
-        "effect": "4.0.0-rc.118",
+        "effect": "4.0.7",
       },
       "devDependencies": {
         "@althar/testing": "workspace:*",
-        "@effect/vitest": "4.0.0-rc.118",
+        "@effect/vitest": "4.0.7",
         "@types/node": "^24.0.0",
         "@vitest/coverage-v8": "5.0.5",
         "typescript": "^7.0.2",
@@ -48,7 +48,7 @@
         "@fontsource-variable/jetbrains-mono": "^5.3.0",
         "@tanstack/react-query": "^5.105.3",
         "@tanstack/react-router": "^1.170.46",
-        "effect": "4.0.0-rc.118",
+        "effect": "4.0.7",
         "electron-updater": "6.8.11",
         "posthog-node": "5.61.2",
         "react": "^19.3.1",
@@ -57,7 +57,7 @@
       },
       "devDependencies": {
         "@althar/testing": "workspace:*",
-        "@effect/vitest": "4.0.0-rc.118",
+        "@effect/vitest": "4.0.7",
         "@playwright/test": "^1.64.1",
         "@testing-library/react": "^16.3.3",
         "@testing-library/user-event": "^14.6.8",
@@ -139,11 +139,11 @@
       "name": "@althar/connectors",
       "version": "0.0.0",
       "dependencies": {
-        "effect": "4.0.0-rc.118",
+        "effect": "4.0.7",
       },
       "devDependencies": {
         "@althar/testing": "workspace:*",
-        "@effect/vitest": "4.0.0-rc.118",
+        "@effect/vitest": "4.0.7",
         "@types/node": "^24.0.0",
         "@vitest/coverage-v8": "5.0.5",
         "typescript": "^7.0.2",
@@ -156,11 +156,11 @@
       "name": "@althar/contracts",
       "version": "0.0.0",
       "dependencies": {
-        "effect": "4.0.0-rc.118",
+        "effect": "4.0.7",
       },
       "devDependencies": {
         "@althar/testing": "workspace:*",
-        "@effect/vitest": "4.0.0-rc.118",
+        "@effect/vitest": "4.0.7",
         "@types/node": "^24.0.0",
         "@vitest/coverage-v8": "5.0.5",
         "typescript": "^7.0.2",
@@ -173,11 +173,11 @@
       "name": "@althar/domain",
       "version": "0.0.0",
       "dependencies": {
-        "effect": "4.0.0-rc.118",
+        "effect": "4.0.7",
       },
       "devDependencies": {
         "@althar/testing": "workspace:*",
-        "@effect/vitest": "4.0.0-rc.118",
+        "@effect/vitest": "4.0.7",
         "@types/node": "^24.0.0",
         "@vitest/coverage-v8": "5.0.5",
         "typescript": "^7.0.2",
@@ -191,12 +191,12 @@
       "version": "0.0.0",
       "dependencies": {
         "@althar/domain": "workspace:*",
-        "@effect/sql-sqlite-node": "4.0.0-rc.118",
-        "effect": "4.0.0-rc.118",
+        "@effect/sql-sqlite-node": "4.0.7",
+        "effect": "4.0.7",
       },
       "devDependencies": {
         "@althar/testing": "workspace:*",
-        "@effect/vitest": "4.0.0-rc.118",
+        "@effect/vitest": "4.0.7",
         "@types/node": "^24.0.0",
         "@vitest/coverage-v8": "5.0.5",
         "typescript": "^7.0.2",
@@ -214,13 +214,13 @@
         "@agentclientprotocol/sdk": "1.5.1",
         "@althar/domain": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.32.2",
-        "effect": "4.0.0-rc.118",
+        "effect": "4.0.7",
         "smol-toml": "1.9.1",
         "zod": "^4.6.7",
       },
       "devDependencies": {
         "@althar/testing": "workspace:*",
-        "@effect/vitest": "4.0.0-rc.118",
+        "@effect/vitest": "4.0.7",
         "@types/node": "^24.0.0",
         "@vitest/coverage-v8": "5.0.5",
         "typescript": "^7.0.2",
@@ -240,12 +240,12 @@
         "@althar/provider-adapters": "workspace:*",
         "@althar/skills": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.32.2",
-        "effect": "4.0.0-rc.118",
+        "effect": "4.0.7",
         "fflate": "0.8.3",
       },
       "devDependencies": {
         "@althar/testing": "workspace:*",
-        "@effect/vitest": "4.0.0-rc.118",
+        "@effect/vitest": "4.0.7",
         "@types/node": "^24.0.0",
         "@vitest/coverage-v8": "5.0.5",
         "typescript": "^7.0.2",
@@ -276,7 +276,7 @@
       "name": "@althar/testing",
       "version": "0.0.0",
       "dependencies": {
-        "effect": "4.0.0-rc.118",
+        "effect": "4.0.7",
       },
       "devDependencies": {
         "@playwright/test": "^1.64.1",
@@ -388,13 +388,13 @@
 
     "@anthropic-ai/claude-agent-sdk-darwin-x64": ["@anthropic-ai/claude-agent-sdk-darwin-x64@0.3.316", "", { "os": "darwin", "cpu": "x64" }, "sha512-gzNncKrID/6yJIKCAuF/pY1kfygQZ4dU0J+MNFl0bU+iQW65ERoIyoghYVfrAQ/gH2fuvnQtWxa8LQNScHgNMA=="],
 
-    "@anthropic-ai/claude-agent-sdk-linux-arm64": ["@anthropic-ai/claude-agent-sdk-linux-arm64@0.3.316", "", { "os": "linux", "cpu": "arm64", "libc": "glibc" }, "sha512-+lm9XSw/em14yMZ41fbo80kfblbylfBQc9nYS6GgLoZVvgT3wSeEbv88v+mEK/jFw9g3VCH4ZI01sjNM34o7uw=="],
+    "@anthropic-ai/claude-agent-sdk-linux-arm64": ["@anthropic-ai/claude-agent-sdk-linux-arm64@0.3.316", "", { "os": "linux", "cpu": "arm64" }, "sha512-+lm9XSw/em14yMZ41fbo80kfblbylfBQc9nYS6GgLoZVvgT3wSeEbv88v+mEK/jFw9g3VCH4ZI01sjNM34o7uw=="],
 
-    "@anthropic-ai/claude-agent-sdk-linux-arm64-musl": ["@anthropic-ai/claude-agent-sdk-linux-arm64-musl@0.3.316", "", { "os": "linux", "cpu": "arm64", "libc": "musl" }, "sha512-1qqaEdsAs6eipEQQ4bMAWiwDjIouyA/YN5KQWS0/+kuPb+GKS8rUVW2dty2elV703hsMovb4IhMP4cv5K7R9YA=="],
+    "@anthropic-ai/claude-agent-sdk-linux-arm64-musl": ["@anthropic-ai/claude-agent-sdk-linux-arm64-musl@0.3.316", "", { "os": "linux", "cpu": "arm64" }, "sha512-1qqaEdsAs6eipEQQ4bMAWiwDjIouyA/YN5KQWS0/+kuPb+GKS8rUVW2dty2elV703hsMovb4IhMP4cv5K7R9YA=="],
 
-    "@anthropic-ai/claude-agent-sdk-linux-x64": ["@anthropic-ai/claude-agent-sdk-linux-x64@0.3.316", "", { "os": "linux", "cpu": "x64", "libc": "glibc" }, "sha512-+csYyGkHziNp4It+ZykqTmXRZBuNrieTiBnji+zwAxNmLLCWz8xEWjNmwhaLPIMpUiaYREkDhZXt/AS6xXta5w=="],
+    "@anthropic-ai/claude-agent-sdk-linux-x64": ["@anthropic-ai/claude-agent-sdk-linux-x64@0.3.316", "", { "os": "linux", "cpu": "x64" }, "sha512-+csYyGkHziNp4It+ZykqTmXRZBuNrieTiBnji+zwAxNmLLCWz8xEWjNmwhaLPIMpUiaYREkDhZXt/AS6xXta5w=="],
 
-    "@anthropic-ai/claude-agent-sdk-linux-x64-musl": ["@anthropic-ai/claude-agent-sdk-linux-x64-musl@0.3.316", "", { "os": "linux", "cpu": "x64", "libc": "musl" }, "sha512-pMG9MRkjxMMbIxpwg/cKz6JorNjZtJOA9l/fifRQ/A01zGTKrRIaSCWoGg+Asmc64QBOa3aA4vzE/od9B1R0Tw=="],
+    "@anthropic-ai/claude-agent-sdk-linux-x64-musl": ["@anthropic-ai/claude-agent-sdk-linux-x64-musl@0.3.316", "", { "os": "linux", "cpu": "x64" }, "sha512-pMG9MRkjxMMbIxpwg/cKz6JorNjZtJOA9l/fifRQ/A01zGTKrRIaSCWoGg+Asmc64QBOa3aA4vzE/od9B1R0Tw=="],
 
     "@anthropic-ai/claude-agent-sdk-win32-arm64": ["@anthropic-ai/claude-agent-sdk-win32-arm64@0.3.316", "", { "os": "win32", "cpu": "arm64" }, "sha512-Xj4iTS8NsB6isGhnZEnaIXIpUcSspv/lyIVnfPZjVGwuttaVHjq4IxfDopsPaVsPuTKd+L7DLAaBram1k85U2g=="],
 
@@ -486,9 +486,9 @@
 
     "@csstools/css-tokenizer": ["@csstools/css-tokenizer@4.0.2", "", {}, "sha512-OoKoR0f76dCY666JlcbhmVTs2drYj1GUXZTYTcbUgJjh9Nv41aFfZ21bPQTERm5+L5cBDo466NltB2lplS5GBw=="],
 
-    "@effect/sql-sqlite-node": ["@effect/sql-sqlite-node@4.0.0-rc.118", "", { "peerDependencies": { "effect": "^4.0.0-rc.118" } }, "sha512-O+TswiXTeP1/9I7GaCalMWWGXrbalzZkFdkXoO/x/3uDdfnYSi3/lkcOvmfFJnmaQPvOR4wG2CkZSdf9n88A4w=="],
+    "@effect/sql-sqlite-node": ["@effect/sql-sqlite-node@4.0.7", "", { "peerDependencies": { "effect": "^4.0.7" } }, "sha512-VMtKDPpYkb6/dt3j4kZ0gw51bY4hbFS6I0vuzxikWBb7pQmaEmV5Tiax9ZrOXxU0fwcuJhLCZm9VhxNUg2cD0w=="],
 
-    "@effect/vitest": ["@effect/vitest@4.0.0-rc.118", "", { "peerDependencies": { "effect": "^4.0.0-rc.118", "vitest": ">=5.0.0 <6.0.0" } }, "sha512-O0CPgtFVhkB+pyFtjP4up2XF4uVWsPgUmlv4hMjq8ARLOPKYix+uu3AUFIUKRHjzzQpx+JPce6KPhD6Flkrfag=="],
+    "@effect/vitest": ["@effect/vitest@4.0.7", "", { "peerDependencies": { "effect": "^4.0.7", "vitest": ">=5.0.0 <6.0.0" } }, "sha512-WdF1w9K65ZyjeDAUfUxDOCBSEgVjUtJfM+G83KAE3mKoZcO6aGgrRoKgwiDKsACAmVWT3zG5hDhwNH3GQg++FQ=="],
 
     "@electron-internal/extract-zip": ["@electron-internal/extract-zip@1.0.8", "", {}, "sha512-8iajeLFbzNwM0m3AsQZSZgYREWglAImyGvvFSWU34FgMW8sHlzdwj9QKvv9dgN7jMP591EFUF/sLOC3Jl9YIjQ=="],
 
@@ -1598,7 +1598,7 @@
 
     "ee-first": ["ee-first@1.1.1", "", {}, "sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow=="],
 
-    "effect": ["effect@4.0.0-rc.118", "", {}, "sha512-hxhpCd+swzrtu9lnyPpEFre2ODQzJ9qxgyL1oHIEY8NKnW4PxTbM1XzplMZXiAsLD62HO+KJc41Nqxr9T791ZQ=="],
+    "effect": ["effect@4.0.7", "", {}, "sha512-47CiUzNAmeLr40pDT9vKMxxtB8o3bdpZEKU4IUM3fVxsK2GYzPsV7fQoZP0I41A308BZd71nMxqJ0KRh3s9u2g=="],
 
     "ejs": ["ejs@3.1.10", "", { "dependencies": { "jake": "^10.8.5" }, "bin": { "ejs": "bin/cli.js" } }, "sha512-UeJmFfOrAQS8OJWPZ4qtgHyWExa088/MtK5UEyoJGFH67cDEXkZSviOiKRCZ4Xij0zxI3JECgYs3oKx+AizQBA=="],
 

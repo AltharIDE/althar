@@ -78,3 +78,63 @@ export const Typed: Story = {
     await expect(args.onPick).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pull', label: '#1300' }))
   },
 }
+
+/**
+ * A branch's name the remote doesn't have, typed: offered last, to make from the default branch; picked, it is made,
+ * and no place is picked. The foot says what a branch picked here does (ADR-093).
+ */
+export const CreatingABranch: Story = {
+  args: {
+    onCreate: fn(),
+    createFrom: 'main',
+    defaultOpen: true,
+    note: 'A branch picked here is what new tasks work toward too. A task or pull request is only where Run runs.',
+  },
+  play: async ({ args }) => {
+    const page = within(document.body)
+    await userEvent.type(await page.findByRole('combobox', { name: 'Find a task, pull request or branch' }), 'release/2.5')
+    const row = page.getByRole('option', { name: /Create release\/2\.5/ })
+    await expect(row).toHaveTextContent('from main')
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onCreate).toHaveBeenCalledWith('release/2.5', undefined)
+    await expect(args.onPick).not.toHaveBeenCalled()
+  },
+}
+
+/** A name a branch has, or one git wouldn't take, is never offered to make. */
+export const NothingToCreate: Story = {
+  args: { onCreate: fn(), createFrom: 'main', defaultOpen: true },
+  play: async () => {
+    const page = within(document.body)
+    const find = await page.findByRole('combobox', { name: 'Find a task, pull request or branch' })
+    await userEvent.type(find, 'release/2.4')
+    await expect(page.queryByRole('option', { name: /Create/ })).toBeNull()
+    await userEvent.clear(find)
+    await userEvent.type(find, 'two words')
+    await expect(page.queryByRole('option', { name: /Create/ })).toBeNull()
+  },
+}
+
+/** In a project of several repositories, a row for each, with its name. */
+export const CreatingInOneOfSeveral: Story = {
+  args: { onCreate: fn(), createFrom: 'main', repositories: ['api', 'web'], defaultOpen: true },
+  play: async ({ args }) => {
+    const page = within(document.body)
+    await userEvent.type(await page.findByRole('combobox', { name: 'Find a task, pull request or branch' }), 'release/2.5')
+    await expect(page.getAllByRole('option', { name: /Create release\/2\.5/ })).toHaveLength(2)
+    await userEvent.click(page.getAllByRole('option', { name: /Create release\/2\.5/ })[1]!)
+    await expect(args.onCreate).toHaveBeenCalledWith('release/2.5', 'web')
+  },
+}
+
+/** Open on a name the remote doesn't have, the foot saying what a branch picked here does. */
+export const CreateOffered: Story = {
+  args: {
+    onCreate: fn(),
+    createFrom: 'main',
+    defaultOpen: true,
+    defaultQuery: 'release/2.5',
+    note: 'A branch picked here is what new tasks work toward too. A task or pull request is only where Run runs.',
+  },
+}
+export const CreateOfferedDark: Story = { ...CreateOffered, globals: { theme: 'dark' } }

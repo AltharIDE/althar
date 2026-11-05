@@ -1,0 +1,72 @@
+/* the plan's steps, numbered and joined by a line, as the plan card shows them, given room */
+.steps {
+  display: grid;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  column-gap: 14px;
+  padding-bottom: 18px;
+}
+.step:last-child {
+  padding-bottom: 0;
+}
+.step:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  top: 26px;
+  bottom: 4px;
+  left: 10.5px;
+  width: 1px;
+  background: var(--line-2);
+}
+.num {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--line-3);
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: var(--t-2);
+}
+.body {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 2px;
+}
+.name {
+  font-size: 12.5px;
+  font-weight: 560;
+  color: var(--t-1);
+}
+.line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-width: 0;
+}
+.none {
+  font-size: 13px;
+  color: var(--t-3);
+}
+.why {
+  margin: 0;
+  max-width: 52ch;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-3);
+}
+.error {
+  margin: 16px 0 0;
+  font-size: 13px;
+  color: var(--danger);
+}

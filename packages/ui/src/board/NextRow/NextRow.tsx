@@ -14,6 +14,11 @@ import s from './NextRow.module.css'
  * is where it is in line and what it waits for: another task, a free worker,
  * or a call of yours, which is violet like every call. One already under way,
  * waiting to go on, says it continues, and with what: Continues · Review.
+ *
+ * One that can start now, such as a plan held for the person, turns its line
+ * into Start where the person points at it or reaches it by keyboard, in the
+ * line's place and colour; and a menu of what else it can do sits at the
+ * line's end, out of sight until then too, so the lane stays calm at rest.
  */
 
 const glyph = (wait: Wait): IconName => {
@@ -34,12 +39,14 @@ export interface NextRowText {
   task: (task: string) => string
   /** Under way, it goes on: with the step it goes on with, where it has one. */
   continues: (step?: string) => string
+  start: string
 }
 
 export const nextRowText: NextRowText = {
   place: (n) => `${n}.`,
   task: (task) => `Task ${task}`,
   continues: (step) => (step === undefined || step === '' ? 'Continues' : `Continues · ${step}`),
+  start: 'Start',
 }
 
 export type NextRowProps = RootProps<
@@ -63,6 +70,10 @@ export type NextRowProps = RootProps<
     /** One fact, at its foot, as on a card. */
     foot?: ReactNode
     onOpen?: () => void
+    /** Starts it now: its line turns into Start while the row is pointed at or has focus. */
+    onStart?: () => void
+    /** What else it can do, as a menu's trigger, at its line's end: shown while the row is pointed at, has focus, or the menu is open. */
+    menu?: ReactNode
     text?: Partial<NextRowText>
   }
 >
@@ -79,6 +90,8 @@ export function NextRow({
   current,
   foot,
   onOpen,
+  onStart,
+  menu,
   text,
   className,
   ...rest
@@ -96,8 +109,17 @@ export function NextRow({
         {title}
       </CardTitle>
       <span className={cx(s.wait, wait === Wait.You && s.you)}>
-        <Icon name={glyph(wait)} size={11} />
-        {reason}
+        <span className={cx(s.reason, onStart && s.rest)}>
+          <Icon name={glyph(wait)} size={11} />
+          <span className={s.words}>{reason}</span>
+        </span>
+        {onStart && (
+          <button type="button" className={s.start} onClick={onStart}>
+            <Icon name="play" size={11} />
+            {t.start}
+          </button>
+        )}
+        {menu !== undefined && menu !== null && <span className={s.menu}>{menu}</span>}
       </span>
       {foot !== undefined && foot !== null && <div className={b.foot}>{foot}</div>}
     </article>

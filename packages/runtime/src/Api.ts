@@ -118,6 +118,7 @@ import { type InputImage, keepSent } from './sentImages'
 import { anyOf, SignIns } from './SignIns'
 import { describe, listSkills, type SkillsConfig } from './Skills'
 import { expected, words } from './words'
+import { makeBranch } from './newBranch'
 
 /*
  * The runtime's side of the API (`@althar/contracts`): each call runs the
@@ -847,14 +848,14 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      SetRepository: ({ commandId, projectId, repositoryId, role, changeTarget, notNow, setup }) =>
+      SetRepository: ({ commandId, projectId, repositoryId, role, changeTarget, notNow, setup, workToward }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
               const said = yield* envelope(
                 'project.set_repository',
-                { projectId, repositoryId, role, changeTarget, notNow, setup },
+                { projectId, repositoryId, role, changeTarget, notNow, setup, workToward },
                 commandId,
               )
               // Its branches go upstream only where its host says now that the person can push there.
@@ -870,8 +871,23 @@ export const handlers = Api.toLayer(
                 ...(changeTarget === undefined ? {} : { changeTarget }),
                 ...(notNow === undefined ? {} : { notNow }),
                 ...(setup === undefined ? {} : { setup }),
+                ...(workToward === undefined ? {} : { workToward }),
                 commandId: said.commandId,
               })
+            }),
+          ),
+        ),
+      CreateBranch: ({ commandId, projectId, repositoryId, branch }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              yield* envelope('project.create_branch', { projectId, repositoryId, branch }, commandId)
+              return yield* makeBranch({ projectId, repositoryId, branch }).pipe(
+                Effect.provideService(SqlClient.SqlClient, sql),
+                Effect.provideService(Instance, instance),
+                Effect.provideService(Connections, connections),
+              )
             }),
           ),
         ),
@@ -1244,8 +1260,8 @@ export const handlers = Api.toLayer(
         ),
       StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, instance.personId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
-      ChangePlan: ({ commandId, planId, steps, end, worksIn }) =>
-        once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn))),
+      ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
+        once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn, toward))),
       ChangeIssueDraft: ({ commandId, draftId, title, body, labels, priority }) =>
         once(
           commandId,

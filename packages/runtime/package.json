@@ -32,12 +32,12 @@
     "@althar/provider-adapters": "workspace:*",
     "@althar/skills": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.32.2",
-    "effect": "4.0.0-rc.118",
+    "effect": "4.0.7",
     "fflate": "0.8.3"
   },
   "devDependencies": {
     "@althar/testing": "workspace:*",
-    "@effect/vitest": "4.0.0-rc.118",
+    "@effect/vitest": "4.0.7",
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "5.0.5",
     "typescript": "^7.0.2",

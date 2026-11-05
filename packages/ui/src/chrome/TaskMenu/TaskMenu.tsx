@@ -2,10 +2,11 @@ import { type ReactElement, useRef } from 'react'
 
 import { Menu, MenuItem, MenuSegments, MenuSeparator, MenuSwitchItem } from '../../primitives/Menu/Menu'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
+import s from './TaskMenu.module.css'
 
 /*
  * What you can do with a task as a whole, from its bar, by intent. First what
- * moves it on where it stands (start its plan now, mark its draft pull
+ * moves it on where it stands (start its plan now or change who does it, mark its draft pull
  * request ready, skip the review under way, resume it, reopen it) and what
  * you do with it (rename it, open its folder in an editor, attach a pull
  * request it didn't open). Then its own two settings, changed in place:
@@ -39,6 +40,7 @@ export interface TaskMenuText {
   open: (editor: string) => string
   rename: string
   startNow: string
+  changeTeam: string
   markReady: string
   attach: string
   skipReview: string
@@ -59,6 +61,9 @@ export interface TaskMenuText {
   allowAll: string
   allowAllAbout: string
   allowAllHeld: string
+  /** The branch its work goes into (ADR-093): the word before it, and what choosing it does, at the menu's foot. */
+  into: string
+  intoAbout: string
 }
 
 export const taskMenuText: TaskMenuText = {
@@ -67,6 +72,7 @@ export const taskMenuText: TaskMenuText = {
   open: (editor) => `Open in ${editor}`,
   rename: 'Rename',
   startNow: 'Start now',
+  changeTeam: 'Change the team…',
   markReady: 'Mark ready for review',
   attach: 'Attach a pull request…',
   skipReview: 'Skip the review',
@@ -83,9 +89,13 @@ export const taskMenuText: TaskMenuText = {
   allowAll: 'Allow everything on this task',
   allowAllAbout: 'Except what can’t be undone.',
   allowAllHeld: 'On for the project, in its Rules',
+  into: 'Into',
+  intoAbout: 'Its pull request goes into this branch. Copies its name.',
 }
 
 export interface TaskMenuProps {
+  /** The branch its work goes into, where it isn't the default (ADR-093): first, said and copied when chosen. */
+  toward?: string
   /** Renames it, in any state: the consumer turns its title into a field. */
   onRename?: () => void
   /** Opens the task's folder in `editor`, the one its files open in. */
@@ -94,6 +104,8 @@ export interface TaskMenuProps {
   editor?: string
   /** Starts its plan now, while it waits to start. */
   onStartNow?: () => void
+  /** Changes who does its plan's steps, while nothing of it has begun: the consumer opens the team. */
+  onChangeTeam?: () => void
   /** Marks its draft pull request ready for review. */
   onMarkReady?: () => void
   /** Attaches it to an open pull request it didn't open; the consumer asks which. */
@@ -126,13 +138,18 @@ export interface TaskMenuProps {
   text?: Partial<TaskMenuText>
 }
 
+/** Onto the clipboard, where there is one; nothing said where it refuses, as the name is still in the menu. */
+const copy = (text: string) => navigator.clipboard?.writeText(text).catch(() => undefined)
+
 const present = (item: ReactElement | false | undefined | null): item is ReactElement => Boolean(item)
 
 export function TaskMenu({
+  toward,
   onRename,
   onOpen,
   editor,
   onStartNow,
+  onChangeTeam,
   onMarkReady,
   onAttach,
   onSkipReview,
@@ -152,11 +169,25 @@ export function TaskMenu({
   const t = { ...taskMenuText, ...text }
   // Renaming puts the cursor in the title's field: the menu closing doesn't take focus back to its button.
   const renaming = useRef(false)
+  // Where its work goes, where that isn't the default branch: copied, as a branch's name is wanted elsewhere.
+  const into =
+    toward === undefined || toward === ''
+      ? []
+      : [
+          <MenuItem key="into" icon="branch" description={t.intoAbout} onSelect={() => void copy(toward)}>
+            {t.into} <code className={s.branch}>{toward}</code>
+          </MenuItem>,
+        ]
   // What moves it on where it stands, then what you do with it.
   const work = [
     onStartNow && (
       <MenuItem key="start" icon="play" onSelect={onStartNow}>
         {t.startNow}
+      </MenuItem>
+    ),
+    onChangeTeam && (
+      <MenuItem key="team" icon="agents" onSelect={onChangeTeam}>
+        {t.changeTeam}
       </MenuItem>
     ),
     onMarkReady && (
@@ -251,7 +282,7 @@ export function TaskMenu({
       </MenuItem>
     ),
   ].filter(present)
-  const groups = [work, settings, end].filter((group) => group.length > 0)
+  const groups = [into, work, settings, end].filter((group) => group.length > 0)
   if (groups.length === 0) return null
   // Said on the button only where the task goes otherwise than its project.
   const differs = conflicts !== undefined && conflicts.choice !== 'project' && (conflicts.choice === 'on') !== conflicts.project

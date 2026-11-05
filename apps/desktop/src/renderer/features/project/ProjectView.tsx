@@ -1,3 +1,4 @@
+import { EarlierTurns } from '../../shared/EarlierTurns'
 import { useQuery } from '@tanstack/react-query'
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
 
@@ -11,7 +12,6 @@ import {
   Room,
   TaskFace,
   Thread,
-  ThreadDivider,
   ThreadMeasure,
   ThreadShellProvider,
   ThreadSkeleton,
@@ -44,6 +44,7 @@ import { AutomationInThread } from '../automations/AutomationInThread'
 import { AutomationsView } from '../automations/AutomationsView'
 import { useAutomationActions, useAutomations } from '../automations/useAutomations'
 import { BoardView } from '../board/BoardView'
+import { ChangeTeam, teamChangeOf } from '../team/Team'
 import type { SettingsWays } from '../settings/open'
 import { useFolds } from '../board/folds'
 import { useClosePullRequests } from '../board/useClosePullRequests'
@@ -102,9 +103,6 @@ export const text = {
   signIn: 'Sign in again',
   needsAgent: 'No agent is signed in.',
   signOneIn: 'Sign one in',
-  earlier: 'Earlier',
-  showEarlier: 'Show',
-  loadingEarlier: 'Showing…',
   dismiss: 'Dismiss',
   boardFailed: 'Althar couldn’t read the board.',
   olderFailed: 'Althar couldn’t load older tasks.',
@@ -300,7 +298,9 @@ export function ProjectView({
     agentName,
     onStart: (planId) => void model.startPlan(planId),
     onHold: (planId) => void model.holdPlan(planId),
-    onChange: (planId, steps, end, worksIn) => void model.changePlan(planId, steps, end, worksIn),
+    onChange: (planId, steps, end, worksIn, toward) => void model.changePlan(planId, steps, end, worksIn, toward),
+    onCreateBranch: (planId, steps, end, repositoryId, branch) =>
+      void model.changePlanToNewBranch(planId, steps, end, repositoryId, branch),
     onOpen: onTask,
     onStopBackground: (threadId, id) => void model.stopBackground(threadId, id),
     // Every waiting card has the same holders, so only the newest says them.
@@ -443,6 +443,9 @@ export function ProjectView({
     if (room === Room.Board) setRoom(Room.Both)
     requestAnimationFrame(() => voice.inputRef.current?.focus())
   }
+  // The team of a plan up next, open from its row, while it can still change.
+  const [teamFor, setTeamFor] = useState<string | null>(null)
+  const teamTask = teamFor === null || lanes === null ? null : (lanes.next.find((one) => one.taskId === teamFor) ?? null)
   /** The first thing that waits on you, in its task. */
   const openYours = () => {
     const first = lanes === null ? null : firstNeedOf(lanes)
@@ -582,15 +585,13 @@ export function ProjectView({
                         className={s.firstConnections}
                       />
                     )}
-                    {coordinator.earlier && (
-                      <ThreadDivider
-                        icon="up"
-                        action={model.loadingEarlier ? text.loadingEarlier : text.showEarlier}
-                        onAction={() => void model.loadEarlier()}
-                      >
-                        {text.earlier}
-                      </ThreadDivider>
-                    )}
+                    <EarlierTurns
+                      key={coordinator.threadId}
+                      earlier={coordinator.earlier}
+                      load={model.loadEarlier}
+                      version={coordinator.items}
+                      loading={model.loadingEarlier}
+                    />
                     {/* The coordinator only reads: what it hands back is pictures, which open in the lightbox; it writes no documents. */}
                     <ThreadShellProvider value={shown.shell}>
                       <ThreadBlocks
@@ -688,8 +689,18 @@ export function ProjectView({
                     folds={folds}
                     onFoldsChange={setFolds}
                     onTalk={talkToCoordinator}
+                    team={{ projectId, start: (planId) => model.startPlan(planId), change: setTeamFor }}
                     {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                   />
+                  {teamFor !== null && (
+                    <ChangeTeam
+                      key={teamFor}
+                      projectId={projectId}
+                      task={teamTask !== null && teamChangeOf(teamTask) !== null ? teamTask : null}
+                      agents={model.agents}
+                      onClose={() => setTeamFor(null)}
+                    />
+                  )}
                 </>
               ) : board.error === null ? (
                 <PartPending label={text.boardReading} />

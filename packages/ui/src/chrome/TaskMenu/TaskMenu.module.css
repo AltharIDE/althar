@@ -1,0 +1,9 @@
+/* The branch its work goes into, in mono as a branch is, cut short with the menu's width. */
+.branch {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

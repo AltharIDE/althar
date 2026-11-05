@@ -1,0 +1,7 @@
+.sentinel:empty {
+  display: none;
+}
+/* An idle history marker must not give the thread's first turn a leading gap. */
+.sentinel:empty:first-child + * {
+  margin-top: 0;
+}

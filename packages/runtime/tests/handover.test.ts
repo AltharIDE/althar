@@ -6,13 +6,23 @@ import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
-import { dueForHandover, FRESH_ROOM, HANDOVER_AT, handoverRecord, openTasks, RECENT_MESSAGES, roomFor } from '../src/handover'
+import {
+  dueForHandover,
+  FRESH_ROOM,
+  HANDOVER_AT,
+  handoverRecord,
+  openTasks,
+  RECENT_BUDGET,
+  RECENT_MESSAGES,
+  roomFor,
+} from '../src/handover'
 import { editNote, keepNote, NOTES_KEPT, notesOf } from '../src/notes'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
+import { piecesOf } from '../src/threads'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, items, notices, repository, runtime, until } from './support'
 
@@ -446,10 +456,18 @@ describe('handing the coordinator to a fresh session', () => {
       const turns = yield* until(prompts(threadId), (rows) => rows.some((row) => row.providerSessionId === fresh.id))
       const brief = turns.find((row) => row.providerSessionId === fresh.id)?.prompt ?? ''
       const recent = brief.slice(brief.indexOf('The last messages of the conversation'))
-      // Twenty messages so far, of which the last few are carried, word for word.
+      // Twenty messages so far, of which the last few are carried, word for word. The fake's first answer echoes the whole
+      // brief, which counts as as many pieces as it is cut into where it is longer than the record holds.
+      const sql = yield* SqlClient.SqlClient
+      const [first] = yield* sql<{ content: string }>`
+        SELECT content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'agent_message' ORDER BY sequence LIMIT 1`
+      const echoed = (JSON.parse(first?.content ?? '{}') as { text?: string }).text ?? ''
+      const cut = piecesOf(`[you] ${echoed}`, RECENT_BUDGET).length - 1
       assert.match(
         recent,
-        new RegExp(`^The last messages of the conversation, oldest first \\(the ${20 - RECENT_MESSAGES} before them are left out\\):\n`),
+        new RegExp(
+          `^The last messages of the conversation, oldest first \\(the ${20 + cut - RECENT_MESSAGES} before them are left out\\):\n`,
+        ),
       )
       assert.notInclude(recent, '[person] Message 3\n')
       assert.include(recent, '[person] Message 5\n[you] echo: Message 5')
