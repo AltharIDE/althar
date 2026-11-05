@@ -112,7 +112,7 @@ describe('what the lead is given shows where it reads it', () => {
         revisions.map((row) => row.revision),
         [1, 1],
       )
-      // Two said during a turn, and one interrupting: the interrupting one first, then the others in the order they were sent.
+      // Two said during a turn, and one interrupting: the whole burst stays in send order.
       yield* say(created.threadId, 'Look around. [lead:slowly]')
       yield* underWay(created.threadId, 'Look around. [lead:slowly]')
       yield* say(created.threadId, 'And the docs.')
@@ -122,9 +122,9 @@ describe('what the lead is given shows where it reads it', () => {
       const shown = (yield* said(created.threadId)).map(([kind, text]) => [kind, text.split('\n')[0]])
       assert.deepStrictEqual(shown.slice(-5), [
         ['agent_message', 'echo: Look around. [lead:slowly]'],
-        ['user_message', 'Stop: the tests first.'],
         ['user_message', 'And the docs.'],
         ['user_message', 'And the tests.'],
+        ['user_message', 'Stop: the tests first.'],
         ['agent_message', 'echo: The person interrupted your last turn to say:'],
       ])
     }).pipe(Effect.provide(withQueries())),
@@ -166,12 +166,12 @@ describe('what the lead is given shows where it reads it', () => {
         "Passed on to retry-checkout's lead.",
       )
       assert.isEmpty(yield* relayed)
-      // Passed on at once, it stops the turn; the lead reads both after it, that one first, and the thread says them there.
+      // Passed on at once, it stops the turn; the lead reads both after it in send order, and the thread says them there.
       yield* callTool(coordinator, 'message_lead', { task: created.taskId, message: 'Stop: the docs first.', now: true })
       yield* until(turns(created.threadId), (rows) => rows.length >= 3 && rows.every(done))
       assert.deepStrictEqual(yield* relayed, [
-        { source: 'runtime', severity: 'info', title: 'From the coordinator:', description: 'Stop: the docs first.', role: 'relayed' },
         { source: 'runtime', severity: 'info', title: 'From the coordinator:', description: 'Keep it short.', role: 'relayed' },
+        { source: 'runtime', severity: 'info', title: 'From the coordinator:', description: 'Stop: the docs first.', role: 'relayed' },
       ])
       assert.deepStrictEqual(
         (yield* said(created.threadId)).map(([kind, text]) => [kind, text.split('\n')[0]]),
@@ -189,7 +189,7 @@ describe('what the lead is given shows where it reads it', () => {
       assert.lengthOf(new Set(placed.map((turn) => turn.prompt)), 1)
       assert.strictEqual(
         placed[0]?.prompt,
-        'The person interrupted your last turn to say:\n\nThe coordinator passes this on:\n\nStop: the docs first.\n\nTake it into account, and carry on with the task.\n\nThe coordinator passes this on:\n\nKeep it short.',
+        'The person interrupted your last turn to say:\n\nThe coordinator passes this on:\n\nKeep it short.\n\nThe coordinator passes this on:\n\nStop: the docs first.\n\nTake it into account, and carry on with the task.',
       )
       // Windows read them with their role.
       const page = yield* (yield* Queries).thread(created.threadId)

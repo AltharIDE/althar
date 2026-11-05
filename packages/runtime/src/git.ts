@@ -8,6 +8,7 @@ import type { ChangeTarget } from '@althar/domain'
 import { cleanUp } from '@althar/provider-adapters'
 import { Context, Duration, Effect } from 'effect'
 
+import { afterOpen, startup } from './startup'
 import { GitFailed } from './errors'
 import { forkOf } from './forks'
 
@@ -230,23 +231,25 @@ const run = (
   /** What the command reads, for one such as `cat-file --batch-check`. */
   input?: string,
 ): Effect.Effect<string, GitFailed> =>
-  runProcess(timeout, cwd, args, env, input).pipe(
-    Effect.flatMap((result) =>
-      result.error === null
-        ? Effect.succeed(trim ? result.stdout.trim() : result.stdout)
-        : Effect.fail(
-            new GitFailed({
-              args: [...args],
-              cwd,
-              stderr: result.stderr.trim(),
-              ...(result.reason === undefined ? {} : { reason: result.reason }),
-              ...(result.code === undefined ? {} : { code: result.code }),
-              ...(result.signal === undefined ? {} : { signal: result.signal }),
-              ...(result.timedOut === undefined ? {} : { timedOut: result.timedOut, timeout: result.timeout }),
-            }),
-          ),
-    ),
-  )
+  runProcess(timeout, cwd, args, env, input)
+    .pipe(
+      Effect.flatMap((result) =>
+        result.error === null
+          ? Effect.succeed(trim ? result.stdout.trim() : result.stdout)
+          : Effect.fail(
+              new GitFailed({
+                args: [...args],
+                cwd,
+                stderr: result.stderr.trim(),
+                ...(result.reason === undefined ? {} : { reason: result.reason }),
+                ...(result.code === undefined ? {} : { code: result.code }),
+                ...(result.signal === undefined ? {} : { signal: result.signal }),
+                ...(result.timedOut === undefined ? {} : { timedOut: result.timedOut, timeout: result.timeout }),
+              }),
+            ),
+      ),
+    )
+    .pipe((effect) => (args[0] === 'fetch' || args[0] === 'ls-remote' ? afterOpen(startup('repository-fetch', effect)) : effect))
 
 /** Runs a git process with a clock-controlled timeout and stops it when its caller leaves. */
 const runProcess = (

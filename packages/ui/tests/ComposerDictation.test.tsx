@@ -120,3 +120,21 @@ describe('back to a composer', () => {
     expect(queryByText('Written down while you were away')).toBeNull()
   })
 })
+
+describe('interrupt shortcut', () => {
+  it('interrupts from the field only while the stop button is shown', () => {
+    const stop = vi.fn()
+    const props = { placeholder: 'Tell the lead', value: '', onChange: vi.fn(), onSubmit: vi.fn(), busy: true, onStopAgent: stop }
+    const { getByRole, rerender } = render(<Composer {...props} />)
+    const press = () => fireEvent.keyDown(getByRole('textbox'), { key: '.', metaKey: true, ctrlKey: true })
+    press()
+    expect(stop).toHaveBeenCalledTimes(1)
+    fireEvent.keyDown(getByRole('textbox'), { key: '.' })
+    expect(stop).toHaveBeenCalledTimes(1)
+    rerender(<Composer {...props} value="draft" />)
+    press()
+    rerender(<Composer {...props} busy={false} />)
+    press()
+    expect(stop).toHaveBeenCalledTimes(1)
+  })
+})

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChangedFile, ThreadSnapshot } from '@althar/contracts'
 
 import { settingsRoute } from '../src/renderer/features/settings/route'
+import { startRoute } from '../src/renderer/features/start/route'
 import { taskRoute } from '../src/renderer/features/task/route'
 import { keptFrom } from '../src/renderer/features/tabs/tabs'
 import { keys } from '../src/renderer/data/reads'
@@ -127,5 +128,27 @@ describe('opening the settings', () => {
     const agents = settingsAt('/settings/agents')
     await agents.router.load()
     expect(agents.client.listSkills).not.toHaveBeenCalled()
+  })
+})
+
+describe('opening the home', () => {
+  it('draws projects while agent checks have not answered', async () => {
+    const { client } = fakeClient({
+      status: vi.fn(() => new Promise<never>(() => {})),
+      listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })),
+    })
+    const services = servicesFor(client)
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([startRoute]),
+      history: createMemoryHistory({ initialEntries: ['/'] }),
+      context: { client, cache: services.cache },
+    })
+    render(
+      <ServicesProvider value={services}>
+        <RouterProvider router={router} />
+      </ServicesProvider>,
+    )
+    expect(await screen.findByRole('complementary', { name: 'Projects' })).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 })

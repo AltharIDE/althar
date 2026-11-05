@@ -1,3 +1,4 @@
+import { isStartupStage, type StartupStage } from '../startup'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 import { doNotTrack } from '../main/appPreferences'
@@ -25,6 +26,14 @@ import type { WindowAction } from '../renderer/data/services'
 
 ipcRenderer.on('althar:port', (event) => {
   window.postMessage('althar:port', '*', event.ports)
+})
+
+let startupStage: StartupStage = 'data'
+const startupStages = new Set<(stage: StartupStage) => void>()
+ipcRenderer.on('althar:startup-stage', (_event, stage: unknown) => {
+  if (!isStartupStage(stage)) return
+  startupStage = stage
+  for (const listener of startupStages) listener(stage)
 })
 
 /* Whether the pointer is on the island, as the main process watches it. */
@@ -88,6 +97,12 @@ ipcRenderer.on('althar:quit-ask', (_event, question: unknown) => {
 contextBridge.exposeInMainWorld('althar', {
   // Which system it is, for the words the window uses (this Mac, this PC, this computer) and for its own chrome: on macOS the system draws the lights.
   platform: process.platform,
+  startup: (stage: string, duration?: number): void => ipcRenderer.send('althar:startup', stage, duration),
+  onStartupStage: (listener: (stage: StartupStage) => void): (() => void) => {
+    startupStages.add(listener)
+    listener(startupStage)
+    return () => void startupStages.delete(listener)
+  },
   // Usage data stays off while it is set, whatever its switch says; the switch shows so.
   doNotTrack: doNotTrack(process.env),
   window: (action: WindowAction): void => ipcRenderer.send('althar:window', action),

@@ -201,23 +201,21 @@ export const held = (cache: QueryClient, options: Read): Promise<unknown> => cac
 /** A read, whatever it reads, as a place's are listed. */
 export type Read = EnsureQueryDataOptions<any, any, any, any>
 
-/** Every read a project's screen shows: its route waits on those never read, and its tab keeps them all. */
+/** Local reads a project needs before opening. Agents and repository host details fill in afterwards. */
 export const projectReads = (read: Reads, projectId: string): ReadonlyArray<Read> => [
   read.projects(),
   read.coordinator(projectId),
   read.board(projectId),
   read.rules(projectId),
-  read.repositories(projectId),
-  read.status(),
   read.connections(),
   read.automations(projectId),
 ]
 
-/** Every read the home shows: the projects, the agents, and across the projects what waits, what runs and what the loop did. */
-export const homeReads = (read: Reads): ReadonlyArray<Read> => [read.projects(), read.status(), read.home()]
+/** The home reads its local projects, work and calls before opening. Agent checks run afterwards. */
+export const homeReads = (read: Reads): ReadonlyArray<Read> => [read.projects(), read.home()]
 
-/** Every read a task's screen shows first: its thread and the agents. */
-export const threadReads = (read: Reads, threadId: string): ReadonlyArray<Read> => [read.thread(threadId), read.status()]
+/** The task reads its thread before opening; agents fill in afterwards. */
+export const threadReads = (read: Reads, threadId: string): ReadonlyArray<Read> => [read.thread(threadId)]
 
 /** Reads what a place shows that the window doesn't hold, or holds out of date, without waiting: as a tab is pointed at, or the window starts. */
 export const readAhead = (cache: QueryClient, reading: ReadonlyArray<Read>) => {

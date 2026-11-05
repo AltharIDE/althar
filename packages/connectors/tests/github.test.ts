@@ -1,5 +1,5 @@
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect } from 'effect'
+import { Duration, Effect, Logger } from 'effect'
 import { TestClock } from 'effect/testing'
 
 import { checkRunState, issueSearchOf, leftQueueOf, LISTING_KEPT_MS, makeGitHub, searchOf, statusesOf, tail } from '../src/github'
@@ -779,6 +779,132 @@ describe('GitHub as a code host', () => {
         ],
       )
       assert.strictEqual(activity.cursor, '2026-10-01T10:07:00Z')
+    }),
+  )
+
+  for (const permission of ['admin', 'maintain', 'write', 'read', 'none', 'triage']) {
+    it.effect(`checks base repository access for comments and reviews: ${permission}`, () =>
+      Effect.gen(function* () {
+        const author = { id: 9, login: 'maintainer' }
+        const comment = { id: 1, user: author, author_association: 'CONTRIBUTOR', body: 'Fix', updated_at: '2026-10-01T10:00:00Z' }
+        const { host, sent } = github([
+          ['GET', /\/issues\/12\/comments/, { json: [comment, { ...comment, id: 2, author_association: 'NONE' }] }],
+          ['GET', /\/pulls\/12\/comments/, { json: [comment] }],
+          ['GET', /\/pulls\/12\/reviews/, { json: [{ ...comment, state: 'APPROVED', submitted_at: comment.updated_at }] }],
+          ['GET', `${REPO}/collaborators/maintainer/permission`, { json: { permission } }],
+        ])
+        const expected = ['admin', 'maintain', 'write'].includes(permission)
+        const activity = yield* host.activity(repository, 12, null)
+        assert.deepStrictEqual(
+          activity.comments.map((row) => row.member),
+          [expected, expected, expected],
+        )
+        assert.strictEqual(activity.reviews[0]?.member, expected)
+        yield* host.activity(repository, 12, null)
+        assert.lengthOf(
+          sent.filter((call) => call.url.endsWith('/permission')),
+          1,
+        )
+        yield* TestClock.adjust(Duration.minutes(5))
+        yield* host.activity(repository, 12, null)
+        assert.lengthOf(
+          sent.filter((call) => call.url.endsWith('/permission')),
+          2,
+        )
+      }),
+    )
+  }
+
+  for (const status of [401, 403, 404, 429, 500]) {
+    it.effect(`falls back to association when permissions answer ${status}`, () =>
+      Effect.gen(function* () {
+        const { host, sent } = github([
+          [
+            'GET',
+            /\/issues\/12\/comments/,
+            {
+              json: ['CONTRIBUTOR', 'NONE', 'MEMBER', 'OWNER', 'COLLABORATOR'].map((association, id) => ({
+                id,
+                user: { id, login: `person${id}` },
+                author_association: association,
+                updated_at: '2026-10-01T10:00:00Z',
+              })),
+            },
+          ],
+          ['GET', /\/pulls\/12\/comments/, { json: [] }],
+          ['GET', /\/pulls\/12\/reviews/, { json: [] }],
+          ['GET', /\/permission$/, { status }],
+        ])
+        const logged: unknown[] = []
+        const logger = Logger.make(({ message }) => logged.push(message))
+        const activity = yield* host.activity(repository, 12, null).pipe(Effect.provide(Logger.layer([logger])))
+        yield* host.activity(repository, 12, null).pipe(Effect.provide(Logger.layer([logger])))
+        assert.lengthOf(logged, status === 404 ? 0 : 1)
+        assert.deepStrictEqual(
+          activity.comments.map((row) => row.member),
+          [false, false, true, true, true],
+        )
+        assert.lengthOf(
+          sent.filter((call) => call.url.endsWith('/permission')),
+          2,
+        )
+      }),
+    )
+  }
+
+  for (const failure of ['network', 'invalid response']) {
+    it.effect(`keeps activity when permission lookup has ${failure}`, () =>
+      Effect.gen(function* () {
+        const stub = stubFetch([
+          [
+            'GET',
+            /\/issues\/12\/comments/,
+            { json: [{ id: 1, user: { id: 1, login: 'person' }, author_association: 'NONE', updated_at: '2026-10-01T10:00:00Z' }] },
+          ],
+          ['GET', /\/pulls\/12\/comments/, { json: [] }],
+          ['GET', /\/pulls\/12\/reviews/, { json: [] }],
+        ])
+        const host = makeGitHub({
+          apiUrl: API,
+          webUrl: 'https://github.com',
+          credential: Effect.succeed({ kind: 'bearer', token: 'test' }),
+          fetch: (url, init) => {
+            if (url.endsWith('/permission')) {
+              if (failure === 'network') return Promise.reject(new Error('offline'))
+              return Promise.resolve(new Response('{}'))
+            }
+            return stub.fetch(url, init)
+          },
+        })
+        const activity = yield* host.activity(repository, 12, null)
+        assert.lengthOf(activity.comments, 1)
+        assert.isFalse(activity.comments[0]?.member)
+      }),
+    )
+  }
+
+  it.effect('does not query permissions for bots', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([
+        [
+          'GET',
+          /\/issues\/12\/comments/,
+          {
+            json: [
+              { id: 1, user: { id: 1, login: 'ci[bot]' }, author_association: 'NONE', updated_at: '2026-10-01T10:00:00Z' },
+              { id: 2, user: { id: 2, login: 'automation', type: 'Bot' }, author_association: 'NONE', updated_at: '2026-10-01T10:00:00Z' },
+            ],
+          },
+        ],
+        ['GET', /\/pulls\/12\/comments/, { json: [] }],
+        ['GET', /\/pulls\/12\/reviews/, { json: [] }],
+      ])
+      const activity = yield* host.activity(repository, 12, null)
+      assert.deepStrictEqual(
+        activity.comments.map((row) => row.member),
+        [false, false],
+      )
+      assert.lengthOf(sent, 3)
     }),
   )
 

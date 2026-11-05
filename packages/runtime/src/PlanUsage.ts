@@ -1,3 +1,4 @@
+import { afterOpen, startup } from './startup'
 import { homedir } from 'node:os'
 
 import type { AccountUsage, PlanUsage as PlanUsageView, UsageFaultKind } from '@althar/contracts'
@@ -659,10 +660,15 @@ export class PlanUsage extends Context.Service<
           // Asked again, it waits for the reading; opened, it answers with what it has, and tells the view again once the accounts are read.
           now: (refresh = false) =>
             refresh
-              ? Effect.andThen(readAll(true), view)
+              ? afterOpen(startup('plan-usage-read', Effect.andThen(readAll(true), view)))
               : Effect.andThen(
                   Effect.forkIn(
-                    Effect.flatMap(readAll(false), (read) => (read > 0 ? told : Effect.void)),
+                    afterOpen(
+                      startup(
+                        'plan-usage-read',
+                        Effect.flatMap(readAll(false), (read) => (read > 0 ? told : Effect.void)),
+                      ),
+                    ),
                     scope,
                   ),
                   view,
