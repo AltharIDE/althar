@@ -71,7 +71,7 @@ describe('changing a plan’s team before it begins', () => {
     await userEvent.click(rowOf(held.title).getByRole('button', { name: 'Start' }))
     expect(team.start).toHaveBeenCalledWith('plh')
 
-    await userEvent.click(rowOf(held.title).getByRole('button', { name: 'More for this task' }))
+    await userEvent.click(rowOf(held.title).getByRole('button', { name: 'The team' }))
     const menu = await screen.findByRole('menu')
     expect(within(menu).getByRole('menuitem', { name: 'Start' })).toBeTruthy()
     await userEvent.click(within(menu).getByRole('menuitem', { name: 'Change the team…' }))
@@ -85,7 +85,7 @@ describe('changing a plan’s team before it begins', () => {
       fakeClient().client,
     )
     expect(rowOf(queued.title).queryByRole('button', { name: 'Start' })).toBeNull()
-    await userEvent.click(rowOf(queued.title).getByRole('button', { name: 'More for this task' }))
+    await userEvent.click(rowOf(queued.title).getByRole('button', { name: 'The team' }))
     const menu = await screen.findByRole('menu')
     expect(within(menu).queryByRole('menuitem', { name: 'Start' })).toBeNull()
     expect(within(menu).getByRole('menuitem', { name: 'Change the team…' })).toBeTruthy()
@@ -94,7 +94,7 @@ describe('changing a plan’s team before it begins', () => {
   it('leaves a row alone without the board’s team actions', () => {
     withServices(<BoardView lanes={lanesOf(board([held]))} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
     expect(rowOf(held.title).queryByRole('button', { name: 'Start' })).toBeNull()
-    expect(rowOf(held.title).queryByRole('button', { name: 'More for this task' })).toBeNull()
+    expect(rowOf(held.title).queryByRole('button', { name: 'The team' })).toBeNull()
   })
 
   it('changes the plan and starts it, from the dialog, with what the person changed', async () => {
@@ -215,7 +215,7 @@ describe('changing a plan’s team before it begins', () => {
   it('opens a row’s team on the project’s board, and saves it there', async () => {
     const { client } = fakeClient({ getBoard: vi.fn(async () => board([held])) })
     withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'The team' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Change the team…' }))
     const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
     await userEvent.click(dialog.getByRole('button', { name: 'Save' }))

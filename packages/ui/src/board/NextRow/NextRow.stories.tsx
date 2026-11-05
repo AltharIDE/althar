@@ -45,7 +45,7 @@ export const Startable: Story = {
     onStart: fn(),
     menu: (
       <Menu
-        trigger={<IconButton icon="more" size="small" label="More for this task" />}
+        trigger={<IconButton icon="more" size="small" label="The team" />}
         label="This task"
         align="end"
         note="Opus 5.5 · High, GPT-6.1 Sol reviews"

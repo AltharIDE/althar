@@ -25,8 +25,9 @@ import { ENDS, endOf } from '../project/Card'
  */
 
 export const text = {
-  more: 'More for this task',
-  menu: 'This task',
+  /** A row's menu, named apart from the task's own ⋯ in its header. */
+  more: 'The team',
+  menu: 'The team',
   start: 'Start',
   change: 'Change the team…',
   /** The team in a line, at the head of a row's menu: Opus 5.5 · High, GPT-6.1 Sol reviews. */
