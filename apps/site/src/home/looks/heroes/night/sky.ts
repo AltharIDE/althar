@@ -1,20 +1,11 @@
-import { AT } from '../../../hero/journey'
-
 /*
- * Prototype, the Night first screen: the re-entry seen from orbit, drawn on
- * the graphics card. A camera high over the night side looks out at the
- * planet's edge: black space and its stars over the dark curve, towns in gold
- * under faint cloud, the thin cobalt line of the air along the edge. That
- * much never changes, so it is drawn once, into a picture the size of the
- * canvas (the scene), and drawn again only when the size does.
- *
- * Every frame of the journey lays the capsule's fire over it (the frame):
- * a point of light low over the edge that catches, brightens and lengthens
- * as it runs along it; every point of its trail was laid down at a second of
- * the journey, as hot as the capsule was then, and cools and spreads from
- * then on, so the trail is read off the clock whole. At its height it
- * breaks: a flash, pieces thrown on and going out, and the trail left to
- * cool to a faint ember wisp. Then the faintest dawn at the edge's far end.
+ * Prototype, the Night first screen: the planet seen from orbit, at rest,
+ * drawn once on the graphics card (and again only when the size changes). A
+ * camera high over the night side looks out at the planet's edge: black
+ * space and its stars over the dark curve, towns in gold under faint cloud,
+ * the thin cobalt line of the air along the edge. Low along the edge, a faint
+ * ember wisp where the capsule came through, cooling; at the edge's far end,
+ * the faintest dawn.
  */
 
 const DEG = Math.PI / 180
@@ -25,14 +16,15 @@ const HC = 1100
 /** How far below the horizontal the planet's edge stands from the camera. */
 const EDGE_DIP = Math.acos(RP / (RP + HC))
 
-/** Where the capsule's fire runs, as the screen's width has it: where it catches, and how far it runs a second. */
-export interface Path {
-  /** Where it catches, across the frame, 0 to 1. */
+/** Where the capsule came through: along the edge, as the frame's width has it. */
+export interface Wisp {
+  /** Where its fire caught, and where it broke, across the frame, 0 to 1. */
   from: number
-  /** How far it runs in a second, in the frame's widths. */
-  speed: number
+  to: number
   /** How far under the edge's line it runs, in CSS px, at the frame's left and right. */
   under: [number, number]
+  /** How bright what is left of it is, 1 as drawn. */
+  glow: number
 }
 
 export interface Framing {
@@ -44,21 +36,16 @@ export interface Framing {
   edge: number
   /** The camera's height of view, in degrees. */
   fov: number
-  path: Path
-}
-
-export interface Frame {
-  /** The journey's second. */
-  t: number
+  /** How far the planet is turned under the camera: which towns are in view. */
+  turn: number
+  wisp: Wisp
   /** How far the dawn has come up at the edge's far end, 0 to 1. */
   dawn: number
 }
 
 export interface Sky {
-  place: (framing: Framing) => void
-  draw: (frame: Frame) => void
-  /** Lets the scene's picture go: the canvas keeps its last frame. */
-  rest: () => void
+  /** Draws the view for a framing, sizing the canvas to it. */
+  draw: (framing: Framing) => void
   dispose: () => void
 }
 
@@ -66,8 +53,7 @@ const VERTEX = `#version 300 es
 in vec2 p;
 void main() { gl_Position = vec4(p, 0.0, 1.0); }`
 
-/** What both passes share: the camera, the planet, noise. */
-const COMMON = `#version 300 es
+const FRAGMENT = `#version 300 es
 precision highp float;
 out vec4 color;
 
@@ -75,6 +61,13 @@ uniform vec2 uRes;
 uniform float uFocal;
 uniform float uPitch;
 uniform float uDpr;
+uniform float uTurn;
+// The wisp: where it caught and broke (0 to 1 across), how far under the edge it runs at the left and the right (CSS px).
+uniform vec4 uWisp;
+uniform float uWispGlow;
+uniform float uDawn;
+// The sun, under the edge's far end.
+uniform vec3 uSun;
 
 const float RP = ${RP.toFixed(1)};
 const float HC = ${HC.toFixed(1)};
@@ -113,7 +106,7 @@ float noise(vec3 p) {
   return mix(mix(mix(a, b, f.x), mix(c, d, f.x), f.y), mix(mix(e, g, f.x), mix(k, l, f.x), f.y), f.z);
 }
 
-// The camera: its ray through a pixel, and the planet's edge as it sees it.
+// The camera: its ray through a pixel.
 vec3 ray(vec2 frag) {
   vec2 uv = (frag - 0.5 * uRes) / uFocal;
   float sp = sin(uPitch), cp = cos(uPitch);
@@ -132,11 +125,6 @@ float edgeAt(float ux) {
   // The one looking down at the planet, not its mirror over the horizontal.
   return sp + y2 * cp < 0.0 ? y2 : y1;
 }
-`
-
-/** The scene: drawn once for a size. */
-const SCENE = `${COMMON}
-uniform float uTurn;
 
 // An fbm whose finer octaves give way to their mean where a pixel covers more than they can show: \`foot\` is a pixel's size at frequency 1.
 float fbm(vec3 p, int octaves, float foot) {
@@ -220,8 +208,56 @@ vec3 stars(vec3 d, float px) {
 
 vec3 aces(vec3 x) { return clamp(x * (2.51 * x + 0.03) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
 
+// The wisp's way across the screen, in device px from the bottom: at a place across, 0 to 1.
+float wayY(float x) {
+  float ux = (x - 0.5) * uRes.x / uFocal;
+  float under = mix(uWisp.z, uWisp.w, x) * uDpr;
+  return 0.5 * uRes.y + edgeAt(ux) * uFocal - under;
+}
+float blob(float d, float r) { return exp(-d * d / (r * r)); }
+
+// What is left of the capsule's fire: a wisp along the edge, cooled to embers, oldest (and widest, faintest) where it caught.
+vec3 wisp(vec2 frag) {
+  float x = frag.x / uRes.x;
+  float along = (x - uWisp.x) / (uWisp.y - uWisp.x);
+  if (along < -0.05 || along > 1.05) return vec3(0.0);
+  float wy = wayY(x);
+  float slope = (wayY(x + 0.002) - wayY(x - 0.002)) / (0.004 * uRes.x);
+  float dy = (frag.y - wy) / uDpr / sqrt(1.0 + slope * slope);
+  if (abs(dy) > 160.0) return vec3(0.0);
+  float xs = frag.x / uDpr;
+  // How hot it ran here: a glow catching, building to its height, gone where it broke.
+  float e = (0.08 + 0.92 * pow(smoothstep(0.0, 0.86, along), 1.7)) * smoothstep(-0.05, 0.1, along) * (1.0 - smoothstep(0.86, 1.04, along));
+  // How long ago it passed, in seconds: cooling and spreading since.
+  float age = mix(9.5, 4.8, clamp(along, 0.0, 1.0));
+  // Drifted and twisted in the high winds.
+  float twist = (noise(vec3(xs / 70.0, 2.0, 5.0)) - 0.5) * 2.0;
+  float d = dy - (twist * 9.0 - 3.0) * smoothstep(0.0, 0.3, age / 9.5);
+  float w1 = 1.0 + 1.4 * e + 1.2 * sqrt(age);
+  float w2 = 6.0 + 8.0 * e + 6.0 * sqrt(age);
+  float grain = 0.55 + 0.9 * noise(vec3(xs / 9.0, 3.0, 1.0));
+  float warm = exp(-(age - 4.8) / 2.2);
+  vec3 red = vec3(0.8, 0.16, 0.05);
+  vec3 ember = vec3(0.5, 0.17, 0.12);
+  vec3 c = mix(ember, red, warm);
+  return uWispGlow * e * (c * blob(d, w1) * (0.05 + 0.1 * warm) * grain + ember * blob(d, w2) * 0.03);
+}
+
+// The faintest dawn at the edge's far end: the air there lit from under the edge, warm low down and cobalt over it.
+vec3 dawn(vec3 rd, float over) {
+  // How far round the edge from the sun, in radians.
+  float ang = acos(clamp(dot(normalize(vec3(rd.x, 0.0, rd.z)), normalize(vec3(uSun.x, 0.0, uSun.z))), -1.0, 1.0));
+  float line = exp(-pow((over - 3.0) / 3.5, 2.0));
+  float band = exp(-max(over, 0.0) / 22.0) * smoothstep(-6.0, 1.0, over);
+  float high = exp(-max(over, 0.0) / 90.0) * smoothstep(-2.0, 4.0, over);
+  float near = exp(-ang / 0.09);
+  float wide = exp(-ang / 0.28);
+  return uDawn * (vec3(1.0, 0.55, 0.22) * line * near * 0.5 + vec3(1.0, 0.42, 0.16) * band * near * 0.12 + vec3(0.3, 0.32, 1.0) * high * wide * 0.035);
+}
+
 void main() {
-  vec3 rd = ray(gl_FragCoord.xy);
+  vec2 frag = gl_FragCoord.xy;
+  vec3 rd = ray(frag);
   vec3 ro = vec3(0.0, RP + HC, 0.0);
   float px = 1.0 / uFocal;
   vec2 hit = sphere(ro, rd, RP);
@@ -262,152 +298,18 @@ void main() {
   }
 
   col *= 2.4;
-  vec3 mapped = aces(col);
-  float lum = dot(mapped, vec3(0.2126, 0.7152, 0.0722));
-  mapped = mix(mapped, mapped * vec3(1.035, 1.0, 0.94), smoothstep(0.45, 1.0, lum));
-  vec3 srgb = pow(mapped, vec3(1.0 / 2.2));
-  // Dither, so the dark gradients never band.
-  srgb += (hash12(gl_FragCoord.xy) - 0.5) / 255.0;
-  color = vec4(srgb, 1.0);
-}`
+  vec3 lin = aces(col);
+  float lum = dot(lin, vec3(0.2126, 0.7152, 0.0722));
+  lin = mix(lin, lin * vec3(1.035, 1.0, 0.94), smoothstep(0.45, 1.0, lum));
 
-/** The frame: the scene, and over it the fire and the dawn, by the journey's second. */
-const FRAME = `${COMMON}
-uniform sampler2D uScene;
-uniform float uT;
-uniform float uDawn;
-// The fire's way: where it catches (0 to 1 across), how far it runs a second (in widths), how far under the edge it runs at the left and the right (CSS px).
-uniform vec4 uPath;
-// The sun, under the edge's far end.
-uniform vec3 uSun;
-
-const float IGNITE = ${AT.ignite.toFixed(3)};
-const float PEAK = ${AT.peak.toFixed(3)};
-const float BREAK = ${AT.break.toFixed(3)};
-const float BROKEN = ${AT.broken.toFixed(3)};
-
-// journey.ts's heat, as the shader reads it.
-float heatAt(float t) {
-  float building = clamp((t - IGNITE) / (PEAK - IGNITE), 0.0, 1.0);
-  float lit = t < IGNITE ? smoothstep(0.0, IGNITE, t) : 1.0;
-  return (0.06 + 0.94 * pow(building, 1.7)) * lit * (1.0 - smoothstep(BREAK, BROKEN, t));
-}
-
-// The fire's way across the screen, in device px from the bottom left: at a place across, 0 to 1.
-float wayY(float x) {
-  float ux = (x - 0.5) * uRes.x / uFocal;
-  float under = mix(uPath.z, uPath.w, x) * uDpr;
-  return 0.5 * uRes.y + edgeAt(ux) * uFocal - under;
-}
-// Where the capsule is at second t, 0 to 1 across.
-float placeAt(float t) { return uPath.x + uPath.y * (t - IGNITE); }
-
-// A point of light: its core and its glow, by the distance in CSS px.
-float blob(float d, float r) { return exp(-d * d / (r * r)); }
-
-void main() {
-  vec3 scene = texelFetch(uScene, ivec2(gl_FragCoord.xy), 0).rgb;
-  vec3 light = vec3(0.0);
-  vec2 frag = gl_FragCoord.xy;
-  float x = frag.x / uRes.x;
-  // CSS px from here to the fire's way, straight up or down; good enough, the way is gentle.
-  float wy = wayY(x);
-  float slope = (wayY(x + 0.002) - wayY(x - 0.002)) / (0.004 * uRes.x);
-  float dy = (frag.y - wy) / uDpr / sqrt(1.0 + slope * slope);
-  float xs = frag.x / uDpr;
-  float v = uPath.y * uRes.x / uDpr;
-
-  vec3 white = vec3(1.0, 0.9, 0.78);
-  vec3 orange = vec3(1.0, 0.42, 0.12);
-  vec3 red = vec3(0.8, 0.13, 0.04);
-  vec3 ember = vec3(0.5, 0.17, 0.12);
-
-  // The trail: this place was passed at second tau, and has cooled and spread since.
-  float tau = IGNITE + (x - uPath.x) / uPath.y;
-  if (tau >= IGNITE && tau <= min(uT, BROKEN) && abs(dy) < 160.0) {
-    float age = uT - tau;
-    float e = heatAt(tau);
-    // It drifts and twists in the high winds as it ages.
-    float twist = (noise(vec3(xs / 70.0, 2.0, 5.0)) - 0.5) * 2.0;
-    float off = twist * min(age, 6.0) * 1.8 - min(age, 6.0) * 0.6;
-    float d = dy - off;
-    float w1 = 0.8 + 1.6 * e + 1.6 * sqrt(age);
-    float w2 = 3.0 + 9.0 * e + 6.0 * sqrt(age);
-    // The plasma's grain along it, fixed where it was laid down.
-    float grain = 0.6 + 0.8 * noise(vec3(xs / 9.0, tau * 3.0, 1.0));
-    float hot = exp(-age / 0.55);
-    float glow = exp(-age / 1.6);
-    float wisp = exp(-age / 9.0);
-    vec3 c = mix(white, orange, smoothstep(0.0, 0.45, age));
-    c = mix(c, red, smoothstep(0.5, 2.2, age));
-    c = mix(c, ember, smoothstep(2.2, 5.0, age));
-    light += e * c * (blob(d, w1) * (3.2 * hot + 0.7 * glow) * grain + blob(d, w2) * (0.45 * hot + 0.22 * glow));
-    // What is left of it, a faint wisp.
-    light += e * ember * blob(d, w2 * 1.3) * 0.05 * wisp;
-  }
-
-  // The capsule itself, white-hot, and the light it throws round it.
-  if (uT >= 0.0 && uT <= BROKEN) {
-    float h = heatAt(uT);
-    float hx = placeAt(uT);
-    vec2 head = vec2(hx * uRes.x, wayY(hx));
-    vec2 rel = (frag - head) / uDpr;
-    float r = length(rel);
-    float flick = 0.85 + 0.15 * sin(uT * 47.0) * sin(uT * 31.0 + 1.0);
-    // The bow of hot air ahead of it, pressed flat along the way.
-    float bow = exp(-pow(rel.x / (6.0 + 10.0 * h), 2.0) - pow(dy / (2.0 + 3.0 * h), 2.0));
-    light += h * flick * (white * blob(r, 1.4 + 2.2 * h) * 7.0 + mix(orange, white, 0.4) * blob(r, 7.0 + 12.0 * h) * 1.1 + orange * bow * 0.6);
-    light += h * h * orange * blob(r, 90.0 + 60.0 * h) * 0.11;
-  }
-
-  // The break: a flash, and pieces thrown on along the way, going out one by one.
-  if (uT >= BREAK) {
-    float dt = uT - BREAK;
-    float bx = placeAt(BREAK);
-    vec2 at = vec2(bx * uRes.x, wayY(bx));
-    float r = length(frag - at) / uDpr;
-    float flash = exp(-dt * 5.0);
-    light += flash * (white * blob(r, 3.0 + 10.0 * dt) * 9.0 + mix(orange, white, 0.5) * blob(r, 26.0 + 30.0 * dt) * 1.4 + orange * blob(r, 220.0) * 0.14);
-    for (int i = 0; i < 6; i++) {
-      float fi = float(i);
-      vec3 h = hash33(vec3(fi, 4.0, 9.0));
-      float life = 0.35 + 1.1 * h.x;
-      float k = exp(-dt / life) * smoothstep(0.0, 0.04, dt);
-      if (k < 0.002) continue;
-      // Thrown on at the capsule's speed or a little less, slowing in the air.
-      float go = v * (0.55 + 0.45 * h.y) * (1.0 - exp(-dt * 1.4)) / 1.4;
-      float px = bx + go / (uRes.x / uDpr);
-      vec2 p = vec2(px * uRes.x, wayY(px) + (h.z - 0.5) * 26.0 * uDpr * pow(dt, 0.8) - 6.0 * uDpr * dt * dt);
-      vec2 q = (frag - p) / uDpr;
-      // Drawn out along the way by their speed.
-      float len = 2.0 + 14.0 * exp(-dt * 1.4);
-      float s = exp(-pow(max(-q.x, 0.0) / len + max(q.x, 0.0) / 1.5, 2.0) - pow(q.y / 1.2, 2.0));
-      light += k * (mix(white, orange, smoothstep(0.0, 0.8, dt)) * s * 3.0 + orange * blob(length(q), 8.0) * 0.4);
-    }
-  }
-
-  // The faintest dawn at the edge's far end: the air there lit from under the edge, warm low down and cobalt over it.
-  if (uDawn > 0.0) {
-    vec3 rd = ray(frag);
-    vec3 ro = vec3(0.0, RP + HC, 0.0);
-    float tc = -dot(ro, rd);
-    float over = length(ro + rd * max(tc, 0.0)) - RP;
-    // How far round the edge from the sun, in radians.
-    float ang = acos(clamp(dot(normalize(vec3(rd.x, 0.0, rd.z)), normalize(vec3(uSun.x, 0.0, uSun.z))), -1.0, 1.0));
-    float line = exp(-pow((over - 3.0) / 3.5, 2.0));
-    float band = exp(-max(over, 0.0) / 22.0) * smoothstep(-6.0, 1.0, over);
-    float high = exp(-max(over, 0.0) / 90.0) * smoothstep(-2.0, 4.0, over);
-    float near = exp(-ang / 0.09);
-    float wide = exp(-ang / 0.28);
-    light += uDawn * (vec3(1.0, 0.55, 0.22) * line * near * 0.5 + vec3(1.0, 0.42, 0.16) * band * near * 0.12 + vec3(0.3, 0.32, 1.0) * high * wide * 0.035);
-  }
-
-  // The light over the scene, as light: it whitens where it is strong.
+  // The wisp and the dawn over it, as light: it whitens where it is strong.
+  vec3 light = wisp(frag) + dawn(rd, over);
   vec3 add = 1.0 - exp(-light * 1.2);
-  vec3 lin = pow(scene, vec3(2.2));
   lin = 1.0 - (1.0 - lin) * (1.0 - add);
+
   vec3 srgb = pow(lin, vec3(1.0 / 2.2));
-  srgb += (hash12(frag + 17.0) - 0.5) / 255.0 * step(0.0001, dot(light, light));
+  // Dither, so the dark gradients never band.
+  srgb += (hash12(frag) - 0.5) / 255.0;
   color = vec4(srgb, 1.0);
 }`
 
@@ -424,13 +326,13 @@ const aim = (f: Framing, W: number, H: number) => {
   return { focal, pitch, sun }
 }
 
+/** The view on `canvas`, or null without the graphics card; `lost` is called if the browser takes it back. */
 export function makeSky(canvas: HTMLCanvasElement, lost: () => void): Sky | null {
   const gl = canvas.getContext('webgl2', {
     antialias: false,
     alpha: false,
     depth: false,
     stencil: false,
-    powerPreference: 'high-performance',
     premultipliedAlpha: false,
   })
   if (!gl) return null
@@ -445,26 +347,20 @@ export function makeSky(canvas: HTMLCanvasElement, lost: () => void): Sky | null
     }
     return shader
   }
-  const link = (fragment: string) => {
-    const vs = compile(gl.VERTEX_SHADER, VERTEX)
-    const fs = compile(gl.FRAGMENT_SHADER, fragment)
-    const program = gl.createProgram()
-    if (!vs || !fs || !program) return null
-    gl.attachShader(program, vs)
-    gl.attachShader(program, fs)
-    gl.bindAttribLocation(program, 0, 'p')
-    gl.linkProgram(program)
-    gl.deleteShader(vs)
-    gl.deleteShader(fs)
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      console.warn('night:', gl.getProgramInfoLog(program))
-      return null
-    }
-    return program
+  const vs = compile(gl.VERTEX_SHADER, VERTEX)
+  const fs = compile(gl.FRAGMENT_SHADER, FRAGMENT)
+  const program = gl.createProgram()
+  if (!vs || !fs || !program) return null
+  gl.attachShader(program, vs)
+  gl.attachShader(program, fs)
+  gl.bindAttribLocation(program, 0, 'p')
+  gl.linkProgram(program)
+  gl.deleteShader(vs)
+  gl.deleteShader(fs)
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    console.warn('night:', gl.getProgramInfoLog(program))
+    return null
   }
-  const scene = link(SCENE)
-  const frame = link(FRAME)
-  if (!scene || !frame) return null
 
   const buffer = gl.createBuffer()
   gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
@@ -472,62 +368,17 @@ export function makeSky(canvas: HTMLCanvasElement, lost: () => void): Sky | null
   gl.enableVertexAttribArray(0)
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0)
 
-  const u = (program: WebGLProgram, name: string) => gl.getUniformLocation(program, name)
-  const S = {
-    res: u(scene, 'uRes'),
-    focal: u(scene, 'uFocal'),
-    pitch: u(scene, 'uPitch'),
-    dpr: u(scene, 'uDpr'),
-    turn: u(scene, 'uTurn'),
-  }
-  const F = {
-    res: u(frame, 'uRes'),
-    focal: u(frame, 'uFocal'),
-    pitch: u(frame, 'uPitch'),
-    dpr: u(frame, 'uDpr'),
-    scene: u(frame, 'uScene'),
-    t: u(frame, 'uT'),
-    dawn: u(frame, 'uDawn'),
-    path: u(frame, 'uPath'),
-    sun: u(frame, 'uSun'),
-  }
-
-  let framing: Framing | null = null
-  let picture: { texture: WebGLTexture; fbo: WebGLFramebuffer } | null = null
-
-  /** The scene, drawn into a picture of the canvas's size. */
-  const paint = () => {
-    if (!framing || picture) return
-    const W = canvas.width
-    const H = canvas.height
-    const texture = gl.createTexture()
-    const fbo = gl.createFramebuffer()
-    gl.bindTexture(gl.TEXTURE_2D, texture)
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo)
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0)
-    gl.viewport(0, 0, W, H)
-    const { focal, pitch } = aim(framing, W, H)
-    gl.useProgram(scene)
-    gl.uniform2f(S.res, W, H)
-    gl.uniform1f(S.focal, focal)
-    gl.uniform1f(S.pitch, pitch)
-    gl.uniform1f(S.dpr, framing.dpr)
-    gl.uniform1f(S.turn, 0.31)
-    gl.drawArrays(gl.TRIANGLES, 0, 3)
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
-    if (texture && fbo) picture = { texture, fbo }
-  }
-
-  const drop = () => {
-    if (!picture) return
-    gl.deleteFramebuffer(picture.fbo)
-    gl.deleteTexture(picture.texture)
-    picture = null
+  const u = (name: string) => gl.getUniformLocation(program, name)
+  const U = {
+    res: u('uRes'),
+    focal: u('uFocal'),
+    pitch: u('uPitch'),
+    dpr: u('uDpr'),
+    turn: u('uTurn'),
+    wisp: u('uWisp'),
+    wispGlow: u('uWispGlow'),
+    dawn: u('uDawn'),
+    sun: u('uSun'),
   }
 
   const lose = (event: Event) => {
@@ -537,47 +388,33 @@ export function makeSky(canvas: HTMLCanvasElement, lost: () => void): Sky | null
   canvas.addEventListener('webglcontextlost', lose)
 
   return {
-    place: (next) => {
-      framing = next
-      const W = Math.max(1, Math.round(next.width * next.dpr))
-      const H = Math.max(1, Math.round(next.height * next.dpr))
+    draw: (f) => {
+      if (gl.isContextLost()) return
+      const W = Math.max(1, Math.round(f.width * f.dpr))
+      const H = Math.max(1, Math.round(f.height * f.dpr))
       if (canvas.width !== W || canvas.height !== H) {
         canvas.width = W
         canvas.height = H
       }
-      drop()
-    },
-    draw: ({ t, dawn }) => {
-      if (!framing || gl.isContextLost()) return
-      paint()
-      if (!picture) return
-      const W = canvas.width
-      const H = canvas.height
-      const { focal, pitch, sun } = aim(framing, W, H)
+      const { focal, pitch, sun } = aim(f, W, H)
       gl.viewport(0, 0, W, H)
-      gl.useProgram(frame)
-      gl.activeTexture(gl.TEXTURE0)
-      gl.bindTexture(gl.TEXTURE_2D, picture.texture)
-      gl.uniform1i(F.scene, 0)
-      gl.uniform2f(F.res, W, H)
-      gl.uniform1f(F.focal, focal)
-      gl.uniform1f(F.pitch, pitch)
-      gl.uniform1f(F.dpr, framing.dpr)
-      gl.uniform1f(F.t, t)
-      gl.uniform1f(F.dawn, dawn)
-      const p = framing.path
-      gl.uniform4f(F.path, p.from, p.speed, p.under[0], p.under[1])
-      gl.uniform3f(F.sun, ...sun)
+      gl.useProgram(program)
+      gl.uniform2f(U.res, W, H)
+      gl.uniform1f(U.focal, focal)
+      gl.uniform1f(U.pitch, pitch)
+      gl.uniform1f(U.dpr, f.dpr)
+      gl.uniform1f(U.turn, f.turn)
+      gl.uniform4f(U.wisp, f.wisp.from, f.wisp.to, f.wisp.under[0], f.wisp.under[1])
+      gl.uniform1f(U.wispGlow, f.wisp.glow)
+      gl.uniform1f(U.dawn, f.dawn)
+      gl.uniform3f(U.sun, ...sun)
       gl.drawArrays(gl.TRIANGLES, 0, 3)
     },
-    rest: drop,
     dispose: () => {
       canvas.removeEventListener('webglcontextlost', lose)
-      drop()
       gl.deleteBuffer(buffer)
-      gl.deleteProgram(scene)
-      gl.deleteProgram(frame)
-      gl.getExtension('WEBGL_lose_context')?.loseContext()
+      gl.deleteProgram(program)
+      // The context is the canvas's for good: a canvas mounted again (as React's strict mode does) gets the same one back, so it is left alive.
     },
   }
 }
