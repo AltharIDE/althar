@@ -197,6 +197,7 @@ export * from './coordinator/TaskAsk/TaskAsk'
 export * from './coordinator/TaskCard/TaskCard'
 export * from './coordinator/TaskHeld/TaskHeld'
 export * from './coordinator/TaskLaunch/TaskLaunch'
+export * from './coordinator/TeamDialog/TeamDialog'
 export { useStickToBottom } from './lib/stick'
 
 export * from './setup/Accounts/Accounts'

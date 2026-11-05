@@ -5,7 +5,7 @@ import { ChromeButton } from '../ChromeButton/ChromeButton'
 
 /*
  * What you can do with a task as a whole, from its bar, by intent. First what
- * moves it on where it stands (start its plan now, mark its draft pull
+ * moves it on where it stands (start its plan now or change who does it, mark its draft pull
  * request ready, skip the review under way, resume it, reopen it) and what
  * you do with it (rename it, open its folder in an editor, attach a pull
  * request it didn't open). Then its own two settings, changed in place:
@@ -39,6 +39,7 @@ export interface TaskMenuText {
   open: (editor: string) => string
   rename: string
   startNow: string
+  changeTeam: string
   markReady: string
   attach: string
   skipReview: string
@@ -67,6 +68,7 @@ export const taskMenuText: TaskMenuText = {
   open: (editor) => `Open in ${editor}`,
   rename: 'Rename',
   startNow: 'Start now',
+  changeTeam: 'Change the team…',
   markReady: 'Mark ready for review',
   attach: 'Attach a pull request…',
   skipReview: 'Skip the review',
@@ -94,6 +96,8 @@ export interface TaskMenuProps {
   editor?: string
   /** Starts its plan now, while it waits to start. */
   onStartNow?: () => void
+  /** Changes who does its plan's steps, while nothing of it has begun: the consumer opens the team. */
+  onChangeTeam?: () => void
   /** Marks its draft pull request ready for review. */
   onMarkReady?: () => void
   /** Attaches it to an open pull request it didn't open; the consumer asks which. */
@@ -133,6 +137,7 @@ export function TaskMenu({
   onOpen,
   editor,
   onStartNow,
+  onChangeTeam,
   onMarkReady,
   onAttach,
   onSkipReview,
@@ -157,6 +162,11 @@ export function TaskMenu({
     onStartNow && (
       <MenuItem key="start" icon="play" onSelect={onStartNow}>
         {t.startNow}
+      </MenuItem>
+    ),
+    onChangeTeam && (
+      <MenuItem key="team" icon="agents" onSelect={onChangeTeam}>
+        {t.changeTeam}
       </MenuItem>
     ),
     onMarkReady && (
