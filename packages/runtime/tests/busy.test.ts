@@ -1244,6 +1244,11 @@ describe('Agents at once, across a restart', () => {
         const second = yield* started(projectId, 'Second', 'Do it. [lead:finish] [review:pass]')
         yield* waiting(second.taskId)
         assert.isTrue((yield* cardOf(projectId, second.taskId))?.planWaits)
+        // Its branch can still be picked from the remote's, but none made for it: a hold doesn't stop it starting while
+        // the host makes one, toward the old branch (ADR-093).
+        const choices = (yield* cardOf(projectId, second.taskId))?.plan
+        assert.strictEqual(choices?.defaultBranch, 'main')
+        assert.isUndefined(choices?.repositoryId)
         // Changed while it waits: Claude Code leads now, Codex reviews, and it ends on its branch.
         const steps = [
           { key: 'implement' as const, agentId: 'claude-code', model: null, skipped: false },

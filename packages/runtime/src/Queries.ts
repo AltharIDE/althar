@@ -54,6 +54,7 @@ import { ModelFacts } from './ModelFacts'
 import { PlanUsage } from './PlanUsage'
 import { checkoutWaitOf, PlanParameters, planWaits } from './Runs'
 import { localTakenFor } from './local'
+import { towardChoicesOf } from './towards'
 import { Agents, RuntimeConfig } from './Config'
 import { backgroundOf, questionTitle } from './Questions'
 import { Changes, STUCK_AFTER } from './Changes'
@@ -229,6 +230,8 @@ interface ItemRow {
   readonly kind: string
   readonly content: string
   readonly agentId: string | null
+  /** The model its turn ran on, as the turn was given; null where no agent wrote it or it wasn't recorded. */
+  readonly model?: string | null
   readonly inputState: 'queued' | 'delivered' | 'superseded' | 'withdrawn' | null
   readonly disposition: string | null
   /** For a message the person said: some of it was dictated. */
@@ -272,6 +275,20 @@ const askedOf = (payload: unknown, asker: { readonly agentId?: string | null; re
 const decodeAllowedBy = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(AllowedBy)))
 const decodeLimit = Schema.decodeUnknownOption(LimitCall)
 const decodeChoice = Schema.decodeUnknownOption(LimitChoice)
+/**
+ * What a plan card offers to work toward (ADR-093). Only a proposed plan,
+ * which a hold stops, can have a branch made for it: one accepted and waiting
+ * for a free agent could start while the host makes it, toward the old one,
+ * so it is pointed only at a branch the remote has, which changes at once.
+ */
+const choicesOf = (taskId: string, proposed: boolean) =>
+  Effect.map(towardChoicesOf(taskId), (choices) => {
+    if (choices === null) return {}
+    if (proposed) return choices
+    const { repositoryId: _made, ...rest } = choices
+    return rest
+  })
+
 /** One who could take a held step over, as its hold kept it; one that doesn't read is left out. */
 const choiceOf = (value: unknown) => Option.toArray(decodeChoice(value))
 const decodeAlways = Schema.decodeUnknownOption(AttentionRequest.fields.always)
@@ -467,7 +484,13 @@ const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear
  */
 export const itemOf = (row: ItemRow): ThreadItem | undefined => {
   const content = parse(row.content)
-  const base = { id: row.id, sequence: row.sequence, agentId: row.agentId, createdAt: row.createdAt }
+  const base = {
+    id: row.id,
+    sequence: row.sequence,
+    agentId: row.agentId,
+    ...(row.model == null ? {} : { model: row.model }),
+    createdAt: row.createdAt,
+  }
   switch (row.kind) {
     case 'user_message':
       return {
@@ -573,6 +596,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       const findings = field(content, 'findings')
       const round = field(content, 'round')
       const agentId = text(content, 'agentId')
+      const model = text(content, 'model')
       return {
         ...base,
         kind: 'step_result',
@@ -600,6 +624,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           ...descriptionsIn(field(content, 'descriptions')),
           ...keptViewsIn(field(content, 'keptViews')),
           agentId: agentId === '' ? null : agentId,
+          ...(model === '' ? {} : { model }),
         },
       }
     }
@@ -970,7 +995,11 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const rows = yield* sql<ItemRow>`
-            SELECT i.id, i.sequence, i.kind, i.content, s.agent_id, u.state AS input_state, u.disposition, u.dictated, i.created_at,
+            SELECT i.id, i.sequence, i.kind, i.content, s.agent_id,
+              -- The model the item's turn ran on, as its delivery recorded it; a session's own is what it is on now,
+              -- so an earlier round would take the name of the model it moved to. Else the session's, as before.
+              COALESCE(d.model, s.model) AS model,
+              u.state AS input_state, u.disposition, u.dictated, i.created_at,
               (SELECT d.outcome FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
                 WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
                 ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS decision,
@@ -992,6 +1021,7 @@ export class Queries extends Context.Service<
               WHERE thread_id = ${threadId} AND kind = 'question') x
               ON i.kind = 'tool_call' AND x.provider_session_id = i.provider_session_id AND x.tool_call_id = i.tool_call_id
             LEFT JOIN attention_requests q ON i.kind = 'question' AND q.id = json_extract(i.content, '$.attentionId')
+            LEFT JOIN turn_deliveries d ON d.id = i.delivery_id
             LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
             LEFT JOIN user_inputs u ON u.id = i.user_input_id
             WHERE i.thread_id = ${threadId}
@@ -1121,7 +1151,7 @@ export class Queries extends Context.Service<
             state: string
             changeTarget: ChangeTarget | null
           }>`
-            SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS default_branch, b.change_target, w.path, w.branch, w.base_ref, w.base_commit,
+            SELECT b.slug, b.display_name AS name, coalesce(w.toward, b.default_base_ref, w.base_ref) AS default_branch, b.change_target, w.path, w.branch, w.base_ref, w.base_commit,
               w.branched_at IS NOT NULL AS branched, l.path AS root, w.task_id, w.project_id, w.id AS workspace_id, w.state,
               EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL) AS opened
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
@@ -1711,7 +1741,7 @@ export class Queries extends Context.Service<
                           base: string | null
                         }>`
                       SELECT w.path, w.task_id, w.project_id, (SELECT c.head_commit FROM repository_changes c WHERE c.pull_request_url = ${change.url}
-                          ORDER BY c.updated_at DESC LIMIT 1) AS head_commit, coalesce(b.default_base_ref, w.base_ref) AS base
+                          ORDER BY c.updated_at DESC LIMIT 1) AS head_commit, coalesce(w.toward, b.default_base_ref, w.base_ref) AS base
                       FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
                       WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
                       ORDER BY w.id = (SELECT c.workspace_id FROM repository_changes c WHERE c.pull_request_url = ${change.url} LIMIT 1) DESC,
@@ -1988,6 +2018,7 @@ export class Queries extends Context.Service<
             turnWaits: number
             runPlan: string | null
             local: number
+            toward: string | null
           }>`
             SELECT k.project_id, t.id AS thread_id, k.title, k.slug, k.state, k.settled_at, k.kept_at, ${sql.unsafe(SHOWN_BRANCH)},
               p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at, p.proposed_at,
@@ -2012,6 +2043,10 @@ export class Queries extends Context.Service<
               -- Whether it works Local, in its repositories' own checkouts here (ADR-091).
               (SELECT count(*) FROM workspaces lw WHERE lw.task_id = k.id AND lw.device_id = ${instance.deviceId} AND lw.kind = 'checkout')
                 AS local,
+              -- The branch its work goes into, where it isn't the default (ADR-093): its first repository's that says one.
+              (SELECT tw.toward FROM workspaces tw JOIN repository_bindings tb ON tb.id = tw.binding_id
+                WHERE tw.task_id = k.id AND tw.device_id = ${instance.deviceId} AND tw.toward IS NOT NULL
+                ORDER BY tb.created_at, tb.rowid LIMIT 1) AS toward,
               (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') + ${sql.unsafe(issueCardsWaiting('k'))} AS waiting,
               (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' LIMIT 1) AS review,
               (SELECT agent_id FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead,
@@ -2261,8 +2296,8 @@ export class Queries extends Context.Service<
                           worksIn: text(parameters, 'worksIn') === 'checkout' ? ('checkout' as const) : ('worktree' as const),
                           worksInWhy: text(parameters, 'worksInWhy') || null,
                           ...(task.planState === 'proposed' || (yield* planWaits(taskId))
-                            ? { localTaken: yield* localTakenFor(taskId) }
-                            : {}),
+                            ? { localTaken: yield* localTakenFor(taskId), ...(yield* choicesOf(taskId, task.planState === 'proposed')) }
+                            : { toward: task.toward }),
                         }),
                   },
             issue:
@@ -2307,6 +2342,7 @@ export class Queries extends Context.Service<
             startedAt: task.attemptAt ?? task.runAt ?? task.firstSession,
             ...(task.local > 0 ? { local: true } : {}),
             ...(waitsForCheckout === null ? {} : { waitsForCheckout }),
+            ...(task.toward === null ? {} : { toward: task.toward }),
             waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
             ...(task.heldFor === 'agent_unavailable' ? { reconnects: reconnectsOf(task.held) } : {}),
             // A merged task whose lead goes back to work waits its turn too (ADR-034).
@@ -2951,6 +2987,7 @@ export class Queries extends Context.Service<
               worktree: head.worktree,
               ...(card?.local === true ? { local: true } : {}),
               ...(card?.waitsForCheckout == null ? {} : { waitsForCheckout: card.waitsForCheckout }),
+              ...(card?.toward === undefined ? {} : { toward: card.toward }),
               ...(folder === undefined ? {} : { folder }),
               baseRef: head.baseRef,
               phase: card?.phase ?? null,

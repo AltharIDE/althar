@@ -11,6 +11,7 @@ import { git as gitRead, untouched } from '../src/git'
 import { Live } from '../src/Live'
 import { place } from '../src/local'
 import { Overlaps, overlapWords } from '../src/Overlaps'
+import { sharedPaths, type TaskChange } from '../src/otherTasks'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { OTHER_TASKS, Sessions } from '../src/Sessions'
@@ -296,6 +297,32 @@ describe('a heads-up of another task changing the same files', () => {
         [first.taskId, second.taskId],
       )
     }).pipe(Effect.provide(runtime(':memory:', {}, { countdown: Duration.hours(1) })))
+  })
+})
+
+describe('two tasks changing the same file', () => {
+  const change = (toward: string | null): TaskChange => ({
+    several: false,
+    repositories: [
+      {
+        slug: 'api',
+        name: 'api',
+        path: '/w',
+        branch: 'b',
+        startedFrom: toward === null ? 'origin/main' : `origin/${toward}`,
+        toward,
+        from: { kind: 'folder', local: false },
+        readIn: '/w',
+        base: 'abc',
+        head: null,
+        files: [{ path: 'README.md', from: null, status: 'modified', add: 1, del: 0, binary: false, uncommitted: true }],
+      },
+    ],
+  })
+  it('share it only where their work goes into the same branch', () => {
+    assert.deepStrictEqual(sharedPaths(change(null), change(null)), ['README.md'])
+    assert.deepStrictEqual(sharedPaths(change('release/0.8.0'), change('release/0.8.0')), ['README.md'])
+    assert.deepStrictEqual(sharedPaths(change('release/0.8.0'), change(null)), [])
   })
 })
 

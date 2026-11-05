@@ -1,3 +1,4 @@
+import { afterOpen, startup } from './startup'
 import { execFile, type ExecFileException } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
@@ -151,7 +152,7 @@ const run = (
       child.stdin.on('error', () => undefined)
       child.stdin.end(input)
     }),
-  )
+  ).pipe((effect) => (args[0] === 'fetch' || args[0] === 'ls-remote' ? afterOpen(startup('repository-fetch', effect)) : effect))
 
 /** A copy of a worktree's index, in a folder of its own: git may refresh the copy as it reads, never the worktree's own. */
 const indexCopy = (cwd: string, args: ReadonlyArray<string>) =>
@@ -674,3 +675,17 @@ export const remoteOf = (cwd: string, base: string) =>
     if (followed.code === 0 && names.includes(followed.stdout)) return followed.stdout
     return names.includes('origin') ? 'origin' : names.length === 1 ? (names[0] ?? null) : null
   })
+
+/**
+ * A repository's branches on a remote, as this Mac last fetched them, `first`
+ * first and the rest by name: what Work toward and the plan card offer. None
+ * where git can't say.
+ */
+export const remoteBranches = (repository: string, remote: string, first: string) =>
+  git(repository, 'for-each-ref', '--format=%(refname:lstrip=3)', `refs/remotes/${remote}`).pipe(
+    Effect.map((listed) => {
+      const names = [...new Set(listed.split('\n').filter((name) => name !== '' && name !== 'HEAD'))]
+      return [first, ...names.filter((name) => name !== first).toSorted((a, b) => a.localeCompare(b))]
+    }),
+    Effect.orElseSucceed(() => [first]),
+  )

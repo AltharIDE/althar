@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ChangedFile, ThreadSnapshot } from '@althar/contracts'
 
+import { startRoute } from '../src/renderer/features/start/route'
 import { taskRoute } from '../src/renderer/features/task/route'
 import { keptFrom } from '../src/renderer/features/tabs/tabs'
 import { ServicesProvider } from '../src/renderer/data/services'
@@ -101,5 +102,27 @@ describe('a coordinator’s thread', () => {
     )
     expect(await screen.findByText(`project ${project.id} talk`)).toBeTruthy()
     expect(getThread).not.toHaveBeenCalled()
+  })
+})
+
+describe('opening the home', () => {
+  it('draws projects while agent checks have not answered', async () => {
+    const { client } = fakeClient({
+      status: vi.fn(() => new Promise<never>(() => {})),
+      listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })),
+    })
+    const services = servicesFor(client)
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([startRoute]),
+      history: createMemoryHistory({ initialEntries: ['/'] }),
+      context: { client, cache: services.cache },
+    })
+    render(
+      <ServicesProvider value={services}>
+        <RouterProvider router={router} />
+      </ServicesProvider>,
+    )
+    expect(await screen.findByRole('complementary', { name: 'Projects' })).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 })

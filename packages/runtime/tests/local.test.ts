@@ -435,7 +435,8 @@ describe('a Local plan', () => {
     const root = repository()
     return Effect.gen(function* () {
       const projectId = yield* opened(root)
-      const first = yield* started(projectId, 'Dark mode')
+      const firstTitle = 'Dark mode [lead:finish]'
+      const first = yield* started(projectId, firstTitle)
       assert.strictEqual(first.outcome, 'running')
       const second = yield* started(projectId, 'Fix the login')
       assert.strictEqual(second.outcome, 'waiting')
@@ -444,10 +445,12 @@ describe('a Local plan', () => {
         (card) => card?.waitsForCheckout != null,
         'the second task waits for the checkout',
       )
-      assert.deepStrictEqual(waiting?.waitsForCheckout, { why: 'taken', by: { taskId: first.taskId, title: 'Dark mode' } })
+      assert.deepStrictEqual(waiting?.waitsForCheckout, { why: 'taken', by: { taskId: first.taskId, title: firstTitle } })
       assert.deepInclude(waiting, { phase: 'running', local: true, continues: true })
-      assert.deepInclude(waiting?.plan, { worksIn: 'checkout', localTaken: { taskId: first.taskId, title: 'Dark mode' } })
+      assert.deepInclude(waiting?.plan, { worksIn: 'checkout', localTaken: { taskId: first.taskId, title: firstTitle } })
 
+      // Settle a finished task, as merging does: not a step still waiting for its lead's report or a queued reminder.
+      yield* until(cardOf(projectId, first.taskId), (card) => card?.phase === 'ready', 'the first task is ready to settle')
       yield* merged(first.taskId)
       yield* until(spotOf(second.taskId), (spot) => spot.state === 'ready', 'the second task takes the checkout')
       assert.strictEqual(branchOf(root), (yield* spotOf(second.taskId)).branch)

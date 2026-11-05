@@ -1,5 +1,5 @@
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect } from 'effect'
+import { Duration, Effect, Logger } from 'effect'
 import { TestClock } from 'effect/testing'
 
 import { checkRunState, issueSearchOf, leftQueueOf, LISTING_KEPT_MS, makeGitHub, searchOf, statusesOf, tail } from '../src/github'
@@ -557,7 +557,7 @@ describe('GitHub as a code host', () => {
         ],
         [
           'GET',
-          `${REPO}/commits/abc/status`,
+          `${REPO}/commits/abc/status?per_page=100`,
           {
             json: {
               statuses: [
@@ -587,7 +587,7 @@ describe('GitHub as a code host', () => {
           `${REPO}/commits/abc/check-runs?per_page=100`,
           { status: 403, json: { message: 'Resource not accessible by personal access token' } },
         ],
-        ['GET', `${REPO}/commits/abc/status`, { json: { statuses: [{ id: 3, context: 'ci/circle', state: 'success' }] } }],
+        ['GET', `${REPO}/commits/abc/status?per_page=100`, { json: { statuses: [{ id: 3, context: 'ci/circle', state: 'success' }] } }],
       ])
       assert.deepStrictEqual(yield* host.checks(repository, 'abc'), [
         { id: 'status:3', name: 'ci/circle', state: 'passed', url: null, summary: null },
@@ -601,6 +601,30 @@ describe('GitHub as a code host', () => {
         ],
       ])
       assert.strictEqual((yield* Effect.flip(limited.host.checks(repository, 'abc'))).reason, 'rate_limited')
+    }),
+  )
+
+  it.effect('reads every page of a commit’s check runs and commit statuses', () =>
+    Effect.gen(function* () {
+      const run = (id: number) => ({ id, name: `job-${id}`, status: 'completed', conclusion: id === 101 ? 'failure' : 'success' })
+      const status = (id: number) => ({ id, context: `ci/${id}`, state: 'success' })
+      const hundred = <A>(from: number, make: (id: number) => A) => Array.from({ length: 100 }, (_, index) => make(from + index))
+      const { host } = github([
+        ['GET', `${REPO}/commits/abc/check-runs?per_page=100`, { json: { check_runs: hundred(1, run) } }],
+        ['GET', `${REPO}/commits/abc/check-runs?per_page=100&page=2`, { json: { check_runs: [run(101)] } }],
+        ['GET', `${REPO}/commits/abc/status?per_page=100`, { json: { statuses: hundred(1, status) } }],
+        ['GET', `${REPO}/commits/abc/status?per_page=100&page=2`, { json: { statuses: [status(101)] } }],
+      ])
+      const checks = yield* host.checks(repository, 'abc')
+      assert.lengthOf(checks, 202)
+      assert.deepInclude(
+        checks.find((check) => check.id === 'run:101:'),
+        { name: 'job-101', state: 'failed' },
+      )
+      assert.deepInclude(
+        checks.find((check) => check.id === 'status:101'),
+        { name: 'ci/101', state: 'passed' },
+      )
     }),
   )
 
@@ -779,6 +803,172 @@ describe('GitHub as a code host', () => {
         ],
       )
       assert.strictEqual(activity.cursor, '2026-10-01T10:07:00Z')
+    }),
+  )
+
+  it.effect('reads every page of a pull request’s comments, line comments and reviews', () =>
+    Effect.gen(function* () {
+      const at = '2026-10-01T10:00:00Z'
+      const user = { id: 5, login: 'you', type: 'User' }
+      const comment = (id: number) => ({ id, user, author_association: 'MEMBER', body: `Comment ${id}`, updated_at: at })
+      const line = (id: number) => ({ ...comment(id), path: 'src/limit.ts', line: 3 })
+      const review = (id: number) => ({
+        id,
+        user,
+        author_association: 'MEMBER',
+        body: `Review ${id}`,
+        state: 'APPROVED',
+        submitted_at: at,
+      })
+      const hundred = <A>(from: number, make: (id: number) => A) => Array.from({ length: 100 }, (_, index) => make(from + index))
+      const { host, sent } = github([
+        ['GET', `${REPO}/issues/12/comments?per_page=100`, { json: hundred(1, comment) }],
+        ['GET', `${REPO}/issues/12/comments?per_page=100&page=2`, { json: [comment(101)] }],
+        ['GET', `${REPO}/pulls/12/comments?per_page=100`, { json: hundred(201, line) }],
+        ['GET', `${REPO}/pulls/12/comments?per_page=100&page=2`, { json: [line(301)] }],
+        ['GET', `${REPO}/pulls/12/reviews?per_page=100`, { json: hundred(401, review) }],
+        ['GET', `${REPO}/pulls/12/reviews?per_page=100&page=2`, { json: [review(501)] }],
+      ])
+      const activity = yield* host.activity(repository, 12, null)
+      // A hundred on each first page, and the rest of each on its second.
+      assert.lengthOf(activity.comments, 202)
+      assert.lengthOf(activity.reviews, 101)
+      const ids = activity.comments.map((one) => Number(one.id))
+      assert.includeMembers(ids, [101, 301])
+      assert.strictEqual(new Set(ids).size, 202)
+      assert.includeMembers(
+        activity.reviews.map((one) => one.id),
+        ['501'],
+      )
+      // Three lists, each followed to its second page and no further.
+      assert.strictEqual(sent.filter((request) => request.url.includes('page=2')).length, 3)
+      assert.isFalse(sent.some((request) => request.url.includes('page=3')))
+    }),
+  )
+
+  for (const permission of ['admin', 'maintain', 'write', 'read', 'none', 'triage']) {
+    it.effect(`checks base repository access for comments and reviews: ${permission}`, () =>
+      Effect.gen(function* () {
+        const author = { id: 9, login: 'maintainer' }
+        const comment = { id: 1, user: author, author_association: 'CONTRIBUTOR', body: 'Fix', updated_at: '2026-10-01T10:00:00Z' }
+        const { host, sent } = github([
+          ['GET', /\/issues\/12\/comments/, { json: [comment, { ...comment, id: 2, author_association: 'NONE' }] }],
+          ['GET', /\/pulls\/12\/comments/, { json: [comment] }],
+          ['GET', /\/pulls\/12\/reviews/, { json: [{ ...comment, state: 'APPROVED', submitted_at: comment.updated_at }] }],
+          ['GET', `${REPO}/collaborators/maintainer/permission`, { json: { permission } }],
+        ])
+        const expected = ['admin', 'maintain', 'write'].includes(permission)
+        const activity = yield* host.activity(repository, 12, null)
+        assert.deepStrictEqual(
+          activity.comments.map((row) => row.member),
+          [expected, expected, expected],
+        )
+        assert.strictEqual(activity.reviews[0]?.member, expected)
+        yield* host.activity(repository, 12, null)
+        assert.lengthOf(
+          sent.filter((call) => call.url.endsWith('/permission')),
+          1,
+        )
+        yield* TestClock.adjust(Duration.minutes(5))
+        yield* host.activity(repository, 12, null)
+        assert.lengthOf(
+          sent.filter((call) => call.url.endsWith('/permission')),
+          2,
+        )
+      }),
+    )
+  }
+
+  for (const status of [401, 403, 404, 429, 500]) {
+    it.effect(`falls back to association when permissions answer ${status}`, () =>
+      Effect.gen(function* () {
+        const { host, sent } = github([
+          [
+            'GET',
+            /\/issues\/12\/comments/,
+            {
+              json: ['CONTRIBUTOR', 'NONE', 'MEMBER', 'OWNER', 'COLLABORATOR'].map((association, id) => ({
+                id,
+                user: { id, login: `person${id}` },
+                author_association: association,
+                updated_at: '2026-10-01T10:00:00Z',
+              })),
+            },
+          ],
+          ['GET', /\/pulls\/12\/comments/, { json: [] }],
+          ['GET', /\/pulls\/12\/reviews/, { json: [] }],
+          ['GET', /\/permission$/, { status }],
+        ])
+        const logged: unknown[] = []
+        const logger = Logger.make(({ message }) => logged.push(message))
+        const activity = yield* host.activity(repository, 12, null).pipe(Effect.provide(Logger.layer([logger])))
+        yield* host.activity(repository, 12, null).pipe(Effect.provide(Logger.layer([logger])))
+        assert.lengthOf(logged, status === 404 ? 0 : 1)
+        assert.deepStrictEqual(
+          activity.comments.map((row) => row.member),
+          [false, false, true, true, true],
+        )
+        assert.lengthOf(
+          sent.filter((call) => call.url.endsWith('/permission')),
+          2,
+        )
+      }),
+    )
+  }
+
+  for (const failure of ['network', 'invalid response']) {
+    it.effect(`keeps activity when permission lookup has ${failure}`, () =>
+      Effect.gen(function* () {
+        const stub = stubFetch([
+          [
+            'GET',
+            /\/issues\/12\/comments/,
+            { json: [{ id: 1, user: { id: 1, login: 'person' }, author_association: 'NONE', updated_at: '2026-10-01T10:00:00Z' }] },
+          ],
+          ['GET', /\/pulls\/12\/comments/, { json: [] }],
+          ['GET', /\/pulls\/12\/reviews/, { json: [] }],
+        ])
+        const host = makeGitHub({
+          apiUrl: API,
+          webUrl: 'https://github.com',
+          credential: Effect.succeed({ kind: 'bearer', token: 'test' }),
+          fetch: (url, init) => {
+            if (url.endsWith('/permission')) {
+              if (failure === 'network') return Promise.reject(new Error('offline'))
+              return Promise.resolve(new Response('{}'))
+            }
+            return stub.fetch(url, init)
+          },
+        })
+        const activity = yield* host.activity(repository, 12, null)
+        assert.lengthOf(activity.comments, 1)
+        assert.isFalse(activity.comments[0]?.member)
+      }),
+    )
+  }
+
+  it.effect('does not query permissions for bots', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([
+        [
+          'GET',
+          /\/issues\/12\/comments/,
+          {
+            json: [
+              { id: 1, user: { id: 1, login: 'ci[bot]' }, author_association: 'NONE', updated_at: '2026-10-01T10:00:00Z' },
+              { id: 2, user: { id: 2, login: 'automation', type: 'Bot' }, author_association: 'NONE', updated_at: '2026-10-01T10:00:00Z' },
+            ],
+          },
+        ],
+        ['GET', /\/pulls\/12\/comments/, { json: [] }],
+        ['GET', /\/pulls\/12\/reviews/, { json: [] }],
+      ])
+      const activity = yield* host.activity(repository, 12, null)
+      assert.deepStrictEqual(
+        activity.comments.map((row) => row.member),
+        [false, false],
+      )
+      assert.lengthOf(sent, 3)
     }),
   )
 
@@ -1999,7 +2189,7 @@ it.effect('lists a job with its workflow and timing when GitHub reports them', (
           },
         },
       ],
-      ['GET', `${REPO}/commits/main/status`, { json: { statuses: [] } }],
+      ['GET', `${REPO}/commits/main/status?per_page=100`, { json: { statuses: [] } }],
       ['GET', `${REPO}/actions/runs?branch=main&per_page=100`, { json: { workflow_runs: [{ check_suite_id: 4, name: 'harness' }] } }],
     ])
     const [job] = yield* host.checks(repository, 'main')

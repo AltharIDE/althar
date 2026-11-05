@@ -24,17 +24,17 @@ export const MER_231 = {
 export const FROM_231: IssueRefProps = { mark: Brand.Linear, id: 'MER-231', linear: true }
 
 export const PLAN_432: LaunchStep[] = [
-  { id: 'impl', label: 'Implement', agents: [OPUS], why: 'recommended · writes to money records', fixed: 'the lead' },
-  { id: 'dry', label: 'Dry run on a copy', agents: [CODEX], why: 'replays against last night’s snapshot', optional: true },
-  { id: 'review', label: 'Review', agents: [SONNET, GEMINI_PRO], why: 'two labs, combined', optional: true },
-  { id: 'sec', label: 'Security review', agents: [SONNET], why: 'required by your rule for money handling', fixed: 'Meridian’s rule' },
+  { id: 'impl', label: 'Implement', agents: [OPUS], fixed: 'the lead' },
+  { id: 'dry', label: 'Dry run on a copy', agents: [CODEX], optional: true },
+  { id: 'review', label: 'Review', agents: [SONNET, GEMINI_PRO], optional: true },
+  { id: 'sec', label: 'Security review', agents: [SONNET], fixed: 'Meridian’s rule' },
 ]
 
 /** Claude Code is out, so Codex leads, and Security review waits for the reset. */
 export const PLAN_433: LaunchStep[] = [
-  { id: 'impl', label: 'Implement', agents: [CODEX], why: 'Claude Code is out; Codex is free', fixed: 'the lead' },
-  { id: 'review', label: 'Review', agents: [GEMINI_PRO], why: 'a different lab from the lead', optional: true },
-  { id: 'sec', label: 'Security review', agents: [SONNET], why: 'required by your rule', fixed: 'Meridian’s rule', waits: true },
+  { id: 'impl', label: 'Implement', agents: [CODEX], fixed: 'the lead' },
+  { id: 'review', label: 'Review', agents: [GEMINI_PRO], optional: true },
+  { id: 'sec', label: 'Security review', agents: [SONNET], fixed: 'Meridian’s rule', waits: true },
 ]
 
 export const T432 = {

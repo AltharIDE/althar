@@ -79,7 +79,7 @@ export const roomFor = (brief: string, context: { readonly size: number } | null
 
 /** How many of the conversation's last messages a handover brief carries word for word, and in how many characters at most. */
 export const RECENT_MESSAGES = 12
-const RECENT_BUDGET = 16_000
+export const RECENT_BUDGET = 16_000
 
 /** How many open tasks, newest first, a brief describes in full; each past them is a line: where it stands, who leads it, and what waits on the person. */
 const TASKS_IN_FULL = 25

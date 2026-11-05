@@ -91,7 +91,8 @@ export interface TaskModel {
   readonly doing: Doing | null
   /** Earlier items are on their way. */
   readonly loadingEarlier: boolean
-  readonly loadEarlier: () => Promise<void>
+  /** Rejects on failure; quiet keeps automatic reads from opening the global error notice. */
+  readonly loadEarlier: (quiet?: boolean) => Promise<void>
   /** Reads the files the task changed from git, past what the runtime keeps: for the person looking at them, hand edits and all. */
   readonly readFiles: () => void
   /**
@@ -416,19 +417,44 @@ export const useTask = (threadId: string): TaskModel => {
     timer.current ??= setTimeout(readChanged, GATHER)
   })
 
-  const loadEarlier = useCallback(async () => {
-    const first = snapshot?.items[0]
-    if (first === undefined) return
-    setLoadingEarlier(true)
-    try {
-      const page = await client.getThread(threadId, { before: first.sequence, limit: PAGE })
-      setSnapshot((current) => ({ ...current, items: mergeItems(current.items, page.items), earlier: page.earlier }))
-    } catch (failure) {
-      fail(failure)
-    } finally {
-      setLoadingEarlier(false)
-    }
-  }, [client, threadId, snapshot, setSnapshot, fail])
+  const earlierRequest = useRef<{ id: string | undefined; promise: Promise<void> } | null>(null)
+  const loadEarlier = useCallback(
+    (quiet = false) => {
+      if (earlierRequest.current?.id === threadId && earlierRequest.current) {
+        const pending = earlierRequest.current.promise
+        return quiet
+          ? pending
+          : pending.catch((error) => {
+              fail(error)
+              throw error
+            })
+      }
+      const first = snapshot?.items[0]
+      if (first === undefined || !snapshot?.earlier) return Promise.resolve()
+      setLoadingEarlier(true)
+      const request = client
+        .getThread(threadId, { before: first.sequence, limit: PAGE })
+        .then((page) => {
+          setSnapshot((current) =>
+            current.threadId === page.threadId
+              ? { ...current, items: mergeItems(current.items, page.items), earlier: page.earlier }
+              : current,
+          )
+        })
+        .catch((error) => {
+          if (!quiet) fail(error)
+          throw error
+        })
+        .finally(() => {
+          if (earlierRequest.current?.promise !== request) return
+          earlierRequest.current = null
+          setLoadingEarlier(false)
+        })
+      earlierRequest.current = { id: threadId, promise: request }
+      return request
+    },
+    [client, threadId, snapshot, setSnapshot, fail],
+  )
 
   /**
    * Runs an action, says what went wrong if it did, and reads the thread's

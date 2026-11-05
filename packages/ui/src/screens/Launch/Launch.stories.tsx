@@ -39,7 +39,7 @@ function Once({ after, quick }: { after: number; quick: boolean }) {
     return () => clearTimeout(timer)
   }, [after])
   return (
-    <Launch ready={ready} quick={quick}>
+    <Launch ready={ready} quick={quick} waiting="Opening your data…">
       <Behind />
     </Launch>
   )
@@ -74,7 +74,7 @@ type Story = StoryObj<typeof meta>
 export const Opening: Story = { render: () => <Replayable after={600} /> }
 
 /** What is behind takes longer than the mark: the light stands and the mark holds until it is ready. */
-export const Waiting: Story = { render: () => <Replayable after={3600} /> }
+export const Waiting: Story = { render: () => <Replayable after={12000} /> }
 
 /** After a reload, or with motion reduced: the mark set, then a fade. */
 export const Quick: Story = { render: () => <Replayable after={400} quick /> }

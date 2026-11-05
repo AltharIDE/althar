@@ -1,3 +1,4 @@
+import { type StartupStage, startupWords } from '../startup'
 import '@fontsource-variable/inter'
 import '@fontsource-variable/jetbrains-mono'
 import '@althar/ui/styles.css'
@@ -49,9 +50,13 @@ const port = Promise.race([
   receivePort(),
   new Promise<never>((_, reject) => setTimeout(() => reject(new Error(text.noRuntime)), WAIT_PORT)),
 ])
-const opening = port.then((given) => openWindow(given, window.althar))
+window.althar.startup?.('renderer-entry')
+const opening = port.then((given) => {
+  window.althar.startup?.('port-received')
+  return openWindow(given, window.althar)
+})
 
-/** The launch plays in full once a window; a reload, as after the runtime restarted, opens at once. */
+/** The first-run welcome plays the full launch; returning profiles and reloads take its quick opening. */
 const OPENED = 'althar.opened'
 const openedBefore = (() => {
   try {
@@ -89,6 +94,8 @@ function FailedOpen({ reason }: { reason: string }) {
 }
 
 function Window() {
+  const [stage, setStage] = useState<StartupStage>('data')
+  useEffect(() => window.althar.onStartupStage?.(setStage), [])
   const [opened, setOpened] = useState<Awaited<typeof opening> | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
   const [storeFailure, setStoreFailure] = useState<StoreFailure | null>(null)
@@ -106,7 +113,17 @@ function Window() {
   if (storeFailure !== null) return <UpdateStoppedView failure={storeFailure} host={window.althar} />
   if (failed !== null) return <FailedOpen reason={failed} />
   return (
-    <Launch ready={opened !== null} quick={openedBefore}>
+    <Launch
+      ready={opened !== null}
+      waiting={startupWords[stage]}
+      quick={openedBefore || opened?.hasProjects === true}
+      onDone={() =>
+        requestAnimationFrame(() => {
+          window.althar.startup?.('first-screen-drawn')
+          opened?.afterOpen()
+        })
+      }
+    >
       {opened !== null && (
         <ServicesProvider value={opened.services}>
           <RouterProvider router={opened.router} />

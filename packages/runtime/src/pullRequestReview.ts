@@ -46,7 +46,26 @@ export interface ReviewRecord {
   readonly changed: ReadonlyArray<{ readonly what: string; readonly commits: ReadonlyArray<string> }>
   /** What the reviewer raised that the lead kept as it was, and why. */
   readonly kept: ReadonlyArray<{ readonly point: string; readonly why: string | null }>
+  /**
+   * True where the task went on after its rounds of review ran out: the lead's last fixes were never read by a reviewer.
+   * Absent where the last pass read the change as it stands.
+   */
+  readonly unreviewed?: boolean
 }
+
+/** How many times the change was reviewed, in words: once, twice, 3 times. */
+export const timesOf = (passes: number) => (passes <= 1 ? 'once' : passes === 2 ? 'twice' : `${passes} times`)
+
+/** What the task and its pull request say when it went on with fixes no review read, in one line. */
+export const unreviewedLine = (passes: number | null) =>
+  passes === null ? 'The last fixes weren’t reviewed.' : `Reviewed ${timesOf(passes)}; the last fixes weren’t reviewed.`
+
+/**
+ * What the head of the description says when the task went on with fixes no review read: plain, outside the fold, whatever
+ * the person chose to show of the review.
+ */
+export const unreviewedNote = (passes: number | null) =>
+  `> **${unreviewedLine(passes)}** The code changed after the last review pass, and no later pass read it.`
 
 /** How many passes, in words: 1 pass, 3 passes. */
 export const passesOf = (passes: number) => `${passes} ${passes === 1 ? 'pass' : 'passes'}`
@@ -85,6 +104,8 @@ const reviewedLine = (record: ReviewRecord) => `Reviewed by ${record.reviewer} i
  * Null where it can't be set.
  */
 export const sealOf = (style: SealStyle, record: ReviewRecord, origin = SEAL_ORIGIN): string | null => {
+  // A seal says a pass read the change: fixes no pass read have none.
+  if (record.unreviewed === true) return null
   // A seal names the commit it passed: without one that holds what the last pass read, there is none.
   const sha = record.sha
   if (sha === null || !sealable(record) || record.passes < 1 || record.passes > 99) return null
@@ -99,8 +120,9 @@ export const sealOf = (style: SealStyle, record: ReviewRecord, origin = SEAL_ORI
 
 /** The review, folded at the description's end: what changed after it, what was kept, and who built and reviewed the change. */
 export const detailsOf = (record: ReviewRecord) => {
-  const at = record.sha === null ? '' : `, at <code>${short(record.sha)}</code>`
-  const parts = [`<details>\n<summary>${lineOf(reviewedLine(record))}${at}</summary>`]
+  const at = record.sha === null || record.unreviewed === true ? '' : `, at <code>${short(record.sha)}</code>`
+  const summary = record.unreviewed !== true ? reviewedLine(record) : `${reviewedLine(record)}; the last fixes weren’t reviewed`
+  const parts = [`<details>\n<summary>${lineOf(summary)}${at}</summary>`]
   if (record.changed.length > 0)
     parts.push(
       `**What changed after review**\n\n${record.changed
@@ -264,8 +286,26 @@ export const reviewRecordOf = (input: {
       date: (last.endedAt ?? (yield* timestamp)).slice(0, 10),
       changed: changed.map((one) => ({ what: one.what, commits: one.commits.map(asSent) })),
       kept,
+      unreviewed: yield* unreviewedOf(input.runId),
     } satisfies ReviewRecord
   })
+
+/** The settle attempt after which the run went on with fixes no review read, or null. */
+const carriedOn = (runId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [carried] = yield* sql<{ id: string }>`
+      SELECT a.id FROM workflow_executions e JOIN nodes n ON n.execution_id = e.id AND n.node_key = 'settle'
+      JOIN node_attempts a ON a.node_id = n.id
+      WHERE e.run_id = ${runId} AND a.state = 'succeeded' AND json_extract(a.output, '$.unreviewed') = 1 LIMIT 1`
+    return carried?.id ?? null
+  })
+
+/**
+ * Whether the run went on after its rounds of review ran out, the lead's last fixes never read (Runs.ts marks the settle that
+ * made them).
+ */
+export const unreviewedOf = (runId: string) => Effect.map(carriedOn(runId), (carried) => carried !== null)
 
 /**
  * The commit that holds exactly what a review pass read, or null. A pass

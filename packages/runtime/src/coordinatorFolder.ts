@@ -10,6 +10,7 @@ import { RuntimeConfig } from './Config'
 import { GitFailed, NotFound } from './errors'
 import { commitOf, git, gitWithin } from './git'
 import { Instance } from './Instance'
+import { startOf } from './Projects'
 
 /*
  * The coordinator's working folder (docs/architecture/04): an Althar-owned
@@ -205,21 +206,27 @@ export const freshMirror = (repository: string, path: string) =>
   })
 
 /**
- * A copy of `repository` at `path`, detached at its default branch as the
- * remote has it, or offline as this computer has it: made if it isn't there, its
+ * A copy of `repository` at `path`, detached at `base` as `remote` has it
+ * (the remote its tasks start from: a fork's upstream, where its work goes
+ * there), or offline as this computer has it: made if it isn't there, its
  * git folder made again, and anything written in it since thrown away, but
  * what git ignores, such as installed packages. Its fetch comes from `from`,
  * a mirror of the repository's (`freshMirror`), or the repository itself.
  */
-export const freshCopy = (repository: string, path: string, base: string, from = repository) =>
+export const freshCopy = (repository: string, path: string, base: string, from = repository, remote = 'origin') =>
   Effect.gen(function* () {
     // Every branch of the remote, so the copy's `git fetch` has them all as of this turn; offline, the repository as it is.
-    const fetched = yield* gitWithin(60_000, repository, 'fetch', '--quiet', 'origin').pipe(
+    const fetched = yield* gitWithin(60_000, repository, 'fetch', '--quiet', remote).pipe(
       Effect.as(true),
       Effect.orElseSucceed(() => false),
     )
-    const remote = fetched ? yield* commitOf(repository, `origin/${base}`).pipe(Effect.option) : Option.none()
-    yield* copyAt(repository, path, Option.isSome(remote) ? remote.value : yield* commitOf(repository, base), from)
+    const there = (ref: string) => commitOf(repository, ref).pipe(Effect.option)
+    const fresh = fetched ? yield* there(`refs/remotes/${remote}/${base}`) : Option.none()
+    // Offline, the branch here, else the remote's as last fetched: one only upstream has no branch here until a task makes it.
+    const commit = Option.isSome(fresh)
+      ? fresh.value
+      : yield* commitOf(repository, `refs/heads/${base}`).pipe(Effect.catch(() => commitOf(repository, `refs/remotes/${remote}/${base}`)))
+    yield* copyAt(repository, path, commit, from)
   })
 
 /**
@@ -257,8 +264,17 @@ export const coordinatorFolder = (projectId: string) =>
     const config = yield* RuntimeConfig
     const [project] = yield* sql<{ slug: string }>`SELECT slug FROM projects WHERE id = ${projectId}`
     if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
-    const bindings = yield* sql<{ slug: string; name: string; base: string | null; within: string | null; repository: string }>`
-      SELECT b.slug, b.display_name AS name, b.default_base_ref AS base, b.folder AS within, l.path AS repository
+    const bindings = yield* sql<{
+      slug: string
+      name: string
+      base: string | null
+      changeTarget: string | null
+      workToward: string | null
+      within: string | null
+      repository: string
+    }>`
+      SELECT b.slug, b.display_name AS name, b.default_base_ref AS base, b.change_target, b.work_toward, b.folder AS within,
+        l.path AS repository
       FROM repository_bindings b
       JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
       WHERE b.project_id = ${projectId} AND b.detached_at IS NULL
@@ -271,9 +287,10 @@ export const coordinatorFolder = (projectId: string) =>
     mkdirSync(mirrors, { recursive: true })
     const repositories = yield* Effect.forEach(bindings, (binding) =>
       Effect.gen(function* () {
-        const base = binding.base ?? 'main'
+        // Where its tasks start (ADR-093): the branch the project works toward, on a fork's upstream where its work goes there.
+        const { remote, base } = yield* startOf({ ...binding, toward: binding.workToward })
         const path = join(folder, binding.slug)
-        yield* freshCopy(binding.repository, path, base, join(mirrors, `${binding.slug}.git`))
+        yield* freshCopy(binding.repository, path, base, join(mirrors, `${binding.slug}.git`), remote)
         return {
           name: binding.name,
           path: binding.within === null ? path : join(path, binding.within),

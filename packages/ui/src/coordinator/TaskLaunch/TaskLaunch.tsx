@@ -14,6 +14,7 @@ import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { Menu, MenuRadioGroup, MenuRadioItem } from '../../primitives/Menu/Menu'
 import { Segmented } from '../../primitives/Segmented/Segmented'
+import { BranchSelect } from '../../primitives/BranchSelect/BranchSelect'
 import { IssueRef, type IssueRefProps } from '../Issue/Issue'
 import s from './TaskLaunch.module.css'
 import { Rhythm } from '../../lib/rhythm'
@@ -34,8 +35,6 @@ export interface LaunchStep {
   label: string
   /** Who runs it: one agent, or several for a parallel review. */
   agents: readonly ModelInfo[]
-  /** Why it is in the plan. */
-  why?: string
   /** It can be skipped. */
   optional?: boolean
   /** Why it cannot be changed, in place of Skip: required by your rule. */
@@ -66,10 +65,8 @@ export interface TaskLaunchText {
   /** Each ending: in the menu, its note there, and its name as the last step of the running task. */
   end: Record<TaskEnd, ChoiceWords & { short: string }>
   endLabel: string
-  endByRule: (project: string) => string
   /** The note of the ending your rule picks, in the menu. */
   ruleNote: (project: string, note: string) => string
-  endThisTask: string
   alsoWaits: (steps: string, until: string) => string
   held: string
   startsIn: (seconds: number) => string
@@ -90,6 +87,10 @@ export interface TaskLaunchText {
   worktreeNote: string
   /** Planned in a worktree while another task works Local: why, where the coordinator didn't say. */
   localTaken: (taken: string) => string
+  /** The branch its work goes into (ADR-093): the picker's name, the word before it after how the work ends, and a line under its list. */
+  toward: string
+  into: (end: TaskEnd) => string
+  towardNote: string
 }
 
 export const taskLaunchText: TaskLaunchText = {
@@ -106,8 +107,6 @@ export const taskLaunchText: TaskLaunchText = {
   waits: (name, until) => `${name} is out; waits until ${until}`,
   end: taskEndText,
   endLabel: 'When the work is done',
-  endByRule: (project) => `by ${project}’s rule`,
-  endThisTask: 'this task only',
   ruleNote: (project, note) => `${project}’s rule. ${note}`,
   alsoWaits: (steps, until) => `${steps} waits until ${until}`,
   held: 'Held. Starts when you say',
@@ -124,11 +123,14 @@ export const taskLaunchText: TaskLaunchText = {
   localNote: (taken) => (taken === null ? 'One task at a time; your own edits share it.' : `Waits for ${taken}.`),
   worktreeNote: 'Side by side with other tasks. Builds from cold.',
   localTaken: (taken) => `Local is taken by ${taken}.`,
+  toward: 'Works toward',
+  into: (end) => (end === TaskEnd.PushOnly ? 'toward' : 'into'),
+  towardNote: 'This task only. The project’s branch is beside Run.',
 }
 
 const ENDS = [TaskEnd.DraftPr, TaskEnd.ReadyPr, TaskEnd.PushOnly] as const
 
-/** Why a step is in the plan, or why it is not running as planned. */
+/** Why a step is not running as planned: skipped, or waiting for a runtime to reset. */
 function Why({ step, limited, t }: { step: LaunchStep; limited?: { name: string; until: string }; t: TaskLaunchText }) {
   if (step.skipped) return t.skipped
   if (step.waits && limited)
@@ -138,7 +140,7 @@ function Why({ step, limited, t }: { step: LaunchStep; limited?: { name: string;
         {t.waits(limited.name, limited.until)}
       </>
     )
-  return step.why ?? null
+  return null
 }
 
 /** Under the choice of where it works: why, where the coordinator said or Local is taken, then what the choice gives up. */
@@ -206,6 +208,20 @@ export interface TaskLaunchProps {
   worksInWhy?: string
   /** The task working Local now, by its title, which it would wait for there. */
   localTaken?: string
+  /**
+   * The branch its work goes into (ADR-093): it starts from it, and its pull
+   * request goes into it. In the last row, after how the work ends, a list
+   * of the remote's `branches`, changeable until its first step starts; none
+   * with only one.
+   */
+  toward?: string
+  /** The repository's default branch, which the list says so of. */
+  defaultBranch?: string
+  /** The remote's branches, the default first. */
+  branches?: readonly string[]
+  onTowardChange?: (branch: string) => void
+  /** Makes a branch its list doesn't have, from the default branch, for it to work toward; without it, only one listed. */
+  onCreateBranch?: (branch: string) => void
   /** Start it: now, or when the time runs out. With what it will do when done. */
   onStart: (steps: readonly LaunchStep[], end: TaskEnd) => void
   text?: Partial<TaskLaunchText>
@@ -237,6 +253,11 @@ export function TaskLaunch({
   onWorksInChange,
   worksInWhy,
   localTaken,
+  toward,
+  defaultBranch,
+  branches = [],
+  onTowardChange,
+  onCreateBranch,
   onStart,
   text,
 }: TaskLaunchProps) {
@@ -281,6 +302,30 @@ export function TaskLaunch({
   })()
   const share = Math.min(1, left / wait)
 
+  // A choice of branch where the remote has more than one, where one can be made, or where it already goes elsewhere.
+  const picks =
+    onTowardChange !== undefined &&
+    (branches.length > 1 || (onCreateBranch !== undefined && branches.length > 0) || (toward !== undefined && toward !== defaultBranch))
+  // The branch, beside how the work ends, looking as that choice does: Open a draft PR into release/0.8.0.
+  const branchPick = picks && (
+    <BranchSelect
+      label={t.toward}
+      value={toward ?? defaultBranch ?? branches[0] ?? ''}
+      branches={branches}
+      {...(defaultBranch === undefined ? {} : { defaultBranch })}
+      onChange={(next) => onTowardChange?.(next)}
+      {...(onCreateBranch === undefined ? {} : { onCreate: onCreateBranch })}
+      variant="bare"
+      className={cx(s.pick, s.branch)}
+      {...(t.towardNote === '' ? {} : { note: t.towardNote })}
+    />
+  )
+  const branch = picks && (
+    <span className={s.towardIn}>
+      <span className={s.into}>{t.into(end)}</span>
+      {branchPick}
+    </span>
+  )
   const set = (id: string, patch: Partial<LaunchStep>) => setSteps(steps.map((st) => (st.id === id ? { ...st, ...patch } : st)))
   const waiting = steps.filter((st) => st.waits && !st.skipped)
 
@@ -298,21 +343,19 @@ export function TaskLaunch({
         </span>
         <p className={s.title}>{title}</p>
         {worksIn !== undefined && (
-          <>
-            <div className={s.where}>
-              <Segmented<WorksIn>
-                label={t.worksIn}
-                value={worksIn}
-                onChange={(next) => onWorksInChange?.(next)}
-                options={[
-                  { value: WorksIn.Local, label: t.local },
-                  { value: WorksIn.Worktree, label: t.worktree },
-                ]}
-              />
-            </div>
-            <p className={s.whereLine}>{whereLine(worksIn, worksInWhy, localTaken ?? null, t)}</p>
-          </>
+          <div className={s.where}>
+            <Segmented<WorksIn>
+              label={t.worksIn}
+              value={worksIn}
+              onChange={(next) => onWorksInChange?.(next)}
+              options={[
+                { value: WorksIn.Local, label: t.local },
+                { value: WorksIn.Worktree, label: t.worktree },
+              ]}
+            />
+          </div>
         )}
+        {worksIn !== undefined && <p className={s.whereLine}>{whereLine(worksIn, worksInWhy, localTaken ?? null, t)}</p>}
       </div>
       <ol className={s.steps}>
         {steps.map((st, i) => (
@@ -363,7 +406,14 @@ export function TaskLaunch({
                 ))}
               </MenuRadioGroup>
             </Menu>
-            <span className={s.why}>{end === ruleEnd ? t.endByRule(project) : t.endThisTask}</span>
+            {branch}
+          </li>
+        )}
+        {hideEnd && picks && (
+          <li className={cx(s.step, s.end, s.toward)}>
+            <span className={s.n} />
+            <span className={s.into}>{t.toward}</span>
+            {branchPick}
           </li>
         )}
       </ol>

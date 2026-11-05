@@ -40,7 +40,7 @@ export const settingsRoute = createRoute({
   pendingComponent: PagePending,
   loader: ({ context: { client, cache } }) => {
     const read = reads(client)
-    return readFirst(cache.fetchQuery(read.status()), cache.fetchQuery(read.settings()), cache.fetchQuery(read.connections()))
+    return readFirst(cache.fetchQuery(read.settings()), cache.fetchQuery(read.connections()))
   },
   validateSearch: settingsSearchOf,
 })

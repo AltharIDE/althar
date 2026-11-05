@@ -1685,7 +1685,7 @@ describe('a project, reaching outside', () => {
     expect(screen.queryByText(/rule/)).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: /Open a draft PR/ }))
     await userEvent.click(await screen.findByRole('menuitemradio', { name: /Push the branch only/ }))
-    await waitFor(() => expect(screen.getByText('this task only')).toBeTruthy())
+    expect(screen.queryByText('this task only')).toBeNull()
     await waitFor(() => expect(client.changePlan).toHaveBeenLastCalledWith('pln1', expect.any(Array), 'none'))
   })
 })

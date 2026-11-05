@@ -14,6 +14,7 @@ import { Changes } from '../src/Changes'
 import { Connections } from '../src/Connections'
 import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
+import { setPlansAndReviews } from '../src/plansAndReviews'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { type PlanStep, Runs } from '../src/Runs'
@@ -416,6 +417,7 @@ describe('a task’s course', () => {
     Effect.gen(function* () {
       const plans = yield* Plans
       const tasks = yield* Tasks
+      yield* setPlansAndReviews({ roundsOut: 'ask' })
       // Out of rounds with settled changes no review has seen: the run waits on the person with no step under way.
       const { task, planId, actor } = yield* planned('Tighten the types [lead:finish] [review:always]', [implement(), reviewBy()])
       yield* plans.start(planId, actor)

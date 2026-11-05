@@ -15,7 +15,7 @@
   Plain promises give none of these by default.
 - **Decision:**
   - Runtime-side code is written with [Effect](https://effect.website), version
-    4, pinned to an exact release candidate and upgraded deliberately. Every
+    4, pinned to an exact stable release and upgraded deliberately. Every
     Effect package in the repository is on the same version.
   - Where: `domain` (schemas for IDs, entities, commands and events; the code
     stays pure), `persistence-sqlite` (Effect's SQL client and migrator on
@@ -39,15 +39,18 @@
 - **Alternatives considered:**
   - Plain promises with small helpers: each requirement above becomes custom
     code, written once per place it is needed.
-  - Effect 3, the stable line: its SQLite driver needs `better-sqlite3`, a
-    native module rebuilt for Electron, and moving to 4 later would touch
-    every file.
+  - Effect 3, the stable line when this was decided: its SQLite driver needs
+    `better-sqlite3`, a native module rebuilt for Electron, and moving to 4
+    later would touch every file.
 - **Trade-off:**
   - Effect is a style of its own, which contributors must learn.
   - AI agents know Effect 3 better and will sometimes write it; type checks
     catch this, and agents are pointed at the version 4 documentation.
-  - A release candidate may still have bugs.
+  - Some of what we use is marked `@stability unstable` and can change in a
+    minor release: Effect's SQL client and migrator (`effect/sql`,
+    `@effect/sql-sqlite-node`), RPC (`effect/rpc`), workers
+    (`effect/workers`), `Crypto` and `@effect/vitest`. Read a minor
+    release's notes for these before moving to it.
   - Effect 4's core has no dependencies of its own, but it is one large one.
-- **Revisit when:** Effect 4 is stable (move to the stable release); the
-  style slows contributors down more than it saves; a release candidate
-  regresses something we rely on.
+- **Revisit when:** the style slows contributors down more than it saves; a
+  release regresses something we rely on.

@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError, type CoordinatorSnapshot, type ThreadItem } from '@althar/contracts'
 import { Room } from '@althar/ui'
@@ -288,9 +288,9 @@ describe('the Talk room', () => {
     expect(screen.getByText('The call has no retry. I planned a task.')).toBeTruthy()
     expect(screen.queryByText('checkout.ts')).toBeNull()
     expect(screen.getByRole('button', { name: /^Worked for/ })).toBeTruthy()
-    // A running task's card says where it is; a planned one shows its plan, and why the coordinator chose its lead.
+    // A running task's card says where it is; a planned one shows its plan, with no reason beside the lead.
     expect(screen.getByText('Reviewing')).toBeTruthy()
-    expect(screen.getByText('It knows the code.')).toBeTruthy()
+    expect(screen.queryByText('It knows the code.')).toBeNull()
     expect(screen.getByText(/^Starts in \d+s$/)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /Open task/ }))
     expect(onTask).toHaveBeenCalledWith('th2')
@@ -487,7 +487,7 @@ describe('the Talk room', () => {
     // One step, which reviews, with why; nothing to pick for when it is done.
     const lead = await screen.findByRole('button', { name: /^Lead for this task: / })
     expect(screen.getByText('Review')).toBeTruthy()
-    expect(screen.getByText('Strong at reading.')).toBeTruthy()
+    expect(screen.queryByText('Strong at reading.')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Skip' })).toBeNull()
     expect(screen.queryByText('When the work is done')).toBeNull()
     // Codex can't be held to reading only, so it isn't offered.
@@ -507,6 +507,47 @@ describe('the Talk room', () => {
     expect(client.holdPlan).toHaveBeenCalledWith('pln1')
     await userEvent.click(screen.getByRole('button', { name: 'Start now' }))
     expect(client.startPlan).toHaveBeenCalledWith('pln1')
+  })
+
+  it('points a plan at another branch from its last row, or at one it makes from the default branch (ADR-093)', async () => {
+    const planned = card({
+      plan: { ...card().plan!, end: 'draft', defaultBranch: 'main', branches: ['main', 'release/0.8.0'], repositoryId: 'repo_api' },
+    })
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(planned)] })) })
+    withServices(<Project room={Room.Talk} />, client)
+    // After how the work ends: Open a draft PR into main.
+    await userEvent.click(await screen.findByRole('button', { name: 'Works toward: main' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'release/0.8.0' }))
+    await waitFor(() => expect(client.changePlan).toHaveBeenLastCalledWith('pln1', expect.anything(), 'draft', undefined, 'release/0.8.0'))
+    // One it doesn't have is made first, then the plan goes toward it.
+    await userEvent.click(await screen.findByRole('button', { name: 'Works toward: release/0.8.0' }))
+    await userEvent.type(screen.getByRole('combobox', { name: 'Find or name a branch' }), 'hotfix/0.8.1{Enter}')
+    expect(await screen.findByRole('button', { name: 'Works toward: hotfix/0.8.1' })).toBeTruthy()
+    await waitFor(() => expect(client.changePlan).toHaveBeenLastCalledWith('pln1', expect.anything(), 'draft', undefined, 'hotfix/0.8.1'))
+    expect(client.createBranch).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: 'repo_api', branch: 'hotfix/0.8.1' })
+    // Held before the host is asked, so its countdown can't start it toward the old branch meanwhile.
+    expect(client.holdPlan).toHaveBeenCalledWith('pln1')
+    expect(vi.mocked(client.holdPlan).mock.invocationCallOrder[0]!).toBeLessThan(
+      vi.mocked(client.createBranch).mock.invocationCallOrder[0]!,
+    )
+  })
+
+  it('leaves a plan held, toward its old branch, where the host refuses the branch to make', async () => {
+    const planned = card({
+      plan: { ...card().plan!, end: 'draft', defaultBranch: 'main', branches: ['main'], repositoryId: 'repo_api' },
+    })
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(planned)] })),
+      createBranch: vi.fn(async () => {
+        throw new ApiError({ reason: 'BranchRefused', message: 'meridian/api didn’t take the new branch: protected' })
+      }),
+    })
+    withServices(<Project room={Room.Talk} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Works toward: main' }))
+    await userEvent.type(screen.getByRole('combobox', { name: 'Find or name a branch' }), 'release/0.9.0{Enter}')
+    expect(await screen.findByText(/didn’t take the new branch: protected/)).toBeTruthy()
+    expect(client.holdPlan).toHaveBeenCalledWith('pln1')
+    expect(client.changePlan).not.toHaveBeenCalled()
   })
 
   it('lets the person change a started plan while its first step waits for a free agent, saying what it waits for', async () => {
@@ -938,8 +979,19 @@ describe('the Talk room', () => {
           : coordinatorSnapshot({ items: [items.says('The oldest.')], earlier: false }),
       ),
     })
+    if (vi.isMockFunction(window.getComputedStyle)) vi.mocked(window.getComputedStyle).mockRestore()
+    const computed = window.getComputedStyle
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
+      const style = computed(element)
+      Object.defineProperty(style, 'overflowY', {
+        value: element.classList.contains('scroll') || element.getAttribute('class')?.includes('scroll_') ? 'auto' : 'visible',
+        configurable: true,
+      })
+      return style
+    })
     withServices(<Project room={Room.Talk} />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Show' }))
+    await screen.findByText('The newest.')
+    scrollEarlier()
     expect(await screen.findByText('The oldest.')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Show' })).toBeNull()
   })
@@ -981,11 +1033,21 @@ describe('what can go wrong', () => {
       ),
       holdPlan: vi.fn(async () => Promise.reject(new ApiError({ reason: 'NotFound', message: "That plan isn't there any more." }))),
     })
+    if (vi.isMockFunction(window.getComputedStyle)) vi.mocked(window.getComputedStyle).mockRestore()
+    const computed = window.getComputedStyle
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
+      const style = computed(element)
+      Object.defineProperty(style, 'overflowY', {
+        value: element.classList.contains('scroll') || element.getAttribute('class')?.includes('scroll_') ? 'auto' : 'visible',
+        configurable: true,
+      })
+      return style
+    })
     withServices(<Project room={Room.Talk} />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Hold' }))
     expect(await screen.findByText("That plan isn't there any more.")).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Show' }))
-    expect(await screen.findByText('Gone.')).toBeTruthy()
+    scrollEarlier()
+    expect(await screen.findByRole('button', { name: 'Retry' })).toBeTruthy()
   })
 })
 
@@ -1000,4 +1062,16 @@ describe('a send to the coordinator that fails', () => {
     expect(screen.queryByText('Plan it', { selector: 'p' })).toBeNull()
     expect((box as HTMLTextAreaElement).value).toBe('Plan it')
   })
+})
+
+function scrollEarlier() {
+  const thread = document.querySelector<HTMLElement>('section[data-arrivals]')!
+  let box = thread.parentElement!
+  while (!/(auto|scroll)/.test(getComputedStyle(box).overflowY) && box.parentElement) box = box.parentElement
+  Object.defineProperty(box, 'clientHeight', { configurable: true, value: 600 })
+  fireEvent.scroll(box)
+}
+
+afterEach(() => {
+  if (vi.isMockFunction(window.getComputedStyle)) vi.mocked(window.getComputedStyle).mockRestore()
 })
