@@ -83,6 +83,8 @@
 }
 .speed b { font: 600 13px/1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
 .speed i { color: var(--ink-2); opacity: 1; }
+/* Its height too, where there is no scale to read it on. */
+.alt { display: none; }
 
 /* ---- the headline with its lead at the right, on its foot, as the sections' heads have theirs; the console standing on the ground ---- */
 .words {
@@ -163,6 +165,7 @@
 @media (max-width: 700px) {
   .hero { --spine: 0px; --l: var(--gut); --r: var(--gut); }
   .needle { display: none; }
+  .alt { display: contents; }
   .words { top: 128px; display: block; }
   .h1 { font-size: clamp(38px, 11.4vw, 48px); line-height: 1; }
   .lead { margin-top: 16px; font-size: 15px; }
@@ -170,7 +173,7 @@
   .install { display: none; }
   .console { width: 100%; grid-template-columns: 1fr; }
   .cell { justify-items: center; }
-  .cell.ways { grid-auto-flow: row; justify-items: stretch; padding: 12px; border-top: 1px solid var(--ink); }
+  .cell.ways { grid-auto-flow: row; justify-content: stretch; justify-items: stretch; padding: 12px; border-top: 1px solid var(--ink); }
   .cell.ways > div { display: grid; gap: 8px; }
   .cell.ways > div > a { justify-content: center; height: 48px; padding: 0 16px; font-size: 15px; }
   .cell.ways > p { text-align: center; }

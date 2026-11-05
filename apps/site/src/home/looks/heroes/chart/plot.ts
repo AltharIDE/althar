@@ -13,8 +13,15 @@ import { altitudeAt, AT, velocityAt } from '../../../hero/journey'
  * bends rather than breaks.
  */
 
-/** The heights drawn as arcs, in km, top down; the ground is the limb. */
-export const ARCS = [120, 100, 80, 60, 40, 20] as const
+/** The air's layers, drawn as arcs where one gives way to the next, in km, top down; the ground is the limb. */
+export const LAYERS = [
+  { km: 100, name: 'Kármán line' },
+  { km: 85, name: 'Mesopause' },
+  { km: 50, name: 'Stratopause' },
+  { km: 12, name: 'Tropopause' },
+] as const
+/** The scale's figures, every 20 km. */
+export const FIGURES = [120, 100, 80, 60, 40, 20, 0] as const
 /** The plot's top, a little over where the capsule enters the air. */
 export const TOP_KM = 126
 /** Where the capsule enters the air and where it comes to rest, in km; its speed there, in km/s. */

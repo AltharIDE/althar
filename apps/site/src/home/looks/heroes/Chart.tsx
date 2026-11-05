@@ -9,7 +9,7 @@ import { cx } from '../../../lib/cx'
 import { AgentMark } from '../../../shared/AgentMark'
 import { Get, OtherMac } from '../../../shared/Close'
 import s from './Chart.module.css'
-import { ARCS, ENTRY_KM, type Plot, plot, REST_KM, REST_SPEED, TOP_KM } from './chart/plot'
+import { ENTRY_KM, FIGURES, LAYERS, type Plot, plot, REST_KM, REST_SPEED, TOP_KM } from './chart/plot'
 
 /*
  * Prototype: the first screen as the flight chart's first plate, a still
@@ -35,7 +35,8 @@ function lay(el: HTMLElement, probe: HTMLElement, words: HTMLElement, deck: HTML
   const phone = w <= 700
   const spine = phone ? 0 : probe.offsetLeft
   const l = words.offsetLeft
-  const top = words.offsetTop + words.offsetHeight + (phone ? 44 : 64)
+  const right = words.offsetLeft + words.offsetWidth
+  const top = words.offsetTop + words.offsetHeight + (phone ? 44 : 52)
   // The ground's crest, so the limb clears the lead and the console all the way along them.
   const parts = [...deck.children] as HTMLElement[]
   const deckLeft = deck.offsetLeft
@@ -48,8 +49,8 @@ function lay(el: HTMLElement, probe: HTMLElement, words: HTMLElement, deck: HTML
   return plot({
     w,
     h,
-    // In from high at the right; at rest midway between the scale's ticks and the sheet's edge, where the sections' path sets off.
-    from: Math.round(w - Math.max(28, (w - l) * 0.1)),
+    // In from high at the right, on the sheet's margin; at rest midway between the scale's ticks and the sheet's edge, where the sections' path sets off.
+    from: phone ? w - 24 : right,
     to: phone ? l + 10 : Math.round((spine + l + 4) / 2),
     top,
     ground: Math.round(ground),
@@ -173,12 +174,17 @@ export function ChartHero({ nav }: { nav?: ReactNode }) {
               <path d="M0 0V7" className={s.hatchLine} />
             </pattern>
           </defs>
-          {/* The air's heights, from the scale to the sheet's edge. */}
+          {/* Where the air begins, and where each of its layers gives way to the next, from the scale to the sheet's edge; named at the margin. */}
           <g className={s.arcs}>
-            {ARCS.map((km) => (
+            {[ENTRY_KM, ...LAYERS.map((layer) => layer.km)].map((km) => (
               <path key={km} d={p.arc(km, spine, w)} />
             ))}
           </g>
+          {LAYERS.map(({ km, name }) => (
+            <text key={km} className={s.note} x={p.entry.x} y={p.yAt(km, p.entry.x) - 7} textAnchor="end">
+              {name} · {km} km
+            </text>
+          ))}
           {/* The ground: the limb, hatched under. */}
           <path className={s.hatch} d={p.band(HATCH, spine, w)} style={{ fill: `url(#${id}-hatch)` }} />
           <path className={s.limb} d={p.arc(0, spine, w)} />
@@ -194,7 +200,7 @@ export function ChartHero({ nav }: { nav?: ReactNode }) {
             </g>
           )}
           {scale &&
-            [...ARCS, 0].map((km) => {
+            FIGURES.map((km) => {
               const y = p.yAt(km, spine)
               // The needle covers the figures near it.
               if (Math.abs(y - needleY) < 24) return null
@@ -213,7 +219,7 @@ export function ChartHero({ nav }: { nav?: ReactNode }) {
             <path d="M-11 0h22M0 -11v22" />
             <circle r="5" />
           </g>
-          <text className={s.note} x={p.entry.x + 4} y={p.entry.y - 18} textAnchor="end">
+          <text className={s.note} x={p.entry.x} y={p.entry.y - 18} textAnchor="end">
             Entry interface · {ENTRY_KM.toFixed(0)} km
           </text>
           {/* The capsule at rest, and a leader out to its speed. */}
@@ -233,6 +239,11 @@ export function ChartHero({ nav }: { nav?: ReactNode }) {
       )}
       {p && (
         <div className={s.speed} style={{ left: p.rest.x, top: p.rest.y }} aria-hidden="true" data-after="">
+          <span className={s.alt}>
+            <b>{REST_KM.toFixed(2)}</b>
+            <i>km</i>
+            <i>·</i>
+          </span>
           <b>{REST_SPEED.toFixed(3)}</b>
           <i>km/s</i>
         </div>
