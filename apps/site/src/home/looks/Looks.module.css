@@ -24,3 +24,13 @@
   .bar { bottom: 10px; padding-right: 5px; }
   .hint, .name { display: none; }
 }
+
+/* Prototype: under Orrery, the Runs on band in the same night, its hairlines and words as Orrery draws them; the band itself is the page's own. */
+.nightBand {
+  --n-2: #070605;
+  --t-1: rgba(255, 248, 240, 0.88);
+  --t-3: #8f887e;
+  --t-4: rgba(255, 244, 232, 0.3);
+  --line-2: rgba(255, 244, 232, 0.11);
+  color-scheme: dark;
+}

@@ -64,17 +64,18 @@ export const WALL = {
   lit: isogrid({ rib: 'rgba(150,164,255,0.04)', edge: 'rgba(170,182,255,0.12)', shade: 'rgba(0,0,0,0.6)', boss: 'rgba(150,164,255,0.05)' }),
 }
 
-/** A tile of stars, drawn once: `size` px square, its stars from `seed`. */
-const skies = new Map<number, string>()
-export function stars(seed = 7, size = 480) {
-  const known = skies.get(seed)
+/** A tile of stars, drawn once: `size` px square, its stars from `seed`, one to every `room` square px (the windows' sky is thick with them; the wall's night, as Orrery's, sparse). */
+const skies = new Map<string, string>()
+export function stars(seed = 7, size = 480, room = 1500) {
+  const key = `${seed}:${size}:${room}`
+  const known = skies.get(key)
   if (known) return known
   const canvas = document.createElement('canvas')
   canvas.width = canvas.height = size
   const g = canvas.getContext('2d')
   if (!g) return ''
   const r = seeded(seed)
-  const count = Math.round((size * size) / 1500)
+  const count = Math.round((size * size) / room)
   for (let i = 0; i < count; i++) {
     const x = r() * size
     const y = r() * size
@@ -97,6 +98,6 @@ export function stars(seed = 7, size = 480) {
     g.fill()
   }
   const url = `url(${canvas.toDataURL()})`
-  skies.set(seed, url)
+  skies.set(key, url)
   return url
 }

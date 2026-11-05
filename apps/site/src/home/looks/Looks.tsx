@@ -54,6 +54,11 @@ export function FirstScreen({ nav }: { nav?: ReactNode }) {
   )
 }
 
+/** The Runs on band, the page's own; under Orrery, in its night. */
+export function Band({ children }: { children: ReactNode }) {
+  return <div className={useHero() === 'Night' ? s.nightBand : undefined}>{children}</div>
+}
+
 const BODIES: Record<Look, ComponentType> = {
   A: lazy(load.A),
   B: lazy(load.B),

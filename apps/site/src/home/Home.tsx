@@ -17,6 +17,8 @@ import { Hero } from './Hero'
 const Looks = import.meta.env.DEV ? lazy(() => import('./looks/Looks')) : null
 /** Prototype: in development, the first screen is today's or one of the new ones, swapped from the same bar. */
 const FirstScreen = import.meta.env.DEV ? lazy(() => import('./looks/Looks').then((m) => ({ default: m.FirstScreen }))) : null
+/** Prototype: in development, the band under the first screen takes its ground (Orrery's night). */
+const Band = import.meta.env.DEV ? lazy(() => import('./looks/Looks').then((m) => ({ default: m.Band }))) : null
 
 export function Home() {
   return (
@@ -29,7 +31,15 @@ export function Home() {
       ) : (
         <Hero nav={<NavSpace />} />
       )}
-      <RunsOn />
+      {Band ? (
+        <Suspense fallback={<RunsOn />}>
+          <Band>
+            <RunsOn />
+          </Band>
+        </Suspense>
+      ) : (
+        <RunsOn />
+      )}
       {Looks ? (
         <Suspense fallback={null}>
           <Looks />

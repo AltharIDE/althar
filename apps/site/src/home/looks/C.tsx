@@ -11,24 +11,35 @@ import { END, SCENE } from '../bodies/desktop/DesktopBody'
 import { Review } from '../bodies/desktop/Review'
 import { EdgeTour } from '../bodies/kit/EdgeTour'
 import t from '../bodies/kit/type.module.css'
-import { AT, altitudeAfter, velocityAfter } from '../hero/journey'
+import dark from '../../../../../packages/ui/src/styles/dark.css?raw'
 import c from './C.module.css'
 import { stars, WALL } from './c/wall'
 
 /*
- * Prototype, C: the cabin. Past the band you are back inside the capsule the
- * first screen looks out of, at its instrument wall: warm dark, its skin
- * milled isogrid, the ribs caught where a screen's light falls on them. The
- * app's pictures are the wall's screens, set in it behind their bezels;
- * each claim is stamped beside its screen as the changelog stamps its
- * releases, on a rail that runs down the wall, its light on where you are
- * reading. The sections open and close on a window: first the night side of
- * the planet, its edge lit cobalt, with the flight deck's readouts going on
- * from the first screen's; last the same edge flatter and lower, the dawn
- * coming up along it, over the download. What keeps you in flow is one
- * console, its modules seamed into it. With reduced motion the readouts read
- * once, and nothing else moves but what the pictures do.
+ * Prototype, C: the cabin. Past the band you are back inside the capsule,
+ * in the same night as Orrery's first screen: its dark, its few stars, its
+ * hairlines; the wall's milled isogrid shows only where a screen's light
+ * falls on its ribs. The app's pictures are the wall's screens, drawn in the
+ * app's own dark theme, each behind a hairline; each claim is stamped beside
+ * its screen as the changelog stamps its releases, on a rail that runs down
+ * the wall, its light on where you are reading. The sections open and close
+ * on a window: first the night side of the planet, its edge lit cobalt;
+ * last the same edge flatter and lower, the dawn coming up along it, over
+ * the download. What keeps you in flow is one console, its modules seamed
+ * into it by hairlines. Nothing moves but what the pictures do.
  */
+
+/** The app's own dark theme (the kit's dark.css), for the pictures on the wall alone: the page round them keeps its own. */
+const DARK_PICTURES = dark.replace(":root[data-theme='dark']", "[data-pictures='dark']")
+let dressed = false
+const dressPictures = () => {
+  if (dressed) return
+  dressed = true
+  const style = document.createElement('style')
+  style.dataset.cabin = ''
+  style.textContent = DARK_PICTURES
+  document.head.appendChild(style)
+}
 
 type Id = keyof typeof SCENE
 
@@ -40,9 +51,6 @@ const STATIONS: Record<Id, { no: string; name: string; km: number }> = {
   flow: { no: '04', name: 'Flow', km: 14 },
   edge: { no: '05', name: 'Notch', km: 6 },
 }
-
-const quiet = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
-const two = (n: number) => String(Math.floor(n)).padStart(2, '0')
 
 /** A station's stamp, on the rail: its node, its number and name, a rule, and the height it stands at. */
 function Stamp({ id }: { id: Id }) {
@@ -81,58 +89,6 @@ function Screen({ className, children }: { className?: string; children: ReactNo
   return (
     <div className={cx(c.screen, className)} data-light="">
       <div className={c.glass}>{children}</div>
-    </div>
-  )
-}
-
-/** The flight deck's readouts, going on from the first screen's: its velocity and altitude as it sinks, and the time since the page opened. */
-function Deck() {
-  const velocity = useRef<HTMLElement>(null)
-  const altitude = useRef<HTMLElement>(null)
-  const elapsed = useRef<HTMLElement>(null)
-  const self = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const say = (el: HTMLElement | null, text: string) => {
-      if (el && el.textContent !== text) el.textContent = text
-    }
-    const read = () => {
-      const now = performance.now() / 1000
-      const after = Math.max(0, now - AT.settled)
-      say(velocity.current, velocityAfter(after).toFixed(3))
-      say(altitude.current, altitudeAfter(after).toFixed(2))
-      say(elapsed.current, `T+${two(now / 3600)}:${two((now / 60) % 60)}:${two(now % 60)}`)
-    }
-    read()
-    if (quiet() || !self.current) return
-    let seen = false
-    const io = new IntersectionObserver(([e]) => (seen = e?.isIntersecting ?? false))
-    io.observe(self.current)
-    const timer = window.setInterval(() => seen && read(), 250)
-    return () => {
-      io.disconnect()
-      window.clearInterval(timer)
-    }
-  }, [])
-  return (
-    <div ref={self} className={c.deck} aria-hidden="true">
-      <span>
-        <i>Velocity</i>
-        <span>
-          <b ref={velocity}>0.931</b> km/s
-        </span>
-      </span>
-      <span className={c.mid}>
-        <i>Mission elapsed</i>
-        <b ref={elapsed} className={c.clock}>
-          T+00:00:00
-        </b>
-      </span>
-      <span className={c.end}>
-        <i>Altitude</i>
-        <span>
-          <b ref={altitude}>38.00</b> km
-        </span>
-      </span>
     </div>
   )
 }
@@ -252,8 +208,13 @@ export function CabinBody() {
   useGrain(grain, 23)
   useLights(main, lit)
   useRail(main)
+  // The pictures' dark, before the first paint; and the wall's few stars, drawn once.
+  useLayoutEffect(() => {
+    dressPictures()
+    main.current?.style.setProperty('--wall-stars', stars(29, 960, 5200))
+  }, [])
   return (
-    <main ref={main} id="main" tabIndex={-1} className={c.body} style={{ '--wall': WALL.dark, '--wall-lit': WALL.lit } as CSSProperties}>
+    <main ref={main} id="main" tabIndex={-1} className={c.body} data-pictures="dark" style={{ '--wall-lit': WALL.lit } as CSSProperties}>
       {/* Dark under the nav, all the way down: it turns to smoked glass over the cabin. */}
       <LightUnder tone="ink" className={c.under} />
       <div className={c.wall} aria-hidden="true">
@@ -264,7 +225,6 @@ export function CabinBody() {
       <section id="independent" className={cx(c.station, c.first)} aria-labelledby="independent-h" data-station="">
         <Stamp id="independent" />
         <Window seed={7} className={c.opening}>
-          <Deck />
           <div className={c.head}>
             <h2 id="independent-h" className={cx(t.title, c.title)}>
               {SCENE.independent.title}
