@@ -147,7 +147,7 @@ float towns(vec3 n, float freq, float keep, float foot, float urban) {
   vec3 h = hash33(cell);
   float lit = clamp((keep * urban - h.z) / 0.12, 0.0, 1.0);
   if (lit <= 0.0) return 0.0;
-  vec3 at = cell + 0.3 + 0.4 * hash33(cell + 7.0);
+  vec3 at = cell + 0.2 + 0.6 * hash33(cell + 7.0);
   float d2 = dot(c - at, c - at);
   float r = 0.07 + 0.09 * h.x;
   float px = foot * freq;
@@ -201,8 +201,8 @@ vec3 stars(vec3 d, float px) {
   float dust = fbm(d * 6.0, 4, 0.0);
   vec3 glow = vec3(0.85, 0.86, 1.0) * band * smoothstep(0.35, 0.8, dust) * 0.0035;
   vec3 s = starLayer(d, 20.0, 0.32, 1.0, 0.0, px);
-  s += starLayer(d, 52.0, 0.16, 0.5, 5.0, px);
-  s += starLayer(d, 130.0, 0.08 + 0.3 * band * smoothstep(0.4, 0.7, dust), 0.32, 11.0, px);
+  s += starLayer(d, 52.0, 0.12, 0.5, 5.0, px);
+  s += starLayer(d, 130.0, 0.05 + 0.3 * band * smoothstep(0.4, 0.7, dust), 0.32, 11.0, px);
   return s + glow;
 }
 
@@ -233,14 +233,14 @@ vec3 wisp(vec2 frag) {
   // Drifted and twisted in the high winds.
   float twist = (noise(vec3(xs / 70.0, 2.0, 5.0)) - 0.5) * 2.0;
   float d = dy - (twist * 9.0 - 3.0) * smoothstep(0.0, 0.3, age / 9.5);
-  float w1 = 1.0 + 1.4 * e + 1.2 * sqrt(age);
-  float w2 = 6.0 + 8.0 * e + 6.0 * sqrt(age);
+  float w1 = 1.0 + 1.2 * e + 1.0 * sqrt(age);
+  float w2 = 4.0 + 6.0 * e + 4.5 * sqrt(age);
   float grain = 0.55 + 0.9 * noise(vec3(xs / 9.0, 3.0, 1.0));
   float warm = exp(-(age - 4.8) / 2.2);
-  vec3 red = vec3(0.8, 0.16, 0.05);
-  vec3 ember = vec3(0.5, 0.17, 0.12);
+  vec3 red = vec3(1.0, 0.3, 0.07);
+  vec3 ember = vec3(0.6, 0.16, 0.06);
   vec3 c = mix(ember, red, warm);
-  return uWispGlow * e * (c * blob(d, w1) * (0.05 + 0.1 * warm) * grain + ember * blob(d, w2) * 0.03);
+  return uWispGlow * e * (c * blob(d, w1) * (0.05 + 0.14 * warm) * grain + ember * blob(d, w2) * 0.025);
 }
 
 // The faintest dawn at the edge's far end: the air there lit from under the edge, warm low down and cobalt over it.
@@ -250,9 +250,9 @@ vec3 dawn(vec3 rd, float over) {
   float line = exp(-pow((over - 3.0) / 3.5, 2.0));
   float band = exp(-max(over, 0.0) / 22.0) * smoothstep(-6.0, 1.0, over);
   float high = exp(-max(over, 0.0) / 90.0) * smoothstep(-2.0, 4.0, over);
-  float near = exp(-ang / 0.09);
-  float wide = exp(-ang / 0.28);
-  return uDawn * (vec3(1.0, 0.55, 0.22) * line * near * 0.5 + vec3(1.0, 0.42, 0.16) * band * near * 0.12 + vec3(0.3, 0.32, 1.0) * high * wide * 0.035);
+  float near = exp(-ang / 0.12);
+  float wide = exp(-ang / 0.3);
+  return uDawn * (vec3(1.0, 0.58, 0.26) * line * near * 0.75 + vec3(1.0, 0.42, 0.16) * band * near * 0.2 + vec3(0.3, 0.32, 1.0) * high * wide * 0.035);
 }
 
 void main() {
@@ -302,8 +302,9 @@ void main() {
   float lum = dot(lin, vec3(0.2126, 0.7152, 0.0722));
   lin = mix(lin, lin * vec3(1.035, 1.0, 0.94), smoothstep(0.45, 1.0, lum));
 
-  // The wisp and the dawn over it, as light: it whitens where it is strong.
+  // The wisp and the dawn over it, as light: it whitens where it is strong. And the air's cobalt over the edge, wide, as the night pages light it.
   vec3 light = wisp(frag) + dawn(rd, over);
+  light += vec3(0.045, 0.07, 1.0) * 0.095 * exp(-max(over, 0.0) / 230.0) * smoothstep(-3.0, 4.0, over);
   vec3 add = 1.0 - exp(-light * 1.2);
   lin = 1.0 - (1.0 - lin) * (1.0 - add);
 
@@ -326,8 +327,13 @@ const aim = (f: Framing, W: number, H: number) => {
   return { focal, pitch, sun }
 }
 
-/** The view on `canvas`, or null without the graphics card; `lost` is called if the browser takes it back. */
-export function makeSky(canvas: HTMLCanvasElement, lost: () => void): Sky | null {
+/**
+ * The view on `canvas`, or null without the graphics card. Its shader is
+ * compiled in the background where the browser can (the page isn't held up
+ * by it): `drawn` is called each time the view is drawn, `failed` if it
+ * can't be, or the browser takes the graphics card back.
+ */
+export function makeSky(canvas: HTMLCanvasElement, on: { drawn: () => void; failed: () => void }): Sky | null {
   const gl = canvas.getContext('webgl2', {
     antialias: false,
     alpha: false,
@@ -335,83 +341,116 @@ export function makeSky(canvas: HTMLCanvasElement, lost: () => void): Sky | null
     stencil: false,
     premultipliedAlpha: false,
   })
-  if (!gl) return null
-  const compile = (type: number, source: string) => {
-    const shader = gl.createShader(type)
-    if (!shader) return null
-    gl.shaderSource(shader, source)
-    gl.compileShader(shader)
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-      console.warn('night: a shader did not compile', gl.getShaderInfoLog(shader))
-      return null
-    }
-    return shader
+  if (!gl || gl.isContextLost()) return null
+  const parallel = gl.getExtension('KHR_parallel_shader_compile')
+  const shader = (type: number, source: string) => {
+    const it = gl.createShader(type)
+    if (!it) return null
+    gl.shaderSource(it, source)
+    gl.compileShader(it)
+    return it
   }
-  const vs = compile(gl.VERTEX_SHADER, VERTEX)
-  const fs = compile(gl.FRAGMENT_SHADER, FRAGMENT)
+  const vs = shader(gl.VERTEX_SHADER, VERTEX)
+  const fs = shader(gl.FRAGMENT_SHADER, FRAGMENT)
   const program = gl.createProgram()
   if (!vs || !fs || !program) return null
   gl.attachShader(program, vs)
   gl.attachShader(program, fs)
   gl.bindAttribLocation(program, 0, 'p')
   gl.linkProgram(program)
-  gl.deleteShader(vs)
-  gl.deleteShader(fs)
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    console.warn('night:', gl.getProgramInfoLog(program))
-    return null
+
+  const uniforms = () => {
+    const u = (name: string) => gl.getUniformLocation(program, name)
+    return {
+      res: u('uRes'),
+      focal: u('uFocal'),
+      pitch: u('uPitch'),
+      dpr: u('uDpr'),
+      turn: u('uTurn'),
+      wisp: u('uWisp'),
+      wispGlow: u('uWispGlow'),
+      dawn: u('uDawn'),
+      sun: u('uSun'),
+    }
   }
 
-  const buffer = gl.createBuffer()
-  gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW)
-  gl.enableVertexAttribArray(0)
-  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0)
+  let state: 'compiling' | 'ready' | 'failed' = 'compiling'
+  let wanted: Framing | null = null
+  let buffer: WebGLBuffer | null = null
+  let U: ReturnType<typeof uniforms> | null = null
+  let poll = 0
 
-  const u = (name: string) => gl.getUniformLocation(program, name)
-  const U = {
-    res: u('uRes'),
-    focal: u('uFocal'),
-    pitch: u('uPitch'),
-    dpr: u('uDpr'),
-    turn: u('uTurn'),
-    wisp: u('uWisp'),
-    wispGlow: u('uWispGlow'),
-    dawn: u('uDawn'),
-    sun: u('uSun'),
+  const paint = (f: Framing) => {
+    if (!U || gl.isContextLost()) return
+    const W = Math.max(1, Math.round(f.width * f.dpr))
+    const H = Math.max(1, Math.round(f.height * f.dpr))
+    if (canvas.width !== W || canvas.height !== H) {
+      canvas.width = W
+      canvas.height = H
+    }
+    const { focal, pitch, sun } = aim(f, W, H)
+    gl.viewport(0, 0, W, H)
+    gl.useProgram(program)
+    gl.uniform2f(U.res, W, H)
+    gl.uniform1f(U.focal, focal)
+    gl.uniform1f(U.pitch, pitch)
+    gl.uniform1f(U.dpr, f.dpr)
+    gl.uniform1f(U.turn, f.turn)
+    gl.uniform4f(U.wisp, f.wisp.from, f.wisp.to, f.wisp.under[0], f.wisp.under[1])
+    gl.uniform1f(U.wispGlow, f.wisp.glow)
+    gl.uniform1f(U.dawn, f.dawn)
+    gl.uniform3f(U.sun, ...sun)
+    gl.drawArrays(gl.TRIANGLES, 0, 3)
+    on.drawn()
   }
+
+  /** Once compiled: the triangle that covers the canvas, the uniforms, and the view if it was asked for meanwhile. */
+  const finish = () => {
+    gl.deleteShader(vs)
+    gl.deleteShader(fs)
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      if (!gl.isContextLost()) console.warn('night:', gl.getShaderInfoLog(fs) || gl.getProgramInfoLog(program))
+      state = 'failed'
+      on.failed()
+      return
+    }
+    buffer = gl.createBuffer()
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW)
+    gl.enableVertexAttribArray(0)
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0)
+    U = uniforms()
+    state = 'ready'
+    if (wanted) paint(wanted)
+  }
+  const wait = () => {
+    if (parallel && !gl.getProgramParameter(program, parallel.COMPLETION_STATUS_KHR)) {
+      poll = requestAnimationFrame(wait)
+      return
+    }
+    finish()
+  }
+  // Looked at from the next frame on, so the page paints first.
+  poll = requestAnimationFrame(wait)
 
   const lose = (event: Event) => {
     event.preventDefault()
-    lost()
+    on.failed()
   }
   canvas.addEventListener('webglcontextlost', lose)
 
   return {
     draw: (f) => {
-      if (gl.isContextLost()) return
-      const W = Math.max(1, Math.round(f.width * f.dpr))
-      const H = Math.max(1, Math.round(f.height * f.dpr))
-      if (canvas.width !== W || canvas.height !== H) {
-        canvas.width = W
-        canvas.height = H
-      }
-      const { focal, pitch, sun } = aim(f, W, H)
-      gl.viewport(0, 0, W, H)
-      gl.useProgram(program)
-      gl.uniform2f(U.res, W, H)
-      gl.uniform1f(U.focal, focal)
-      gl.uniform1f(U.pitch, pitch)
-      gl.uniform1f(U.dpr, f.dpr)
-      gl.uniform1f(U.turn, f.turn)
-      gl.uniform4f(U.wisp, f.wisp.from, f.wisp.to, f.wisp.under[0], f.wisp.under[1])
-      gl.uniform1f(U.wispGlow, f.wisp.glow)
-      gl.uniform1f(U.dawn, f.dawn)
-      gl.uniform3f(U.sun, ...sun)
-      gl.drawArrays(gl.TRIANGLES, 0, 3)
+      wanted = f
+      if (state === 'ready') paint(f)
     },
     dispose: () => {
+      cancelAnimationFrame(poll)
       canvas.removeEventListener('webglcontextlost', lose)
+      if (state === 'compiling') {
+        gl.deleteShader(vs)
+        gl.deleteShader(fs)
+      }
       gl.deleteBuffer(buffer)
       gl.deleteProgram(program)
       // The context is the canvas's for good: a canvas mounted again (as React's strict mode does) gets the same one back, so it is left alive.

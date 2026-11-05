@@ -78,9 +78,12 @@ export function NightHero({ nav }: { nav?: ReactNode }) {
     const cv = canvas.current
     if (!el || !cv) return
     const phone = window.matchMedia(PHONE)
-    let sky: Sky | null = makeSky(cv, () => {
-      sky = null
-      setShown('flat')
+    let sky: Sky | null = makeSky(cv, {
+      drawn: () => setShown('drawn'),
+      failed: () => {
+        sky = null
+        setShown('flat')
+      },
     })
 
     /** Draws the view for the frame's size, if it changed. */
@@ -95,8 +98,9 @@ export function NightHero({ nav }: { nav?: ReactNode }) {
       sky.draw({ ...frame(w, h, phone.matches), dpr })
     }
 
-    draw()
-    setShown(sky ? 'drawn' : 'flat')
+    // Drawn once the shader is ready; without the graphics card, the stylesheet's edge at once.
+    if (sky) draw()
+    else setShown('flat')
 
     // Off screen, the stars' twinkling stops (data-away).
     const io = new IntersectionObserver(([e]) => {

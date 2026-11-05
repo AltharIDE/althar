@@ -121,8 +121,8 @@
   /* White, with a trace of the fire's warmth still in it. */
   color: #fff;
   text-shadow:
-    0 0 1px rgba(255, 214, 170, 0.35),
-    0 0 60px rgba(255, 110, 40, 0.14),
+    0 0 1px rgba(255, 214, 170, 0.3),
+    0 0 40px rgba(255, 130, 60, 0.07),
     0 10px 50px rgba(0, 10, 40, 0.35);
 }
 
@@ -206,11 +206,8 @@
   .edge::before { left: -90%; right: -90%; }
   .line { top: 17cqh; font-size: clamp(26px, 7.4cqw, 32px); }
   .fast { top: 24cqh; font-size: 30cqw; }
-  .hud { top: 76px; }
-  .hud span { gap: 6px; }
-  .hud b { min-width: 0; font-size: 13px; }
-  /* No installing from a phone: the agents over the download. */
-  .install { display: none; }
+  /* No room for the readouts under the nav, and no installing from a phone: the agents over the download, as today's first screen has it. */
+  .hud, .install { display: none; }
   .console { width: 100%; max-width: 440px; grid-template-columns: 1fr; }
   .cell { justify-items: center; }
   .cell.ways { justify-items: stretch; padding: 12px; }
