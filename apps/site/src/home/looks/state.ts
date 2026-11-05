@@ -2,9 +2,10 @@ import { useSyncExternalStore } from 'react'
 
 /*
  * Prototype: which look the homepage's sections wear, A, B, C or as they are
- * today, and which first screen opens the page. The address keeps both
- * (?look=b&hero=chart), so a link opens them again; keys 1 to 6 pick a look,
- * ← and → step through them, H steps through the first screens (⇧H back).
+ * today, which first screen opens the page, and under Orrery how its sun is
+ * drawn. The address keeps them (?look=b&hero=night&sun=2.5d), so a link
+ * opens them again; keys 1 to 6 pick a look, ← and → step through them, H
+ * steps through the first screens (⇧H back), S swaps the sun.
  * Swapping a look keeps the section you are reading where it was on the
  * screen.
  */
@@ -36,6 +37,16 @@ export const HEROES: ReadonlyArray<{ value: HeroLook; name: string }> = [
 const heroOf = (word: string | null): HeroLook | undefined => HEROES.find((one) => one.value.toLowerCase() === word?.toLowerCase())?.value
 
 let hero: HeroLook = heroOf(new URLSearchParams(window.location.search).get('hero')) ?? 'Today'
+
+export type SunLook = '3D' | '2.5D'
+
+export const SUNS: ReadonlyArray<{ value: SunLook; name: string }> = [
+  { value: '3D', name: '3D' },
+  { value: '2.5D', name: '2.5D' },
+]
+
+let sun: SunLook =
+  SUNS.find((one) => one.value.toLowerCase() === new URLSearchParams(window.location.search).get('sun')?.toLowerCase())?.value ?? '3D'
 
 /** The address, with `key` set to `value`. */
 const keep = (key: string, value: string) => {
@@ -91,6 +102,14 @@ export const goHero = (next: HeroLook) => {
   for (const on of listeners) on()
 }
 
+/** Draws the Orrery's sun the other way. */
+export const goSun = (next: SunLook) => {
+  if (next === sun) return
+  sun = next
+  keep('sun', next.toLowerCase())
+  for (const on of listeners) on()
+}
+
 const subscribe = (on: () => void) => {
   listeners.add(on)
   return () => void listeners.delete(on)
@@ -110,7 +129,14 @@ export const useHero = () =>
     () => hero,
   )
 
-/** Keys 1 to 6 pick a look, ← and → step through them, H and ⇧H the first screens; never while typing, or on a control that takes the arrows itself. */
+export const useSun = () =>
+  useSyncExternalStore(
+    subscribe,
+    () => sun,
+    () => sun,
+  )
+
+/** Keys 1 to 6 pick a look, ← and → step through them, H and ⇧H the first screens, S the sun; never while typing, or on a control that takes the arrows itself. */
 export const onKey = (event: KeyboardEvent) => {
   if (event.metaKey || event.ctrlKey || event.altKey) return
   const target = event.target instanceof Element ? event.target : null
@@ -120,6 +146,10 @@ export const onKey = (event: KeyboardEvent) => {
     const step = event.shiftKey ? HEROES.length - 1 : 1
     event.preventDefault()
     return goHero(HEROES[(at + step) % HEROES.length]!.value)
+  }
+  if ((event.key === 's' || event.key === 'S') && hero === 'Night') {
+    event.preventDefault()
+    return goSun(sun === '3D' ? '2.5D' : '3D')
   }
   if (event.shiftKey) return
   if (event.key.startsWith('Arrow') && target?.closest('[role=radiogroup], [role=tablist]')) return

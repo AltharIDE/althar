@@ -6,7 +6,22 @@ import { useMedia } from '../../lib/browser'
 import { DesktopBody } from '../bodies/desktop/DesktopBody'
 import { Hero } from '../Hero'
 import s from './Looks.module.css'
-import { go, goHero, HEROES, type HeroLook, keepPlace, LOOKS, type Look, onKey, useHero, useLook } from './state'
+import {
+  go,
+  goHero,
+  goSun,
+  HEROES,
+  type HeroLook,
+  keepPlace,
+  LOOKS,
+  type Look,
+  onKey,
+  SUNS,
+  type SunLook,
+  useHero,
+  useLook,
+  useSun,
+} from './state'
 
 /*
  * Prototype, in development only (Home.tsx): the homepage's sections between
@@ -81,6 +96,7 @@ function Kept({ children }: { children: ReactNode }) {
 export default function Looks() {
   const look = useLook()
   const hero = useHero()
+  const sun = useSun()
   const Body = BODIES[look]
   // Letters alone where the names don't fit.
   const narrow = useMedia('(max-width: 700px)')
@@ -134,7 +150,18 @@ export default function Looks() {
             onChange={goHero}
             options={HEROES.map((one) => ({ value: one.value, label: one.name }))}
           />
-          <span className={s.hint}>{past ? `1–${LOOKS.length} ← → · H` : 'H'}</span>
+          {hero === 'Night' && (
+            <>
+              <span className={s.name}>Sun</span>
+              <Segmented<SunLook>
+                label="Orrery's sun"
+                value={sun}
+                onChange={goSun}
+                options={SUNS.map((one) => ({ value: one.value, label: one.name }))}
+              />
+            </>
+          )}
+          <span className={s.hint}>{(past ? `1–${LOOKS.length} ← → · H` : 'H') + (hero === 'Night' ? ' · S' : '')}</span>
         </div>,
         document.body,
       )}

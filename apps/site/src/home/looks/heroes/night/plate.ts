@@ -14,13 +14,13 @@ import { seeded } from '../../../../shared/footer/random'
 
 const DEG = Math.PI / 180
 
-/** Where an agent rides: its orbit (0 the innermost) and how far round it, in degrees. */
+/** Where an agent rides: its orbit (0 the innermost) and how far round it at the start, in degrees. */
 type Seat = readonly [orbit: number, at: number]
 
 /** On a wide screen: seven orbits, the two outer ones running off the sides; the agents spread round them so no two names meet. */
 const WIDE = {
   orbits: 7,
-  inner: 0.19,
+  inner: 0.23,
   flat: 0.22,
   seats: {
     [Agent.Claude]: [0, 36],
@@ -39,7 +39,7 @@ const WIDE = {
 /** On a phone: six orbits, higher and smaller, the outer three running off; the agents near the nearest and farthest points, where the orbits are on screen. */
 const PHONE = {
   orbits: 6,
-  inner: 0.2,
+  inner: 0.25,
   flat: 0.27,
   seats: {
     [Agent.Claude]: [0, 40],
@@ -67,6 +67,8 @@ export interface Frame {
 export interface Orbit {
   rx: number
   ry: number
+  /** How fast it is ridden, in degrees a second: the inner ones faster, as a planet's year is shorter nearer its sun. */
+  speed: number
   /** The far half, behind the sun, and the near half, in front of it. */
   far: string
   near: string
@@ -79,6 +81,9 @@ export interface Orbit {
 export interface Body {
   id: Agent
   name: string
+  /** Its orbit, and how far round it at the start, in degrees. */
+  orbit: number
+  at: number
   x: number
   y: number
   /** How near: 1 at the nearest point of its orbit, -1 at the farthest. */
@@ -117,6 +122,12 @@ export interface Plate {
   h: number
   cx: number
   cy: number
+  phone: boolean
+  /** How large the bodies are drawn, and where the band's words begin. */
+  scale: number
+  foot: number
+  /** What no name may cover: the sun and its light, and the bar under the nav. */
+  fixed: Box[]
   orbits: Orbit[]
   bodies: Body[]
   stars: Star[]
@@ -137,6 +148,10 @@ const r1 = (n: number) => Math.round(n * 10) / 10
 const WARM = [246, 228, 206] as const
 const COLD = [170, 180, 255] as const
 const mix = (a: readonly number[], b: readonly number[], t: number) => `rgb(${a.map((x, i) => Math.round(x + (b[i]! - x) * t)).join(' ')})`
+
+/** The innermost orbit's year, in seconds; each outer one's longer by its size to the power of one and a half, as Kepler found the planets' are. */
+const YEAR = 64
+const KEPLER = 1.5
 
 /** Seen from a little above, in perspective: the near half of each orbit a little deeper than the far half. */
 const FAR = 0.88
@@ -178,6 +193,7 @@ export function plate(f: Frame): Plate {
     return {
       rx,
       ry,
+      speed: 360 / (YEAR * (rx / (rxMost * plan.inner)) ** KEPLER),
       far: `M${L} ${y}A${r1(rx)} ${r1(ry * FAR)} 0 0 1 ${R} ${y}`,
       near: `M${R} ${y}A${r1(rx)} ${r1(ry * NEAR)} 0 0 1 ${L} ${y}`,
       // Brighter near the sun, fainter outward.
@@ -186,66 +202,35 @@ export function plate(f: Frame): Plate {
     }
   })
 
-  const at = (o: Orbit, deg: number) => {
-    const sin = Math.sin(deg * DEG)
-    return [cx + o.rx * Math.cos(deg * DEG), cy + o.ry * sin * (sin > 0 ? NEAR : FAR)] as const
-  }
-
-  // The sun: the mark, and its light rising from behind it.
-  const sun = phone ? 34 : Math.round(50 * scale)
-  const tall = sun * (phone ? 2.4 : 2.7)
+  // The sun: the mark, standing as an object in the middle, and its light rising from behind it, no higher than the bar.
+  const sun = phone ? 72 : Math.round(124 * scale)
+  const tall = Math.min(sun * 2.4, cy - f.top + 6)
   const rays = raysOf(cx, cy, sun, tall)
+  const fixed: Box[] = [
+    // The sun and its light.
+    { l: cx - sun * 0.7, t: cy - tall, r: cx + sun * 0.7, b: cy + sun * 0.45 },
+    // The bar under the nav, where the picture's top would meet it.
+    { l: cx - 190, t: 0, r: cx + 190, b: f.top },
+  ]
+  const geo = { cx, cy, orbits, phone, scale, w, foot: f.foot, fixed }
 
   // The bodies, seated; then their names, set where there is room.
   const bodies: Body[] = AGENTS.map((agent, n) => {
     const [oi, deg] = plan.seats[agent.id] ?? [n % plan.orbits, (n * 137) % 360]
-    const o = orbits[Math.min(oi, orbits.length - 1)]!
-    const [x, y] = at(o, deg)
-    const d = Math.sin(deg * DEG)
-    const size = Math.round((phone ? 20 + 4 * d : 26 + 5 * d) * scale)
-    // The way it came: prograde, so from a little further round (a larger angle); a like length of arc on every orbit.
-    const span = clamp(((phone ? 46 : 70) * scale) / o.rx, 0.12, 0.42) / DEG
-    const steps = 16
-    const pts = Array.from({ length: steps + 1 }, (_, k) => at(o, deg + (span * k) / steps))
-    const [x1, y1] = pts[steps]!
-    return {
-      id: agent.id,
-      name: agent.name,
-      x,
-      y,
-      d,
-      size,
-      mark: Math.round(size * 0.5),
-      side: null,
-      trail: { d: `M${pts.map(([px, py]) => `${r1(px)} ${r1(py)}`).join('L')}`, x1, y1 },
-    }
+    const orbit = Math.min(oi, orbits.length - 1)
+    const o = bodyAt(geo, orbit, deg)
+    return { id: agent.id, name: agent.name, orbit, at: deg, ...o, mark: Math.round(sizeOf(geo, 1) * 0.5), side: null }
   })
 
   // Names, nearest first: outward from the middle, or inward if that doesn't fit, or none.
-  const kept: Box[] = [
-    // The sun and its light.
-    { l: cx - sun * 0.7, t: cy - tall, r: cx + sun * 0.7, b: cy + sun * 0.5 },
-    // The bar under the nav, where the picture's top would meet it.
-    { l: cx - 190, t: 0, r: cx + 190, b: f.top },
-  ]
-  const discs: Box[] = bodies.map((b) => ({ l: b.x - b.size / 2, t: b.y - b.size / 2, r: b.x + b.size / 2, b: b.y + b.size / 2 }))
+  const kept: Box[] = [...fixed]
   const order = [...bodies].sort((a, b) => b.d - a.d)
   const names: Box[] = []
   for (const b of order) {
-    const lw = labelWidth(b.name)
-    const out: 'left' | 'right' = b.x < cx ? 'left' : 'right'
-    const box = (side: 'left' | 'right'): Box => {
-      const l = side === 'right' ? b.x + b.size / 2 + LABEL.gap : b.x - b.size / 2 - LABEL.gap - lw
-      return { l, t: b.y - LABEL.height / 2, r: l + lw, b: b.y + LABEL.height / 2 }
-    }
-    // On a phone, only outward: a name across the middle crowds it.
-    const sides: ('left' | 'right')[] = phone ? [out] : [out, out === 'left' ? 'right' : 'left']
-    for (const side of sides) {
-      const bx = box(side)
-      const edge = phone ? 10 : 16
-      if (bx.l < edge || bx.r > w - edge || bx.b > f.foot - 6) continue
-      if (kept.some((k) => meets(k, bx, 8))) continue
-      if (discs.some((k, i) => bodies[i] !== b && meets(k, bx, 6))) continue
+    const others = bodies.filter((one) => one !== b)
+    for (const side of sidesFor(geo, b, null)) {
+      const bx = nameBox(b, b.name, side)
+      if (!fits(geo, bx, kept, others)) continue
       b.side = side
       kept.push(bx)
       names.push(bx)
@@ -257,7 +242,7 @@ export function plate(f: Frame): Plate {
   const ticked = orbits[Math.min(phone ? 3 : 3, orbits.length - 1)]!
   const ticks = { near: '', far: '' }
   for (let deg = 0; deg < 360; deg += 5) {
-    const [x, y] = at(ticked, deg)
+    const [x, y] = onOrbit(geo, ticked, deg)
     const sin = Math.sin(deg * DEG)
     const nx = Math.cos(deg * DEG) / ticked.rx
     const ny = sin / (ticked.ry * (sin > 0 ? NEAR : FAR))
@@ -268,8 +253,58 @@ export function plate(f: Frame): Plate {
     else ticks.far += seg
   }
 
-  const stars = starsOf(w, h, f.foot, cx, cy, sun).filter((s) => !names.some((n) => meets(n, { l: s.x, t: s.y, r: s.x, b: s.y }, 4)))
-  return { w, h, cx, cy, orbits, bodies, stars, sun, rays, tall, ticks, names }
+  const stars = starsOf(w, h, f.foot, cx, cy, sun, tall).filter((s) => !names.some((n) => meets(n, { l: s.x, t: s.y, r: s.x, b: s.y }, 4)))
+  return { w, h, cx, cy, phone, scale, foot: f.foot, fixed, orbits, bodies, stars, sun, rays, tall, ticks, names }
+}
+
+/** What placing a body needs of the drawing. */
+type Geo = Pick<Plate, 'cx' | 'cy' | 'orbits' | 'phone' | 'scale' | 'w' | 'foot' | 'fixed'>
+
+/** A point on an orbit, `deg` round it. */
+const onOrbit = (p: Geo, o: Orbit, deg: number) => {
+  const sin = Math.sin(deg * DEG)
+  return [p.cx + o.rx * Math.cos(deg * DEG), p.cy + o.ry * sin * (sin > 0 ? NEAR : FAR)] as const
+}
+
+/** A disc's diameter, by how near it is (1 nearest, -1 farthest). */
+export const sizeOf = (p: Pick<Plate, 'phone' | 'scale'>, d: number) => Math.round((p.phone ? 20 + 4 * d : 26 + 5 * d) * p.scale * 10) / 10
+
+/** A body `deg` round its orbit: where it is, how near, how large, and the way it came. */
+export function bodyAt(p: Geo, orbit: number, deg: number) {
+  const o = p.orbits[orbit]!
+  const [x, y] = onOrbit(p, o, deg)
+  const d = Math.sin(deg * DEG)
+  // The way it came: prograde, so from a little further round (a larger angle); a like length of arc on every orbit.
+  const span = clamp(((p.phone ? 46 : 70) * p.scale) / o.rx, 0.12, 0.42) / DEG
+  const steps = 16
+  const pts = Array.from({ length: steps + 1 }, (_, k) => onOrbit(p, o, deg + (span * k) / steps))
+  const [x1, y1] = pts[steps]!
+  return { x, y, d, size: sizeOf(p, d), trail: { d: `M${pts.map(([px, py]) => `${r1(px)} ${r1(py)}`).join('L')}`, x1, y1 } }
+}
+
+type Placed = Pick<Body, 'x' | 'y' | 'size'>
+
+/** Where a body's name is set on `side`. */
+export function nameBox(b: Placed, name: string, side: 'left' | 'right'): Box {
+  const lw = labelWidth(name)
+  const l = side === 'right' ? b.x + b.size / 2 + LABEL.gap : b.x - b.size / 2 - LABEL.gap - lw
+  return { l, t: b.y - LABEL.height / 2, r: l + lw, b: b.y + LABEL.height / 2 }
+}
+
+/** The sides a name may take, in the order to try them: the one it has first, then outward, then (not on a phone, where a name across the middle crowds it) inward. */
+export function sidesFor(p: Pick<Plate, 'cx' | 'phone'>, b: Placed, has: 'left' | 'right' | null): ('left' | 'right')[] {
+  const out = b.x < p.cx ? 'left' : 'right'
+  const inward = out === 'left' ? 'right' : 'left'
+  const order: ('left' | 'right')[] = p.phone ? [out] : [out, inward]
+  return has && (!p.phone || has === out) ? [has, ...order.filter((one) => one !== has)] : order
+}
+
+/** Whether a name fits there: on the screen, above the band, clear of what is kept and of the other discs. */
+export function fits(p: Geo, bx: Box, kept: Box[], others: Placed[]) {
+  const edge = p.phone ? 10 : 16
+  if (bx.l < edge || bx.r > p.w - edge || bx.b > p.foot - 6) return false
+  if (kept.some((k) => meets(k, bx, 8))) return false
+  return !others.some((o) => meets({ l: o.x - o.size / 2, t: o.y - o.size / 2, r: o.x + o.size / 2, b: o.y + o.size / 2 }, bx, 6))
 }
 
 /**
@@ -280,8 +315,8 @@ export function plate(f: Frame): Plate {
 function raysOf(cx: number, cy: number, sun: number, tall: number): Ray[] {
   const rand = seeded(29)
   const k = sun / 24
-  // Across most of the mark's width, a line every two and a half px or so.
-  const half = sun * 0.3
+  // Across the mark's upper half, a line every two and a half px or so, rooted well inside its edges so the light stays behind it as it turns.
+  const half = sun * 0.15
   const n = Math.max(9, Math.round((half * 2) / 2.6) | 1)
   return Array.from({ length: n }, (_, i) => {
     const u = (i / (n - 1)) * 2 - 1
@@ -289,7 +324,7 @@ function raysOf(cx: number, cy: number, sun: number, tall: number): Ray[] {
     const middle = 1 - Math.abs(u)
     // Its root: just inside the mark's upper edge where it is, so it stands on it. The edge is a face hollowed to a circle: the chord from the tip to a corner, and the hollow under it (on the 24 grid).
     const along = clamp((Math.abs(dx) / k - 0.42) / 7.47, 0, 1)
-    const edge = 5.53 + along * 12.94 + 3.9 * 4 * along * (1 - along) + 0.9
+    const edge = 5.53 + along * 12.94 + 3.9 * 4 * along * (1 - along) + 1.6
     const root = cy + (edge - 14.4) * k
     const reach = tall * (0.38 + 0.62 * middle ** 1.6) * (0.86 + 0.14 * rand())
     const top = cy - reach
@@ -308,7 +343,7 @@ function raysOf(cx: number, cy: number, sun: number, tall: number): Ray[] {
 }
 
 /** A still field of stars, sparse and fine, the same wherever the frame is cut: laid on a fixed field about the middle, and thinning out over the band. */
-function starsOf(w: number, h: number, band: number, cx: number, cy: number, sun: number): Star[] {
+function starsOf(w: number, h: number, band: number, cx: number, cy: number, sun: number, tall: number): Star[] {
   const rand = seeded(7)
   const stars: Star[] = []
   const FIELD_W = 2600
@@ -325,7 +360,7 @@ function starsOf(w: number, h: number, band: number, cx: number, cy: number, sun
     // Fewer over the band, where the words are.
     if (y > band - 40 && keep > 0.25) continue
     // None in the sun's light.
-    if (Math.abs(x - cx) < sun * 1.6 && y > cy - sun * 4.5 && y < cy + sun) continue
+    if (Math.abs(x - cx) < sun * 0.95 && y > cy - tall - 24 && y < cy + sun * 0.6) continue
     stars.push({
       x: r1(x),
       y: r1(y),

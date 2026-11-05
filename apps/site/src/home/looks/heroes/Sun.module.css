@@ -1,0 +1,44 @@
+/* Prototype: the Orrery's sun (Sun.tsx). It stands between the far half of the system and the near: the bodies behind it pass behind it. */
+
+.solid { position: absolute; z-index: 10; display: block; pointer-events: none; }
+
+/* ---- 2.5D: flat planes in depth, tilting together; --k is a grid unit in px ---- */
+
+.planes { position: absolute; z-index: 10; pointer-events: none; perspective: calc(var(--k) * 190px); perspective-origin: 50% 60%; }
+.bob, .sway { position: absolute; inset: 0; transform-style: preserve-3d; }
+/* Turning about the bore, its middle. */
+.sway { transform-origin: 50% 60%; transform: rotateX(13deg) rotateY(-20deg); }
+.sway > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+
+/* A cobalt plate of the same cut, far behind it, as a second colour printed under the first: as it tilts, the two slide apart. */
+.ghost { transform: translateZ(calc(var(--k) * -6px)); fill: #3c4cff; fill-opacity: 0.3; }
+/* The edge: the face again, a little further back each time and darker, so a thin side shows as it turns. */
+.edge { transform: translateZ(calc(var(--k) * var(--i) * -0.14px)); fill: color-mix(in srgb, #8d857a calc(100% - var(--i) * 9%), #4a4540); }
+.face { transform: translateZ(0); }
+/* The point, floating in front of the bore, a little cobalt light. */
+.point {
+  position: absolute;
+  left: 50%;
+  top: 60%;
+  width: calc(var(--k) * 1.7px);
+  height: calc(var(--k) * 1.7px);
+  margin: calc(var(--k) * -0.85px) 0 0 calc(var(--k) * -0.85px);
+  border-radius: 50%;
+  background: #8f99ff;
+  box-shadow: 0 0 calc(var(--k) * 2px) rgba(127, 139, 255, 0.75);
+  transform: translateZ(calc(var(--k) * 3.2px));
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .planes:not([data-still]) .bob { animation: bob 6.4s ease-in-out infinite alternate; }
+  .planes:not([data-still]) .sway { animation: sway 19s ease-in-out infinite alternate; }
+}
+@keyframes bob {
+  from { transform: translateY(calc(var(--k) * -0.55px)); }
+  to { transform: translateY(calc(var(--k) * 0.55px)); }
+}
+@keyframes sway {
+  0% { transform: rotateX(15deg) rotateY(-26deg) rotateZ(-1.5deg); }
+  50% { transform: rotateX(10deg) rotateY(2deg) rotateZ(1deg); }
+  100% { transform: rotateX(14deg) rotateY(26deg) rotateZ(-1deg); }
+}
