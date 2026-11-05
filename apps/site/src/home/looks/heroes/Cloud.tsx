@@ -294,6 +294,7 @@ export function CloudHero({ nav }: { nav?: ReactNode }) {
         <div className={s.sky} aria-hidden="true" />
         <img ref={sea} className={s.sea} src={seaUrl} alt="" aria-hidden="true" decoding="async" />
         <img ref={bank} className={s.bank} src={bankUrl} alt="" aria-hidden="true" decoding="async" />
+        <div className={s.foot} aria-hidden="true" />
         <div ref={night} className={s.night} aria-hidden="true" />
         <div ref={heat} className={s.heat} aria-hidden="true" />
         <div ref={flash} className={s.flash} aria-hidden="true" />

@@ -28,9 +28,11 @@
 
 /* The cloud sea, its sky melting into the sky above it; and the bank in front of it, nearer. */
 .sea, .bank { position: absolute; left: 50%; display: block; height: auto; pointer-events: none; transform: translate3d(-50%, 0, 0); will-change: transform; }
-.sea { bottom: -14cqh; width: max(100cqw, 1200px); -webkit-mask: linear-gradient(transparent, #000 30%); mask: linear-gradient(transparent, #000 30%); }
-.bank { bottom: -2px; width: max(100cqw, 900px); }
+.sea { bottom: -14cqh; width: max(106cqw, 1200px); -webkit-mask: linear-gradient(transparent, #000 30%); mask: linear-gradient(transparent, #000 30%); }
+.bank { bottom: -2px; width: max(106cqw, 900px); }
 .hero[data-settled] :is(.sea, .bank) { will-change: auto; }
+/* The cloud's foot thinning into the paper of the band below, so the band is what the cloud gives on to. */
+.foot { position: absolute; left: 0; right: 0; bottom: -2px; height: 15cqh; background: linear-gradient(rgba(244, 242, 236, 0), rgba(244, 242, 236, 0.72) 58%, var(--paper)); }
 
 /* The night over it all at first, lifting as the capsule comes down. */
 .night { position: absolute; inset: 0; background: #04061a; will-change: opacity; }
