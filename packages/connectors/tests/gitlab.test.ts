@@ -712,6 +712,17 @@ describe('GitLab as a code host', () => {
       assert.deepStrictEqual(yield* host.checks(repository, 'abc'), [
         { id: 'status:9', name: 'ci/buildkite', state: 'running', url: 'https://buildkite.example/9', summary: null },
       ])
+      // A commit the project doesn't hold, as a fork's is, has no statuses there: its checks are its pipeline's, if any.
+      const elsewhere = gitlab([
+        [
+          'GET',
+          `${PROJECT}/repository/commits/def/statuses?per_page=100&page=1`,
+          { status: 404, json: { message: '404 Commit Not Found' } },
+        ],
+        ['GET', `${PROJECT}/pipelines?sha=def&per_page=20`, { json: [] }],
+        ['GET', `${PROJECT}/repository/commits/def/merge_requests`, { json: [] }],
+      ])
+      assert.deepStrictEqual(yield* elsewhere.host.checks(repository, 'def'), [])
     }),
   )
 

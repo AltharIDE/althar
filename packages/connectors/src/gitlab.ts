@@ -1143,6 +1143,12 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
             ),
             (rows) => ({ items: rows, next: rows.length < 100 ? undefined : page + 1 }),
           ),
+        ).pipe(
+          // A commit the project doesn't hold, as one on a fork is, has no statuses there: its checks are its pipeline's.
+          Effect.catchIf(
+            (error) => error.reason === 'not_found',
+            () => Effect.succeed<ReadonlyArray<StatusAnswer>>([]),
+          ),
         )
         const pipelines = yield* http.cached(Schema.Array(Pipeline), `${project(repository)}/pipelines?sha=${sha}&per_page=20`)
         // The newest of GitLab's own pipelines; one an outside CI made has no jobs to read.
