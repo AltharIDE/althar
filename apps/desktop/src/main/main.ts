@@ -1,3 +1,4 @@
+import { isStartupStage, type StartupStage } from '../startup'
 import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import { homedir, hostname, userInfo } from 'node:os'
@@ -212,6 +213,26 @@ const logs = startLogs({
   dir: ownProfile !== undefined && ownProfile !== '' ? join(ownProfile, 'logs') : app.getPath('logs'),
   passOn: !app.isPackaged,
 })
+const startupMark = (stage: string, duration_ms?: number) =>
+  logs.info('Startup', { stage, elapsed_ms: Math.round(process.uptime() * 1000), duration_ms, pid: process.pid })
+logs.info('Startup', { stage: 'process-start', elapsed_ms: 0, pid: process.pid })
+startupMark('main-entry')
+let startupStage: StartupStage = 'data'
+let firstScreenDrawn = false
+let releaseBackground: () => void = () => {}
+const backgroundReady = new Promise<void>((resolve) => {
+  releaseBackground = resolve
+})
+ipcMain.on('althar:startup', (_event, stage: unknown, duration: unknown) => {
+  if (typeof stage !== 'string' || !/^[a-z-]{1,60}$/.test(stage)) return
+  startupMark(stage, typeof duration === 'number' && Number.isFinite(duration) ? duration : undefined)
+  if (stage === 'first-screen-drawn') {
+    firstScreenDrawn = true
+    releaseBackground()
+    runtime?.postMessage({ type: 'first-screen' })
+  }
+})
+
 /* What reports ask the runtime (report/reports.ts). */
 const facts = factsAsker()
 
@@ -235,6 +256,7 @@ const granting = new Map<string, (grant: string | null) => void>()
 
 interface RuntimeMessage {
   readonly type?: string
+  readonly stage?: unknown
   readonly requestId?: string
   readonly grant?: string
   readonly value?: unknown
@@ -512,6 +534,7 @@ if (__ALTHAR_TEST_HOOKS__)
 
 const startRuntime = () => {
   const { profile, worktrees } = locations()
+  startupMark('runtime-start')
   const child = utilityProcess.fork(join(here, '../runtime/runtime.js'), [], {
     serviceName: 'Althar runtime',
     // What it writes goes to runtime.log, and in development on to the terminal too.
@@ -539,6 +562,17 @@ const startRuntime = () => {
     },
   )
   child.on('message', (message: RuntimeMessage) => {
+    if (message.type === 'startup-stage' && isStartupStage(message.stage)) {
+      startupStage = message.stage
+      for (const window of windows) if (!window.isDestroyed()) window.webContents.send('althar:startup-stage', startupStage)
+      return
+    }
+    if (message.type === 'runtime-ready') {
+      startupStage = 'screen'
+      for (const window of windows) if (!window.isDestroyed()) window.webContents.send('althar:startup-stage', startupStage)
+      startupMark('runtime-ready')
+      return
+    }
     if (message.type === 'seal' || message.type === 'open') return seal(child, message)
     if (message.type === 'screenshot') return screenshot(child, message)
     if (message.type === 'facts') return facts.answer(message)
@@ -594,6 +628,7 @@ const startRuntime = () => {
     void sendersStopped().finally(() => app.quit())
   })
   runtime = child
+  if (firstScreenDrawn) child.postMessage({ type: 'first-screen' })
 }
 
 /** Tells the runtime a folder the person chose, and returns the grant the window opens it by. */
@@ -607,11 +642,13 @@ const allowFolder = (path: string): Promise<string | null> =>
 
 /** Gives a window a port to the runtime: once per page load, so a reload gets a fresh connection. */
 const connect = (window: BrowserWindow) => {
+  window.webContents.send('althar:startup-stage', startupStage)
   if (storeFailure !== undefined) return window.webContents.send('althar:store-failed', failureForWindow(storeFailure, homedir()))
   if (runtime === undefined) return
   const { port1, port2 } = new MessageChannelMain()
   runtime.postMessage({ type: 'connect' }, [port1])
   window.webContents.postMessage('althar:port', null, [port2])
+  startupMark('port-handed-over')
 }
 
 /**
@@ -924,9 +961,13 @@ void ready.then(() => {
     app.isPackaged &&
     (process.platform === 'darwin' || process.platform === 'win32' || (process.platform === 'linux' && process.env.APPIMAGE !== undefined))
   )
-    updates = startUpdates((glance: UpdateGlance) => {
-      for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('althar:update', glance)
-    })
+    updates = startUpdates(
+      (glance: UpdateGlance) => {
+        for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('althar:update', glance)
+      },
+      backgroundReady,
+      startupMark,
+    )
   // macOS keeps its system menu with the updater command, and Help → Report a Problem…, which opens the dialog in Althar's window, brought forward (report/reports.ts).
   // Elsewhere the hidden app menu keeps zoom, full screen, quit and dev tools' accelerators; Report a problem is at the quick settings' foot and in Settings' About there.
   if (process.platform === 'darwin') {
@@ -942,6 +983,11 @@ void ready.then(() => {
   }
   // Opened at login, it starts in the background, with no window: the runtime and its automations run, and a window opens as the person asks.
   const background = app.isPackaged && openedAtLogin(process.platform, process.argv, app.getLoginItemSettings().wasOpenedAtLogin)
+  if (background) {
+    firstScreenDrawn = true
+    releaseBackground()
+    runtime?.postMessage({ type: 'first-screen' })
+  }
   // Once the preferences are read, so the first window opens in the scheme the person chose, never the other one first;
   // on Linux, matching the desktop, once it has said its scheme too (a moment at most), since Electron can't tell it.
   void preferencesRead
@@ -995,6 +1041,10 @@ app.on('second-instance', () => void ready.then(bringForward))
 
 // Closing the last window isn't quitting on macOS: the runtime and its work carry on.
 app.on('window-all-closed', () => {
+  // With no window left to draw, macOS still carries on with its background work.
+  firstScreenDrawn = true
+  releaseBackground()
+  runtime?.postMessage({ type: 'first-screen' })
   if (process.platform !== 'darwin' && !keepingOn) quitWhenNoneLeft()
 })
 

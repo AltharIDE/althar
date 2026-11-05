@@ -1,3 +1,4 @@
+import { afterOpen, startup } from './startup'
 import { execFile, type ExecFileException } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
@@ -151,7 +152,7 @@ const run = (
       child.stdin.on('error', () => undefined)
       child.stdin.end(input)
     }),
-  )
+  ).pipe((effect) => (args[0] === 'fetch' || args[0] === 'ls-remote' ? afterOpen(startup('repository-fetch', effect)) : effect))
 
 /** A copy of a worktree's index, in a folder of its own: git may refresh the copy as it reads, never the worktree's own. */
 const indexCopy = (cwd: string, args: ReadonlyArray<string>) =>

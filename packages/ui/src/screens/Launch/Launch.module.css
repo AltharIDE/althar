@@ -17,6 +17,19 @@
   height: 100%;
 }
 
+.waiting {
+  position: absolute;
+  top: 64%;
+  left: 24px;
+  right: 24px;
+  z-index: 2;
+  margin: 0;
+  text-align: center;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+
 .veil {
   position: absolute;
   inset: 0;

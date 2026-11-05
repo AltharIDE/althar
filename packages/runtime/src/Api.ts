@@ -85,6 +85,7 @@ import { timestamp } from './records'
 import { Setups } from './Setups'
 import * as Runtime from './Runtime'
 import { withEdits, workedOutReach } from './sandboxReach'
+import { afterOpen, startup } from './startup'
 import { tallyOf } from './tally'
 import { Coordinator } from './Coordinator'
 import { TaskActions } from './TaskActions'
@@ -614,7 +615,16 @@ export const handlers = Api.toLayer(
     return Api.of({
       Status: ({ recheck }) =>
         Effect.map(
-          api(Effect.forEach(agents.list, (entry) => signIn(entry, recheck === true), { concurrency: 'unbounded' })),
+          api(
+            afterOpen(
+              startup(
+                'agent-checks',
+                Effect.forEach(agents.list, (entry) => startup(`agent-${entry.definition.id}`, signIn(entry, recheck === true)), {
+                  concurrency: 'unbounded',
+                }),
+              ),
+            ),
+          ),
           (statuses) => ({
             apiVersion: API_VERSION,
             appVersion: config.appVersion,

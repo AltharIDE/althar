@@ -1,10 +1,26 @@
 import { SqliteClient, SqliteMigrator } from '@effect/sql-sqlite-node'
-import { Cause, type Duration, Effect, Layer, Schema } from 'effect'
+import { Cause, Clock, type Duration, Effect, Exit, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 import { camelToSnake, snakeToCamel } from 'effect/String'
 
 import { BackupFailed, backUpBeforeMigrating, latestBackup, reasonOf } from './backups'
 import { loaderFor, type Migration, MIGRATIONS_TABLE, migrations } from './migrations'
+
+/** Timings stay in the runtime log even if opening or migration fails. */
+const timed = <A, E, R>(stage: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+  Effect.gen(function* () {
+    const at = yield* Clock.currentTimeMillis
+    yield* Effect.logInfo('Startup').pipe(Effect.annotateLogs({ stage, phase: 'start', at_ms: at }))
+    return yield* effect.pipe(
+      Effect.onExit((exit) =>
+        Effect.flatMap(Clock.currentTimeMillis, (end) =>
+          Effect.logInfo('Startup').pipe(
+            Effect.annotateLogs({ stage, phase: Exit.isSuccess(exit) ? 'done' : 'failed', duration_ms: end - at, at_ms: end }),
+          ),
+        ),
+      ),
+    )
+  })
 
 export { BackupFailed }
 
@@ -119,15 +135,24 @@ export const layer = (
   SqlClient.SqlClient | SqliteClient.SqliteClient,
   MigrationFailed | BackupFailed | SqlError.SqlError | ForeignKeyViolations | DatabaseInUse
 > =>
-  migrate(options).pipe(
+  Layer.fromBuildMemo((memo, scope) => timed('store-migrations', Layer.buildWithMemoMap(migrate(options), memo, scope))).pipe(
     Layer.provideMerge(beforeMigrations(options.filename)),
     Layer.provideMerge(
-      SqliteClient.layer({
-        filename: options.filename,
-        transformQueryNames: camelToSnake,
-        transformResultNames: snakeToCamel,
-        ...(options.busyTimeout === undefined ? {} : { busyTimeout: options.busyTimeout }),
-      }),
+      Layer.fromBuildMemo((memo, scope) =>
+        timed(
+          'store-open',
+          Layer.buildWithMemoMap(
+            SqliteClient.layer({
+              filename: options.filename,
+              transformQueryNames: camelToSnake,
+              transformResultNames: snakeToCamel,
+              ...(options.busyTimeout === undefined ? {} : { busyTimeout: options.busyTimeout }),
+            }),
+            memo,
+            scope,
+          ),
+        ),
+      ),
     ),
     // Opening a file another runtime holds fails as the client sets it up, before any statement of ours.
     Layer.catchCause((cause) =>

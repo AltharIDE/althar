@@ -1,3 +1,4 @@
+import { afterOpen, startup } from './startup'
 import { Errands } from './Errands'
 import { makeFollowing } from './Follow'
 import { thisDevice } from './device'
@@ -5899,7 +5900,7 @@ export class Changes extends Context.Service<
       yield* busy.queue(provide(roundsWaiting))
 
       // What a lead committed as an earlier launch ended goes up now, where its project's rules push it on its own (ADR-072).
-      yield* Effect.forkScoped(provide(pushNow({})))
+      yield* Effect.forkScoped(afterOpen(provide(pushNow({}))))
 
       /*
        * A settled task's pull request that Althar stopped listening to while
@@ -5928,7 +5929,7 @@ export class Changes extends Context.Service<
         (effect) => provide(effect),
         Effect.catchCause((cause) => Effect.logWarning('Could not read settled pull requests', cause)),
       )
-      yield* Effect.forkScoped(readSettled)
+      yield* Effect.forkScoped(afterOpen(startup('settled-pull-requests', readSettled)))
 
       // What an earlier launch was doing outside when it stopped is uncertain until read back or asked for again.
       yield* provide(reconcileOutward).pipe(
