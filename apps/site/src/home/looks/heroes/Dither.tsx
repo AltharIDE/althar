@@ -145,7 +145,7 @@ const lightAt = (t: number) => 0.22 + 0.38 * smooth(AT.ignite, AT.peak, t) + 0.4
 export function DitherHero({ nav }: { nav?: ReactNode }) {
   const root = useRef<HTMLDivElement>(null)
   const field = useRef<HTMLDivElement>(null)
-  const band = useRef<HTMLImageElement>(null)
+  const light = useRef<HTMLDivElement>(null)
   const warm = useRef<HTMLImageElement>(null)
   const flash = useRef<HTMLDivElement>(null)
   const head = useRef<HTMLHeadingElement>(null)
@@ -170,8 +170,8 @@ export function DitherHero({ nav }: { nav?: ReactNode }) {
       const broken = brokenAt(t)
       put(el, '--dark', (1 - smooth(AT.open, AT.opened, t)).toFixed(3))
       // The band: its light, warmed by the heat as it builds and clearing to its own colours as the fire breaks.
-      put(band.current, 'opacity', lightAt(t).toFixed(3))
-      put(warm.current, 'opacity', clamp(heat * 0.95 * (1 - broken)).toFixed(3))
+      put(light.current, 'opacity', lightAt(t).toFixed(3))
+      put(warm.current, 'opacity', clamp(heat * 0.9).toFixed(3))
       put(flash.current, 'opacity', clamp(0.85 * flare(t, AT.break - 0.02, 2.4)).toFixed(3))
       // "fast.", forged at the heat's height, glowing and slammed in, then cooling as it breaks.
       put(word, 'opacity', smooth(AT.peak + 0.1, AT.peak + 0.4, t).toFixed(3))
@@ -308,8 +308,10 @@ export function DitherHero({ nav }: { nav?: ReactNode }) {
       {/* The band of light along the foot: the picture as sent, its ember-warmed copy over it while the heat lasts, and the break's flash. */}
       <div ref={field} className={s.field} aria-hidden="true">
         <div className={s.afloat}>
-          <img ref={band} className={s.band} src={fieldUrl} alt="" width={1672} height={941} decoding="async" fetchPriority="high" />
-          <img ref={warm} className={s.warm} src={fieldUrl} alt="" width={1672} height={941} decoding="async" />
+          <div ref={light} className={s.light}>
+            <img className={s.band} src={fieldUrl} alt="" width={1672} height={941} decoding="async" fetchPriority="high" />
+            <img ref={warm} className={s.warm} src={fieldUrl} alt="" width={1672} height={941} decoding="async" />
+          </div>
           <div ref={flash} className={s.flash} />
         </div>
       </div>
