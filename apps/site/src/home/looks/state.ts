@@ -29,8 +29,8 @@ export type HeroLook = 'Today' | 'Night' | 'Chart' | 'Cloud' | 'Dither'
 
 export const HEROES: ReadonlyArray<{ value: HeroLook; name: string }> = [
   { value: 'Today', name: 'Today' },
-  { value: 'Night', name: 'Night' },
-  { value: 'Chart', name: 'Chart' },
+  { value: 'Night', name: 'Orrery' },
+  { value: 'Chart', name: 'Descent' },
   { value: 'Cloud', name: 'Cloud' },
   { value: 'Dither', name: 'Dither' },
 ]
