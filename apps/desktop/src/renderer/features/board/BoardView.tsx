@@ -168,9 +168,10 @@ export interface ClosingPullRequests {
 /** How many of what a task handed back show on its card: a row of pictures, or a few files. */
 const HANDED_SHOWN = 3
 
-/** Starting a plan up next, by its id, and opening a task's team, by the task's id. */
+/** Starting a plan up next, by its id, and opening a task's team, by the task's id, in the project whose usage the menu says. */
 export interface TeamActions {
-  readonly start: (planId: string) => void
+  readonly projectId: string
+  readonly start: (planId: string) => Promise<void>
   readonly change: (taskId: string) => void
 }
 
@@ -719,6 +720,8 @@ export function BoardView({
     ...lanes.calls.map((call) => ({ at: call.createdAt, waiting: null, call })),
   ].toSorted((a, b) => a.at.localeCompare(b.at))
 
+  // The plans starting from their rows, by id, until the runtime has answered.
+  const [starting, setStarting] = useState<ReadonlySet<string>>(new Set())
   // While the person points at Up next or Running, or drags in the line, what would move between them stays where it was.
   const [held, setHeld] = useState<Held | null>(null)
   const shown = held === null ? lanes : holding(lanes, held)
@@ -768,15 +771,34 @@ export function BoardView({
       />
     )
   }
-  // A plan that hasn't begun starts, or changes who does it, from its row.
+  // A plan that hasn't begun starts, or changes who does it, from its row; one starting offers Start no more until it has.
   const teamOf = (work: BoardTask) => {
     const change = team === undefined ? null : teamChangeOf(work)
     if (team === undefined || change === null || work.plan === null) return {}
     const planId = work.plan.id
-    const start = change === 'starts' ? () => team.start(planId) : undefined
+    const start =
+      change === 'starts' && !starting.has(planId)
+        ? () => {
+            setStarting((was) => new Set(was).add(planId))
+            void team.start(planId).finally(() =>
+              setStarting((was) => {
+                const next = new Set(was)
+                next.delete(planId)
+                return next
+              }),
+            )
+          }
+        : undefined
     return {
       ...(start === undefined ? {} : { onStart: start }),
-      menu: <TeamMenu task={work} {...(start === undefined ? {} : { onStart: start })} onChange={() => team.change(work.taskId)} />,
+      menu: (
+        <TeamMenu
+          projectId={team.projectId}
+          task={work}
+          {...(start === undefined ? {} : { onStart: start })}
+          onChange={() => team.change(work.taskId)}
+        />
+      ),
     }
   }
 

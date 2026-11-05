@@ -58,7 +58,8 @@ export interface TeamDialogProps {
   steps: ReadonlyArray<TeamDialogStep>
   /** How the work ends, where it reaches the repository's host; absent where nothing does. */
   end?: { readonly value: TaskEnd; readonly onChange: (end: TaskEnd) => void }
-  onSave: () => void
+  /** Saves it; absent where it can't change any more, when `error` says why. */
+  onSave?: () => void
   /** Saves and starts it, for a task held before it started; absent where it starts by itself. */
   onStart?: () => void
   onClose: () => void
@@ -117,9 +118,11 @@ export function TeamDialog({ task, steps, end, onSave, onStart, onClose, busy = 
           <Button variant="quiet" onClick={onClose}>
             {t.cancel}
           </Button>
-          <Button variant={onStart === undefined ? 'ink' : 'default'} busy={busy} onClick={onSave}>
-            {t.save}
-          </Button>
+          {onSave !== undefined && (
+            <Button variant={onStart === undefined ? 'ink' : 'default'} busy={busy} onClick={onSave}>
+              {t.save}
+            </Button>
+          )}
           {onStart !== undefined && (
             <Button variant="ink" busy={busy} onClick={onStart}>
               {t.start}

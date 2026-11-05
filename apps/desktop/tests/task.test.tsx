@@ -12,7 +12,7 @@ import { conflictsOf } from '../src/renderer/features/task/Outputs'
 import { elapsedOf, openingFace, statusOf, stepsOf, TaskView, tookOf } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { numberOf, reachOf, reviewedUnfurl } from '../src/renderer/features/task/ReviewCard'
-import { agents, change, changed, fakeClient, fakeHost, items, models, snapshot, status, streamed, usual } from './fixtures'
+import { agents, card, change, changed, fakeClient, fakeHost, items, models, snapshot, status, streamed, usual } from './fixtures'
 import type { ChangedFile } from '@althar/contracts'
 import { clock } from '../src/renderer/shared/time'
 import { reads } from '../src/renderer/data/reads'
@@ -1720,6 +1720,56 @@ describe('a task', () => {
     expect(offered).toEqual(['Start now', 'Open in Zed', 'Attach a pull request…', 'Abandon'])
     await userEvent.click(screen.getByRole('menuitem', { name: /Start now/ }))
     await waitFor(() => expect(client.startPlan).toHaveBeenCalledWith('pln1'))
+  })
+
+  it('changes the team of its plan before it begins, from its menu and its composer’s picker, in one dialog', async () => {
+    const held = {
+      ...card({ taskId: 't1', threadId: 'th1', phase: 'held' }),
+      state: 'open',
+      createdAt: '',
+      settledAt: null,
+      changed: null,
+      here: [],
+    }
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({ task: { ...thread().task, phase: 'held', actions: ['start', 'abandon'], planId: 'pln1' }, session: null }),
+      ),
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [held], calls: [], settledTotal: 0 })),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Change the team…/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Team' })
+    expect(within(dialog).getByText('It knows the code.')).toBeTruthy()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Team' })).toBeNull())
+
+    // The composer's picker closes, then opens the same dialog.
+    await userEvent.click(screen.getByRole('button', { name: /^Lead:/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    expect(await screen.findByRole('dialog', { name: 'Team' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'All models' })).toBeNull()
+  })
+
+  it('offers no change of team once its plan has begun', async () => {
+    const begun = {
+      ...card({ taskId: 't1', threadId: 'th1', phase: 'running', step: 'implement' }),
+      state: 'open',
+      createdAt: '',
+      settledAt: null,
+      changed: null,
+      here: [],
+    }
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread({ task: { ...thread().task, phase: 'running', actions: ['stop', 'abandon'] } })),
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [begun], calls: [], settledTotal: 0 })),
+    })
+    withServices(<Task />, client)
+    await waitFor(() => expect(client.getBoard).toHaveBeenCalled())
+    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+    expect(await screen.findByRole('menuitem', { name: /Stop the task/ })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: /Change the team…/ })).toBeNull()
   })
 
   it('marks each of its draft pull requests ready from its menu, in turn', async () => {

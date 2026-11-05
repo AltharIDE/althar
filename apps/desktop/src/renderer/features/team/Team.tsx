@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import type { AgentStatus, BoardTask, PlanStep, TaskEnd as End } from '@althar/contracts'
-import { IconButton, Menu, MenuItem, TeamDialog } from '@althar/ui'
+import { IconButton, Menu, MenuItem, modelRoomText, TeamDialog, UsageTone, usageTone } from '@althar/ui'
 
 import { messageOf } from '../../data/client'
 import { keys, reads } from '../../data/reads'
@@ -11,6 +11,7 @@ import { useEffortNames, useModelNames } from '../../shared/modelNames'
 import { ModelChoice } from '../../shared/ModelChoice'
 import type { Choice } from '../../shared/models'
 import { stepText } from '../../shared/steps'
+import { useModelRooms } from '../usage/usePlan'
 import { ENDS, endOf } from '../project/Card'
 
 /*
@@ -32,6 +33,8 @@ export const text = {
   team: (lead: string, review: string | null) => (review === null ? lead : `${lead}, ${review}`),
   reviews: (name: string) => `${name} reviews`,
   noReview: 'no review',
+  /** Its team can't change any more: it started with the team it had. */
+  begun: 'It started with the team it had.',
 }
 
 type Plan = NonNullable<BoardTask['plan']>
@@ -57,15 +60,26 @@ export const useTeamed = (projectId: string | null, taskId: string | null): Team
   return task === undefined || teamChangeOf(task) === null ? null : task
 }
 
-/** Its team in a line: who leads, how hard, and who reviews. */
-const useTeamLine = (plan: Plan) => {
+/** Its team in a line: who leads, how hard, with how much is left of its plan where that is nearly out, and who reviews. */
+const useTeamLine = (plan: Plan, projectId: string) => {
   const named = useModelNames()
   const effortOf = useEffortNames()
+  const roomOf = useModelRooms(projectId)
   const lead = plan.steps.find((step) => step.key === 'implement')
   const review = plan.steps.find((step) => step.key === 'review')
   if (lead === undefined) return null
+  const leadInfo = named(lead.agentId, lead.model)
   const effort = effortOf(lead.agentId, lead.model, lead.effort ?? null)
-  const leadWords = effort === null ? named(lead.agentId, lead.model).name : `${named(lead.agentId, lead.model).name} · ${effort}`
+  const room = roomOf(leadInfo)
+  // Said as the picker's chip says it, once nearly out: 9% left · until 17:10, Out · until 18:00.
+  const low =
+    room == null ||
+    usageTone(room.left) === UsageTone.Plenty ||
+    usageTone(room.left) === UsageTone.Half ||
+    usageTone(room.left) === UsageTone.Low
+      ? null
+      : `${room.left === 0 ? modelRoomText.chipOut : modelRoomText.chipLeft(room.left)}${room.until === null ? '' : ` · ${modelRoomText.until(room.until)}`}`
+  const leadWords = `${leadInfo.name}${effort === null ? '' : ` · ${effort}`}${low === null ? '' : ` (${low})`}`
   return text.team(
     leadWords,
     review === undefined ? null : review.skipped ? text.noReview : text.reviews(named(review.agentId, review.model).name),
@@ -73,14 +87,24 @@ const useTeamLine = (plan: Plan) => {
 }
 
 /** A row's menu, up next: who's on it, then Start where it starts now, and Change the team…. */
-export function TeamMenu({ task, onStart, onChange }: { task: Teamed; onStart?: () => void; onChange: () => void }) {
-  const line = useTeamLine(task.plan!)
+export function TeamMenu({
+  projectId,
+  task,
+  onStart,
+  onChange,
+}: {
+  projectId: string
+  task: Teamed
+  onStart?: () => void
+  onChange: () => void
+}) {
+  const line = useTeamLine(task.plan!, projectId)
   return (
     <Menu
       trigger={<IconButton icon="more" size="small" label={text.more} />}
       label={text.menu}
       align="end"
-      width={300}
+      width={320}
       {...(line === null ? {} : { note: line })}
     >
       {onStart !== undefined && (
@@ -97,9 +121,15 @@ export function TeamMenu({ task, onStart, onChange }: { task: Teamed; onStart?: 
 
 const choiceOf = (step: PlanStep): Choice => ({ agentId: step.agentId, model: step.model, effort: step.effort ?? null })
 
+/** What the person changed of each step, laid on the plan as it is now: what someone else changed meanwhile stays. */
+type Edits = Partial<Record<PlanStep['key'], Partial<PlanStep>>>
+const withEdits = (steps: ReadonlyArray<PlanStep>, edits: Edits) => steps.map((step) => ({ ...step, ...edits[step.key] }))
+
 /**
  * The team, in a dialog: each step's picker, the composer's own, and how the work ends, kept until the person saves. A plan
- * held or on its countdown can start with it at once.
+ * held or on its countdown can start with it at once; one on its countdown is held as the dialog opens, so it doesn't start
+ * with the team it had while the person changes it. `task` is the task as its board reads it now, null once its team can't
+ * change: then it says so, rather than going with what the person picked.
  */
 export function ChangeTeam({
   projectId,
@@ -108,26 +138,37 @@ export function ChangeTeam({
   onClose,
 }: {
   projectId: string
-  task: Teamed
+  task: Teamed | null
   agents: ReadonlyArray<AgentStatus>
   onClose: () => void
 }) {
   const { client, cache } = useServices()
-  const plan = task.plan!
-  const [steps, setSteps] = useState<ReadonlyArray<PlanStep>>(plan.steps)
-  const [end, setEnd] = useState<End | null>(plan.end)
+  // The task as it opened: what the dialog shows once it can no longer change.
+  const [first] = useState(task)
+  const [edits, setEdits] = useState<Edits>({})
+  const [end, setEnd] = useState<End | null | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const firstPlan = first?.plan ?? null
+  useEffect(() => {
+    // Its countdown stops while its team is changed: held, it starts when the person says.
+    if (first?.phase === 'planned' && firstPlan !== null) void client.holdPlan(firstPlan.id).catch(() => undefined)
+  }, [client, first, firstPlan])
+  if (first === null || firstPlan === null) return null
+  const now = task ?? first
+  const plan = now.plan ?? firstPlan
+  const steps = withEdits(plan.steps, edits)
+  const ending = end === undefined ? plan.end : end
+  const gone = task === null || teamChangeOf(task) === null
   // Only the agents the plan allows: a review's lead only reads, so an agent that can't be held to that isn't offered.
   const allowed = plan.agents
   const offered = allowed === undefined ? agents : agents.filter((agent) => allowed.includes(agent.id))
-  const put = (key: PlanStep['key'], patch: Partial<PlanStep>) =>
-    setSteps((was) => was.map((step) => (step.key === key ? { ...step, ...patch } : step)))
+  const put = (key: PlanStep['key'], patch: Partial<PlanStep>) => setEdits((was) => ({ ...was, [key]: { ...was[key], ...patch } }))
   const save = async (andStart: boolean) => {
     setBusy(true)
     setError(null)
     try {
-      await client.changePlan(plan.id, steps, end)
+      await client.changePlan(plan.id, steps, ending)
       if (andStart) await client.startPlan(plan.id)
       void cache.invalidateQueries({ queryKey: keys.board(projectId) })
       onClose()
@@ -136,16 +177,17 @@ export function ChangeTeam({
       setBusy(false)
     }
   }
-  const reviews = task.reviewing != null
+  const reviews = now.reviewing != null
+  const label = (key: PlanStep['key']) => stepText.label[reviews ? 'review' : key]
   return (
     <TeamDialog
-      task={task.title}
+      task={now.title}
       steps={steps.map((step) => ({
         id: step.key,
-        label: stepText.label[reviews ? 'review' : step.key],
+        label: label(step.key),
         picker: (
           <ModelChoice
-            owner={stepText.label[step.key]}
+            owner={label(step.key)}
             agents={offered}
             projectId={projectId}
             value={choiceOf(step)}
@@ -160,12 +202,12 @@ export function ChangeTeam({
         ...(step.key === 'review' ? { onAdd: () => put('review', { skipped: false }) } : {}),
       }))}
       // Where the repository's host isn't connected, the task ends on its branch, and there is no ending to pick.
-      {...(end === null ? {} : { end: { value: ENDS[end], onChange: (next) => setEnd(endOf(next)) } })}
-      onSave={() => void save(false)}
-      {...(teamChangeOf(task) === 'starts' ? { onStart: () => void save(true) } : {})}
+      {...(ending === null ? {} : { end: { value: ENDS[ending], onChange: (next) => setEnd(endOf(next)) } })}
+      {...(gone ? {} : { onSave: () => void save(false) })}
+      {...(!gone && teamChangeOf(now) === 'starts' ? { onStart: () => void save(true) } : {})}
       onClose={onClose}
       busy={busy}
-      error={error}
+      error={gone ? text.begun : error}
     />
   )
 }

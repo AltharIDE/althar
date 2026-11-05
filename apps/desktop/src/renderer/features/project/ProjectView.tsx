@@ -699,14 +699,14 @@ export function ProjectView({
                     folds={folds}
                     onFoldsChange={setFolds}
                     onTalk={talkToCoordinator}
-                    team={{ start: (planId) => void model.startPlan(planId), change: setTeamFor }}
+                    team={{ projectId, start: (planId) => model.startPlan(planId), change: setTeamFor }}
                     {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                   />
-                  {teamTask !== null && teamChangeOf(teamTask) !== null && (
+                  {teamFor !== null && (
                     <ChangeTeam
-                      key={teamTask.taskId}
+                      key={teamFor}
                       projectId={projectId}
-                      task={teamTask}
+                      task={teamTask !== null && teamChangeOf(teamTask) !== null ? teamTask : null}
                       agents={model.agents}
                       onClose={() => setTeamFor(null)}
                     />

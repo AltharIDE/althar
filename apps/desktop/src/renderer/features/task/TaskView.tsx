@@ -1177,7 +1177,7 @@ export function TaskView({
         </TaskFace>
       )}
       {host.lightbox}
-      {changingTeam && teamed !== null && (
+      {changingTeam && (
         <ChangeTeam projectId={snapshot.project.id} task={teamed} agents={model.agents} onClose={() => setChangingTeam(false)} />
       )}
       {abandoning && (

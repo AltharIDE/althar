@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -8,7 +8,14 @@ import { BoardView } from '../src/renderer/features/board/BoardView'
 import { lanesOf } from '../src/renderer/features/board/lanes'
 import { ChangeTeam, teamChangeOf } from '../src/renderer/features/team/Team'
 import { agents, card, fakeClient } from './fixtures'
-import { withServices } from './render'
+import { servicesFor, withServices } from './render'
+import { ServicesProvider } from '../src/renderer/data/services'
+import { ProjectView } from '../src/renderer/features/project/ProjectView'
+import { useBoard } from '../src/renderer/features/board/useBoard'
+import { useConnections } from '../src/renderer/features/connections/useConnections'
+import { useProject } from '../src/renderer/features/project/useProject'
+import { fakeHost } from './fixtures'
+import { useSettingsOf } from './render'
 
 const NOW = '2026-10-01T10:00:00.000Z'
 
@@ -56,7 +63,7 @@ describe('changing a plan’s team before it begins', () => {
   })
 
   it('starts a held plan from its row, and opens its team from the row’s menu', async () => {
-    const team = { start: vi.fn(), change: vi.fn() }
+    const team = { projectId: 'p1', start: vi.fn(async () => {}), change: vi.fn() }
     withServices(
       <BoardView lanes={lanesOf(board([held, queued]))} agents={agents} now={NOW} onOpen={vi.fn()} team={team} />,
       fakeClient().client,
@@ -72,7 +79,7 @@ describe('changing a plan’s team before it begins', () => {
   })
 
   it('offers no Start on a plan that starts by itself once an agent is free, only its team', async () => {
-    const team = { start: vi.fn(), change: vi.fn() }
+    const team = { projectId: 'p1', start: vi.fn(async () => {}), change: vi.fn() }
     withServices(
       <BoardView lanes={lanesOf(board([held, queued]))} agents={agents} now={NOW} onOpen={vi.fn()} team={team} />,
       fakeClient().client,
@@ -129,4 +136,103 @@ describe('changing a plan’s team before it begins', () => {
     expect(client.startPlan).not.toHaveBeenCalled()
     expect(onClose).not.toHaveBeenCalled()
   })
+
+  it('holds a plan on its countdown as its team opens, so it doesn’t start with the team it had', async () => {
+    const { client } = fakeClient()
+    const counting = task({ taskId: 'c', phase: 'planned', plan: { ...card().plan!, id: 'plc' } })
+    withServices(<ChangeTeam projectId="p1" task={counting} agents={agents} onClose={vi.fn()} />, client)
+    await waitFor(() => expect(client.holdPlan).toHaveBeenCalledWith('plc'))
+    expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Start' })).toBeTruthy()
+  })
+
+  it('says so, rather than closing or going with what was picked, once it started meanwhile', async () => {
+    const { client } = fakeClient()
+    const onClose = vi.fn()
+    const services = servicesFor(client, fakeHost())
+    const view = withServices(<ChangeTeam projectId="p1" task={held} agents={agents} onClose={onClose} />, client)
+    view.rerender(
+      <ServicesProvider value={services}>
+        <ChangeTeam projectId="p1" task={null} agents={agents} onClose={onClose} />
+      </ServicesProvider>,
+    )
+    const dialog = within(await screen.findByRole('dialog'))
+    expect(dialog.getByRole('alert').textContent).toBe('It started with the team it had.')
+    expect(dialog.queryByRole('button', { name: 'Start' })).toBeNull()
+    expect(dialog.queryByRole('button', { name: 'Save' })).toBeNull()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(client.changePlan).not.toHaveBeenCalled()
+  })
+
+  it('keeps what someone else changed meanwhile, sending only what the person changed', async () => {
+    const { client } = fakeClient()
+    const services = servicesFor(client, fakeHost())
+    const view = withServices(<ChangeTeam projectId="p1" task={held} agents={agents} onClose={vi.fn()} />, client)
+    const dialog = within(screen.getByRole('dialog'))
+    await userEvent.click(dialog.getByRole('button', { name: /^Review:/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove from this step' }))
+    // The coordinator gives the lead to Codex while the dialog is open.
+    const moved = {
+      ...held,
+      plan: { ...held.plan!, steps: held.plan!.steps.map((step) => (step.key === 'implement' ? { ...step, agentId: 'codex' } : step)) },
+    }
+    view.rerender(
+      <ServicesProvider value={services}>
+        <ChangeTeam projectId="p1" task={moved} agents={agents} onClose={vi.fn()} />
+      </ServicesProvider>,
+    )
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(client.changePlan).toHaveBeenCalledWith(
+        'plh',
+        [
+          { key: 'implement', agentId: 'codex', model: null, skipped: false },
+          { key: 'review', agentId: 'codex', model: null, skipped: true },
+        ],
+        null,
+      ),
+    )
+  })
+
+  it('names a review’s one step Review, in its picker too', () => {
+    const review = { ...held, reviewing: {} as BoardTask['reviewing'], plan: { ...held.plan!, steps: [held.plan!.steps[0]!] } }
+    withServices(<ChangeTeam projectId="p1" task={review} agents={agents} onClose={vi.fn()} />, fakeClient().client)
+    const dialog = within(screen.getByRole('dialog'))
+    expect(dialog.getByRole('button', { name: /^Review:/ })).toBeTruthy()
+    expect(dialog.queryByRole('button', { name: /^Implement:/ })).toBeNull()
+  })
+
+  it('starts a plan once from its row, however often Start is pressed while it starts', async () => {
+    let started = () => {}
+    const team = { projectId: 'p1', start: vi.fn(() => new Promise<void>((done) => (started = done))), change: vi.fn() }
+    withServices(<BoardView lanes={lanesOf(board([held]))} agents={agents} now={NOW} onOpen={vi.fn()} team={team} />, fakeClient().client)
+    await userEvent.click(rowOf(held.title).getByRole('button', { name: 'Start' }))
+    expect(rowOf(held.title).queryByRole('button', { name: 'Start' })).toBeNull()
+    expect(team.start).toHaveBeenCalledTimes(1)
+    act(() => started())
+    await waitFor(() => expect(rowOf(held.title).getByRole('button', { name: 'Start' })).toBeTruthy())
+  })
+
+  it('opens a row’s team on the project’s board, and saves it there', async () => {
+    const { client } = fakeClient({ getBoard: vi.fn(async () => board([held])) })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Change the team…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(client.changePlan).toHaveBeenCalledWith('plh', held.plan!.steps, null))
+    expect(client.startPlan).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Team' })).toBeNull())
+  })
 })
+
+function Project() {
+  return (
+    <ProjectView
+      model={useProject('p1')}
+      board={useBoard('p1')}
+      connections={useConnections()}
+      settings={useSettingsOf('p1')}
+      onTask={vi.fn()}
+    />
+  )
+}
