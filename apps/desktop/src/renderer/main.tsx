@@ -56,7 +56,7 @@ const opening = port.then((given) => {
   return openWindow(given, window.althar)
 })
 
-/** The launch plays in full once a window; a reload, as after the runtime restarted, opens at once. */
+/** The first-run welcome plays the full launch; returning profiles and reloads take its quick opening. */
 const OPENED = 'althar.opened'
 const openedBefore = (() => {
   try {
