@@ -44,7 +44,10 @@
     reason, a hook or a protection rule, is refused as git said it. The
     person's own click is their word. Made from a plan card, the plan is
     held first, so its countdown can't start it toward the old branch while
-    the host makes the new one; it then waits for the person's Start.
+    the host makes the new one; it then waits for the person's Start. A plan
+    already started and waiting for a free agent offers no branch to make:
+    a hold doesn't stop it, so it could start meanwhile toward the old one.
+    It is pointed only at a branch the remote has, which changes at once.
   - **A single task can be pointed elsewhere.** `draft_task`, `propose_plan`
     and `start_task` take `toward`; the plan card's last row says it after
     how the work ends ("Open a draft PR into release/0.8.0"), a list of the
