@@ -19,8 +19,10 @@ import type { Host, Services } from './services'
  */
 
 export const openWindow = async (port: DomMessagePort, host: Host) => {
+  host.startup?.('open-window-start')
   const began = performance.now()
   const timed = async <A>(stage: string, read: () => Promise<A>): Promise<A> => {
+    host.startup?.(`${stage}-start`)
     const at = performance.now()
     try {
       return await read()
@@ -28,7 +30,7 @@ export const openWindow = async (port: DomMessagePort, host: Host) => {
       host.startup?.(stage, Math.round(performance.now() - at))
     }
   }
-  const client = await timed('runtime-connected', () => connect(port))
+  const client = await timed('client-created', () => connect(port))
   const cache = makeQueryClient()
   const read = reads(client)
   // Watched from where the projects were read: nothing after is missed. Unread, from now.

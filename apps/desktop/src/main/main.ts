@@ -213,8 +213,8 @@ const logs = startLogs({
   dir: ownProfile !== undefined && ownProfile !== '' ? join(ownProfile, 'logs') : app.getPath('logs'),
   passOn: !app.isPackaged,
 })
-const startupMark = (stage: string, duration_ms?: number) =>
-  logs.info('Startup', { stage, elapsed_ms: Math.round(process.uptime() * 1000), duration_ms, pid: process.pid })
+const startupMark = (stage: string, duration_ms?: number, window_id?: number) =>
+  logs.info('Startup', { stage, elapsed_ms: Math.round(process.uptime() * 1000), duration_ms, pid: process.pid, window_id })
 logs.info('Startup', { stage: 'process-start', elapsed_ms: 0, pid: process.pid })
 startupMark('main-entry')
 let startupStage: StartupStage = 'data'
@@ -223,9 +223,9 @@ let releaseBackground: () => void = () => {}
 const backgroundReady = new Promise<void>((resolve) => {
   releaseBackground = resolve
 })
-ipcMain.on('althar:startup', (_event, stage: unknown, duration: unknown) => {
+ipcMain.on('althar:startup', (event, stage: unknown, duration: unknown) => {
   if (typeof stage !== 'string' || !/^[a-z-]{1,60}$/.test(stage)) return
-  startupMark(stage, typeof duration === 'number' && Number.isFinite(duration) ? duration : undefined)
+  startupMark(stage, typeof duration === 'number' && Number.isFinite(duration) ? duration : undefined, event.sender.id)
   if (stage === 'first-screen-drawn') {
     firstScreenDrawn = true
     releaseBackground()
@@ -648,7 +648,7 @@ const connect = (window: BrowserWindow) => {
   const { port1, port2 } = new MessageChannelMain()
   runtime.postMessage({ type: 'connect' }, [port1])
   window.webContents.postMessage('althar:port', null, [port2])
-  startupMark('port-handed-over')
+  startupMark('port-handed-over', undefined, window.webContents.id)
 }
 
 /**

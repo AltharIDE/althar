@@ -50,7 +50,11 @@ const port = Promise.race([
   receivePort(),
   new Promise<never>((_, reject) => setTimeout(() => reject(new Error(text.noRuntime)), WAIT_PORT)),
 ])
-const opening = port.then((given) => openWindow(given, window.althar))
+window.althar.startup?.('renderer-entry')
+const opening = port.then((given) => {
+  window.althar.startup?.('port-received')
+  return openWindow(given, window.althar)
+})
 
 /** The launch plays in full once a window; a reload, as after the runtime restarted, opens at once. */
 const OPENED = 'althar.opened'
