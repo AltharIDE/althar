@@ -1,8 +1,7 @@
-import { type ReactNode, useRef } from 'react'
+import type { ReactNode } from 'react'
 
 import { cx } from '../../lib/cx'
 import { Get, OtherMac } from '../../shared/Close'
-import { useGrain } from '../../shared/grain'
 import { AskOnce } from '../bodies/desktop/AskOnce'
 import { AtWork } from '../bodies/desktop/AtWork'
 import { TILES } from '../bodies/desktop/Bento'
@@ -11,17 +10,18 @@ import { Review } from '../bodies/desktop/Review'
 import { EdgeTour } from '../bodies/kit/EdgeTour'
 import t from '../bodies/kit/type.module.css'
 import d from './D.module.css'
-import { Clouds } from './d/clouds'
+import bankUrl from './d/art/bank.webp'
 
 /*
  * Prototype, D: the cloud sea. Calm, on the footer's paper. The first screen
  * ends with the cloud far below; here the app's pictures come down into it,
  * each on a plate of cobalt sky, sinking into a sea of cloud painted in the
- * footer's two inks, a bank of it passing in front of its foot. What keeps
+ * footer's two inks, a bank of it passing in front of its foot (d/art: the
+ * person's painted plates, gouache in cobalt and paper). What keeps
  * you in flow is a quiet ruled index on the paper, and the notch is on it too. The last plate is under
  * the cloud's base, its sky giving way to the paper the footer's engraving
- * is printed on. The cloud is painted in code (d/clouds.tsx) until the
- * painted plates come. Nothing moves but the pictures rising a little out
+ * is printed on: the lake, the cliffs and the altar with its light, the
+ * footer's own landscape, painted before it is engraved. Nothing moves but the pictures rising a little out
  * of the cloud as they come up the screen, and not with reduced motion.
  */
 
@@ -38,16 +38,12 @@ function Head({ id }: { id: Id }) {
   )
 }
 
-/** A plate of sky: the cloud sea behind the picture, the picture coming down into it, a bank of cloud in front of its foot, the paint's grain over all. */
-function Plate({ seed, horizon = 0.6, className, children }: { seed: number; horizon?: number; className?: string; children: ReactNode }) {
-  const grain = useRef<HTMLDivElement>(null)
-  useGrain(grain, seed)
+/** A plate of sky, painted: the cloud sea (or the towering cloud) behind the picture, the picture coming down into it, a bank of cloud in front of its foot. */
+function Plate({ className, children }: { className?: string; children: ReactNode }) {
   return (
     <div className={cx(d.plate, className)}>
-      <Clouds className={d.sea} sea={{ seed, horizon, rows: 9, near: 58 }} />
       <div className={d.picture}>{children}</div>
-      <Clouds className={d.bank} sea={{ seed: seed + 101, horizon: 0.3, rows: 2, near: 92 }} />
-      <div ref={grain} className={d.grain} aria-hidden="true" />
+      <img className={d.bank} src={bankUrl} alt="" aria-hidden="true" decoding="async" loading="lazy" />
     </div>
   )
 }
@@ -74,27 +70,25 @@ function Index() {
 }
 
 export function CloudBody() {
-  const grain = useRef<HTMLDivElement>(null)
-  useGrain(grain, 41)
   return (
     <main id="main" tabIndex={-1} className={d.body}>
       <section id="independent" className={d.section} aria-labelledby="independent-h">
         <Head id="independent" />
-        <Plate seed={3} className={d.board}>
+        <Plate className={d.board}>
           <AtWork />
         </Plate>
       </section>
 
       <section id="coordinator" className={cx(d.section, d.split)} aria-labelledby="coordinator-h">
         <Head id="coordinator" />
-        <Plate seed={17} horizon={0.5} className={d.talk}>
+        <Plate className={d.talk}>
           <AskOnce />
         </Plate>
       </section>
 
       <section id="review" className={d.section} aria-labelledby="review-h">
         <Head id="review" />
-        <Plate seed={29} className={d.review}>
+        <Plate className={d.review}>
           <Review />
         </Plate>
       </section>
@@ -113,16 +107,14 @@ export function CloudBody() {
 
       {/* Under the cloud's base: the sky giving way to the footer's paper, and the download. */}
       <section id="end" className={d.end} aria-label="Download Althar">
-        <Clouds className={d.base} sea={{ seed: 71, horizon: 0.18, rows: 6, near: 110, under: true }} />
-        <div ref={grain} className={d.grain} aria-hidden="true" />
         <div className={d.endWords}>
           <p className={d.endLine}>
             {END[0]} <br />
             <b>{END[1]}</b>
           </p>
           <div className={d.endGet}>
-            <Get tone="blue" />
-            <OtherMac tone="blue" />
+            <Get tone="paper" />
+            <OtherMac tone="paper" />
           </div>
         </div>
       </section>
