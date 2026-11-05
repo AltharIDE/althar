@@ -1,13 +1,27 @@
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, statSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
 
 import type { Fetch } from '@althar/connectors'
 import { emitterPort } from '@althar/contracts'
 import type { EndpointRead } from '@althar/provider-adapters'
-import { backupsIn, connection, Connectivity, databaseIn, Failures, Folders, Nudges, Secrets, services, UsageData } from '@althar/runtime'
-import { Cause, Context, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
+import {
+  AfterOpen,
+  backupsIn,
+  connection,
+  Connectivity,
+  databaseIn,
+  Failures,
+  Folders,
+  Nudges,
+  Secrets,
+  services,
+  startup,
+  UsageData,
+} from '@althar/runtime'
+import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
 import { net } from 'electron'
+import { SqlClient } from 'effect/sql'
 import { appFetchOf } from './appFetch'
 import { handledOf, watchCrashes } from './crashes'
 import { runtimeWork } from './atWork'
@@ -110,7 +124,17 @@ const secrets = Secrets.sealed(join(profile, 'secrets'), {
 const screenshots = screenshotsWith((message) => parent.postMessage(message))
 
 /** Code hosts and trackers are called over the app's own network, Chromium's (appFetch.ts). */
-const appFetch: Fetch = appFetchOf(net)
+const firstScreen = Deferred.makeUnsafe<void>()
+const opened = Effect.runPromise(Deferred.await(firstScreen))
+const fetchNow = appFetchOf(net)
+const appFetch: Fetch = async (input, init) => {
+  await opened
+  return Effect.runPromise(
+    startup('network-fetch', Effect.tryPromise({ try: () => fetchNow(input, init), catch: (error) => error })).pipe(
+      Effect.provide(Logger.layer([stdoutLogger])),
+    ),
+  )
+}
 
 /** OpenRouter's public list of models, with each one's scores and prices (ADR-015). */
 const MODEL_LIST = 'https://openrouter.ai/api/v1/models'
@@ -198,8 +222,12 @@ const storeStopped = (stopped: 'moving' | 'copying', backup: string | null, reas
   )
 
 const program = Effect.gen(function* () {
+  yield* Effect.logInfo('Startup').pipe(
+    Effect.annotateLogs({ stage: 'runtime-entry', elapsed_ms: Math.round(process.uptime() * 1000), pid: process.pid }),
+  )
   // In a Flatpak, the person's own agents and editors live outside the sandbox: where they are, and how to run them there.
-  device = yield* deviceHere()
+  parent.postMessage({ type: 'startup-stage', stage: 'device' })
+  device = yield* startup('device', deviceHere())
   // The Codex its adapter drives, out on the device, where Codex's own sandbox works (flatpak/codex-host.sh says why, and what to do without one).
   if (process.env.FLATPAK_ID !== undefined) process.env.CODEX_PATH = '/app/bin/althar-host-codex'
   // The end-to-end tests drive the app against a scripted agent and a fake code host, keeping tokens in memory. Packaged builds leave this out.
@@ -235,31 +263,43 @@ const program = Effect.gen(function* () {
           agentSearch: { env: process.env, dirs: [] },
         }
       : undefined
-  const context = yield* Layer.build(
-    services(
-      fake === undefined
-        ? {
-            ...(device === undefined ? options : { ...options, onDevice: device.onDevice, probeRoot: join(profile, 'probe') }),
-            clientIds,
-            ...(githubApp === undefined ? {} : { githubApp }),
-            secrets,
-            fetch: appFetch,
-            // What is known of models, for the coordinator to weigh (ADR-015): fetched as the runtime starts, kept in the profile.
-            modelFacts: { url: MODEL_LIST, cache: join(profile, 'model-facts.json'), fetch: appFetch },
-            ...fakeHost,
-          }
-        : { ...options, ...fake },
+  parent.postMessage({ type: 'startup-stage', stage: 'data' })
+  const context = yield* startup(
+    'services',
+    Layer.build(
+      services(
+        fake === undefined
+          ? {
+              ...(device === undefined ? options : { ...options, onDevice: device.onDevice, probeRoot: join(profile, 'probe') }),
+              clientIds,
+              ...(githubApp === undefined ? {} : { githubApp }),
+              secrets,
+              fetch: appFetch,
+              // What is known of models, for the coordinator to weigh (ADR-015): fetched as the runtime starts, kept in the profile.
+              modelFacts: { url: MODEL_LIST, cache: join(profile, 'model-facts.json'), fetch: appFetch },
+              ...fakeHost,
+            }
+          : { ...options, ...fake },
+      ),
+    ).pipe(
+      Effect.catchTags({
+        MigrationFailed: (failure) => storeStopped('moving', failure.backup, failure.reason),
+        ForeignKeyViolations: (failure) =>
+          storeStopped('moving', failure.backup, `Rows in ${failure.tables.join(', ')} point at rows that aren’t there.`),
+        BackupFailed: (failure) => storeStopped('copying', null, failure.reason),
+        DatabaseInUse: () => profileInUse((message) => parent.postMessage(message)),
+      }),
     ),
-  ).pipe(
-    Effect.catchTags({
-      MigrationFailed: (failure) => storeStopped('moving', failure.backup, failure.reason),
-      ForeignKeyViolations: (failure) =>
-        storeStopped('moving', failure.backup, `Rows in ${failure.tables.join(', ')} point at rows that aren’t there.`),
-      BackupFailed: (failure) => storeStopped('copying', null, failure.reason),
-      DatabaseInUse: () => profileInUse((message) => parent.postMessage(message)),
-    }),
   )
+  const sql = Context.get(context, SqlClient.SqlClient)
+  const [size] = yield* sql<{
+    projects: number
+    tasks: number
+    threads: number
+  }>`SELECT (SELECT count(*) FROM projects) AS projects, (SELECT count(*) FROM tasks) AS tasks, (SELECT count(*) FROM threads) AS threads`
+  yield* Effect.logInfo('Startup profile').pipe(Effect.annotateLogs({ ...size, database_bytes: statSync(databaseIn(profile)).size }))
   isReady(context)
+  parent.postMessage({ type: 'runtime-ready' })
   yield* Effect.logInfo('Runtime ready').pipe(Effect.annotateLogs({ version: options.appVersion, pid: process.pid }))
   // What needs the person goes to the main process, which notifies them and keeps the Dock's count.
   yield* Effect.forkScoped(
@@ -285,7 +325,9 @@ const program = Effect.gen(function* () {
 })
 
 // The runtime's own lines go to stdout, for the main process to keep in runtime.log.
-const fiber = Effect.runFork(Effect.scoped(program).pipe(Effect.provide(Logger.layer([stdoutLogger]))))
+const fiber = Effect.runFork(
+  Effect.scoped(program).pipe(Effect.provide(Logger.layer([stdoutLogger])), Effect.provideService(AfterOpen, Deferred.await(firstScreen))),
+)
 
 fiber.addObserver((exit) => {
   if (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)) {
@@ -363,6 +405,7 @@ parent.on('message', (message) => {
     answerSealed(data.requestId, data)
   }
   if (data?.type === 'screenshot-taken' && data.requestId !== undefined) screenshots.answer(data.requestId, data as Taken)
+  if (data?.type === 'first-screen') Effect.runSync(Deferred.succeed(firstScreen, undefined))
   if (data?.type === 'connect' && port !== undefined) accept(port)
   if (data?.type === 'allow-folder' && data.requestId !== undefined && data.path !== undefined) allowFolder(data.requestId, data.path)
   if (data?.type === 'facts' && data.requestId !== undefined) tellFacts(data.requestId, data.threadId ?? null)

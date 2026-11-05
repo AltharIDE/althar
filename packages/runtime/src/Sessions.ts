@@ -89,6 +89,7 @@ import { scratchOf } from './firstWrite'
 import { quickIn } from './kinds'
 import { defaultEffortOf } from './preferences'
 import { makeKeyedLock } from './keyedLock'
+import { makeInputBatches } from './inputBatches'
 import { addItem, betweenTurns, moveToEnd, type OutputSoFar, recorder, toolItem, transcript } from './threads'
 import {
   addressOf,
@@ -122,7 +123,7 @@ import { agentSaid, lostWords, startedAfreshWords, summarize } from './words'
  *
  * Input is accepted into the thread's queue first, durably, and delivered
  * after (docs/architecture/01): `after_current` waits for the turn running,
- * `interrupt_and_continue` stops it and goes first.
+ * `interrupt_and_continue` stops it; the whole queued burst keeps its order.
  */
 
 export type Disposition = 'after_current' | 'interrupt_and_continue'
@@ -540,8 +541,8 @@ export const compactedWords = (name: string, before: { readonly used: number } |
 
 /**
  * What a turn says to the agent: the brief when the session is new, then each
- * input, an interrupting one first. With no input waiting, a new session is
- * told what to do by `closing`.
+ * input in send order, with one interruption for the whole burst. With no
+ * input waiting, a new session is told what to do by `closing`.
  */
 export const promptFor = (
   inputs: ReadonlyArray<{
@@ -577,16 +578,16 @@ export const promptFor = (
     const noted = [...(input.body === '' ? [] : [input.body]), ...notes].join('\n\n')
     // Dictated words are said to be, once, after them: the thread shows the person's words as they are.
     const body = input.dictated === 1 && input.body !== '' ? `${noted}\n\n${DICTATED}` : noted
-    const said =
-      input.disposition === 'interrupt_and_continue'
-        ? `The person interrupted your last turn to say:\n\n${body}\n\nTake it into account, and carry on with the task.`
-        : body
     // A delivered turn may have acted: what it was given isn't new, and some of it may be done.
     return input.cutShort === undefined
-      ? said
-      : `${input.cutShort} was working on this when it reached its usage limit, and may have done some of it already. Check what is done before you carry on.\n\n${said}`
+      ? body
+      : `${input.cutShort} was working on this when it reached its usage limit, and may have done some of it already. Check what is done before you carry on.\n\n${body}`
   })
-  const said = news === null ? parts : [news, ...parts]
+  const body = parts.join('\n\n')
+  const burst = inputs.some((input) => input.disposition === 'interrupt_and_continue')
+    ? [`The person interrupted your last turn to say:\n\n${body}\n\nTake it into account, and carry on with the task.`]
+    : parts
+  const said = news === null ? burst : [news, ...burst]
   if (brief === undefined) return said.join('\n\n')
   return [brief.text, ...(parts.length === 0 ? [brief.closing] : said)].join('\n\n')
 }
@@ -678,6 +679,8 @@ export class Sessions extends Context.Service<
     tryAgain(
       threadId: string,
     ): Effect.Effect<boolean, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | PlanOnly | Failure>
+    /** Serializes preparation and acceptance in arrival order, holding delivery until the whole burst is ready. */
+    accepting<A, E, R>(threadId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
     /** Accepts input into the thread's queue, and delivers it when the session can take it. */
     send(input: {
       readonly envelope: CommandEnvelope
@@ -937,6 +940,38 @@ export class Sessions extends Context.Service<
         work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
       ) => Effect.as(work(Effect.void), true)
       const run = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
+      const inputBatches = makeInputBatches(sessionsScope, (threadId) =>
+        Effect.gen(function* () {
+          const running = threads.get(threadId)
+          if (running === undefined) return
+          const interrupting = yield* run(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              return (
+                (yield* sql`SELECT id FROM user_inputs WHERE thread_id = ${threadId} AND state = 'queued'
+            AND disposition = 'interrupt_and_continue' LIMIT 1`).length > 0
+              )
+            }),
+          ).pipe(Effect.orElseSucceed(() => false))
+          if (interrupting && running.turnRunning) {
+            const sent = running.promptSent
+            // Keep cancellation off the delivery path: an agent may not acknowledge it. Stop only this turn,
+            // once its prompt has gone out, never a later turn that started while cancellation was waiting.
+            yield* Effect.forkIn(
+              (sent === null ? Effect.void : Deferred.await(sent)).pipe(
+                Effect.timeoutOption(Duration.seconds(5)),
+                Effect.andThen(
+                  Effect.suspend(() =>
+                    running.turnRunning && running.promptSent === sent ? Effect.ignore(running.agent.interrupt) : Effect.void,
+                  ),
+                ),
+              ),
+              sessionsScope,
+            )
+          }
+          yield* Queue.offer(running.wake, undefined)
+        }),
+      )
 
       /** Tells watching clients what a session has left running, whole. */
       const toldBackground = (running: Running) =>
@@ -1370,6 +1405,7 @@ export class Sessions extends Context.Service<
           // A coordinator or lead handing its work over takes no more turns. One whose context is filling up hands it over now,
           // between turns, never in one: what waits goes to the fresh session (ADR-031, ADR-038).
           if (running.handover === 'under_way') return false
+          yield* inputBatches.ready(thread.threadId)
           // A compaction the person asked for comes first: it may leave nothing to hand over.
           if (running.handover === 'none' && !(yield* compactQueued(thread.threadId)) && (yield* dueToHandOver(running))) {
             running.handover = 'under_way'
@@ -1398,7 +1434,7 @@ export class Sessions extends Context.Service<
                 WHERE di.user_input_id = i.id AND d.error_class = 'usage_limit' ORDER BY d.requested_at DESC LIMIT 1) AS cut_by
             FROM user_inputs i JOIN actors a ON a.id = i.author_actor_id
             WHERE i.thread_id = ${thread.threadId} AND i.state = 'queued'
-            ORDER BY i.disposition = 'interrupt_and_continue' DESC, i.sequence`
+            ORDER BY i.sequence`
           // The images the person sent with each, read from the store for this turn: only an agent that takes images is sent them.
           const sent = yield* imagesFor(
             queued.map((input) => input.id),
@@ -1467,13 +1503,16 @@ export class Sessions extends Context.Service<
           const claimed = yield* sql
             .withTransaction(
               Effect.gen(function* () {
-                // The person may have taken some of it back since it was read: then this turn isn't given, and what still waits is read again.
-                if (inputs.length > 0) {
-                  const still = yield* sql<{
-                    id: string
-                  }>`SELECT id FROM user_inputs WHERE state = 'queued' AND id IN ${sql.in(inputs.map((input) => input.id))}`
-                  if (still.length < inputs.length) return yield* new TakenBack()
-                }
+                // A message may have been withdrawn, or another arrived while the prompt was prepared.
+                // Read the whole burst again, including attachments still being prepared, before claiming it.
+                const still = yield* sql<{ id: string }>`SELECT id FROM user_inputs
+                  WHERE thread_id = ${thread.threadId} AND state = 'queued' ORDER BY sequence`
+                if (
+                  inputBatches.pending(thread.threadId) ||
+                  still.length !== queued.length ||
+                  still.some((input, index) => input.id !== queued[index]?.id)
+                )
+                  return yield* new TakenBack()
                 // What became of its plans since it last spoke, which only the cards show the person: read with the turn's record, so none falls between two turns.
                 if (thread.role === 'coordinator' && named !== null && !compacting) {
                   const news = yield* coordinatorNews(thread.threadId, thread.projectId, named).pipe(
@@ -1886,7 +1925,7 @@ export class Sessions extends Context.Service<
             const sql = yield* SqlClient.SqlClient
             const [next] = yield* sql<{ body: string }>`
               SELECT body FROM user_inputs WHERE thread_id = ${threadId} AND state = 'queued'
-              ORDER BY disposition = 'interrupt_and_continue' DESC, sequence LIMIT 1`
+              ORDER BY sequence LIMIT 1`
             return next?.body === COMPACT
           }),
         ).pipe(Effect.orElseSucceed(() => false))
@@ -2904,15 +2943,8 @@ export class Sessions extends Context.Service<
               return { inputId, sequence }
             }),
           })
-          const running = threads.get(input.threadId)
-          if (running !== undefined) {
-            // The interruption is asked for after the input is safely queued; the queue puts it first.
-            if (disposition === 'interrupt_and_continue' && running.turnRunning)
-              yield* Effect.forkIn(Effect.ignore(running.agent.interrupt), sessionsScope)
-            yield* Queue.offer(running.wake, undefined)
-          }
           return accepted
-        })
+        }).pipe((effect) => inputBatches.hold(input.threadId, effect))
 
       const setModel = (input: { readonly threadId: string; readonly model: string }) =>
         Effect.gen(function* () {
@@ -3632,6 +3664,7 @@ export class Sessions extends Context.Service<
         start: (input) => run(start(input)),
         startLast: (threadId) => run(startLast(threadId)),
         tryAgain: (threadId) => run(tryAgain(threadId)),
+        accepting: inputBatches.accepting,
         send: (input) => run(send(input)),
         compact: (input) =>
           run(

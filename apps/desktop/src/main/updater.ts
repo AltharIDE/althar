@@ -34,7 +34,11 @@ export const testFeed = (value: string | undefined): string | null => {
 }
 
 /** Starts checking for updates, and says what a window shows of them as it changes. */
-export const startUpdates = (changed: (glance: UpdateGlance) => void): Updates => {
+export const startUpdates = (
+  changed: (glance: UpdateGlance) => void,
+  opened: Promise<void> = Promise.resolve(),
+  timing: (stage: string, duration?: number) => void = () => {},
+): Updates => {
   const { autoUpdater } = updater
   autoUpdater.autoDownload = true
   // Squirrel puts a downloaded update in place at once, and it installs as Althar quits.
@@ -45,7 +49,15 @@ export const startUpdates = (changed: (glance: UpdateGlance) => void): Updates =
 
   const updates = updating(
     {
-      check: () => checkFor(autoUpdater),
+      check: async () => {
+        timing('updater-start')
+        const began = performance.now()
+        try {
+          return await checkFor(autoUpdater)
+        } finally {
+          timing('updater-done', Math.round(performance.now() - began))
+        }
+      },
       // On Windows the installer runs silently and opens the new version; elsewhere these say nothing.
       install: () => autoUpdater.quitAndInstall(process.platform === 'win32', process.platform === 'win32'),
       settle: () => new Promise((resolve) => setTimeout(resolve, SETTLE)),
@@ -61,8 +73,10 @@ export const startUpdates = (changed: (glance: UpdateGlance) => void): Updates =
   if (process.platform === 'darwin') squirrel.on('update-downloaded', updates.staged)
   else autoUpdater.on('update-downloaded', updates.staged)
 
-  setTimeout(() => void updates.check(), FIRST_CHECK)
-  setInterval(() => void updates.check(), EVERY).unref()
+  void opened.then(() => {
+    setTimeout(() => void updates.check(), FIRST_CHECK)
+    setInterval(() => void updates.check(), EVERY).unref()
+  })
   return updates
 }
 

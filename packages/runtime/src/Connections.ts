@@ -1,3 +1,4 @@
+import { afterOpen, startup } from './startup'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { homedir } from 'node:os'
@@ -1701,7 +1702,7 @@ export class Connections extends Context.Service<
       yield* provide(adoptAll).pipe(
         Effect.catchCause((cause) => Effect.logWarning('Connections made again didn’t take over what they held', cause)),
       )
-      yield* Effect.forkIn(provide(learnWorkspaces), scope)
+      yield* Effect.forkIn(provide(afterOpen(startup('connection-workspaces', learnWorkspaces))), scope)
 
       return Connections.of({
         list: provide(Effect.map(rows, (all) => all.map(toInfo))),

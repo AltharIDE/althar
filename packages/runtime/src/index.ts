@@ -49,3 +49,5 @@ export { Limits, type Out } from './Limits'
 export { Policies, type ProjectRules, type UsageLimit } from './Policies'
 export { backupsIn, databaseIn, defaultProfile, defaultWorktrees } from './locations'
 export { InstallFailed, Installs, type OnDevice } from './Installs'
+
+export { AfterOpen, startup } from './startup'

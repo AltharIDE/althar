@@ -42,7 +42,6 @@ export const settingsRoute = createRoute({
   loader: ({ params: { section }, context: { client, cache } }) => {
     const read = reads(client)
     return readFirst(
-      cache.fetchQuery(read.status()),
       cache.fetchQuery(read.settings()),
       cache.fetchQuery(read.connections()),
       ...(section === 'skills' ? [cache.fetchQuery(read.skills())] : []),

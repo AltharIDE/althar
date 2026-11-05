@@ -545,6 +545,20 @@ export function Composer({
               onAddFiles(pasted, 'paste')
             }}
             onKeyDown={(e) => {
+              if (
+                e.key === '.' &&
+                commandDown(e) &&
+                !e.altKey &&
+                !e.shiftKey &&
+                !e.nativeEvent.isComposing &&
+                !drafted &&
+                busy &&
+                onStopAgent
+              ) {
+                e.preventDefault()
+                onStopAgent()
+                return
+              }
               /* Tab takes the suggestion into the field, to send with Enter or change first. */
               if (e.key === 'Tab' && !e.shiftKey && suggested !== null) {
                 e.preventDefault()
