@@ -11,6 +11,7 @@ import { EdgeTour } from '../bodies/kit/EdgeTour'
 import t from '../bodies/kit/type.module.css'
 import d from './D.module.css'
 import bankUrl from './d/art/bank.webp'
+import { Dither, dome, type Field, limb } from './e/Dither'
 
 /*
  * Prototype, D: the cloud sea. Calm, on the footer's paper. The first screen
@@ -23,6 +24,11 @@ import bankUrl from './d/art/bank.webp'
  * is printed on: the lake, the cliffs and the altar with its light, the
  * footer's own landscape, painted before it is engraved. Nothing moves but the pictures rising a little out
  * of the cloud as they come up the screen, and not with reduced motion.
+ *
+ * E is D with its plates dithered rather than painted (e/Dither.tsx): each
+ * the edge of the planet in the first screen's night, cobalt under it, its
+ * foot dissolving dot by dot into the page's paper; the close the paper
+ * deepening into cobalt over a dome of the altar's light.
  */
 
 type Id = keyof typeof SCENE
@@ -38,14 +44,22 @@ function Head({ id }: { id: Id }) {
   )
 }
 
-/** A plate of sky, painted: the cloud sea (or the towering cloud) behind the picture, the picture coming down into it, a bank of cloud in front of its foot. */
-function Plate({ className, children }: { className?: string; children: ReactNode }) {
+/** A plate of sky, painted: the cloud sea (or the towering cloud) behind the picture, the picture coming down into it, a bank of cloud in front of its foot. Dithered, its field instead. */
+function Plate({ field, className, children }: { field?: Field; className?: string; children: ReactNode }) {
   return (
     <div className={cx(d.plate, className)}>
+      {field && <Dither field={field} className={d.dots} />}
       <div className={d.picture}>{children}</div>
-      <img className={d.bank} src={bankUrl} alt="" aria-hidden="true" decoding="async" loading="lazy" />
+      {!field && <img className={d.bank} src={bankUrl} alt="" aria-hidden="true" decoding="async" loading="lazy" />}
     </div>
   )
+}
+
+/** E's fields: the edge rising to the right, falling, rising again. */
+const FIELDS = {
+  board: limb({ from: 0.8, to: 0.14 }),
+  talk: limb({ from: 0.16, to: 0.6, bend: 2.2 }),
+  review: limb({ from: 0.86, to: 0.3, bend: 2.4 }),
 }
 
 /** What keeps you in flow, as an index on the paper: two columns of ruled entries, each its drawing, its name and its words; the wide one across. */
@@ -69,26 +83,29 @@ function Index() {
   )
 }
 
-export function CloudBody() {
+export const DitherBody = () => <CloudBody dithered />
+
+export function CloudBody({ dithered = false }: { dithered?: boolean }) {
+  const field = (id: keyof typeof FIELDS) => (dithered ? FIELDS[id] : undefined)
   return (
-    <main id="main" tabIndex={-1} className={d.body}>
+    <main id="main" tabIndex={-1} className={cx(d.body, dithered && d.dithered)}>
       <section id="independent" className={d.section} aria-labelledby="independent-h">
         <Head id="independent" />
-        <Plate className={d.board}>
+        <Plate field={field('board')} className={d.board}>
           <AtWork />
         </Plate>
       </section>
 
       <section id="coordinator" className={cx(d.section, d.split)} aria-labelledby="coordinator-h">
         <Head id="coordinator" />
-        <Plate className={d.talk}>
+        <Plate field={field('talk')} className={d.talk}>
           <AskOnce />
         </Plate>
       </section>
 
       <section id="review" className={d.section} aria-labelledby="review-h">
         <Head id="review" />
-        <Plate className={d.review}>
+        <Plate field={field('review')} className={d.review}>
           <Review />
         </Plate>
       </section>
@@ -107,14 +124,15 @@ export function CloudBody() {
 
       {/* Under the cloud's base: the sky giving way to the footer's paper, and the download. */}
       <section id="end" className={d.end} aria-label="Download Althar">
+        {dithered && <Dither field={dome} className={d.dots} />}
         <div className={d.endWords}>
           <p className={d.endLine}>
             {END[0]} <br />
             <b>{END[1]}</b>
           </p>
           <div className={d.endGet}>
-            <Get tone="paper" />
-            <OtherMac tone="paper" />
+            <Get tone={dithered ? 'blue' : 'paper'} />
+            <OtherMac tone={dithered ? 'blue' : 'paper'} />
           </div>
         </div>
       </section>

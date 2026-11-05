@@ -113,6 +113,17 @@
 .endWords { position: relative; z-index: 2; display: grid; justify-items: start; gap: 30px; width: min(1180px, 100% - 2 * var(--side)); margin: 0 auto; padding: calc(var(--w) * 2 / 3 * 0.6) 0 clamp(96px, 10vw, 140px); }
 .endLine { margin: 0; font-family: 'Inter Display', var(--display); font-size: clamp(40px, 4.8vw, 76px); font-weight: 200; line-height: 1; letter-spacing: -0.05em; color: var(--t-1); text-wrap: balance; }
 
+/* ---- E: the plates dithered, their foot the page's paper, so they have no lower edge ---- */
+.dots { position: absolute; z-index: 0; left: 0; top: 0; image-rendering: pixelated; pointer-events: none; }
+.dithered .plate { background: var(--n-2); border-radius: 3px 3px 0 0; }
+.dithered .picture { padding-bottom: clamp(120px, 13vw, 190px); }
+.dithered .talk .picture { padding-top: clamp(120px, 12vw, 180px); }
+.dithered .end { background: none; min-height: clamp(720px, 96svh, 960px); display: grid; align-content: start; }
+.dithered .end::before, .dithered .end::after { content: none; }
+.dithered .endWords { padding: clamp(230px, 24vw, 320px) 0 clamp(300px, 30vw, 400px); }
+.dithered .endLine { color: var(--paper); }
+.dithered .endLine b { color: #fff; }
+
 /* ---- narrower ---- */
 @media (max-width: 1000px) {
   .title { grid-column: 1 / -1; }
