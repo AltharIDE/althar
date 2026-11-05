@@ -148,11 +148,12 @@
 
 /* ---- the landing site: the last line and the download at the left, the lake and its mark at the right ---- */
 .end { position: relative; z-index: 1; padding-bottom: 104px; }
-.endWords { display: grid; justify-items: start; gap: 30px; max-width: 46%; padding-top: 72px; }
+.endWords { display: grid; justify-items: start; gap: 30px; max-width: min(46%, 600px); padding-top: 72px; }
 .endLine { margin: 0; font-family: 'Inter Display', var(--display); font-size: clamp(34px, 3.6vw, 54px); font-weight: 300; line-height: 1.04; letter-spacing: -0.04em; color: var(--t-1); text-wrap: balance; }
 .endLine b { font-weight: 680; letter-spacing: -0.045em; }
 .endGet > p { margin: 10px 0 0; }
-.end .scale { justify-self: start; margin-top: 30px; }
+/* In its own column, not the heads' grid. */
+.end .scale { grid-column: auto; grid-row: auto; justify-self: start; margin-top: 30px; }
 
 /* ---- narrower: the claim across, its scale under the lead; the coordinator stacked ---- */
 @media (max-width: 1099px) {
