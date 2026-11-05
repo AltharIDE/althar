@@ -294,7 +294,7 @@ export function CabinBody() {
       </Station>
 
       <Station id="edge" layout="notch">
-        <div className={c.tour} data-light="">
+        <div className={c.tour}>
           <EdgeTour />
         </div>
       </Station>

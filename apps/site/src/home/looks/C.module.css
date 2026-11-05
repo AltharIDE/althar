@@ -286,8 +286,8 @@
 .closing .haze {
   background:
     radial-gradient(ellipse 60% 34% at 40% 100%, rgba(43, 59, 255, 0.3), transparent 72%),
-    radial-gradient(ellipse 46% 36% at 76% 100%, rgba(255, 150, 96, 0.22), transparent 70%),
-    radial-gradient(ellipse 24% 18% at 76% 92%, rgba(255, 206, 160, 0.22), transparent 70%);
+    radial-gradient(ellipse 46% 36% at 76% 100%, rgba(255, 150, 96, 0.34), transparent 70%),
+    radial-gradient(ellipse 24% 18% at 76% 92%, rgba(255, 206, 160, 0.3), transparent 70%);
 }
 .closing .stars {
   -webkit-mask: linear-gradient(100deg, #000 30%, rgba(0, 0, 0, 0.5) 62%, transparent 80%), linear-gradient(#000 40%, transparent 72%);
