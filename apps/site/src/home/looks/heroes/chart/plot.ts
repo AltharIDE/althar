@@ -72,6 +72,8 @@ export interface Plot {
   rest: { x: number; y: number }
   /** Down from where it rests to the ground, toward the planet's centre: the rest of the descent, still to fly. */
   down: string
+  /** Where the path crosses the arc at height `km`, across; null if it never comes to it. */
+  crosses: (km: number) => number | null
 }
 
 const f = (n: number) => n.toFixed(1)
@@ -99,17 +101,20 @@ export function plot(frame: Frame): Plot {
   // The angles about the centre where the path sets off and comes to rest; it may run either way.
   const phi0 = Math.asin((frame.from - cx) / radius(ENTRY_KM))
   const phi1 = Math.asin((frame.to - cx) / radius(REST_KM))
+  /** The path where a share `a` of the height is lost. */
+  const along = (a: number) => {
+    const phi = phi0 + (phi1 - phi0) * (1 - (1 - a) ** SHAPE)
+    const rr = radius(ENTRY_KM + (REST_KM - ENTRY_KM) * a)
+    return { x: cx + rr * Math.sin(phi), y: cy - rr * Math.cos(phi) }
+  }
   let d = ''
   let x = 0
   let y = 0
   for (let i = 0; i <= SAMPLES; i++) {
-    const a = i / SAMPLES
-    const phi = phi0 + (phi1 - phi0) * (1 - (1 - a) ** SHAPE)
-    const rr = radius(ENTRY_KM + (REST_KM - ENTRY_KM) * a)
-    x = cx + rr * Math.sin(phi)
-    y = cy - rr * Math.cos(phi)
+    ;({ x, y } = along(i / SAMPLES))
     d += `${i ? 'L' : 'M'}${f(x)} ${f(y)}`
   }
+  const crosses = (km: number) => (km > ENTRY_KM || km < REST_KM ? null : along((ENTRY_KM - km) / (ENTRY_KM - REST_KM)).x)
   const entry = { x: frame.from, y: yAt(ENTRY_KM, frame.from) }
   const rest = { x, y }
   // Straight down to the ground, toward the planet's centre.
@@ -117,5 +122,5 @@ export function plot(frame: Frame): Plot {
   const fall = Math.hypot(cx - rest.x, cy - rest.y) - r
   const down = `M${f(rest.x)} ${f(rest.y)}L${f(rest.x + fall * Math.cos(toCentre))} ${f(rest.y + fall * Math.sin(toCentre))}`
 
-  return { frame, k, arc, yAt, band, d, entry, rest, down }
+  return { frame, k, arc, yAt, band, d, entry, rest, down, crosses }
 }

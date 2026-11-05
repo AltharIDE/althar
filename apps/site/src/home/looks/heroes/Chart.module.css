@@ -115,7 +115,8 @@
 .lead { grid-column: 10 / span 3; margin: 0; padding-bottom: 0.4em; font-size: 15.5px; line-height: 1.5; letter-spacing: -0.01em; color: var(--t-2); text-wrap: pretty; }
 
 /* The console as the chart's title block, its left edge on the scale's line: hairline cells on the paper. */
-.deck { position: absolute; z-index: 1; left: var(--spine); right: var(--r); bottom: clamp(20px, 3.6svh, 40px); display: grid; }
+/* Its right edge on the lead's, as far as the sheet's measure. */
+.deck { position: absolute; z-index: 1; left: var(--spine); width: calc(min(100% - var(--r), var(--l) + 1280px) - var(--spine)); bottom: clamp(20px, 3.6svh, 40px); display: grid; }
 .console { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; border: 1px solid var(--ink); background: var(--n-2); }
 .cell { display: grid; align-content: center; justify-items: start; gap: 9px; padding: 13px 16px; }
 .cell + .cell { border-left: 1px solid var(--ink); }
@@ -155,7 +156,7 @@
   .hero { --spine: 20px; --l: 76px; --r: var(--gut); --gap: 24px; }
   .h1 { grid-column: 1 / -1; }
   .lead { grid-column: 1 / span 8; margin-top: 22px; padding: 0; }
-  .deck { left: var(--l); }
+  .deck { left: var(--l); width: auto; right: var(--r); }
   .needle { width: 50px; height: 24px; margin: -12px 0 0 15px; padding: 6px 5px 0 0; box-shadow: 0 0 0 3px var(--n-2); }
   .needle::after { right: auto; left: -6px; border-width: 5px 6px 5px 0; border-color: transparent var(--ink) transparent transparent; }
   .needle b { font-size: 11px; }
@@ -169,7 +170,7 @@
   .words { top: 128px; display: block; }
   .h1 { font-size: clamp(38px, 11.4vw, 48px); line-height: 1; }
   .lead { margin-top: 16px; font-size: 15px; }
-  .deck { left: var(--gut); right: var(--gut); bottom: 16px; }
+  .deck { left: var(--gut); right: var(--gut); width: auto; bottom: 16px; }
   .install { display: none; }
   .console { width: 100%; grid-template-columns: 1fr; }
   .cell { justify-items: center; }

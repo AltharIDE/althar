@@ -33,6 +33,7 @@ function lay(el: HTMLElement, probe: HTMLElement, words: HTMLElement, deck: HTML
   const w = el.clientWidth
   const h = el.clientHeight
   const phone = w <= 700
+  const narrow = w < 1100
   const spine = phone ? 0 : probe.offsetLeft
   const l = words.offsetLeft
   const right = words.offsetLeft + words.offsetWidth
@@ -51,7 +52,7 @@ function lay(el: HTMLElement, probe: HTMLElement, words: HTMLElement, deck: HTML
     h,
     // In from high at the right, on the sheet's margin; at rest midway between the scale's ticks and the sheet's edge, where the sections' path sets off.
     from: phone ? w - 24 : right,
-    to: phone ? l + 10 : Math.round((spine + l + 4) / 2),
+    to: phone ? l + 10 : narrow ? l + 40 : Math.round((spine + l + 4) / 2),
     top,
     ground: Math.round(ground),
     centre,
@@ -163,6 +164,8 @@ export function ChartHero({ nav }: { nav?: ReactNode }) {
   const h = p?.frame.h ?? 0
   const spine = p && w > 700 ? (probe.current?.offsetLeft ?? 0) : 0
   const scale = spine > 0
+  // Wide, the scale's figures stand at the left of its line, as the sections' do; narrower, at the right of its ticks.
+  const wide = w >= 1100
   const needleY = p && scale ? p.yAt(REST_KM, spine) : 0
   return (
     <div ref={root} className={s.hero}>
@@ -180,11 +183,18 @@ export function ChartHero({ nav }: { nav?: ReactNode }) {
               <path key={km} d={p.arc(km, spine, w)} />
             ))}
           </g>
-          {LAYERS.map(({ km, name }) => (
-            <text key={km} className={s.note} x={p.entry.x} y={p.yAt(km, p.entry.x) - 7} textAnchor="end">
-              {name} · {km} km
-            </text>
-          ))}
+          {LAYERS.map(({ km, name }) => {
+            // At the margin; or, where the path runs through the words there, short of where it crosses the arc.
+            const width = (name.length + 8) * 7.2
+            const over = p.crosses(km + 16 / p.k) ?? p.crosses(km)
+            const at = p.crosses(km)
+            const x = over !== null && at !== null && over > p.entry.x - width - 12 ? at - 14 : p.entry.x
+            return (
+              <text key={km} className={s.note} x={x} y={p.yAt(km, x) - 7} textAnchor="end">
+                {name} · {km} km
+              </text>
+            )
+          })}
           {/* The ground: the limb, hatched under. */}
           <path className={s.hatch} d={p.band(HATCH, spine, w)} style={{ fill: `url(#${id}-hatch)` }} />
           <path className={s.limb} d={p.arc(0, spine, w)} />
@@ -205,7 +215,7 @@ export function ChartHero({ nav }: { nav?: ReactNode }) {
               // The needle covers the figures near it.
               if (Math.abs(y - needleY) < 24) return null
               return (
-                <text key={km} className={s.km} x={spine - 12} y={y + 3.5} textAnchor="end">
+                <text key={km} className={s.km} x={wide ? spine - 12 : spine + 22} y={y + 3.5} textAnchor={wide ? 'end' : 'start'}>
                   {km}
                 </text>
               )
