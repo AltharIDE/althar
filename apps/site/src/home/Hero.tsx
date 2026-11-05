@@ -1,513 +1,373 @@
 import { CopyButton } from '@althar/ui'
-import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react'
-import { preload } from 'react-dom'
+import { type CSSProperties, type ReactNode, type RefObject, useId, useLayoutEffect, useRef, useState } from 'react'
 
 import { AGENTS } from '../content/agents'
 import { INSTALL } from '../content/facts'
-import { HERO } from '../content/home'
-import { askedSecond, useHydrated } from '../lib/browser'
+import { BRAND, HERO } from '../content/home'
+import { askedSecond, useHydrated, useMedia } from '../lib/browser'
 import { cx } from '../lib/cx'
 import { AgentMark } from '../shared/AgentMark'
 import { Get, OtherMac } from '../shared/Close'
-import { LightUnder } from '../shared/lightUnder'
 import { useGrain } from '../shared/grain'
+import { LightUnder } from '../shared/lightUnder'
 import { addDisplay } from './display'
 import s from './Hero.module.css'
-import { type Fire, makeFire } from './hero/fire'
-import {
-  altitudeAfter,
-  altitudeAt,
-  AT,
-  brokenAt,
-  driftAt,
-  flowAt,
-  heatAt,
-  shakeAt,
-  speedAt,
-  swayAt,
-  velocityAfter,
-  velocityAt,
-} from './hero/journey'
-import { clamp, flare, inOut, ring, smooth, wobble } from './hero/motion'
-import { PHONE, type Plate, TALL, WIDE } from './hero/plate'
-import plasmaUrl from './hero/plate/plasma.webp'
-import skyUrl from './hero/plate/sky.webp'
+import { type Clock, useClock } from './hero/clock'
+import { type Plate, plate, sizeOf } from './hero/plate'
+import { Sun } from './hero/Sun'
+import { type At, bodiesAt, type Name, nameBox, placeNames, unnamed } from './hero/system'
 
 /*
- * The developer page's first screen, coming in from orbit: the capsule's cabin comes up out
- * of the dark, two astronauts strapped in, a faint glow at the window. The
- * headline comes in; the glow catches and builds into fire streaming past
- * the glass, faster and faster, sparks shooting by, the capsule shaking
- * harder and pressed down, the cabin lit by it; at its height the headline's
- * last word is forged in it, "fast."; and then the fire breaks, torn away,
- * the glass flashing white, and there is the sky and the cloud far below,
- * the word cooling to white. Then everything comes to rest: from then on
- * nothing is drawn, and the browser keeps it gently moving. In the window's
- * top corners the flight deck reads the capsule slowing and falling; under
- * the lead, a console holds the agents, the install and the download.
+ * The developer page's first screen, an orrery: Althar at the middle of the
+ * deep night sky as the system's sun, the mark floating there as a solid
+ * (hero/Sun.tsx), a small warm light rising from it as the altar's does in
+ * the footer, and the agents you already pay for each riding an orbit round
+ * it, in fine line, as an astronomical plate draws them. The words in a band
+ * along the foot, under a hairline rule and the figure's caption: the
+ * headline at the left, the lead and the ways to get it at the right.
  *
- * The cabin is a photograph with its window keyed out (hero/plate.ts),
- * wide, or tall on a phone, laid over the page to cover it. Behind it, the
- * fire and the sky are drawn on the graphics card (hero/fire.ts) by the
- * photograph's measure, by the clock (hero/journey.ts). The words are the
- * page's own, set in the window. The scene is dark, so the nav over it turns
- * to smoked glass (LightUnder, tone ink).
+ * The drawing is worked out for the frame (hero/plate.ts) before the first
+ * paint, and again only when the frame or the band changes size. The system
+ * turns (hero/system.ts): each agent rides its orbit, the inner ones faster,
+ * passing behind the sun and in front of it, its name set aside where there
+ * is room and fading where there isn't. One clock moves it and the sun
+ * (hero/clock.ts), only while it is on screen; with reduced motion it holds
+ * as composed, and `?t=` holds it that many seconds on.
  *
- * With reduced motion it is the last frame, at rest; `?t=` in the address
- * holds it at that second. Without the graphics card, or without scripts,
- * the window shows the sky.
+ * The prerender has the sky, the words and the agents' names; the drawing
+ * fades up out of the dark once the page's script has measured the frame,
+ * and the nav comes in after it (Nav's `opening`).
  */
 
 addDisplay()
 
-/** The most pixels the fire is drawn in, so a large screen keeps its frame rate. */
-const MOST_PIXELS = 1.6e6
-/** How long the capsule waits for its photographs before setting off without them. */
-const WAIT = 1800
+/** The width at which the frame is a phone's (Hero.module.css). */
+const PHONE = 760
+/** Where the picture may start: under the nav. */
+const TOP = { wide: 104, phone: 96 }
 
-/** The second to hold at, if any: `?t=`, or the last frame with reduced motion. */
-const heldAt = () => {
-  const t = askedSecond()
-  if (t !== null) return t
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? AT.settled : null
+/** "Building software / has never felt so / fast.": the line in two, the last word its own. */
+const WORDS = HERO.title.split(' ')
+const LINES = [WORDS.slice(0, 2).join(' '), WORDS.slice(2).join(' ')] as const
+
+const TONE = ['#fffaf2', '#b9c0ff', '#ffd9b0'] as const
+
+/** The discs' size before the frame is measured: a wide screen's, at its nearest. */
+const FIRST = sizeOf({ phone: false, scale: 1 }, 1)
+
+/** What the clock moves, by body: the body, its disc and name; its trail (behind the sun or in front), the trail's light, and the break its name makes in the lines. */
+interface Moving {
+  li: HTMLLIElement | null
+  disc: HTMLSpanElement | null
+  name: HTMLSpanElement | null
+  far: SVGPathElement | null
+  near: SVGPathElement | null
+  light: SVGLinearGradientElement | null
+  stop: SVGStopElement | null
+  gap: SVGRectElement | null
+}
+type Parts = RefObject<Moving[]>
+const part = (parts: Parts, i: number) =>
+  (parts.current[i] ??= { li: null, disc: null, name: null, far: null, near: null, light: null, stop: null, gap: null })
+
+/** The ids the drawing's layers share, the page's own. */
+interface Ids {
+  fade: string
+  sides: string
+  trail: (i: number) => string
+  light: string
+  warmth: string
 }
 
-/** A photograph, decoded. */
-const picture = (src: string) =>
-  new Promise<HTMLImageElement>((resolve, reject) => {
-    const img = new Image()
-    img.decoding = 'async'
-    img.onload = () =>
-      void img.decode().then(
-        () => resolve(img),
-        () => resolve(img),
-      )
-    img.onerror = () => reject(new Error(`couldn't load ${src}`))
-    img.src = src
-  })
-
-/**
- * Each photograph's measure, for the stylesheet, which takes the tall one's
- * on a phone: its size, the point it keeps in view, the window, the sky
- * behind it, and the photograph itself as the mask for the cabin's light.
- */
-const measure = (plate: Plate, end: string) => ({
-  [`--pw-${end}`]: plate.width,
-  [`--ph-${end}`]: plate.height,
-  [`--fx-${end}`]: plate.focus.x,
-  [`--fy-${end}`]: plate.focus.y,
-  [`--wx-${end}`]: plate.window.x,
-  [`--wy-${end}`]: plate.window.y,
-  [`--ww-${end}`]: plate.window.w,
-  [`--wh-${end}`]: plate.window.h,
-  [`--sx-${end}`]: plate.sky.x,
-  [`--sy-${end}`]: plate.sky.y,
-  [`--sw-${end}`]: plate.sky.w,
-  [`--sh-${end}`]: plate.sky.h,
-  // How far the sky has drifted by the time everything is at rest, in the plate's px: where the page's own picture of it then stands.
-  [`--sd-${end}`]: driftAt(AT.settled) * plate.unit,
-  [`--mask-${end}`]: `url(${plate.src})`,
-})
-const STAGE = { ...measure(WIDE, 'w'), ...measure(TALL, 't') } as CSSProperties
-
-/** Quick out, long settle: an expo out. */
-const EXPO = 'cubic-bezier(0.19, 1, 0.22, 1)'
-
-/** A line's words, each in a mask it rises out of. */
-function Words({ text }: { text: string }) {
-  const words = text.split(' ')
+/** The sky behind the sun: the stars, the far halves of the orbits, and the trails of the bodies behind it; the gradients and the mask all the layers use. */
+function Behind({ p, parts, ids }: { p: Plate; parts: Parts; ids: Ids }) {
   return (
-    <>
-      {words.map((word, i) => (
-        <span key={i}>
-          <span className={s.mask}>
-            <span className={s.word} data-word>
-              {word}
-            </span>
-          </span>
-          {i < words.length - 1 ? ' ' : ''}
-        </span>
-      ))}
-    </>
+    <svg className={s.layer} width={p.w} height={p.h} viewBox={`0 0 ${p.w} ${p.h}`} aria-hidden="true" focusable="false">
+      <defs>
+        {/* The orbits thin out toward the sides, into the dark... */}
+        <linearGradient id={ids.fade} x1="0" x2="1" y1="0" y2="0">
+          <stop offset="0" stopColor="#fff" stopOpacity="0.35" />
+          <stop offset="0.22" stopColor="#fff" stopOpacity="1" />
+          <stop offset="0.78" stopColor="#fff" stopOpacity="1" />
+          <stop offset="1" stopColor="#fff" stopOpacity="0.35" />
+        </linearGradient>
+        {/* ...and break round the names, wherever they are. */}
+        <mask id={ids.sides} maskUnits="userSpaceOnUse" x="0" y="0" width={p.w} height={p.h}>
+          <rect width={p.w} height={p.h} fill={`url(#${ids.fade})`} />
+          {p.bodies.map((b, i) => (
+            <rect key={b.id} ref={(el) => void (part(parts, i).gap = el)} rx="3" fill="#000" width="0" height="0" />
+          ))}
+        </mask>
+        {p.bodies.map((b, i) => (
+          <linearGradient key={b.id} ref={(el) => void (part(parts, i).light = el)} id={ids.trail(i)} gradientUnits="userSpaceOnUse">
+            <stop ref={(el) => void (part(parts, i).stop = el)} stopColor="#dfe3ff" stopOpacity="1" />
+            <stop offset="1" stopColor="#dfe3ff" stopOpacity="0" />
+          </linearGradient>
+        ))}
+      </defs>
+      <g>
+        {p.stars.map((star, i) => (
+          <circle key={i} cx={star.x} cy={star.y} r={star.r} fill={TONE[star.tone]} opacity={star.a} />
+        ))}
+      </g>
+      <g className={s.orbit} mask={`url(#${ids.sides})`}>
+        {p.orbits.map((o, i) => (
+          <path key={i} d={o.far} stroke={o.tone} opacity={o.bright * 0.42} />
+        ))}
+        <path className={s.ticks} d={p.ticks.far} opacity={0.16} />
+      </g>
+      <Trails p={p} parts={parts} ids={ids} side="far" />
+    </svg>
   )
 }
 
-/** The headline's words rise out of their masks one after another; then the rest. */
-const arrive = (within: HTMLElement) => {
-  const animate = (el: Element, frames: Keyframe[], options: KeyframeAnimationOptions) =>
-    el.animate(frames, { fill: 'backwards', ...options })
-  return [
-    ...[...within.querySelectorAll('[data-word]')].map((word, i) =>
-      animate(word, [{ transform: 'translateY(108%) rotate(5deg)' }, { transform: 'none' }], {
-        duration: 1050,
-        delay: AT.words * 1000 + i * 55,
-        easing: EXPO,
-      }),
-    ),
-    ...[...within.querySelectorAll<HTMLElement>('[data-arrive]')].flatMap((el) => {
-      const delay = AT.rest * 1000 + Number(el.dataset.arrive || 0)
-      return [
-        animate(el, [{ transform: 'translateY(14px)' }, { transform: 'none' }], { duration: 1000, delay, easing: EXPO }),
-        animate(el, [{ opacity: 0 }, { opacity: 1 }], { duration: 500, delay, easing: 'ease-out' }),
-      ]
-    }),
-  ]
-}
-
-/** Writes a style only when it changes: the frame runs sixty times a second. */
-const put = (el: HTMLElement | null, name: string, value: string) => {
-  if (el && el.style.getPropertyValue(name) !== value) el.style.setProperty(name, value)
-}
-
-/** The flight deck's readouts, as they read: at the journey's second `t`, and `s` seconds after rest. */
-const km = (n: number, places: number, unit: string) => `${n.toFixed(places)} ${unit}`
-const READ = {
-  velocity: (t: number) => km(velocityAt(t), 3, 'km/s'),
-  altitude: (t: number) => km(altitudeAt(t), 2, 'km'),
-  velocityAfter: (s: number) => km(velocityAfter(s), 3, 'km/s'),
-  altitudeAfter: (s: number) => km(altitudeAfter(s), 2, 'km'),
-}
-
-/** How often the instruments read at rest, in ms. */
-const READING = 250
-
-/** Writes a readout only when it changes. */
-const say = (el: HTMLElement | null, text: string) => {
-  if (el && el.textContent !== text) el.textContent = text
-}
-
-/** Every agent Althar runs, as its mark, named on hover and to a screen reader. */
-function Agents() {
+/** The way each body came: in front of the sun or behind it, where the body is. */
+function Trails({ p, parts, ids, side }: { p: Plate; parts: Parts; ids: Ids; side: 'far' | 'near' }) {
   return (
-    <ul className={s.agents} aria-label={HERO.agentsName}>
-      {AGENTS.map((agent) => (
-        <li key={agent.id} title={agent.name}>
-          <AgentMark agent={agent.id} size={17} />
-          <span className={s.sr}>{agent.name}</span>
+    <g fill="none" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" mask={`url(#${ids.sides})`}>
+      {p.bodies.map((b, i) => (
+        <path key={b.id} ref={(el) => void (part(parts, i)[side] = el)} stroke={`url(#${ids.trail(i)})`} />
+      ))}
+    </g>
+  )
+}
+
+/** The sun's light: a little warmth, and fine lines rising from behind the mark, at the sun's depth, so a body passing behind passes behind its light too. Only as large as the light, as it is drawn again while it drifts. */
+function Light({ p, ids }: { p: Plate; ids: Ids }) {
+  const g = p.glow
+  return (
+    <svg
+      className={cx(s.layer, s.light)}
+      style={{ left: g.l, top: g.t }}
+      width={g.r - g.l}
+      height={g.b - g.t}
+      viewBox={`${g.l} ${g.t} ${g.r - g.l} ${g.b - g.t}`}
+      aria-hidden="true"
+      focusable="false"
+    >
+      <defs>
+        <linearGradient id={ids.light} gradientUnits="userSpaceOnUse" x1="0" y1={p.cy} x2="0" y2={p.cy - p.tall}>
+          <stop offset="0" stopColor="#ffe9cf" stopOpacity="0.8" />
+          <stop offset="0.45" stopColor="#ffe9cf" stopOpacity="0.32" />
+          <stop offset="1" stopColor="#ffe9cf" stopOpacity="0" />
+        </linearGradient>
+        <radialGradient id={ids.warmth}>
+          <stop offset="0" stopColor="#ffd2a0" stopOpacity="0.2" />
+          <stop offset="0.4" stopColor="#ffd2a0" stopOpacity="0.06" />
+          <stop offset="1" stopColor="#ffd2a0" stopOpacity="0" />
+        </radialGradient>
+      </defs>
+      <circle cx={p.warmth.x} cy={p.warmth.y} r={p.warmth.r} fill={`url(#${ids.warmth})`} />
+      <g stroke={`url(#${ids.light})`} fill="none">
+        {p.rays.map((r, i) => {
+          // Where it breaks up, on its way from its root to its top; above it, the broken light drifts upward.
+          const mx = Math.round((r.x0 + ((r.x1 - r.x0) * (r.y0 - r.mid)) / (r.y0 - r.top)) * 10) / 10
+          const len = r.dash.split(' ').reduce((sum, one) => sum + Number(one), 0)
+          return (
+            <g key={i} strokeWidth={r.width}>
+              <path d={`M${r.x0} ${r.y0}L${mx} ${r.mid}`} />
+              <path
+                className={s.rise}
+                d={`M${mx} ${r.mid}L${r.x1} ${r.top}`}
+                strokeDasharray={r.dash}
+                style={{ '--len': len } as CSSProperties}
+              />
+            </g>
+          )
+        })}
+      </g>
+    </svg>
+  )
+}
+
+/** In front of the sun: the near halves of the orbits, and the trails of the bodies in front of it. */
+function Before({ p, parts, ids }: { p: Plate; parts: Parts; ids: Ids }) {
+  return (
+    <svg className={cx(s.layer, s.before)} width={p.w} height={p.h} viewBox={`0 0 ${p.w} ${p.h}`} aria-hidden="true" focusable="false">
+      <g className={s.orbit} mask={`url(#${ids.sides})`}>
+        {p.orbits.map((o, i) => (
+          <path key={i} d={o.near} stroke={o.tone} opacity={o.bright} />
+        ))}
+        <path className={s.ticks} d={p.ticks.near} opacity={0.34} />
+      </g>
+      <Trails p={p} parts={parts} ids={ids} side="near" />
+    </svg>
+  )
+}
+
+/** Every agent Althar runs, on its orbit: its mark on a small dark body, its name beside it where there is room. In the prerender too, for its names; laid out at the nearest size, and placed and sized by the clock. */
+function Bodies({ p, parts }: { p: Plate | null; parts: Parts }) {
+  const most = p ? sizeOf(p, 1) : FIRST
+  return (
+    <ul className={s.bodies} aria-label={HERO.agentsName}>
+      {AGENTS.map((agent, i) => (
+        <li
+          key={agent.id}
+          ref={(el) => void (part(parts, i).li = el)}
+          className={s.body}
+          style={{ '--size': `${most}px` } as CSSProperties}
+        >
+          <span ref={(el) => void (part(parts, i).disc = el)} className={s.disc}>
+            <AgentMark agent={agent.id} size={Math.round(most * 0.5)} />
+          </span>
+          <span ref={(el) => void (part(parts, i).name = el)} className={s.name}>
+            {agent.name}
+          </span>
         </li>
       ))}
     </ul>
   )
 }
 
-/** The developer page's first screen, coming in from orbit. */
-export function Hero({ nav }: { nav?: ReactNode } = {}) {
+const r2 = (n: number) => Math.round(n * 100) / 100
+
+/** Draws the system as it is: every body, its trail, its name, and the break its name makes in the lines. */
+function draw(p: Plate, at: At[], names: Name[], parts: Moving[]) {
+  const most = sizeOf(p, 1)
+  at.forEach((b, i) => {
+    const el = parts[i]
+    const n = names[i]!
+    if (!el?.li) return
+    el.li.style.transform = `translate(${r2(b.x)}px, ${r2(b.y)}px)`
+    // Behind the sun (at 10) on the far half, in front of it on the near.
+    el.li.style.zIndex = String(b.d < 0 ? 5 + Math.round((1 + b.d) * 4) : 12 + Math.round(b.d * 4))
+    el.li.style.setProperty('--d', b.d.toFixed(3))
+    if (el.disc) el.disc.style.transform = `scale(${r2(b.size / most)})`
+    if (el.name) {
+      el.name.style.opacity = String(r2(n.alpha))
+      el.name.dataset.side = n.side ?? 'right'
+      const off = b.size / 2 + 7
+      el.name.style.transform = `translateX(${r2(n.side === 'left' ? -off : off)}px)`
+    }
+    if (el.gap) {
+      const bx = n.side ? nameBox(b, p.bodies[i]!.name, n.side) : null
+      el.gap.setAttribute('x', bx ? String(r2(bx.l - 5)) : '0')
+      el.gap.setAttribute('y', bx ? String(r2(bx.t - 3)) : '0')
+      el.gap.setAttribute('width', bx ? String(r2(bx.r - bx.l + 8)) : '0')
+      el.gap.setAttribute('height', bx ? String(r2(bx.b - bx.t + 6)) : '0')
+      el.gap.setAttribute('opacity', String(r2(n.alpha)))
+    }
+    const len = Math.hypot(b.x1 - b.x, b.y1 - b.y)
+    el.light?.setAttribute('x1', String(r2(b.x)))
+    el.light?.setAttribute('y1', String(r2(b.y)))
+    el.light?.setAttribute('x2', String(r2(b.x1)))
+    el.light?.setAttribute('y2', String(r2(b.y1)))
+    el.stop?.setAttribute('offset', Math.min(0.9, (b.size / 2 + 3) / Math.max(1, len)).toFixed(3))
+    const front = b.d >= 0
+    el.near?.setAttribute('d', front ? b.trail : '')
+    el.far?.setAttribute('d', front ? '' : b.trail)
+    ;(front ? el.near : el.far)?.setAttribute('opacity', String(r2(0.7 + 0.3 * b.d)))
+  })
+}
+
+/** Sets the system where the clock is (on opening, after a resize, when motion stops) and moves it with the clock. The names keep their sides across a resize. */
+function useSystem(p: Plate | null, parts: Parts, clock: Clock, still: boolean) {
+  const names = useRef<Name[]>([])
+  useLayoutEffect(() => {
+    if (!p) return
+    if (names.current.length !== p.bodies.length) names.current = unnamed(p)
+    const step = (t: number, dt: number) => {
+      const at = bodiesAt(p, t)
+      placeNames(p, at, names.current, t, dt)
+      draw(p, at, names.current, parts.current)
+    }
+    step(clock.t, 0)
+    if (still) return
+    return clock.on(step)
+  }, [p, parts, clock, still])
+}
+
+export function Hero({ nav }: { nav?: ReactNode }) {
   const root = useRef<HTMLDivElement>(null)
-  const canvas = useRef<HTMLCanvasElement>(null)
-  const plate = useRef<HTMLDivElement>(null)
-  const dim = useRef<HTMLDivElement>(null)
-  const firelit = useRef<HTMLDivElement>(null)
-  const daylit = useRef<HTMLDivElement>(null)
-  const camera = useRef<HTMLDivElement>(null)
-  const flash = useRef<HTMLDivElement>(null)
-  const fast = useRef<HTMLSpanElement>(null)
+  const band = useRef<HTMLDivElement>(null)
   const grain = useRef<HTMLDivElement>(null)
-  const velocity = useRef<HTMLElement>(null)
-  const altitude = useRef<HTMLElement>(null)
-  const [drawn, setDrawn] = useState(false)
-  const hydrated = useHydrated()
-  // The sky and the fire, asked for with the page rather than once its script has run.
-  preload(skyUrl, { as: 'image' })
-  preload(plasmaUrl, { as: 'image' })
+  const parts = useRef<Moving[]>([])
+  const [p, setP] = useState<Plate | null>(null)
+  const id = useId()
+  const [ids] = useState<Ids>(() => ({
+    fade: `${id}fade`,
+    sides: `${id}sides`,
+    trail: (i) => `${id}trail${i}`,
+    light: `${id}light`,
+    warmth: `${id}warmth`,
+  }))
+  // Held still with reduced motion, followed as it changes, or for a look at one frame (`?t=`); neither while the page hydrates.
+  const reduced = useMedia('(prefers-reduced-motion: reduce)')
+  const frame = useHydrated() && askedSecond() !== null
+  const still = reduced || frame
+  const clock = useClock(root, !still)
 
-  useGrain(grain, 7)
+  useGrain(grain, 11)
+  useSystem(p, parts, clock, still)
 
-  useEffect(() => {
+  // Worked out before the first paint, and again only when the frame or the band changes size.
+  useLayoutEffect(() => {
     const el = root.current
-    const cv = canvas.current
-    const box = plate.current
-    const word = fast.current
-    if (!el || !cv || !box || !word) return
-    const held = heldAt()
-    let live = true
-    let fire: Fire | null = null
-    let size = ''
-    // The photograph the stylesheet is showing: the tall one on a phone.
-    const phone = window.matchMedia(PHONE)
-    let shown: Plate = phone.matches ? TALL : WIDE
-
-    /** Sets the fire's canvas over the glass, for the size; false if nothing changed. */
-    const place = () => {
+    const words = band.current
+    if (!el || !words) return
+    let last = ''
+    const measure = () => {
       const w = el.clientWidth
       const h = el.clientHeight
-      // Where the photograph stands, by its layout box: the camera's shaking is a transform, which this ignores.
-      shown = phone.matches ? TALL : WIDE
-      const scale = box.offsetWidth / shown.width
-      const left = box.offsetLeft
-      const top = box.offsetTop
-      const next = `${w}x${h}@${left},${top},${scale.toFixed(4)},${shown.width}`
-      if (next === size || w < 10 || h < 10 || scale <= 0) return false
-      size = next
-      // Over the glass that is on the screen, and a good way round it for the shaking.
-      const glass = shown.window
-      const x = Math.max(0, Math.floor(left + glass.x * scale - 40))
-      const y = Math.max(0, Math.floor(top + glass.y * scale - 40))
-      const r = Math.min(w, Math.ceil(left + (glass.x + glass.w) * scale + 40))
-      const b = Math.min(h, Math.ceil(top + (glass.y + glass.h) * scale + 40))
-      const dpr = Math.min(window.devicePixelRatio || 1, 1.5, Math.sqrt(MOST_PIXELS / Math.max(1, (r - x) * (b - y))))
-      fire?.place({ plate: { left, top, scale }, box: { x, y, w: r - x, h: b - y }, dpr, sky: shown.sky, unit: shown.unit })
-      return true
+      const foot = words.offsetTop
+      const key = `${w}x${h}:${foot}`
+      if (key === last || w < 10) return
+      last = key
+      const phone = w <= PHONE
+      setP(plate({ w, h, foot, phone, top: phone ? TOP.phone : TOP.wide }))
     }
-
-    /** Everything for second `t`; after the last frame, the last frame. */
-    const draw = (at: number) => {
-      const t = Math.min(at, AT.settled)
-      const heat = heatAt(t)
-      const broken = brokenAt(t)
-      // Up out of the dark as it sets off, fire or not.
-      put(el, '--dark', (1 - smooth(AT.open, AT.opened, t)).toFixed(3))
-      fire?.draw({ t, heat, flow: flowAt(t), speed: speedAt(t), broken, white: 0.5 * flare(t, AT.break, 4), drift: driftAt(t) })
-      // The cabin: dark, then lit by the fire, flickering; then the cool light of the sky.
-      const flicker = 0.78 + 0.22 * (wobble(t * 9, 4) * 0.6 + wobble(t * 23, 8) * 0.4)
-      put(dim.current, 'opacity', (0.55 * (1 - heat) * (1 - broken) + 0.08).toFixed(3))
-      put(firelit.current, 'opacity', clamp(heat * flicker * 1.1).toFixed(3))
-      put(daylit.current, 'opacity', (0.75 * broken).toFixed(3))
-      put(flash.current, 'opacity', clamp(0.9 * flare(t, AT.break - 0.02, 2.6)).toFixed(3))
-      // "fast.", forged in the fire at its height, glowing and slammed in, then cooling as it breaks.
-      put(word, 'opacity', smooth(AT.peak + 0.1, AT.peak + 0.4, t).toFixed(3))
-      put(word, '--cool', smooth(AT.break, AT.broken + 0.7, t).toFixed(3))
-      put(word, '--punch', (1 - smooth(AT.peak + 0.1, AT.peak + 0.55, t)).toFixed(3))
-      say(velocity.current, READ.velocity(t))
-      say(altitude.current, READ.altitude(t))
-      direct(t, heat, broken)
-    }
-
-    /*
-     * The camera, strapped in: drawing back from the window as the cabin comes
-     * up, swaying a little, shaking with the heat, harder and faster the
-     * hotter, pressed down as the capsule slows; thrown as the fire breaks,
-     * then coming to rest under the sky.
-     */
-    const direct = (t: number, heat: number, broken: number) => {
-      const shake = shakeAt(t) * 9
-      const sway = swayAt(t)
-      const x = wobble(t * 0.3, 3) * 4 * sway + (wobble(t * 23, 1) * 0.6 + wobble(t * 41, 2) * 0.4) * shake + 12 * ring(t, AT.break, 8, 2.4)
-      const y =
-        wobble(t * 0.25, 7) * 3 * sway +
-        (wobble(t * 29, 4) * 0.6 + wobble(t * 47, 5) * 0.4) * shake +
-        6 * heat -
-        7 * ring(t, AT.break, 6.6, 2.4)
-      const turn = wobble(t * 0.2, 9) * 0.25 * sway + wobble(t * 19, 6) * 0.04 * shake + 0.3 * ring(t, AT.break, 5.6, 2.4)
-      const zoom = 1 + 0.06 * (1 - inOut(t / 2.6)) + 0.035 * heat * (1 - broken) - 0.03 * flare(t, AT.break, 2.2)
-      put(
-        camera.current,
-        'transform',
-        t >= AT.settled
-          ? 'none'
-          : `translate3d(${x.toFixed(2)}px, ${y.toFixed(2)}px, 0) rotate(${turn.toFixed(3)}deg) scale(${zoom.toFixed(4)})`,
-      )
-    }
-
-    let frame = 0
-    let start = performance.now()
-    let pausedAt: number | null = null
-    let seen = true
-    let runs: Animation[] = []
-    let begun = false
-    let settled = false
-    const now = () => (performance.now() - start) / 1000
-    /*
-     * Once at rest, the graphics card stops: its last frame is the sky picture
-     * just as the page's own copy of it shows it, so that takes its place
-     * (data-settled), and the canvas and its memory are let go. From then on
-     * what moves is the browser's to move: the sky easing, the camera floating
-     * and buffeted, the daylight turning, now and then an ember
-     * (Hero.module.css); and the readouts, read a few times a second.
-     */
-    const rest = () => {
-      el.dataset.settled = ''
-      fire?.dispose()
-      fire = null
-    }
-    // At rest the readouts go on reading, a few times a second while on screen: the capsule still sinking, the air jostling it.
-    let after = 0
-    let reading = 0
-    const read = () => {
-      reading = window.setInterval(() => {
-        if (!seen) return
-        after += READING / 1000
-        say(velocity.current, READ.velocityAfter(after))
-        say(altitude.current, READ.altitudeAfter(after))
-      }, READING)
-    }
-    const settle = () => {
-      settled = true
-      cancelAnimationFrame(frame)
-      draw(AT.settled)
-      rest()
-      read()
-    }
-    const tick = () => {
-      const t = now()
-      if (t >= AT.settled) return settle()
-      draw(t)
-      frame = requestAnimationFrame(tick)
-    }
-
-    // It sets off once the fire is in, or after a moment without it; the words come with it, or are there at once when held still.
-    const begin = () => {
-      if (begun || !live) return
-      begun = true
-      el.dataset.begun = ''
-      start = performance.now()
-      runs = arrive(el)
-      if (held !== null) {
-        for (const run of runs) {
-          run.pause()
-          run.currentTime = held * 1000
-        }
-        draw(held)
-        if (held >= AT.settled) {
-          settled = true
-          rest()
-        }
-      } else if (seen) frame = requestAnimationFrame(tick)
-      else {
-        // Begun off screen (the page opened scrolled down): it waits at its first frame, and coming into view starts it.
-        pausedAt = 0
-        runs.forEach((run) => run.pause())
-      }
-    }
-    const waited = window.setTimeout(begin, WAIT)
-    void Promise.all([picture(skyUrl), picture(plasmaUrl)]).then(
-      ([sky, plasma]) => {
-        // Already at rest (the pictures came late, or it is held there, as with reduced motion), there is nothing for the graphics card to do.
-        if (!live || settled || (held !== null && held >= AT.settled)) return begin()
-        // If the graphics card takes the canvas back, the window shows the sky instead.
-        fire = makeFire(cv, sky, plasma, () => {
-          fire = null
-          setDrawn(false)
-        })
-        if (fire) {
-          size = ''
-          place()
-          setDrawn(true)
-        }
-        begin()
-        if (held !== null) draw(held)
-      },
-      () => begin(),
-    )
-    place()
-
-    // Off screen it stops, and takes up where it left off when it's back; at rest, the browser's motion stops with it (data-away).
-    const io = new IntersectionObserver(([e]) => {
-      const was = seen
-      seen = e?.isIntersecting ?? true
-      if (seen) delete el.dataset.away
-      else el.dataset.away = ''
-      if (held !== null || !begun || settled) return
-      if (was && !seen) {
-        pausedAt = now()
-        cancelAnimationFrame(frame)
-        runs.forEach((run) => run.pause())
-      } else if (!was && seen) {
-        if (pausedAt !== null) start = performance.now() - pausedAt * 1000
-        pausedAt = null
-        runs.forEach((run) => run.play())
-        cancelAnimationFrame(frame)
-        frame = requestAnimationFrame(tick)
-      }
-    })
-    io.observe(el)
-
-    let timer = 0
-    const ro = new ResizeObserver(() => {
-      clearTimeout(timer)
-      timer = window.setTimeout(() => {
-        if (place()) draw(held ?? (settled ? AT.settled : now()))
-      }, 120)
-    })
+    measure()
+    const ro = new ResizeObserver(measure)
     ro.observe(el)
-
-    return () => {
-      live = false
-      delete el.dataset.begun
-      delete el.dataset.settled
-      delete el.dataset.away
-      cancelAnimationFrame(frame)
-      clearTimeout(timer)
-      clearTimeout(waited)
-      clearInterval(reading)
-      io.disconnect()
-      ro.disconnect()
-      runs.forEach((run) => run.cancel())
-      fire?.dispose()
-    }
+    ro.observe(words)
+    return () => ro.disconnect()
   }, [])
 
   return (
-    <div ref={root} className={s.hero} data-ready={hydrated || undefined} data-drawn={drawn || undefined}>
-      {/* Dark under the nav: it turns to smoked glass over the scene. */}
+    <div
+      ref={root}
+      className={s.hero}
+      data-drawn={p ? '' : undefined}
+      data-still={still ? '' : undefined}
+      data-frame={frame ? '' : undefined}
+    >
+      {/* The nav's room, in the flow at the top. */}
+      {nav}
+      {/* Dark under the nav: it turns to smoked glass over the sky. */}
       <LightUnder tone="ink" className={s.under} />
-      {/* What the camera sees: the fire and the sky, the light, and the cabin and the words in it. */}
-      <div ref={camera} className={s.camera}>
-        <canvas ref={canvas} className={s.fire} aria-hidden="true" />
-        <div className={s.stage} style={STAGE}>
-          {/* Until the fire is drawn, and without the graphics card or scripts, the sky through the glass. */}
-          <div className={s.sky} style={{ backgroundImage: `url(${skyUrl})` }} aria-hidden="true" />
-          {/* Now and then, at rest, an ember of the fire streaks past the glass. */}
-          <div className={s.embers} aria-hidden="true">
-            <i />
-            <i />
-            <i />
-          </div>
-          <div ref={plate} className={s.plate} aria-hidden="true">
-            {/* The tall photograph on a phone, the wide one otherwise: a browser fetches only the one it shows. */}
-            <picture>
-              <source media={PHONE} srcSet={TALL.src} width={TALL.width} height={TALL.height} />
-              <img
-                className={s.photo}
-                src={WIDE.src}
-                alt=""
-                width={WIDE.width}
-                height={WIDE.height}
-                decoding="async"
-                fetchPriority="high"
-              />
-            </picture>
-            <div ref={dim} className={s.dim} />
-            <div ref={firelit} className={s.firelit} />
-            <div ref={daylit} className={s.daylit} />
-          </div>
-          <div ref={flash} className={s.flash} aria-hidden="true" />
-          <div className={s.curtain} aria-hidden="true" />
-          <div ref={grain} className={s.grain} aria-hidden="true" />
-          <div className={s.vignette} aria-hidden="true" />
-          <div className={s.words}>
-            <h1 className={s.h1}>
-              <span className={s.line}>
-                <Words text={HERO.title} />
-              </span>{' '}
-              <span ref={fast} className={s.fast}>
-                {HERO.last}
-              </span>
-            </h1>
-            {/* The flight deck's readouts, at rest until the clock runs them. */}
-            <div className={s.hud} aria-hidden="true">
-              <span>
-                <i>{HERO.velocity}</i>
-                <b ref={velocity}>{READ.velocity(AT.settled)}</b>
-              </span>
-              <span>
-                <i>{HERO.altitude}</i>
-                <b ref={altitude}>{READ.altitude(AT.settled)}</b>
-              </span>
-            </div>
-          </div>
-        </div>
+      <div className={s.sky} aria-hidden="true" />
+      <div ref={grain} className={s.grain} aria-hidden="true" />
+      <div className={s.drawing}>
+        {p && (
+          <>
+            <Behind p={p} parts={parts} ids={ids} />
+            <Light p={p} ids={ids} />
+            <Sun cx={p.cx} cy={p.cy} size={p.sun} tilt={p.tilt} clock={clock} still={still} />
+            <Before p={p} parts={parts} ids={ids} />
+          </>
+        )}
+        <Bodies p={p} parts={parts} />
       </div>
-      {/* In front of the camera, so its shaking leaves them be: the lead, and the console under it. */}
-      <footer className={s.deck}>
-        <p className={s.lead} data-arrive={0}>
-          {HERO.lead}
+      <div ref={band} className={s.band}>
+        <p className={s.caption} aria-hidden="true">
+          <b>Fig. 1</b>
+          <span>{BRAND}</span>
+          <i className={s.rule} />
+          <span>
+            {HERO.agents} <b>{AGENTS.length}</b>
+          </span>
         </p>
-        <div className={s.console} data-arrive={120}>
-          <div className={s.cell}>
-            <span className={s.label}>{HERO.agents}</span>
-            <Agents />
+        <h1 className={s.h1}>
+          <span className={s.line}>{LINES[0]}</span> <span className={s.line}>{LINES[1]}</span>{' '}
+          <span className={cx(s.line, s.fast)}>{HERO.last}</span>
+        </h1>
+        <div className={s.side}>
+          <p className={s.lead}>{HERO.lead}</p>
+          <div className={s.ways}>
+            <Get tone="blue" />
+            <OtherMac tone="blue" />
           </div>
-          <div className={cx(s.cell, s.install)}>
+          <div className={s.install}>
             <span className={s.label}>{HERO.install}</span>
             <div className={s.command}>
               <code>
@@ -520,13 +380,8 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
               </span>
             </div>
           </div>
-          <div className={cx(s.cell, s.ways)}>
-            <Get tone="blue" />
-            <OtherMac tone="blue" />
-          </div>
         </div>
-      </footer>
-      {nav}
+      </div>
     </div>
   )
 }

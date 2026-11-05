@@ -1,5 +1,5 @@
 /*
- * The mark as a solid, for the Orrery's sun: the section (LOGO_SECTION, its
+ * The mark as a solid, for the first screen's sun (gl.ts): the section (LOGO_SECTION, its
  * three faces hollowed to circles, its corners cut) drawn out into a thick
  * piece, the bore through it, every edge rounded a little so it catches the
  * light; and the point, a small ball in the middle of the bore. As plain
@@ -142,8 +142,8 @@ function insets(runs: Run[], closed: boolean): V2[][] {
   )
 }
 
-/** A wall round a run, front to back: the front edge rounded over, straight down, the back edge rounded. */
-function wall(b: Builder, run: Run, inset: V2[]) {
+/** A wall round a run, front to back: the front edge rounded over, straight down, the back edge rounded. Its triangles turn outward, counter-clockwise seen from outside, round the outline; round a hole, which goes the same way, they are turned over (`hole`). */
+function wall(b: Builder, run: Run, inset: V2[], hole = false) {
   const h = DEPTH / 2
   // The round, in quarters of a right angle: 0 on the face, 1 on the wall.
   const ARC = [0, 1 / 3, 2 / 3, 1]
@@ -170,12 +170,17 @@ function wall(b: Builder, run: Run, inset: V2[]) {
     for (let k = 0; k < per - 1; k++) {
       const a = first + r * per + k
       const c = a + per
-      b.tri(a, a + 1, c)
-      b.tri(a + 1, c + 1, c)
+      if (hole) {
+        b.tri(a, c, a + 1)
+        b.tri(a + 1, c, c + 1)
+      } else {
+        b.tri(a, a + 1, c)
+        b.tri(a + 1, c + 1, c)
+      }
     }
 }
 
-/** A flat face, front (+1) or back (-1): the ring between the outline's inner edge and the bore's, stitched by their angle round the middle. */
+/** A flat face, front (+1) or back (-1): the ring between the outline's inner edge and the bore's, stitched by their angle round the middle, its triangles counter-clockwise seen from the side it faces. */
 function face(b: Builder, outer: V2[], inner: V2[], side: 1 | -1) {
   const z = (side * DEPTH) / 2
   const o = outer.map((p) => b.vert(p[0], p[1], z, 0, 0, side))
@@ -191,16 +196,18 @@ function face(b: Builder, outer: V2[], inner: V2[], side: 1 | -1) {
   // The outline goes round clockwise, as LOGO_SECTION draws it; the bore's points from the same angle the same way.
   const N = outer.length
   const M = inner.length
+  // Stitched as seen from behind; turned over for the front.
+  const tri = (x: number, y: number, z: number) => (side === 1 ? b.tri(x, z, y) : b.tri(x, y, z))
   const po = (k: number) => (k >= N ? 2 * Math.PI : round(outer[k]!))
   const pi = (k: number) => (k >= M ? 2 * Math.PI : round(inner[k]!))
   let a = 0
   let c = 0
   while (a < N || c < M) {
     if (a < N && (c >= M || po(a + 1) <= pi(c + 1))) {
-      b.tri(o[a]!, o[(a + 1) % N]!, i[c % M]!)
+      tri(o[a]!, o[(a + 1) % N]!, i[c % M]!)
       a++
     } else {
-      b.tri(o[a % N]!, i[(c + 1) % M]!, i[c % M]!)
+      tri(o[a % N]!, i[(c + 1) % M]!, i[c % M]!)
       c++
     }
   }
@@ -218,7 +225,7 @@ export function solid(): Mesh {
   const start = Math.atan2(outer[0]![1], outer[0]![0])
   const hole = bore(56, start)
   const holeIn = insets([hole], true)[0]!
-  wall(b, hole, holeIn)
+  wall(b, hole, holeIn, true)
   const inner: V2[] = hole.pts.slice(0, -1).map((p, k) => [p[0] - holeIn[k]![0], p[1] - holeIn[k]![1]])
   face(b, outer, inner, 1)
   face(b, outer, inner, -1)
@@ -242,8 +249,8 @@ export function point(): Mesh {
     for (let j = 0; j < S; j++) {
       const a = i * (S + 1) + j
       const c = a + S + 1
-      b.tri(a, c, a + 1)
-      b.tri(a + 1, c, c + 1)
+      b.tri(a, a + 1, c)
+      b.tri(a + 1, c + 1, c)
     }
   return b.done()
 }

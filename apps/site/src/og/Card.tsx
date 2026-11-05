@@ -1,7 +1,7 @@
 import { Logo } from '@althar/ui'
 import { useLayoutEffect, useRef, useState } from 'react'
 
-import skyUrl from '../home/hero/plate/sky.webp'
+import skyUrl from './sky.webp'
 import { CARDS, type OgPage } from './cards'
 import s from './Og.module.css'
 

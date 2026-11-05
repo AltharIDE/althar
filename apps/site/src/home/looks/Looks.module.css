@@ -15,22 +15,12 @@
   white-space: nowrap;
   transition: opacity var(--enter) var(--ease-out), translate var(--enter) var(--ease-out);
 }
-/* On the first screen: at the top, under the nav, off the console. */
-.bar[data-top] { bottom: auto; top: 76px; }
+/* Away while the first screen is in view, off its console. */
+.bar[data-away] { opacity: 0; translate: 0 12px; pointer-events: none; }
 .name { margin-left: 4px; font: 500 11px var(--mono); color: var(--t-3); }
 .hint { font: 500 11px var(--mono); color: var(--t-3); }
 
 @media (max-width: 700px) {
   .bar { bottom: 10px; padding-right: 5px; }
   .hint, .name { display: none; }
-}
-
-/* Prototype: under Orrery, the Runs on band in the same night, its hairlines and words as Orrery draws them; the band itself is the page's own. */
-.nightBand {
-  --n-2: #070605;
-  --t-1: rgba(255, 248, 240, 0.88);
-  --t-3: #8f887e;
-  --t-4: rgba(255, 244, 232, 0.3);
-  --line-2: rgba(255, 244, 232, 0.11);
-  color-scheme: dark;
 }
