@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useState } from 'react'
 import { expect, it, vi } from 'vitest'
 import { EarlierTurns } from '../src/renderer/shared/EarlierTurns'
 
@@ -74,4 +75,42 @@ it('checks a short initial page even when there is no scrollbar to move', async 
   Object.defineProperty(box, 'clientHeight', { value: 600 })
   Object.defineProperty(box, 'scrollHeight', { value: 100 })
   await waitFor(() => expect(load).toHaveBeenCalledTimes(1))
+})
+
+it('loads consecutive short pages through the beginning without scroll or resize events', async () => {
+  const pending: Array<() => void> = []
+  const load = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        pending.push(resolve)
+      }),
+  )
+  function ShortThread() {
+    const [page, setPage] = useState(0)
+    return (
+      <div style={{ overflowY: 'auto' }} data-testid="scroll">
+        <EarlierTurns
+          earlier={page < 3}
+          version={page}
+          loading={false}
+          load={async () => {
+            await load()
+            setPage((value) => value + 1)
+          }}
+        />
+        <span>Page {page}</span>
+      </div>
+    )
+  }
+  render(<ShortThread />)
+  const box = screen.getByTestId('scroll')
+  Object.defineProperty(box, 'clientHeight', { value: 600 })
+  Object.defineProperty(box, 'scrollHeight', { value: 100 })
+  for (let page = 1; page <= 3; page++) {
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(page))
+    await act(async () => pending.shift()!())
+  }
+  await screen.findByText('Page 3')
+  fireEvent.scroll(box)
+  expect(load).toHaveBeenCalledTimes(3)
 })

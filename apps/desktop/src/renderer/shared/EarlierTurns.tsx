@@ -52,19 +52,16 @@ export function useEarlierTurns(load: (quiet?: boolean) => Promise<void>, versio
       anchor.current = element ? { element, top: element.getBoundingClientRect().top, box: scroller } : null
     }
     const near = () => scroller.getBoundingClientRect().top - marker.parentElement!.getBoundingClientRect().top < scroller.clientHeight
-    const check = () => {
+    // Checks of its own, not the reader's scroll, load only while the thread is too short to scroll back through:
+    // otherwise a check on opening, before the thread settles at its latest turn, would read it as at the top.
+    const short = () => scroller.scrollHeight - scroller.clientHeight < scroller.clientHeight
+    const check = (scrolled: boolean) => {
       if (!near()) {
         anchor.current = null
         return
       }
       remember()
-      if (
-        earlier &&
-        !failed &&
-        scroller.clientHeight > 0 &&
-        scroller.getBoundingClientRect().top - marker.parentElement!.getBoundingClientRect().top < scroller.clientHeight
-      )
-        void request()
+      if ((scrolled || short()) && earlier && !failed && scroller.clientHeight > 0) void request()
     }
     const resize =
       typeof ResizeObserver === 'undefined'
@@ -72,21 +69,25 @@ export function useEarlierTurns(load: (quiet?: boolean) => Promise<void>, versio
         : new ResizeObserver(() => {
             const saved = anchor.current
             if (saved?.element.isConnected) saved.box.scrollTop += saved.element.getBoundingClientRect().top - saved.top
+            // A taller window or collapsed content can bring the top back into reach without a scroll.
+            check(false)
           })
     if (marker.parentElement) resize?.observe(marker.parentElement)
-    scroller.addEventListener('scroll', check, { passive: true })
+    resize?.observe(scroller)
+    const onScroll = () => check(true)
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+    // Recheck after every committed page too: short pages may leave no scrollbar to move.
     const initial = requestAnimationFrame(() => {
-      initialFrame = requestAnimationFrame(check)
+      initialFrame = requestAnimationFrame(() => check(false))
     })
     let initialFrame = 0
-    // The initial page starts at the latest turn. Only scrolling back requests history.
     return () => {
-      scroller.removeEventListener('scroll', check)
+      scroller.removeEventListener('scroll', onScroll)
       resize?.disconnect()
       cancelAnimationFrame(initial)
       cancelAnimationFrame(initialFrame)
     }
-  }, [failed, earlier])
+  }, [failed, earlier, version])
 
   return { sentinel, failed, request }
 }
