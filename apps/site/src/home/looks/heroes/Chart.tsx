@@ -225,6 +225,14 @@ export function ChartHero({ nav }: { nav?: ReactNode }) {
           {/* The path: flown, then the rest of the way down still to fly; where it entered the air. */}
           <path className={s.planned} d={p.down} />
           <path ref={flown} className={s.flown} d={p.d} />
+          {/* A station where it crosses each layer, as the sections' path has where it crosses a sheet; none crowding the capsule. */}
+          {LAYERS.map(({ km }) => {
+            const x = p.crosses(km)
+            if (x === null) return null
+            const y = p.yAt(km, x)
+            if (Math.hypot(x - p.rest.x, y - p.rest.y) < 40) return null
+            return <circle key={km} className={s.cross} cx={x.toFixed(1)} cy={y.toFixed(1)} r="3" data-after="" />
+          })}
           <g className={s.station} transform={`translate(${p.entry.x.toFixed(1)} ${p.entry.y.toFixed(1)})`}>
             <path d="M-11 0h22M0 -11v22" />
             <circle r="5" />

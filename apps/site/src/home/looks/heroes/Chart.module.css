@@ -45,7 +45,7 @@
 .planned { fill: none; stroke: var(--ink-2); stroke-width: 1.25; stroke-dasharray: 0.5 5.5; stroke-linecap: round; }
 .reading { fill: none; stroke: var(--ink); stroke-width: 1; }
 .station path { fill: none; stroke: var(--ink); stroke-width: 1; }
-.station circle { fill: var(--n-2); stroke: var(--ink); stroke-width: 1.25; }
+.station circle, .cross { fill: var(--n-2); stroke: var(--ink); stroke-width: 1.25; }
 .note { font: 500 10px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; fill: var(--ink-2); }
 /* The capsule, at rest: the fire, as the sections' chart has it. */
 .capsule circle { fill: var(--fire); }
