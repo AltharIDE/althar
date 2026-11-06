@@ -11,7 +11,7 @@ import { SqlClient } from 'effect/sql'
 import { thisDevice } from './device'
 import { Busy } from './Busy'
 import { Connections } from './Connections'
-import { touchCard } from './cards'
+import { touchCard, touchTask } from './cards'
 import { Changes } from './Changes'
 import { endWords, modelNamer, teamOf, withEffort } from './coordinatorNews'
 import { suggestedCoordinator } from './coordinatorChoice'
@@ -30,6 +30,7 @@ import { findWords, foundLine, Issues, keysOf, READ_ISSUE, READ_ISSUE_INPUT, sto
 import { answeredIn, quickIn } from './kinds'
 import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
+import { DRAFTING_MS } from './needsYou'
 import { Installs } from './Installs'
 import { Models } from './Models'
 import { Plans } from './Plans'
@@ -318,6 +319,10 @@ export class Coordinator extends Context.Service<
     Effect.gen(function* () {
       const context = yield* Effect.context<Store>()
       const instance = yield* Instance
+      const config = yield* RuntimeConfig
+      // The runtime's own lifetime: a draft's deadline outlives the turn that made it.
+      const lifetime = yield* Effect.scope
+      const draftingMs = Duration.toMillis(config.drafting ?? Duration.millis(DRAFTING_MS))
       const agents = yield* Agents
       const sessions = yield* Sessions
       const projects = yield* Projects
@@ -872,6 +877,21 @@ export class Coordinator extends Context.Service<
         Effect.gen(function* () {
           const { pull_request: pullRequest, ...drafted } = yield* read(DraftedTask, input)
           const { created, issue } = yield* drafting(access, drafted)
+          // Its plan comes in this turn. If it never does, every open board is told when its moment ends, so the draft
+          // shows in Needs you then: a board reads again only when the feed says something changed.
+          yield* Effect.forkIn(
+            Effect.gen(function* () {
+              // A moment past the cutoff, so a clock that reads the same millisecond still finds it over.
+              yield* Effect.sleep(Duration.millis(draftingMs + 50))
+              const sql = yield* SqlClient.SqlClient
+              const [still] = yield* sql<{ one: number }>`
+                SELECT 1 AS one FROM tasks k
+                WHERE k.id = ${created.taskId} AND k.state = 'draft'
+                  AND NOT EXISTS (SELECT 1 FROM task_plans p WHERE p.task_id = k.id AND p.state IN ('proposed', 'accepted'))`
+              if (still !== undefined) yield* touchTask(created.taskId)
+            }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not surface a draft whose plan never came', cause))),
+            lifetime,
+          )
           const from = issue === undefined ? '' : drafted.part_of === true ? `, part of ${issue.key}` : `, from ${issue.key}`
           if (pullRequest === undefined) return `Drafted ${created.slug}${from}. Now propose its plan with propose_plan.`
           // A new task has nothing of its own to lose: it starts on the pull request's head.

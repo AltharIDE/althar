@@ -67,7 +67,7 @@ import { graphOf, type RunRows, type StepRow } from './graph'
 import { taskFindingsOf } from './taskFindings'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { answeredIn, handedOf, issueCardsWaiting, kindOf } from './kinds'
-import { BETWEEN_AGENTS_MS, betweenAgents, byItself, isMergeable, stillDrafting } from './needsYou'
+import { BETWEEN_AGENTS_MS, betweenAgents, byItself, DRAFTING_MS, isMergeable, stillDrafting } from './needsYou'
 import { documentKept, documentText, outputText } from './reading'
 import { type CodeRoot, type CodeRoots, findCode, readCode } from './code'
 import type { Artifacts } from './Artifacts'
@@ -843,6 +843,8 @@ export class Queries extends Context.Service<
       const context = yield* Effect.context<Store>()
       const instance = yield* Instance
       const config = yield* RuntimeConfig
+      // How long a draft waits for its plan before it is the person's (DRAFTING_MS unless a test says otherwise).
+      const draftingMs = Duration.toMillis(config.drafting ?? Duration.millis(DRAFTING_MS))
       const launches = yield* Launches
       // Each read reads a project's line once, however many of its cards wait in it.
       const run = <A, E>(effect: Effect.Effect<A, E, Store>) =>
@@ -2005,12 +2007,13 @@ export class Queries extends Context.Service<
             toward: string | null
           }>`
             SELECT k.project_id, t.id AS thread_id, k.title, k.slug, k.state, k.settled_at, k.kept_at, k.created_at,
-              -- The turn that made it, where one covers its making: still open, or over. A draft's plan comes in that turn,
-              -- and once the turn is over without one, the draft is the person's.
-              EXISTS (SELECT 1 FROM turn_deliveries d
+              -- The coordinator's turn that made it, where one covers its making: still open, or over. A draft's plan comes
+              -- in that turn, and once it is over without one the draft is the person's. Only the coordinator drafts: a lead's
+              -- turn on another task, open or over, says nothing of this draft's plan.
+              EXISTS (SELECT 1 FROM turn_deliveries d JOIN threads h ON h.id = d.thread_id AND h.kind = 'coordinator'
                 WHERE d.project_id = k.project_id AND d.requested_at <= k.created_at
                   AND coalesce(d.ended_at, '9999') >= k.created_at) AS made_in_turn,
-              EXISTS (SELECT 1 FROM turn_deliveries d
+              EXISTS (SELECT 1 FROM turn_deliveries d JOIN threads h ON h.id = d.thread_id AND h.kind = 'coordinator'
                 WHERE d.project_id = k.project_id AND d.requested_at <= k.created_at AND d.ended_at IS NULL) AS made_in_open_turn,
               ${sql.unsafe(SHOWN_BRANCH)},
               p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at, p.proposed_at,
@@ -2162,7 +2165,7 @@ export class Queries extends Context.Service<
             task.runState === null &&
             task.turns === 0 &&
             task.firstSession === null &&
-            stillDrafting(task.createdAt, yield* Clock.currentTimeMillis) &&
+            stillDrafting(task.createdAt, yield* Clock.currentTimeMillis, draftingMs) &&
             (task.madeInOpenTurn === 1 || task.madeInTurn === 0)
           const ready = ((): TaskPhase => {
             if (task.state === 'abandoned') return 'settled'

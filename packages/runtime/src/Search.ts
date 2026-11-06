@@ -1,11 +1,12 @@
 import { basename, isAbsolute, sep } from 'node:path'
 
 import type { FoundPart, FoundTask, TaskPhase } from '@althar/contracts'
-import { Clock, Effect, Layer } from 'effect'
+import { Clock, Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { RuntimeConfig } from './Config'
 import { issueCardsWaiting } from './kinds'
-import { stillDrafting } from './needsYou'
+import { DRAFTING_MS, stillDrafting } from './needsYou'
 
 /*
  * Finding a task by what it was about (ADR-035). Each task has one row of
@@ -257,8 +258,9 @@ export const phaseOf = (
     Partial<Pick<Found, 'drafted' | 'keptAt' | 'createdAt' | 'madeInTurn' | 'madeInOpenTurn'>>,
   working: ReadonlySet<string>,
   now?: number,
+  within: number = DRAFTING_MS,
 ): TaskPhase => {
-  const phase = readyOrNot(task, working, now)
+  const phase = readyOrNot(task, working, now, within)
   // Finished and kept for later by the person, as its card says.
   return phase === 'ready' && task.keptAt != null ? 'kept' : phase
 }
@@ -268,6 +270,7 @@ const readyOrNot = (
     Partial<Pick<Found, 'drafted' | 'createdAt' | 'madeInTurn' | 'madeInOpenTurn'>>,
   working: ReadonlySet<string>,
   now: number | undefined,
+  within: number,
 ): TaskPhase => {
   if (task.state === 'abandoned') return 'settled'
   if (task.planState === 'proposed') return task.startsAt === null ? 'held' : 'planned'
@@ -278,7 +281,7 @@ const readyOrNot = (
     task.state === 'draft' &&
     task.runState === null &&
     now !== undefined &&
-    stillDrafting(task.createdAt ?? null, now) &&
+    stillDrafting(task.createdAt ?? null, now, within) &&
     ((task.madeInOpenTurn ?? 0) === 1 || (task.madeInTurn ?? 0) === 0)
   )
     return 'drafting'
@@ -305,7 +308,10 @@ export interface SearchInput {
  */
 export const findTasks = Effect.fn('Search.findTasks')(function* (input: SearchInput, working: ReadonlySet<string>) {
   const sql = yield* SqlClient.SqlClient
+  const config = yield* RuntimeConfig
   const now = yield* Clock.currentTimeMillis
+  // How long a draft stays off the board, as its card reads it (DRAFTING_MS unless a test says otherwise).
+  const draftingMs = Duration.toMillis(config.drafting ?? Duration.millis(DRAFTING_MS))
   const limit = Math.max(1, Math.min(input.limit ?? 20, 50))
   const match = matchOf(input.text)
   if (match === null && input.text.trim() !== '') return []
@@ -331,10 +337,11 @@ export const findTasks = Effect.fn('Search.findTasks')(function* (input: SearchI
   // Where each stands, read as its card does; its latest pull request; and what matched, marked.
   const standing = sql`
     r.id AS row_id, t.id AS thread_id, k.id AS task_id, k.project_id, k.title, k.slug, k.state, k.created_at, k.kept_at, ${recency} AS changed_at,
-    EXISTS (SELECT 1 FROM turn_deliveries d
+    -- Only the coordinator's own turn, which is the one that drafts a task: a lead's turn on another says nothing of its plan.
+    EXISTS (SELECT 1 FROM turn_deliveries d JOIN threads h ON h.id = d.thread_id AND h.kind = 'coordinator'
       WHERE d.project_id = k.project_id AND d.requested_at <= k.created_at
         AND coalesce(d.ended_at, '9999') >= k.created_at) AS made_in_turn,
-    EXISTS (SELECT 1 FROM turn_deliveries d
+    EXISTS (SELECT 1 FROM turn_deliveries d JOIN threads h ON h.id = d.thread_id AND h.kind = 'coordinator'
       WHERE d.project_id = k.project_id AND d.requested_at <= k.created_at AND d.ended_at IS NULL) AS made_in_open_turn,
     p.state AS plan_state, p.starts_at,
     (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') + ${sql.unsafe(issueCardsWaiting('k'))} AS waiting,
@@ -369,7 +376,7 @@ export const findTasks = Effect.fn('Search.findTasks')(function* (input: SearchI
     projectId: row.projectId,
     title: row.title,
     slug: row.slug,
-    phase: phaseOf(row, working, now),
+    phase: phaseOf(row, working, now, draftingMs),
     state: row.state,
     pullRequest: row.pullRequest,
     changedAt: row.changedAt,

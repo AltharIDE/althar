@@ -93,6 +93,17 @@ type Story = StoryObj<typeof meta>
  * Its review running, in a blue chip with its steps' bars. Pointed at or focused, where it stands says who
  * does each step: the reviewer, not the lead the composer names, and for how long.
  */
+/**
+ * Drafted by the coordinator, its plan not proposed yet: under way, with no steps yet, and nowhere on the board until
+ * its card arrives with the plan. Past its moment without one, it is stopped and the person's.
+ */
+export const BeingPlanned: Story = {
+  args: { status: TaskStatus.Running, state: 'Being planned', steps: [], took: undefined, elapsed: undefined },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('Being planned')).toBeVisible()
+  },
+}
+
 export const Reviewing: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
