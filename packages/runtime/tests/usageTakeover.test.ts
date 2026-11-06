@@ -147,7 +147,8 @@ const agentsOn = (threadId: string) =>
   )
 const noCall = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-  const calls = yield* sql`SELECT id FROM attention_requests WHERE state = 'open'`
+  const calls =
+    yield* sql`SELECT id FROM attention_requests WHERE state = 'open' OR (kind = 'stuck' AND json_extract(payload, '$.why') = 'usage_limit')`
   assert.lengthOf(calls, 0)
 })
 
