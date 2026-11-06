@@ -23,7 +23,7 @@ import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { TaskActions } from '../src/TaskActions'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, callToolAtOnce, fakeConnectors, HOST, hosted, notices, repository, runtime, until } from './support'
+import { callTool, callToolAtOnce, fakeConnectors, HOST, hosted, notices, repository as bare, runtime, until } from './support'
 
 /*
  * The coordinator accepting a task as the person's Accept on its card does
@@ -37,6 +37,18 @@ const git = (cwd: string, ...args: Array<string>) =>
   execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', ...args], { cwd })
     .toString()
     .trim()
+
+/**
+ * A repository with an identity of its own, as the person's has: a merge here
+ * that isn't a fast-forward makes a commit, which git refuses without one
+ * where nothing global gives it (CI).
+ */
+const repository = () => {
+  const root = bare()
+  git(root, 'config', 'user.name', 'T')
+  git(root, 'config', 'user.email', 't@t.test')
+  return root
+}
 
 /** Commits a file in a working tree: its head. */
 const commit = (cwd: string, file: string, text: string) => {
@@ -84,6 +96,15 @@ const changed = (projectId: ProjectId, title: string, file: string) =>
     const head = commit(created.worktree, file, `${title}\n`)
     return { taskId: created.taskId, slug: task?.slug ?? '', threadId: task?.threadId ?? '', worktree: created.worktree, head }
   })
+
+/**
+ * That the task's work is on main here: its branch, as merging credited it to
+ * the person (so not the head's own hash), and the file it wrote.
+ */
+const landed = (root: string, task: { readonly slug: string }, file: string, text: string) => {
+  assert.strictEqual(git(root, 'merge-base', '--is-ancestor', `althar/${task.slug}`, 'main'), '')
+  assert.strictEqual(git(root, 'show', `main:${file}`), text)
+}
 
 const stateOf = (taskId: string) =>
   Effect.map(
@@ -147,8 +168,8 @@ describe('accept_task, for a task with no pull request', () => {
         { task: cap.slug, head: cap.head, message },
       ])
       for (const one of said) assert.match(one, /^Merged .* into main here, and it is done\. Nothing was pushed/)
-      assert.strictEqual(git(root, 'merge-base', '--is-ancestor', retry.head, 'main'), '')
-      assert.strictEqual(git(root, 'merge-base', '--is-ancestor', cap.head, 'main'), '')
+      landed(root, retry, 'retry.ts', 'Add a retry')
+      landed(root, cap, 'cap.ts', 'Cap retries')
       assert.strictEqual(yield* stateOf(retry.taskId), 'done')
       assert.strictEqual(yield* stateOf(cap.taskId), 'done')
       assert.include(yield* titles(c.threadId), 'Accepted “Add a retry”, merging it here, as you asked: “Accept the green ones”')
@@ -261,7 +282,7 @@ describe('accept_task, for a task with no pull request', () => {
 
       yield* (yield* TaskActions).answer(card?.id ?? '', true, (yield* Instance).personId)
       assert.deepInclude((yield* asks(c.threadId))[0], { state: 'done' })
-      assert.strictEqual(git(root, 'merge-base', '--is-ancestor', task.head, 'main'), '')
+      landed(root, task, 'retry.ts', 'Add a retry')
       assert.strictEqual(yield* stateOf(task.taskId), 'done')
     }).pipe(Effect.provide(runtime()))
   })
