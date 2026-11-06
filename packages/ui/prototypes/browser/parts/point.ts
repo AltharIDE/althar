@@ -7,12 +7,15 @@ const short = (name: string) => MODULE_CLASS.exec(name)?.[2] ?? name
 
 const css = (value: string) => (typeof CSS !== 'undefined' && 'escape' in CSS ? CSS.escape(value) : value)
 
+/** A value as a quoted CSS string: backslashes and quotes escaped, line breaks as code points. */
+const quoted = (value: string) => `"${value.replace(/[\\"]/g, '\\$&').replace(/[\n\r\f]/g, (c) => `\\${c.charCodeAt(0).toString(16)} `)}"`
+
 /** One step of a selector: the tag, its id, its label, or its first class. */
 const step = (el: Element): string => {
   const tag = el.tagName.toLowerCase()
   if (el.id !== '') return `#${css(el.id)}`
   const label = el.getAttribute('aria-label')
-  if (label !== null && label.length < 60) return `${tag}[aria-label="${label.replace(/"/g, '\\"')}"]`
+  if (label !== null && label.length < 60) return `${tag}[aria-label=${quoted(label)}]`
   const named = [...el.classList].find((one) => !one.startsWith('ch-'))
   return named === undefined ? tag : `${tag}.${css(named)}`
 }
