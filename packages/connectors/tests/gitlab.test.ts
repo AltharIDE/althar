@@ -456,6 +456,51 @@ describe('GitLab as a code host', () => {
     }),
   )
 
+  it.effect('gives a merge request another title or description, a draft staying one, and says why it can’t', () =>
+    Effect.gen(function* () {
+      const { host, sent } = gitlab([
+        ['GET', `${PROJECT}/merge_requests/12`, { json: request() }],
+        [
+          'PUT',
+          `${PROJECT}/merge_requests/12`,
+          { json: request({ title: 'Draft: The homepage opens on the orrery', description: 'Why it changed.' }) },
+        ],
+      ])
+      const edited = yield* host.editChange(repository, change, { title: 'The homepage opens on the orrery', body: 'Why it changed.' })
+      // GitLab's draft is its title's prefix: kept, else the new title would mark it ready. The model's title has none.
+      assert.deepStrictEqual(sent.find((one) => one.method === 'PUT')?.body, {
+        title: 'Draft: The homepage opens on the orrery',
+        description: 'Why it changed.',
+      })
+      assert.strictEqual(edited.title, 'The homepage opens on the orrery')
+      assert.strictEqual(edited.body, 'Why it changed.')
+      assert.isTrue(edited.draft)
+      // Ready, it stays ready, whatever prefix the title came with.
+      const ready = gitlab([
+        ['GET', `${PROJECT}/merge_requests/12`, { json: request({ title: 'Rate-limit refunds', draft: false, work_in_progress: false }) }],
+        ['PUT', `${PROJECT}/merge_requests/12`, { json: request({ title: 'Renamed', draft: false, work_in_progress: false }) }],
+      ])
+      yield* ready.host.editChange(repository, change, { title: 'Draft: Renamed' })
+      assert.deepStrictEqual(ready.sent.find((one) => one.method === 'PUT')?.body, { title: 'Renamed' })
+      // The description alone needs no read: the title isn't touched.
+      const described = gitlab([['PUT', `${PROJECT}/merge_requests/12`, { json: request({ description: 'Only this' }) }]])
+      yield* described.host.editChange(repository, change, { body: 'Only this' })
+      assert.deepStrictEqual(
+        described.sent.map((one) => [one.method, one.body]),
+        [['PUT', { description: 'Only this' }]],
+      )
+      // An account that may not edit it is refused, as forbidden, while its token works.
+      const refusing = gitlab([
+        ['PUT', `${PROJECT}/merge_requests/12`, { status: 401, json: { message: '401 Unauthorized' } }],
+        ['GET', `${API}/user`, { json: user(5, 'you') }],
+      ])
+      assert.deepInclude(yield* Effect.flip(refusing.host.editChange(repository, change, { body: 'No' })), {
+        reason: 'forbidden',
+        status: 401,
+      })
+    }),
+  )
+
   it.effect('merges only the head it saw, squashed where the project prefers it', () =>
     Effect.gen(function* () {
       const { host, sent } = gitlab([['PUT', `${PROJECT}/merge_requests/12/merge`, { json: request({ state: 'merged', draft: false }) }]])

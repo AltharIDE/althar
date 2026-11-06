@@ -400,7 +400,7 @@ export const readFields = (at: FieldsAt, wanted: Wanted): Effect.Effect<Read> =>
             wanted.due !== null && !DAY.test(wanted.due.trim())
               ? Effect.fail(`a due date is a day, as 2026-11-30, not “${wanted.due}”`)
               : Effect.succeed(
-                  (issue?.due ?? undefined) === (wanted.due?.trim() ?? null) && issue !== undefined
+                  (issue?.due ?? null) === (wanted.due?.trim() ?? null) && issue !== undefined
                     ? { already: wanted.due === null ? 'no due date' : `due ${wanted.due}` }
                     : { to: wanted.due?.trim() ?? null },
                 ),

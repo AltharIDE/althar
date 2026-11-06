@@ -19,12 +19,13 @@ import { messageOf, type StuckAnswer } from '../../data/client'
 import { useMerge } from '../../data/merges'
 import { keys, reads } from '../../data/reads'
 import { canPick } from '../../shared/agents'
-import { caughtUp, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
+import { isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { headsOf } from '../../shared/mergeHere'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
 import type { OutputSoFar } from '../../shared/handed'
 import { type Outgoing, sentWith } from '../../shared/useAttachments'
 import { useOutputs } from '../../shared/useOutputs'
+import { useStreamed } from '../../shared/useStreamed'
 import type { Streamed } from '../../shared/thread'
 import { useServices, useWatch } from '../../data/services'
 
@@ -251,7 +252,8 @@ export const useTask = (threadId: string): TaskModel => {
   const snapshot = thread.data ?? null
   const status = useQuery(read.status()).data
   const agents = useMemo(() => status?.agents.filter(canPick) ?? [], [status])
-  const [streaming, setStreaming] = useState<ReadonlyMap<string, Streamed>>(new Map())
+  // What its lead is still saying, while the window hears it.
+  const streaming = useStreamed(threadId, snapshot?.items ?? NO_ITEMS)
   // What its commands have printed so far, while they run.
   const outputs = useOutputs(threadId, snapshot?.items ?? NO_ITEMS, snapshot?.session?.turnRunning ?? false)
   const [failed, setError] = useState<string | null>(null)
@@ -314,7 +316,6 @@ export const useTask = (threadId: string): TaskModel => {
   const arrived = useCallback(
     (items: ReadonlyArray<ThreadItem>) => {
       setSnapshot((current) => ({ ...current, items: mergeItems(current.items, items) }))
-      setStreaming((current) => caughtUp(current, items))
     },
     [setSnapshot],
   )
@@ -376,18 +377,8 @@ export const useTask = (threadId: string): TaskModel => {
   useWatch((event) => {
     // A command's output as far as it has come is useOutputs'; plan usage is the plan gauge's and the pickers'.
     if (event._tag === 'Output' || event._tag === 'PlanUsage') return
-    if (event._tag === 'Streaming') {
-      if (event.threadId !== threadId) return
-      setStreaming((current) =>
-        new Map(current).set(event.itemId, {
-          kind: event.kind,
-          agentId: event.agentId,
-          text: event.text,
-          at: current.get(event.itemId)?.at ?? new Date().toISOString(),
-        }),
-      )
-      return
-    }
+    // What its lead is still saying is useStreamed's.
+    if (event._tag === 'Streaming') return
     // What Althar runs of the project, whole each time: this task's, which the pill over the composer shows.
     if (event._tag === 'Launches')
       return void setSnapshot((current) =>
