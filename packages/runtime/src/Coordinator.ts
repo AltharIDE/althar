@@ -572,9 +572,12 @@ export class Coordinator extends Context.Service<
             unverified.length === 0 ? '' : `What its lead couldn't show working:\n${unverified.map((line) => `- ${line}`).join('\n')}`,
             yield* issueWords(task.id),
             branches.length === 1
-              ? `${upper(branchWords(branches[0]))}, in ${branches[0]?.path ?? ''}.${towardWords(branches[0])}`
+              ? `${upper(branchWords(branches[0]))}, in ${branches[0]?.path ?? ''}.${headWords(branches[0])}${towardWords(branches[0])}`
               : branches
-                  .map((workspace) => `${workspace.name}: ${branchWords(workspace)}, in ${workspace.path}.${towardWords(workspace)}`)
+                  .map(
+                    (workspace) =>
+                      `${workspace.name}: ${branchWords(workspace)}, in ${workspace.path}.${headWords(workspace)}${towardWords(workspace)}`,
+                  )
                   .join('\n'),
             yield* stuckWords(task.id),
             ...results.map((row) => {
@@ -643,10 +646,13 @@ export class Coordinator extends Context.Service<
        * A task's branch in a repository, and the branch its work goes into (ADR-093), or that it has none yet: a plain task whose
        * lead hasn't changed the repository.
        */
-      const branchWords = (workspace: { readonly branch: string; readonly branched: number; readonly head?: string | null } | undefined) =>
+      const branchWords = (workspace: { readonly branch: string; readonly branched: number } | undefined) =>
         workspace === undefined || workspace.branched === 1
-          ? `branch ${workspace?.branch ?? ''}${workspace?.head == null ? '' : ` at ${workspace.head}`}`
+          ? `branch ${workspace?.branch ?? ''}`
           : 'no branch yet: its lead has changed nothing in the repository'
+      /** Where a branch's head is now: what accepting its task merges up to, named back as the head read. */
+      const headWords = (workspace: { readonly head: string | null } | undefined) =>
+        workspace?.head == null ? '' : ` Its head is at ${workspace.head}.`
 
       /** A task's step stuck on the person, as its card says it, and how the coordinator answers it on their word. */
       const stuckWords = (taskId: string) =>
