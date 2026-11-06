@@ -39,16 +39,6 @@
   border-left: 1px solid var(--line-3);
   border-bottom-left-radius: 6px;
 }
-/* a card just started on the page: it arrives where it is */
-.fresh {
-  animation: arrive var(--enter, 240ms) var(--ease-out, ease-out);
-}
-@keyframes arrive {
-  from {
-    opacity: 0;
-    transform: scale(0.97);
-  }
-}
 .card {
   margin: 4px 0 8px;
 }
@@ -71,11 +61,4 @@
 }
 .answered {
   margin: 4px 0;
-}
-.ways {
-  display: inline-flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 2px 14px;
-  white-space: nowrap;
 }

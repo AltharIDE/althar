@@ -1,6 +1,6 @@
 # Capable agents, optional coordinator
 
-A prototype, to be deleted once directions are picked. It is the real desktop app (router, project screen, board, task threads, settings, kit) on the tests' fake client, in a browser, as althar stands on 6 November: five tasks at work or waiting, a task the ADR's lead started, a design review that used the person's own MCP servers, and Linear's open issues. Seams in `vite.config.mjs` swap a few imports of the real screens for this page alone; nothing in the app changes.
+A prototype, to be deleted once directions are picked. It is the real desktop app (router, project screen, board, task threads, settings, kit) on the tests' fake client, in a browser, as althar stands on 6 November: five tasks at work or waiting, a task the ADR's lead started, and a design review that used the person's own MCP servers. Seams in `vite.config.mjs` swap a few imports of the real screens for this page alone; nothing in the app changes.
 
 From the repository's root:
 
@@ -8,16 +8,17 @@ From the repository's root:
 cd packages/ui && ./node_modules/.bin/vp dev --config prototypes/capable/vite.config.mjs
 ```
 
-Then <http://localhost:5367/>. The strip under the window picks the surface (keys 1 to 6) and its direction (A to D, and T for today; `[` and `]` step through them). Its links go to where the surface shows, and Start over puts back what was started or answered. `?s=rules&d=B` opens on a surface and direction, `bare` leaves the strip out, and `node shoot.mjs` takes every state into `test-results/capable`.
+Then <http://localhost:5367/>. The strip under the window picks the surface (keys 1 to 6) and its direction (A to C, and T for today; `[` and `]` step through them). Its links go to where the surface shows, and Start over puts back what was answered. `?s=rules&d=B` opens on a surface and direction, `week` a week after sync was turned on, `bare` leaves the strip out, and `node shoot.mjs` takes every state into `test-results/capable`.
 
 What the person decided on 6 November, and what each surface draws from it. Then, looking at the page:
 
-- **New task without the coordinator: set aside.** The person starts tasks with the coordinator for now. Its three directions are off the strip; the code stays in `directions/start`, and its notes are at the end.
+- **New task without the coordinator: set aside.** The person starts tasks with the coordinator for now. Its code is gone from here; it is in the history up to 7274e40, and its notes are at the end.
 - **What asks: A**, the four kinds in Rules. Open: whether they live in the person's own Settings instead (2 · B).
-- **MCP servers and skills: B**, the role table, with a card for each act in the thread. Open: how to keep a server the same in each of the person's agents (3 · A, B, C).
+- **MCP servers and skills:** the role table, a card for each act in the thread, and **one switch** that keeps the person's agents the same. Open: how it says what it writes to their files and what it leaves alone (3 · A, B).
 - **Settings an agent changed: A**, a line each.
-- **A task's parts:** the faces, Run and the menu never move. Open: where the parts go (5 · A to D).
+- **A task's parts: one Parts button** just before the faces; the faces, Run and the menu never move. The rail beside the thread is out, as DESIGN.md rules out side panels. Open: how the button and what it opens look (5 · A to C).
 - Not yet decided: a lead-started task (1).
+- The directions not picked are gone from the code too; the history has them.
 
 The flow, as it stands:
 
@@ -74,24 +75,56 @@ What the runtime needs:
 
 Settings' Skills becomes **MCP servers and skills**: the role table (chosen), a row each, a column each for leads, reviewers and the coordinator; above, Every project or althar. In a thread, each MCP call says its server, and what acted on the outside world is a card: the server, what it did, what it said, Open. The "could see" line from #596 counts both: "Claude Code could see 6 skills and 7 MCP servers", opening by whose. Seen there and in a design review the person's own skill ran on dana's #612.
 
-Inside Althar nothing needs syncing: each role gets what's ticked, whichever agent's settings it was found in. Syncing is for the person's agents on their own: Claude Code, Codex and OpenCode each keep their own list, and here they disagree (github runs with npx in Claude Code and in Docker in Codex; linear, figma and sentry are only in Claude Code; context7 only in Codex; playwright only in OpenCode). Three ways to bring them together, each on the role table:
+Inside Althar nothing needs syncing: each role gets what's ticked, whichever agent's settings it was found in. Syncing is for the person's agents on their own: Claude Code, Codex and OpenCode each keep their own list, and here they disagree (github runs with npx in Claude Code and in Docker in Codex; linear, figma and sentry are only in Claude Code; context7 only in Codex; playwright only in OpenCode). The person chose **one switch**, "Keep your agents' servers the same". It writes into files that are theirs, so it has to say what it writes, to which file, and what it won't touch. Two ways to say it:
 
-| Direction | What it adds to the table | Adding a server to an agent |
-| --- | --- | --- |
-| A · A column per agent | "In Althar" over the role columns, "In your agents" over a column each for Claude Code, Codex and OpenCode; a server's cell ticked where it is, Differs where it runs another way | Tick its cell; Add them all fills every gap. A server that signs in on its own (linear, sentry) then says Sign in in that cell. Differs opens how each runs it, and which to use everywhere |
-| B · Marks in the row | Each server's agents as marks beside its name, faint where it's missing, ringed where it signs in or differs | Add to Codex and OpenCode, on the row you point at; Add them all over the table |
-| C · One switch | "Keep your agents' servers the same", with what turning it on would add (2 to Claude Code, 4 to Codex, 5 to OpenCode); B's marks in the rows | Turned on, it adds them all, and one you add later in any agent goes to the others. What it can't do alone is a short list to settle: github's two ways, and each sign-in |
-| Today | Althar's skills only, every one off until turned on; no MCP servers | |
+| Direction | While it's off | Turning it on | Turning it off |
+| --- | --- | --- | --- |
+| A · Before it starts | The switch and one line: Althar writes each server into each agent's own settings | A dialog: what it adds to each agent, by file and server; github waiting until the person picks how it runs; what it leaves alone; that it keeps a copy of each file and can take back what it added. Turn on | A dialog: Leave them in, or Take them out |
+| B · On the card | All of A's dialog, on the card | It just turns on | The same choice, in the card |
+| Today | Althar's skills only; none of the person's MCP servers | | |
 
-**Recommendation: C, with B's marks and Add to … while it's off.** The person wants the same servers everywhere; that is one decision, not one per cell. C makes it once, and leaves only what needs them: a sign-in, or a server set up two ways. A's columns show the drift most plainly, but double the table's ticks, and the agent columns read as if they decided what Althar gives each role. Project servers (`.mcp.json`, which only Claude Code reads) stay out of syncing: copying one writes into the repository, a change to commit.
+The same in both once it's on:
+- **To settle**, problems first: a file it couldn't read (OpenCode's, a week on), github's two ways (pick one, which changes the other agent's, or leave github out of syncing), and each sign-in, a button per agent.
+- **Since**, a week on: "You added notion to Claude Code. Copied to Codex", with Undo; "You took context7 out of Claude Code. It stays out there", with Put it back.
+- **Added**, a row per agent's file, each server a chip: pressing it takes it back out of that agent, and keeps it out. While it's off, the same chips leave a server out before it starts.
+- **A server's marks** in the table open a menu: which agents have it; untick one to keep it out of that agent.
+
+What it leaves alone, as the card says it: a server already in an agent, set up as the person set it, on or off; one they take out of an agent; sign-ins and tokens (a token goes across as the name of its variable, never its value).
+
+**Recommendation: A.** The explanation matters once, at the moment Althar first writes to the person's files; after that the card stays short, and nobody who never turns it on reads a block of text in Settings. B is the better reference later, but "Added" and the chips give that back once it's on.
+
+How it works:
+
+```mermaid
+flowchart LR
+  CC["Claude Code<br/>~/.claude.json"] --> R[Althar reads each agent's servers]
+  CX["Codex<br/>~/.codex/config.toml"] --> R
+  OC["OpenCode<br/>opencode.json"] --> R
+  R --> M{"The same server<br/>everywhere?"}
+  M -->|"missing in one, and not kept out"| W["Written there through<br/>that agent's own command"]
+  M -->|"set up two ways"| S["To settle: the person picks"]
+  M -->|"needs a sign-in"| I["To settle: Sign in to …"]
+  W --> L["A record of each change:<br/>Undo, Take them out"]
+```
+
+**Can it be built reliably? Yes, for the servers here, with a few limits it shows rather than hides.**
+- **Writes go through each agent's own command:** `claude mcp add-json --scope user` and `claude mcp remove`, `codex mcp add` and `codex mcp remove`, `opencode mcp add --global` (all three are on this computer: Claude Code 2.1.263, Codex 0.166.0). OpenCode has no remove, so taking a server back out edits its JSON with a comment-keeping editor. Althar never writes `~/.claude.json` by hand: Claude Code rewrites that file all the time, and a running session would write over a change made beside it.
+- **Formats:** a local command (command, arguments, environment) and a plain URL carry across all three. Codex takes streamable HTTP but not SSE, so an SSE-only server can't go there; it would show as such.
+- **Secrets:** a token goes across as a reference, `${VAR}` for Claude Code, `{env:VAR}` for OpenCode, `--bearer-token-env-var` for a URL in Codex. For a local command in Codex this needs checking: its `--env` takes values, not names. A token written out in a file isn't copied; it becomes something to settle, as secrets are one of the four kinds that ask.
+- **Sign-ins can't be copied:** each agent keeps its own, so each needs one sign-in per server; Althar can start each from its button (`claude mcp login`, `codex mcp login`, `opencode mcp auth`).
+- **Undo:** a copy of each file before Althar first writes to it, and a record of each change (file, server, before, after), so Undo and Take them out remove only what Althar added, never what the person did since.
+- **Their decisions hold:** a server they take out of an agent is recorded as kept out and never added back; one turned off in an agent stays off; one set up two ways is never overwritten without their pick; nothing is removed on its own.
+- **Watching:** the three files, comparing only their server lists (`~/.claude.json` changes all the time for other reasons). A file it can't read is left alone, and said so.
+- **When it takes effect:** each agent reads its servers as it starts, so a change reaches a session already running on its next start.
+- **The risk:** the formats change between versions, as Codex's MCP keys have. Going through each agent's own command absorbs most of that; a file in a shape Althar doesn't know is left alone.
 
 What the runtime needs:
 - **Discovery** of servers from Claude Code (user and project scopes in `~/.claude.json`, `.mcp.json`), Codex (`[mcp_servers]` in `~/.codex/config.toml`), OpenCode (`mcp` in `opencode.json`), merged by name and command or URL, with each source kept. Skills from `~/.claude/skills`, plugins, `.claude/skills` and the catalog.
 - **Settings per server and skill**: on or off, roles, projects; passed to every agent whatever found it (Claude without `strictMcpConfig`, Codex's and OpenCode's config without the names switched off).
 - **Tool call items** carry `mcp: { server, tool, reads | acts }` and, for an act, where to see it (the review's or comment's URL from the call's result).
 - #596's skills notice also lists the servers each session got.
-- **Syncing**: writing a server into each agent's own file in its format (`~/.claude.json` JSON, `~/.codex/config.toml` TOML, `opencode.json` JSON), the same server matched across them by name, command or URL; "differs" where the name matches and the rest doesn't. With C on, watching the three files and copying a new server to the others.
-- **Each agent's sign-in to a remote server** (OAuth), readable per agent, and a way to start it from the window (`claude mcp`'s and `codex mcp login`'s own flows).
+- **Syncing**, as above: reading each agent's servers, matching them by name, then command or URL ("differs" where the name matches and the rest doesn't), writing through each agent's own command, a record of each change for Undo, a kept-out list per agent, and watching the three files while it's on.
+- **Each agent's sign-in to a remote server** (OAuth), readable per agent, and a way to start it from the window.
 - Skills could sync the same way where an agent reads them from a folder; left out here.
 
 ## 4 · Settings an agent changed
@@ -115,17 +148,16 @@ What the runtime needs:
 
 ## 5 · A task's parts
 
-A task's parts are its worktree, its pull requests, its reviews, the issues it came from, what it runs, what it made and the access it was given; + Add takes on another any time (a worktree, a pull request, a review, an issue, a browser, access). They replace Fix these and make-it-a-change. The person's rule: **the faces (Conversation, Outputs), Run and the menu never move.** So in every direction the faces sit just before Run, the files button goes into the worktree part ("6 files changed"), and the parts go somewhere that grows without pushing them. Seen on the ADR's task (three parts), on the Runs task (ten), and on a review (two).
+A task's parts are its worktree, its pull requests, its reviews, the issues it came from, what it runs, what it made and the access it was given; Add takes on another any time (a worktree, a pull request, a review, an issue, a browser, access). They replace Fix these and make-it-a-change. The person's rule: **the faces (Conversation, Outputs), Run and the menu never move.** So the faces sit just before Run, the files button goes into the worktree part ("6 files changed"), and one Parts button sits just before the faces. Three looks for the button and what it opens, seen on the ADR's task (three parts), on the Runs task (ten), and on a review (two):
 
-| Direction | Where the parts are | At ten parts |
+| Direction | The button | What it opens |
 | --- | --- | --- |
-| A · After the title | Chips after the task's title, in the bar's free middle, then + | The first three, then "7 more", a menu by group |
-| B · A row under the bar | A row of their own under the bar, each chip with where it stands (Open · checks pass), then Add | As many as the window has room for, then "6 more" |
-| C · One button | Parts, with its count, just before the faces; a dot when one waits on you | A popover, every part by group, each with where it stands, Add at its head |
-| D · Beside the thread | The same button; the parts in the free margin beside the thread, open until closed | The same list, scrolling in its column |
+| A · List | Parts, its count, a dot when something waits on the person | Every part by group, each with where it stands |
+| B · Tiles | The same | A tile each, two to a row, what waits first: its group, its name, where it stands, and its button (Merge, See the check, Post it) |
+| C · Waits first | The parts' own icons, the first four, then +6; one that waits in its colour | What waits on the person, each with its button; what runs; the rest, a chip each |
 | Today | Files, Run and the menu; a pull request is attached from the menu | |
 
-**Recommendation: D, folding into C's popover where the window is too narrow.** It is the only one that stays readable at ten parts and gives each room to say where it stands, which is what the person looks at a part for: a pull request's checks, a review's findings, a run's address. A wide window has 300px of empty margin beside the thread; D uses it, and below about 1200px the same button opens the same list over the thread instead. The bar gains one button, always there, so nothing beside it moves. A fights the title and runs out at three. B is the best glance at two to five parts, but costs a row on every task, a chat included, and still hides most at ten.
+**Recommendation: A's button with C's popover.** C answers what the person opens it for: what wants them, and the one click that settles it, with the rest out of the way but one press off. Its row of icons in the bar reads poorly, though: two pull request icons and a folder say less than "Parts 10" with a dot. B's tiles are the easiest to read one at a time, but ten of them are a tall wall for a popover. The earlier D, the rail beside the thread, is a side panel, which DESIGN.md rules out.
 
 What the runtime needs:
 - **A task's parts as one list** (the plan's phase 5, the task-as-parts ADR): each with its kind, name, where it stands in a few words, and whether it waits on the person or failed. Today these are separate fields (`worktree`, `changes`, `review`, `launches`), read by separate pieces of the window.
@@ -142,4 +174,14 @@ What the runtime needs: a review's `outside` from the host's author association,
 
 ## Set aside: New task without the coordinator
 
-The person keeps starting tasks with the coordinator for now (6 Nov). The three directions (a dialog, the composer, a card on the board) are off the strip; their code stays in `directions/start` and the seams that check for `start`. If it comes back, it needs a StartTask command from the window (words or issue keys, the lead or Auto, effort, review, `toward`, `worksIn`, started at once), and Auto as routing the coordinator shares.
+The person keeps starting tasks with the coordinator for now (6 Nov). The three directions (a dialog, the composer, a card on the board) are gone from the page; their code is in the history up to 7274e40. If it comes back, it needs a StartTask command from the window (words or issue keys, the lead or Auto, effort, review, `toward`, `worksIn`, started at once), and Auto as routing the coordinator shares.
+
+## What else needs prototyping
+
+For these decisions to work, and not yet drawn:
+
+1. **A small change, fast, through the coordinator.** With New task set aside, the one-line fix that took 40 minutes has to get fast on the coordinator's path: what it starts for "fix the typo in X" (no plan to approve, no countdown, a lighter model and effort, review after rather than before), and how that task reads on the board as it goes by in a few minutes.
+2. **The first time, for someone already using Althar.** Allow everything becomes the default where it was off, and their own servers load in every role. One notice that says what changed in which project, and where to change it back.
+3. **What agents did, afterwards.** With fewer asks, the person learns of pushes, posts, merges, issue changes and settings changes after they happen, each in its own thread today. A view across the project, or a "while you were away", with Undo where it can be undone.
+4. **A server that fails in a task:** signed out, down, or switched off. What the lead and the person see in the thread, and the one click that fixes it.
+5. **Leads (1)**, still open, and a lead that starts many tasks at once.

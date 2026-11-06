@@ -43,6 +43,8 @@ const FEW = '#/threads/th-adr'
 const MANY = '#/threads/th-runs'
 /** Only the window's bar and what's just under it. */
 const BAR = { x: 0, y: 0, width: 1280, height: 140 }
+/** The bar's right half and the popover under it. */
+const POP = { x: 400, y: 0, width: 880, height: 640 }
 
 const shots = [
   // 1 · A task a lead started; the coordinator in a task's thread.
@@ -71,26 +73,57 @@ const shots = [
     },
   },
 
-  // 3 · MCP servers and skills: the role table (chosen), and three ways to sync your agents.
-  { id: '3a-1-settings', s: 'tools', d: 'A', hash: '#/settings/skills', height: 1000, go: () => undefined },
-  { id: '3a-2-differs', s: 'tools', d: 'A', hash: '#/settings/skills', keep: true, go: (page) => press(page, 'Differs') },
-  { id: '3a-3-added', s: 'tools', d: 'A', hash: '#/settings/skills', go: (page) => press(page, 'Add them all') },
+  // 3 · MCP servers and skills: the role table and one switch (chosen); what it writes, before it starts (A) or on its card (B).
+  { id: '3a-1-off', s: 'tools', d: 'A', hash: '#/settings/skills', clip: { x: 324, y: 60, width: 916, height: 420 }, go: () => undefined },
   {
-    id: '3b-1-settings',
+    id: '3a-2-dialog',
     s: 'tools',
-    d: 'B',
-    hash: '#/settings/skills',
-    keep: true,
-    go: (page) => page.getByRole('row').filter({ hasText: 'figma' }).hover(),
-  },
-  { id: '3c-1-off', s: 'tools', d: 'C', hash: '#/settings/skills', go: () => undefined },
-  {
-    id: '3c-2-on',
-    s: 'tools',
-    d: 'C',
+    d: 'A',
     hash: '#/settings/skills',
     height: 900,
-    clip: { x: 324, y: 200, width: 916, height: 560 },
+    go: (page) => page.getByRole('switch', { name: 'Keep your agents’ servers the same' }).click(),
+  },
+  {
+    id: '3a-3-on',
+    s: 'tools',
+    d: 'A',
+    hash: '#/settings/skills',
+    height: 1000,
+    go: async (page) => {
+      await page.getByRole('switch', { name: 'Keep your agents’ servers the same' }).click()
+      await press(page, 'Turn on')
+    },
+  },
+  { id: '3b-1-off', s: 'tools', d: 'B', hash: '#/settings/skills', clip: { x: 324, y: 60, width: 916, height: 560 }, go: () => undefined },
+  {
+    id: '3b-2-week',
+    s: 'tools',
+    d: 'B',
+    q: '&week',
+    hash: '#/settings/skills',
+    height: 1000,
+    go: () => undefined,
+  },
+  {
+    id: '3b-3-week-menu',
+    s: 'tools',
+    d: 'B',
+    q: '&week',
+    hash: '#/settings/skills',
+    height: 1100,
+    keep: true,
+    go: async (page) => {
+      await to(page, 'MCP servers', 'start')
+      await page.getByRole('button', { name: 'figma in your agents' }).click()
+    },
+  },
+  {
+    id: '3b-4-off',
+    s: 'tools',
+    d: 'B',
+    q: '&week',
+    hash: '#/settings/skills',
+    clip: { x: 324, y: 60, width: 916, height: 300 },
     go: (page) => page.getByRole('switch', { name: 'Keep your agents’ servers the same' }).click(),
   },
   {
@@ -122,7 +155,7 @@ const shots = [
     },
   },
 
-  // 5 · A task's parts: the faces, Run and the menu stay where they are; the parts go elsewhere.
+  // 5 · A task's parts: one button just before the faces, three looks for it and what it opens.
   { id: '5t-1-today', s: 'parts', d: 'Today', hash: MANY, clip: BAR, go: () => undefined },
   { id: '5a-1-few', s: 'parts', d: 'A', hash: FEW, clip: BAR, go: () => undefined },
   {
@@ -131,23 +164,37 @@ const shots = [
     d: 'A',
     hash: MANY,
     keep: true,
-    clip: { x: 0, y: 0, width: 1280, height: 560 },
-    go: (page) => press(page, '7 more'),
+    clip: POP,
+    go: (page) => page.getByRole('button', { name: /^Parts/ }).click(),
   },
-  { id: '5b-1-few', s: 'parts', d: 'B', hash: FEW, clip: BAR, go: () => undefined },
-  { id: '5b-2-many', s: 'parts', d: 'B', hash: MANY, clip: BAR, go: () => undefined },
-  { id: '5b-3-review', s: 'parts', d: 'B', hash: '#/threads/th-review', clip: BAR, go: () => undefined },
   {
-    id: '5c-1-many',
+    id: '5b-1-many',
+    s: 'parts',
+    d: 'B',
+    hash: MANY,
+    keep: true,
+    clip: POP,
+    go: (page) => page.getByRole('button', { name: /^Parts/ }).click(),
+  },
+  {
+    id: '5b-2-review',
+    s: 'parts',
+    d: 'B',
+    hash: '#/threads/th-review',
+    keep: true,
+    clip: { x: 640, y: 0, width: 640, height: 300 },
+    go: (page) => page.getByRole('button', { name: /^Parts/ }).click(),
+  },
+  { id: '5c-1-few', s: 'parts', d: 'C', hash: FEW, clip: BAR, go: () => undefined },
+  {
+    id: '5c-2-many',
     s: 'parts',
     d: 'C',
     hash: MANY,
     keep: true,
-    clip: { x: 0, y: 0, width: 1280, height: 640 },
+    clip: POP,
     go: (page) => page.getByRole('button', { name: /^Parts/ }).click(),
   },
-  { id: '5d-1-few', s: 'parts', d: 'D', hash: FEW, height: 640, go: () => undefined },
-  { id: '5d-2-many', s: 'parts', d: 'D', hash: MANY, height: 640, go: () => undefined },
 
   // 6 · Sketches.
   { id: '6-1-review', s: 'sketches', d: 'A', hash: '#/threads/th-review', go: () => undefined },
@@ -159,7 +206,7 @@ for (const shot of shots.filter((one) => only.length === 0 || only.some((id) => 
   const page = await browser.newPage({ viewport: { width: shot.width ?? 1280, height: shot.height ?? 820 }, deviceScaleFactor: 1 })
   const errors = []
   page.on('pageerror', (error) => errors.push(String(error)))
-  await page.goto(`http://localhost:5367/?s=${shot.s}&d=${shot.d}&bare${shot.hash}`)
+  await page.goto(`http://localhost:5367/?s=${shot.s}&d=${shot.d}&bare${shot.q ?? ''}${shot.hash}`)
   await settle(page, 1600)
   try {
     await shot.go(page)

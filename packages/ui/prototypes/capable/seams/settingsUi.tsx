@@ -14,12 +14,11 @@ export * from '../../../src/index'
 const TITLE = 'MCP servers and skills'
 const on = (p: ReturnType<typeof useProto>) => p.surface === 'tools' && p.direction !== 'Today'
 const asks = (p: ReturnType<typeof useProto>) => p.surface === 'rules' && p.direction === 'B'
-const MODES = { A: 'columns', B: 'marks', C: 'switch' } as const
 
 export function SkillList(props: ComponentProps<typeof RealSkillList>) {
   const p = useProto()
   if (!on(p)) return <RealSkillList {...props} />
-  return <ToolsByRole mode={MODES[p.direction as keyof typeof MODES]} />
+  return <ToolsByRole sync />
 }
 
 export function SkillInstall(props: ComponentProps<typeof RealSkillInstall>) {

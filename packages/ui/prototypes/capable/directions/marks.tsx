@@ -13,7 +13,7 @@ export function Marked({ mark }: { mark: string }) {
   if (mark === '§selfpush') return p.surface === 'sketches' ? <SelfPush /> : null
   if (mark === '§reviewhead') return p.surface === 'sketches' ? <ReviewHead outside /> : null
   const tune = p.surface === 'tune' && p.direction !== 'Today'
-  if (mark === '§tune-changes') return tune ? <SettingsChanges card={false} /> : null
+  if (mark === '§tune-changes') return tune ? <SettingsChanges /> : null
   if (mark === '§tune-loosen') return tune ? <Loosen /> : null
   return null
 }

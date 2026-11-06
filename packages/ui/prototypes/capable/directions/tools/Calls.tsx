@@ -82,23 +82,7 @@ const ACTS: Record<string, { server: string; what: ReactNode; said?: string; lin
   },
 }
 
-/** A, an act lifted out of the folded work: one stronger line, with where to see it. */
-export function ActLine({ mark }: { mark: string }) {
-  const act = ACTS[mark]
-  if (act === undefined) return null
-  return (
-    <p className={s.actLine}>
-      <Icon name="external" size={12} />
-      <span className={s.actWhat}>{act.what}</span>
-      <ServerName server={SERVER_NAMES[act.server]!} />
-      <a className={s.actOpen} href={act.link} target="_blank" rel="noreferrer">
-        Open
-      </a>
-    </p>
-  )
-}
-
-/** B, an act as a card: what it did and where, and what it said for the person. */
+/** An act as a card: what it did and where, and what it said for the person. */
 export function ActCard({ mark }: { mark: string }) {
   const act = ACTS[mark]
   if (act === undefined) return null

@@ -1,8 +1,7 @@
-/* Scrappy, surface 6: settings an agent changed. */
+/* Scrappy, surface 4: settings an agent changed. */
 
 /* —— the coordinator's thread —— */
-.lines,
-.cardRows {
+.lines {
   display: grid;
   gap: 2px;
   margin: 2px 0 6px;
@@ -43,48 +42,13 @@
 .undo {
   font-size: 12.5px;
 }
-.card {
-  display: grid;
-  gap: 4px;
-  margin: 4px 0 8px;
-  padding: 10px 14px 6px;
-  border-radius: 12px;
-  background: var(--n-1);
-  box-shadow:
-    inset 0 0 0 1px var(--line-2),
-    var(--lift-card);
-}
-.cardHead {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  font-size: 13px;
-  color: var(--t-2);
-}
-.open {
-  margin-left: auto;
-  font-size: 12.5px;
-}
-.cardRows {
-  margin: 0;
-}
 /* tucked under the coordinator's words, past the thread's space between blocks */
 .lines {
   margin-top: -14px !important;
 }
-.card,
 .ask,
 .answered {
   margin-top: 0 !important;
-}
-.cardRows .line {
-  justify-content: space-between;
-  border-top: 1px solid var(--line);
-}
-.cardRows .what,
-.cardRows .gone {
-  flex: 1;
 }
 .ask,
 .answered {

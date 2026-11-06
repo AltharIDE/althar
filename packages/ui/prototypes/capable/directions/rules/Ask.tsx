@@ -5,10 +5,18 @@ import { Brand } from '../../../../src/foundations/brands/brands'
 import { BrandMark } from '../../../../src/foundations/Marks/Marks'
 import { AskAnswered, AskCard, AskFoot, AskNote } from '../../../../src/primitives/Ask/Ask'
 import { Button } from '../../../../src/primitives/Button/Button'
-import { LinkButton } from '../../../../src/primitives/LinkButton/LinkButton'
 import { Model } from '../../../../src/primitives/Model/Model'
-import { OPUS } from '../start/pieces'
+import type { ModelInfo } from '../../../../src/primitives/Model/Model'
 import s from './rules.module.css'
+
+const OPUS: ModelInfo = {
+  id: 'claude-opus-5-5',
+  name: 'Claude Opus 5.5',
+  short: 'Opus 5.5',
+  mark: Brand.Anthropic,
+  runtime: 'claude-code',
+  efforts: ['Low', 'Medium', 'High', 'Xhigh'],
+}
 
 /** What an agent asks to do that can't be undone, as the card says it. */
 export interface Irreversible {
@@ -69,8 +77,8 @@ const Through = ({ ask }: { ask: Irreversible }) =>
     </span>
   )
 
-/** One ask: A puts what can't be undone in one line under the action; B heads it with the kind, as Rules names it, and shows what would be said. */
-export function IrreversibleAsk({ ask, layout }: { ask: Irreversible; layout: 'A' | 'B' }) {
+/** One ask: the action, what can't be undone in one line under it, the words it would post, and where the call goes. */
+export function IrreversibleAsk({ ask }: { ask: Irreversible }) {
   const [said, setSaid] = useState<'yes' | 'no' | null>(null)
   if (said !== null)
     return (
@@ -88,26 +96,14 @@ export function IrreversibleAsk({ ask, layout }: { ask: Irreversible; layout: 'A
       </Button>
     </AskFoot>
   )
-  if (layout === 'A')
-    return (
-      <AskCard icon="lock" kicker="Can’t be undone" who={<Model model={OPUS} short />} what={ask.what} className={s.ask}>
-        <p className={s.stays}>{ask.stays}</p>
-        {ask.words !== undefined && <blockquote className={s.words}>{ask.words}</blockquote>}
-        <p className={s.from}>
-          <Through ask={ask} />
-        </p>
-        {foot}
-      </AskCard>
-    )
   return (
-    <AskCard icon="lock" kicker={KINDS[ask.kind]} who={<Through ask={ask} />} className={s.ask}>
-      <p className={s.whatB}>{ask.what}</p>
+    <AskCard icon="lock" kicker="Can’t be undone" who={<Model model={OPUS} short />} what={ask.what} className={s.ask}>
+      <p className={s.stays}>{ask.stays}</p>
       {ask.words !== undefined && <blockquote className={s.words}>{ask.words}</blockquote>}
-      <p className={s.staysB}>{ask.stays}</p>
-      <div className={s.footB}>
-        <LinkButton onClick={() => window.location.assign('#/projects/p1?room=settings&section=rules')}>Rules</LinkButton>
-        {foot}
-      </div>
+      <p className={s.from}>
+        <Through ask={ask} />
+      </p>
+      {foot}
     </AskCard>
   )
 }

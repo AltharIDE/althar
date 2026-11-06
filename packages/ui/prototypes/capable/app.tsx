@@ -112,10 +112,10 @@ proto.subscribe(() => {
   const now = proto.get()
   if (
     now.surface !== seen.surface ||
-    now.started !== seen.started ||
     now.answered !== seen.answered ||
     now.childHeld !== seen.childHeld ||
-    now.off !== seen.off
+    now.off !== seen.off ||
+    now.week !== seen.week
   )
     void cache.invalidateQueries()
   seen = now
@@ -144,17 +144,18 @@ const fitting = (surface: Surface, direction: Direction): Direction => {
 }
 
 const goSurface = (surface: Surface) => {
-  proto.set({ surface, direction: fitting(surface, proto.get().direction), composing: false })
-  window.location.assign(surfaceOf(surface).places[0]!.hash)
+  const first = surfaceOf(surface).places[0]!
+  proto.set({ surface, direction: fitting(surface, proto.get().direction), week: false, ...first.set })
+  window.location.assign(first.hash)
   remember()
 }
 
 const goDirection = (direction: Direction) => {
-  proto.set({ direction, composing: false })
+  proto.set({ direction })
   remember()
 }
 
-/** Keys 1 to 6 pick a surface, A to D and T a direction, [ and ] step through them; never while typing, or inside a menu or dialog. */
+/** Keys 1 to 6 pick a surface, A to C and T a direction, [ and ] step through them; never while typing, or inside a menu or dialog. */
 const onKey = (event: KeyboardEvent) => {
   if (event.metaKey || event.ctrlKey || event.altKey) return
   const target = event.target instanceof Element ? event.target : null
@@ -209,13 +210,19 @@ function Switcher() {
       )}
       <span className={s.gap} />
       {surface.places.map((place) => (
-        <LinkButton key={place.hash} onClick={() => window.location.assign(place.hash)}>
+        <LinkButton
+          key={place.label}
+          onClick={() => {
+            if (place.set !== undefined) proto.set(place.set)
+            window.location.assign(place.hash)
+          }}
+        >
           {place.label}
         </LinkButton>
       ))}
       <LinkButton onClick={proto.startOver}>Start over</LinkButton>
       <span className={s.grow} />
-      <span className={s.keys}>1–6 · A–D T · [ ]</span>
+      <span className={s.keys}>1–6 · A–C T · [ ]</span>
     </div>
   )
 }
@@ -224,7 +231,7 @@ function Switcher() {
 function App({ router }: { router: ReturnType<typeof makeRouter> }) {
   const p = useProto()
   return (
-    <Fragment key={`${p.surface}-${p.direction}`}>
+    <Fragment key={`${p.surface}-${p.direction}-${p.week}`}>
       <div className={p.bare ? s.bare : s.frame}>
         <RouterProvider router={router} />
       </div>
@@ -234,13 +241,13 @@ function App({ router }: { router: ReturnType<typeof makeRouter> }) {
 
 /** Opens the app on the surface and direction the URL says, or the first, at the surface's first place. */
 export const boot = () => {
-  // ?s=rules&d=B opens on a surface and direction, once: taken off the address, so the router doesn't read it.
+  // ?s=rules&d=B opens on a surface and direction (&week: a week after sync was turned on), once: taken off the address, so the router doesn't read it.
   const params = new URLSearchParams(window.location.search)
   const kept = JSON.parse(window.sessionStorage.getItem('capable') ?? '{}') as { s?: string; d?: string }
   const surface = SURFACES.find((one) => one.value === (params.get('s') ?? kept.s))?.value ?? SURFACES[0]!.value
   const named = params.get('d') ?? kept.d ?? null
   const direction = fitting(surface, (named === 'Today' ? 'Today' : (named?.toUpperCase() ?? 'A')) as Direction)
-  proto.set({ surface, direction, bare: params.has('bare'), composing: params.has('open') })
+  proto.set({ surface, direction, bare: params.has('bare'), week: params.has('week') })
   window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`)
   remember()
   window.localStorage.removeItem('althar.tabs')

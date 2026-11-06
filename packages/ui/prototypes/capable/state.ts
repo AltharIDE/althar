@@ -1,14 +1,14 @@
-// Scrappy: what the page holds: the surface and direction shown, and what the person did on it (tasks started, calls answered).
+// Scrappy: what the page holds: the surface and direction shown, and what the person did on it (calls answered, a child held).
 import { useSyncExternalStore } from 'react'
 
-import { type Draft, freshDraft } from './directions/start/pieces'
-
-export type Surface = 'start' | 'lineage' | 'rules' | 'tools' | 'tune' | 'parts' | 'sketches'
-export type Direction = 'A' | 'B' | 'C' | 'D' | 'Today'
+export type Surface = 'lineage' | 'rules' | 'tools' | 'tune' | 'parts' | 'sketches'
+export type Direction = 'A' | 'B' | 'C' | 'Today'
 
 export interface Place {
   readonly label: string
   readonly hash: string
+  /** What the page holds there, beyond the address: a week on, for sync. */
+  readonly set?: Partial<Proto>
 }
 
 export interface SurfaceInfo {
@@ -34,7 +34,7 @@ const GENERAL = '#/projects/p1?room=settings&section=general'
 const ACCOUNT = '#/settings/what-asks'
 const MANY = '#/threads/th-runs'
 
-/** The surfaces in the strip's order, keys 1 to 6, each with its directions, keys A to D (and T for today). New task (start) is set aside: the person keeps starting tasks with the coordinator for now. */
+/** The surfaces in the strip's order, keys 1 to 6, each with its directions, keys A to C (and T for today). New task without the coordinator is set aside (6 Nov); it was the strip's first surface up to 7274e40. */
 export const SURFACES: ReadonlyArray<SurfaceInfo> = [
   {
     value: 'lineage',
@@ -82,24 +82,20 @@ export const SURFACES: ReadonlyArray<SurfaceInfo> = [
     name: 'MCP and skills',
     short: 'MCP',
     places: [
-      { label: 'Settings', hash: TOOLS },
+      { label: 'Settings', hash: TOOLS, set: { week: false } },
+      { label: 'A week on', hash: TOOLS, set: { week: true } },
       { label: 'Calls in a thread', hash: MCP },
     ],
     directions: [
       {
         value: 'A',
-        name: 'A column per agent',
-        about: 'The role table you chose, with a column for each of your agents: tick one to add it there',
+        name: 'Before it starts',
+        about: 'One switch, as chosen: turning it on shows what it writes to each agent’s file and what it leaves alone, first',
       },
       {
         value: 'B',
-        name: 'Marks in the row',
-        about: 'The role table, each server with its agents’ marks, faint where it’s missing, and Add to …',
-      },
-      {
-        value: 'C',
-        name: 'One switch',
-        about: 'The role table, with one switch that keeps your agents the same, and what’s left to settle',
+        name: 'On the card',
+        about: 'One switch, as chosen: what it would write and what it leaves alone, on its card all along',
       },
       { value: 'Today', name: 'Today', about: 'Althar’s skills only; none of your MCP servers' },
     ],
@@ -131,13 +127,12 @@ export const SURFACES: ReadonlyArray<SurfaceInfo> = [
       { label: 'A review', hash: REVIEW },
     ],
     directions: [
-      { value: 'A', name: 'After title', about: 'The first three follow the title in the bar; the rest behind “N more”' },
-      { value: 'B', name: 'A row', about: 'A row of their own, each with where it stands; what doesn’t fit behind “N more”' },
-      { value: 'C', name: 'One button', about: 'Parts, with its count, beside the faces; it opens every part by group' },
+      { value: 'A', name: 'List', about: 'Parts and its count before the faces; it opens every part by group, each with where it stands' },
+      { value: 'B', name: 'Tiles', about: 'The same button; a tile each, what waits on you first, with what to do with it' },
       {
-        value: 'D',
-        name: 'Beside thread',
-        about: 'The same button opens them in the free margin beside the thread, open until closed',
+        value: 'C',
+        name: 'Waits first',
+        about: 'The parts’ own icons in the bar; what waits on you first, with its button, then what runs, then a chip each',
       },
       { value: 'Today', name: 'Today', about: 'Files, Run and the menu; a pull request is attached from the menu' },
     ],
@@ -155,59 +150,29 @@ export const SURFACES: ReadonlyArray<SurfaceInfo> = [
 
 export const surfaceOf = (surface: Surface) => SURFACES.find((one) => one.value === surface) ?? SURFACES[0]!
 
-/** A task the person started on the page, as it was asked for. */
-export interface Started {
-  readonly id: string
-  readonly title: string
-  readonly issue: string | null
-  readonly model: string
-  readonly modelId: string
-  readonly review: boolean
-  readonly small: boolean
-  readonly toward: string | null
-  readonly worksIn: 'worktree' | 'checkout'
-  readonly at: number
-  /** B: what was written in the composer, which the conversation shows as the person's message. */
-  readonly words?: string | null
-}
-
 export interface Proto {
   readonly surface: Surface
   readonly direction: Direction
   /** No strip under the window: for screenshots. */
   readonly bare: boolean
-  /** The new-task dialog, or the board's new card, open. */
-  readonly composing: boolean
-  /** In the composer direction: whether it talks to the coordinator or starts a task. */
-  readonly to: 'coordinator' | 'task'
-  readonly started: ReadonlyArray<Started>
   /** The parent's hold on the task its lead started, while held. */
   readonly childHeld: boolean
   /** Calls the person answered on the page, by id. */
   readonly answered: Readonly<Record<string, 'allowed' | 'refused'>>
   /** Servers and skills switched off on the page, by id; and roles taken off. */
   readonly off: ReadonlyArray<string>
-  /** Words handed from the new task to the coordinator's composer, once. */
-  readonly handed: string | null
-  /** B: the task being written in the project's composer. */
-  readonly composer: Draft
-  /** A task's parts, D: the rail beside the thread open. */
-  readonly rail: boolean
+  /** MCP: a week after sync was turned on. */
+  readonly week: boolean
 }
 
 let state: Proto = {
   surface: 'lineage',
   direction: 'A',
   bare: false,
-  composing: false,
-  to: 'task',
-  started: [],
   childHeld: false,
   answered: {},
   off: [],
-  handed: null,
-  composer: freshDraft(),
-  rail: true,
+  week: false,
 }
 const listeners = new Set<() => void>()
 
@@ -223,17 +188,7 @@ export const proto = {
     listeners.add(listener)
     return () => listeners.delete(listener)
   },
-  startOver: () =>
-    set({ composing: false, started: [], childHeld: false, answered: {}, off: [], to: 'task', composer: freshDraft(), rail: true }),
-  start: (tasks: ReadonlyArray<Omit<Started, 'id' | 'at'>>) =>
-    set({
-      composing: false,
-      composer: freshDraft(),
-      started: [
-        ...tasks.map((task, index) => ({ ...task, id: `tk-new-${state.started.length + index}`, at: Date.now() })),
-        ...state.started,
-      ],
-    }),
+  startOver: () => set({ childHeld: false, answered: {}, off: [], week: false }),
   toggle: (id: string) => set({ off: state.off.includes(id) ? state.off.filter((one) => one !== id) : [...state.off, id] }),
   answer: (id: string, how: 'allowed' | 'refused') => set({ answered: { ...state.answered, [id]: how } }),
 }

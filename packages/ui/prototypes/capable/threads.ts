@@ -91,7 +91,7 @@ export const threads: Record<string, () => Own> = {
       ),
       at(
         items.says(
-          'Every check on #635 passed, so it can merge. dana’s #640 fixes the same pill another way; once this merges hers isn’t needed, and she should hear it.',
+          'Every check on #635 passed, so it can merge. dana’s #640 fixes the same pill another way; once this merges theirs isn’t needed, and they should hear it.',
         ),
         1,
       ),

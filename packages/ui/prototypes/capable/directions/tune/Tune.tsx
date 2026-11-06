@@ -1,4 +1,4 @@
-// Scrappy, surface 6: settings the coordinator or a lead changed with Althar's own tools: in the coordinator's thread, a line each (A) or one card (B), each with Undo; a change that loosens what asks waits on the person; and in Settings, the changed row says who and when.
+// Scrappy, surface 6: settings the coordinator or a lead changed with Althar's own tools: in the coordinator's thread, a line each, with Undo; a change that loosens what asks waits on the person; and in Settings, the changed row says who and when.
 import { Icon } from '../../../../src/foundations/Icon/Icon'
 import { AskAnswered, AskCard, AskFoot, AskNote } from '../../../../src/primitives/Ask/Ask'
 import { Button } from '../../../../src/primitives/Button/Button'
@@ -57,7 +57,6 @@ export const tuneText = {
   redo: 'Redo',
   undone: 'Undone',
   settings: 'Settings',
-  card: 'Changed althar’s settings',
   changed: (by: string, ago: string) => `Changed by ${by}, ${ago}`,
   loosen: {
     kicker: 'Loosens what asks',
@@ -74,7 +73,6 @@ export const tuneText = {
 
 const undone = (p: ReturnType<typeof useProto>, id: string) => p.off.includes(`undo:${id}`)
 const undo = (id: string) => proto.toggle(`undo:${id}`)
-const toSettings = () => window.location.assign('#/projects/p1?room=settings&section=general')
 
 const FromTo = ({ change, gone }: { change: Change; gone: boolean }) => (
   <span className={gone ? s.gone : s.what}>
@@ -85,14 +83,14 @@ const FromTo = ({ change, gone }: { change: Change; gone: boolean }) => (
   </span>
 )
 
-/** A: a line each, in the thread's flow; B: one card for the turn, with Settings at its head. */
-export function SettingsChanges({ card }: { card: boolean }) {
+/** A line each, in the thread's flow, each with Undo. */
+export function SettingsChanges() {
   const p = useProto()
   const rows = MINE.map((change) => {
     const gone = undone(p, change.id)
     return (
       <li key={change.id} className={s.line}>
-        {!card && <Icon name="gear" size={13} />}
+        <Icon name="gear" size={13} />
         <FromTo change={change} gone={gone} />
         {gone && <span className={s.undoneWord}>{tuneText.undone}</span>}
         <LinkButton className={s.undo} onClick={() => undo(change.id)}>
@@ -101,19 +99,7 @@ export function SettingsChanges({ card }: { card: boolean }) {
       </li>
     )
   })
-  if (!card) return <ul className={s.lines}>{rows}</ul>
-  return (
-    <div className={s.card}>
-      <p className={s.cardHead}>
-        <Icon name="gear" size={13} />
-        <span>{tuneText.card}</span>
-        <LinkButton className={s.open} onClick={toSettings}>
-          {tuneText.settings}
-        </LinkButton>
-      </p>
-      <ul className={s.cardRows}>{rows}</ul>
-    </div>
-  )
+  return <ul className={s.lines}>{rows}</ul>
 }
 
 /** A change that loosens what asks: the coordinator proposes it, and it waits on the person. */

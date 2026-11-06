@@ -15,15 +15,10 @@ import { defineConfig } from 'vite-plus'
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = resolve(here, '../../../..')
 
-const PROJECT = 'features/project/ProjectView.tsx'
 const BOARD = 'features/board/BoardView.tsx'
 const TASK = 'features/task/TaskView.tsx'
 const seams = [
-  // The project's header (New task) and its composer (B starts a task from it).
-  { importer: PROJECT, id: '@althar/ui', to: 'seams/projectUi.tsx' },
-  // What the conversation holds: in B, what was started from the composer.
-  { importer: 'features/project/ProjectScreen.tsx', id: './useProject', to: 'seams/useProject.ts' },
-  // The board's lanes and cards: C's card at the top of Running, a lead-started task's lineage.
+  // The board's lanes and cards: a lead-started task's lineage.
   { importer: BOARD, id: '@althar/ui', to: 'seams/boardUi.tsx' },
   // The task's thread: each direction's pieces where its data marks them.
   { importer: TASK, id: './TaskThread', to: 'seams/TaskThread.tsx' },
@@ -38,7 +33,7 @@ const seams = [
   { importer: 'features/settings/route.tsx', id: './sections', to: 'seams/settingsSections.ts' },
   // A thread's tool rows: an MCP call says its server.
   { importer: 'shared/ThreadBlocks.tsx', id: '@althar/ui', to: 'seams/threadUi.tsx' },
-  // The task's header: in the sketches, its parts.
+  // The task's header: its Parts button.
   { importer: TASK, id: '@althar/ui', to: 'seams/taskUi.tsx' },
   // A project's General settings: a row an agent changed says who and when.
   { importer: 'features/projectSettings/GeneralSection.tsx', id: '@althar/ui', to: 'seams/projectSettingsUi.tsx' },

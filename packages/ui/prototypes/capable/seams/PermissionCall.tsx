@@ -15,7 +15,7 @@ export function PermissionCalls(props: ComponentProps<typeof Built>) {
     <div className={s.stack}>
       {props.requests.map((request) => {
         const ask = ASKS.find((one) => one.id === request.id)
-        return ask === undefined ? null : <IrreversibleAsk key={ask.id} ask={ask} layout="A" />
+        return ask === undefined ? null : <IrreversibleAsk key={ask.id} ask={ask} />
       })}
     </div>
   )

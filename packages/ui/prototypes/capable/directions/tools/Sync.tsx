@@ -1,16 +1,15 @@
-// Scrappy, surface 3: the same MCP server in each of the person's agents' own settings (Claude Code, Codex, OpenCode), for when they use them outside Althar. Three ways on the role table: a column per agent (A), marks in the row (B), one switch (C).
-import { Checkbox } from 'radix-ui'
-import { useState } from 'react'
+// Scrappy, surface 3: one switch that keeps the same MCP servers in each of the person's agents' own settings (Claude Code, Codex, OpenCode), for when they use them on their own. What it writes, to which file, and what it leaves alone: in a dialog before it starts (A), or on its card all along (B). A week on, it has copied a server added since, kept out one the person took out, and left alone a file it couldn't read.
+import { type ReactElement, useState } from 'react'
 
 import { Brand } from '../../../../src/foundations/brands/brands'
 import { Icon } from '../../../../src/foundations/Icon/Icon'
 import { BrandMark } from '../../../../src/foundations/Marks/Marks'
 import { Button } from '../../../../src/primitives/Button/Button'
+import { Dialog } from '../../../../src/primitives/Dialog/Dialog'
 import { Tooltip } from '../../../../src/primitives/HoverCard/HoverCard'
 import { LinkButton } from '../../../../src/primitives/LinkButton/LinkButton'
-import { Menu, MenuGroup, MenuItem, MenuSeparator } from '../../../../src/primitives/Menu/Menu'
+import { Menu, MenuCheckboxItem, MenuGroup, MenuItem, MenuSeparator } from '../../../../src/primitives/Menu/Menu'
 import { Switch } from '../../../../src/primitives/Switch/Switch'
-import box from '../../../../src/primitives/CheckList/CheckList.module.css'
 import { type Found, SERVERS } from './found'
 import s from './sync.module.css'
 
@@ -20,235 +19,482 @@ export const AGENTS: ReadonlyArray<{ id: AgentId; name: string; brand: Brand; fi
   { id: 'codex', name: 'Codex', brand: Brand.Codex, file: '~/.codex/config.toml' },
   { id: 'opencode', name: 'OpenCode', brand: Brand.OpenCode, file: '~/.config/opencode/opencode.json' },
 ]
+const agentOf = (id: AgentId) => AGENTS.find((one) => one.id === id)!
 
-/** How it runs in each agent where they differ: github, as Claude Code and Codex each have it. */
-const DIFFERS: Readonly<Record<string, Partial<Record<AgentId, string>>>> = {
-  github: { claude: 'npx -y @github/github-mcp-server', codex: 'docker run -i ghcr.io/github/github-mcp-server' },
+/** github runs two ways: Claude Code's with npx, Codex's in Docker. */
+const WAYS = { npx: 'npx -y @github/github-mcp-server', docker: 'docker run -i ghcr.io/github/github-mcp-server' } as const
+type Way = keyof typeof WAYS | 'apart'
+/** Servers that sign in on their own, in each agent: a copy leaves a sign-in to do there. */
+const SIGNS_IN = new Set(['linear', 'sentry', 'notion'])
+
+/** A week on: a server the person added to Claude Code since, which sync copied to the others. */
+const NOTION: Found = {
+  id: 'notion',
+  name: 'notion',
+  sources: ['claude'],
+  runs: 'https://mcp.notion.com/mcp',
+  roles: ['lead', 'coordinator'],
 }
-/** Servers that sign in on their own, in each agent: copying one leaves a sign-in to do there. */
-const SIGNS_IN = new Set(['linear', 'sentry'])
 
-export type Here = 'in' | 'differs' | 'missing' | 'signIn' | 'project'
+export type Here = 'in' | 'added' | 'missing' | 'out' | 'signIn' | 'differs' | 'project'
 
-/** Where each server is now, as the page changed it. */
-export const useSync = () => {
-  const [added, setAdded] = useState<Record<string, ReadonlyArray<AgentId>>>({})
-  const [settled, setSettled] = useState<ReadonlyArray<string>>([])
-  const [signedIn, setSignedIn] = useState<ReadonlyArray<string>>([])
+const key = (found: Found, agent: AgentId) => `${found.id}:${agent}`
+
+/** What sync has done and been told, as the page changed it; a week on, as it stands after one. */
+export const useSync = ({ week, confirm }: { week: boolean; confirm: boolean }) => {
+  const [on, setOn] = useState(week)
+  /** What the person keeps out of an agent: taken back, left out of the plan, or taken out of the agent by hand. */
+  const [out, setOut] = useState<ReadonlyArray<string>>(week ? ['context7:claude'] : [])
+  const [way, setWay] = useState<Way | null>(week ? 'npx' : null)
+  const [signedIn, setSignedIn] = useState<ReadonlyArray<string>>(
+    week ? ['linear:codex', 'linear:opencode', 'sentry:codex', 'notion:codex'] : [],
+  )
+  /** A: the dialog open, to turn it on or off; B: turning off, asked on the card. */
+  const [asking, setAsking] = useState<'on' | 'off' | null>(null)
+  /** A week on, OpenCode's file has a mistake in it, so nothing was written there since. */
+  const [broken, setBroken] = useState(week)
+  /** Turned off with "Leave them in": what it added stays in each agent, as the person's own now. */
+  const [stayed, setStayed] = useState<ReadonlyArray<string>>([])
+  const servers = week ? [...SERVERS, NOTION] : SERVERS
+
+  /** It would go to this agent, or went: not set up there, not kept out, and not github until it runs one way. */
+  const planned = (found: Found, agent: AgentId) =>
+    found.sources[0] !== 'project' &&
+    !found.sources.includes(agent) &&
+    !out.includes(key(found, agent)) &&
+    (found.id !== 'github' || way === 'npx' || way === 'docker') &&
+    !(broken && agent === 'opencode' && found.id === 'notion')
   const here = (found: Found, agent: AgentId): Here => {
     if (found.sources[0] === 'project') return agent === 'claude' ? 'in' : 'project'
-    if (DIFFERS[found.id]?.[agent] !== undefined && agent !== 'claude' && !settled.includes(found.id)) return 'differs'
-    if (found.sources.includes(agent)) return 'in'
-    if (!(added[found.id] ?? []).includes(agent)) return 'missing'
-    return SIGNS_IN.has(found.id) && !signedIn.includes(`${found.id}:${agent}`) ? 'signIn' : 'in'
+    if (found.id === 'github' && agent !== 'opencode' && way === null) return 'differs'
+    if (found.sources.includes(agent) || stayed.includes(key(found, agent))) return 'in'
+    if (out.includes(key(found, agent))) return 'out'
+    if (!on || !planned(found, agent)) return 'missing'
+    return SIGNS_IN.has(found.id) && !signedIn.includes(key(found, agent)) ? 'signIn' : 'added'
   }
-  const add = (found: Found, agents: ReadonlyArray<AgentId>) =>
-    setAdded((now) => ({ ...now, [found.id]: [...new Set([...(now[found.id] ?? []), ...agents])] }))
-  const remove = (found: Found, agent: AgentId) =>
-    setAdded((now) => ({ ...now, [found.id]: (now[found.id] ?? []).filter((one) => one !== agent) }))
-  const missing = (found: Found) => AGENTS.filter((agent) => here(found, agent.id) === 'missing').map((agent) => agent.id)
-  const addAll = () => {
-    for (const found of SERVERS) add(found, missing(found))
+  const adds = (agent: AgentId, all = false) =>
+    servers.filter((found) => (all ? found.sources[0] !== 'project' && !found.sources.includes(agent) : planned(found, agent)))
+  const keepOut = (found: Found, agent: AgentId) => setOut((now) => [...new Set([...now, key(found, agent)])])
+  const putBack = (found: Found, agent: AgentId) => setOut((now) => now.filter((one) => one !== key(found, agent)))
+  const total = AGENTS.reduce((sum, agent) => sum + adds(agent.id).length, 0)
+  const turn = (next: boolean) => {
+    if (confirm || !next) setAsking(next ? 'on' : 'off')
+    else setOn(true)
   }
-  const signIn = (found: Found, agent: AgentId) => setSignedIn((now) => [...now, `${found.id}:${agent}`])
-  const settle = (found: Found) => setSettled((now) => [...now, found.id])
-  return { here, add, remove, missing, addAll, signIn, settle }
+  return {
+    on,
+    servers,
+    week,
+    way,
+    broken,
+    asking,
+    total,
+    here,
+    planned,
+    adds,
+    keepOut,
+    putBack,
+    turn,
+    pick: setWay,
+    fix: () => setBroken(false),
+    signIn: (found: Found, agent: AgentId) => setSignedIn((now) => [...now, key(found, agent)]),
+    cancel: () => setAsking(null),
+    start: () => {
+      setOn(true)
+      setAsking(null)
+    },
+    /** Off: what it added stays in the agents, or is taken back out of each. */
+    stop: (takeBack: boolean) => {
+      if (!takeBack)
+        setStayed(servers.flatMap((found) => AGENTS.filter((agent) => planned(found, agent.id)).map((agent) => key(found, agent.id))))
+      setOn(false)
+      setAsking(null)
+    },
+  }
 }
 export type Sync = ReturnType<typeof useSync>
 
 export const syncText = {
-  inAlthar: 'In Althar',
-  inAgents: 'In your agents',
-  why: 'In Althar, each role gets what’s ticked, whichever agent it was found in. Syncing writes a server into your agents’ own settings, for when you use them on their own.',
-  drift: (n: number) => `${n} servers aren’t in all three of your agents.`,
-  addAll: 'Add them all',
-  addTo: (names: string) => `Add to ${names}`,
-  signIn: 'Sign in',
-  differs: 'Differs',
-  project: 'In althar’s .mcp.json, which only Claude Code reads',
   keep: 'Keep your agents’ servers the same',
-  keepNote: 'A server you add or change in one of them goes to the others too.',
-  wouldAdd: 'Turning it on adds 2 servers to Claude Code, 4 to Codex and 5 to OpenCode.',
+  what: 'Althar writes each server into Claude Code’s, Codex’s and OpenCode’s own settings, so each has them when you use it on its own.',
+  later: 'A server you add to one later goes to the others. Each agent picks up a change when it next starts.',
+  leaves: 'It leaves alone',
+  leave: [
+    'A server already in an agent, set up as you set it, on or off.',
+    'One you take out of an agent: it stays out there.',
+    'Sign-ins and tokens. Each agent signs in on its own; a token is copied as the name of its variable, never its value.',
+  ],
+  copy: 'It keeps a copy of each file before changing it, and turning it off can take back what it added.',
+  willAdd: 'Adds',
+  added: 'Added',
+  nothing: 'Nothing to add',
   settle: 'To settle',
+  recent: 'Since',
+  project: 'In althar’s .mcp.json, which only Claude Code reads',
+  turnOn: 'Turn on',
+  offTitle: 'Stop keeping them the same?',
+  offWhat: (n: number) => `It added ${n} servers to your agents’ settings. They can stay, or come out of each.`,
+  keepThem: 'Leave them in',
+  takeBack: 'Take them out',
 }
 
-const names = (agents: ReadonlyArray<AgentId>) => {
-  const list = AGENTS.filter((one) => agents.includes(one.id)).map((one) => one.name)
-  return list.length < 2 ? (list[0] ?? '') : `${list.slice(0, -1).join(', ')} and ${list.at(-1)}`
-}
-
-/** How the two differ, and one to keep in every agent. */
-function DiffersMenu({ found, sync }: { found: Found; sync: Sync }) {
-  const ways = DIFFERS[found.id] ?? {}
+/** github, set up two ways: one to run everywhere, which changes the other agent's, or github left out of syncing. */
+function WayMenu({ sync, trigger }: { sync: Sync; trigger: ReactElement }) {
   return (
-    <Menu
-      label={`${found.name} differs`}
-      width={340}
-      trigger={
-        <button type="button" className={s.differs}>
-          {syncText.differs}
-        </button>
-      }
-    >
+    <Menu label="How github runs" width={360} align="end" trigger={trigger}>
       <MenuGroup label="Run it everywhere as">
-        {AGENTS.filter((agent) => ways[agent.id] !== undefined).map((agent) => (
-          <MenuItem
-            key={agent.id}
-            lead={<BrandMark brand={agent.brand} size={12} />}
-            description={<code className={s.way}>{ways[agent.id]}</code>}
-            onSelect={() => sync.settle(found)}
-          >
-            {`${agent.name}’s`}
-          </MenuItem>
-        ))}
+        <MenuItem
+          lead={<BrandMark brand={Brand.ClaudeCode} size={12} />}
+          description={<code className={s.way}>{WAYS.npx}</code>}
+          onSelect={() => sync.pick('npx')}
+        >
+          Claude Code’s, which changes Codex’s
+        </MenuItem>
+        <MenuItem
+          lead={<BrandMark brand={Brand.Codex} size={12} />}
+          description={<code className={s.way}>{WAYS.docker}</code>}
+          onSelect={() => sync.pick('docker')}
+        >
+          Codex’s, which changes Claude Code’s
+        </MenuItem>
       </MenuGroup>
       <MenuSeparator />
-      <MenuItem onSelect={() => sync.settle(found)}>Leave them as they are</MenuItem>
+      <MenuItem onSelect={() => sync.pick('apart')}>Leave github out of syncing</MenuItem>
     </Menu>
   )
 }
 
-/** A: one agent's cell in a server's row: in its settings, missing, to sign in, or different. */
-export function AgentCell({ found, agent, sync }: { found: Found; agent: (typeof AGENTS)[number]; sync: Sync }) {
-  const here = sync.here(found, agent.id)
-  if (here === 'project')
-    return (
-      <Tooltip label={syncText.project}>
-        <span className={s.none} tabIndex={0}>
-          –
-        </span>
-      </Tooltip>
-    )
-  if (here === 'differs') return <DiffersMenu found={found} sync={sync} />
-  if (here === 'signIn')
-    return (
-      <LinkButton className={s.signIn} onClick={() => sync.signIn(found, agent.id)}>
-        {syncText.signIn}
-      </LinkButton>
-    )
+/** One agent's file, and the servers sync adds to it or added: each one a chip that leaves it out, or takes it back out. */
+function FileRow({ sync, agent, done }: { sync: Sync; agent: (typeof AGENTS)[number]; done: boolean }) {
+  const all = sync.adds(agent.id, true).filter((found) => !(found.id === 'github' && (sync.way === null || sync.way === 'apart')))
+  const left = all.filter((found) => sync.here(found, agent.id) === 'out')
+  const going = all.filter((found) => !left.includes(found) && (done ? sync.here(found, agent.id) !== 'missing' : true))
   return (
-    <Checkbox.Root
-      checked={here === 'in'}
-      className={box.box}
-      aria-label={`${found.name} in ${agent.name}`}
-      onCheckedChange={(next) => (next === true ? sync.add(found, [agent.id]) : sync.remove(found, agent.id))}
-    >
-      <Checkbox.Indicator className={box.tick}>
-        <Icon name="check" size={10} />
-      </Checkbox.Indicator>
-    </Checkbox.Root>
-  )
-}
-
-/** B: each agent's mark beside the name: solid where it is, faint where it isn't; then a way to add it to the rest. */
-export function AgentMarks({ found, sync, links }: { found: Found; sync: Sync; links: boolean }) {
-  const missing = sync.missing(found)
-  return (
-    <span className={s.marks}>
-      {AGENTS.map((agent) => {
-        const here = sync.here(found, agent.id)
-        const said =
-          here === 'in'
-            ? `In ${agent.name}`
-            : here === 'missing'
-              ? `Not in ${agent.name}`
-              : here === 'signIn'
-                ? `In ${agent.name}, to sign in`
-                : here === 'differs'
-                  ? `In ${agent.name}, run another way`
-                  : syncText.project
-        return (
-          <Tooltip key={agent.id} label={said}>
-            <span className={s.mark} data-here={here} tabIndex={0} aria-label={said}>
-              <BrandMark brand={agent.brand} size={12} />
-            </span>
+    <li className={s.file}>
+      <span className={s.fileWho}>
+        <BrandMark brand={agent.brand} size={13} />
+        <span className={s.fileName}>{agent.name}</span>
+        <code className={s.filePath} title={agent.file}>
+          {agent.file}
+        </code>
+      </span>
+      <span className={s.chips}>
+        {going.length === 0 && left.length === 0 && <span className={s.nothing}>{syncText.nothing}</span>}
+        {going.map((found) => (
+          <Tooltip key={found.id} label={done ? `Take ${found.name} out of ${agent.name}` : `Leave ${found.name} out of ${agent.name}`}>
+            <button type="button" className={s.chip} onClick={() => sync.keepOut(found, agent.id)}>
+              {found.name}
+              <Icon name="close" size={10} />
+            </button>
           </Tooltip>
-        )
-      })}
-      {links && AGENTS.some((agent) => sync.here(found, agent.id) === 'differs') && <DiffersMenu found={found} sync={sync} />}
-      {links &&
-        AGENTS.filter((agent) => sync.here(found, agent.id) === 'signIn').map((agent) => (
-          <LinkButton key={agent.id} className={s.signIn} onClick={() => sync.signIn(found, agent.id)}>
-            {`${syncText.signIn} in ${agent.name}`}
-          </LinkButton>
         ))}
-      {links && missing.length > 0 && (
-        <LinkButton reveal className={s.addTo} onClick={() => sync.add(found, missing)}>
-          {syncText.addTo(names(missing))}
-        </LinkButton>
-      )}
-    </span>
+        {left.map((found) => (
+          <Tooltip key={found.id} label={`Put ${found.name} back in ${agent.name}`}>
+            <button type="button" className={s.chip} data-out="" onClick={() => sync.putBack(found, agent.id)}>
+              {found.name}
+              <Icon name="plus" size={10} />
+            </button>
+          </Tooltip>
+        ))}
+      </span>
+    </li>
   )
 }
 
-/** A and B, over the table: how many aren't everywhere, and all of them added at once. */
-export function Drift({ sync, line }: { sync: Sync; line: boolean }) {
-  const short = SERVERS.filter((one) => sync.missing(one).length > 0).length
+function Files({ sync, done }: { sync: Sync; done: boolean }) {
   return (
-    <p className={s.drift}>
-      <span>{syncText.why}</span>
-      {line && short > 0 && (
-        <span className={s.driftLine}>
-          {syncText.drift(short)}
-          <LinkButton onClick={sync.addAll}>{syncText.addAll}</LinkButton>
+    <div className={s.files}>
+      <span className={s.label}>{done ? syncText.added : syncText.willAdd}</span>
+      <ul className={s.fileList}>
+        {AGENTS.map((agent) => (
+          <FileRow key={agent.id} sync={sync} agent={agent} done={done} />
+        ))}
+      </ul>
+      {!done && sync.way === null && (
+        <span className={s.waits}>
+          <BrandMark brand={Brand.GitHub} size={13} />
+          <span className={s.settleWhat}>
+            <strong>github</strong> runs with npx in Claude Code and in Docker in Codex, so it isn’t copied until you pick one.
+          </span>
+          <WayMenu
+            sync={sync}
+            trigger={
+              <Button size="small" variant="quiet" trailingIcon="chevronD">
+                Pick one
+              </Button>
+            }
+          />
         </span>
       )}
-    </p>
+    </div>
   )
 }
 
-/** C: one switch that keeps them the same; on, what it couldn't do alone, to settle. */
-export function KeepSame({ sync, on, onChange }: { sync: Sync; on: boolean; onChange: (on: boolean) => void }) {
-  const github = SERVERS.find((one) => one.id === 'github')!
-  const toSignIn = SERVERS.map((found) => ({ found, agents: AGENTS.filter((agent) => sync.here(found, agent.id) === 'signIn') })).filter(
-    (one) => one.agents.length > 0,
+/** What a person needs to know before it writes to their files: what it leaves alone, and that it can be taken back. */
+function Leaves() {
+  return (
+    <div className={s.leaves}>
+      <span className={s.label}>{syncText.leaves}</span>
+      <ul className={s.leaveList}>
+        {syncText.leave.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+      <p className={s.copy}>{syncText.copy}</p>
+    </div>
   )
-  const differs = AGENTS.some((agent) => sync.here(github, agent.id) === 'differs')
+}
+
+/** What it can't do alone, problems first: a file it can't read, github's two ways, then each sign-in. */
+function Settle({ sync }: { sync: Sync }) {
+  const signIns = sync.servers
+    .map((found) => ({ found, agents: AGENTS.filter((agent) => sync.here(found, agent.id) === 'signIn') }))
+    .filter((one) => one.agents.length > 0)
+  const rows = [
+    sync.broken && (
+      <span key="broken" className={s.settleRow} data-tone="bad">
+        <BrandMark brand={Brand.OpenCode} size={13} />
+        <span className={s.settleWhat}>OpenCode’s settings have a mistake on line 14, so nothing has been written there since 4 Nov.</span>
+        <Button size="small" variant="quiet" onClick={sync.fix}>
+          Open the file
+        </Button>
+      </span>
+    ),
+    sync.way === null && (
+      <span key="github" className={s.settleRow}>
+        <BrandMark brand={Brand.GitHub} size={13} />
+        <span className={s.settleWhat}>
+          <strong>github</strong> runs with npx in Claude Code and in Docker in Codex, so it isn’t copied until you pick one.
+        </span>
+        <WayMenu
+          sync={sync}
+          trigger={
+            <Button size="small" variant="quiet" trailingIcon="chevronD">
+              Pick one
+            </Button>
+          }
+        />
+      </span>
+    ),
+    ...signIns.map(({ found, agents }) => (
+      <span key={found.id} className={s.settleRow}>
+        <Icon name="plug" size={13} />
+        <span className={s.settleWhat}>
+          <strong>{found.name}</strong> signs in on its own in each agent.
+        </span>
+        {agents.map((agent) => (
+          <Button key={agent.id} size="small" variant="quiet" onClick={() => sync.signIn(found, agent.id)}>
+            {`Sign in to ${agent.name}`}
+          </Button>
+        ))}
+      </span>
+    )),
+  ].filter(Boolean)
+  if (rows.length === 0) return null
+  return (
+    <div className={s.settle}>
+      <span className={s.label}>{syncText.settle}</span>
+      {rows}
+    </div>
+  )
+}
+
+/** A week on: what it did since it was turned on, and a decision of the person's it kept. */
+function Since({ sync }: { sync: Sync }) {
+  const notion = sync.servers.find((one) => one.id === 'notion')
+  const context7 = SERVERS.find((one) => one.id === 'context7')!
+  if (!sync.week || notion === undefined) return null
+  const copied = (['codex', 'opencode'] as const).filter(
+    (agent) => sync.here(notion, agent) !== 'missing' && sync.here(notion, agent) !== 'out',
+  )
+  const kept = sync.here(context7, 'claude') === 'out'
+  return (
+    <div className={s.since}>
+      <span className={s.label}>{syncText.recent}</span>
+      <span className={s.sinceRow}>
+        <BrandMark brand={Brand.ClaudeCode} size={13} />
+        <span className={s.settleWhat}>
+          You added <strong>notion</strong> to Claude Code.{' '}
+          {copied.length > 0 ? `Copied to ${copied.map((one) => agentOf(one).name).join(' and ')}.` : 'Not copied.'}
+          {sync.broken && ' Not to OpenCode yet.'}
+        </span>
+        <span className={s.when}>3 min ago</span>
+        {copied.length > 0 && (
+          <LinkButton className={s.undo} onClick={() => copied.forEach((agent) => sync.keepOut(notion, agent))}>
+            Undo
+          </LinkButton>
+        )}
+      </span>
+      <span className={s.sinceRow}>
+        <BrandMark brand={Brand.ClaudeCode} size={13} />
+        <span className={s.settleWhat}>
+          {kept ? (
+            <>
+              You took <strong>context7</strong> out of Claude Code. It stays out there.
+            </>
+          ) : (
+            <>
+              <strong>context7</strong> is back in Claude Code.
+            </>
+          )}
+        </span>
+        <span className={s.when}>2 Nov</span>
+        <LinkButton className={s.undo} onClick={() => (kept ? sync.putBack(context7, 'claude') : sync.keepOut(context7, 'claude'))}>
+          {kept ? 'Put it back' : 'Undo'}
+        </LinkButton>
+      </span>
+    </div>
+  )
+}
+
+/** The card over the table: the switch, and what it does, as each direction tells it. */
+export function KeepSame({ sync, inline }: { sync: Sync; inline: boolean }) {
+  const offAsked = inline && sync.asking === 'off'
   return (
     <div className={s.keep}>
       <div className={s.keepRow}>
         <span className={s.keepText}>
           <span className={s.keepTitle}>{syncText.keep}</span>
-          <span className={s.keepNote}>{on ? syncText.keepNote : syncText.wouldAdd}</span>
+          <span className={s.keepNote}>{sync.on ? syncText.later : syncText.what}</span>
         </span>
-        <Switch
-          checked={on}
-          label={syncText.keep}
-          onChange={(next) => {
-            onChange(next)
-            if (next) sync.addAll()
-          }}
-        />
+        <Switch checked={sync.on && !offAsked} label={syncText.keep} onChange={sync.turn} />
       </div>
-      {on && (differs || toSignIn.length > 0) && (
-        <div className={s.settle}>
-          <span className={s.settleTitle}>{syncText.settle}</span>
-          {differs && (
-            <span className={s.settleRow}>
-              <BrandMark brand={Brand.GitHub} size={13} />
-              <span className={s.settleWhat}>
-                <strong>github</strong> runs with npx in Claude Code and in Docker in Codex.
-              </span>
-              <Button size="small" variant="quiet" onClick={() => sync.settle(github)}>
-                Use npx everywhere
-              </Button>
-            </span>
-          )}
-          {toSignIn.map(({ found, agents }) => (
-            <span key={found.id} className={s.settleRow}>
-              {found.brand !== undefined ? <BrandMark brand={found.brand} size={13} /> : <Icon name="plug" size={13} />}
-              <span className={s.settleWhat}>
-                <strong>{found.name}</strong> signs in on its own in each agent.
-              </span>
-              {agents.map((agent) => (
-                <Button key={agent.id} size="small" variant="quiet" onClick={() => sync.signIn(found, agent.id)}>
-                  {`Sign in to ${agent.name}`}
-                </Button>
-              ))}
-            </span>
-          ))}
+      {offAsked && (
+        <div className={s.offRow}>
+          <span className={s.settleWhat}>{syncText.offWhat(sync.total)}</span>
+          <Button size="small" variant="quiet" onClick={sync.cancel}>
+            Cancel
+          </Button>
+          <Button size="small" variant="quiet" onClick={() => sync.stop(true)}>
+            {syncText.takeBack}
+          </Button>
+          <Button size="small" onClick={() => sync.stop(false)}>
+            {syncText.keepThem}
+          </Button>
         </div>
       )}
+      {sync.on && !offAsked && (
+        <>
+          <Settle sync={sync} />
+          <Since sync={sync} />
+          <Files sync={sync} done />
+        </>
+      )}
+      {!sync.on && inline && (
+        <div className={s.body}>
+          <Files sync={sync} done={false} />
+          <Leaves />
+        </div>
+      )}
+      {!inline && sync.asking === 'on' && (
+        <Dialog
+          title={syncText.keep}
+          description={`${syncText.what} ${syncText.later}`}
+          width={600}
+          onClose={sync.cancel}
+          actions={
+            <>
+              <Button variant="quiet" onClick={sync.cancel}>
+                Cancel
+              </Button>
+              <Button variant="signal" onClick={sync.start}>
+                {syncText.turnOn}
+              </Button>
+            </>
+          }
+        >
+          <div className={s.dialogBody}>
+            <Files sync={sync} done={false} />
+            <Leaves />
+          </div>
+        </Dialog>
+      )}
+      {!inline && sync.asking === 'off' && (
+        <Dialog
+          title={syncText.offTitle}
+          description={syncText.offWhat(sync.total)}
+          onClose={sync.cancel}
+          actions={
+            <>
+              <Button variant="quiet" onClick={sync.cancel}>
+                Cancel
+              </Button>
+              <Button variant="quiet" onClick={() => sync.stop(true)}>
+                {syncText.takeBack}
+              </Button>
+              <Button onClick={() => sync.stop(false)}>{syncText.keepThem}</Button>
+            </>
+          }
+        />
+      )}
     </div>
+  )
+}
+
+/** Each agent's mark beside a server's name: solid where it is, faint where it isn't; they open a menu that keeps it out of an agent, or puts it back. */
+export function AgentMarks({ found, sync }: { found: Found; sync: Sync }) {
+  const marks = AGENTS.map((agent) => {
+    const here = sync.here(found, agent.id)
+    const said =
+      here === 'in'
+        ? `In ${agent.name}`
+        : here === 'added'
+          ? `In ${agent.name}, copied by Althar`
+          : here === 'missing'
+            ? `Not in ${agent.name}`
+            : here === 'out'
+              ? `Kept out of ${agent.name}`
+              : here === 'signIn'
+                ? `In ${agent.name}, to sign in`
+                : here === 'differs'
+                  ? `In ${agent.name}, run another way`
+                  : syncText.project
+    return { agent, here, said }
+  })
+  const faces = (
+    <span className={s.marks}>
+      {marks.map(({ agent, here, said }) => (
+        <Tooltip key={agent.id} label={said}>
+          <span className={s.mark} data-here={here} aria-label={said}>
+            <BrandMark brand={agent.brand} size={12} />
+          </span>
+        </Tooltip>
+      ))}
+    </span>
+  )
+  if (found.sources[0] === 'project') return faces
+  return (
+    <Menu
+      label={`${found.name} in your agents`}
+      width={260}
+      trigger={
+        <button type="button" className={s.marksButton} aria-label={`${found.name} in your agents`}>
+          {faces}
+        </button>
+      }
+    >
+      <MenuGroup label={`${found.name} in your agents`}>
+        {marks.map(({ agent, here }) => (
+          <MenuCheckboxItem
+            key={agent.id}
+            keepOpen
+            checked={
+              here === 'in' || here === 'added' || here === 'signIn' || here === 'differs' || (!sync.on && sync.planned(found, agent.id))
+            }
+            disabled={here === 'in' || here === 'differs' || (found.id === 'github' && here !== 'added' && here !== 'out')}
+            {...(here === 'in'
+              ? { description: 'Set up there by you' }
+              : here === 'differs'
+                ? { description: 'Set up there another way' }
+                : found.id === 'github' && here !== 'added' && here !== 'out'
+                  ? { description: 'Once you pick how github runs' }
+                  : {})}
+            onCheckedChange={(next) => (next ? sync.putBack(found, agent.id) : sync.keepOut(found, agent.id))}
+          >
+            {agent.name}
+          </MenuCheckboxItem>
+        ))}
+      </MenuGroup>
+    </Menu>
   )
 }

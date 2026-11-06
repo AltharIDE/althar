@@ -128,14 +128,6 @@
   display: contents;
   --t-3: var(--t-1);
 }
-.actLine {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 2px 0;
-  font-size: 13px;
-  color: var(--t-1);
-}
 .actWhat strong {
   font-weight: 560;
 }

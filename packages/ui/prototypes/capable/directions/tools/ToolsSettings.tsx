@@ -1,20 +1,15 @@
-// Scrappy, surface 4: Settings › MCP servers and skills. A lists them by where they were found, each with a switch and who gets it; B is one table of what each role gets.
+// Scrappy, surface 3: Settings › MCP servers and skills: one table of what each role gets, and the switch that keeps the person's agents the same.
 import { Checkbox } from 'radix-ui'
 import { Fragment, useState } from 'react'
 
 import { Icon } from '../../../../src/foundations/Icon/Icon'
 import { BrandMark } from '../../../../src/foundations/Marks/Marks'
-import { Menu, MenuCheckboxItem, MenuGroup, MenuSeparator } from '../../../../src/primitives/Menu/Menu'
 import { Segmented } from '../../../../src/primitives/Segmented/Segmented'
 import { VisuallyHidden } from '../../../../src/primitives/VisuallyHidden/VisuallyHidden'
-import { Switch } from '../../../../src/primitives/Switch/Switch'
-import { RuleWord } from '../../../../src/setup/Charter/Charter'
-import { SettingGroup, SettingList, SettingRow } from '../../../../src/setup/Preferences/Preferences'
 import box from '../../../../src/primitives/CheckList/CheckList.module.css'
-import { proto, useProto } from '../../state'
-import { type Found, PROJECTS, type Reach, reachOf, reachWords, ROLES, type Role, SERVERS, SKILLS, SOURCES, type SourceId } from './found'
-import { AGENTS, AgentCell, AgentMarks, Drift, KeepSame, syncText as syncTextOf, useSync } from './Sync'
-import sync from './sync.module.css'
+import { useProto } from '../../state'
+import { type Found, type Reach, reachOf, ROLES, type Role, SERVERS, SKILLS, SOURCES, type SourceId } from './found'
+import { AgentMarks, KeepSame, useSync } from './Sync'
 import s from './tools.module.css'
 
 export const toolsText = {
@@ -31,44 +26,6 @@ export const toolsText = {
   every: 'Every project',
   role: 'Role',
   name: 'Server or skill',
-}
-
-/** Who gets it: a word that opens the roles and projects. */
-function ReachWord({ found, reach, onChange }: { found: Found; reach: Reach; onChange: (reach: Reach) => void }) {
-  return (
-    <Menu label={`Who gets ${found.name}`} width={240} trigger={<RuleWord>{reachWords(reach)}</RuleWord>}>
-      <MenuGroup label={toolsText.roles}>
-        {ROLES.map((role) => (
-          <MenuCheckboxItem
-            key={role.id}
-            keepOpen
-            checked={reach.roles.includes(role.id)}
-            onCheckedChange={(on) =>
-              onChange({ ...reach, roles: ROLES.map((one) => one.id).filter((id) => (id === role.id ? on : reach.roles.includes(id))) })
-            }
-          >
-            {role.plural}
-          </MenuCheckboxItem>
-        ))}
-      </MenuGroup>
-      <MenuSeparator />
-      <MenuGroup label={toolsText.projects}>
-        {PROJECTS.map((project) => (
-          <MenuCheckboxItem
-            key={project}
-            keepOpen
-            checked={reach.projects.includes(project)}
-            disabled={(found.sources[0] === 'project' || found.sources[0] === 'repository') && project !== 'althar'}
-            onCheckedChange={(on) =>
-              onChange({ ...reach, projects: PROJECTS.filter((one) => (one === project ? on : reach.projects.includes(one))) })
-            }
-          >
-            {project}
-          </MenuCheckboxItem>
-        ))}
-      </MenuGroup>
-    </Menu>
-  )
 }
 
 const markOf = (found: Found) =>
@@ -95,78 +52,12 @@ const useReaches = () => {
   return { reach, set }
 }
 
-/** A: by where each was found, the config's name and path heading its group; one found twice is listed under the first. */
-export function ToolsBySource() {
-  const p = useProto()
-  const { reach, set } = useReaches()
-  const groups = (list: ReadonlyArray<Found>) =>
-    (Object.keys(SOURCES) as SourceId[])
-      .map((source) => ({ source, found: list.filter((one) => one.sources[0] === source) }))
-      .filter((group) => group.found.length > 0)
-  const section = (title: string, note: string, list: ReadonlyArray<Found>) => (
-    <SettingGroup title={title} note={note} headingLevel={3}>
-      {groups(list).map(({ source, found }) => (
-        <Fragment key={source}>
-          <p className={s.source}>
-            {sourceMark(source)}
-            <span className={s.sourceName}>{SOURCES[source].name}</span>
-            <code className={s.path}>{SOURCES[source].path}</code>
-          </p>
-          <SettingList>
-            {found.map((one) => {
-              const on = !p.off.includes(one.id)
-              return (
-                <SettingRow
-                  key={one.id}
-                  title={one.name}
-                  mark={markOf(one)}
-                  note={
-                    <span className={s.note}>
-                      <span className={SERVERS.includes(one) ? s.runs : s.about}>{one.runs}</span>
-                      {one.sources.length > 1 && (
-                        <span>
-                          {toolsText.also(
-                            one.sources
-                              .slice(1)
-                              .map((id) => SOURCES[id].name)
-                              .join(', '),
-                          )}
-                        </span>
-                      )}
-                    </span>
-                  }
-                  className={on ? undefined : s.off}
-                >
-                  {(ids) => (
-                    <span className={s.control}>
-                      {on && <ReachWord found={one} reach={reach(one)} onChange={(next) => set(one, next)} />}
-                      <Switch checked={on} onChange={() => proto.toggle(one.id)} {...ids} />
-                    </span>
-                  )}
-                </SettingRow>
-              )
-            })}
-          </SettingList>
-        </Fragment>
-      ))}
-    </SettingGroup>
-  )
-  return (
-    <div className={s.page}>
-      {section(toolsText.servers, toolsText.serversNote, SERVERS)}
-      {section(toolsText.skills, toolsText.skillsNote, SKILLS)}
-    </div>
-  )
-}
-
-/** B: one table, a row each, a column for each role; above it, which project it is for. */
-export function ToolsByRole({ mode }: { mode?: 'columns' | 'marks' | 'switch' }) {
+/** One table, a row each, a column for each role; above it, which project it is for. With sync, each server says which of your agents have it, and one switch keeps them the same. */
+export function ToolsByRole({ sync: syncing }: { sync: boolean }) {
   const p = useProto()
   const { reach, set } = useReaches()
   const [scope, setScope] = useState<'every' | 'althar'>('every')
-  const agents = useSync()
-  const [kept, setKept] = useState(false)
-  const columns = mode === 'columns'
+  const agents = useSync({ week: p.week, confirm: p.direction === 'A' })
   const tick = (one: Found, role: Role) => {
     const now = reach(one)
     const inScope = scope === 'every' || now.projects.includes('althar')
@@ -189,7 +80,7 @@ export function ToolsByRole({ mode }: { mode?: 'columns' | 'marks' | 'switch' })
   const rows = (title: string, list: ReadonlyArray<Found>) => (
     <>
       <tr className={s.groupRow}>
-        <th scope="rowgroup" colSpan={columns ? 7 : 4}>
+        <th scope="rowgroup" colSpan={4}>
           {title}
         </th>
       </tr>
@@ -200,8 +91,8 @@ export function ToolsByRole({ mode }: { mode?: 'columns' | 'marks' | 'switch' })
               <span className={s.nameLine}>
                 {markOf(one)}
                 <span className={s.name}>{one.name}</span>
-                {columns && SERVERS.includes(one) ? null : mode !== undefined && SERVERS.includes(one) ? (
-                  <AgentMarks found={one} sync={agents} links={mode === 'marks'} />
+                {syncing && SERVERS.includes(one) ? (
+                  <AgentMarks found={one} sync={agents} />
                 ) : (
                   <span className={s.sources} title={one.sources.map((id) => `${SOURCES[id].name}: ${SOURCES[id].path}`).join('\n')}>
                     {one.sources.map((id) => (
@@ -218,16 +109,6 @@ export function ToolsByRole({ mode }: { mode?: 'columns' | 'marks' | 'switch' })
               {tick(one, role.id)}
             </td>
           ))}
-          {columns &&
-            (SERVERS.includes(one) ? (
-              AGENTS.map((agent, at) => (
-                <td key={agent.id} className={`${s.tick} ${at === 0 ? sync.first : ''}`}>
-                  <AgentCell found={one} agent={agent} sync={agents} />
-                </td>
-              ))
-            ) : (
-              <td colSpan={3} className={`${s.tick} ${sync.first}`} />
-            ))}
         </tr>
       ))}
     </>
@@ -245,21 +126,9 @@ export function ToolsByRole({ mode }: { mode?: 'columns' | 'marks' | 'switch' })
           ]}
         />
       </div>
-      {mode !== undefined && <Drift sync={agents} line={mode !== 'switch'} />}
-      {mode === 'switch' && <KeepSame sync={agents} on={kept} onChange={setKept} />}
+      {syncing && <KeepSame sync={agents} inline={p.direction === 'B'} />}
       <table className={s.table}>
         <thead>
-          {columns && (
-            <tr>
-              <td />
-              <th scope="colgroup" colSpan={3} className={sync.overHead}>
-                <span>{syncTextOf.inAlthar}</span>
-              </th>
-              <th scope="colgroup" colSpan={3} className={sync.overHead}>
-                <span>{syncTextOf.inAgents}</span>
-              </th>
-            </tr>
-          )}
           <tr>
             <th scope="col" className={s.corner}>
               <VisuallyHidden>{toolsText.name}</VisuallyHidden>
@@ -269,19 +138,10 @@ export function ToolsByRole({ mode }: { mode?: 'columns' | 'marks' | 'switch' })
                 {role.plural}
               </th>
             ))}
-            {columns &&
-              AGENTS.map((agent, at) => (
-                <th key={agent.id} scope="col" className={`${sync.agentHead} ${at === 0 ? sync.first : ''}`}>
-                  <span>
-                    <BrandMark brand={agent.brand} size={12} />
-                    {agent.name}
-                  </span>
-                </th>
-              ))}
           </tr>
         </thead>
         <tbody>
-          {rows(toolsText.servers, SERVERS)}
+          {rows(toolsText.servers, syncing ? agents.servers : SERVERS)}
           {rows(toolsText.skills, SKILLS)}
         </tbody>
       </table>

@@ -1,4 +1,4 @@
-// Scrappy: althar on the afternoon of 6 November, as the runtime would give it: a busy board, a lead-started task, a Linear batch.
+// Scrappy: althar on the afternoon of 6 November, as the runtime would give it: a busy board and a lead-started task.
 import { card, change, items } from '../../../../apps/desktop/tests/fixtures'
 import type { BoardTask, ThreadItem } from './deps'
 import { proto } from './state'
@@ -190,17 +190,6 @@ export const boardTasks = (): BoardTask[] => [
   boardTask(TASKS.flatpak(), 900),
 ]
 
-/** Linear's Althar team, its open issues not yet in a task, as the picker lists them. */
-export const LINEAR = [
-  { key: 'DEV-201', title: 'Board: lane counts jump while a task moves', labels: ['board'], estimate: 'small' },
-  { key: 'DEV-202', title: 'Composer: dictation pill overlaps a long model name', labels: ['composer'], estimate: 'small' },
-  { key: 'DEV-203', title: 'Settings: the Codex sign-in row truncates without a tooltip', labels: ['settings'], estimate: 'small' },
-  { key: 'DEV-198', title: 'Usage: OpenCode Go’s week resets on the wrong day', labels: ['usage'], estimate: 'medium' },
-  { key: 'DEV-176', title: 'Automations: a run that made nothing says why', labels: ['automations'], estimate: 'medium' },
-  { key: 'DEV-170', title: 'Forks: push to a fork whose author allows edits', labels: ['code host'], estimate: 'large' },
-] as const
-export type LinearIssue = (typeof LINEAR)[number]
-
 /** The coordinator's conversation today: short, as it is optional now. */
 export const coordinatorTalk = (): ThreadItem[] => [
   at(items.you('Plan the ADR for agents working as my own. Opus 5.5, xhigh.'), 52),
@@ -221,8 +210,3 @@ const tuning = (): ThreadItem[] => [
   ),
   at(items.notice({ title: '§tune-loosen', source: 'runtime' }, null), 2),
 ]
-
-export const usage = {
-  claude: { left: 38, resets: 'Monday 09:00' },
-  codex: { left: 71, resets: 'Sunday 18:00' },
-}
