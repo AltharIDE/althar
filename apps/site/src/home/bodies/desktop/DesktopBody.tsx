@@ -1,145 +1,333 @@
-import type { ReactNode } from 'react'
+import { type CSSProperties, type ReactNode, type RefObject, useEffect, useLayoutEffect, useRef } from 'react'
 
 import { cx } from '../../../lib/cx'
 import { Get, OtherMac } from '../../../shared/Close'
+import { useGrain } from '../../../shared/grain'
 import { LightUnder } from '../../../shared/lightUnder'
-import { EdgeTour } from '../kit/EdgeTour'
-import t from '../kit/type.module.css'
 import { AskOnce } from './AskOnce'
 import { AtWork } from './AtWork'
-import { Bento } from './Bento'
-import s from './DesktopBody.module.css'
+import { TILES } from './Bento'
 import { Review } from './Review'
+import { EdgeTour } from '../kit/EdgeTour'
+import t from '../kit/type.module.css'
+import dark from '../../../../../../packages/ui/src/styles/dark.css?raw'
+import c from './DesktopBody.module.css'
+import { stars, WALL } from './wall'
 
 /*
- * Desktop: the product, shown, after the first screen's "fast": first that
- * it is independent of the labs, then how it keeps you in flow, and at the
- * end the craft and the freedom of open source, by the download. One claim
- * a screen, in the first screen's type, each over a large picture of the
- * app drawn by its own components: the board at work on a panel as dark and
- * warm as the first screen's cabin, then the coordinator, the work reviewing
- * itself, a bento of what keeps you in flow, and the notch. Pictures of the app framed as pictures,
- * so nothing looks like it is part of this page.
+ * Desktop: the product, shown, after the first screen and the Runs on band,
+ * in the same night as the orrery: its dark, its few stars, its hairlines.
+ * Past the band you are inside the cabin; its wall's milled isogrid shows
+ * only where a screen's light falls on its ribs. The app's pictures are the
+ * wall's screens, drawn in the app's own dark theme, each behind a hairline;
+ * each claim is stamped beside its screen, as the changelog stamps its
+ * releases, on a rail that runs down the wall, its light on where you are
+ * reading. The sections open and close on a window: first the night side of
+ * the planet, its edge lit cobalt; last the same edge flatter and lower, the
+ * dawn coming up along it, over the download. What keeps you in flow is one
+ * console, its modules seamed into it by hairlines. Nothing moves but what
+ * the pictures do.
  */
 
-function Scene({
-  id,
-  title,
-  lead,
-  children,
-  tone,
-}: {
-  id: string
-  title: ReactNode
-  lead: ReactNode
-  children: ReactNode
-  /** A dark panel: ink, warm as the first screen's cabin, or the warm near-black a lit drawing stands on. */
-  tone?: 'ink' | 'cabin' | 'lit'
-}) {
+/** What each scene says: its claim and its lead, by the scene's id. */
+export const SCENE = {
+  independent: {
+    title: (
+      <>
+        Usage gets cut.
+        <br />
+        Models get pulled.
+        <br />
+        <b>Althar stays.</b>
+      </>
+    ),
+    lead: 'Open source, local-first, your data on your computer, any agent you have. None of the industry’s bullshit touches it.',
+  },
+  coordinator: {
+    title: (
+      <>
+        Every project
+        <br />
+        <b>has a manager.</b>
+      </>
+    ),
+    lead: 'It’s called the coordinator. It knows your whole project, and puts a team of agents on every ask.',
+  },
+  review: {
+    title: (
+      <>
+        No more <b>meat proxying.</b>
+      </>
+    ),
+    lead: 'Every change is reviewed by a model from another lab, and fixed until it’s clean.',
+  },
+  flow: {
+    title: (
+      <>
+        Fall in love
+        <br />
+        <b>with building again.</b>
+      </>
+    ),
+    lead: 'Tired of juggling terminals, re-explaining your project and babysitting agents? So were we.',
+  },
+  edge: {
+    title: (
+      <>
+        Wherever you are, <b>still in reach.</b>
+      </>
+    ),
+    lead: 'Althar sits round your Mac’s notch, in whatever you’re doing: point at it to answer a permission or open a pull request, and carry on.',
+  },
+} as const
+
+/** The last line, by the download: its quiet half, then its heavy one. */
+export const END = ['The craft of a paid app.', 'The freedom of open source.'] as const
+
+/** The app's own dark theme (the kit's dark.css), for the pictures on the wall alone: the page round them keeps its own. */
+const DARK_PICTURES = dark.replace(":root[data-theme='dark']", "[data-pictures='dark']")
+let dressed = false
+const dressPictures = () => {
+  if (dressed) return
+  dressed = true
+  const style = document.createElement('style')
+  style.dataset.cabin = ''
+  style.textContent = DARK_PICTURES
+  document.head.appendChild(style)
+}
+
+type Id = keyof typeof SCENE
+
+/** Each station: its number, its name on the wall, and the height it stands at on the way down. */
+const STATIONS: Record<Id, { no: string; name: string; km: number }> = {
+  independent: { no: '01', name: 'Board', km: 38 },
+  coordinator: { no: '02', name: 'Coordinator', km: 30 },
+  review: { no: '03', name: 'Review', km: 22 },
+  flow: { no: '04', name: 'Flow', km: 14 },
+  edge: { no: '05', name: 'Notch', km: 6 },
+}
+
+/** A station's stamp, on the rail: its node, its number and name, a rule, and the height it stands at. */
+function Stamp({ id }: { id: Id }) {
+  const station = STATIONS[id]
   return (
-    <section
-      id={id}
-      className={cx(s.scene, tone && s.ink, tone === 'cabin' && s.cabin, tone === 'lit' && s.lit)}
-      aria-labelledby={`${id}-h`}
-    >
-      {/* Dark under the nav: it turns to smoked glass with white words over it. */}
-      {tone && <LightUnder tone="ink" className={s.under} />}
-      <div className={s.head}>
-        <h2 id={`${id}-h`} className={t.title}>
-          {title}
+    <p className={c.stamp} aria-hidden="true">
+      <span className={c.node} />
+      <b>{station.no}</b>
+      <span>{station.name}</span>
+      <span className={c.rule} />
+      <span className={c.alt}>
+        Alt <b>{station.km.toFixed(1)}</b> km
+      </span>
+    </p>
+  )
+}
+
+/** A station on the wall: its stamp, then its head and its screen, laid out as `layout` says. */
+function Station({ id, layout, children }: { id: Id; layout: 'split' | 'wide' | 'bank' | 'notch'; children: ReactNode }) {
+  return (
+    <section id={id} className={cx(c.station, c[layout])} aria-labelledby={`${id}-h`} data-station="">
+      <Stamp id={id} />
+      <div className={c.head}>
+        <h2 id={`${id}-h`} className={cx(t.title, c.title)}>
+          {SCENE[id].title}
         </h2>
-        <p className={t.lead}>{lead}</p>
+        <p className={cx(t.lead, c.lead)}>{SCENE[id].lead}</p>
       </div>
       {children}
     </section>
   )
 }
 
-export function DesktopBody() {
+/** A screen set in the wall: its bezel, its glass, and the light it throws on the ribs round it. */
+function Screen({ className, children }: { className?: string; children: ReactNode }) {
   return (
-    <main id="main" tabIndex={-1} className={s.body}>
-      <Scene
-        id="independent"
-        tone="cabin"
-        title={
-          <>
-            Usage gets cut.
-            <br />
-            Models get pulled.
-            <br />
-            <b>Althar stays.</b>
-          </>
-        }
-        lead="Open source, local-first, your data on your computer, any agent you have. None of the industry’s bullshit touches it."
-      >
-        <AtWork />
-      </Scene>
+    <div className={cx(c.screen, className)} data-light="">
+      <div className={c.glass}>{children}</div>
+    </div>
+  )
+}
 
-      <Scene
-        id="coordinator"
-        title={
-          <>
-            Every project
-            <br />
-            <b>has a manager.</b>
-          </>
-        }
-        lead="It’s called the coordinator. It knows your whole project, and puts a team of agents on every ask."
-      >
-        <AskOnce />
-      </Scene>
+/** A window in the wall: its bezel, the sky in it (stars, the air, the planet's lit edge, the glass's grain), then what stands in it. */
+function Window({ className, seed, children }: { className?: string; seed: number; children: ReactNode }) {
+  const sky = useRef<HTMLDivElement>(null)
+  const grain = useRef<HTMLDivElement>(null)
+  useGrain(grain, seed)
+  useLayoutEffect(() => {
+    if (sky.current) sky.current.style.setProperty('--stars', stars(seed))
+  }, [seed])
+  return (
+    <div className={cx(c.window, className)}>
+      <div ref={sky} className={c.sky} aria-hidden="true">
+        <div className={c.stars} />
+        <div className={c.haze} />
+        <div className={c.limb} />
+        <div className={c.sun} />
+        <div ref={grain} className={c.grain} />
+      </div>
+      {children}
+    </div>
+  )
+}
 
-      <Scene
-        id="review"
-        tone="lit"
-        title={
-          <>
-            No more <b>meat proxying.</b>
-          </>
-        }
-        lead="Every change is reviewed by a model from another lab, and fixed until it’s clean."
-      >
-        <Review />
-      </Scene>
-
-      <Scene
-        id="flow"
-        title={
-          <>
-            Fall in love
-            <br />
-            <b>with building again.</b>
-          </>
-        }
-        lead="Tired of juggling terminals, re-explaining your project and babysitting agents? So were we."
-      >
-        <Bento />
-      </Scene>
-
-      <Scene
-        id="edge"
-        tone="ink"
-        title={
-          <>
-            Wherever you are, <b>still in reach.</b>
-          </>
-        }
-        lead="Althar sits round your Mac’s notch, in whatever you’re doing: point at it to answer a permission or open a pull request, and carry on."
-      >
-        <EdgeTour />
-      </Scene>
-
-      <section className={s.end} aria-label="Download Althar">
-        <div className={s.endRow}>
-          <p className={s.endLine}>
-            The craft of a paid app. <br className={s.phoneBreak} />
-            <b>The freedom of open source.</b>
-          </p>
-          <div className={s.endGet}>
-            <Get tone="paper" />
-            <OtherMac tone="paper" />
+/** What keeps you in flow: one console, its modules seamed into it, each with its number and its light. */
+function Console() {
+  return (
+    <ol className={c.console} data-light="">
+      {TILES.map((tile, i) => (
+        <li
+          key={tile.id}
+          className={cx(c.module, c[`span${tile.span}`])}
+          data-drawn={tile.drawn ? '' : undefined}
+          data-small={tile.small ? '' : undefined}
+        >
+          <span className={c.plate} aria-hidden="true">
+            <b>{String(i + 1).padStart(2, '0')}</b>
+            <i className={c.led} />
+          </span>
+          <div className={c.moduleHead}>
+            <h3 className={c.moduleTitle}>{tile.title}</h3>
+            <p className={c.moduleLead}>{tile.lead}</p>
           </div>
+          <div className={c.piece}>{tile.piece(tile.drawn ? 'dark' : 'light')}</div>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+/** Where the screens' light falls on the wall: the lit ribs, masked to a pool round each screen; measured again whenever anything changes size. */
+function useLights(main: RefObject<HTMLElement | null>, lit: RefObject<HTMLDivElement | null>) {
+  useLayoutEffect(() => {
+    const body = main.current
+    const layer = lit.current
+    if (!body || !layer) return
+    let frame = 0
+    let last = ''
+    const measure = () => {
+      frame = 0
+      const box = body.getBoundingClientRect()
+      const pools = [...body.querySelectorAll<HTMLElement>('[data-light]')].map((el) => {
+        const r = el.getBoundingClientRect()
+        const x = Math.round(r.left - box.left + r.width / 2)
+        const y = Math.round(r.top - box.top + r.height / 2)
+        const rx = Math.round(r.width / 2 + Math.min(240, r.width * 0.22))
+        const ry = Math.round(r.height / 2 + Math.min(160, r.height * 0.2))
+        return `radial-gradient(${rx}px ${ry}px at ${x}px ${y}px, #000 40%, rgba(0,0,0,0.45) 72%, transparent)`
+      })
+      const mask = pools.join(', ')
+      if (mask === last) return
+      last = mask
+      layer.style.maskImage = mask
+      layer.style.webkitMaskImage = mask
+    }
+    const later = () => {
+      if (!frame) frame = requestAnimationFrame(measure)
+    }
+    measure()
+    const ro = new ResizeObserver(later)
+    ro.observe(body)
+    window.addEventListener('resize', later)
+    void document.fonts?.ready.then(later)
+    return () => {
+      cancelAnimationFrame(frame)
+      ro.disconnect()
+      window.removeEventListener('resize', later)
+    }
+  }, [main, lit])
+}
+
+/** The rail's light: on at the station you are reading, the one across the window's middle. */
+function useRail(main: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const body = main.current
+    if (!body) return
+    const stations = [...body.querySelectorAll<HTMLElement>('[data-station]')]
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) for (const one of stations) one.toggleAttribute('data-on', one === e.target)
+        }
+      },
+      { rootMargin: '-48% 0px -48% 0px' },
+    )
+    for (const one of stations) io.observe(one)
+    return () => io.disconnect()
+  }, [main])
+}
+
+export function DesktopBody() {
+  const main = useRef<HTMLElement>(null)
+  const lit = useRef<HTMLDivElement>(null)
+  const grain = useRef<HTMLDivElement>(null)
+  useGrain(grain, 23)
+  useLights(main, lit)
+  useRail(main)
+  // The pictures' dark, before the first paint; and the wall's few stars, drawn once.
+  useLayoutEffect(() => {
+    dressPictures()
+    main.current?.style.setProperty('--wall-stars', stars(29, 960, 5200))
+  }, [])
+  return (
+    <main ref={main} id="main" tabIndex={-1} className={c.body} data-pictures="dark" style={{ '--wall-lit': WALL.lit } as CSSProperties}>
+      {/* Dark under the nav, all the way down: it turns to smoked glass over the cabin. */}
+      <LightUnder tone="ink" className={c.under} />
+      <div className={c.wall} aria-hidden="true">
+        <div ref={lit} className={c.wallLit} />
+        <div ref={grain} className={c.wallGrain} />
+      </div>
+
+      <section id="independent" className={cx(c.station, c.first)} aria-labelledby="independent-h" data-station="">
+        <Stamp id="independent" />
+        <Window seed={7} className={c.opening}>
+          <div className={c.head}>
+            <h2 id="independent-h" className={cx(t.title, c.title)}>
+              {SCENE.independent.title}
+            </h2>
+            <p className={cx(t.lead, c.lead)}>{SCENE.independent.lead}</p>
+          </div>
+          <div className={c.board}>
+            <AtWork />
+          </div>
+        </Window>
+      </section>
+
+      <Station id="coordinator" layout="split">
+        <Screen className={c.talk}>
+          <AskOnce />
+        </Screen>
+      </Station>
+
+      <Station id="review" layout="wide">
+        <Screen className={c.review}>
+          <Review />
+        </Screen>
+      </Station>
+
+      <Station id="flow" layout="bank">
+        <Console />
+      </Station>
+
+      <Station id="edge" layout="notch">
+        <div className={c.tour}>
+          <EdgeTour />
         </div>
+      </Station>
+
+      {/* The last window: the planet's edge lower and flatter, the dawn coming up along it, and the download. */}
+      <section id="end" className={c.endStation} aria-label="Download Althar">
+        <Window seed={11} className={c.closing}>
+          <div className={c.endRow}>
+            <p className={c.endLine}>
+              {END[0]} <br />
+              <b>{END[1]}</b>
+            </p>
+            <div className={c.endGet}>
+              <Get tone="blue" />
+              <OtherMac tone="blue" />
+            </div>
+          </div>
+        </Window>
       </section>
     </main>
   )

@@ -11,14 +11,12 @@ import { Agent } from './agents'
 export const BRAND = 'Althar'
 
 export const HERO = {
-  /** "Building software has never felt so fast.": a line, then its last word, large, forged in the fire as the capsule comes in. */
+  /** "Building software has never felt so fast.": a line, then its last word, set apart by its weight. */
   title: 'Building software has never felt so',
   last: 'fast.',
   /** The subhead: open source and independence from the labs, in one sentence (the positioning's second and third messages). */
   lead: 'Althar is an open-source IDE for building with AI agents. It runs the ones you already pay for, and keeps going whatever the labs change.',
-  /** The flight deck: its readouts in the window's top corners, and the console under the lead. */
-  velocity: 'Velocity',
-  altitude: 'Altitude',
+  /** The figure's caption, with how many agents ride the orrery; the list of them, for screen readers; and the console under the lead. */
   agents: 'Agents',
   agentsName: 'The agents Althar runs',
   install: 'Install',

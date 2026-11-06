@@ -6,9 +6,9 @@ import s from './Home.module.css'
 import { Hero } from './Hero'
 
 /*
- * The developer page: the lens for a nav, the first screen coming in from
- * orbit (Hero), the systems it runs on, the product shown (bodies/desktop),
- * and the footer (shared/footer).
+ * The developer page: the lens for a nav, the first screen an orrery in the
+ * night (Hero), the systems it runs on in the same night, the product shown
+ * (bodies/desktop), and the footer (shared/footer).
  */
 
 export function Home() {
@@ -16,7 +16,9 @@ export function Home() {
     <div className={s.page} id="top">
       <Nav opening />
       <Hero nav={<NavSpace />} />
-      <RunsOn />
+      <div className={s.night}>
+        <RunsOn />
+      </div>
       <DesktopBody />
       <Footer />
     </div>
