@@ -299,13 +299,15 @@ describe('what an agent hands back, on a task', () => {
       .fn()
       .mockResolvedValueOnce({ path: '/w/meridian/docs/notes.md', body: '# Notes\n\nFirst.\n', bytes: 16, lines: 3 })
       .mockResolvedValue({ path: '/w/meridian/docs/notes.md', body: '# Notes\n\nRewritten by a script.\n', bytes: 30, lines: 3 })
-    // A script rewrites the document: the command says no file it touched.
+    const thread = handing()
+    // A script rewrites the document: the command says no file it touched. It comes after the thread's last item,
+    // however far the fixtures' shared numbering has gone.
     const script = {
       ...items.tool({ title: 'python3 tidy.py', toolKind: 'execute', command: 'python3 tidy.py', status: 'completed' }),
       id: 'i-script',
-      sequence: 1_000,
+      sequence: Math.max(...thread.items.map((item) => item.sequence)) + 1,
     }
-    const { client, emit } = fakeClient({ getThread: vi.fn(async () => handing()), readDocument, getThreadItem: vi.fn(async () => script) })
+    const { client, emit } = fakeClient({ getThread: vi.fn(async () => thread), readDocument, getThreadItem: vi.fn(async () => script) })
     withServices(<Task />, client)
     const card = await screen.findByRole('article', { name: 'notes.md' })
     expect(await within(card).findByText('First.')).toBeTruthy()
