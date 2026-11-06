@@ -339,6 +339,12 @@ export interface PictureUpload {
   readonly mediaType: string
 }
 
+/** What `editChange` sets on a change: its title, its description, or both. */
+export interface ChangeEdit {
+  readonly title?: string
+  readonly body?: string
+}
+
 /** How git pushes to a repository: its URL, and the header that signs the push in. */
 export interface PushTarget {
   readonly url: string
@@ -479,6 +485,14 @@ export interface CodeHost extends HostReleases {
    * `rejected`, in the host's words.
    */
   reopenChange(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
+  /**
+   * Gives a change another title, description, or both: what isn't given
+   * stays as the host has it, and nothing else of it changes (its reviewers,
+   * whether it is a draft). Read back as the host has it after. Refused,
+   * where the account may not, as on an upstream it can't push to, with the
+   * host's own words.
+   */
+  editChange(repository: Repository, change: ChangeRequest, edit: ChangeEdit): Effect.Effect<ChangeRequest, ConnectorFailed>
   /**
    * Merges the change's target branch into its branch, so the branch has
    * what the target has since it was made (ADR-081). A merge commit, never a

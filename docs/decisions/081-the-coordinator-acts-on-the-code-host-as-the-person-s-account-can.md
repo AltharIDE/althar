@@ -341,6 +341,9 @@ and repositories ([Leads](#leads-under-the-same-rule)).
   - `reply_on_pull_request`, on Althar's and the repository's own people's.
     On an outside author's pull request, a reply or a close sends them a
     notification that can't be taken back, so there it is asked-for.
+  - `edit_pull_request`, a pull request's title or description, on the
+    same pull requests as a reply: the old ones are set back in a step. On
+    an outside author's it is asked-for, as a reply is.
 - **Asked-for:**
   - `merge_pull_request`: merge it, or put it in the host's queue or merge
     train where its branch has one Althar can reach, with a method the

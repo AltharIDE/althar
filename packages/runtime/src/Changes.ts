@@ -47,7 +47,7 @@ import { SqlClient } from 'effect/sql'
 import { Busy } from './Busy'
 import { touchCard, touchTask } from './cards'
 import { ChecksAsked, inspectChecks } from './readChecks'
-import { logForLead, logPage, readLog } from './checkLogs'
+import { hostName, logForLead, logPage, readLog } from './checkLogs'
 import { Agents, RuntimeConfig } from './Config'
 import { Models } from './Models'
 import { detailsOf, reviewRecordOf, reviewSeal, sealOf, unreviewedNote, unreviewedOf, type SessionNamer } from './pullRequestReview'
@@ -73,7 +73,7 @@ import {
 import { coAuthorOn, creditBranch, type Memory, recallMade, rememberMade, withoutAgentCredit } from './credit'
 import { envelope } from './envelope'
 import { evidencePaths, taskShown } from './evidence'
-import { AttachRefused, CantMerge, ChangedSinceSeen, GitFailed, NoChangeToOpen, NotFound, PushRefused } from './errors'
+import { AttachRefused, CantMerge, ChangedSinceSeen, GitFailed, NoChangeToOpen, NotFound, OutwardUncertain, PushRefused } from './errors'
 import { conventionsAt, ruleOf, titleFor } from './conventions'
 import { baseBranch, forkOf, workRemotes } from './forks'
 import { makeKeyedLock } from './keyedLock'
@@ -114,6 +114,8 @@ import {
   stoppedLine,
   commentForLead,
   commentLine,
+  describedAs,
+  describedOf,
   fromAlthar,
   leftQueueNote,
   nameOf,
@@ -121,13 +123,17 @@ import {
   queuedNote,
   reviewForLead,
   reviewLine,
+  sameDescription,
   signed,
   gaveUpLine,
   spentLine,
   standing,
+  titleWords,
   unsettledLine,
+  withDescribed,
 } from './pullRequestWords'
 import { change, fact, timestamp } from './records'
+import { retitleTask, TITLE_LENGTH } from './taskTitle'
 import { indexTask } from './Search'
 import { IssueChanges } from './IssueChanges'
 import { Policies, pushesCommits, resolvesConflictsFor, ruleSetOf } from './Policies'
@@ -764,6 +770,38 @@ export class Changes extends Context.Service<
       taskId: string,
       reply: { readonly body: string; readonly threadId: string | null; readonly by: string | null },
     ): Effect.Effect<ChangeSummary, unknown>
+    /**
+     * Gives the task's open pull request at `url` (else its current one)
+     * another title, description, or both, and the task's title follows its
+     * pull request's: `title` is the words alone, which the project's naming
+     * puts the issue's key and the like around, and the task is called by;
+     * `body` is the description's own part, which what Althar put around it
+     * (the review, the issue, its credit) stays around. The agents' credit
+     * goes from both. Says, in words for an agent, what it set; refused, in
+     * those words, where it can't, a host's own words included.
+     */
+    edit(
+      taskId: string,
+      edit: { readonly title?: string; readonly body?: string; readonly url?: string },
+      by: ActorId,
+    ): Effect.Effect<string, unknown>
+    /**
+     * Gives each open pull request Althar opened for the task the title the
+     * task has now, by the project's naming, where it has another: after
+     * the person or the coordinator renamed the task. What it did, or
+     * couldn't, a line each; nothing where no pull request needed it.
+     */
+    followTitle(taskId: string): Effect.Effect<ReadonlyArray<string>>
+    /** As `followTitle`, in the background: what the host refused is said in the task's thread. */
+    followTitleLater(taskId: string): Effect.Effect<void>
+    /**
+     * Sets the descriptions the lead just gave, by repository slug, on the
+     * task's pull requests open already, which were described when they
+     * opened: the lead's part, what Althar put around it staying. One changed
+     * on its host since Althar last set it is left as it is. A line each for
+     * the lead, where there is something to say.
+     */
+    redescribe(taskId: string, given: Readonly<Record<string, string>>, built: string | null): Effect.Effect<ReadonlyArray<string>>
     /** The pull request as it stands, in words for an agent: its state, checks (a failure's log), and what was said. */
     read(taskId: string): Effect.Effect<string, unknown>
     /** The task's changes, as last seen. */
@@ -3152,6 +3190,304 @@ export class Changes extends Context.Service<
           yield* news(taskId)
           return yield* summaryOf(link)
         })
+
+      /**
+       * The title the project's naming gives the task's pull request for
+       * these words, as it gave it when it opened: by the project's rule, else
+       * the worktree's docs, with the issue's key where its host wouldn't link
+       * it; and `After #12:` for one after the task's last in that repository
+       * merged or closed (ADR-034).
+       */
+      const titleOn = (link: LinkRow, snapshot: Snapshot, words: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const where = yield* worktreeOf(link.taskId, snapshot.url)
+          const conventions = where === undefined ? null : yield* conventionsAt(where.path, 'HEAD')
+          const rule = ruleOf('title', (yield* (yield* Policies).current(link.projectId)).rules.titlePattern)
+          const [issue] = yield* sql<{ product: Product; key: string; ref: string }>`
+            SELECT product, key, ref FROM external_links WHERE task_id = ${link.taskId} AND kind = 'issue' LIMIT 1`
+          const sameHost =
+            issue !== undefined &&
+            issue.product === link.product &&
+            issue.ref.toLowerCase().startsWith(`${snapshot.repository.join('/').toLowerCase()}#`)
+          const all = yield* urlsOf(link.taskId)
+          const at = all.findIndex((one) => one.url === snapshot.url)
+          const after = all
+            .slice(0, Math.max(at, 0))
+            .filter((one) => one.state !== 'open' && samePath(one.repository, snapshot.repository))
+            .at(-1)
+          return titleFor(rule ?? conventions?.title?.pattern ?? null, {
+            title: after === undefined ? words : `After ${after.words.prefix}${after.number}: ${words}`,
+            issue: issue === undefined ? null : { key: issue.key, sameHost },
+          })
+        })
+
+      /** The issue's key the task came from, which the naming puts in a title: null where it came from none. */
+      const issueKeyOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [issue] = yield* sql<{ key: string }>`SELECT key FROM external_links WHERE task_id = ${taskId} AND kind = 'issue' LIMIT 1`
+          return issue?.key ?? null
+        })
+
+      /**
+       * The description Althar last set on a pull request, as its host gave it
+       * back, by the receipts of its opening and of its edits that set one: an
+       * edit of the title alone echoes whatever the description was, someone
+       * else's words too, so it never counts. Null where it set none, as on
+       * one a task was attached to.
+       */
+      const lastSetBody = (link: LinkRow, url: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ body: string | null }>`
+            SELECT json_extract(m.response, '$.body') AS body FROM mutation_receipts m JOIN work_items w ON w.id = m.work_item_id
+            WHERE m.state = 'confirmed' AND m.response IS NOT NULL AND (
+              (m.operation = 'edit_change' AND w.subject_type = 'external_link' AND w.subject_id = ${link.id}
+                AND json_extract(m.request, '$.body') IS NOT NULL)
+              OR (m.operation = 'open_change' AND w.subject_type = 'task' AND w.subject_id = ${link.taskId}
+                AND lower(json_extract(m.response, '$.url')) = ${url.toLowerCase()}))
+            ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1`
+          return row?.body ?? null
+        })
+
+      /**
+       * Sets a pull request's title or description on its host, kept with a
+       * receipt, which says what Althar last set; its snapshot takes the
+       * title as the host gave it back. A refusal is the host's, in its words.
+       */
+      const editOnHost = (
+        link: LinkRow,
+        on: { readonly snapshot: Snapshot; readonly host: CodeHost; readonly repository: Repository; readonly now: ChangeRequest },
+        edit: { readonly title?: string; readonly body?: string },
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const digest = createHash('sha256')
+            .update(`${edit.title ?? ''}\0${edit.body ?? ''}\0${yield* Clock.currentTimeMillis}`)
+            .digest('hex')
+            .slice(0, 32)
+          const edited = yield* outward({
+            projectId: link.projectId,
+            subject: { type: 'external_link', id: link.id },
+            target: `${on.host.product}:${on.snapshot.repository.join('/')}`,
+            operation: 'edit_change',
+            key: `edit_change:${link.id}:${digest}`,
+            request: { number: on.snapshot.number, ...edit },
+            retryable: false,
+            perform: on.host.editChange(on.repository, on.now, edit),
+            encode: (answer) => answer,
+            decode: (kept) => Option.getOrUndefined(Schema.decodeUnknownOption(ChangeRequest)(kept)),
+          })
+          const [row] = yield* sql<{ snapshot: string }>`SELECT snapshot FROM external_links WHERE id = ${link.id}`
+          const seen = row === undefined ? Option.none() : yield* Effect.option(decodeSnapshot(row.snapshot))
+          if (Option.isSome(seen) && seen.value.title !== edited.title)
+            yield* change('external_links', link.id, {
+              snapshot: JSON.stringify({ ...seen.value, title: edited.title }),
+              updatedAt: yield* timestamp,
+            })
+          yield* news(link.taskId)
+          yield* touchCard(link.taskId)
+          return edited
+        })
+
+      /**
+       * Whether an edit's answer was lost on the way, so the host may have
+       * made it: its receipt stays uncertain, and nobody may say it didn't.
+       */
+      const editUnsure = (error: unknown) =>
+        error instanceof OutwardUncertain ||
+        (error instanceof ConnectorFailed && (error.reason === 'unreachable' || error.reason === 'invalid_response'))
+
+      /** A host's refusal, in its words, for whoever asked the edit; or, where its answer was lost, that nobody knows yet. */
+      const editRefused = (host: CodeHost, name: string, url: string, error: ConnectorFailed | OutwardUncertain) =>
+        new ToolRefused({
+          message: editUnsure(error)
+            ? `Althar couldn't tell whether ${hostName(host)} changed ${name}${error instanceof ConnectorFailed ? `: ${error.message}` : ''}. The task's title stays as it was. Read it with read_pull_request before saying it changed or didn't; edit_pull_request sets it again if it should.`
+            : `${hostName(host)} wouldn't change ${name}: ${(error as ConnectorFailed).message}. Its title and description stay as they were, and so does the task's title. Tell the person what you would set; they can set it on ${url}.`,
+        })
+
+      const edit = (taskId: string, asked: { readonly title?: string; readonly body?: string; readonly url?: string }, by: ActorId) =>
+        Effect.gen(function* () {
+          if (asked.title === undefined && asked.body === undefined)
+            return yield* new ToolRefused({ message: 'Give a title, a description, or both.' })
+          const { link, snapshot, host, repository } = yield* current(taskId, asked.url)
+          const name = nameOf(snapshot)
+          const now = yield* host.change(repository, snapshot.number)
+          if (now.state !== 'open')
+            return yield* new ToolRefused({ message: `${name} is ${now.state}, so its title and description stay as they are.` })
+          const words = asked.title === undefined ? undefined : titleWords(asked.title, agentNames, yield* issueKeyOf(taskId))
+          if (words === '') return yield* new ToolRefused({ message: 'Give it a title: what the change does, in a few words.' })
+          if (words !== undefined && words.length > TITLE_LENGTH)
+            return yield* new ToolRefused({
+              message: `That title is ${words.length} characters, and the task's card takes it too. Keep it to ${TITLE_LENGTH}: what the change does, in a few words.`,
+            })
+          const title = words === undefined ? undefined : yield* titleOn(link, snapshot, words)
+          let body: string | undefined
+          if (asked.body !== undefined) {
+            const where = yield* worktreeOf(taskId, snapshot.url)
+            const template = where === undefined ? null : ((yield* conventionsAt(where.path, 'HEAD')).template?.text ?? null)
+            const described = describedAs(withoutAgentCredit(asked.body, agentNames), template)
+            if (described === '') return yield* new ToolRefused({ message: 'Say what the description should say.' })
+            body = withDescribed(now.body, described)
+          }
+          const set = {
+            ...(title === undefined || title === now.title ? {} : { title }),
+            ...(body === undefined || sameDescription(body, now.body) ? {} : { body }),
+          }
+          if (set.title !== undefined || set.body !== undefined)
+            yield* editOnHost(link, { snapshot, host, repository, now }, set).pipe(
+              Effect.catchIf(
+                (error) => error instanceof ConnectorFailed || error instanceof OutwardUncertain,
+                (error) => Effect.fail(editRefused(host, name, now.url, error as ConnectorFailed | OutwardUncertain)),
+              ),
+            )
+          // The task is called what its pull request is, in the words given: its card follows once the host took them.
+          const renamed =
+            words === undefined
+              ? false
+              : yield* retitleTask({
+                  envelope: yield* envelope('task.rename', { taskId, title: words }, undefined, by),
+                  taskId,
+                  title: words,
+                })
+          const said = [
+            ...(title === undefined
+              ? []
+              : [
+                  set.title === undefined ? `${name} is called “${title}” already.` : `${name} is called “${title}” now.`,
+                  renamed ? `The task's card says “${words}”.` : '',
+                ]),
+            ...(body === undefined
+              ? []
+              : [set.body === undefined ? `${name}'s description says that already.` : `${name} has the new description.`]),
+          ]
+          return said.filter((line) => line !== '').join(' ')
+        })
+
+      /** What following the task's title did on each open pull request Althar opened for it, and what a host refused. */
+      const followTitleOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${taskId}`
+          const said: Array<string> = []
+          const refused: Array<string> = []
+          if (task === undefined) return { said, refused }
+          for (const link of yield* linksOf(taskId)) {
+            const seen = Option.getOrUndefined(yield* Effect.option(decodeSnapshot(link.snapshot)))
+            // One a task follows that someone else opened keeps the title its author gave it: only an edit asked for changes it.
+            if (seen === undefined || seen.state !== 'open' || seen.attached === true || link.connectionId === null) continue
+            yield* Effect.gen(function* () {
+              const { snapshot, host, repository } = yield* current(taskId, seen.url)
+              const now = yield* host.change(repository, snapshot.number)
+              if (now.state !== 'open') return
+              const title = yield* titleOn(link, snapshot, task.title)
+              if (title === now.title) return
+              yield* editOnHost(link, { snapshot, host, repository, now }, { title })
+              said.push(`${nameOf(snapshot)} is called “${title}” now.`)
+            }).pipe(
+              Effect.catch((error) =>
+                Effect.sync(() => {
+                  refused.push(
+                    editUnsure(error)
+                      ? `Althar couldn’t tell whether ${nameOf(seen)} took the task’s title: its host’s answer was lost. Look at it before saying either way.`
+                      : `${nameOf(seen)} kept its title: ${refusalOf(error) ?? 'Althar couldn’t reach it.'}`,
+                  )
+                }),
+              ),
+              contained('Changes.followTitle', () => {
+                refused.push(`${nameOf(seen)} kept its title: Althar couldn’t reach it.`)
+              }),
+            )
+          }
+          return { said, refused }
+        })
+
+      const followTitle = (taskId: string) =>
+        Effect.map(followTitleOf(taskId), ({ said, refused }) => [...said, ...refused]).pipe(
+          Effect.catchCause((cause) => Effect.as(Effect.logWarning('A task’s pull request did not follow its title', cause), [])),
+        )
+
+      /** As `followTitle`, in the background; what a host refused goes in the task's thread, where the person renamed it. */
+      const followTitleLater = (taskId: string) =>
+        Effect.asVoid(
+          Effect.forkIn(
+            provide(
+              Effect.gen(function* () {
+                const { refused } = yield* followTitleOf(taskId)
+                if (refused.length === 0) return
+                const sql = yield* SqlClient.SqlClient
+                const [thread] = yield* sql<{ id: string; projectId: ProjectId }>`
+                  SELECT id, project_id FROM threads WHERE task_id = ${taskId} AND kind = 'task' LIMIT 1`
+                if (thread === undefined) return
+                for (const line of refused)
+                  yield* addItem({ projectId: thread.projectId, threadId: thread.id }, 'notice', {
+                    source: 'runtime',
+                    severity: 'warning',
+                    title: line,
+                  })
+              }).pipe(Effect.catchCause((cause) => Effect.logWarning('A task’s pull request did not follow its title', cause))),
+            ),
+            scope,
+          ),
+        )
+
+      /**
+       * Sets the descriptions a lead just gave on the task's open pull
+       * requests, by repository slug: its part of each, as it would open with
+       * them, and what Althar put around it as it is. One changed on its host
+       * since Althar last set it, or one Althar never described, is left.
+       */
+      const redescribe = (taskId: string, given: Readonly<Record<string, string>>, built: string | null) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const lines: Array<string> = []
+          for (const link of yield* linksOf(taskId)) {
+            const seen = Option.getOrUndefined(yield* Effect.option(decodeSnapshot(link.snapshot)))
+            if (seen === undefined || seen.state !== 'open' || link.connectionId === null) continue
+            const [where] = yield* sql<{ slug: string; path: string }>`
+              SELECT b.slug, w.path FROM repository_changes c JOIN workspaces w ON w.id = c.workspace_id
+              JOIN repository_bindings b ON b.id = w.binding_id
+              WHERE c.pull_request_url = ${seen.url} AND w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} LIMIT 1`
+            const text = where === undefined ? undefined : given[where.slug]
+            if (where === undefined || text === undefined) continue
+            const name = nameOf(seen)
+            const line = yield* Effect.gen(function* () {
+              const { snapshot, host, repository } = yield* current(taskId, seen.url)
+              const now = yield* host.change(repository, snapshot.number)
+              if (now.state !== 'open') return null
+              const last = yield* lastSetBody(link, now.url)
+              if (last === null)
+                return `${name} wasn't described by Althar, so its description stays as it is: edit_pull_request sets yours on it, if it should.`
+              if (!sameDescription(last, now.body))
+                return `${name}'s description was changed on ${hostName(host)} since Althar set it, so it stays as it is: edit_pull_request sets yours over it, if it should.`
+              const { template } = yield* conventionsAt(where.path, 'HEAD')
+              const described = describedOf({
+                built: built === null ? null : withoutAgentCredit(built, agentNames),
+                lead: null,
+                template: template?.text ?? null,
+                written: withoutAgentCredit(text, agentNames),
+              })
+              const body = withDescribed(now.body, described)
+              if (described === '' || sameDescription(body, now.body)) return null
+              yield* editOnHost(link, { snapshot, host, repository, now }, { body })
+              return `${name} has your new description.`
+            }).pipe(
+              Effect.catch((error) =>
+                Effect.succeed(
+                  editUnsure(error)
+                    ? `Althar couldn't tell whether ${name} took your new description: its host's answer was lost. Read it with read_pull_request before saying either way.`
+                    : `${name} kept its description: ${refusalOf(error) ?? 'Althar couldn’t reach it.'}`,
+                ),
+              ),
+              contained('Changes.redescribe', () => `${name} kept its description: Althar couldn’t reach it.`),
+            )
+            if (line !== null) lines.push(line)
+          }
+          return lines
+        }).pipe(
+          Effect.catchCause((cause) => Effect.as(Effect.logWarning('A lead’s description did not reach its pull request', cause), [])),
+        )
 
       /** The ids of the replies Althar posted on a change, from their receipts. */
       const repliesOf = (linkId: string) =>
@@ -6237,6 +6573,12 @@ export class Changes extends Context.Service<
         pull_request: Schema.optional(Schema.NullOr(Schema.Union([Schema.Number, Schema.String]))),
       })
 
+      const EditAsked = Schema.Struct({
+        title: Schema.optional(Schema.NullOr(Schema.String)),
+        description: Schema.optional(Schema.NullOr(Schema.String)),
+        pull_request: Schema.optional(Schema.NullOr(Schema.Union([Schema.Number, Schema.String]))),
+      })
+
       const PushAsked = Schema.Struct({
         pull_request: Schema.optional(Schema.NullOr(Schema.Union([Schema.Number, Schema.String]))),
       })
@@ -6730,6 +7072,47 @@ export class Changes extends Context.Service<
             }),
         ),
         leadTool(
+          'edit_pull_request',
+          `Sets the title, the description, or both, of the task's own pull request, the one it opened or follows, on its host. title is the words alone, at most ${TITLE_LENGTH} characters: the project's naming puts the issue's key and the like around them, as when it opened, and the task's card takes the same words. description replaces what the pull request says of the change, in the repository's template where it has one; the review, the issue's link and Althar's line stay where Althar put them. When what the task does has changed, such as after cutting it down or turning it another way, retitle it yourself rather than asking the person to. A description you give finish_step later reaches an open pull request by itself. Where the host refuses, as on a repository the account can't change, you get its words: tell the person what you would set. In a task of several repositories, pull_request names the one, as read_pull_request names it: web#3.`,
+          {
+            type: 'object',
+            properties: {
+              title: { type: 'string', maxLength: TITLE_LENGTH },
+              description: { type: 'string' },
+              pull_request: { type: 'string' },
+            },
+          },
+          (taskId, input) =>
+            Effect.gen(function* () {
+              const asked = yield* Schema.decodeUnknownEffect(EditAsked)(input).pipe(
+                Effect.mapError((error) => new ToolRefused({ message: `Althar couldn't read that: ${error.message}` })),
+              )
+              const seen = yield* urlsOf(taskId)
+              const named = asked.pull_request == null ? null : String(asked.pull_request).trim().toLowerCase()
+              const matching = seen.filter((candidate) => named !== null && isNamed(candidate, named))
+              const [one] = matching
+              // A name given must be one of the task's, with one pull request as with several: another's is never edited.
+              if ((named !== null || seen.length > 1) && (one === undefined || matching.length > 1))
+                return yield* new ToolRefused({
+                  message:
+                    seen.length > 1
+                      ? `This task has several pull requests: ${seen.map(shortNameOf).join(', ')}. Say which with pull_request, as one of those.`
+                      : `This task's pull request is ${seen.map(nameOf).join('')}, and it edits only its own. Leave pull_request out, or name it so.`,
+                })
+              return yield* locked(taskId)(
+                edit(
+                  taskId,
+                  {
+                    ...(asked.title == null ? {} : { title: asked.title }),
+                    ...(asked.description == null ? {} : { body: asked.description }),
+                    ...(one === undefined ? {} : { url: one.url }),
+                  },
+                  instance.systemId,
+                ),
+              )
+            }),
+        ),
+        leadTool(
           'push_to_pull_request',
           "Pushes what you've committed on the task's branch to its pull request, once it's open, where the project has Althar push a lead's commits by itself; otherwise, or where something holds them (someone else pushed to it, the person stopped you), asks the person: Althar shows them the commits that would go up, from the pull request's head to your branch's, with a Push button, and tells you once they've pushed. Use it when the person asks you to push, or when what you've committed should go up to the pull request. Commit first: only commits go up. What it says is what happened: don't say it's up unless it says it pushed. In a task of several repositories, pull_request names the one, as read_pull_request names it: web#3.",
           { type: 'object', properties: { pull_request: { type: 'string' } } },
@@ -6910,6 +7293,10 @@ export class Changes extends Context.Service<
         opensNext: (taskId, opening) => Effect.sync(() => void (opening ? nextOpening.add(taskId) : nextOpening.delete(taskId))),
         pushBranch: (taskId, heads) => provide(locked(taskId)(pushBranch(taskId, heads))),
         reply: (taskId, input) => provide(locked(taskId)(reply(taskId, input))),
+        edit: (taskId, asked, by) => provide(locked(taskId)(edit(taskId, asked, by))),
+        followTitle: (taskId) => provide(locked(taskId)(followTitle(taskId))),
+        followTitleLater,
+        redescribe: (taskId, given, built) => provide(locked(taskId)(redescribe(taskId, given, built))),
         read: (taskId) => provide(read(taskId)),
         ofTask: (taskId) => provide(Effect.flatMap(linksOf(taskId), (links) => Effect.forEach(links, summaryOf))),
         pullRequest: (taskId, url) =>
