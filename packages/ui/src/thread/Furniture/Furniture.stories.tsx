@@ -19,6 +19,10 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const ContextCompacted: Story = {}
+/** A task's folder whose link to its repository broke, as after moving to another build with the same profile, repaired by Althar (ADR-099). */
+export const FolderRepaired: Story = {
+  args: { icon: 'folder', children: 'Althar repaired this task’s folder link to the repository.', action: undefined, onAction: undefined },
+}
 /** You interrupted a turn with the composer's square; the task kept going. */
 export const InterruptedByYou: Story = {
   render: () => (

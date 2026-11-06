@@ -131,7 +131,8 @@ export class WorktreeRepair extends Context.Service<
               severity: done.repaired ? 'info' : 'warning',
               title: done.repaired ? repairedWords : unrepairedWords(done.said),
               description: `${done.copy ? 'The copy its reviews read' : 'Its folder'}, ${homeShortened(done.folder)}.`,
-              role: 'folder',
+              // Repaired, it is a line across the thread, as its folder going or coming back is; not repaired, a warning that is the person's.
+              ...(done.repaired ? { role: 'folder' as const } : {}),
             })
         })
 

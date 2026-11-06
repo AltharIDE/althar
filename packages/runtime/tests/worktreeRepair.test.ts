@@ -158,7 +158,7 @@ const folderLines = (threadId: string) =>
     }>`SELECT content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'notice' ORDER BY sequence`
     return rows
       .map((row) => JSON.parse(row.content) as { title: string; severity: string; description: string | null; role?: string })
-      .filter((notice) => notice.role === 'folder')
+      .filter((notice) => /folder link to the repository/.test(notice.title))
   })
 
 const factsOf = (workspaceId: string) =>
@@ -181,6 +181,7 @@ describe('a task’s worktree whose link broke, in the runtime', () => {
       const [line] = yield* folderLines(task.threadId)
       assert.strictEqual(line?.title, repairedWords)
       assert.strictEqual(line?.severity, 'info')
+      assert.strictEqual(line?.role, 'folder')
       const [recorded] = yield* factsOf(task.workspaceId)
       assert.strictEqual(recorded?.type, 'workspace.repaired')
       assert.deepInclude(recorded?.payload, { folder: task.worktree, copy: false, why: 'gitdir' })
@@ -250,6 +251,9 @@ describe('a task’s worktree whose link broke, in the runtime', () => {
         line?.title ?? '',
         /^Althar couldn’t repair this task’s folder link to the repository: git worktree: unable to locate repository/,
       )
+      // A warning of Althar's in the thread, not a line across it as a repaired folder is.
+      assert.strictEqual(line?.severity, 'warning')
+      assert.isUndefined(line?.role)
       assert.strictEqual((yield* factsOf(task.workspaceId))[0]?.type, 'workspace.repair_failed')
       // Not tried again on the next command that fails there.
       yield* Effect.flip(runtimeGit(task.worktree, 'status'))
