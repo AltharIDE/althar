@@ -91,6 +91,8 @@ export type RoundBlock =
   | { readonly kind: 'althar'; readonly id: string; readonly text: string; readonly tone: 'info' | 'warning' }
   /** Its folder went, or came back: a line across the thread, a change of scene (ADR-056). */
   | { readonly kind: 'folder'; readonly id: string; readonly text: string }
+  /** What a lead's agent could see of the person's skills and the repository's. */
+  | { readonly kind: 'skills'; readonly id: string; readonly title: string; readonly skills: NonNullable<NoticeContent['skills']> }
   /**
    * A reviewer's verdict and findings, in its own voice, on the model its review ran; with the lead's round settling them,
    * where a later round of the lead's handed the work over since.
@@ -138,7 +140,13 @@ export const countsOf = (steps: ReadonlyArray<WorkStep>): string => {
     .size
   const edited = new Set(tools.filter((tool) => CHANGES.has(tool.toolKind)).map((tool) => tool.target)).size
   const ran = tools.filter((tool) => tool.toolKind === ToolKind.Run).length
+  const skills = (reported: boolean) =>
+    new Set(tools.flatMap((tool) => (tool.state === ToolState.Done && tool.skills?.reported === reported ? tool.skills.names : []))).size
+  const loaded = skills(true)
+  const readSkills = skills(false)
   return [
+    loaded > 0 ? `loaded ${plural(loaded, 'skill', 'skills')}` : null,
+    readSkills > 0 ? `read ${plural(readSkills, 'skill', 'skills')}` : null,
     edited > 0 ? `edited ${plural(edited, 'file', 'files')}` : null,
     read > 0 ? `read ${plural(read, 'file', 'files')}` : null,
     looked > 0 ? `looked at ${plural(looked, 'screenshot', 'screenshots')}` : null,
@@ -324,6 +332,11 @@ export const roundsOf = (
       }
       case 'divider': {
         const content = noticeOf(block)
+        // Before the round it may arrive during, which it doesn't end: a session says what it could see once it has started.
+        if (content.role === 'skills') {
+          out.push({ kind: 'skills', id: block.id, title: content.title, skills: content.skills ?? [] })
+          return
+        }
         const role = roleOf(content)
         if (role === 'relayed') {
           close(false)
@@ -375,17 +388,20 @@ const handsOver = (block: RoundBlock | undefined): block is Round =>
 /**
  * Each review with the round its lead settled it in, right after it, where a
  * later round handed the work over again: the latest handoff stands open.
+ * What a session that started between them could see stays on its line, after the review's.
  */
 const withSettled = (blocks: ReadonlyArray<RoundBlock>): ReadonlyArray<RoundBlock> => {
   const latest = blocks.findLastIndex(handsOver)
   const out: Array<RoundBlock> = []
   for (let at = 0; at < blocks.length; at++) {
     const block = blocks[at]
-    const next = blocks[at + 1]
     if (block === undefined) continue
-    if (block.kind === 'verdict' && handsOver(next) && next.report?.result.step === 'settle' && !next.live && at + 1 < latest) {
-      out.push({ ...block, settle: next })
-      at += 1
+    let ahead = at + 1
+    while (blocks[ahead]?.kind === 'skills') ahead += 1
+    const next = blocks[ahead]
+    if (block.kind === 'verdict' && handsOver(next) && next.report?.result.step === 'settle' && !next.live && ahead < latest) {
+      out.push({ ...block, settle: next }, ...blocks.slice(at + 1, ahead))
+      at = ahead
     } else out.push(block)
   }
   return out

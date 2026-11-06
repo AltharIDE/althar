@@ -129,8 +129,10 @@ function TabsBar({
           <QuickSettings open={quick} onOpenChange={onQuick} onSettings={tabs.openSettings} />
         </>
       }
-      // macOS draws its traffic lights over the bar; elsewhere the bar draws the window's own buttons.
-      lights={host.platform === 'darwin' ? 'space' : 'drawn'}
+      // macOS draws its traffic lights over the bar; elsewhere the bar draws the window's own buttons as the desktop has them, or
+      // none where the window manager draws the frame or a tiling compositor has none (useWindowChrome).
+      lights={chrome.lights}
+      {...(chrome.controls === undefined ? {} : { controls: chrome.controls })}
       text={{ newProjectKbd: modKey('N') }}
       maximized={chrome.window?.maximized === true}
       onCloseWindow={() => host.window('close')}

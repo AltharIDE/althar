@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { type CommandEnvelope, Ids, newId, type ProjectId, type WorksIn } from '@althar/domain'
 import { Commands, type CommandIdReused, Ledger, type RevisionConflict, type RowNotFound } from '@althar/persistence-sqlite'
 import {
+  adapterNode,
   type AgentConnection,
   type AgentDefinition,
   type AgentExited,
@@ -13,11 +14,13 @@ import {
   type AgentSession,
   connect,
   type ConfigOption,
+  inFlatpakSandbox,
   type PermissionDecision,
   type PermissionRequest,
   type Question,
   type SessionEvent,
   type SessionOptions,
+  skillsIn,
   type StopReport,
 } from '@althar/provider-adapters'
 import {
@@ -1656,6 +1659,7 @@ export class Sessions extends Context.Service<
             deliveryId: turnId,
             folders: foldersOf(thread),
             sandboxed: running.requestContext.sandbox !== undefined,
+            ...(thread.role === 'task' ? { lead: running.entry.definition.name } : {}),
           })
           // What it was saying between turns ends here: what follows belongs after this turn's input.
           yield* running.settleBetween
@@ -2612,11 +2616,28 @@ export class Sessions extends Context.Service<
             sessionId,
             folders: foldersOf(thread),
             sandboxed: requestContext.sandbox !== undefined,
+            ...(thread.role === 'task' ? { lead: definition.name } : {}),
           })
           const heard = yield* betweenTurns(between, scope)
           running.settleBetween = heard.close
           // A turn that already started records itself; between turns, this one does.
           running.recording ??= between
+          // An agent that doesn't say what it could see: read where it reads, out on the device as a Flatpak's home is the device's by path (ADR-027). A review's lead loads none of the repository's.
+          const launched = definition.launch(adapterNode())
+          if (thread.role === 'task' && thread.review === null && definition.skillFolders !== undefined)
+            yield* between
+              .record({
+                _tag: 'SkillsSeen',
+                skills: skillsIn(
+                  definition.skillFolders({
+                    env: launched.onDevice === undefined ? process.env : {},
+                    homeDir: homedir(),
+                    cwd: thread.cwd,
+                    inSandbox: inFlatpakSandbox(launched),
+                  }),
+                ),
+              })
+              .pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record the skills an agent could see', cause)))
           yield* Effect.forkIn(
             run(
               Stream.runForEach(agent.events, (event) =>
@@ -3278,7 +3299,7 @@ export class Sessions extends Context.Service<
             "To get a change made, use Althar's tools:",
             `- draft_task, with a title that says what should change in a few words, at most 60 characters, and a description with what the lead needs: the context, where to look, constraints, and what done looks like.${repositories.length > 1 ? ' Name the repositories it changes, as repositories; its lead can still read the others.' : ''}`,
             '- list_models, for the models you can give work to now, with how each scores, whether a plan pays for it, and the efforts it takes.',
-            '- propose_plan, for the task you drafted: the model that implements it (its lead) and why, in a sentence, and the model that reviews it, or no review for something trivial; each with an effort where it matters. The reviewer only reads; the lead then settles what it finds. The plan starts on its own after 25 seconds, unless the person changes or holds it.',
+            '- propose_plan, for the task you drafted: the model that implements it (its lead) and why, in a sentence, and the model that reviews it, or no review for something trivial; each with an effort where it matters. A change of a few lines is planned small, with no review and its lead at low effort, so it starts at once in a place kept for small tasks. The reviewer only reads; the lead then settles what it finds. The plan starts on its own after 25 seconds, unless the person changes or holds it.',
             towardLine,
             `- works_in, on draft_task, propose_plan and start_task: where the task works. Local is the person's own checkout, with their builds, simulators and services, one task at a time and beside their own edits; a worktree is a folder of its own, side by side with other tasks, built from cold. This project starts tasks ${worksIn === 'checkout' ? 'Local' : 'in a worktree'} unless you say. When another task works Local, plan the next one in a worktree and say why in works_in_why, unless it needs the person's setup and can wait; the tools say who works Local now.`,
             '- screenshot, to see a page served on this computer, such as what run_project runs or Storybook: Althar draws it headless and gives it back to you as a picture, at a viewport you choose, the whole page or one element.',

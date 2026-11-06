@@ -10,6 +10,7 @@ import {
   ReviewLine,
   Round,
   shotName,
+  SkillsSeen,
   Thinking,
   ThreadDivider,
   WorkLine,
@@ -364,6 +365,8 @@ export function TaskThread({ rounds, versionOf, settledOf, reviewing = null, set
             {block.text}
           </ThreadDivider>
         )
+      case 'skills':
+        return <SkillsSeen key={block.id} title={block.title} skills={block.skills} data-item={block.id} />
       case 'verdict': {
         // One line: who reviewed, what it found, what became of it; opened, its findings and words, and the lead settling them.
         const settled = settledOf?.(block.id)

@@ -9,6 +9,8 @@ import { locations as locationsOf } from './locations'
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
 import { type AppPreferences, DEFAULT_PREFERENCES, doNotTrack, isPreferenceKey } from './appPreferences'
 import { FIRST_SCHEME_WAIT, firstScheme, followDesktopScheme, type Scheme, themeSourceFor } from './colorScheme'
+import { CHROME_ARG, decideChrome, type DesktopChrome, parseHexAccent } from './desktop'
+import { chromeOf, FIRST_CHROME_WAIT, type FollowedChrome, followDesktopChrome, systemSources } from './desktopChrome'
 import { keepingAwake } from './awake'
 import { attachedOf, clipboardPaths, pastedOf, rawFormat } from './attachments'
 import { tokenIn } from './clipboard'
@@ -60,6 +62,7 @@ import {
   protocol,
   safeStorage,
   shell,
+  systemPreferences,
   type UtilityProcess,
   utilityProcess,
 } from 'electron'
@@ -697,6 +700,56 @@ const paintPaper = () => {
 }
 nativeTheme.on('updated', paintPaper)
 
+/*
+ * The desktop the windows sit on, and how they are dressed for it (desktopChrome.ts, ADR-098): read once the app is ready, handed
+ * to each window as it opens so its first frame draws its buttons where they go, and sent to every window as the desktop changes.
+ * Whether the windows have the window manager's own frame is decided as the first one opens, from what is known then: a window's
+ * frame can't change once it is open, and every window of a run has the same.
+ */
+let desktopLook: FollowedChrome | undefined
+let framed: boolean | undefined
+const chromeNow = (): DesktopChrome | undefined =>
+  desktopLook === undefined ? undefined : chromeOf(desktopLook.current(), framed === true)
+const accentOffLinux = () => ({
+  systemAccent: () => parseHexAccent(systemPreferences.getAccentColor()),
+  onSystemAccent: (listener: () => void) => {
+    if (process.platform === 'darwin') {
+      const id = systemPreferences.subscribeNotification('AppleColorPreferencesChangedNotification', listener)
+      return () => systemPreferences.unsubscribeNotification(id)
+    }
+    systemPreferences.on('accent-color-changed', listener)
+    return () => void systemPreferences.off('accent-color-changed', listener)
+  },
+})
+const startDesktopLook = () => {
+  desktopLook ??= followDesktopChrome(
+    systemSources({
+      platform: process.platform,
+      env: process.env,
+      home: homedir(),
+      profile: locations().profile,
+      ...(process.platform === 'linux' ? {} : accentOffLinux()),
+    }),
+  )
+  desktopLook.follow(() => {
+    const chrome = chromeNow()
+    for (const window of windows) if (!window.isDestroyed()) window.webContents.send('althar:chrome', chrome)
+  })
+  process.once('exit', () => desktopLook?.stop())
+  return desktopLook
+}
+
+/** Whether the windows of this run have the window manager's frame: decided once, as the first opens. */
+const framedNow = () => {
+  framed ??= process.platform === 'linux' && desktopLook !== undefined && decideChrome(desktopLook.current().facts).kind === 'frame'
+  return framed
+}
+
+const chromeArgs = () => {
+  const chrome = chromeNow()
+  return chrome === undefined ? [] : [CHROME_ARG + JSON.stringify(chrome)]
+}
+
 const openWindow = () => {
   const window = new BrowserWindow({
     width: 1280,
@@ -704,10 +757,13 @@ const openWindow = () => {
     minWidth: 880,
     minHeight: 600,
     show: false,
-    // Off a Mac the window is frameless, its own strip is the chrome (windowOptions.ts), and on Linux it carries Althar's icon.
-    ...windowOptions(process.platform, windowIcon(), nativeTheme.shouldUseDarkColors),
+    // Off a Mac the window is frameless, its own strip is the chrome (windowOptions.ts), but where a Linux window manager draws a good
+    // frame of its own (desktop.ts); there it carries Althar's icon.
+    ...windowOptions(process.platform, windowIcon(), nativeTheme.shouldUseDarkColors, framedNow()),
     webPreferences: {
       preload: join(here, '../preload/preload.cjs'),
+      // What the desktop says of the window's buttons, for its first frame (desktop.ts); changes come as althar:chrome.
+      additionalArguments: chromeArgs(),
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
@@ -992,10 +1048,17 @@ void ready.then(() => {
   }
   // Once the preferences are read, so the first window opens in the scheme the person chose, never the other one first;
   // on Linux, matching the desktop, once it has said its scheme too (a moment at most), since Electron can't tell it.
+  // And once the desktop has said where its window buttons go, so they don't move as the window opens (a moment at most too).
+  const look = startDesktopLook()
   void preferencesRead
     .catch(() => undefined)
     .then(() =>
-      process.platform === 'linux' && preferences.appearance === 'system' ? firstScheme(followDesktopScheme, FIRST_SCHEME_WAIT) : undefined,
+      Promise.all([
+        process.platform === 'linux' && preferences.appearance === 'system'
+          ? firstScheme(followDesktopScheme, FIRST_SCHEME_WAIT)
+          : undefined,
+        look.first(FIRST_CHROME_WAIT),
+      ]),
     )
     .then(() => {
       if (!background && windows.size === 0) openWindow()

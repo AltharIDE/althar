@@ -113,6 +113,24 @@ describe('reviews, and the lead settling them', () => {
     expect(rounds(blocks).at(-1)).toMatchObject({ result: { text: 'Named it better.' } })
   })
 
+  it('folds a settling round its session said what it could see before, keeping that line after the review’s', () => {
+    const seen = when(
+      items.notice(
+        {
+          source: 'runtime',
+          title: 'Codex could see a skill',
+          role: 'skills',
+          skills: [{ name: 'mine', path: '/h/mine/SKILL.md', from: 'person' }],
+        },
+        null,
+      ),
+      6,
+    )
+    const blocks = read([...thread.slice(0, 5), seen, ...thread.slice(5)])
+    expect(blocks.map((block) => block.kind)).toEqual(['you', 'round', 'verdict', 'skills', 'verdict', 'round'])
+    expect(blocks[2]).toMatchObject({ settle: { kind: 'round', result: { text: 'Capped it.' } } })
+  })
+
   it('leaves a review with no round settling it after it, or one still at work, as it is', () => {
     expect(read(thread.slice(0, 5)).filter((block) => block.kind === 'verdict')).toMatchObject([{ settle: null }])
     // The lead still settling the second review: the first's settling folds, the round at work stands open.

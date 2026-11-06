@@ -12,7 +12,7 @@ import { IconButton } from '../../primitives/IconButton/IconButton'
 import { Menu, MenuGroup, MenuItem, MenuSeparator } from '../../primitives/Menu/Menu'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
-import { WindowButtons } from '../WindowButtons/WindowButtons'
+import { dotControls, type WindowControls, WindowButtons } from '../WindowButtons/WindowButtons'
 import s from './ProjectTabs.module.css'
 import { type Dragging, useReorder } from '../../lib/useReorder'
 
@@ -138,6 +138,8 @@ export type ProjectTabsProps = RootProps<
     onToggleMaximize?: () => void
     /** The window is maximized: the third button restores it. */
     maximized?: boolean
+    /** With lights='drawn': which buttons, whose manner, at which end (the desktop's, ADR-098); Althar's dots at the start where not given. */
+    controls?: WindowControls
     text?: Partial<ProjectTabsText>
   }
 >
@@ -184,6 +186,7 @@ export function ProjectTabs({
   onMinimize,
   onToggleMaximize,
   maximized = false,
+  controls = dotControls,
   className,
   text,
   ...rest
@@ -240,25 +243,32 @@ export function ProjectTabs({
     list,
     onReorder,
   })
+  const windowButtons = (side: 'start' | 'end') =>
+    lights !== 'drawn' || controls[side].length === 0 ? null : (
+      <WindowButtons
+        look={controls.look}
+        {...(controls.tone === undefined ? {} : { tone: controls.tone })}
+        buttons={controls[side]}
+        side={side}
+        onClose={onCloseWindow}
+        onMinimize={onMinimize}
+        onToggleMaximize={onToggleMaximize}
+        maximized={maximized}
+        text={{ close: t.closeWindow, minimize: t.minimizeWindow, maximize: t.maximizeWindow, restore: t.restoreWindow }}
+      />
+    )
+  const windowEnd = windowButtons('end')
   return (
-    <header className={cx(s.strip, className)} data-drag="" {...rest}>
-      {lights === 'drawn' ? (
-        <WindowButtons
-          onClose={onCloseWindow}
-          onMinimize={onMinimize}
-          onToggleMaximize={onToggleMaximize}
-          maximized={maximized}
-          text={{ close: t.closeWindow, minimize: t.minimizeWindow, maximize: t.maximizeWindow, restore: t.restoreWindow }}
-        />
-      ) : (
-        lights !== 'none' && (
-          <span className={s.lights} aria-hidden="true">
-            <i />
-            <i />
-            <i />
-          </span>
-        )
-      )}
+    <header className={cx(s.strip, windowEnd !== null && s[`end-${controls.look}`], className)} data-drag="" {...rest}>
+      {lights === 'drawn'
+        ? windowButtons('start')
+        : lights !== 'none' && (
+            <span className={s.lights} aria-hidden="true">
+              <i />
+              <i />
+              <i />
+            </span>
+          )}
       <nav className={s.nav} aria-label={t.label}>
         <ul className={s.pinned}>
           <li className={cx(s.tab, s.home, current === null && s.current)}>
@@ -356,6 +366,7 @@ export function ProjectTabs({
         )}
       </nav>
       {end !== undefined && <div className={s.end}>{end}</div>}
+      {windowEnd}
     </header>
   )
 }

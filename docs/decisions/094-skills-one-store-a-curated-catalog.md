@@ -1,6 +1,8 @@
 # ADR-094: Skills are one store on the computer, from a curated catalog, given to each lead for its session
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06):
+  skills go to every role, the catalog is on by default, the person's own
+  skills and plugins load beside it, and only `hooks` frontmatter is refused
 - **Date:** 2026-10-18
 - **Owner:** Repository maintainers
 - **Context:** Claude Code, Codex and OpenCode each read skills (the Agent
@@ -35,6 +37,7 @@
     as the person's acts.
   - **Who gets them.** Only a task's lead. Readers, reviewers, a review's
     lead (its repository is untrusted) and the coordinator get none.
+    Superseded by ADR-097: every role, with the person's own skills too.
   - **A curated catalog, vendored and pinned.** The app ships
     `packages/skills/catalog/`: skill folders copied from the two
     repositories at pinned commits, each with its source, commit, upstream
@@ -46,7 +49,8 @@
     that only makes worktrees Althar already gives (`using-git-worktrees`)
     is left out. `scripts/vendor.ts` rebuilds the catalog from
     `scripts/curation.ts`, and stops where upstream changed under a patch.
-  - **All are off until the person turns them on**, in Settings, under
+  - **All are off until the person turns them on** (since ADR-097, on until
+    they turn one off), in Settings, under
     Skills. They change how every lead works, and there is no per-project
     selection yet, so none is given to a lead unasked. The catalog is
     installed once per revision (by its catalog.json's hash), not on every
@@ -56,7 +60,8 @@
     against the commit's tree. The review card shows source, commit,
     licence, findings (scripts, links, permission-like frontmatter), the
     files and the diff from the installed version; only approving it
-    installs. `allowed-tools` and `hooks` in frontmatter are refused. Updates
+    installs. `allowed-tools` and `hooks` in frontmatter are refused (since
+    ADR-097, only `hooks`). Updates
     are checked only when the person asks, and the replaced version is kept
     to roll back to. Nothing a skill carries is run by Althar.
 - **Alternatives considered:**
@@ -79,13 +84,15 @@
     or drop some; nothing checks or reports that yet. The person can't
     choose a set for one project yet either: what they turn on is on for
     every lead.
-  - **Off by default means nobody gets them unasked.** Someone who never
+  - **Off by default means nobody gets them unasked** (no longer: ADR-097
+    turns them on). Someone who never
     opens Settings never has them; the catalog is a choice to make, not a
     default behaviour change.
   - **Skill text is not a boundary.** The catalog's patches keep its skills
     from telling an agent to push, but a person's own install may; the push
     guard ([ADR-095](095-skill-and-openspec-files-stay-off-the-repository.md))
-    and the project's rules are what hold.
+    and the project's rules are what hold. (ADR-095's held push goes with
+    ADR-097: git's guard and the irreversible list hold.)
   - **A catalog update needs an app release** until `althar-skills` and its
     update channel exist.
 - **Revisit when:**

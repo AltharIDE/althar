@@ -11,6 +11,7 @@ import { RuntimeConfig } from './Config'
 import { Connectivity } from './Connectivity'
 import { Live } from './Live'
 import { treeMembers, workedBetween } from './processTree'
+import { plannedSmall, QUICK_LANE } from './quickLane'
 import { timestamp } from './records'
 import { Sessions } from './Sessions'
 
@@ -76,6 +77,13 @@ import { Sessions } from './Sessions'
  * How many may be at once is the person's number, kept in the profile's
  * settings once they change it; otherwise the default this machine's cores
  * and memory give, worked out at each launch (atOnce.ts).
+ *
+ * A task planned small (quickLane.ts: no review, its lead at a light effort)
+ * has the quick lane besides: one place beyond the number, so a one-line fix
+ * never waits behind long tasks. Its lead takes a place of the number where
+ * one is free, else the one beyond it; past that it waits as any task does,
+ * for either. Only tasks planned small stand before it for that place. A
+ * card counts it as any work beyond the number: "4 of 4 busy, and 1 more".
  */
 
 /** The settings key the person's own number is kept under; none is kept for the default. */
@@ -252,6 +260,30 @@ export class Busy extends Context.Service<
       const quiet = Duration.toMillis(options.quiet ?? Duration.seconds(30))
       const askGrace = Duration.toMillis(options.askGrace ?? Duration.minutes(5))
       const automationsAtOnce = options.automations ?? AUTOMATIONS_AT_ONCE
+      const quickLane = options.quick ?? QUICK_LANE
+      /**
+       * Which of these tasks are planned small, by the plan of their run under way (quickLane.ts): their leads have the
+       * quick lane. None where it can't be read, so each waits as any task does.
+       */
+      const smallOf = (taskIds: ReadonlyArray<string>) =>
+        quickLane === 0 || taskIds.length === 0
+          ? Effect.succeed(new Set<string>() as ReadonlySet<string>)
+          : sql<{ taskId: string; parameters: string }>`
+              SELECT task_id, parameters FROM runs WHERE plan_id IS NOT NULL AND state IN ('admitted', 'running')
+                AND task_id IN (SELECT value FROM json_each(${JSON.stringify([...new Set(taskIds)])}))`.pipe(
+              Effect.map(
+                (rows) => new Set(rows.flatMap((row) => (plannedSmall(row.parameters) ? [row.taskId] : []))) as ReadonlySet<string>,
+              ),
+              Effect.catchCause((cause) =>
+                Effect.as(
+                  Effect.logWarning('Could not read which tasks are planned small', cause),
+                  new Set<string>() as ReadonlySet<string>,
+                ),
+              ),
+            )
+      /** The most at work that leaves room for an agent: the number, and for a small task's lead the quick lane beyond it. */
+      const roomUpTo = (most: number, agent: Agent, small: ReadonlySet<string>) =>
+        agent.review !== true && small.has(agent.taskId) ? most + quickLane : most
       /** The tasks automations' runs started that are under way; none where they can't be read, so nothing waits for that. */
       const automated = provide(automatedTasks).pipe(
         Effect.catchCause((cause) =>
@@ -503,13 +535,22 @@ export class Busy extends Context.Service<
           // Offline, it waits for the computer to be back rather than start into a dead connection.
           if (!(yield* connectivity.online)) return false
           if (keptPlace(agent.taskId, holders) !== undefined) return true
-          if (at.size >= (yield* atOnce).count) return false
+          const most = (yield* atOnce).count
+          // Every place of the number taken, only a small task's lead has room, in the quick lane beyond it.
+          const beyond = at.size >= most
+          if (beyond && at.size >= roomUpTo(most, agent, yield* smallOf([agent.taskId]))) return false
           // An automation's run takes a place only while fewer automations than it may have are at work.
           if (order === 'automation' && automationsAt(at, tasks) >= automationsAtOnce) return false
           // Work waiting for a place of its own, standing where this does or before it, goes first; what waits on an agent at
-          // work, or is on its way, takes none.
-          return !(yield* waiting).some(
-            ({ waiter, rank }) => waiterKey(waiter) !== key && !at.has(waiterKey(waiter)) && rank <= RANK[order],
+          // work, or is on its way, takes none. In the quick lane, only what could take its place stands before it.
+          const queue = yield* waiting
+          const small = beyond ? yield* smallOf(queue.map(({ waiter }) => waiter.taskId)) : new Set<string>()
+          return !queue.some(
+            ({ waiter, rank }) =>
+              waiterKey(waiter) !== key &&
+              !at.has(waiterKey(waiter)) &&
+              rank <= RANK[order] &&
+              (!beyond || roomUpTo(most, waiter, small) > most),
           )
         })
 
@@ -536,6 +577,8 @@ export class Busy extends Context.Service<
           const most = (yield* atOnce).count
           const tasks = yield* automated
           const online = yield* connectivity.online
+          // Which of what waits is planned small, read only where every place of the number may be taken: those have the quick lane.
+          const small = busy.size + queue.length > most ? yield* smallOf(queue.map(({ waiter }) => waiter.taskId)) : new Set<string>()
           const left: Array<string> = []
           // The tasks whose place kept by what they left running is taken in this look: by one of their work only.
           const taken = new Set<string>()
@@ -557,7 +600,7 @@ export class Busy extends Context.Service<
               !busy.has(key) &&
               kept === undefined &&
               !back &&
-              (busy.size >= most || (rank === RANK.automation && automationsAt(busy, tasks) >= automationsAtOnce))
+              (busy.size >= roomUpTo(most, waiter, small) || (rank === RANK.automation && automationsAt(busy, tasks) >= automationsAtOnce))
             ) {
               left.push(waiter.taskId)
               continue

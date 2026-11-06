@@ -41,6 +41,13 @@ finish-args:
   # No --socket=ssh-auth: the agent's socket would sit at a fixed path any
   # agent in the sandbox could use (docs/decisions/061).
   - --talk-name=org.freedesktop.Flatpak
+  # The person's own skills, read-only: Claude Code runs in here and can't reach
+  # them otherwise, and Althar reads what the agents out on the device can see.
+  # Only these folders of the home, each where it is outside (ADR-027).
+  - --filesystem=~/.claude/skills:ro
+  - --filesystem=~/.codex/skills:ro
+  - --filesystem=~/.agents/skills:ro
+  - --filesystem=~/.config/opencode/skills:ro
 
 modules:
   - name: althar

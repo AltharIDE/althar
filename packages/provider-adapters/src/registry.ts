@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { delimiter, dirname, join } from 'node:path'
-import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt } from './ownTools'
+import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt, upToRepository } from './ownTools'
 import { SECRET_PLACES, secretReadRules } from './secrets'
 import { claudeShellFolder } from './shellFolder'
 import { openCodeProviderName, openCodeProviders } from './usageSources'
@@ -359,6 +359,11 @@ export interface AgentDefinition {
    * only the servers it is given.
    */
   readonly withoutOwnTools?: (at: StartingAt) => Readonly<Record<string, string>>
+  /**
+   * Where it finds skills, for an agent that doesn't say what it could see
+   * (`skills.ts`): the folders it reads, as it reads them from here.
+   */
+  readonly skillFolders?: (at: StartingAt) => ReadonlyArray<string>
   /** Per-session process config, applied after own-tool removal and review hardening. */
   readonly sessionEnv?: (own: Readonly<Record<string, string>>, options: SessionOptions) => Readonly<Record<string, string>>
   /**
@@ -636,6 +641,22 @@ const openCodeBase = {
   experimental: { continue_loop_on_deny: true },
 }
 const openCodeConfig = JSON.stringify(openCodeBase)
+
+/** Whether a command runs inside a Flatpak's sandbox, rather than out on the device or where there is none. */
+export const inFlatpakSandbox = (spec: LaunchSpec) => process.env.FLATPAK_ID !== undefined && spec.onDevice === undefined
+
+/** The person's own folder of OpenCode skills, which the Flatpak has in its sandbox at this path (ADR-027). */
+const personsOpenCodeSkills = (homeDir: string) => join(homeDir, '.config', 'opencode', 'skills')
+
+/**
+ * What OpenCode is started with where it runs. A copy Althar downloaded runs
+ * inside a Flatpak, whose XDG_CONFIG_HOME is the app's, so it would never look
+ * in the person's folder: `skills.paths` names it, as 2.2.5 and 1.19.5 read it.
+ * Out on the device OpenCode reads that folder itself, and the person's may be
+ * old enough to refuse a setting it doesn't know.
+ */
+const openCodeBaseAt = ({ homeDir, inSandbox }: StartingAt) =>
+  inSandbox === true ? { ...openCodeBase, skills: { paths: [personsOpenCodeSkills(homeDir)] } } : openCodeBase
 
 /**
  * OpenCode as the lead of a review of someone else's pull request, as
@@ -1205,7 +1226,28 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     },
     /* Seen on 29 September 2026: `once`, `always` and `reject`, for commands and edits alike. */
     version: () => ({ command: 'opencode', args: ['--version'] }),
-    withoutOwnTools: openCodeWithoutOwnTools(openCodeBase),
+    withoutOwnTools: (at) => openCodeWithoutOwnTools(openCodeBaseAt(at))(at),
+    /*
+     * As OpenCode 1.19.5 and 2.2.5 read them, a skill in each seen in what it
+     * offers its model; `~/.opencode/skills` only 1.x reads, so it isn't said.
+     */
+    skillFolders: ({ env, homeDir, cwd, inSandbox }) => {
+      const config = join(env.XDG_CONFIG_HOME || join(homeDir, '.config'), 'opencode')
+      return [
+        ...(env.OPENCODE_CONFIG_DIR ? [join(env.OPENCODE_CONFIG_DIR, 'skills'), join(env.OPENCODE_CONFIG_DIR, 'skill')] : []),
+        ...(inSandbox === true ? [personsOpenCodeSkills(homeDir)] : []),
+        join(config, 'skills'),
+        join(config, 'skill'),
+        join(homeDir, '.claude', 'skills'),
+        join(homeDir, '.agents', 'skills'),
+        ...upToRepository(cwd).flatMap((folder) => [
+          join(folder, '.opencode', 'skills'),
+          join(folder, '.opencode', 'skill'),
+          join(folder, '.claude', 'skills'),
+          join(folder, '.agents', 'skills'),
+        ]),
+      ]
+    },
     reviewing: { outside: true, env: openCodeReviewing },
     /* Its config's `skills.paths`, each searched for every `SKILL.md` below it (OpenCode 1.19.0), beside its own config; its task tool runs subagents. */
     skills: {

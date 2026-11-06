@@ -45,11 +45,12 @@ import {
 } from '@althar/ui'
 
 import altharFace from '../../../../resources/faces/althar-ai.svg'
-import type { Appearance } from '../../../main/appPreferences'
+import type { AccentSource, Appearance } from '../../../main/appPreferences'
 import { SYSTEM_SOUND } from '../../../main/notify'
 import { notesOf } from '../../../main/updates'
 import { useServices } from '../../data/services'
 import { agentLineOf, brandOf, pinnedOf } from '../../shared/agents'
+import { systemAccentState } from '../../shared/accent'
 import { appIcons } from '../../shared/appIcons'
 import { device, platform } from '../../shared/device'
 import { choosing, edgePlaces, edgeWords } from '../../shared/edge'
@@ -57,6 +58,7 @@ import { useEditorList, useEditorPictures } from '../../shared/OpenIn'
 import { type PreferencesModel, usePreferences } from '../../shared/usePreferences'
 import { useSounds } from '../../shared/useSounds'
 import { useUpdate } from '../../shared/useUpdate'
+import { useDesktopChrome } from '../../shared/useWindowChrome'
 import { AgentAccounts } from '../accounts/AgentAccounts'
 import { type AccountSignInModel, useAccountSignIn } from '../accounts/useAccountSignIn'
 import { ConnectionsView } from '../connections/ConnectionsView'
@@ -574,6 +576,8 @@ function AppearanceSection({ appIcon, edge }: Looks) {
   const { spot } = edge
   const words = spot === null ? null : edgeWords(spot)
   const { preferences, set, failed } = usePreferences()
+  const { host } = useServices()
+  const accent = systemAccentState(useDesktopChrome(host)?.accent)
   return (
     <>
       <SettingList>
@@ -587,6 +591,25 @@ function AppearanceSection({ appIcon, edge }: Looks) {
                 { value: 'light', label: text.themeLight },
                 { value: 'dark', label: text.themeDark },
                 { value: 'system', label: text.themeSystem },
+              ]}
+            />
+          )}
+        </SettingRow>
+        <SettingRow
+          title={text.accent}
+          {...(preferences.accent === 'system' && accent !== 'used'
+            ? { note: accent === 'none' ? text.accentNone : text.accentIllegible }
+            : {})}
+          glyph={<Icon name="theme" size={15} />}
+        >
+          {() => (
+            <Segmented<AccentSource>
+              label={text.accent}
+              value={preferences.accent}
+              onChange={(source) => set('accent', source)}
+              options={[
+                { value: 'althar', label: text.accentAlthar },
+                { value: 'system', label: text.accentSystem },
               ]}
             />
           )}

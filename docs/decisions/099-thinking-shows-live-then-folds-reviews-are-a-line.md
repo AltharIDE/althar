@@ -1,4 +1,4 @@
-# ADR-097: Thinking shows while it happens, then folds to a line; streamed text comes at an even pace; a review is a line
+# ADR-099: Thinking shows while it happens, then folds to a line; streamed text comes at an even pace; a review is a line
 
 - **Status:** Accepted
 - **Date:** 2026-11-06

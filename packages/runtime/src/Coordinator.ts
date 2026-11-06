@@ -2114,7 +2114,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'propose_plan',
-          "Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. It starts on its own after 25 seconds unless the person holds or changes it. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it.",
+          "Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. A change of a few lines is planned small: no review, and its lead at low effort (minimal where that is the lowest it lists), so it starts at once in a place kept for small tasks, however many long ones are at work. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. It starts on its own after 25 seconds unless the person holds or changes it. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it.",
           {
             type: 'object',
             properties: {
