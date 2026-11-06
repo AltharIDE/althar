@@ -97,7 +97,7 @@ describe('a push that failed', () => {
     assert.deepStrictEqual(pushFailureOf({ stderr }), { why: 'no_push_address', said: 'DISABLED' })
     assert.strictEqual(
       words(new GitFailed({ args: ['fetch'], cwd: '/here', stderr }), String).message,
-      "git fetch didn't work: fatal: 'DISABLED' does not appear to be a git repository.",
+      "git fetch didn't work: 'DISABLED' does not appear to be a git repository.",
     )
   })
 

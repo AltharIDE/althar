@@ -5,7 +5,7 @@ import { ConnectorFailed, fromOutside, parseRemote, type PostedReview, type Prod
 import type { ReviewBrief, ReviewDraftCard } from '@althar/contracts'
 import { type ActorId, type CommandEnvelope, Ids, newId, type ProjectId, type ReviewDraftState, type ReviewVerdict } from '@althar/domain'
 import { Commands, type Ledger } from '@althar/persistence-sqlite'
-import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
+import { Cause, Context, type Crypto, Effect, Layer, Option, Result, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { postCard, touchCard } from './cards'
@@ -14,7 +14,8 @@ import { Connections } from './Connections'
 import { envelope } from './envelope'
 import { NotFound } from './errors'
 import { makeKeyedLock } from './keyedLock'
-import { commitOf, fetchRefs, gitOutcome } from './git'
+import { commitOf, fetchedRefs, gitOutcome } from './git'
+import { gitSummary } from './gitSaid'
 import { Instance } from './Instance'
 import { freeSlug, slugify } from './Projects'
 import { logForLead, logPage, readLog } from './checkLogs'
@@ -429,12 +430,18 @@ export class Reviews extends Context.Service<
             // Its head and its target, fetched as a push is signed in, into refs of Althar's own: nothing is a branch here.
             const ref = `refs/althar/reviews/${place.path.join('/')}/${pull.number}`
             const target = yield* host.pushTarget(repository).pipe(Effect.mapError(hostWords))
-            const fetched = yield* fetchRefs(place.binding.repository, target, [
+            const fetched = yield* fetchedRefs(place.binding.repository, target, [
               { from: `refs/pull/${pull.number}/head`, into: `${ref}/head` },
               { from: `refs/heads/${pull.target}`, into: `${ref}/base` },
-            ])
-            const head = fetched ? yield* commitOf(place.binding.repository, `${ref}/head`).pipe(Effect.option) : Option.none()
-            if (Option.isNone(head)) return yield* refused(`Althar couldn’t fetch the ${name}’s code. Try again, or tell the person.`)
+            ]).pipe(Effect.andThen(commitOf(place.binding.repository, `${ref}/head`)), Effect.result)
+            // Where it can't be fetched, what git said goes with the refusal, and all of it to the log.
+            if (Result.isFailure(fetched)) {
+              yield* Effect.logWarning('Could not fetch a pull request to review', Cause.fail(fetched.failure))
+              return yield* refused(
+                `Althar couldn’t fetch the ${name}’s code (${gitSummary(fetched.failure)}). Try again, or tell the person.`,
+              )
+            }
+            const head = { value: fetched.success }
             // Where its change starts: where its head meets its base; or, for histories that never meet, its base.
             const met = yield* gitOutcome(place.binding.repository, 'merge-base', `${ref}/base`, head.value)
             const baseCommit = met.code === 0 ? met.stdout : yield* commitOf(place.binding.repository, `${ref}/base`)

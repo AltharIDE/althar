@@ -37,6 +37,7 @@ import {
   Option,
   Queue,
   Ref,
+  Result,
   Schema,
   Scope,
   Semaphore,
@@ -84,6 +85,7 @@ import {
   commitsAhead,
   commitsOf,
   git,
+  fetchedInto,
   fetchInto,
   gitOutcome,
   gitWithin,
@@ -145,6 +147,7 @@ import { spanOf } from './stallWatch'
 import { addItem, updateItem } from './threads'
 import { readReviewed, reviewOf } from './reviewing'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
+import { gitLine, gitSummary } from './gitSaid'
 import { summarize, words } from './words'
 import { BETWEEN_AGENTS_MS, betweenAgents } from './needsYou'
 
@@ -600,13 +603,21 @@ const RoundWaiting = Schema.Struct({
 })
 type RoundWaiting = typeof RoundWaiting.Type
 
-/** Why reading a repository failed, in a sentence: git's first line, before any usage it adds, or what went wrong otherwise. */
-const gitSaid = (cause: Cause.Cause<unknown>) => {
-  const failed = Option.getOrUndefined(Cause.findErrorOption(cause))
-  if (!(failed instanceof GitFailed)) return summarize(cause)
-  const said = failed.stderr.trim().split('\n')[0]?.trim() ?? ''
-  return /[.!?]$/.test(said) ? said : `${said}.`
-}
+/** Why reading a repository failed, in a sentence: the git subcommand and its most telling line, or what went wrong otherwise. */
+const gitSaid = (cause: Cause.Cause<unknown>) => summarize(cause)
+
+/** A branch that couldn't be fetched to merge with a task's, for its card: with what git said. */
+const couldntFetch = (target: string, failed: GitFailed) =>
+  `Althar couldn’t fetch ${target} to merge it with the branch here: ${sentence(gitLineOf(failed))}`
+
+/** A task's branch that couldn't be read here, for its card: with what git said. */
+const couldntRead = (failed: GitFailed) => `Althar couldn’t read the branch here: ${sentence(gitLineOf(failed))}`
+
+/** What git said of a failure, in a line, or how it ended where it said nothing. */
+const gitLineOf = (failed: GitFailed) => gitLine(failed.stderr) || gitSummary(failed)
+
+/** A sentence, with its full stop. */
+const sentence = (words: string) => (/[.!?…]$/.test(words) ? words : `${words}.`)
 
 /** One of a task's repositories here: its worktree and branch, the default branch it merges into, and whether it has a pull request. */
 interface HereRow {
@@ -1314,9 +1325,8 @@ export class Changes extends Context.Service<
           let start: string | null = leftOut ? next.shipped : null
           if (next.change.state === 'merged') {
             // The default branch as its host has it now, with what merged: as this Mac last saw it, it may not have that yet.
-            const tip = yield* fetchInto(task.path, baseTarget, target, `refs/althar/base/${target}`)
-            if (tip === null)
-              return yield* new GitFailed({ args: ['fetch', target], cwd: task.path, stderr: `Couldn't fetch ${target} from the host.` })
+            // Where it can't be fetched, git's own words say why.
+            const tip = yield* fetchedInto(task.path, baseTarget, target, `refs/althar/base/${target}`)
             base = tip
             start = leftOut || !(yield* onHead(task.path, tip)) ? tip : null
           }
@@ -2475,13 +2485,8 @@ export class Changes extends Context.Service<
           const { snapshot, workspace, pushTarget, sent } = yield* pushingTo(taskId, url)
           const onto = sourceOf(snapshot, workspace.branch)
           const ref = `refs/althar/pull-request/${onto}`
-          const head = yield* fetchInto(workspace.path, pushTarget, onto, ref)
-          if (head === null)
-            return yield* new GitFailed({
-              args: ['fetch', onto],
-              cwd: workspace.path,
-              stderr: `Couldn't fetch ${onto} from the host.`,
-            })
+          // Where it can't be fetched, git's own words say why.
+          const head = yield* fetchedInto(workspace.path, pushTarget, onto, ref)
           const where = nameOf(snapshot)
           const short = head.slice(0, 12)
           const rewritten = head === sent && !(yield* onHead(workspace.path, head))
@@ -5378,7 +5383,8 @@ export class Changes extends Context.Service<
       /**
        * Where a pull request's target branch is, fetched into the task's
        * workspace at most every few turns, unless `fresh`: the worktrees of a
-       * repository share what one fetched. Null where it couldn't be fetched.
+       * repository share what one fetched. Where it couldn't be fetched, git's
+       * failure, which its caller puts in words.
        */
       const baseOf = (
         workspace: { readonly path: string; readonly binding: string },
@@ -5393,8 +5399,8 @@ export class Changes extends Context.Service<
           const at = yield* Clock.currentTimeMillis
           const known = fetchedAt.get(key)
           if (!fresh && known !== undefined && at - known.at < baseEvery) return known.tip
-          const tip = yield* fetchInto(workspace.path, yield* host.pushTarget(repository), branch, `refs/remotes/${ref}`)
-          if (tip !== null) fetchedAt.set(key, { at, tip })
+          const tip = yield* fetchedInto(workspace.path, yield* host.pushTarget(repository), branch, `refs/remotes/${ref}`)
+          fetchedAt.set(key, { at, tip })
           return tip
         })
 
@@ -5459,17 +5465,22 @@ export class Changes extends Context.Service<
           const remote =
             fork !== null && repository.path.join('/').toLowerCase() === fork.upstream.path.join('/').toLowerCase() ? 'upstream' : 'origin'
           const ref = `${remote}/${now.target}`
-          const target = yield* baseOf(workspace, host, repository, now.target, ref, how.fresh || says)
-          const from = yield* commitOf(workspace.path, 'HEAD').pipe(Effect.orElseSucceed(() => null))
-          if (target === null || from === null)
-            return yield* Effect.as(
-              couldnt(
-                target === null
-                  ? `Althar couldn’t fetch ${now.target} to merge it with the branch here.`
-                  : 'Althar couldn’t read the branch here.',
-              ),
-              false,
-            )
+          // Where either can't be had, the card says what git said, and the log keeps all of it.
+          const fetched = yield* baseOf(workspace, host, repository, now.target, ref, how.fresh || says).pipe(
+            Effect.map((tip) => ({ tip })),
+            Effect.catchTag('GitFailed', (failed) => Effect.succeed({ failed })),
+          )
+          if ('failed' in fetched) {
+            yield* Effect.logWarning('Could not fetch the branch a pull request goes into', Cause.fail(fetched.failed))
+            return yield* Effect.as(couldnt(couldntFetch(now.target, fetched.failed)), false)
+          }
+          const target = fetched.tip
+          const read = yield* commitOf(workspace.path, 'HEAD').pipe(Effect.result)
+          if (Result.isFailure(read)) {
+            yield* Effect.logWarning('Could not read the branch a pull request comes from', Cause.fail(read.failure))
+            return yield* Effect.as(couldnt(couldntRead(read.failure)), false)
+          }
+          const from = read.success
           const merged = yield* gitOutcome(workspace.path, 'merge-tree', '--write-tree', '--name-only', '--no-messages', target, from)
           if (merged.code === 0) {
             const was = cleanHere.get(link.id)
@@ -6402,13 +6413,16 @@ export class Changes extends Context.Service<
             let couldnt: string | null = null
             for (const repository of yield* repositoriesHere(task.taskId)) {
               if (repository.opened !== 0) continue
-              const head = yield* commitOf(repository.worktree, 'HEAD').pipe(Effect.orElseSucceed(() => null))
-              if (head === null) {
+              const read = yield* commitOf(repository.worktree, 'HEAD').pipe(Effect.result)
+              if (Result.isFailure(read)) {
+                if (existsSync(repository.worktree))
+                  yield* Effect.logWarning('Could not read the branch a task works on', Cause.fail(read.failure))
                 couldnt ??= existsSync(repository.worktree)
-                  ? 'Althar couldn’t read the branch here.'
+                  ? couldntRead(read.failure)
                   : `Its folder isn’t on this computer, so Althar can’t merge ${repository.base} into it here.`
                 continue
               }
+              const head = read.success
               const files = yield* conflictsOf(repository.root, repository.base, head)
               if (files === null) couldnt ??= `Git couldn’t merge ${repository.base} with the branch here.`
               else if (files.length > 0) found.push(yield* conflictHere(repository, files))
