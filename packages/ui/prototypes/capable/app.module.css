@@ -13,8 +13,17 @@
 .gap {
   width: 6px;
 }
+.strip > * {
+  flex: none;
+  white-space: nowrap;
+}
 .grow {
-  flex: 1;
+  flex: 1 !important;
+}
+.keys {
+  overflow: hidden;
+  flex: 0 1 auto !important;
+  text-overflow: ellipsis;
 }
 .frame {
   height: calc(100% - 44px);

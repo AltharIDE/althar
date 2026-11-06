@@ -1,6 +1,7 @@
 // Scrappy: althar on the afternoon of 6 November, as the runtime would give it: a busy board, a lead-started task, a Linear batch.
 import { card, change, items } from '../../../../apps/desktop/tests/fixtures'
 import type { BoardTask, ThreadItem } from './deps'
+import { proto } from './state'
 
 export const minutes = (n: number) => new Date(Date.now() - n * 60_000).toISOString()
 export const at = (item: ThreadItem, ago: number): ThreadItem => ({ ...item, createdAt: minutes(ago) })
@@ -205,6 +206,20 @@ export const coordinatorTalk = (): ThreadItem[] => [
   at(items.you('Plan the ADR for agents working as my own. Opus 5.5, xhigh.'), 52),
   at(items.says('Planned **ADR: agents work as the person’s own** on Opus 5.5 at xhigh, reviewed by GPT-6.1 Sol.'), 51),
   at(items.card(TASKS.adr(), 'card-adr'), 51),
+  ...(proto.get().surface === 'tune' ? tuning() : []),
+]
+
+/** Surface 6: the person asks for two settings, which the coordinator changes; later, news wakes it, and what it proposes loosens what asks. */
+const tuning = (): ThreadItem[] => [
+  at(items.you('New tasks should each get a worktree, and work toward next until 0.9 is out.'), 9),
+  at(items.says('Done. Tasks already running keep theirs.'), 8),
+  at(items.notice({ title: '§tune-changes', source: 'runtime' }, null), 8),
+  at(items.notice({ title: 'DEV-201 and DEV-203 are waiting on you to merge', source: 'runtime' }, null), 3),
+  at(
+    items.says('Both have passed their checks and their reviews found nothing. That’s the fourth and fifth today waiting only on a merge.'),
+    2,
+  ),
+  at(items.notice({ title: '§tune-loosen', source: 'runtime' }, null), 2),
 ]
 
 export const usage = {

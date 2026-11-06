@@ -110,7 +110,13 @@ const services = { client, host, cache, feed: follow(client, cache) }
 let seen = proto.get()
 proto.subscribe(() => {
   const now = proto.get()
-  if (now.started !== seen.started || now.answered !== seen.answered || now.childHeld !== seen.childHeld || now.off !== seen.off)
+  if (
+    now.surface !== seen.surface ||
+    now.started !== seen.started ||
+    now.answered !== seen.answered ||
+    now.childHeld !== seen.childHeld ||
+    now.off !== seen.off
+  )
     void cache.invalidateQueries()
   seen = now
 })
@@ -157,7 +163,7 @@ const onKey = (event: KeyboardEvent) => {
   const ones = surfaceOf(p.surface).directions
   const at = ones.findIndex((one) => one.value === p.direction)
   const key = event.key.toLowerCase()
-  if (/^[1-5]$/.test(key)) {
+  if (/^[1-6]$/.test(key)) {
     event.preventDefault()
     goSurface(SURFACES[Number(key) - 1]!.value)
     return
@@ -205,7 +211,7 @@ function Switcher() {
       ))}
       <LinkButton onClick={proto.startOver}>Start over</LinkButton>
       <span className={s.grow} />
-      <span>1–5 · A B C T · [ ]</span>
+      <span className={s.keys}>1–6 · A B C T · [ ]</span>
     </div>
   )
 }

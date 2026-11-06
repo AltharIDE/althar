@@ -3,7 +3,7 @@ import { useSyncExternalStore } from 'react'
 
 import { type Draft, freshDraft } from './directions/start/pieces'
 
-export type Surface = 'start' | 'lineage' | 'rules' | 'tools' | 'parts'
+export type Surface = 'start' | 'lineage' | 'rules' | 'tools' | 'tune' | 'parts'
 export type Direction = 'A' | 'B' | 'C' | 'Today'
 
 export interface Place {
@@ -28,8 +28,10 @@ const ASK = '#/threads/th-runs'
 const TOOLS = '#/settings/skills'
 const MCP = '#/threads/th-design'
 const REVIEW = '#/threads/th-review'
+const TALK = '#/projects/p1?room=talk'
+const GENERAL = '#/projects/p1?room=settings&section=general'
 
-/** The surfaces in the strip's order, keys 1 to 5, each with its directions, keys A, B, C (and T for today). */
+/** The surfaces in the strip's order, keys 1 to 6, each with its directions, keys A, B, C (and T for today). */
 export const SURFACES: ReadonlyArray<SurfaceInfo> = [
   {
     value: 'start',
@@ -115,6 +117,24 @@ export const SURFACES: ReadonlyArray<SurfaceInfo> = [
         name: 'Sketch',
         about: 'Parts as chips on a task’s header, a review that says whether it runs the code, an agent’s own push',
       },
+    ],
+  },
+  {
+    value: 'tune',
+    name: 'Changed by agents',
+    places: [
+      { label: 'Coordinator', hash: TALK },
+      { label: 'Settings', hash: GENERAL },
+      { label: 'Rules', hash: RULES },
+    ],
+    directions: [
+      {
+        value: 'A',
+        name: 'A line each',
+        about: 'What the coordinator changed is a line each in its thread, with Undo; Settings says who changed a row',
+      },
+      { value: 'B', name: 'One card', about: 'A turn’s changes are one card, with Settings at its head; Settings says who changed a row' },
+      { value: 'Today', name: 'Today', about: 'Only you change settings' },
     ],
   },
 ]

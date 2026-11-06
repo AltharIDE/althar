@@ -26,8 +26,9 @@ const ASKING = [RuleKind.DefaultBranch, RuleKind.ForcePush, RuleKind.ManyBranche
 
 export function ProjectRules(props: ComponentProps<typeof RealProjectRules>) {
   const p = useProto()
-  if (p.surface !== 'rules' || p.direction === 'Today') return <RealProjectRules {...props} />
-  if (p.direction === 'A')
+  const tune = p.surface === 'tune' && p.direction !== 'Today'
+  if (!tune && (p.surface !== 'rules' || p.direction === 'Today')) return <RealProjectRules {...props} />
+  if (tune || p.direction === 'A')
     return (
       <>
         <WhatAsks />

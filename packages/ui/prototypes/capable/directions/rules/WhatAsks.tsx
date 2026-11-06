@@ -4,6 +4,7 @@ import { Fragment, useState } from 'react'
 import { Heading } from '../../../../src/primitives/Heading/Heading'
 import { Menu, MenuRadioGroup, MenuRadioItem } from '../../../../src/primitives/Menu/Menu'
 import { AddCommand, Charter, Clause, CommandToken, NewCommand, RuleWord } from '../../../../src/setup/Charter/Charter'
+import { RulesChanged } from '../tune/Tune'
 import { KINDS } from './Ask'
 import s from './rules.module.css'
 
@@ -117,6 +118,7 @@ export function WhatAsks() {
                     </Fragment>
                   ))}
                 </span>
+                {one.kind === 'publish' && <RulesChanged />}
               </div>
               <Menu
                 label={KINDS[one.kind]}

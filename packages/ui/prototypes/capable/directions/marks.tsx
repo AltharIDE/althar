@@ -1,6 +1,7 @@
 // Scrappy: the pieces a thread's marks stand for, beyond surface 2's, by the surface and direction shown.
 import { ActCard, ActLine, Seen } from './tools/Calls'
 import { Origin, ReviewHead, SelfPush } from './parts/Sketches'
+import { Loosen, SettingsChanges } from './tune/Tune'
 import { useProto } from '../state'
 
 export function Marked({ mark }: { mark: string }) {
@@ -11,5 +12,8 @@ export function Marked({ mark }: { mark: string }) {
   if (mark === '§origin') return p.surface === 'lineage' && p.direction !== 'Today' ? <Origin /> : null
   if (mark === '§selfpush') return p.surface === 'parts' ? <SelfPush /> : null
   if (mark === '§reviewhead') return p.surface === 'parts' ? <ReviewHead outside /> : null
+  const tune = p.surface === 'tune' && p.direction !== 'Today'
+  if (mark === '§tune-changes') return tune ? <SettingsChanges card={p.direction === 'B'} /> : null
+  if (mark === '§tune-loosen') return tune ? <Loosen /> : null
   return null
 }

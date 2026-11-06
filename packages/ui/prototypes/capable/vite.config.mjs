@@ -38,6 +38,8 @@ const seams = [
   { importer: 'shared/ThreadBlocks.tsx', id: '@althar/ui', to: 'seams/threadUi.tsx' },
   // The task's header: in the sketches, its parts.
   { importer: TASK, id: '@althar/ui', to: 'seams/taskUi.tsx' },
+  // A project's General settings: a row an agent changed says who and when.
+  { importer: 'features/projectSettings/GeneralSection.tsx', id: '@althar/ui', to: 'seams/projectSettingsUi.tsx' },
 ]
 
 /** @type {import('vite-plus').Plugin} */

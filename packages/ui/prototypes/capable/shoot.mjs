@@ -260,6 +260,24 @@ const shots = [
   },
   { id: '5-2-review', s: 'parts', d: 'A', hash: '#/threads/th-review', go: () => undefined },
   { id: '5-3-self-push', s: 'parts', d: 'A', hash: '#/threads/th-codex-net', go: () => undefined },
+
+  // 6 · Settings an agent changed.
+  { id: '6a-1-coordinator', s: 'tune', d: 'A', hash: '#/projects/p1?room=talk', go: () => undefined },
+  { id: '6b-1-coordinator', s: 'tune', d: 'B', hash: '#/projects/p1?room=talk', go: () => undefined },
+  { id: '6a-2-settings', s: 'tune', d: 'A', hash: '#/projects/p1?room=settings&section=general', height: 760, go: () => undefined },
+  {
+    id: '6a-3-rules-allowed',
+    s: 'tune',
+    d: 'A',
+    hash: '#/projects/p1?room=talk',
+    height: 640,
+    go: async (page) => {
+      await page.getByRole('button', { name: 'Let them merge' }).click()
+      await page.evaluate(() => {
+        window.location.hash = '#/projects/p1?room=settings&section=rules'
+      })
+    },
+  },
 ]
 
 const browser = await chromium.launch()

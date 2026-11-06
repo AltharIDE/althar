@@ -8,7 +8,7 @@ From the repository's root:
 cd packages/ui && ./node_modules/.bin/vp dev --config prototypes/capable/vite.config.mjs
 ```
 
-Then <http://localhost:5367/>. The strip under the window picks the surface (keys 1 to 5) and its direction (A, B, C, and T for today; `[` and `]` step through them). Its links go to where the surface shows, and Start over puts back what was started or answered. `?s=rules&d=B` opens on a surface and direction, `bare` leaves the strip out, and `node shoot.mjs` takes every state into `test-results/capable`.
+Then <http://localhost:5367/>. The strip under the window picks the surface (keys 1 to 6) and its direction (A, B, C, and T for today; `[` and `]` step through them). Its links go to where the surface shows, and Start over puts back what was started or answered. `?s=rules&d=B` opens on a surface and direction, `bare` leaves the strip out, and `node shoot.mjs` takes every state into `test-results/capable`.
 
 What the person decided on 6 November, and what each surface draws from it:
 
@@ -109,3 +109,23 @@ What the runtime needs:
 - **Where a lead-started task came from**, as its thread opens: "Started by the lead of ADR: agents work…, from your words there."
 
 What the runtime needs: the task-as-parts ADR (the plan's phase 5); a review's `outside` from the host's author association, and a Run it command that gives it a worktree; pushes seen on the host that Althar didn't make, attributed to the task by branch, as a thread item.
+
+## 6 · Settings an agent changed
+
+The coordinator, and leads too, tune the project's settings with Althar's own tools: works in, work toward, tracker, branch and pull request names, setup, review rounds, rules, and the MCP and skills switches. Seen in the coordinator's thread, where the person asked for two changes and news later woke it, and in Settings, where a lead had changed one row an hour before.
+
+| Direction | The coordinator's thread | Settings |
+| --- | --- | --- |
+| A · A line each | A line per change under its words: the row's name, from → to, Undo | The changed row says "Changed by the coordinator, 8 min ago · Undo"; who opens the thread it was changed from |
+| B · One card | A turn's changes as one card, with Settings at its head and Undo on each row | The same |
+| Today | Only the person changes settings | No note |
+
+A change that **loosens what asks** (here: let leads merge their own once checks pass and the review is clean) is a card that waits for the person, "Loosens what asks", with Keep asking and the action on its button. It waits even when the person asked for it in words: a single irreversible act asked for in the thread goes ahead, but a rule outlasts the turn. Once allowed, Rules says what goes ahead now under its kind, with who changed it, "on your word", and Undo.
+
+**Recommendation: A.** Settings changes are small and usually asked for; a line each reads as what the coordinator did, the way its other acts read in a task's thread (surface 2), and Undo stays one click from it. B's card earns its place only when a turn changes many rows at once, so show it from three changes up. Keep the note in Settings either way: it's where the person finds a change they didn't watch happen.
+
+What the runtime needs:
+- **Settings tools** for leads and the coordinator, one per setting the window changes, writing through the same commands the window uses.
+- **A change record per setting**: who (person, coordinator, a lead with its task), when, the value before, and the turn and message it came from. Settings reads the latest per row; Undo writes the value before back, as a change by the person.
+- **Loosening is a kind**: a change to rules, or to switches that decide what asks (merging, posting as the person, secrets), is a `task_ask` holding the change, whoever's turn it came from; tightening goes ahead.
+- Today's notice for a setup a lead re-recorded becomes one of these lines.
