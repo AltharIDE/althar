@@ -398,3 +398,45 @@ export const AllStates: Story = {
     />
   ),
 }
+
+/** Its findings can be fixed rather than only posted: Fix these asks the review's lead to, in your words. */
+export const ToFix: Story = {
+  args: { onFix: fn() },
+  play: async ({ canvasElement, args }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Fix these' }))
+    await expect(args.onFix).toHaveBeenCalled()
+    await expect(args.onPost).not.toHaveBeenCalled()
+  },
+}
+
+/** Its task is fixing them now: where, as Althar decided, and the draft as it was, yours to post with a note, or discard. */
+export const BeingFixed: Story = {
+  args: {
+    fixing: 'on #1212’s own branch, retry-webhooks, which Althar pushes to once it’s reviewed',
+    onFix: fn(),
+    onNote: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const c = within(canvasElement)
+    await expect(
+      c.getByText(
+        'Being fixed on #1212’s own branch, retry-webhooks, which Althar pushes to once it’s reviewed. Post this review as it is, with a note, or discard it.',
+      ),
+    ).toBeInTheDocument()
+    await expect(c.queryByRole('button', { name: 'Fix these' })).not.toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Add a note that fixes are coming' }))
+    await expect(args.onNote).toHaveBeenCalled()
+    await expect(c.getByRole('button', { name: 'Post review' })).toBeInTheDocument()
+  },
+}
+
+/** Posted, its findings can still be fixed: the line offers it. */
+export const PostedToFix: Story = {
+  args: { state: ReviewDraftState.Posted, review: POSTED_REVIEW, onFix: fn() },
+  play: async ({ canvasElement, args }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Fix these' }))
+    await expect(args.onFix).toHaveBeenCalled()
+  },
+}

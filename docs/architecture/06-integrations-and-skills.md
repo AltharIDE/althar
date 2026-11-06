@@ -974,6 +974,77 @@ Althar narrows them itself. A listing refused for a scope says which
 - **Other hosts** don't take reviews yet: the code host model's
   `capabilities.reviews` is GitHub's alone, and the coordinator says so.
 
+#### Fixing what a review found
+
+Often the person wants a review's findings fixed, not only posted ("actually,
+fix these"). A review task becomes a change that fixes them, only on the
+person's own word: a message of theirs in the turn, from the window or a
+paired device, never news, a lead, the review, or what the pull request or
+its author says. It comes three ways, all one path (`fixReview`,
+Coordinator.ts): the review's lead's `make_it_a_change`, offered to a review
+too; the coordinator's `fix_review`; and **Fix these** on the draft's card,
+posted or not, which sends the lead the person's words ("Fix what this
+review found: the blocking and major findings").
+
+```mermaid
+flowchart TD
+  ask["The person: fix these"] --> read["Read the pull request again"]
+  read -->|merged or closed| refuse["Refused: a new task from its base instead"]
+  read -->|open| where{"Where its work goes"}
+  where -->|"its branch is the repository's, the account can push,\nits author one of its people (or the person said)"| own["Its own branch: the task attaches to it (ADR-052)\nends with it pushed"]
+  where -->|"a fork, an outside author, no push, or the person said base"| mine["A branch of the task's own\nwith its own pull request into that branch, or its base"]
+  own --> work["A worktree at its head, the findings as the brief,\nimplement + review, the reading lead stopped, the run started"]
+  mine --> work
+```
+
+- **The pull request is read again.** One merged or closed takes no more
+  work on its branch: the call is refused, and says a new task from its base
+  can fix them, which the coordinator starts on the person's word. Nothing
+  changes.
+- **Where its work goes is Althar's to decide** (`whereOf`, reviewFix.ts),
+  from what it can do, and a line in the thread, and on the draft's card,
+  says which before work starts. The pull request's own branch where it is
+  on the repository itself, the account can push there, and its author is
+  one of the repository's people: the task attaches to the pull request
+  (ADR-052), by its number, at its head, so it follows its reviews, checks
+  and conflicts, and its plan ends with the branch pushed. Otherwise a branch
+  of its own, with its own pull request into the reviewed pull request's
+  branch, or into its base for one from a fork (Althar never pushes to a
+  fork, ADR-052), or where the person said so (`into: base`). An outside
+  author's branch, even on the repository, is pushed to only on the person's
+  word (`their_branch`), as `update_branch` asks. Where attaching is refused
+  after all, its work goes on its own branch, and the thread says why.
+- **Its workspace becomes a worktree.** The read-only copy is a repository
+  of its own, so no worktree can be made from it: a fresh worktree of the
+  person's repository is made beside it, at the pull request's head fetched
+  again, and the task's workspace becomes it, access `write`, working toward
+  the pull request's base (attached) or the branch its own pull request goes
+  into. It is set up as any task's is, the project's recorded setup replayed
+  before its lead's first turn (Setups.ts). The copy goes once its reading
+  lead has stopped.
+- **Its brief is its description** (`fixBrief`), so its lead reads it
+  first however its session starts: the findings it fixes (the blocking and
+  major ones the person kept on the draft, all where none is, or those they
+  named, by their number in the draft or `all`), the review's summary, the
+  pull request's description as its author's words, marked as data from
+  outside where it is, and what the person said. Each finding gets an
+  outcome in the lead's report, as a settle's does: fixed, with its commit,
+  or declined, with why. It is renamed for what the change does ("Fix #12:
+  …" where nothing else is named).
+- **Its plan** no longer only reads (`reads` goes): an implement step, its
+  lead's agent and model, then the review the lead or the coordinator names,
+  ending as the change ends: the pull request's branch pushed, or a draft or
+  ready pull request of its own. A review that started at once, as an
+  automation's does, had no plan: one is proposed and started. The reading
+  session stops once its turn ends, and the plan's run starts a fresh lead in
+  the worktree, a task's lead like any other (`reviewOf` is null once the
+  task has `task.made_change`; its link of kind `review` stays, so the task
+  stays linked to the pull request it reviewed).
+- **The draft is the person's.** Nothing of it changes: they post it as it
+  is, with a note that fixes are coming (**Add a note**), or discard it, and
+  nothing is posted without them. Posting it no longer settles the task,
+  which is a change now, settled by its pull request as any change is.
+
 ### Signing in
 
 A desktop app can't keep a secret, so each service's way in depends on

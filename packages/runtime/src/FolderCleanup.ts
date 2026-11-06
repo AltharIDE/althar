@@ -19,6 +19,7 @@ import { KEPT, taskThreadOf, withFolder } from './bringBack'
 import { git, uncommittedFiles } from './git'
 import { Instance } from './Instance'
 import { quickIn } from './kinds'
+import { reviewsIn } from './reviewing'
 import { Launches } from './Launches'
 import { change, fact, timestamp } from './records'
 import { reviewCopyOf } from './reviewCopy'
@@ -370,7 +371,7 @@ export class FolderCleanup extends Context.Service<
           quick: number
         }>`
           SELECT k.id AS task_id, k.project_id, k.title, p.name AS project, k.state, k.settled_at, k.seen_at, k.opened_at,
-            EXISTS (SELECT 1 FROM external_links rl WHERE rl.task_id = k.id AND rl.kind = 'review') AS review,
+            ${sql.unsafe(reviewsIn('k'))} AS review,
             CASE WHEN ${sql.unsafe(quickIn('k'))} THEN 1 ELSE 0 END AS quick,
             (SELECT t.id FROM threads t WHERE t.task_id = k.id AND t.kind = 'task' ORDER BY t.created_at, t.rowid LIMIT 1) AS thread_id
           FROM tasks k JOIN projects p ON p.id = k.project_id

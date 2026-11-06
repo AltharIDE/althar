@@ -34,8 +34,13 @@
     it a real thing; the lead calls `make_it_a_change`, which renames the
     task for what it does now, adds a review by the model it names, and
     gives it an ending: a draft pull request, or one ready for review. A
-    review the person takes over becomes a change that builds on it. It is
-    one task, thread and card throughout: nothing restarts.
+    review the person takes over becomes a change that builds on it: asked
+    to fix what it found, its lead calls `make_it_a_change` too (or the
+    coordinator `fix_review`), and its work goes on the pull request's own
+    branch or one of its own, in a real worktree (amended 2026-11-06,
+    [06](../architecture/06-integrations-and-skills.md), "Fixing what a
+    review found"). It is one task, thread and card throughout: nothing
+    restarts.
   - **A card has nothing to press.** The whole card is one button that
     opens the task, where a permission is answered, a question answered,
     and the lead told what's next. The card says where the task stands in a

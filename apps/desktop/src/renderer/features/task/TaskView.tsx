@@ -75,7 +75,7 @@ import { listeningText, listeningOf, useHeard, waitOf } from './behind'
 import { ChangesCard } from '../../shared/ChangesCard'
 import { DraftCard } from '../../shared/DraftCard'
 import { PermissionCalls } from './PermissionCall'
-import { reachOf, ReviewCard, reviewedUnfurl } from './ReviewCard'
+import { FIX_THESE, reachOf, ReviewCard, reviewedUnfurl } from './ReviewCard'
 import { usePostTeamReviews } from '../settings/usePostTeamReviews'
 import { HeldLimit } from './LimitCall'
 import { StuckCall } from './StuckCall'
@@ -1172,6 +1172,8 @@ export function TaskView({
                         onPost: (draftId) => void model.postReview(draftId),
                         onPostFromNow: (draftId, automationId) => void model.postReviewsFromNow(draftId, automationId),
                         onDiscard: (draftId) => void model.discardReview(draftId),
+                        // The person's word, as their message to its lead, which makes the review a change of its findings.
+                        onFix: () => void send(FIX_THESE, false),
                       }}
                     />
                   )}

@@ -43,6 +43,7 @@ import { Issues } from './Issues'
 import { makeKeyedLock } from './keyedLock'
 import { type CheckoutConsent, type CheckoutSeen, checkoutsHeld, giveBackSpot, place, settledHolding, type Spot } from './local'
 import { quickIn } from './kinds'
+import { reviewsIn } from './reviewing'
 import { capitalized, Limits, lowWords, NEARLY_OUT, type Out, outStep, outWords, type Room, whenWords } from './Limits'
 import { Live, type LiveEvent } from './Live'
 import { roundsNow, roundsOutNow } from './plansAndReviews'
@@ -634,7 +635,9 @@ export class Runs extends Context.Service<
      * Mac. A round under way then publishes as its plan's run would, its work
      * counted from where the task started, so all of it is reviewed and goes
      * in the pull request. Whether a run is under way: where none is,
-     * `madeRound` opens one once this is in.
+     * `madeRound` opens one once this is in. A review made a change of its
+     * findings the same way: its plan no longer only reads, and, as it had no
+     * run, its plan's run starts once its reading lead has stopped (`run`).
      */
     makeChange(
       taskId: string,
@@ -2152,7 +2155,7 @@ export class Runs extends Context.Service<
           yield* change('runs', run.runId, { endReason: why })
           const [task] = yield* sql<{ state: string; change: number }>`
             SELECT k.state,
-              CASE WHEN ${sql.unsafe(quickIn('k'))} OR EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review')
+              CASE WHEN ${sql.unsafe(quickIn('k'))} OR ${sql.unsafe(reviewsIn('k'))}
                 THEN 0 ELSE 1 END AS change
             FROM tasks k WHERE k.id = ${run.taskId}`
           if (back.state !== 'done' || task?.state !== 'open' || committed) return
@@ -5374,9 +5377,10 @@ export class Runs extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))
-          // Its review in place of any it had, its ending, and nothing more of staying here; `publishes`, for a round under way.
+          // Its review in place of any it had, its ending, and nothing more of staying here or of only reading, for a review made
+          // a change; `publishes`, for a round under way.
           const reshaped = (parameters: string, publishes: boolean) =>
-            Effect.map(decode(parameters), ({ here: _here, publishes: _publishes, ...before }) =>
+            Effect.map(decode(parameters), ({ here: _here, publishes: _publishes, reads: _reads, ...before }) =>
               JSON.stringify({
                 ...before,
                 steps: [...before.steps.filter((step) => step.key !== 'review'), ...(review === null ? [] : [review])],

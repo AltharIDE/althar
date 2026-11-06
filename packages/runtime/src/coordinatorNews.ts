@@ -340,8 +340,9 @@ const startedNews = (projectId: string, since: number) =>
 
 /**
  * The quick tasks made changes since a place in the ledger, as the person
- * asked their leads (make_it_a_change): a line for each, with what it is
- * called now and was called, who reviews it, and how it ends.
+ * asked their leads (make_it_a_change), and the reviews made changes that fix
+ * what they found: a line for each, with what it is called now and was
+ * called, who reviews it, and how it ends.
  */
 const madeNews = (projectId: string, since: number, modelOf: ModelNamer) =>
   Effect.gen(function* () {
@@ -351,9 +352,18 @@ const madeNews = (projectId: string, since: number, modelOf: ModelNamer) =>
       WHERE e.project_id = ${projectId} AND e.aggregate_type = 'task' AND e.sequence > ${since} AND e.type = 'task.made_change'
       ORDER BY e.sequence`
     return events.map((event) => {
-      const made = JSON.parse(event.payload) as { was?: string; review?: PlanStep | null; end?: TaskEnd | null }
+      const made = JSON.parse(event.payload) as {
+        was?: string
+        review?: PlanStep | null
+        end?: TaskEnd | null
+        from?: string
+        onBranch?: boolean
+      }
       const was = made.was === undefined || made.was === event.title ? '' : ` (it was “${made.was}”)`
       const who = made.review == null ? 'no review' : `${modelOf(made.review)} reviews it`
+      // A review made a change of its findings: on the pull request's own branch, which it follows, or one of its own.
+      if (made.from === 'review')
+        return `- ${event.slug} (${event.title})${was}: the person had this review fix what it found, and it is a change now, ${made.onBranch === true ? 'on the reviewed pull request’s own branch, which it follows and pushes to once reviewed' : 'on a branch of its own, with its own pull request'}: ${who}.`
       return `- ${event.slug} (${event.title})${was}: the person asked its lead to make this quick task a change, and it is one now: ${who}, and ${endWords(made.end)}.`
     })
   })

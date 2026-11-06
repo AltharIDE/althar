@@ -7,6 +7,7 @@ import { Changes } from './Changes'
 import { envelope } from './envelope'
 import { Instance } from './Instance'
 import { quickIn } from './kinds'
+import { reviewsIn } from './reviewing'
 import { Plans } from './Plans'
 import { fact } from './records'
 import { Sessions } from './Sessions'
@@ -130,7 +131,7 @@ export class TaskActions extends Context.Service<
             change: number
           }>`
             SELECT k.id, k.slug, k.title, k.project_id, t.id AS thread_id,
-              CASE WHEN ${sql.unsafe(quickIn('k'))} OR EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review')
+              CASE WHEN ${sql.unsafe(quickIn('k'))} OR ${sql.unsafe(reviewsIn('k'))}
                 THEN 0 ELSE 1 END AS change
             FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
             WHERE k.project_id = ${projectId} AND (k.id = ${reference} OR k.slug = ${reference})`

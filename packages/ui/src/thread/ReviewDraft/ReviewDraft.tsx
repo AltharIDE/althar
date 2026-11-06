@@ -70,6 +70,12 @@ export interface ReviewDraftText {
   post: string
   /** For an automation's review: post this one, and its next ones without asking. */
   postFromNow: string
+  /** Has the review's task fix what it found, rather than only post it. */
+  fix: string
+  /** Once its task is fixing them: where, as Althar decided. */
+  fixing: (where: string) => string
+  /** Adds a line to the summary saying fixes are coming. */
+  addNote: string
   postAgain: string
   /** The edit form's name. */
   editing: string
@@ -116,6 +122,9 @@ export const reviewDraftText: ReviewDraftText = {
   edit: 'Edit',
   post: 'Post review',
   postFromNow: 'Post this automation’s reviews from now on',
+  fix: 'Fix these',
+  fixing: (where) => `Being fixed ${where}. Post this review as it is, with a note, or discard it.`,
+  addNote: 'Add a note that fixes are coming',
   postAgain: 'Post again',
   editing: 'Edit the review draft',
   summaryLabel: 'Summary',
@@ -190,6 +199,12 @@ export type ReviewDraftProps = RootProps<
     /** An automation drafted it: post it, and let the automation's next reviews post themselves. Only before it is first posted. */
     onPostFromNow?: () => void
     onDiscard?: () => void
+    /** Has the review's task fix its findings: before posting it, or once it is posted. */
+    onFix?: () => void
+    /** Where its findings are being fixed, once its task is a change of them: the draft waits on the person as it was. */
+    fixing?: string
+    /** Adds to the summary that fixes are coming, while it is being fixed. */
+    onNote?: () => void
     /** Shows what the lead could reach, for a card from outside. */
     onReach?: () => void
     /** A save is under way: the form's save button shows it. */
@@ -227,6 +242,9 @@ export function ReviewDraft({
   onPost,
   onPostFromNow,
   onDiscard,
+  onFix,
+  fixing,
+  onNote,
   onReach,
   saving = false,
   headingLevel = 3,
@@ -260,6 +278,7 @@ export function ReviewDraft({
               <VisuallyHidden> {t.newTab}</VisuallyHidden>
             </a>
           )}
+          {onFix && fixing === undefined && <LinkButton onClick={onFix}>{t.fix}</LinkButton>}
         </article>
       )
     }
@@ -294,9 +313,10 @@ export function ReviewDraft({
             suggested,
             verdict,
             error,
+            fixing,
           }}
           state={state}
-          actions={{ onVerdict, onKeep, onChange, onPost, onPostFromNow, onDiscard, onReach }}
+          actions={{ onVerdict, onKeep, onChange, onPost, onPostFromNow, onDiscard, onFix, onNote, onReach }}
           saving={saving}
           headingLevel={headingLevel}
           t={t}
@@ -341,9 +361,13 @@ interface CardProps {
     | 'suggested'
     | 'verdict'
     | 'error'
+    | 'fixing'
   >
   state: ReviewDraftState
-  actions: Pick<ReviewDraftProps, 'onVerdict' | 'onKeep' | 'onChange' | 'onPost' | 'onPostFromNow' | 'onDiscard' | 'onReach'>
+  actions: Pick<
+    ReviewDraftProps,
+    'onVerdict' | 'onKeep' | 'onChange' | 'onPost' | 'onPostFromNow' | 'onDiscard' | 'onFix' | 'onNote' | 'onReach'
+  >
   saving: boolean
   headingLevel: HeadingLevel
   t: ReviewDraftText
@@ -367,8 +391,9 @@ function DraftCard({ root, draft, state, actions, saving, headingLevel, t }: Car
     suggested,
     verdict,
     error,
+    fixing,
   } = draft
-  const { onVerdict, onKeep, onChange, onPost, onPostFromNow, onDiscard, onReach } = actions
+  const { onVerdict, onKeep, onChange, onPost, onPostFromNow, onDiscard, onFix, onNote, onReach } = actions
   const { className, ...rest } = root
   const kickerId = useId()
   const titleId = useId()
@@ -495,6 +520,13 @@ function DraftCard({ root, draft, state, actions, saving, headingLevel, t }: Car
               </p>
             )}
           </div>
+          {fixing !== undefined && (
+            <p className={s.fixing}>
+              <Icon name="branch" size={12} className={s.lock} />
+              <span>{t.fixing(fixing)}</span>
+              {onNote && !posting && <LinkButton onClick={onNote}>{t.addNote}</LinkButton>}
+            </p>
+          )}
           <div className={s.foot}>
             <span className={s.note}>{posting ? t.posting(source) : t.note(source, as ?? null, kept, comments.length)}</span>
             {onDiscard && !posting && (
@@ -507,6 +539,7 @@ function DraftCard({ root, draft, state, actions, saving, headingLevel, t }: Car
                 {t.edit}
               </Button>
             )}
+            {onFix && fixing === undefined && !posting && <Button onClick={onFix}>{t.fix}</Button>}
             {onPostFromNow && state === ReviewDraftState.Pending && (
               <Button aria-describedby={missing ? missingId : undefined} onClick={() => chosen(onPostFromNow)}>
                 {t.postFromNow}

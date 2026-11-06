@@ -13,7 +13,8 @@ import { filesOf } from './handed'
  * own, whatever it wrote or committed and whether or not it has a branch. It
  * stays plain until the person asks its lead to make it a change
  * (make_it_a_change), which gives its plan a review and an ending. A review
- * reads someone else's pull request, with nothing of its own. A change is
+ * reads someone else's pull request, with nothing of its own, until the
+ * person has it fix what it found (make_it_a_change too). A change is
  * everything else: every planned task, a quick task made one, and any task
  * with a pull request; a task with no `here` is never a quick one, as a quick
  * task started before Althar wrote it was a change once it had a branch.
@@ -50,11 +51,13 @@ export const kindOf = (facts: KindFacts): TaskKind => {
  * Whether the task `task` (a table alias) is a review whose review was
  * posted, with nothing drafted since that waits on the person or is being
  * posted, as SQL: written to again, its lead answered, it is finished as a
- * quick task is, the person's to settle (ADR-051).
+ * quick task is, the person's to settle (ADR-051). Not one made a change of
+ * its findings: its draft posted or not, it is a change, its pull request's.
  */
 export const answeredIn = (task: string) =>
   `(EXISTS (SELECT 1 FROM review_drafts ad WHERE ad.task_id = ${task}.id AND ad.state = 'posted')
-    AND NOT EXISTS (SELECT 1 FROM review_drafts ad WHERE ad.task_id = ${task}.id AND ad.state IN ('pending', 'posting', 'failed', 'uncertain')))`
+    AND NOT EXISTS (SELECT 1 FROM review_drafts ad WHERE ad.task_id = ${task}.id AND ad.state IN ('pending', 'posting', 'failed', 'uncertain'))
+    AND NOT EXISTS (SELECT 1 FROM record_events ae WHERE ae.aggregate_type = 'task' AND ae.aggregate_id = ${task}.id AND ae.type = 'task.made_change'))`
 
 /**
  * Whether the task `task` (a table alias) is a quick task still, as SQL:

@@ -28,7 +28,15 @@ export interface ReviewActions {
   /** An automation drafted it: post it, and let that automation's next reviews post themselves. */
   readonly onPostFromNow?: (draftId: string, automationId: string) => void
   readonly onDiscard: (draftId: string) => void
+  /** Asks the review's lead, in the person's words, to fix what it found: its task becomes a change of them. */
+  readonly onFix?: () => void
 }
+
+/** What "Fix these" says to the review's lead, as the person's message: its findings, the blocking and major ones by default. */
+export const FIX_THESE = 'Fix what this review found: the blocking and major findings.'
+
+/** The line "Add a note" puts at the end of the summary, while its findings are being fixed. */
+export const FIXES_NOTE = 'Fixes for these are on their way.'
 
 /** The kit's state and verdict, from the runtime's. */
 const STATES: Readonly<Record<State, ReviewDraftState>> = {
@@ -107,6 +115,16 @@ export function ReviewCard({ draft, actions }: { draft: ReviewDraftContent; acti
       onPost={() => actions.onPost(draft.draftId)}
       {...(asksOnce ? { onPostFromNow: () => fromNow(draft.draftId, automation.id) } : {})}
       onDiscard={() => actions.onDiscard(draft.draftId)}
+      {...(draft.fixing === undefined
+        ? actions.onFix === undefined
+          ? {}
+          : { onFix: actions.onFix }
+        : {
+            fixing: draft.fixing,
+            ...(draft.summary.includes(FIXES_NOTE)
+              ? {}
+              : { onNote: () => void actions.onChange(draft.draftId, { summary: `${draft.summary.trimEnd()}\n\n${FIXES_NOTE}` }) }),
+          })}
       saving={saving}
     />
   )

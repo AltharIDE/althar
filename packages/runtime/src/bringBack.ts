@@ -9,7 +9,7 @@ import { makeScratch } from './firstWrite'
 import { branchExists, commitOf, git, restoreDetachedWorktree, restoreWorktree } from './git'
 import { Instance } from './Instance'
 import { change, fact } from './records'
-import { copyReviewed, reviewOf } from './reviewing'
+import { copyReviewed, reviewedOf } from './reviewing'
 import { addItem } from './threads'
 
 /*
@@ -87,7 +87,7 @@ const bringingBack = (taskId: string, actorId: ActorId) =>
         if (!(yield* worktreeAt(one.path))) return yield* new TaskRefused({ taskId, why: 'folder_in_way' })
       } else {
         if (one.access === 'read') {
-          const review = yield* reviewOf(taskId)
+          const review = yield* reviewedOf(taskId)
           if (review === null) return yield* new TaskRefused({ taskId, why: 'branch_gone' })
           yield* copyReviewed(one.repository, one.path, review)
         } else {

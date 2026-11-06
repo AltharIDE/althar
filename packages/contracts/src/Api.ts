@@ -2297,6 +2297,13 @@ export const ReviewDraftCard = Schema.Struct({
    * the next ones post. Null or absent otherwise.
    */
   automation: Schema.optional(Schema.NullOr(Schema.Struct({ ...FromAutomation.fields, postsReviews: Schema.Boolean }))),
+  /**
+   * Where its findings are being fixed, once the person had its task made a
+   * change of them: "on #12's own branch, feature-x". The draft is untouched,
+   * theirs to post as it is, with a note that fixes are coming, or discard.
+   * Absent before then.
+   */
+  fixing: Schema.optional(Schema.String),
 })
 export type ReviewDraftCard = typeof ReviewDraftCard.Type
 

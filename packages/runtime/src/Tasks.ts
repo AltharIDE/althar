@@ -28,7 +28,7 @@ import { makeKeyedLock } from './keyedLock'
 import { answeredIn, issueCardsWaiting, quickIn } from './kinds'
 import { Launches } from './Launches'
 import { Plans } from './Plans'
-import { copyReviewed, reviewOf } from './reviewing'
+import { copyReviewed, reviewedOf, reviewsIn } from './reviewing'
 import { touchQuestion } from './Questions'
 import { change, fact, timestamp } from './records'
 import { indexTask } from './Search'
@@ -483,7 +483,7 @@ export class Tasks extends Context.Service<
           for (const worktree of worktrees) {
             if (existsSync(worktree.path)) continue
             if (worktree.access === 'read') {
-              const review = yield* reviewOf(input.taskId)
+              const review = yield* reviewedOf(input.taskId)
               if (review === null) return yield* new TaskRefused({ taskId: input.taskId, why: 'branch_gone' })
               yield* copyReviewed(worktree.repository, worktree.path, review)
             } else if (worktree.branched === 0 && worktree.baseCommit !== null) {
@@ -722,7 +722,7 @@ export class Tasks extends Context.Service<
               const [task] = yield* sql<{ projectId: ProjectId; state: string; keptAt: string | null; change: number }>`
                 SELECT k.project_id, k.state, k.kept_at,
                   -- A quick task, or a review: a change waits on the person in its own way.
-                  CASE WHEN ${sql.unsafe(quickIn('k'))} OR EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review')
+                  CASE WHEN ${sql.unsafe(quickIn('k'))} OR ${sql.unsafe(reviewsIn('k'))}
                     THEN 0 ELSE 1 END AS change
                 FROM tasks k WHERE k.id = ${input.taskId}`
               if (task === undefined || task.state !== 'open' || task.keptAt !== null || task.change === 1) return false
@@ -750,7 +750,7 @@ export class Tasks extends Context.Service<
             Effect.gen(function* () {
               const [task] = yield* sql<{ projectId: ProjectId; state: string; keptAt: string | null; review: number }>`
                 SELECT k.project_id, k.state, k.kept_at,
-                  EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review') AS review
+                  ${sql.unsafe(reviewsIn('k'))} AS review
                 FROM tasks k WHERE k.id = ${taskId}`
               if (task === undefined) return false
               // A review posted has no round to open again (Runs.openRound does for any other): it opens here, and what its lead

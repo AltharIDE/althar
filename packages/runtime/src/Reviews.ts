@@ -21,7 +21,7 @@ import { logForLead, logPage, readLog } from './checkLogs'
 import { checksLine, checksOf, commentLine, nameOf, quoted, reviewLine, signed, standing } from './pullRequestWords'
 import { change, fact, timestamp } from './records'
 import { automationOf, linkTask } from './automated'
-import { copyReviewed, LOGS_SHOWN, type ReviewOf, reviewOf, type Reviewed, SAID_SHOWN } from './reviewing'
+import { copyReviewed, LOGS_SHOWN, type ReviewOf, reviewedOf, reviewOf, type Reviewed, SAID_SHOWN } from './reviewing'
 import { indexTask } from './Search'
 import { Sessions } from './Sessions'
 import { LeftBehind } from './LeftBehind'
@@ -131,8 +131,12 @@ interface Row {
   readonly postsReviews: number | null
 }
 
-/** A draft's card, from its row, and whether its pull request came from a fork. */
-const cardOf = (row: Row, fork: boolean): ReviewDraftCard => ({
+/**
+ * A draft's card, from its row, whether its pull request came from a fork,
+ * and where its findings are being fixed, once the person had its task made
+ * a change of them: the draft waits on them as it was.
+ */
+const cardOf = (row: Row, fork: boolean, fixing: string | null = null): ReviewDraftCard => ({
   draftId: row.id,
   product: row.product,
   repository: row.repository,
@@ -155,6 +159,7 @@ const cardOf = (row: Row, fork: boolean): ReviewDraftCard => ({
     row.automationId === null || row.automationName === null
       ? null
       : { id: row.automationId, name: row.automationName, postsReviews: row.postsReviews === 1 },
+  ...(fixing === null ? {} : { fixing }),
 })
 
 /** What the host calls each verdict a review posts with. */
@@ -315,6 +320,12 @@ export class Reviews extends Context.Service<
     post(draftId: string, actorId: ActorId): Effect.Effect<ReviewDraftCard, unknown>
     /** Discards a draft: nothing is posted. */
     discard(draftId: string, actorId: ActorId): Effect.Effect<void, unknown>
+    /**
+     * Draws a task's drafts again once it was made a change of their
+     * findings, so each says where they are being fixed: nothing of them
+     * changes, and they post only as the person says.
+     */
+    fixing(taskId: string): Effect.Effect<void, unknown>
   }
 >()('@althar/runtime/Reviews') {
   static readonly layer: Layer.Layer<Reviews, never, Store> = Layer.effect(
@@ -673,8 +684,17 @@ export class Reviews extends Context.Service<
           return row === undefined ? yield* new NotFound({ kind: 'review draft', id: draftId }) : row
         })
 
-      /** The card a draft's item shows, read with whether its pull request came from a fork. */
-      const cardFor = (row: Row) => Effect.map(reviewOf(row.taskId), (review) => cardOf(row, (review?.fork ?? null) !== null))
+      /** The card a draft's item shows, read with whether its pull request came from a fork, and where its findings are fixed. */
+      const cardFor = (row: Row) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const review = yield* reviewedOf(row.taskId)
+          const [made] = yield* sql<{ where: string | null }>`
+            SELECT json_extract(payload, '$.where') AS "where" FROM record_events
+            WHERE aggregate_type = 'task' AND aggregate_id = ${row.taskId} AND type = 'task.made_change'
+            ORDER BY sequence DESC LIMIT 1`
+          return cardOf(row, (review?.fork ?? null) !== null, made?.where ?? null)
+        })
 
       /** Rewrites a draft's card from its row, inside the transaction that changed it. */
       const showCard = (draftId: string) =>
@@ -736,12 +756,15 @@ export class Reviews extends Context.Service<
           return result
         })
 
-      /** Settles a review task once its review is posted, in the transaction that records it posted; one not open stays as it is. */
+      /**
+       * Settles a review task once its review is posted, in the transaction that records it posted; one not open stays as it
+       * is, and so does one made a change of its findings, which its pull request settles as any change's does.
+       */
       const settle = (row: Row, actorId: ActorId) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${row.taskId}`
-          if (task?.state !== 'open') return
+          if (task?.state !== 'open' || (yield* reviewOf(row.taskId)) === null) return
           const at = yield* timestamp
           const revision = yield* change('tasks', row.taskId, { state: 'done', settledAt: at })
           yield* fact({
@@ -1347,7 +1370,16 @@ export class Reviews extends Context.Service<
         },
       ])
 
-      return Reviews.of({ start, lead, canLead: (agentId) => canLead(agentId), change: changeDraft, post, discard })
+      const fixing: Reviews['Service']['fixing'] = (taskId) =>
+        provide(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const drafts = yield* sql<{ id: string }>`SELECT id FROM review_drafts WHERE task_id = ${taskId} AND state <> 'discarded'`
+            for (const draft of drafts) yield* sql.withTransaction(showCard(draft.id))
+          }),
+        )
+
+      return Reviews.of({ start, lead, canLead: (agentId) => canLead(agentId), change: changeDraft, post, discard, fixing })
     }),
   )
 }
