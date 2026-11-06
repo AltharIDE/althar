@@ -1,5 +1,4 @@
 // Scrappy, direction B: the project's composer starts a task itself, or talks to the coordinator, by a switch on its edge; what a task needs sits in its lower row.
-import { BranchSelect } from '../../../../src/primitives/BranchSelect/BranchSelect'
 import { Menu, MenuCheckboxItem, MenuGroup, MenuRadioGroup, MenuRadioItem, MenuSeparator } from '../../../../src/primitives/Menu/Menu'
 import { Segmented } from '../../../../src/primitives/Segmented/Segmented'
 import { LINEAR } from '../../data'
@@ -19,6 +18,7 @@ export const composerText = {
   reviewNote: (model: string) => `By ${model}`,
   noReview: 'No review',
   into: 'Into',
+  where: 'Where it goes',
   worksIn: 'Works in',
   worktree: 'Worktree',
   checkout: 'Your checkout',
@@ -81,20 +81,20 @@ export function ComposerStart({ task }: { task: Task }) {
           </MenuRadioGroup>
         </Menu>
       )}
-      <BranchSelect
-        label={composerText.into}
-        value={draft.toward}
-        branches={BRANCHES}
-        defaultBranch="main"
-        onChange={(toward) => set({ toward })}
-        variant="quiet"
-      />
       <Menu
-        label={composerText.worksIn}
+        label={composerText.where}
         placement="above"
-        width={220}
-        trigger={<Chip>{draft.worksIn === 'worktree' ? composerText.worktree : composerText.checkout}</Chip>}
+        width={260}
+        trigger={<Chip>{`${draft.toward}${draft.worksIn === 'checkout' ? ` · ${composerText.checkout}` : ''}`}</Chip>}
       >
+        <MenuRadioGroup label={composerText.into} value={draft.toward} onChange={(toward) => set({ toward })}>
+          {BRANCHES.map((branch) => (
+            <MenuRadioItem key={branch} value={branch}>
+              {branch}
+            </MenuRadioItem>
+          ))}
+        </MenuRadioGroup>
+        <MenuSeparator />
         <MenuRadioGroup
           label={composerText.worksIn}
           value={draft.worksIn}

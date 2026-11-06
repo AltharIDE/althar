@@ -105,7 +105,8 @@ export const threadOf = (threadId: string): ThreadSnapshot => {
     threadId,
     project: { id: 'p1', name: 'althar' },
     task: taskOf(content, own.task),
-    session: session(content.leadModel ?? 'claude-opus-5-5', content.phase === 'running'),
+    // Only the child's lead is mid-turn; the others ended theirs, so their last words show.
+    session: session(content.leadModel ?? 'claude-opus-5-5', threadId === 'th-codex-net'),
     items: own.items,
     attention: own.attention ?? [],
   })

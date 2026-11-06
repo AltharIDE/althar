@@ -72,3 +72,7 @@
 .answered {
   margin: 4px 0;
 }
+.ways {
+  display: inline-flex;
+  gap: 14px;
+}

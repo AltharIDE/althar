@@ -2,7 +2,9 @@
 import { Children, type ComponentProps, isValidElement, type ReactElement } from 'react'
 
 import { BoardCard as RealBoardCard } from '../../../src/board/BoardCard/BoardCard'
-import { BoardColumn as RealBoardColumn } from '../../../src/board/Board/Board'
+import { BoardColumn as RealBoardColumn, BoardEmpty as RealBoardEmpty } from '../../../src/board/Board/Board'
+import { LinkButton } from '../../../src/primitives/LinkButton/LinkButton'
+import { openNewTask } from './projectUi'
 import { BoardLane } from '../../../src/foundations/vocabulary'
 import { BoardStart } from '../directions/start/BoardStart'
 import { Lineage, lineageText } from '../directions/lineage/Lineage'
@@ -60,4 +62,23 @@ export function BoardColumn(props: ComponentProps<typeof RealBoardColumn>) {
     )
   if (p.surface === 'lineage' && p.direction === 'B') return <RealBoardColumn {...props}>{nested(props.children)}</RealBoardColumn>
   return <RealBoardColumn {...props} />
+}
+
+/** Up next, empty: work you start or the coordinator plans waits here for a free agent; either way in. */
+export function BoardEmpty(props: ComponentProps<typeof RealBoardEmpty>) {
+  const p = useProto()
+  if (p.surface !== 'start' || p.direction === 'Today') return <RealBoardEmpty {...props} />
+  return (
+    <RealBoardEmpty
+      title={props.title}
+      action={
+        <span className={s.ways}>
+          <LinkButton onClick={openNewTask}>New task</LinkButton>
+          {props.action}
+        </span>
+      }
+    >
+      Tasks wait here for a free agent.
+    </RealBoardEmpty>
+  )
 }

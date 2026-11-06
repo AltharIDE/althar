@@ -10,14 +10,16 @@ export const ROLES: ReadonlyArray<{ id: Role; name: string; plural: string }> = 
 
 export const PROJECTS = ['althar', 'site', 'meridian'] as const
 
-export type SourceId = 'claude' | 'codex' | 'opencode' | 'project' | 'plugin' | 'althar'
+export type SourceId = 'claude' | 'codex' | 'opencode' | 'project' | 'mine' | 'plugin' | 'repository' | 'althar'
 
 export const SOURCES: Readonly<Record<SourceId, { name: string; path: string; brand?: Brand }>> = {
   claude: { name: 'Claude Code', path: '~/.claude.json', brand: Brand.ClaudeCode },
   codex: { name: 'Codex', path: '~/.codex/config.toml', brand: Brand.Codex },
   opencode: { name: 'OpenCode', path: '~/.config/opencode/opencode.json', brand: Brand.OpenCode },
   project: { name: 'althar', path: '.mcp.json' },
+  mine: { name: 'Yours', path: '~/.claude/skills', brand: Brand.ClaudeCode },
   plugin: { name: 'superpowers', path: 'a Claude Code plugin', brand: Brand.ClaudeCode },
+  repository: { name: 'althar', path: '.claude/skills' },
   althar: { name: 'Althar’s catalog', path: 'kept by Althar' },
 }
 
@@ -67,7 +69,7 @@ export const SKILLS: ReadonlyArray<Found> = [
   {
     id: 'design-review',
     name: 'design-review',
-    sources: ['claude'],
+    sources: ['mine'],
     runs: 'Builds the app and Storybook, compares them, posts on the pull request',
     acts: true,
     roles: ['lead', 'reviewer'],
@@ -75,7 +77,7 @@ export const SKILLS: ReadonlyArray<Found> = [
   {
     id: 'release-notes',
     name: 'release-notes',
-    sources: ['claude'],
+    sources: ['mine'],
     runs: 'Writes a release’s notes from its merged pull requests',
     roles: EVERY,
   },
@@ -96,7 +98,7 @@ export const SKILLS: ReadonlyArray<Found> = [
   {
     id: 'althar-prototype',
     name: 'althar-prototype',
-    sources: ['project'],
+    sources: ['repository'],
     runs: 'Prototypes on the real kit, one live page, A/B/C',
     roles: ['lead'],
     projects: ['althar'],

@@ -56,7 +56,7 @@ function ReachWord({ found, reach, onChange }: { found: Found; reach: Reach; onC
             key={project}
             keepOpen
             checked={reach.projects.includes(project)}
-            disabled={found.sources[0] === 'project' && project !== 'althar'}
+            disabled={(found.sources[0] === 'project' || found.sources[0] === 'repository') && project !== 'althar'}
             onCheckedChange={(on) =>
               onChange({ ...reach, projects: PROJECTS.filter((one) => (one === project ? on : reach.projects.includes(one))) })
             }
@@ -81,7 +81,7 @@ const sourceMark = (id: SourceId) => {
   return source.brand !== undefined ? (
     <BrandMark brand={source.brand} size={13} />
   ) : (
-    <Icon name={id === 'project' ? 'folder' : 'knowledge'} size={12} />
+    <Icon name={id === 'project' || id === 'repository' ? 'folder' : 'knowledge'} size={12} />
   )
 }
 
@@ -120,7 +120,7 @@ export function ToolsBySource() {
                   mark={markOf(one)}
                   note={
                     <span className={s.note}>
-                      <span className={s.runs}>{one.runs}</span>
+                      <span className={SERVERS.includes(one) ? s.runs : s.about}>{one.runs}</span>
                       {one.sources.length > 1 && (
                         <span>
                           {toolsText.also(
@@ -191,16 +191,18 @@ export function ToolsByRole() {
       {list.map((one) => (
         <tr key={one.id}>
           <th scope="row" className={s.nameCell}>
-            <span className={s.nameLine}>
-              {markOf(one)}
-              <span className={s.name}>{one.name}</span>
-              <span className={s.sources} title={one.sources.map((id) => `${SOURCES[id].name}: ${SOURCES[id].path}`).join('\n')}>
-                {one.sources.map((id) => (
-                  <Fragment key={id}>{sourceMark(id)}</Fragment>
-                ))}
+            <div className={s.nameBox}>
+              <span className={s.nameLine}>
+                {markOf(one)}
+                <span className={s.name}>{one.name}</span>
+                <span className={s.sources} title={one.sources.map((id) => `${SOURCES[id].name}: ${SOURCES[id].path}`).join('\n')}>
+                  {one.sources.map((id) => (
+                    <Fragment key={id}>{sourceMark(id)}</Fragment>
+                  ))}
+                </span>
               </span>
-            </span>
-            <span className={s.runs}>{one.runs}</span>
+              <span className={SERVERS.includes(one) ? s.runs : s.about}>{one.runs}</span>
+            </div>
           </th>
           {ROLES.map((role) => (
             <td key={role.id} className={s.tick}>

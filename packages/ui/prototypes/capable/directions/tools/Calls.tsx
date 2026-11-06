@@ -16,7 +16,7 @@ const WORDS: Record<string, { verb: string; target: (input: string) => string; a
   get_pull_request: { verb: 'Read', target: () => '#612' },
   get_pull_request_files: { verb: 'Read', target: () => '#612’s files' },
   get_issue: { verb: 'Read', target: () => 'DEV-188' },
-  browser_take_screenshot: { verb: 'Took', target: () => 'a screenshot of localhost:6126' },
+  browser_take_screenshot: { verb: 'Took', target: () => 'a screenshot' },
   create_pull_request_review: { verb: 'Posted', target: () => 'a review on #612', acts: true },
   update_issue: { verb: 'Moved', target: () => 'DEV-188 to In Review', acts: true },
 }
@@ -121,9 +121,9 @@ export function ActCard({ mark }: { mark: string }) {
 export function Seen({ agent }: { agent: string }) {
   const groups = [
     { label: 'MCP servers', names: SERVERS.filter((one) => one.roles.includes('lead')).map((one) => one.name) },
-    { label: 'Yours', names: SKILLS.filter((one) => one.sources[0] === 'claude').map((one) => one.name) },
+    { label: 'Yours', names: SKILLS.filter((one) => one.sources[0] === 'mine').map((one) => one.name) },
     { label: SOURCES.plugin.name, names: SKILLS.filter((one) => one.sources[0] === 'plugin').map((one) => one.name) },
-    { label: 'This repository', names: SKILLS.filter((one) => one.sources[0] === 'project').map((one) => one.name) },
+    { label: 'This repository', names: SKILLS.filter((one) => one.sources[0] === 'repository').map((one) => one.name) },
     { label: 'Althar’s', names: SKILLS.filter((one) => one.sources[0] === 'althar').map((one) => one.name) },
   ]
   const skills = SKILLS.length
