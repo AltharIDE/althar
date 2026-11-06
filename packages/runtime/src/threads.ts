@@ -210,7 +210,9 @@ const skillsRead = (place: ItemPlace, content: Readonly<Record<string, unknown>>
     return (line?.content.skills ?? []).flatMap((skill) => {
       const spellings = [
         skill.path,
-        ...spelledBoth(place.folders).flatMap((folder) => (inside(skill.path, folder) ? [relative(folder, skill.path)] : [])),
+        ...spelledBoth(place.folders).flatMap((folder) =>
+          inside(skill.path, folder) ? [relative(folder, skill.path), relative(folder, skill.path).replaceAll('\\', '/')] : [],
+        ),
       ]
       return paths.some((path) => spellings.includes(path)) || printing.some((part) => spellings.some((one) => part.includes(one)))
         ? [skill.name]
