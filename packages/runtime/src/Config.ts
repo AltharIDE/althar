@@ -214,6 +214,8 @@ export interface BusyOptions {
   readonly askGrace?: Duration.Duration
   /** How many automations' tasks may be at work at once: one. */
   readonly automations?: number
+  /** How many places beyond the number tasks planned small may take (quickLane.ts): one; none turns the quick lane off. */
+  readonly quick?: number
   /**
    * The CPU time of each process in the tree of each of these agents (the agent's process and everything it started), by
    * process and in milliseconds, by thread; null where it can't be said, as for an agent that is no process of its own:
