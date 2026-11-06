@@ -1,6 +1,9 @@
 # ADR-066: Althar runs any branch or pull request, and fetches for leads
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06): a
+  lead may carry the person's own sign-in where they have one set up;
+  `fetch_from_remote` stays the preferred way, and Althar's own tokens
+  still never leave it
 - **Date:** 2026-10-27
 - **Amended:** 2026-11-03: a branch or pull request is picked beside Run, as a place to run on, and fetched as something runs there
   ([ADR-090](090-run-opens-its-list-and-runs-where-it-is-picked.md)).
@@ -17,7 +20,9 @@
   never ran the app. The person got a task card and a report instead of the
   branch running.
 - **Decision:** Althar fetches, with its own sign-in, whatever a run or a lead
-  needs from the code host; credentials never leave it.
+  needs from the code host; credentials never leave it. (Since ADR-097,
+  Althar's never do, and a lead with the person's own sign-in may fetch
+  with it.)
   - **A run of a branch or a pull request** (`run_project`'s `branch` and
     `pull_request`, the `RunProject` call's `branch` and `pullRequest`):
     Althar fetches it into the person's repository (`Fetches.ts`), through

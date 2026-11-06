@@ -1,6 +1,6 @@
 # ADR-090: Run opens its list, and runs where it is picked
 
-- **Status:** Accepted
+- **Status:** Accepted; the pill over the composers is back, see [ADR-096](096-runs-show-in-the-pill-over-the-composer-again.md)
 - **Date:** 2026-11-03
 - **Owner:** Repository maintainers
 - **Context:** ADR-044 made Run a split button whose one press ran the

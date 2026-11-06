@@ -1428,6 +1428,8 @@ export const ToolCallItem = Schema.Struct({
     asks: Schema.optional(Schema.Boolean),
     /** Let through without asking by the project's allow rules, the first that did (ADR-018); absent otherwise. */
     allowedBy: Schema.optional(AllowedBy),
+    /** The skills it loads, by the agent's own word (`reported`), or a read of their `SKILL.md`, where the agent has no such word. */
+    skill: Schema.optional(Schema.Struct({ names: Schema.Array(Schema.String), reported: Schema.Boolean })),
     ...handedFields,
     output: Schema.NullOr(CommandOutput),
     exit: Schema.NullOr(Schema.Number),
@@ -1514,7 +1516,11 @@ export const NoticeItem = Schema.Struct({
      * work, what the coordinator relayed, or its task's folder going or coming
      * back, a line across the thread (ADR-056).
      */
-    role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder'])),
+    role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder', 'skills'])),
+    /** For what a lead's agent could see: each skill, and whether it is the person's or the repository's. */
+    skills: Schema.optional(
+      Schema.Array(Schema.Struct({ name: Schema.String, path: Schema.String, from: Schema.Literals(['person', 'repository']) })),
+    ),
     /**
      * For an agent's turn that failed: why, as the runtime classes it
      * (`auth_required`, `usage_limit`, `context_full`, `session_lost`,

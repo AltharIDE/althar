@@ -1,6 +1,10 @@
 # ADR-011: Althar's own connectors for code hosts and trackers
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06):
+  agents may use the person's own `gh`, `glab` and git sign-in and their MCP
+  servers, Althar's tools reach every pull request and issue in the
+  project's repositories, and the rules read `gh` as they read git. Althar's
+  own way to the host stays the preferred and recorded one
 - **Date:** 2026-10-01
 - **Amended:** 2026-10-31 ([ADR-081](081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md), to build for 0.7.0): an agent does on the code host what the person's account can, through Althar's tools, and merging waits for the person's word, which their message to the coordinator or to a task's lead now is, never an agent's own initiative; agents still carry no sign-in of their own.
 - **Owner:** Repository maintainers
@@ -35,19 +39,24 @@
       without the person noticing.
     - OAuth that needs the app's secret (Atlassian's) waits for Althar's
       cloud.
-  - Agents reach the hosts only through Althar:
+  - Agents reach the hosts only through Althar (since ADR-097, Althar's way
+    is the preferred one, not the only one):
     - Pushing a task's branch, opening its pull request and marking it ready
       are Althar's, done as steps of the plan.
     - Merging is the person's: accepting the change in Althar merges it,
       or they merge it on the host. Never an agent's.
     - Agents read pull requests and issues, and reply on a pull request,
-      through Althar's tools, which only reach the task's own repository.
+      through Althar's tools, which only reach the task's own repository
+      (since ADR-097, any of the project's repositories).
     - Agents run without the person's ways into a host: `gh` and `glab`
       signed out, git's credential helpers reset, no SSH agent. The
-      environment is the boundary.
+      environment is the boundary. Superseded by ADR-097: where the person
+      has them set up, agents use them, unless the project's switch turns
+      that off.
     - The rules refuse `gh` and `glab` commands that change a host, with a
       reason that names Althar's tool, and any command that reads
-      credentials.
+      credentials. Since ADR-097 only the second holds: `gh` and `glab` are
+      read as git is, and only what can't be undone asks.
     - What the lead hears from a pull request is what the person and the
       repository's own people say, and failed checks. Anyone else, as on a
       public repository, stays in the thread for the person to pass on.

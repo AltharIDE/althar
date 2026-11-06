@@ -409,6 +409,36 @@ describe('tool calls', () => {
     expect(tool).toMatchObject({ state: ToolState.Declined, why: 'Althar’s rules: No writes' })
   })
 
+  it('makes a skill loaded a row naming it, and a read of its file a row saying so', () => {
+    const partOf = (content: Parameters<typeof items.tool>[0]) => {
+      const blocks = blocksOf({ items: [items.tool(content)], turnRunning: false, worktree: '/w' }, new Map(), at)
+      const turn = blocks[0]
+      return turn?.kind === 'turn' ? turn.parts[0] : undefined
+    }
+    expect(partOf({ title: 'Load skill: mine', toolKind: 'other', skill: { names: ['mine'], reported: true } })).toMatchObject({
+      toolKind: ToolKind.Skill,
+      verb: 'Loaded skill',
+      target: 'mine',
+    })
+    expect(
+      partOf({
+        title: "Read file '/h/mine/SKILL.md'",
+        toolKind: 'read',
+        locations: [{ path: '/h/mine/SKILL.md' }],
+        skill: { names: ['mine'], reported: false },
+      }),
+    ).toMatchObject({ toolKind: ToolKind.Skill, verb: 'Read skill', target: 'mine' })
+    // A command that printed one is still what it ran.
+    expect(
+      partOf({
+        title: 'cat',
+        toolKind: 'execute',
+        command: 'cat /h/mine/SKILL.md && git status',
+        skill: { names: ['mine'], reported: false },
+      }),
+    ).toMatchObject({ toolKind: ToolKind.Run, verb: 'Ran', target: 'cat /h/mine/SKILL.md && git status', skills: { names: ['mine'] } })
+  })
+
   it('says what it acted on: the file, the command, or its title', () => {
     const tool = (content: Parameters<typeof items.tool>[0]) => {
       const made = items.tool(content)

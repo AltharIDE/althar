@@ -41,6 +41,8 @@ export type Part =
       readonly command: string | null
       /** The command as it reads at a glance, which the row shows in its place, where it can be said shorter. */
       readonly label?: string
+      /** The skills it loads, or read the `SKILL.md` of: a row naming them, or, for a command, said beside it. */
+      readonly skills?: { readonly names: ReadonlyArray<string>; readonly reported: boolean }
       /** For a refused call: who refused it and why, as the row says it; absent where the person refused it. */
       readonly why?: string
       /** The project's rule that let it through without asking (ADR-018), where one did. */
@@ -220,6 +222,7 @@ export const verbs: Readonly<Record<ToolKind, { readonly plain: string; readonly
   [ToolKind.PullRequest]: { plain: 'Open', running: 'Opening', done: 'Opened' },
   [ToolKind.Comment]: { plain: 'Reply on', running: 'Replying on', done: 'Replied on' },
   [ToolKind.Push]: { plain: 'Push', running: 'Pushing', done: 'Pushed' },
+  [ToolKind.Skill]: { plain: 'Load skill', running: 'Loading skill', done: 'Loaded skill' },
   [ToolKind.Other]: { plain: 'Use', running: 'Using', done: 'Used' },
 }
 
@@ -324,15 +327,19 @@ const partOf = (
         : { kind: 'message', id: item.id, text, pictures: item.content.pictures, files: item.content.files }
     }
     case 'tool_call': {
-      const toolKind = toolKindOf(item.content.toolKind)
+      const ranKind = toolKindOf(item.content.toolKind)
+      const { skill } = item.content
+      // A load is a row of its own, naming the skill; a command that printed one stays what it ran, and says so.
+      const toolKind = skill !== undefined && ranKind !== ToolKind.Run ? ToolKind.Skill : ranKind
       const state = toolStateOf(item.content.status, turnRunning, item.content.declined)
       const why = declinedWords(item.content.declinedBy, item.content.declinedWhy)
       return {
         kind: 'tool',
         id: item.id,
         toolKind,
-        verb: verbFor(toolKind, state),
-        target: targetOf(item.content, worktree),
+        verb: toolKind === ToolKind.Skill && skill?.reported === false ? 'Read skill' : verbFor(toolKind, state),
+        target: toolKind === ToolKind.Skill && skill !== undefined ? skill.names.join(', ') : targetOf(item.content, worktree),
+        ...(skill === undefined ? {} : { skills: skill }),
         state,
         command: item.content.command,
         ...(item.content.label === undefined ? {} : { label: item.content.label }),

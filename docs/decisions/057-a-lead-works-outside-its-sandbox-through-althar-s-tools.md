@@ -1,6 +1,9 @@
 # ADR-057: A lead works outside its sandbox through Althar's tools, not around it
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06): a
+  review's lead of a pull request by the repository's own people gets these
+  tools as a task's lead does, the coordinator shares them, and `screenshot`
+  draws any address
 - **Date:** 2026-10-21
 - **Amended:** 2026-10-29 ([ADR-071](071-the-sandbox-is-the-boundary-anything-inside-it-runs.md)): where a lead's sandbox can start, its session doesn't start without it, and what it holds runs without Althar reading it; what crosses meets the rules, and git's guard stops what can't be undone.
 - **Owner:** Repository maintainers
@@ -33,7 +36,8 @@
     viewport asked (1280×800 without), the whole page (cut at 16,000 pixels)
     or one element by a CSS selector. Only a page served on this computer, on
     a loopback address or where one of Althar's runs answers, over http;
-    never one on the internet, which would be a way out of the sandbox. The
+    never one on the internet, which would be a way out of the sandbox
+    (since ADR-097, any address: agents reach the web already). The
     window holds the page there: a redirect or the page's own navigation
     anywhere else ends the shot with where it went, and a frame that would
     go elsewhere stays empty. Where
@@ -46,7 +50,8 @@
     Vercel), and every Bitbucket check, can't run again from Althar, and the
     lead is told so, with the check's page for the person.
   - A review's lead gets none of these: it runs nothing of someone else's
-    code (Reviews.ts guards a review's tools).
+    code (Reviews.ts guards a review's tools). Since ADR-097, only an
+    outside author's review, until the person says "run it".
 - **Alternatives considered:**
   - **Let the commands through the sandbox from the start** (Claude Code's
     `excludedCommands`). Planned on its own, for commands the project runs

@@ -20,6 +20,8 @@ export interface StartingAt {
   readonly env: Readonly<Record<string, string | undefined>>
   readonly homeDir: string
   readonly cwd: string
+  /** Inside a Flatpak's sandbox, not out on the device: `inFlatpakSandbox`. */
+  readonly inSandbox?: boolean
 }
 
 const read = (path: string) => {
@@ -35,7 +37,7 @@ const read = (path: string) => {
  * first with a `.git`), the root first, as both agents look for a project's
  * config; outside a repository, up to the top.
  */
-const upToRepository = (cwd: string): ReadonlyArray<string> => {
+export const upToRepository = (cwd: string): ReadonlyArray<string> => {
   const folders: string[] = []
   for (let folder = cwd; ; folder = dirname(folder)) {
     folders.push(folder)

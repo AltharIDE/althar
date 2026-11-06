@@ -1,6 +1,9 @@
 # ADR-027: What the Flatpak reaches, and what it does not
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06): what
+  crosses to an agent may include the person's own sign-in (their SSH agent,
+  `gh` and `glab`) where the project's switch allows; how it reaches the
+  agents inside the Flatpak is for ADR-097's third phase
 - **Date:** 2026-10-10
 - **Amended:** 2026-10-24: Althar's own git over SSH runs the device's ssh,
   with the person's agent and known hosts; ssh in the sandbox trusts pinned
@@ -30,7 +33,8 @@
     home, PATH and runtime directory, and what an executor set for the agent
     (an account's home, Althar's settings, the signed-out git settings) cross;
     nothing else does, so no ssh agent and no signed-in tool reaches an agent
-    (ADR-011). The account homes and the profile are host-visible, so host runs
+    (ADR-011; from ADR-097's third phase the person's sign-in crosses too,
+    unless the project's switch is off). The account homes and the profile are host-visible, so host runs
     read and write the same files the sandbox does. Where a worktree's `.git`
     file points through `/run/flatpak/doc`, the bridge passes translated
     `GIT_DIR` and `GIT_WORK_TREE` paths to host git.
@@ -60,6 +64,13 @@
     as plain `bun`, failing sign-in and sessions alike. In a reader role,
     commands reach Althar's reader rules, which refuse direct and wrapped
     `flatpak-spawn` commands.
+  - **The person's skill folders are in the sandbox, read-only.** The manifest
+    asks for `~/.claude/skills`, `~/.codex/skills`, `~/.agents/skills` and
+    `~/.config/opencode/skills` as `:ro`, each at the same path, and nothing
+    else of the home. Without them the bundled Claude Code, the one agent that
+    runs inside, never sees the person's skills, and an account's home has none
+    to link. A skill that is a link to somewhere else stays out of reach, and a
+    folder made after the app started shows at its next start.
   - **The desktop's tray carries the edge's icon.** The manifest asks for
     `--talk-name=org.kde.StatusNotifierWatcher`, so the StatusNotifierItem
     Electron registers for the tray (edgeWindows.ts) reaches the desktop's
@@ -80,7 +91,9 @@
   - **git has no ssh-agent socket.** The manifest does not expose the
     person's ssh agent to the sandbox. Althar's own pushes use the code-host
     connections it keeps, and its own git over SSH runs the device's ssh,
-    which has the agent (ADR-073).
+    which has the agent (ADR-073). ADR-097 lets agents use the person's
+    sign-in, so whether the Flatpak passes the socket in for them, as
+    ADR-073 turned down for ADR-011's sake, is its third phase's to settle.
   - **The profile is the app's own.** In a Flatpak it is
     `$XDG_DATA_HOME/althar` = `~/.var/app/dev.althar.app/data/althar`, with the
     worktrees beside it; the CLI keeps `~/.local/share/althar`. Projects reach

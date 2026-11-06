@@ -139,6 +139,38 @@ describe('accounts', () => {
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { agents: insideOnly('codex') }))))),
   )
 
+  it.effect("puts the person's skills in a home whose own `skills` folder would keep them out", () =>
+    Effect.gen(function* () {
+      const accounts = yield* Accounts
+      const config = yield* RuntimeConfig
+      const definition = (yield* (yield* Agents).get('claude-code')).definition
+      const usual = definition.home.usual({}, '')
+      // The usual folder is the whole file's: the person's skills in it are this test's alone.
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(join(usual, 'skills'), { recursive: true, force: true })))
+      mkdirSync(join(usual, 'skills', 'mine'), { recursive: true })
+      const [account] = yield* accounts.of('claude-code')
+      if (account === undefined) return assert.fail('Claude Code has its usual account')
+      // What Claude Code made itself there, for what it syncs from an account: it stays.
+      const home = join(config.accountsRoot ?? '', 'claude-usual')
+      mkdirSync(join(home, 'skills', 'synced'), { recursive: true })
+
+      yield* accounts.prepare(account)
+      assert.isFalse(lstatSync(join(home, 'skills')).isSymbolicLink())
+      assert.isTrue(lstatSync(join(home, 'skills', 'synced')).isDirectory())
+      assert.isTrue(lstatSync(join(home, 'skills', 'mine')).isSymbolicLink())
+      // Again, as every session does, with one more since.
+      mkdirSync(join(usual, 'skills', 'more'))
+      yield* accounts.prepare(account)
+      assert.isTrue(lstatSync(join(home, 'skills', 'more')).isSymbolicLink())
+    }).pipe(
+      Effect.provide(
+        Queries.layer.pipe(
+          Layer.provideMerge(runtime(':memory:', {}, { onDevice: { reachable: true, where: () => null, run: (spec) => spec } })),
+        ),
+      ),
+    ),
+  )
+
   it.effect('gives an older version installed the line of its own, as OpenCode 1.x signs in without --standalone', () =>
     Effect.gen(function* () {
       const [claude] = yield* (yield* Accounts).of('claude-code')

@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
-import { baseOf, changedFiles, changedStretch, fileDiff, parseDiff } from '../src/diffs'
+import { baseOf, changedBetween, changedFiles, changedStretch, fileDiff, parseDiff, unchangedFileDiff } from '../src/diffs'
 import { NotFound } from '../src/errors'
 
 /** Windows, where what some tests stand on isn't (each says what). */
@@ -287,4 +287,47 @@ describe('reading a diff', () => {
     // A number that grows a digit in front is marked whole, not its last digit kept apart.
     assert.deepStrictEqual(changedStretch('const wait = 0', 'const wait = 10'), [['0'], ['10']])
   })
+})
+
+describe('a file the task left as it was', () => {
+  it.effect('reads every line of one git tracks, and nothing of one it doesn’t or outside the worktree', () =>
+    Effect.gen(function* () {
+      const { root } = changed()
+      const git = (...args: Array<string>) =>
+        execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', ...args], { cwd: root })
+      writeFileSync(join(root, 'blank.txt'), '')
+      writeFileSync(join(root, 'last.txt'), 'one\ntwo')
+      if (!windows) symlinkSync('retry.ts', join(root, 'pointer'))
+      git('add', '-A')
+      git('commit', '-q', '-m', 'More')
+      writeFileSync(join(root, 'loose.md'), 'not added\n')
+
+      const lines = (path: string) =>
+        Effect.map(unchangedFileDiff(root, path), (diff) => [diff.file.binary, diff.lines.map((line) => line.text), diff.truncated])
+      assert.deepStrictEqual(yield* lines('last.txt'), [false, ['one', 'two'], false])
+      assert.deepStrictEqual(yield* lines('blank.txt'), [false, [], false])
+      // A picture is binary, with no lines to show.
+      assert.deepStrictEqual(yield* lines('mark.png'), [true, [], false])
+      // A link is read as git keeps it: its target, never the file it points at.
+      if (!windows) assert.deepStrictEqual(yield* lines('pointer'), [false, ['retry.ts'], false])
+      for (const path of ['', '/etc/passwd', '../retry.ts', 'loose.md'])
+        assert.instanceOf(yield* Effect.flip(unchangedFileDiff(root, path)), NotFound, path)
+    }),
+  )
+})
+
+describe('what a task changed between two commits', () => {
+  it.effect('lists only what git tracks, in path order, and no file of the worktree’s own', () =>
+    Effect.gen(function* () {
+      const { root, base } = changed()
+      const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root }).toString().trim()
+      const files = yield* changedBetween(root, base, head)
+      const paths = files.map((file) => file.path)
+      assert.deepStrictEqual(paths, paths.toSorted())
+      assert.includeMembers(paths, ['notes.md', 'retry.ts', 'src/added.ts'])
+      assert.notInclude(paths, 'scratch.md')
+      // Between two commits, a file nobody committed isn't one the task changed.
+      assert.instanceOf(yield* Effect.flip(fileDiff(root, base, 'scratch.md', head)), NotFound)
+    }),
+  )
 })

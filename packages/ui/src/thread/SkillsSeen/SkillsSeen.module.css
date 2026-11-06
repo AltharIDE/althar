@@ -1,0 +1,70 @@
+.seen {
+  display: block;
+}
+/* one faint line, as a round's work is: it sits back from the words either side */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 22px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--t-4);
+  text-align: left;
+  transition: color var(--fast) var(--ease);
+}
+button.row:hover,
+.seen[data-state='open'] .row {
+  color: var(--t-3);
+}
+.mark {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 12px;
+}
+.chevron {
+  transition: transform var(--fold) var(--ease-fold);
+}
+.seen[data-state='open'] .chevron {
+  transform: rotate(90deg);
+}
+.title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.groups {
+  display: grid;
+  gap: 10px;
+  padding: 4px 0 8px 18px;
+}
+.group {
+  display: grid;
+  gap: 2px;
+}
+.label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: inherit;
+  color: var(--t-3);
+}
+.names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.name {
+  max-width: 100%;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--t-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -153,7 +153,7 @@ const ROUND_REACH = 2_000
  * a pull request.
  */
 const ROUND_ASK = `(i.kind = 'user_message' AND coalesce(u.state, 'delivered') = 'delivered')
-  OR (i.kind = 'notice' AND json_extract(i.content, '$.source') = 'runtime' AND coalesce(json_extract(i.content, '$.role'), '') NOT IN ('aside', 'folder'))
+  OR (i.kind = 'notice' AND json_extract(i.content, '$.source') = 'runtime' AND coalesce(json_extract(i.content, '$.role'), '') NOT IN ('aside', 'folder', 'skills'))
   OR (i.kind = 'step_result' AND json_extract(i.content, '$.step') IN ('review', 'publish'))
   OR i.kind = 'arrival'`
 
@@ -206,6 +206,23 @@ export const text = (value: unknown, key: string): string => {
   const found = field(value, key)
   return typeof found === 'string' ? found : ''
 }
+
+/** A tool call's skills, as `threads.ts` keeps them. */
+const skillOf = (skill: unknown) => {
+  const names = field(skill, 'names')
+  return Array.isArray(names) && names.length > 0
+    ? { skill: { names: names.filter((name): name is string => typeof name === 'string'), reported: field(skill, 'reported') === true } }
+    : {}
+}
+
+/** What a lead's agent could see, as `threads.ts` keeps it. */
+const skillsSeenOf = (skills: unknown) =>
+  (Array.isArray(skills) ? skills : []).flatMap((skill) => {
+    const name = text(skill, 'name')
+    return name === ''
+      ? []
+      : [{ name, path: text(skill, 'path'), from: text(skill, 'from') === 'repository' ? ('repository' as const) : ('person' as const) }]
+  })
 
 interface ItemRow {
   readonly id: string
@@ -526,6 +543,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           ...(row.decision === 'reject' && row.reason ? { declinedWhy: row.reason } : {}),
           ...(row.asks === 1 ? { asks: true } : {}),
           ...(allowedBy === undefined ? {} : { allowedBy }),
+          ...skillOf(field(content, 'skill')),
           pictures: picturesOf(field(content, 'pictures')),
           files: filesOf(field(content, 'files')),
           output: outputOf(field(content, 'output')),
@@ -566,7 +584,8 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           severity: severity === 'error' || severity === 'warning' ? severity : 'info',
           title: text(content, 'title'),
           description: description === '' ? null : description,
-          ...(role === 'aside' || role === 'relayed' || role === 'folder' ? { role } : {}),
+          ...(role === 'aside' || role === 'relayed' || role === 'folder' || role === 'skills' ? { role } : {}),
+          ...(role === 'skills' ? { skills: skillsSeenOf(field(content, 'skills')) } : {}),
           ...(failure === undefined || failure === '' ? {} : { failure }),
         },
       }
