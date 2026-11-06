@@ -189,7 +189,11 @@ function Switcher() {
         label="Surface"
         value={p.surface}
         onChange={goSurface}
-        options={SURFACES.map((one, at) => ({ value: one.value, label: one.name, tooltip: { label: one.name, kbd: String(at + 1) } }))}
+        options={SURFACES.map((one, at) => ({
+          value: one.value,
+          label: one.short ?? one.name,
+          tooltip: { label: one.name, kbd: String(at + 1) },
+        }))}
       />
       {surface.directions.length > 1 && (
         <Segmented<Direction>

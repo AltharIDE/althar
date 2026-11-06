@@ -14,6 +14,8 @@ export interface Place {
 export interface SurfaceInfo {
   readonly value: Surface
   readonly name: string
+  /** Its name in the strip, where the full one is long; the full one is its tooltip. */
+  readonly short?: string
   readonly directions: ReadonlyArray<{ readonly value: Direction; readonly name: string; readonly about: string }>
   /** Where in the app the surface shows, the first where it opens. */
   readonly places: ReadonlyArray<Place>
@@ -37,6 +39,7 @@ export const SURFACES: ReadonlyArray<SurfaceInfo> = [
   {
     value: 'lineage',
     name: 'Leads and the coordinator',
+    short: 'Leads',
     places: [
       { label: 'Board', hash: BOARD },
       { label: 'Parent’s thread', hash: PARENT },
@@ -77,6 +80,7 @@ export const SURFACES: ReadonlyArray<SurfaceInfo> = [
   {
     value: 'tools',
     name: 'MCP and skills',
+    short: 'MCP',
     places: [
       { label: 'Settings', hash: TOOLS },
       { label: 'Calls in a thread', hash: MCP },
@@ -120,18 +124,19 @@ export const SURFACES: ReadonlyArray<SurfaceInfo> = [
   {
     value: 'parts',
     name: 'A task’s parts',
+    short: 'Parts',
     places: [
       { label: 'Three parts', hash: PARENT },
       { label: 'Ten parts', hash: MANY },
       { label: 'A review', hash: REVIEW },
     ],
     directions: [
-      { value: 'A', name: 'After the title', about: 'The first three follow the title in the bar; the rest behind “N more”' },
-      { value: 'B', name: 'A row under the bar', about: 'A row of their own, each with where it stands; what doesn’t fit behind “N more”' },
+      { value: 'A', name: 'After title', about: 'The first three follow the title in the bar; the rest behind “N more”' },
+      { value: 'B', name: 'A row', about: 'A row of their own, each with where it stands; what doesn’t fit behind “N more”' },
       { value: 'C', name: 'One button', about: 'Parts, with its count, beside the faces; it opens every part by group' },
       {
         value: 'D',
-        name: 'Beside the thread',
+        name: 'Beside thread',
         about: 'The same button opens them in the free margin beside the thread, open until closed',
       },
       { value: 'Today', name: 'Today', about: 'Files, Run and the menu; a pull request is attached from the menu' },
