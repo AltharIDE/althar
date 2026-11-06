@@ -16,7 +16,9 @@
   border-radius: var(--r-sm);
   font-size: 12.5px;
   color: var(--t-2);
-  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
 }
 .chip:hover,
 .chipOn:hover {
