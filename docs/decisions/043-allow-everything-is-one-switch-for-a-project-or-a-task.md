@@ -1,10 +1,12 @@
 # ADR-043: Allow everything is one switch, for a project or a task
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06):
+  allowing everything is on by default, for new and existing projects, and
+  agents may reach the host with the person's own sign-in
 - **Date:** 2026-10-15
 - **Amended:** 2026-10-15: allowing everything stops short of what could
   lose work, which still asks the person (DEV-69,
-  [the safety pass](../plans/safety-pass.md)): a force push, a push to or a
+  the safety pass): a force push, a push to or a
   deletion of the default branch, deleting or forcing a branch that isn't
   the task's, a push Althar can't read, git throwing away work in another
   checkout or what it keeps to recover lost work, deleting outside the
@@ -54,8 +56,10 @@
     refused, and, while it lists anything, a command Althar can't read is
     refused too, so a Never can't be slipped past by writing it unreadably.
     No agent reads the person's credentials or reaches the code host except
-    through Althar, whatever the switch says.
-  - **It shows wherever the task does:** "Unrestricted" beside the task's
+    through Althar, whatever the switch says. Since ADR-097 the first holds;
+    the host may be reached with the person's own sign-in.
+  - **It shows wherever the task does** (no longer: the person found the
+    label meaningless on 16 October, and it went): "Unrestricted" beside the task's
     menu in its header, with what it means on hover, and at the foot of its
     board card until it settles, up next included. The project's switch
     changing reads its board again and each of its tasks' heads, as no

@@ -1,6 +1,9 @@
 # ADR-067: Allow everything asks only before what can't be undone
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06):
+  allowing everything is every project's default, its irreversible kinds
+  also take in publishing, releases, merging and speaking for the person,
+  and the floor no longer holds in the other modes
 - **Date:** 2026-10-28
 - **Amends:** [ADR-043](043-allow-everything-is-one-switch-for-a-project-or-a-task.md)
 - **Amended:** 2026-10-29: with everything allowed, what the rules can't
@@ -40,7 +43,9 @@
     No one reads keys and sign-ins, whatever the switch says. In every
     other mode (allowed as the rest, the coordinator decides, ask me) the
     whole floor holds as it did: the coordinator never answers it, and it
-    asks unless the person always allows its kind.
+    asks unless the person always allows its kind. Superseded by ADR-097:
+    the floor goes in every mode, and what the person wants asked there
+    they say in Ask me.
   - **A card that still asks says why in one line**, such as "A force
     push asks even with everything allowed: it can throw away commits on
     the remote." Each irreversible kind's reason now ends with why it

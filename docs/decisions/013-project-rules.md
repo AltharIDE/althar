@@ -1,7 +1,12 @@
 # ADR-013: Project rules: a mode, always ask, never, and command rules
 
 - **Status:** Accepted; amended by [ADR-018](018-allow-always-keeps-a-rule.md)
-  (2026-10-10), which adds allow rules after what always asks
+  (2026-10-10), which adds allow rules after what always asks; its defaults
+  partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06): allowing
+  everything is every project's default, the built-in Ask me list is
+  ADR-097's irreversible list, and changing the code host is no longer
+  beyond what a project can change; and agents change the rules too,
+  tightening at once and loosening only on the person's own message
 - **Date:** 2026-10-04
 - **Amended:** 2026-10-10: the usage limit row offers "Ask me". The step
   waits for the person, with each account that could take it over and when
@@ -9,7 +14,7 @@
   2026-10-12: the rules keep whether the project's leads resolve merge
   conflicts on their own ([ADR-030](030-the-lead-resolves-conflicts-and-althar-pushes-the-merge.md)),
   switched in the project's settings. Off unless the person turns it on.
-  2026-10-15 (DEV-69, [the safety pass](../plans/safety-pass.md)): reading
+  2026-10-15 (DEV-69, the safety pass): reading
   credentials covers the files people keep keys and sign-ins in under their
   home folder (`~/.ssh`, `~/.aws`, `~/.npmrc` and the like), refused for
   every role. Deleting a branch that isn't the task's counts locally too, as
@@ -52,7 +57,8 @@
 - **Decision:**
   - **What a project's rules hold** (`Policies.ts`, read by `rules.ts`):
     - **A mode**, for what no rule keeps:
-      - `rules` (the default): allowed;
+      - `rules` (the default, until ADR-097 made allowing everything
+        every project's): allowed;
       - `ask`: it waits for the person, except reads;
       - `allow`: everything is allowed, short of what is never allowed.
     - **The kinds that always ask the person:**
@@ -62,6 +68,13 @@
       - deleting branches that aren't the task's;
       - deploying and publishing;
       - writing outside the task's worktree.
+
+      Since ADR-097 the built-in list is its irreversible one: a push to
+      the default branch, a force push, deleting another branch, deleting
+      outside the worktree or discarding another checkout's changes,
+      publishing, releases, teardown and merging, and speaking for the
+      person. Pushing many branches, deploying and writing outside go
+      ahead.
     - **The kinds that are never allowed.**
     - **Commands the person names** by how they start (`npm publish`,
       `terraform *`), to ask about or refuse.
@@ -74,7 +87,8 @@
     Every kind counts.
     1. What no project can change: reading credentials, and changing the
        code host
-       ([ADR-011](011-own-connectors-for-hosts-and-trackers.md)).
+       ([ADR-011](011-own-connectors-for-hosts-and-trackers.md)). Since
+       ADR-097, reading credentials; the code host is read as the rest is.
     2. What is never allowed, any kind of it or a command.
     3. Allowing everything. While Never lists anything, a request the rules
        can't read (`eval`, `$(…)`) is refused, saying how to spell it out:
@@ -118,7 +132,9 @@
     so.
   - **Each change is a revision, recorded as the person's.** The rules as
     they are decide the next request; a run cites the revision it started
-    under.
+    under. (Since [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md#settings), recorded as whoever
+    made it: an agent may change the rules too, tightening at once and
+    loosening only on the person's own message, which the revision quotes.)
   - **The screen offers only what Althar does.**
     - "The lead decides", the modes with a model as judge in other tools,
       comes when the lead answers requests.

@@ -1,6 +1,10 @@
 # ADR-058: The coordinator is a trusted reader, in copies of its own, held by a sandbox where it has one
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06): the
+  coordinator shares the leads' pool of tools, MCP servers and skills,
+  installs, builds and runs tests in its copies, reads the task folders as
+  leads do, and its sandbox reaches the hosts a lead's does. Its copies and
+  its denied edit tools stay, for tidiness, not safety
 - **Date:** 2026-10-21
 - **Amended:** 2026-10-29: the coordinator's line may also loop (`for … in …`,
   `while read …`), branch (`if`, `&&`, `||`), set variables of its own and
@@ -73,8 +77,8 @@
     commands run there without asking.** Claude Code's coordinator runs
     its shell commands in its sandbox, held to the coordinator's folder:
     they write only there and in the sandbox's own temporary folder, reach
-    no network (no domain allowed, every other refused without asking) and
-    no socket, and never run outside it. They read none of the home folder,
+    no network (no domain allowed, every other refused without asking;
+    since ADR-097, the hosts a lead's reaches) and no socket, and never run outside it. They read none of the home folder,
     the person's checkouts or the project's task folders, but what Althar
     gives back: the coordinator's folder, the mirrors, the objects folders
     the copies borrow, the toolchains kept in the home folder (bun, Node's
@@ -89,13 +93,14 @@
     or above one (its folder, or one a pattern of paths names), since it
     goes down into it.
     It loads no settings file, the person's or the repository's, and runs no
-    hook, as a review's lead: no allow rule or sandbox exemption of theirs
+    hook, as a review's lead (since ADR-097 the person's own MCP servers and
+    skills load for it): no allow rule or sandbox exemption of theirs
     lets a command out, and no hook of a repository it reads runs beside it.
     A session whose sandbox can't start doesn't start
     at all, so Althar asks for this only where it can start (macOS; Linux
     with bubblewrap and socat, outside a Flatpak); elsewhere the coordinator
     starts as any reader, every command asking. Its edit tools stay denied:
-    a change is a task.
+    a change is a task (since ADR-097, for tidiness, not safety).
   - **Elsewhere, the reader rules take a little more from the
     coordinator,** and only from it: a substitution, `$(…)` or backticks,
     each of whose commands is read as a line of its own and only looks,
@@ -113,7 +118,8 @@
     packages installed, and Althar installs none: a test file the sandbox
     can run with nothing installed runs (`node --test`, `bun test` of a file
     that imports none, Python's `unittest`); one that needs the project's
-    setup doesn't, and is a task's, or `start_task`'s.
+    setup doesn't, and is a task's, or `start_task`'s. Since ADR-097 the
+    coordinator may install the project's setup in a copy, and run it.
 - **Alternatives considered:**
   - **The coordinator's sandbox reaching the project's remotes:** git
     would need the person's keys or their SSH agent's socket inside the
@@ -125,7 +131,7 @@
   - **Letting the coordinator install the project's setup in its copies:**
     an install runs the project's scripts with the network, beyond what a
     reader should do unasked; a task's lead does it, under the project's
-    rules.
+    rules. ADR-097 lets it.
   - **The same additions for every reader:** a review's lead reads code
     whose authors may aim it at its rules, so it keeps the list that names
     every flag a program may take.

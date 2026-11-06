@@ -1,6 +1,9 @@
 # ADR-087: A lead starts helpers on any agent, each in a copy of its own, and hears each one's result as a new turn
 
-- **Status:** Proposed, to build from the list below ([Build](#build))
+- **Status:** Proposed, to build from the list below ([Build](#build));
+  amended by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06): a helper gets the person's
+  MCP servers and skills as its lead does, and ADR-081's mark no longer
+  follows it; its caps stay, as cost caps, and it still pushes nothing
 - **Date:** 2026-11-02
 - **Amends:** [ADR-015](015-coordinator-picks-models.md) (a lead picks its
   helpers' models), [ADR-022](022-what-agents-leave-running.md) (the Running
@@ -357,7 +360,10 @@ Never more than its lead, and only in its copy.
   session to its folder, Claude Code's (ADR-058, ADR-071) or Codex's
   `workspace-write`, it is held to its copy, as DEV-183 holds a task's
   reviewer. Its web reads follow the project's switch (ADR-078).
-- **It pushes nothing and acts on nothing outside.** Its git runs Althar's
+- **It pushes nothing and acts on nothing outside** (kept by ADR-097 as
+  tidiness: a helper's work comes back through its lead; its MCP servers
+  are its lead's, and what can't be undone among their calls asks the
+  person, in the lead's thread under its name, as its commands do). Its git runs Althar's
   guard with every push refused (`pushGuard.ts`); it has none of Althar's
   tools that act on the code host or the tracker. It has those that read
   (`read_issue`, `read_pull_request`, `read_checks`, `read_check_log`),
@@ -374,7 +380,8 @@ Never more than its lead, and only in its copy.
   them in the main session naming the agent (2.1.186); OpenCode's nested asks
   hung unseen for eight months (#13715). A helper waiting on the person keeps
   its place only for `askGrace`, as a lead does.
-- **What reaches it from outside carries ADR-081's mark,** and so does its
+- **What reaches it from outside carries ADR-081's mark** (no longer:
+  ADR-097 drops the mark), and so does its
   result: an outside author's words that a helper read can't steer the
   lead's web reads.
 

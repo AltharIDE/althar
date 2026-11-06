@@ -1,6 +1,9 @@
 # ADR-086: The coordinator moves a task on when the person's message asks, and asks on a card otherwise
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06):
+  stopping, holding, restarting, settling and discarding a task go at once
+  in any turn, for the coordinator and for leads, with the lines in both
+  threads; resuming or turning on an automation stays on the person's word
 - **Date:** 2026-11-03
 - **Amends:** [ADR-048](048-where-the-runtime-runs-and-who-may-reach-it.md),
   [ADR-081](081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md)
@@ -33,7 +36,8 @@
     person's press, and Not now. The coordinator gives why, in a line, on it.
     Stopping or settling a task changes the person's own course of work:
     what news, a pull request or a lead says shouldn't move it, and the card
-    costs one press where it would.
+    costs one press where it would. Superseded by ADR-097: each can be
+    undone, so each goes at once, with the lines below.
   - **The same for resuming an automation, running one now, and starting an
     attached task from its pull request's head:** at once in a turn the
     person's message started; otherwise as before (the automation's card, or
