@@ -1,0 +1,219 @@
+/* Scrappy: two runs of one page, compared in one place: not a panel beside the work, the work itself. */
+.labels {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 34px;
+  padding: 0 8px 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--n-1);
+  font-size: 12px;
+  color: var(--t-2);
+}
+.side {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.half {
+  flex: 1 1 0;
+}
+.half + .half {
+  padding-left: 14px;
+  margin-left: -6px;
+  box-shadow: inset 1px 0 var(--line);
+  height: 100%;
+}
+.dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--t-4);
+}
+.dot[data-run='task'] {
+  background: var(--live);
+}
+.sideName {
+  font-weight: 550;
+  color: var(--t-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.branch,
+.port {
+  font: 400 11.5px var(--mono);
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.grow {
+  flex: 1;
+}
+.onion {
+  width: 220px;
+  accent-color: var(--ink-fill);
+}
+.fade {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--t-3);
+}
+.fade input {
+  width: 180px;
+  accent-color: var(--ink-fill);
+}
+
+.body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.split {
+  gap: 1px;
+  background: var(--line-2);
+}
+.under,
+.over {
+  position: absolute !important;
+  inset: 0;
+}
+.over {
+  background: transparent !important;
+}
+.handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 3;
+  width: 24px;
+  margin-left: -12px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.handle::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 11px;
+  width: 2px;
+  background: rgb(255 255 255 / 0.92);
+  box-shadow: 0 0 0 1px var(--ink-fill);
+}
+.grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  border-radius: 50%;
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift-card);
+  color: var(--t-1);
+}
+
+/* The lead's screenshot, where it was taken. */
+.laid {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.6);
+}
+
+.evidence {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 64px;
+  padding: 0 12px;
+  border-top: 1px solid var(--line);
+  background: var(--n-1);
+}
+.evidenceHead {
+  flex: none;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.shots {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.shot {
+  display: grid;
+  grid-template-columns: 72px auto;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  align-items: center;
+  height: 48px;
+  padding: 4px 12px 4px 4px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  font-size: 12.5px;
+  color: var(--t-1);
+  text-align: left;
+  cursor: pointer;
+}
+.shot:hover {
+  background: var(--hover-paper);
+}
+.on,
+.on:hover {
+  background: var(--chosen);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.shot img {
+  grid-row: 1 / 3;
+  width: 72px;
+  height: 40px;
+  object-fit: cover;
+  object-position: center;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px var(--line-2);
+  background: var(--n-0);
+}
+.at {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+
+/* What the task's page has that main's doesn't: green, as additions are. */
+.changed {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: 4px;
+  box-shadow:
+    0 0 0 1.5px var(--add),
+    0 0 0 3px rgb(0 0 0 / 0.35);
+}
+.count {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  margin-left: 4px;
+  padding: 0 7px 0 8px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--chip);
+  font: 500 11.5px var(--font);
+  color: var(--add-ink);
+  cursor: pointer;
+}
+.count:hover {
+  background: var(--hover-paper);
+}

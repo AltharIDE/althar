@@ -1,0 +1,150 @@
+/* Scrappy: the page, and what Althar draws over it while the person points. */
+.frame {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--n-0);
+}
+/* A phone's width, in the middle of a well. */
+.narrow {
+  background: var(--well);
+}
+.narrow .page {
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift-card);
+}
+.page {
+  position: absolute;
+  top: 0;
+  border: 0;
+  display: block;
+  background: var(--n-0);
+  transform-origin: 0 0;
+}
+
+/* Pointing: the pointer is Althar's, the element under it outlined. */
+.pointing {
+  position: absolute;
+  inset: 0;
+  cursor: crosshair;
+  z-index: 2;
+}
+.lit,
+.held {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 3px;
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.9),
+    0 0 0 2px var(--ink-fill);
+  background: rgb(255 255 255 / 0.07);
+}
+.held {
+  z-index: 2;
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.95),
+    0 0 0 3px var(--ink-fill);
+}
+.tag {
+  position: absolute;
+  bottom: calc(100% + 5px);
+  left: -2px;
+  padding: 2px 6px;
+  border-radius: var(--r-sm);
+  background: var(--ink-fill);
+  color: var(--on-ink);
+  font: 500 11px/16px var(--mono);
+  white-space: nowrap;
+}
+.tagInside {
+  bottom: auto;
+  top: 4px;
+  left: 4px;
+}
+
+/* A comment left on the page: its number, on its element's corner. */
+.pin {
+  position: absolute;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50% 50% 50% 2px;
+  background: var(--ink-fill);
+  color: var(--on-ink);
+  font: 600 11px/1 var(--font);
+  box-shadow:
+    0 0 0 1.5px rgb(255 255 255 / 0.9),
+    var(--lift-card);
+  cursor: pointer;
+}
+.pin:hover {
+  background: var(--ink-hover);
+}
+
+/* The comment being written. */
+.draft {
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: var(--lift-pop);
+  cursor: auto;
+}
+.what {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.what code {
+  flex: none;
+  font: 500 11.5px var(--mono);
+  color: var(--t-1);
+}
+.what span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.note {
+  width: 100%;
+  min-height: 52px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1.5px var(--signal);
+  font: 400 13px/1.45 var(--font);
+  color: var(--t-1);
+  resize: none;
+  outline: 0;
+}
+.note::placeholder {
+  color: var(--t-3);
+}
+.missing {
+  box-shadow: inset 0 0 0 1px var(--danger);
+}
+.missing::placeholder {
+  color: var(--danger);
+}
+.draftActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.grow {
+  flex: 1;
+}

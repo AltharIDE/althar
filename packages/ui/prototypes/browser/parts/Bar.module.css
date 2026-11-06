@@ -1,0 +1,153 @@
+/* Scrappy: the browser's bar, quiet as the window's own: one row, the address the widest thing in it. */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 10px 0 8px;
+  background: var(--n-1);
+  border-bottom: 1px solid var(--line);
+}
+.moves,
+.ends {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+.ends {
+  gap: 6px;
+}
+
+.address {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  max-width: 760px;
+  height: 30px;
+  margin: 0 auto;
+  padding: 0 6px 0 3px;
+  border-radius: 7px;
+  background: var(--well);
+  transition: box-shadow var(--fast) var(--ease);
+}
+.address:hover {
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.editing,
+.editing:hover {
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1.5px var(--signal);
+}
+.session {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--t-3);
+  cursor: pointer;
+}
+.session:hover {
+  background: var(--hover-paper);
+  color: var(--t-1);
+}
+/* A page asked for something it never gets: the shield says so until the line is dismissed. */
+.asked {
+  color: var(--t-1);
+  position: relative;
+}
+.asked::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 0 1.5px var(--well);
+}
+.host {
+  flex: none;
+  padding-left: 4px;
+  font: 400 12.5px var(--mono);
+  color: var(--t-3);
+}
+.field {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 4px;
+  border: 0;
+  outline: 0;
+  background: none;
+  font: 400 12.5px var(--mono);
+  color: var(--t-1);
+  text-overflow: ellipsis;
+}
+.host + .field {
+  padding-left: 0;
+}
+.field::placeholder {
+  color: var(--t-3);
+}
+
+.facts {
+  display: grid;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.facts strong {
+  font-weight: 600;
+  color: var(--t-1);
+}
+.facts ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 16px;
+}
+.factsActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding-top: 4px;
+}
+
+/* One line under the bar. */
+.line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 8px 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--n-1);
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.line > svg {
+  color: var(--t-3);
+}
+.sent > svg {
+  color: var(--t-1);
+}
+.path {
+  overflow: hidden;
+  max-width: 420px;
+  font: 400 12px var(--mono);
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.grow {
+  flex: 1;
+}

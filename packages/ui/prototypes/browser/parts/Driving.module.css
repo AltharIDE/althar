@@ -1,0 +1,70 @@
+/* Scrappy: the lead in the preview: its pointer, a screenshot's flash, and the line saying who has it. */
+.catch {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  cursor: default;
+}
+.pointer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  pointer-events: none;
+  transition: transform 900ms var(--ease-move);
+}
+@media (prefers-reduced-motion: reduce) {
+  .pointer {
+    transition: none;
+  }
+}
+.arrow {
+  color: var(--live);
+  fill: var(--live);
+  filter: drop-shadow(0 0 1.5px rgb(255 255 255 / 0.95));
+  margin: -3px 0 0 -3px;
+}
+.who {
+  margin-top: 14px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--live);
+  color: #fff;
+  font: 600 11px/18px var(--font);
+  white-space: nowrap;
+}
+.flash {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 3;
+  background: #fff;
+  opacity: 0.55;
+  pointer-events: none;
+}
+.line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 8px 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--n-1);
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.line > svg {
+  color: var(--t-3);
+}
+.lead {
+  color: var(--t-1);
+}
+.words b {
+  font-weight: 600;
+}
+.grow {
+  flex: 1;
+}

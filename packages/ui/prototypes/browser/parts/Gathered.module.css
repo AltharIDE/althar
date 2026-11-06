@@ -1,0 +1,126 @@
+/* Scrappy: the gathered comments, a strip at the page's foot, under it and never over it (a WebContentsView draws over the window's page). */
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 0 12px;
+  border-top: 1px solid var(--line);
+  background: var(--n-1);
+}
+.chips {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow: hidden;
+}
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 240px;
+  height: 30px;
+  padding: 0 10px 0 5px;
+  border: 0;
+  border-radius: 15px;
+  background: var(--chip);
+  font-size: 12.5px;
+  color: var(--t-1);
+  cursor: pointer;
+}
+.chip:hover {
+  background: var(--hover-paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.n {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50% 50% 50% 2px;
+  background: var(--ink-fill);
+  color: var(--on-ink);
+  font: 600 11px/1 var(--font);
+}
+.note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card {
+  display: grid;
+  gap: 8px;
+}
+.crop {
+  display: block;
+  width: 100%;
+  max-height: 180px;
+  object-fit: contain;
+  object-position: left top;
+  border-radius: 5px;
+  box-shadow: 0 0 0 1px var(--line-2);
+  background: var(--n-0);
+}
+.drawing {
+  display: grid;
+  place-items: center;
+  height: 64px;
+  border-radius: 5px;
+  background: var(--well);
+}
+.facts {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.facts code {
+  font: 500 11.5px var(--mono);
+  color: var(--t-1);
+}
+.on {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.grow {
+  flex: 1;
+}
+.to {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 320px;
+  height: 30px;
+  padding: 0 8px 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  font-size: 12.5px;
+  color: var(--t-1);
+  cursor: pointer;
+}
+.to:hover,
+.to[aria-expanded='true'] {
+  background: var(--hover-paper);
+}
+.toWord {
+  color: var(--t-3);
+}
+.toName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.send {
+  flex: none;
+}
+
+.said {
+  font-size: 12.5px;
+  color: var(--t-1);
+}

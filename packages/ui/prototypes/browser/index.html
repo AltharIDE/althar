@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Althar’s browser</title>
+    <style>
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body class="ch-root">
+    <div id="root"></div>
+    <script type="module">
+      import { boot } from './app.tsx'
+      // The direction the URL says (?d=B), else A, on the task's thread.
+      boot()
+    </script>
+  </body>
+</html>

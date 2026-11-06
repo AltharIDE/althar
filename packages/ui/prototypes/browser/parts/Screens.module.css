@@ -1,0 +1,20 @@
+/* Scrappy: where a page shows: over the screen under the window's bar (A), or as a task's face (B, C). */
+.over {
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: calc(var(--z-float) + 1);
+  display: flex;
+  background: var(--n-2);
+}
+.screen,
+.face {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.face {
+  border-top: 1px solid var(--line);
+}

@@ -1,0 +1,274 @@
+[
+  {
+    "id": "A1",
+    "page": "?d=A#/threads/th1",
+    "steps": ["key:c", "wait:600", "a[href=\"http://localhost:5321/\"]", "wait:1500"],
+    "caption": "A · The task's run card in its thread opens the run in a tab of its own, after the projects' tabs: back, forward, reload, the address with its own session's shield, Comment, and Open in your browser."
+  },
+  {
+    "id": "A2",
+    "page": "?d=A#/threads/th1",
+    "steps": [
+      "key:c",
+      "wait:600",
+      "a[href=\"http://localhost:5321/\"]",
+      "wait:1500",
+      "button:has-text(\"Comment\")",
+      "scroll:section[aria-label^=\"Runs on\"]",
+      "pick:section[aria-label^=\"Runs on\"] > span:nth-of-type(4) [class*=\"needs\"]",
+      "type:Too long beside the other two. Keep x64 and arm64; the distributions can go on the install page."
+    ],
+    "caption": "A · Comment (⇧⌘C) points at the page: the element under the pointer is outlined with its class; pressed, a comment is written beside it."
+  },
+  {
+    "id": "A3",
+    "page": "?d=A#/threads/th1",
+    "steps": [
+      "key:c",
+      "wait:600",
+      "a[href=\"http://localhost:5321/\"]",
+      "wait:1500",
+      "button:has-text(\"Comment\")",
+      "scroll:section[aria-label^=\"Runs on\"]",
+      "pick:section[aria-label^=\"Runs on\"] > span:nth-of-type(4) [class*=\"needs\"]",
+      "type:Too long beside the other two. Keep x64 and arm64; the distributions can go on the install page.",
+      "key:Enter",
+      "pick:section[aria-label^=\"Runs on\"]",
+      "type:The two lines sit tight against the hairlines. Give the band room at every width.",
+      "key:Enter",
+      "pick:section[aria-label^=\"Runs on\"] > span:nth-of-type(3) [class*=\"needs\"]",
+      "type:Windows on Arm runs it too: say arm64.",
+      "key:Enter",
+      "wait:7000",
+      "key:Escape",
+      "over:button:has-text(\"Too long beside\")",
+      "wait:900"
+    ],
+    "settle": 800,
+    "caption": "A · Three comments gathered, each a numbered pin on its element and a chip at the page's foot; they go to the task the page came from unless another is picked."
+  },
+  {
+    "id": "A4",
+    "page": "?d=A#/threads/th1",
+    "steps": [
+      "key:c",
+      "wait:600",
+      "a[href=\"http://localhost:5321/\"]",
+      "wait:1500",
+      "button:has-text(\"Comment\")",
+      "scroll:section[aria-label^=\"Runs on\"]",
+      "pick:section[aria-label^=\"Runs on\"] > span:nth-of-type(4) [class*=\"needs\"]",
+      "type:Too long beside the other two. Keep x64 and arm64; the distributions can go on the install page.",
+      "key:Enter",
+      "pick:section[aria-label^=\"Runs on\"]",
+      "type:The two lines sit tight against the hairlines. Give the band room at every width.",
+      "key:Enter",
+      "pick:section[aria-label^=\"Runs on\"] > span:nth-of-type(3) [class*=\"needs\"]",
+      "type:Windows on Arm runs it too: say arm64.",
+      "key:Enter",
+      "wait:7000",
+      "[class*=\"Gathered-module__to\"]"
+    ],
+    "caption": "A · Where they go: the task the page came from, another task's lead, or the project's coordinator."
+  },
+  {
+    "id": "A5",
+    "page": "?d=A#/threads/th1",
+    "steps": [
+      "key:c",
+      "wait:600",
+      "a[href=\"http://localhost:5321/\"]",
+      "wait:1500",
+      "button:has-text(\"Comment\")",
+      "scroll:section[aria-label^=\"Runs on\"]",
+      "pick:section[aria-label^=\"Runs on\"] > span:nth-of-type(4) [class*=\"needs\"]",
+      "type:Too long beside the other two. Keep x64 and arm64; the distributions can go on the install page.",
+      "key:Enter",
+      "pick:section[aria-label^=\"Runs on\"]",
+      "type:The two lines sit tight against the hairlines. Give the band room at every width.",
+      "key:Enter",
+      "pick:section[aria-label^=\"Runs on\"] > span:nth-of-type(3) [class*=\"needs\"]",
+      "type:Windows on Arm runs it too: say arm64.",
+      "key:Enter",
+      "wait:7000",
+      "button:has-text(\"Send\")",
+      "wait:3200",
+      "button:has-text(\"Open the task\")",
+      "wait:1500",
+      "hover:640,300",
+      "wheel:-330",
+      "wait:500"
+    ],
+    "caption": "A · What the lead receives: one message, each comment with its element's selector and text, the page's address and viewport, and a crop of the spot; the lead answers."
+  },
+  {
+    "id": "A6",
+    "page": "?d=A#/threads/th1",
+    "steps": ["key:c", "wait:600", "a[href^=\"https://linear.app\"]", "wait:800"],
+    "caption": "A · A Linear issue from the thread asks for a sign-in: sign-ins go to the person's own browser, and the tab says so."
+  },
+  {
+    "id": "A7",
+    "page": "?d=A#/threads/th1",
+    "steps": [
+      "key:c",
+      "wait:600",
+      "a[href=\"http://localhost:5321/\"]",
+      "wait:1500",
+      "input[aria-label=\"Address\"]",
+      "key:Meta+a",
+      "type:file:///Users/balazs/Althar/althar/runs-on-versions/apps/site/coverage/index.html",
+      "key:Enter"
+    ],
+    "caption": "A · A file: address is refused in place, with the way to its folder; javascript: and other schemes the same."
+  },
+  {
+    "id": "A8",
+    "page": "?d=A&page=new#/threads/th1",
+    "steps": ["wait:300"],
+    "caption": "A · A new page (⌘T, or the + menu): what runs in the project, a press away, and the address ready to type."
+  },
+  {
+    "id": "A9",
+    "page": "?d=A#/threads/th1",
+    "steps": [
+      "key:c",
+      "wait:600",
+      "a[href=\"http://localhost:5321/\"]",
+      "wait:1500",
+      "button:has-text(\"The page asks for the camera\")",
+      "button[aria-label=\"Its own session\"]"
+    ],
+    "caption": "A · Its own session: a page asking for the camera is refused, and the shield says what a page here never gets."
+  },
+  {
+    "id": "B1",
+    "page": "?d=B&face=preview#/threads/th1",
+    "steps": ["scroll:section[aria-label^=\"Runs on\"]"],
+    "caption": "B · The task's Preview face, beside Conversation and Outputs (p): its own run, its host fixed, only the path typed; Desktop or Phone."
+  },
+  {
+    "id": "B2",
+    "page": "?d=B&face=preview&run=off#/threads/th1",
+    "steps": [],
+    "caption": "B · The task's site not running: the face says what shows here and runs it in the task's folder."
+  },
+  {
+    "id": "B3",
+    "page": "?d=B&face=preview#/threads/th1",
+    "steps": [
+      "button:has-text(\"Comment\")",
+      "scroll:section[aria-label^=\"Runs on\"]",
+      "pick:section[aria-label^=\"Runs on\"] > span:nth-of-type(4) [class*=\"needs\"]",
+      "type:Too long beside the other two. Keep x64 and arm64; the distributions can go on the install page.",
+      "key:Enter",
+      "pick:section[aria-label^=\"Runs on\"]",
+      "type:The two lines sit tight against the hairlines. Give the band room at every width.",
+      "key:Enter",
+      "pick:section[aria-label^=\"Runs on\"] > span:nth-of-type(3) [class*=\"needs\"]",
+      "type:Windows on Arm runs it too: say arm64.",
+      "key:Enter",
+      "wait:7000",
+      "key:Escape",
+      "wait:900",
+      "over:button:has-text(\"Too long beside\")",
+      "wait:900"
+    ],
+    "settle": 800,
+    "caption": "B · Comments gather at the face's foot and go to this task's lead, in one message, as diff comments would (DEV-175)."
+  },
+  {
+    "id": "B4",
+    "page": "?d=B&face=preview&width=narrow#/threads/th1",
+    "steps": ["scroll:section[aria-label^=\"Runs on\"]"],
+    "caption": "B · At a phone's width, in a well, the page at 390."
+  },
+  {
+    "id": "B5",
+    "page": "?d=B#/threads/th1",
+    "steps": ["key:c", "wait:600", "a[href^=\"https://althar.ai\"]", "wait:300"],
+    "caption": "B · Anything that isn't the task's run goes to the person's browser, as today (the strip says where the app would have sent it)."
+  },
+  {
+    "id": "C1",
+    "page": "?d=C&face=preview#/threads/th1",
+    "steps": ["scroll:section[aria-label^=\"Runs on\"]"],
+    "caption": "C · Compare: main's run and the task's, at the same desktop width, scrolled together; the lead's screenshots, taken in this same browser, at the foot."
+  },
+  {
+    "id": "C2",
+    "page": "?d=C&face=preview&mode=swipe#/threads/th1",
+    "steps": ["scroll:section[aria-label^=\"Runs on\"]", "hover:400,450"],
+    "caption": "C · Swipe: main left of the handle, the task right of it, at full size."
+  },
+  {
+    "id": "C3",
+    "page": "?d=C&face=preview&mode=onion#/threads/th1",
+    "steps": ["scroll:section[aria-label^=\"Runs on\"]"],
+    "caption": "C · Onion skin: the task's run over main's, faded to taste."
+  },
+  {
+    "id": "C4",
+    "page": "?d=C&face=preview#/threads/th1",
+    "steps": ["button:has-text(\"Runs on band\")", "wait:1500"],
+    "caption": "C · The lead's screenshot laid over the live page, where and at the viewport it was taken, faded between them."
+  },
+  {
+    "id": "C5",
+    "page": "?d=C&face=preview#/threads/th1",
+    "steps": [
+      "button:has-text(\"Comment\")",
+      "scroll:section[aria-label^=\"Runs on\"]",
+      "pick:section[aria-label^=\"Runs on\"] > span:nth-of-type(4) [class*=\"needs\"]",
+      "type:Too long beside the other two. Keep x64 and arm64; the distributions can go on the install page.",
+      "key:Enter",
+      "pick:section[aria-label^=\"Runs on\"]",
+      "type:The two lines sit tight against the hairlines. Give the band room at every width.",
+      "key:Enter",
+      "wait:6500",
+      "button:has-text(\"Send\")",
+      "wait:7500",
+      "button[aria-label=\"Dismiss\"]",
+      "button:has-text(\"Runs on band\")",
+      "wait:1800"
+    ],
+    "caption": "C · After the comments, the lead's second go is on the task's run; its earlier screenshot, laid over, no longer matches the band."
+  },
+  {
+    "id": "C6",
+    "page": "?d=C&face=preview#/threads/th1",
+    "steps": [
+      "button:has-text(\"Comment\")",
+      "scroll:section[aria-label^=\"Runs on\"]",
+      "pick:section[aria-label^=\"Runs on\"] > span:nth-of-type(4) [class*=\"needs\"]",
+      "type:Too long beside the other two. Keep x64 and arm64; the distributions can go on the install page."
+    ],
+    "caption": "C · Comments are made on the task's side only; main's is there to compare."
+  },
+  {
+    "id": "D1",
+    "page": "?d=D&face=preview#/threads/th1",
+    "steps": ["button:has-text(\"The lead checks the page\")", "wait:6400"],
+    "caption": "D · The lead uses the same preview to check its fix: its pointer, what it's doing, and Take over."
+  },
+  {
+    "id": "D2",
+    "page": "?d=D&face=preview#/threads/th1",
+    "steps": ["button:has-text(\"The lead checks the page\")", "wait:4200", "button:has-text(\"Take over\")"],
+    "caption": "D · Taken over (a press on the page does it too): the lead waits until it's given back."
+  },
+  {
+    "id": "D3",
+    "page": "?d=D&face=preview#/threads/th1",
+    "steps": [
+      "button:has-text(\"The lead checks the page\")",
+      "wait:13500",
+      "button:has-text(\"Conversation\")",
+      "wait:6000",
+      "hover:640,400",
+      "wheel:-140",
+      "wait:800"
+    ],
+    "caption": "D · Done: the screenshots it took in the person's preview come back in the thread."
+  }
+]
