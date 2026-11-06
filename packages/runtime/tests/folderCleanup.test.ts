@@ -482,6 +482,30 @@ describe('a removed folder put back', () => {
       assert.strictEqual(git(task.worktree, 'rev-parse', 'HEAD'), task.head)
     }).pipe(Effect.provide(withCleanup())),
   )
+
+  it.live('brings nothing back for a folder still here, and one with its branch and kept commit gone from where it started', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* finished('done', 4)
+      assert.isFalse(yield* bringBack(task.taskId, yield* person))
+      yield* (yield* FolderCleanup).sweep
+      git(task.root, 'branch', '-D', task.branch)
+      git(task.root, 'update-ref', '-d', `${KEPT}${task.workspaceId}`)
+      const [{ base } = { base: '' }] = yield* sql<{
+        base: string
+      }>`SELECT base_commit AS base FROM workspaces WHERE id = ${task.workspaceId}`
+      assert.isTrue(yield* bringBack(task.taskId, yield* person))
+      assert.strictEqual(git(task.worktree, 'rev-parse', 'HEAD'), base)
+      // Removed again with nothing at all left to start it from: refused, and still removed.
+      yield* (yield* FolderCleanup).sweep
+      yield* sql`UPDATE workspaces SET state = 'cleaned', base_commit = NULL WHERE id = ${task.workspaceId}`
+      rmSync(task.worktree, { recursive: true, force: true })
+      git(task.root, 'worktree', 'prune')
+      git(task.root, 'update-ref', '-d', `${KEPT}${task.workspaceId}`)
+      assert.deepInclude(yield* Effect.flip(bringBack(task.taskId, yield* person)), { _tag: 'TaskRefused', why: 'branch_gone' })
+      assert.strictEqual((yield* stateOf(task.workspaceId))?.state, 'cleaned')
+    }).pipe(Effect.provide(withCleanup())),
+  )
 })
 
 describe('a task of several repositories whose folders were removed', () => {

@@ -288,6 +288,41 @@ describe('accept_task, for a task with no pull request', () => {
   })
 })
 
+describe('accept_task, where a task can’t be merged here', () => {
+  it.live('says a conflict, an untracked file or changes in the way, and a head that isn’t one, and merges none of them', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const c = yield* coordinatorOf(root)
+      const first = yield* changed(c.projectId, 'Add a retry', 'retry.ts')
+      const second = yield* changed(c.projectId, 'Write the retry another way', 'retry.ts')
+      const docs = yield* changed(c.projectId, 'Add docs', 'docs.md')
+      const readme = yield* changed(c.projectId, 'Retitle the readme', 'README.md')
+      const message = yield* c.turn('Accept them all')
+      const accept = (task: { readonly slug: string; readonly head: string }, head = task.head) =>
+        callTool(c.access, 'accept_task', { task: task.slug, head, message })
+
+      // A head that isn't a commit's hash, or none for the repository it changes, merges nothing.
+      assert.match(yield* accept(first, 'the-latest'), /A head is a commit’s hash/)
+      assert.match(
+        yield* callTool(c.access, 'accept_task', { task: first.slug, heads: [{ repository: 'elsewhere', head: first.head }], message }),
+        /Name the head you read for each repository/,
+      )
+
+      assert.match(yield* accept(first), /^Merged .* into main here, and it is done/)
+      // The second wrote the same file the first merged: it conflicts with main, and its lead is told to resolve it.
+      assert.match(yield* accept(second), /^Nothing changed: .* conflicts with main \(retry\.ts\)\. Its lead can resolve it/)
+      // A file of the person's own, not yet added, where the task writes one.
+      writeFileSync(join(root, 'docs.md'), 'Mine\n')
+      assert.match(yield* accept(docs), /^Nothing changed: main is checked out in .* with changes in the way/)
+      // A change of the person's own, not yet committed, to the file the task changes.
+      writeFileSync(join(root, 'README.md'), '# Mine\n')
+      assert.match(yield* accept(readme), /^Nothing changed: main is checked out in .* with changes in the way/)
+      for (const task of [second, docs, readme]) assert.strictEqual(yield* stateOf(task.taskId), 'open')
+      assert.strictEqual(git(root, 'show', 'main:README.md'), '# Meridian')
+    }).pipe(Effect.provide(runtime()))
+  })
+})
+
 describe('answer_stuck_step', () => {
   /** A stuck call on the task's step, as its card shows it. */
   const stuck = (projectId: ProjectId, taskId: string, info: Record<string, unknown>) =>
@@ -452,6 +487,35 @@ describe('answer_stuck_step', () => {
         /Althar has no agent nobody/,
       )
       assert.deepInclude(yield* answered(call), { state: 'open' })
+    }).pipe(Effect.provide(runtime()))
+  })
+
+  it.live('refuses to try again a step that had no agent, and to hand on a pull request Althar opens or to no agent', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const c = yield* coordinatorOf(root)
+      const task = yield* changed(c.projectId, 'Add a retry', 'retry.ts')
+      const message = yield* c.turn('Try it again')
+      assert.match(
+        yield* callTool(c.access, 'answer_stuck_step', { task: task.slug, answer: 'again', message }),
+        /^Nothing changed: .* has no stuck step waiting on the person/,
+      )
+      const lost = yield* stuck(c.projectId, task.taskId, { step: 'implement', why: 'no_report', agentId: null })
+      assert.match(
+        yield* callTool(c.access, 'answer_stuck_step', { task: task.slug, answer: 'again', message }),
+        /its implement: it had no agent to try again/,
+      )
+      assert.match(
+        yield* callTool(c.access, 'answer_stuck_step', { task: task.slug, answer: 'hand_on', message }),
+        /name the agent to hand it to/,
+      )
+      assert.deepInclude(yield* answered(lost), { state: 'open' })
+      yield* (yield* SqlClient.SqlClient)`UPDATE attention_requests SET state = 'withdrawn' WHERE id = ${lost}`
+      yield* stuck(c.projectId, task.taskId, { step: 'publish', why: 'failed' })
+      assert.match(
+        yield* callTool(c.access, 'answer_stuck_step', { task: task.slug, answer: 'hand_on', agent: 'codex', message }),
+        /Althar opens the pull request itself: try it again instead/,
+      )
     }).pipe(Effect.provide(runtime()))
   })
 })
