@@ -2,8 +2,8 @@ import type { MenuItemConstructorOptions, NativeImage } from 'electron'
 
 /*
  * How the window is dressed, by platform. macOS keeps its inset title bar
- * and the system's traffic lights; elsewhere the strip the tabs draw is the
- * window's own chrome, and on Linux the window manager reads the app's icon
+ * and the system's traffic lights; elsewhere the system draws the title bar
+ * with its configured button appearance and placement. On Linux it reads the app's icon
  * from here (main.ts gives it already small: 256px and up silently overflow
  * X11's property size and leave the window iconless). The paper under the
  * page is the same everywhere, so nothing else shows before its first frame:
@@ -25,7 +25,7 @@ export const windowOptions = (platform: NodeJS.Platform, icon: NativeImage, dark
   backgroundColor: dark ? PAGE.dark : PAGE.light,
   ...(platform === 'darwin'
     ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 16, y: 14 } }
-    : { frame: false, ...(platform === 'linux' ? { icon } : {}) }),
+    : { frame: true, ...(platform === 'linux' ? { icon } : {}) }),
 })
 
 /** The menu off a Mac: accelerators without a bar; null on macOS, which keeps the system's own menu bar. */

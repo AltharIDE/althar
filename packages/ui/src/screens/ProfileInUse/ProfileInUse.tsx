@@ -31,7 +31,7 @@ export interface ProfileInUseProps {
   /** Tries to open the profile again. */
   onTryAgain: () => void
   /** Off a Mac, draw the window's own controls; on macOS the system draws its lights. */
-  lights?: 'space' | 'drawn'
+  lights?: 'space' | 'drawn' | 'none'
   window?: TitleBarWindow
   text?: Partial<ProfileInUseText>
 }

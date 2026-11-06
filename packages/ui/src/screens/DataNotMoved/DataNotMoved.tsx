@@ -49,7 +49,7 @@ export interface DataNotMovedProps {
   /** Reports the problem. Without it, nothing offers to. */
   onReport?: () => void
   /** Off a Mac, draw the window's own controls; on macOS the system draws its lights. */
-  lights?: 'space' | 'drawn'
+  lights?: 'space' | 'drawn' | 'none'
   window?: TitleBarWindow
   text?: Partial<DataNotMovedText>
 }

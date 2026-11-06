@@ -27,7 +27,7 @@ export function UpdateStoppedView({
       reason={failure.reason}
       onShowBackup={() => void host.showBackup()}
       {...(reportProblem === undefined ? {} : { onReport: () => reportProblem({ kind: 'update', reason: failure.reason }) })}
-      lights={darwin ? 'space' : 'drawn'}
+      lights={darwin ? 'space' : 'none'}
       {...(darwin
         ? {}
         : {

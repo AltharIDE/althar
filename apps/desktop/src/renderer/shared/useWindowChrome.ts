@@ -3,15 +3,9 @@ import { useEffect, useState } from 'react'
 
 import { type Host, useServices } from '../data/services'
 
-/*
- * What a screen with no tabs above it needs where the system draws none: the
- * window's own buttons, wired to the host, and whether the window is
- * maximized, so the third says maximize or restore. On macOS the system
- * draws its traffic lights instead, and only their room is kept.
- */
-
+/** macOS overlays its system controls; other systems draw their native title bar above the page. */
 export interface WindowChrome {
-  readonly lights: 'space' | 'drawn'
+  readonly lights: 'space' | 'none'
   readonly window?: TitleBarWindow
 }
 
@@ -37,15 +31,5 @@ export const useMaximized = (host: Pick<Host, 'maximized' | 'onMaximized'>): boo
 
 export const useWindowChrome = (): WindowChrome => {
   const { host } = useServices()
-  const maximized = useMaximized(host)
-  if (host.platform === 'darwin') return { lights: 'space' }
-  return {
-    lights: 'drawn',
-    window: {
-      onClose: () => host.window('close'),
-      onMinimize: () => host.window('minimize'),
-      onToggleMaximize: () => host.window('toggle-maximize'),
-      maximized,
-    },
-  }
+  return { lights: host.platform === 'darwin' ? 'space' : 'none' }
 }
