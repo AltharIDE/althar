@@ -1,6 +1,8 @@
 # ADR-026: Connecting walks the person in, and says what the connection can do
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06): agents
+  may use the person's own `gh` and `glab` sign-in where they have one set
+  up; the copy Althar keeps in its keychain still never reaches them
 - **Date:** 2026-10-11
 - **Owner:** Repository maintainers
 - **Context:** Connecting a code host or tracker was a row with Sign in or
@@ -29,7 +31,9 @@
       runtime reads the token the way the tool hands it out (`gh auth
       token`, `glab config get token`) and keeps its own copy in Althar's
       keychain; agents never see it, and still run with gh and glab signed
-      out. gh's token is a broad OAuth token, which an organisation that
+      out (until ADR-097's third phase, which leaves agents the person's own
+      gh and glab where the project's switch allows; Althar's copy still
+      never reaches them). gh's token is a broad OAuth token, which an organisation that
       restricts OAuth apps keeps out; the check says so.
     - **A token, made on a page opened filled in** where the service takes
       it (GitHub's fine-grained token page: its name, description, owner,

@@ -217,6 +217,11 @@ lasted of it).
   `process.ts`'s allowlist), behind a project switch, on by default. The
   rules read `gh` and `glab` as git (`rules.ts:402-449`, `:614-625`): what's
   on the list asks, the rest goes ahead.
+- **The Flatpak.** The person's sign-in is on the device. Agents run there
+  (OpenCode, Codex) get it as their environment crosses (ADR-027). For
+  Claude Code in the sandbox, recommended: `--socket=ssh-auth`, which
+  ADR-073 turned down only for ADR-011's sake, and `gh`'s and `glab`'s
+  config folders passed in.
 - **Noticing a push Althar didn't make:** after a lead's turn and in the
   sweep, read the task's branch on the remote; a head that is the
   worktree's is the lead's own push, said in a line and taken as the task's
@@ -311,8 +316,8 @@ once phases 1 to 4 have shown what it needs.
 ## The docs this changed
 
 ADR-097, and a line at the top of each ADR it supersedes in part: 004, 011,
-013, 016, 035, 043, 050, 052, 057, 058, 066, 067, 071, 078, 081, 086, 087,
-088, 089, 094 and 095 (wholly), and a line amending 007 and 019. Architecture 03, 04 and 06 and the
+013, 016, 026, 027, 030, 035, 043, 050, 052, 057, 058, 066, 067, 071, 073,
+078, 081, 086, 087, 088, 089, 094 and 095 (wholly), and a line amending 007 and 019. Architecture 03, 04 and 06 and the
 glossary say what was decided, marked where it waits on a phase.
 `docs/plans/safety-pass.md` is gone; ADR-067 and ADR-097 keep what lasted
 of it.

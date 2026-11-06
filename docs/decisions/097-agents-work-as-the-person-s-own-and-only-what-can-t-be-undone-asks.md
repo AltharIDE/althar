@@ -11,6 +11,12 @@
   [ADR-013](013-project-rules.md) (what asks by default),
   [ADR-016](016-push-without-a-connection.md) (the person's MCP servers
   switched off; leads never pushing themselves),
+  [ADR-026](026-connecting-walks-the-person-in.md) (agents run with `gh` and
+  `glab` signed out),
+  [ADR-027](027-what-the-flatpak-reaches.md) (no SSH agent or signed-in tool
+  reaches an agent in the Flatpak),
+  [ADR-030](030-the-lead-resolves-conflicts-and-althar-pushes-the-merge.md)
+  (the lead has no way to push its merge),
   [ADR-035](035-a-task-s-kind-is-read-from-what-it-has.md) (a review runs
   nothing and posts only on Post),
   [ADR-043](043-allow-everything-is-one-switch-for-a-project-or-a-task.md)
@@ -29,6 +35,8 @@
   (the floor in the other modes),
   [ADR-071](071-the-sandbox-is-the-boundary-anything-inside-it-runs.md)
   (where no sandbox holds, and review steps),
+  [ADR-073](073-git-over-ssh-in-the-flatpak-goes-through-the-device.md)
+  (agents' ssh kept from the person's SSH agent),
   [ADR-078](078-project-leads-can-read-the-web.md) (Codex's network, the
   `curl` form),
   [ADR-081](081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md)
@@ -333,6 +341,12 @@ SSH agent are no longer taken out of the agent's environment
 (`runtime/src/Config.ts`, ADR-011). A project switch, "Agents use my code
 host sign-in", on by default, turns it off.
 
+In the Flatpak the person's sign-in is on the device, not in the sandbox
+(ADR-027, ADR-073). Agents that run on the device get it as their
+environment crosses. For those in the sandbox, passing the SSH agent's
+socket in, which ADR-073 turned down only for ADR-011's sake, is the
+plan's recommendation; `gh` and `glab` need their config's folder too.
+
 - **The rules read `gh` and `glab` as they read git,** no longer refusing
   what changes a host: `gh pr merge`, `gh release create`, a tag pushed,
   `gh api` deleting a ref, a comment on someone else's pull request, and
@@ -460,6 +474,9 @@ the network, screenshots, and a draft that carries pictures.
 | 011 | Agents run without the person's sign-ins; `gh` and `glab` writes refused; Althar's tools reach only the task's repository | Althar's connectors; its push and pull request steps, preferred |
 | 013 | The six kinds asking by default; "changing the code host" as what no project can change | Reading credentials; the person's Never, Ask me and command rules |
 | 016 | The person's MCP servers switched off by name; leads never pushing themselves | Pushing with the person's git where nothing is connected |
+| 026 | Agents running with `gh` and `glab` signed out | Althar's copy of the token never reaching agents |
+| 027 | No SSH agent or signed-in tool reaching an agent | What crosses is built, not inherited; Althar's git through the device's ssh |
+| 030 | The lead having no way to push its merge | Althar pushing the merge it checked, preferred; the round and its checks |
 | 035 | A review runs nothing and posts only on Post | An outside author's review, read-only by default |
 | 043 | Allowing everything as an opt-in; the host only through Althar | The one switch, project and task; Never over it |
 | 050 | No review led by an agent a repository's settings can approve for | That rule for an outside author's review |
@@ -469,6 +486,7 @@ the network, screenshots, and a draft that carries pictures.
 | 066 | Leads carry none of the person's sign-ins | `fetch_from_remote`, preferred |
 | 067 | The floor in the other modes | The irreversible kinds |
 | 071 | Today's rules where no sandbox holds; review steps' rules | The sandbox as the boundary; the guard |
+| 073 | ADR-011's boundary on agents' ssh | The device's ssh for Althar's git, the pinned hosts, nothing asking |
 | 078 | Codex's shell without the network; the `curl` form | The project's switch; outside reviews offline |
 | 081 | No host sign-in; leads only on their task's pull requests; the web mark; a tag asking twice; replies to the team's people unasked | The four limits, the person's word, errands, the merge line |
 | 086 | A card for a task move outside the person's turn | The lines in both threads; discarding deletes nothing |
