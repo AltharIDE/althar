@@ -165,11 +165,6 @@ export function AgentMarks({ found, sync, links }: { found: Found; sync: Sync; l
           </Tooltip>
         )
       })}
-      {links && missing.length > 0 && (
-        <LinkButton reveal className={s.addTo} onClick={() => sync.add(found, missing)}>
-          {syncText.addTo(names(missing))}
-        </LinkButton>
-      )}
       {links && AGENTS.some((agent) => sync.here(found, agent.id) === 'differs') && <DiffersMenu found={found} sync={sync} />}
       {links &&
         AGENTS.filter((agent) => sync.here(found, agent.id) === 'signIn').map((agent) => (
@@ -177,6 +172,11 @@ export function AgentMarks({ found, sync, links }: { found: Found; sync: Sync; l
             {`${syncText.signIn} in ${agent.name}`}
           </LinkButton>
         ))}
+      {links && missing.length > 0 && (
+        <LinkButton reveal className={s.addTo} onClick={() => sync.add(found, missing)}>
+          {syncText.addTo(names(missing))}
+        </LinkButton>
+      )}
     </span>
   )
 }
