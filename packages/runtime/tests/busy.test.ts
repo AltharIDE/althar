@@ -60,8 +60,11 @@ const person = Effect.gen(function* () {
   return (row?.id ?? '') as ActorId
 })
 
-/** A task whose plan, its lead Codex unless said, with no review, the person starts now: whether its lead is on it, or it waits. */
-const started = (projectId: ProjectId, title: string, description: string, agentId = 'codex') =>
+/**
+ * A task whose plan, its lead Codex unless said, with no review, the person starts now: whether its lead is on it, or it
+ * waits. At a light effort, it is planned small, and has the quick lane (quickLane.ts).
+ */
+const started = (projectId: ProjectId, title: string, description: string, agentId = 'codex', effort?: string) =>
   Effect.gen(function* () {
     const projects = yield* Projects
     const plans = yield* Plans
@@ -76,7 +79,7 @@ const started = (projectId: ProjectId, title: string, description: string, agent
     const planId = yield* plans.propose({
       projectId,
       taskId: created.taskId,
-      steps: [{ key: 'implement', agentId, model: null, skipped: false }],
+      steps: [{ key: 'implement', agentId, model: null, ...(effort === undefined ? {} : { effort }), skipped: false }],
       reason: null,
       actorId: actor,
       end: null,
@@ -1418,6 +1421,66 @@ describe('The line', () => {
         assert.deepStrictEqual(yield* lineOn(projectId), ['Second', 'Fourth', 'Fifth'])
       }).pipe(Effect.provide(machine(1, file)))
     }),
+  )
+})
+
+describe('The quick lane', () => {
+  it.live('start a task planned small at once though every place is taken, ahead of a long one that waits; one at a time', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* opened
+      const long = yield* started(projectId, 'Long', 'Work on it. [lead:wait]')
+      yield* working(long.taskId)
+      const waits = yield* started(projectId, 'Waits', 'Work on it. [lead:wait]')
+      assert.strictEqual(waits.outcome, 'waiting')
+
+      // A one-line fix, its lead at a light effort with no review, takes the place beyond the number, though Waits waited longer.
+      const small = yield* started(projectId, 'Small', 'Fix it. [lead:wait]', 'codex', 'low')
+      assert.strictEqual(small.outcome, 'running')
+      yield* working(small.taskId)
+      // The lane holds one: a second small task waits, and so does Waits, whose card counts the lane as one beyond the number.
+      const smallToo = yield* started(projectId, 'Small too', 'Fix it. [lead:finish]', 'codex', 'low')
+      assert.strictEqual(smallToo.outcome, 'waiting')
+      yield* until(
+        Effect.map(cardOf(projectId, waits.taskId), (card) => (card?.queued?.busy === 2 ? [card.queued] : [])),
+        (rows) => rows.length === 1,
+      )
+      assert.deepStrictEqual(countsOf((yield* cardOf(projectId, waits.taskId))?.queued), { busy: 2, atOnce: 1 })
+      assert.deepStrictEqual(
+        (yield* cardOf(projectId, waits.taskId))?.queued?.holders?.map((holder) => holder.title),
+        ['Long', 'Small'],
+      )
+
+      // The first small one done, the lane frees for the next small one; the long one that waits still does.
+      yield* say(small.threadId, '[lead:finish]')
+      yield* until(attempts(smallToo.taskId), (rows) => rows[0]?.state === 'succeeded')
+      assert.deepStrictEqual((yield* attempts(waits.taskId)).at(-1), { step: 'implement', state: 'held', holdReason: 'machine_busy' })
+      assert.strictEqual((yield* attempts(long.taskId))[0]?.state, 'running')
+    }).pipe(Effect.provide(machine(1))),
+  )
+
+  it.live('leave a task at its agent’s own effort, or a harder one, to wait as any does', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* opened
+      const long = yield* started(projectId, 'Long', 'Work on it. [lead:wait]')
+      yield* working(long.taskId)
+      const unsaid = yield* started(projectId, 'Unsaid', 'Fix it. [lead:wait]')
+      assert.strictEqual(unsaid.outcome, 'waiting')
+      yield* waiting(unsaid.taskId)
+      const harder = yield* started(projectId, 'Harder', 'Fix it. [lead:wait]', 'codex', 'high')
+      assert.strictEqual(harder.outcome, 'waiting')
+      yield* waiting(harder.taskId)
+    }).pipe(Effect.provide(machine(1))),
+  )
+
+  it.live('give no place beyond the number with the lane turned off', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* opened
+      const long = yield* started(projectId, 'Long', 'Work on it. [lead:wait]')
+      yield* working(long.taskId)
+      const small = yield* started(projectId, 'Small', 'Fix it. [lead:wait]', 'codex', 'low')
+      assert.strictEqual(small.outcome, 'waiting')
+      yield* waiting(small.taskId)
+    }).pipe(Effect.provide(machine(1, ':memory:', { quick: 0 }))),
   )
 })
 

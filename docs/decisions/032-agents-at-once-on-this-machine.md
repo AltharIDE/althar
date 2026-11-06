@@ -1,6 +1,6 @@
 # ADR-032: A machine runs as many tasks' agents at once as its cores and memory allow, and the rest wait their turn
 
-- **Status:** Accepted; its order of what waits amended by [ADR-037](037-what-the-person-does-goes-first.md); a task's own servers count once for it (follow-up of 2026-10-21)
+- **Status:** Accepted; its order of what waits amended by [ADR-037](037-what-the-person-does-goes-first.md); a task's own servers count once for it (follow-up of 2026-10-21); a task planned small has a place beyond the number (follow-up of 2026-11-06)
 - **Date:** 2026-10-13
 - **Owner:** Repository maintainers
 - **Context:** Althar set no limit on tasks at once, and had no queue
@@ -197,3 +197,33 @@
   heavy test run left by the lead and its review run together while another
   task waits. The two belong to the same piece of work, which the person
   expects to go on.
+
+## Follow-up: a task planned small has a place beyond the number (2026-11-06)
+
+- **What went wrong.** A one-line fix (#599) waited nine minutes for one
+  of four places, all taken by long tasks, then worked for one. Of the last
+  eleven small tasks, four waited, 14 minutes in the middle, the largest
+  part of their time from start to pull request
+  ([small-task-timeline.md](../research/small-task-timeline.md)). The
+  trade-off above, "a light task waits behind the cap as a heavy one does",
+  is what the person called ridiculous.
+- **Decision.** A task planned small, its lead at a light effort (`low`, or
+  Codex's `minimal`) and no review to do, has a **quick lane**: one place
+  beyond the number. Its lead takes a place of the number where one is free,
+  else the lane's; past both it waits as any task does. In the lane, only
+  other small tasks stand before it, so it goes ahead of long tasks that
+  waited longer, which couldn't take the lane anyway. Planned small is read
+  from the plan its run carries, so nobody writes a size: the coordinator
+  plans a change of a few lines that way, and a person who adds a review or
+  a harder effort takes the task out of the lane. A card counts the lane's
+  place as work beyond the number ("and 1 more"). `quickLane.ts` holds the
+  rule, with its tests.
+- **Alternatives.** *Put small tasks first in the line:* nothing in the
+  line starts while long tasks hold every place, which is when #599 waited.
+  *A size the coordinator writes on the plan:* a new field for what effort
+  and review already say. *A lane for every task planned without review:*
+  prototypes run that way at high effort for an hour.
+- **Trade-off.** The machine may run one agent more than its number, for
+  the minutes a small task takes. Its lead at a light effort rarely runs
+  more than the checks of the package it changed, far from the 2.5 cores
+  and 3 GB a task is counted at.
