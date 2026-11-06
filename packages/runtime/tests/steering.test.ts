@@ -183,6 +183,8 @@ describe('a new step on an agent nearly out', () => {
   it.live('runs a review planned on an agent nearly out on one with room, other than the lead’s', () => {
     const resetsAt = second(Date.now() + HOUR)
     return Effect.gen(function* () {
+      // The notice names the selected model only once its catalog has been read.
+      yield* until((yield* Models).catalog, (catalog) => catalog.every((agent) => !agent.probing))
       const { task, start } = yield* planned([lead('claude-code'), { key: 'review', agentId: 'codex', model: null, skipped: false }])
       yield* reading(yield* first('codex'), 'codex', left(1, resetsAt))
       yield* start
@@ -233,6 +235,8 @@ describe('a settle step on a lead that fell nearly out since it worked', () => {
     const reviewer = holds()
     const resetsAt = second(Date.now() + HOUR)
     return Effect.gen(function* () {
+      // The notice names the selected model only once its catalog has been read.
+      yield* until((yield* Models).catalog, (catalog) => catalog.every((agent) => !agent.probing))
       const { projectId, task } = yield* reviewed(reviewer, () =>
         Effect.flatMap(first('claude-code'), (claude) => reading(claude, 'claude-code', left(3, resetsAt))),
       )
@@ -376,6 +380,8 @@ describe('a settle step on a lead that fell nearly out since it worked', () => {
     const reviewer = holds()
     const resetsAt = second(Date.now() + HOUR)
     return Effect.gen(function* () {
+      // The notice names the selected model only once its catalog has been read.
+      yield* until((yield* Models).catalog, (catalog) => catalog.every((agent) => !agent.probing))
       const { projectId, task, usual } = yield* bothLow(reviewer, resetsAt)
       const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.strictEqual(ready?.lead, 'opencode')

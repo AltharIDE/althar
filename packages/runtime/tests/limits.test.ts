@@ -16,6 +16,7 @@ import { NotFound } from '../src/errors'
 import { type Failure, failureOf, Failures } from '../src/Failures'
 import { Instance } from '../src/Instance'
 import { Limits, outWords, whenWords } from '../src/Limits'
+import { Models } from '../src/Models'
 import { Policies, usageLimitOf } from '../src/Policies'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
@@ -305,6 +306,8 @@ describe('an agent out of usage', () => {
 
   /** A task planned on Claude Code with Codex reviewing, Codex already out from another task, and what its thread said once it is ready. */
   const reviewerOut = Effect.gen(function* () {
+    // Make the replacement model known before a takeover can be selected.
+    yield* until((yield* Models).catalog, (catalog) => catalog.every((agent) => !agent.probing))
     const sessions = yield* Sessions
     const projects = yield* Projects
     const limits = yield* Limits
@@ -369,6 +372,8 @@ describe('an agent out of usage', () => {
   it.live('moves the coordinator on, with what the person said waiting for the agent that takes over', () => {
     const back = Date.now() + HOUR
     return Effect.gen(function* () {
+      // Make the replacement model known before a takeover can be selected.
+      yield* until((yield* Models).catalog, (catalog) => catalog.every((agent) => !agent.probing))
       const projects = yield* Projects
       const coordinator = yield* Coordinator
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
