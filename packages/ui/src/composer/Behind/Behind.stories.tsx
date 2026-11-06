@@ -118,6 +118,37 @@ export const Running: Story = {
     await expect(args.onStopListening).toHaveBeenCalledWith('pr')
   },
 }
+/** A run of Althar's own, with no agent at work: its name, its address, how long it has been up, and Stop. */
+export const ARun: Story = {
+  args: {
+    processes: [
+      { id: 'run:proc_1', name: 'Clearing prototype', command: 'bun run dev', url: 'localhost:5363', since: '18h 37m', output: false },
+    ],
+  },
+  play: async ({ canvasElement, args }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Clearing prototype, localhost:5363' }))
+    const page = within(document.body)
+    await expect(page.getByText('18h 37m')).toBeVisible()
+    await expect(page.queryByRole('button', { name: /Show the output/ })).toBeNull()
+    await userEvent.click(page.getByRole('button', { name: 'Stop Clearing prototype' }))
+    await expect(args.onStop).toHaveBeenCalledWith('run:proc_1')
+  },
+}
+/** What its lead left running and a run, in one list, drawn the same. */
+export const ALeadProcessAndARun: Story = {
+  args: {
+    processes: [
+      STORYBOOK,
+      { id: 'run:proc_1', name: 'Clearing prototype', command: 'bun run dev', url: 'localhost:5363', since: '18h 37m', output: false },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: /2 running/ }))
+    const page = within(document.body)
+    await expect(page.getByRole('button', { name: 'Stop Storybook' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Stop Clearing prototype' })).toBeVisible()
+  },
+}
 /** Several running, two pull requests, a failed exit, and waiting: still one chip, one popover. */
 export const Several: Story = {
   args: { wait: WAIT, processes: [SITE, STORYBOOK, WATCH, TESTS, ...FINISHED], sources: [PR, PR2] },

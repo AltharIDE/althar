@@ -64,7 +64,7 @@ import { documentVersions, editorPath, wholePath } from '../../shared/handed'
 import { roundsOf } from '../../shared/rounds'
 import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
 import { type Outgoing, outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
-import { runningOf } from '../../shared/running'
+import { pillOf, runIdOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
 import { Runs } from '../runs/Runs'
 import { PushRequestOf } from '../../shared/PushRequestOf'
@@ -201,7 +201,7 @@ export const statusOf = (
   // Held for the connection, it carries on by itself once it is back (ADR-060).
   if (snapshot.task.reconnects != null) return { status: TaskStatus.Paused, state: reconnectsWords(snapshot.task.reconnects, clock) }
   if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
-  // Started Local, it waits for its checkout: another task's there, or the person's changes aren't committed (ADR-091).
+  // Started Local, it waits for its checkout: another task's there, or the person's changes aren't committed (ADR-096).
   if (snapshot.task.waitsForCheckout != null)
     return { status: TaskStatus.Queued, state: localText.word, why: localText.waits(snapshot.task.waitsForCheckout) }
   // Its folder coming back from its branch, set up again, before anything it was asked goes on (ADR-056).
@@ -552,10 +552,9 @@ export function TaskView({
   const queue = queueShown(session, model.pending)
   const listening = listeningOf(snapshot)
   const wait = waitOf(snapshot.task, upNextWords)
-  // What its lead left running; what Althar runs of it itself is Run's to say (ADR-090).
+  // What its lead left running, and what Althar runs of it itself (ADR-096); a run's output is in its card.
   const left = session?.background ?? []
-  // Althar's own runs keep their output in their cards, not here.
-  const leftRunning = runningOf(left, now)
+  const leftRunning = pillOf(left, snapshot.task.launches, now)
   const outputShown = leftRunning.find((one) => one.id === outputOf)
   const blocks = [
     // What the person asked for opens the thread, in their words, before anything the lead did.
@@ -867,12 +866,19 @@ export function TaskView({
             // Behind another in its project's line, it can go first in it from here; what continues keeps its order (ADR-065).
             {...(snapshot.task.front === true ? { onFront: () => void model.moveToFront() } : {})}
             processes={leftRunning}
-            onStop={(id) => void model.stopBackground(id)}
+            onStop={(id) => {
+              const run = runIdOf(id)
+              void (run === null ? model.stopBackground(id) : model.stopLaunch(run))
+            }}
             onDismiss={(id) => void model.clearBackground(id)}
             onOutput={setOutputOf}
             // Where it answers opens in the person's browser.
             onOpenUrl={(id) => {
-              const url = left.find((command) => command.id === id)?.url
+              const run = runIdOf(id)
+              const url =
+                run === null
+                  ? left.find((command) => command.id === id)?.url
+                  : snapshot.task.launches.find((launch) => launch.id === run)?.url
               if (url != null) window.open(url, '_blank')
             }}
             sources={listening}
@@ -905,7 +911,7 @@ export function TaskView({
                 {...(teamed === null ? {} : { onTeam: () => setChangingTeam(true) })}
               />
             )}
-            {/* Where it works, as Codex says it under its composer: Local, in the person's own checkout (ADR-091). */}
+            {/* Where it works, as Codex says it under its composer: Local, in the person's own checkout (ADR-096). */}
             {snapshot.task.local === true && <LocalPlace path={snapshot.task.worktree} />}
           </>
         }
@@ -1204,7 +1210,7 @@ export function TaskView({
                 </div>
               )}
               {snapshot.attention.map((request) => (request.kind === 'stuck' && request.stuck !== null ? stuckCall(request) : null))}
-              {/* Before a Local task takes the person's checkout: its changes not committed, or a branch of theirs (ADR-091). */}
+              {/* Before a Local task takes the person's checkout: its changes not committed, or a branch of theirs (ADR-096). */}
               {snapshot.attention.map((request) =>
                 request.kind === 'checkout' && request.checkout !== undefined ? (
                   <CheckoutAsk
