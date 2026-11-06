@@ -615,6 +615,8 @@ const hostReason = (words: ReadonlyArray<string>): string | undefined => {
     return "Merging is the person's to do: they accept the change in Althar, or on the host."
   if ((command === 'pr' || command === 'mr') && (subcommand === 'comment' || subcommand === 'review' || subcommand === 'note'))
     return "Answer on the task's pull request with Althar's reply_on_pull_request tool."
+  if ((command === 'pr' && subcommand === 'edit') || (command === 'mr' && subcommand === 'update'))
+    return "Change the task's pull request's title or description with Althar's edit_pull_request tool."
   if (command === 'pr' || command === 'mr')
     return "Althar opens the task's pull request itself, and what you commit goes to it with push_to_pull_request, which pushes it, or asks the person to, as the project has it. Commit, then call it; read the pull request with read_pull_request."
   if (command === 'issue')

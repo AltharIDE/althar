@@ -1,21 +1,27 @@
 # ADR-004: The coordinator is an agent session with Althar's tools
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06): the
+  coordinator is optional, shares one pool of tools, MCP servers and skills
+  with leads, and changes no code for tidiness, not as a safety boundary
 - **Date:** 2026-09-28
 - **Amended:** 2026-09-30, on what read-only rests on. Agents' plan modes
   refuse MCP tools (Claude Code's plan mode, OpenCode's plan agent), so a
   coordinator in them can't plan anything.
 - **Owner:** Repository maintainers
 - **Context:** Each project has a coordinator that plans and hands out work
-  and never writes code. Its conversation is kept in full, its agent can be
+  and never writes code (optional since ADR-097: tasks also start from the
+  board, the composer or a lead). Its conversation is kept in full, its agent can be
   switched, and continuous compaction may come later.
 - **Decision:**
   - The coordinator is an ordinary agent session, over ACP, on any agent.
   - It gets Althar's tools as an MCP server: read tools for the project and
     its tasks, and commands to draft, plan, start, and order tasks and to
-    message leads.
+    message leads. Since ADR-097 a task's lead gets the same tools, and
+    both get the person's own MCP servers and skills.
   - It is read-only by construction, as every role that only reads is (a
-    reviewer too):
+    reviewer too). Since ADR-097 that is tidiness, not safety: a change is a
+    task, with a branch, a review and a record, and the coordinator may
+    install and run tests in its copies.
     - It reads throwaway copies: the coordinator, worktrees refreshed from
       the default branch each turn; a reviewer, a snapshot of the lead's
       work taken when its round begins.
@@ -34,7 +40,7 @@
     boundary, and could not run on plans.
   - Read-only by prompt: not enforceable.
   - Letting the coordinator make small changes itself: rejected; a change is
-    always a task with a lead.
+    always a task with a lead. ADR-097 keeps this, for tidiness.
 - **Trade-off:** an always-on session costs usage on the user's plan. The
   coordinator sees code only through read-only worktrees and tools. It relies
   on throwaway copies and agents' sandboxes, with the reader rules as the

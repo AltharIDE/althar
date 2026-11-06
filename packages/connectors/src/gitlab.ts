@@ -1102,6 +1102,21 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
           yield* mayNot(http.json(MergeAnswer, 'PUT', `${project(repository)}/merge_requests/${change.number}`, { state_event: 'reopen' })),
         )
       }),
+    // GitLab says draft with the title's prefix: a draft keeps it, as it is now, else the new title would mark it ready.
+    editChange: (repository, change, edit) =>
+      Effect.gen(function* () {
+        const now = edit.title === undefined ? null : yield* read(repository, change.number)
+        const draft = now !== null && (now.draft ?? now.work_in_progress ?? false)
+        const title = edit.title === undefined ? undefined : draft ? `Draft: ${readyTitle(edit.title)}` : readyTitle(edit.title)
+        return changeOf(
+          yield* mayNot(
+            http.json(MergeAnswer, 'PUT', `${project(repository)}/merge_requests/${change.number}`, {
+              ...(title === undefined ? {} : { title }),
+              ...(edit.body === undefined ? {} : { description: edit.body }),
+            }),
+          ),
+        )
+      }),
     deleteBranch: (repository, change) =>
       Effect.gen(function* () {
         const now = yield* read(repository, change.number)

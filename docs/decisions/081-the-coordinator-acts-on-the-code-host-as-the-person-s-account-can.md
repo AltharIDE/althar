@@ -1,6 +1,13 @@
 # ADR-081: The coordinator acts on the code host as the person's account can, and what can't be undone waits for their word
 
-- **Status:** Accepted, to build for 0.7.0 ([Build](#build-for-070))
+- **Status:** Accepted, to build for 0.7.0 ([Build](#build-for-070)); partly
+  superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06): agents may use the
+  person's own sign-in and MCP servers, leads act on any of the project's
+  pull requests with the coordinator's tools, the web mark goes, a tag asks
+  once, and a reply on a pull request no task of Althar's opened or follows
+  is asked-for, as speaking for the person to others, and agents change
+  Althar's settings, loosening what asks only on the person's message. The
+  four limits, the person's word and errands stay
 - **Date:** 2026-10-31; reworked around one rule on 2026-11-01
 - **Amends:** [ADR-011](011-own-connectors-for-hosts-and-trackers.md),
   [ADR-024](024-signed-releases-and-updates.md),
@@ -229,6 +236,7 @@ it, each for a reason no tool takes away:
    ([the lists](#on-the-code-host)). These decide what every agent may do,
    so no agent changes them, whoever asks.
 3. **A change to the code is a task,** with a lead and a review (ADR-004).
+   Since ADR-097, a matter of tidiness, not safety.
    The coordinator edits nothing, and no call to the host writes the
    repository's content.
 4. **Nothing approves its own work.** No agent approves a pull request a
@@ -249,7 +257,7 @@ a task's lead ([Leads](#leads-under-the-same-rule)).
 | Can be undone in a step | Whenever its work calls for it | Run a failed check again; mark one of Althar's pull requests ready; bring a branch up to date with the default branch, by a merge; close or reopen one of Althar's own, where the host can reopen it; reply on Althar's or the repository's own people's; take a pull request out of the queue before it merges; stop, hold, restart or settle a task; read anything the account can read |
 | **Asked-for:** can't be undone, and the person asked for it | In the turn their message started, or for an errand kept from it, with no card ([The person's word](#the-persons-word)) | Merge; enter the merge queue or turn on auto-merge; push, move or delete a tag; approve a run's `release` environment; publish a release; start a workflow; post a review; delete a branch; turn an automation on; discard a task; comment on an issue; reply on, or close, an outside author's pull request; close one on Bitbucket Cloud, where declining is final; any other write through the gated call |
 | Can't be undone, and the person didn't ask | Never. It says so in a line in its chat, or, where there is a decision to make, on DEV-173's card | The same, prompted by what it read or by news |
-| Never | Only the person, in Althar's Settings or on the host (ADR-048) | Althar's rules, allow everything, accounts and connections; the host's settings, in the [never list](#on-the-code-host); approving a pull request a task opened, making a status or a check run, dismissing a review; answering its own permission request |
+| Never | Only the person, in Althar's Settings or on the host (ADR-048) | Althar's rules, allow everything, accounts and connections (since ADR-097, an agent changes Althar's settings: loosening what asks on the person's message, signing in and out still theirs); the host's settings, in the [never list](#on-the-code-host); approving a pull request a task opened, making a status or a check run, dismissing a review; answering its own permission request |
 
 - **What an action does in that repository decides its kind,** not its
   name. Here a `v*` tag builds a draft and waits for the `release`
@@ -318,7 +326,10 @@ task's lead in the same way ([Leads](#leads-under-the-same-rule)).
   and over a card for every ask.
 - **Still the window's press,** as ADR-048 has it: answering a permission
   request or a question, and widening what agents may do: the fourth limit
-  and the second ([The rule](#the-rule)).
+  and the second ([The rule](#the-rule)). Since [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md#settings), an agent's
+  change to Althar's own settings that loosens what asks goes on the
+  person's message in the turn, as an asked-for tool; the host's settings
+  stay the second limit's.
 
 ## On the code host
 
@@ -338,9 +349,14 @@ and repositories ([Leads](#leads-under-the-same-rule)).
   - `close_pull_request` and `reopen_pull_request`, on Althar's own. On
     Bitbucket Cloud a declined pull request can't be reopened, so there
     closing is asked-for;
-  - `reply_on_pull_request`, on Althar's and the repository's own people's.
+  - `reply_on_pull_request`, on Althar's and the repository's own people's
+    (since ADR-097, on Althar's own; on any other it is asked-for, as
+    speaking for the person to others).
     On an outside author's pull request, a reply or a close sends them a
     notification that can't be taken back, so there it is asked-for.
+  - `edit_pull_request`, a pull request's title or description, on the
+    same pull requests as a reply: the old ones are set back in a step. On
+    an outside author's it is asked-for, as a reply is.
 - **Asked-for:**
   - `merge_pull_request`: merge it, or put it in the host's queue or merge
     train where its branch has one Althar can reach, with a method the
@@ -457,7 +473,8 @@ is read for each version Althar supports. A write placed nowhere is refused.
 
 The rule isn't the coordinator's alone. A task's lead does on the code host
 what the person's account can, on its task's pull requests and
-repositories, with the same four limits:
+repositories (since ADR-097, on any of the project's, with the
+coordinator's tools), with the same four limits:
 
 - **The person's word is their message in the task's thread,** in the turn
   it started, as the coordinator's is in its chat. "Tag it 0.7.1" or "merge
@@ -477,6 +494,9 @@ repositories, with the same four limits:
   ([why](#the-coordinator-not-a-standing-task)).
 
 ## The web
+
+Since ADR-097 the mark below goes, and the coordinator's commands reach the
+hosts a lead's do; the switch stays the person's control.
 
 The coordinator reads the web as a task's lead does, under the project's
 switch "Leads can reach the web" (ADR-078). On, it searches and reads pages
@@ -827,7 +847,7 @@ decision's, and its reason says which.
 | Only pull requests a task opened or attached are followed | ADR-052; `Changes.ts:5304-5310` | Lifted | Every open one, slowly, for news |
 | A contributor's fork can't be attached or pushed to; the task's own fork can | `Changes.ts:1585-1596` | Kept here | DEV-170 decides it |
 | It posts no review; an outside pull request's waits for the person | `Reviews.ts:59`, `:223-227`, `:957-961` | Lifted, when the person asks, but never an approval of a task's own | A review they asked for is their word; an approval of a task's pull request would stand where a check of the work belongs: the fourth limit |
-| Agents carry no host sign-in; `gh` and `glab` only read | ADR-011; `Config.ts:336-346`; `rules.ts:402-449` | Kept | Not a limit on what: the gated call reaches all the host has, and one way to the host is what lets the limits hold |
+| Agents carry no host sign-in; `gh` and `glab` only read | ADR-011; `Config.ts:336-346`; `rules.ts:402-449` | Kept | Not a limit on what: the gated call reaches all the host has, and one way to the host is what lets the limits hold. Lifted by ADR-097: agents may use the person's own sign-in, read against the irreversible list; Althar's way stays the preferred and recorded one |
 | A rerun reaches the host's own CI only: Actions' jobs, GitLab's jobs, and now Bitbucket Pipelines', whole | `connectors/src/github.ts:867-872`, `gitlab.ts:719-724`, `bitbucketCloud.ts:598` | Kept | Not Althar's limit: no host can run another service's, and Bitbucket Data Center's builds are all another's |
 | *New:* the gated call can't change the repository's content, make a status or a check run, approve a task's pull request or dismiss a review | [On the code host](#on-the-code-host) | Added | The third and fourth limits |
 | *New:* the gated call starts a workflow on any branch, and places GraphQL mutations by name | [On the code host](#on-the-code-host) | Added, asked-for | A push to a branch runs its workflow files already; some writes are GraphQL's alone, and a mutation's name places it as a path does |
@@ -835,8 +855,8 @@ decision's, and its reason says which.
 | **Git and its copies** | | | |
 | It reads in copies of its own, from a mirror, with no network | ADR-058; `provider-adapters/src/registry.ts:760` | Kept | Not a limit on what: news brings what it would have fetched for |
 | Each web read asks the person, and the project's web switch passes it by | ADR-078; `provider-adapters/src/registry.ts:754` | Lifted: it follows the switch, as a lead does | The switch is the person's call on the leak ADR-078 weighs, for the coordinator as for a lead |
-| *New:* while an outside author's words can reach its conversation, a web read asks | [How long the mark lasts](#how-long-the-mark-lasts) | Added | A URL sent can't be called back, and a stranger's words may have chosen it, in the turn that brought them or a later one: the first limit. ADR-078 keeps outside reviews offline, for as long as each runs, for the same reason |
-| Its edit tools are denied: a change is always a task | `provider-adapters/src/registry.ts:754`; `Sessions.ts:2915` | Kept | The third limit: the record and the review |
+| *New:* while an outside author's words can reach its conversation, a web read asks | [How long the mark lasts](#how-long-the-mark-lasts) | Added | A URL sent can't be called back, and a stranger's words may have chosen it, in the turn that brought them or a later one: the first limit. ADR-078 keeps outside reviews offline, for as long as each runs, for the same reason. Lifted by ADR-097: the project's switch is the person's control for it |
+| Its edit tools are denied: a change is always a task | `provider-adapters/src/registry.ts:754`; `Sessions.ts:2915` | Kept | The third limit: the record and the review; since ADR-097, tidiness, not safety |
 | Where no sandbox holds it, only commands that look | ADR-058; `provider-adapters/src/registry.ts:743-744` | Kept | ADR-071 runs Claude Code's inside its sandbox unread already; ADR-082's task 4 and DEV-179 are the rest |
 | **Tasks** | | | |
 | It can't stop, hold, restart or settle a task; `settle_task` is a lead's | `Coordinator.ts:1480-1776`, `:1808` | Lifted | Each can be undone: a stopped task starts again, a settled one goes back to work (ADR-034). Discarding one is asked-for |
@@ -861,7 +881,7 @@ decision's, and its reason says which.
 | **The person's word** | | | |
 | Merging, pushing and posting a review are the person's press | ADR-048 | Lifted for what they ask | Their message is their word; an approval of a task's own pull request stays theirs, on the host: the fourth limit |
 | Answering a permission request or a question is the person's press | ADR-019, ADR-048 | Kept | An agent answering its own would approve its own work: the fourth limit |
-| Widening what agents may do is the person's, in Settings | ADR-048 | Kept | The second limit |
+| Widening what agents may do is the person's, in Settings | ADR-048 | Kept; since ADR-097, Althar's settings loosen on the person's message through an agent's call too | The second limit |
 | A client on the local socket can't answer for the person | ADR-048 | Kept, and widened | Its messages aren't the person's word either |
 | *New:* a turn the person didn't start does nothing that can't be undone, except an errand's next step | [The person's word](#the-persons-word) | Added | The first limit: news, and what it reads, can't set off a merge by themselves |
 | A step's turns, fix rounds, review rounds and stuck checks are capped | `Stalls.ts`; `Changes.ts`; `Runs.ts` | Kept | Not a limit on what: each hands the work to the person rather than refusing it |

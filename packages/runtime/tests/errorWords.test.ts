@@ -110,3 +110,84 @@ describe('the words for what went wrong', () => {
     for (const reason of ['GitFailed', 'StartTimedOut', 'CoordinatorUnavailable', 'Unknown']) assert.isFalse(expected.has(reason), reason)
   })
 })
+
+describe('the words for what went wrong, for the refusals the API’s tests don’t reach', () => {
+  it('says a project with no name for its repository, and a branch that isn’t there or can’t be made', () => {
+    assert.strictEqual(said({ _tag: 'RepositoryRefused', reason: 'unnamed' }), 'Name the project first: its repository is named after it.')
+    assert.strictEqual(
+      said({ _tag: 'BranchNotFound', repository: 'app', branch: 'release/2' }),
+      'app has no branch release/2, on its remote or here.',
+    )
+    assert.strictEqual(said({ _tag: 'BranchRefused', message: 'A branch can’t be called “a b”.' }), 'A branch can’t be called “a b”.')
+    assert.strictEqual(said({ _tag: 'AutomationRefused', message: 'That automation is paused.' }), 'That automation is paused.')
+  })
+
+  it('names a file refused without a name as a file, and says one refused for a reason it doesn’t know', () => {
+    assert.strictEqual(said({ _tag: 'FileRefused', reason: 'missing', name: null }), "A file isn't there any more. Add it again.")
+    assert.strictEqual(said({ _tag: 'FileRefused', reason: 'nowhere', name: null }), "The task's folder isn't ready yet.")
+    assert.strictEqual(said({ _tag: 'FileRefused', reason: 'cursed', name: 'a.txt' }), "Althar can't send that file.")
+  })
+
+  it('says how a git command ended where git itself said nothing', () => {
+    assert.strictEqual(
+      said({ _tag: 'GitFailed', args: ['-c', 'core.quotepath=off', 'fetch'], stderr: '', reason: 'the clone is locked' }),
+      "git fetch couldn't complete: the clone is locked.",
+    )
+    // No command to name: git alone.
+    assert.strictEqual(
+      said({ _tag: 'GitFailed', args: ['-c', 'a=b'], stderr: '', timedOut: true }),
+      'git  got no answer in its time, so Althar stopped it. Try again.',
+    )
+    assert.strictEqual(
+      said({ _tag: 'GitFailed', stderr: '', signal: 'SIGTERM' }),
+      'git  was stopped (SIGTERM) before it was done. Try again.',
+    )
+    assert.strictEqual(said({ _tag: 'GitFailed', args: ['push'], stderr: '' }), "git push didn't work.")
+  })
+
+  it('keeps all a git command said, and how it ended, for its Details', () => {
+    const failed = (ended: object) => words({ _tag: 'GitFailed', args: ['fetch'], stderr: 'fatal: no\n', ...ended }, name)
+    assert.deepStrictEqual(failed({ code: 128 }), {
+      reason: 'GitFailed',
+      message: "git fetch didn't work: fatal: no.",
+      detail: 'fatal: no\nExit code 128.',
+    })
+    assert.strictEqual(failed({ signal: 'SIGKILL' }).detail, 'fatal: no\nStopped by SIGKILL.')
+    assert.strictEqual(failed({ timedOut: true, timeout: 30_000 }).detail, 'fatal: no\nStopped after 30 seconds with no answer.')
+    assert.isUndefined(words({ _tag: 'GitFailed', args: ['fetch'], stderr: ' ', code: 1 }, name).detail)
+  })
+
+  it('names the settings that let protected files be pushed, however many', () => {
+    const protectedBy = (needs: ReadonlyArray<string>, held = 'skills/a.md') =>
+      said({ _tag: 'PushRefused', remote: 'origin', why: 'protected', needs, said: held })
+    assert.strictEqual(
+      protectedBy([]),
+      'Nothing was pushed: skills/a.md is a skill or OpenSpec file, which stays on this computer. To push it, turn on what it needs in the project’s Settings, under Repository files.',
+    )
+    assert.strictEqual(
+      protectedBy(['writeSkills', 'writeOpenSpec', 'pushProtected'], 'skills/a.md, openspec/b.md'),
+      'Nothing was pushed: skills/a.md, openspec/b.md are skill or OpenSpec files, which stay on this computer. To push them, turn on “Write Althar-managed skills”, “Write OpenSpec artifacts” and “Push skill/OpenSpec files” in the project’s Settings, under Repository files.',
+    )
+  })
+
+  it('says a folder changed since it was seen, and issue changes that can’t change now', () => {
+    assert.strictEqual(
+      said(new ChangedSinceSeen({ taskId: 'task_1', what: 'folder' })),
+      'The task’s folder changed since you looked. Look again, then remove it.',
+    )
+    assert.strictEqual(said({ _tag: 'ChangesClosed', state: 'applied' }), 'Those changes are applied already.')
+    assert.strictEqual(said({ _tag: 'ChangesClosed', state: 'lost' }), 'Those issue changes can’t change now.')
+  })
+
+  it('says a merge the lead is resolving, and a submodule in the way, with or without their files', () => {
+    const merge = (why: string, files?: ReadonlyArray<string>) =>
+      said({ _tag: 'CantMerge', why, into: 'main', detail: 'the merge stopped', ...(files === undefined ? {} : { files }) })
+    assert.strictEqual(merge('resolving', ['src/a.ts']), 'It conflicts with main in a.ts. The lead is resolving it.')
+    assert.strictEqual(merge('resolving'), 'It conflicts with main in the merge stopped. The lead is resolving it.')
+    assert.strictEqual(
+      merge('submodule', ['vendor/lib']),
+      'Submodule vendor/lib has uncommitted changes, or isn’t at the commit recorded for it.',
+    )
+    assert.strictEqual(merge('submodule'), 'Submodule the merge stopped has uncommitted changes, or isn’t at the commit recorded for it.')
+  })
+})

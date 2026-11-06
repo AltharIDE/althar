@@ -4,7 +4,15 @@ import { homedir, tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
 import { available, type Fetch, type Product, type ProductInfo } from '@althar/connectors'
-import { adapterNode, agents, type AgentDefinition, type SessionOptions, type Transport, usingLocated } from '@althar/provider-adapters'
+import {
+  adapterNode,
+  agents,
+  type AgentDefinition,
+  inFlatpakSandbox,
+  type SessionOptions,
+  type Transport,
+  usingLocated,
+} from '@althar/provider-adapters'
 import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
 import type { Machine } from './atOnce'
@@ -334,7 +342,13 @@ export class Agents extends Context.Service<
           definition,
           transport: (cwd: string, env: Readonly<Record<string, string>> = {}, options: SessionOptions = {}) => {
             const spec = definition.launch(adapterNode())
-            const own = definition.withoutOwnTools?.({ env: { ...process.env, ...env }, homeDir: homedir(), cwd }) ?? {}
+            const own =
+              definition.withoutOwnTools?.({
+                env: { ...process.env, ...env },
+                homeDir: homedir(),
+                cwd,
+                inSandbox: inFlatpakSandbox(spec),
+              }) ?? {}
             const held = options.untrusted === true ? { ...readingUntrusted, ...definition.reviewing?.env?.({ ...spec.env, ...own }) } : {}
             // The run's skills, where the agent finds them through its environment: what it would have, with the folder added.
             const via = definition.skills?.via

@@ -1,6 +1,9 @@
 # ADR-050: An ACP agent joins where Althar can hold it to asking, and the rest wait with their reasons
 
-- **Status:** Accepted
+- **Status:** Accepted; who may lead a review partly superseded by
+  [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06): a review of a pull request by
+  the repository's own people is led by any agent that may lead a task; only
+  an outside author's keeps to agents held to reading
 - **Date:** 2026-10-19
 - **Owner:** Repository maintainers
 - **Context:** People pay for more coding agents than the three Althar ran
@@ -121,7 +124,8 @@
   signed in (`bun run test:agents`): mode ids, option ids and permission
   options were seen, but turns on a real account weren't. A repository's own
   settings can approve for Copilot (hooks), Qwen Code (allow rules) and Grok
-  (once trusted), so none leads a review of a pull request. Four have no
+  (once trusted), so none leads a review of a pull request (since ADR-097,
+  of an outside author's pull request). Four have no
   status command, so whether they are signed in shows only as a session
   starts. Copilot, Junie and Mistral Vibe have one account each until their
   sign-ins are seen apart, or Althar signs a home out before removing it.

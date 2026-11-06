@@ -19,6 +19,7 @@ import {
   Thinking,
   ThreadDivider,
   Tool,
+  ToolKind,
   ToolState,
   Turn,
   WorkedFor,
@@ -71,6 +72,7 @@ const LONG_COMMAND = 72
 
 export const text = {
   thought: 'Thought',
+  readSkill: (names: ReadonlyArray<string>) => `read skill ${names.join(', ')}`,
   shell: 'Shell',
   step: { implement: 'Implement', review: 'Review', settle: 'Settle', publish: 'Pull request' } satisfies Record<
     StepResult['step'],
@@ -185,6 +187,7 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
       verb={part.verb}
       target={part.target}
       state={part.state}
+      {...(part.toolKind === ToolKind.Run && part.skills !== undefined ? { meta: text.readSkill(part.skills.names) } : {})}
       {...(part.why === undefined ? {} : { why: part.why })}
       {...(part.command === null ? {} : { copy: part.command })}
       {...(part.state === ToolState.Failed && part.exit !== null ? { exit: part.exit } : {})}

@@ -5,6 +5,7 @@ import type { ToolKind } from '@althar/domain'
 
 import type { BackgroundEvent } from './background'
 import type { Classified } from './failures'
+import { type SeenSkill, skillLoadedBy, skillsAmong } from './skills'
 import { claudeRateLimitWindows, record, type UsageWindow } from './usage'
 
 /*
@@ -111,6 +112,8 @@ export type SessionEvent =
       readonly locations?: ReadonlyArray<ToolLocation>
       readonly content?: ReadonlyArray<ToolContent>
       readonly terminal?: TerminalReport
+      /** The skill it loads, where it says. */
+      readonly skill?: string
     }
   | {
       readonly _tag: 'ToolCallUpdate'
@@ -124,7 +127,10 @@ export type SessionEvent =
       /** What it holds now, whole: each update that has content says all of it again. */
       readonly content?: ReadonlyArray<ToolContent>
       readonly terminal?: TerminalReport
+      readonly skill?: string
     }
+  /** The skills it could see, as it says, whole each time (`skills.ts`). */
+  | { readonly _tag: 'SkillsSeen'; readonly skills: ReadonlyArray<SeenSkill> }
   | { readonly _tag: 'Plan'; readonly entries: ReadonlyArray<{ readonly content: string; readonly status: string }> }
   | {
       readonly _tag: 'ContextUsage'
@@ -349,6 +355,7 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         ...defined('locations', locationsOf(update.locations)),
         ...defined('content', toolContentOf(update.content)),
         ...defined('terminal', terminalOf(update._meta)),
+        ...defined('skill', skillLoadedBy(update)),
       }
     case 'tool_call_update':
       return {
@@ -361,6 +368,7 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         ...defined('locations', locationsOf(update.locations)),
         ...defined('content', toolContentOf(update.content)),
         ...defined('terminal', terminalOf(update._meta)),
+        ...defined('skill', skillLoadedBy(update)),
       }
     case 'plan':
       return { _tag: 'Plan', entries: update.entries.map((entry) => ({ content: entry.content, status: entry.status })) }
@@ -386,10 +394,13 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
       return { _tag: 'ModeChanged', modeId: update.currentModeId, byAgent: true }
     case 'notice':
       return { _tag: 'Notice', severity: update.severity, title: update.title, ...defined('description', update.description) }
+    case 'available_commands_update': {
+      const skills = skillsAmong(update.availableCommands)
+      return skills === undefined ? { _tag: 'Other', update: update.sessionUpdate, raw: update } : { _tag: 'SkillsSeen', skills }
+    }
     case 'user_message_chunk':
     case 'plan_update':
     case 'plan_removed':
-    case 'available_commands_update':
     case 'session_info_update':
     case 'compaction_update':
     case 'compaction_summary_chunk':

@@ -1484,6 +1484,15 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           return yield* mergedForGood(product, { noun: 'pull request', short: 'PR', prefix: '#' }, change.number)
         return changeOf(yield* http.json(PullAnswer, 'PATCH', `${repo(repository)}/pulls/${change.number}`, { state: 'open' }))
       }),
+    // Only what is given is sent: GitHub leaves the rest as it is.
+    editChange: (repository, change, edit) =>
+      Effect.map(
+        http.json(PullAnswer, 'PATCH', `${repo(repository)}/pulls/${change.number}`, {
+          ...(edit.title === undefined ? {} : { title: edit.title }),
+          ...(edit.body === undefined ? {} : { body: edit.body }),
+        }),
+        changeOf,
+      ),
     deleteBranch: (repository, change) =>
       Effect.gen(function* () {
         const now = yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`)

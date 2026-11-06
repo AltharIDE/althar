@@ -382,7 +382,8 @@ request that names the issue links it.
   Althar calls it when the person accepts the change (from the board, or the
   task), or when they ask the coordinator ([04](04-coordinator.md#merging-on-the-persons-word)):
   never on an agent's own initiative, and the rules still refuse agents'
-  `gh pr merge`. A draft is marked ready first on accepting, and only the
+  `gh pr merge` (from ADR-097's third phase, they read it as on the list
+  that asks: it goes on the person's word). A draft is marked ready first on accepting, and only the
   head Althar last read is merged, in the way asked or the first the
   repository allows.
 - **How a branch merges** is the host's to say (`mergeWays`): GitHub's merge
@@ -556,7 +557,9 @@ for the task or the project, beside Resolve now.
   the pull request ends its round too, since nothing there is heard; Althar
   does the same, as it starts, for a round left waiting on a pull request it
   no longer listens to.
-- **The lead never pushes,** here as anywhere (Agents and the hosts, below).
+- **The lead never pushes,** here as anywhere (Agents and the hosts, below;
+  from ADR-097's third phase it may, with the person's own sign-in, and
+  Althar's push stays the preferred one).
   Its brief says what Althar pushes for it where the task, or else its
   project, has it resolve conflicts.
 - **A round under way when Althar stopped** is looked at as it starts again,
@@ -864,6 +867,15 @@ flowchart LR
 
 ### Reviewing someone else's pull request
 
+What follows is how every review works today. Since
+[ADR-097](../decisions/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md), it is the review of an outside author's pull request
+(a fork, or an author the host doesn't name a member or collaborator); one
+by the repository's own people gets what a task's lead gets, a worktree at
+its head with the project's setup, its code run in the sandbox, the
+person's MCP servers and skills, and a draft with pictures, from ADR-097's
+fourth phase. An outside author's turns into that on the person's "run it".
+Both are ADR-097's recommendations until the person settles them.
+
 A review is a task. The coordinator starts one (`review_pull_request`, [04](04-coordinator.md))
 when the person asks for a review, or pastes a pull request's link and
 asks; its thread opens with what they said and the pull request under it.
@@ -913,11 +925,13 @@ Althar narrows them itself. A listing refused for a scope says which
   it. Nor does it load anything
   of the repository's own: Claude Code starts with no settings file, the
   repository's or the person's (whose allow rules would approve its
-  commands), and its hooks off; OpenCode with no project config, plugins or
+  commands), and its hooks off (from ADR-097's first phase the person's own
+  MCP servers and skills load, never the repository's); OpenCode with no project config, plugins or
   language servers; Codex with its hooks off. Git takes no bare repository
   the pull request carries for its own unless named (`safe.bareRepository`).
 - **Only a review's tools.** Its lead is given `read_pull_request`,
-  `read_issue`, `find_issues` and `draft_review`; every other lead tool is refused to it
+  `read_checks`, `read_issue`, `find_issues`, `draft_review` and
+  `settle_task`; every other lead tool is refused to it
   when called, listed or not, nothing that could change the project
   (keeping how it runs, which Althar later runs outside any sandbox) or reach
   the host (a reply, a push).
@@ -965,7 +979,8 @@ Althar narrows them itself. A listing refused for a scope says which
   is guarded as filing an issue draft is: marked first, refused or perhaps
   posted said on the card, never posted again unasked. Posted, the card folds
   to a line with the review's link, and the task is done, in the same
-  transaction. Asked again once it is done, the coordinator starts a new
+  transaction. From ADR-097's third phase the person's word in the thread
+  posts it too, as an asked-for tool, with no card. Asked again once it is done, the coordinator starts a new
   review; while it is open, the same one answers.
 - **A setting of the person's own** posts a review of their team's pull
   request as soon as it is drafted, with the lead's verdict ("Post reviews of
@@ -1047,24 +1062,37 @@ stopped working only once the connection needs its person.
 
 ### Agents and the hosts
 
-Agents reach code hosts and trackers only through Althar:
+Today agents reach code hosts and trackers only through Althar.
+[ADR-097](../decisions/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) keeps Althar's way as the preferred and recorded one,
+and lets agents use the person's own: their MCP servers in every role (its
+first phase), and their `gh`, `glab` and git sign-in where they have one
+set up, behind a project switch on by default (its third). What can't be
+undone still waits for the person's word where Althar can see it
+([03](03-agent-runtime-and-auth.md#mcp-calls-and-the-persons-sign-in)).
+As it stands now:
 
 - **Althar's own steps** push the task's branch, open its pull request and
   mark it ready.
 - **Althar's tools** let agents read a pull request (comments, reviews,
   checks with their logs) and an issue, and reply on a pull request. They
-  reach only the task's own repository, and every call is recorded.
-- **The coordinator drafts issues,** and the person files them: no agent
-  files an issue, or anything else on a tracker, on its own word. A review's
-  lead drafts a review, which the person posts, or their setting posts for
-  their team's pull requests (Reviewing someone else's pull request, above).
+  reach only the task's own repository (any of the project's, from ADR-097's
+  third phase), and every call is recorded.
+- **The coordinator and a task's lead draft issues,** and the person files
+  them, or they file at once where the project's notes or the person's own
+  words say so (Drafting issues, above). A review's lead drafts a review,
+  which the person posts, or their setting posts for their team's pull
+  requests (Reviewing someone else's pull request, above).
 - **Agents run without the person's ways into a host:** `gh` and `glab`
   signed out, git's credential helpers reset (`credential.helper` empty, in
   git's environment), git's prompts off, and no SSH agent. Althar pushes
   for them. The environment is the boundary; in the Flatpak the agent's
   socket isn't in the sandbox at all, and the rules refuse the device's ssh
-  Althar's own git runs (ADR-073).
-- **Nor with the MCP servers the person set up for them** (ADR-016). Claude
+  Althar's own git runs (ADR-073). ADR-097's third phase gives agents the
+  person's own, and Althar reads the task's branch after each turn, so a
+  push it didn't make is recorded as the lead's.
+- **Nor with the MCP servers the person set up for them** (ADR-016), until
+  ADR-097's first phase loads them in every role. Copilot, Kimi Code and
+  Mistral Vibe load them already. Claude
   Code loads only the servers it is given. Codex and OpenCode load every one
   their config names, so each of the person's is switched off by name as the
   agent starts: Codex's through `CODEX_CONFIG`, OpenCode's in the config it
@@ -1074,11 +1102,16 @@ Agents reach code hosts and trackers only through Althar:
   server it can't reach, so each is switched off with its own command or
   URL beside it.
 - **The rules refuse** `gh` and `glab` commands that change a host, with a
-  reason that names Althar's tool; and, for every role, the ways to
-  credentials a shell still has: the keychain's `security`, and git's helpers
-  called directly. Credentials the person keeps in plain files under their
-  home folder remain readable to an agent that goes looking; only a sandbox
-  closes that (open question).
+  reason that names Althar's tool (from ADR-097's third phase, they read
+  them as git, and only what can't be undone asks); and, for every role, the
+  ways to credentials a shell still has: the keychain's `security`, and
+  git's helpers called directly. The refusal of `gh pr merge` still says
+  merging is the person's, which ADR-081 changed: Althar merges on their
+  word. A request that names where the person keeps keys and sign-ins
+  (`~/.ssh`, `~/.aws`, token files: `SECRET_PLACES`) is refused for every
+  role, and Claude Code's sandbox is given those places as denied reads.
+  What still reaches them is a command that finds a file without naming it,
+  or Codex's sandbox, which reads anywhere (open question).
 - **What slips through is adopted:** opening a pull request first looks for
   one already open on the task's branch.
 
@@ -1124,7 +1157,14 @@ The broker:
 ACP gives each session its MCP servers at `session/new`, so Althar decides
 per session what an agent can reach, whatever the agent's own configuration
 says. Every session gets Althar's own tools server
-([04](04-coordinator.md)) and the broker's allowed servers.
+([04](04-coordinator.md)). From ADR-097's first phase the person's own
+servers pass through to every role as their agent loads them, each with a
+switch in Settings, and each call is read against what can't be undone
+where the agent sends it to Althar
+([03](03-agent-runtime-and-auth.md#mcp-calls-and-the-persons-sign-in)).
+The broker is the target for when that pass-through isn't enough: it would
+see every call whatever the agent, at the cost of carrying each server's
+own sign-in.
 
 When direct provider MCP configuration is allowed, record its exact
 configuration digest and treat pass-through as an explicit adapter capability.
@@ -1163,10 +1203,12 @@ What is built so far is narrower than this section: one store on the
 computer, a curated default catalog and each lead's set fixed and recorded
 for its session ([ADR-094](../decisions/094-skills-one-store-a-curated-catalog.md)),
 and skill and OpenSpec files held off the repository unless the project says
-so ([ADR-095](../decisions/095-skill-and-openspec-files-stay-off-the-repository.md)).
-Bindings by scope, precedence and conflicts are not built; every lead gets
-the same active set, and the catalog's skills are off until the person turns
-them on. [The plan](../plans/skills-across-harnesses.md#implementation-status)
+so ([ADR-095](../decisions/095-skill-and-openspec-files-stay-off-the-repository.md),
+which ADR-097 supersedes: they go up with the diff). Bindings by scope,
+precedence and conflicts are not built; every lead gets the same active set,
+and the catalog's skills are off until the person turns them on. From
+ADR-097's first phase every role gets them, the catalog is on by default,
+and the person's own skills and plugins load beside it. [The plan](../plans/skills-across-harnesses.md#implementation-status)
 keeps what is done and what is not.
 
 Althar should adopt the open Agent Skills package shape:
@@ -1183,6 +1225,41 @@ The `SKILL.md` front matter and body provide discovery metadata and
 instructions; referenced files are loaded progressively. Althar can add a
 manifest sidecar for provenance and compatibility without forking the content
 format.
+
+### What passes through today
+
+Althar manages no skills yet: each agent finds the person's own and the
+repository's where it always does, and a task's thread says what its lead's
+agent could see and what it loaded (`provider-adapters/src/skills.ts`).
+Everything below it in this section is the model for later, not what runs.
+
+Where each finds them, read from the real agents on 3 November 2026
+(`bun run test:agents`, `tests/agents/skills.test.ts`, no model call):
+
+| Agent | The person's | The repository's | Not read |
+| --- | --- | --- | --- |
+| Claude Code 0.3.316 | its home's `skills`: `~/.claude/skills`, linked into a home Althar makes | `.claude/skills` | `~/.agents/skills`, `.agents/skills` |
+| Codex 0.165.0 | `~/.agents/skills` (from Codex 0.95), and its home's `skills`: `~/.codex/skills`, linked likewise | `.agents/skills` (from Codex 0.94) | `~/.claude/skills`, `.claude/skills` |
+| OpenCode 2.2.5, 1.19.5 | `~/.config/opencode/skills`, `~/.claude/skills`, `~/.agents/skills` | `.opencode/skills`, `.claude/skills`, `.agents/skills` | |
+
+Each agent's own folders are its own business, so nothing is copied across to
+what it doesn't read. In a Flatpak ([ADR-027](../decisions/027-what-the-flatpak-reaches.md)):
+Codex and a person's own OpenCode run out on the device, with the device's home,
+and read those same folders there. Claude Code and a copy of OpenCode Althar
+downloaded run inside: the four folders are in the sandbox read-only at the same
+paths, so Claude Code's home (`claude-usual` under the profile) links them. A
+downloaded OpenCode takes its config home from the sandbox, so Althar names
+`~/.config/opencode/skills` to it by its `skills.paths` setting. Codex older
+than those reads only its home's `skills`, but only a Flatpak runs the person's
+own, and the adapter can't open a session on one as old as 0.92 anyway.
+
+What each says:
+
+| Agent | What it could see | A skill loaded |
+| --- | --- | --- |
+| Claude Code | says, each skill's file among its commands | says, on the `Skill` tool's call |
+| Codex | says, likewise | can't: its model reads the file. A read of a `SKILL.md` it listed shows as that, a read, and a `$name` the person typed shows nothing |
+| OpenCode | can't: its commands name them without saying which are skills (1.x), or don't list them (2.x). Althar reads the folders above | says, on its `skill` tool's call |
 
 ### Skill is not workflow, tool, or connector
 

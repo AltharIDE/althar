@@ -1,6 +1,9 @@
 # ADR-030: Where the project says so, the lead resolves a conflict unasked, and Althar pushes the merge
 
-- **Status:** Accepted; amended by [ADR-092](092-conflicts-and-failed-checks-send-a-task-back-to-work.md)
+- **Status:** Accepted; amended by [ADR-092](092-conflicts-and-failed-checks-send-a-task-back-to-work.md);
+  partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06): a lead may push with the
+  person's own sign-in; Althar pushing the merge it checked stays the
+  preferred and recorded way
 - **Date:** 2026-10-12
 - **Amended:** 2026-10-27: a conflict is never skipped without a word. A
   pull request's host works out whether it conflicts lazily and needn't say
@@ -111,6 +114,10 @@
   - **The lead still never pushes.** Its environment has no way to
     ([ADR-011](011-own-connectors-for-hosts-and-trackers.md)); its brief, and
     the rules' word when it tries `gh`, say Althar pushes this merge for it.
+    From ADR-097's third phase a lead with the person's own sign-in could
+    push it; its brief still leaves the push to Althar, which keeps the
+    hold and the receipt. A push of its own is noticed on the branch and
+    taken as the task's, and the round follows the checks on what's there.
   - **Merging stays the person's.** Nothing here merges a pull request or
     the default branch.
 - **Alternatives considered:**
@@ -121,7 +128,8 @@
     when the person wants the board's conflicts gone.
   - **Let the lead push its own resolution.** It would need a way to the
     host, which is exactly what agents don't have. Althar pushing a commit
-    it checked keeps the boundary.
+    it checked keeps the boundary. (ADR-097 gives agents that way; what
+    Althar's push keeps now is the check and the record.)
   - **Push whatever the lead committed once the conflict is resolved.** It
     would carry unreviewed work up with the merge, under cover of a rule
     meant only for conflicts.

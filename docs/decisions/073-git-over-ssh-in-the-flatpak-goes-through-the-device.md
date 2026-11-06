@@ -1,6 +1,9 @@
 # ADR-073: git over SSH in the Flatpak: Althar's own goes through the device's ssh, and nothing asks
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06): ADR-011's
+  boundary kept here, agents without the person's SSH agent, goes from
+  ADR-097's third phase; Althar's own git through the device's ssh, the
+  pinned hosts and nothing asking stay
 - **Date:** 2026-10-24
 - **Amends:** [ADR-027](027-what-the-flatpak-reaches.md) ("git has no
   ssh-agent socket"). Keeps [ADR-011](011-own-connectors-for-hosts-and-trackers.md)
@@ -64,6 +67,8 @@
     `GlobalKnownHostsFile`. It has no agent, so an agent's `git fetch`
     over SSH gets past the host check and is refused at sign-in. That is
     ADR-011's boundary, and it fails in under a second instead of hanging.
+    ADR-097 lifts that boundary from its third phase; the wrapper stays,
+    and how the person's agent reaches it is that phase's to settle.
   - **Well-known code hosts are pinned, from their vendors' documents.**
     `flatpak/known_hosts`, installed as
     `/app/share/althar/ssh/known_hosts`, holds github.com,
@@ -134,7 +139,8 @@
     the person first suggested. It is simple, and only ssh would need the
     pinned file. But the socket sits at a fixed path every process in the
     sandbox can open, Claude Code's sessions among them. ADR-011 would hold
-    only as long as no agent typed that path.
+    only as long as no agent typed that path. With ADR-097 agents may use
+    the person's agent, so this is the likely way for its third phase.
   - **Run the whole git command on the device.** It needs git on the device
     too, and paths translated for the document portal and for linked
     worktrees, as `codex-host.sh` does. Running only ssh there needs

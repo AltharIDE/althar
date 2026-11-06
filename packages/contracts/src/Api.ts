@@ -1430,6 +1430,8 @@ export const ToolCallItem = Schema.Struct({
     asks: Schema.optional(Schema.Boolean),
     /** Let through without asking by the project's allow rules, the first that did (ADR-018); absent otherwise. */
     allowedBy: Schema.optional(AllowedBy),
+    /** The skills it loads, by the agent's own word (`reported`), or a read of their `SKILL.md`, where the agent has no such word. */
+    skill: Schema.optional(Schema.Struct({ names: Schema.Array(Schema.String), reported: Schema.Boolean })),
     ...handedFields,
     output: Schema.NullOr(CommandOutput),
     exit: Schema.NullOr(Schema.Number),
@@ -1516,7 +1518,11 @@ export const NoticeItem = Schema.Struct({
      * work, what the coordinator relayed, or its task's folder going or coming
      * back, a line across the thread (ADR-056).
      */
-    role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder'])),
+    role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder', 'skills'])),
+    /** For what a lead's agent could see: each skill, and whether it is the person's or the repository's. */
+    skills: Schema.optional(
+      Schema.Array(Schema.Struct({ name: Schema.String, path: Schema.String, from: Schema.Literals(['person', 'repository']) })),
+    ),
     /**
      * For an agent's turn that failed: why, as the runtime classes it
      * (`auth_required`, `usage_limit`, `context_full`, `session_lost`,
@@ -2354,10 +2360,10 @@ export const AutomationItem = Schema.Struct({
 })
 
 /**
- * The coordinator asking the person to stop, hold, restart or settle a task,
- * in its thread, where no message of theirs in that turn asked it to
- * (ADR-086): one button, which does it as the person's own press, and Not
- * now. Answered, it says what became of it: done, declined, or nothing to do
+ * The coordinator asking the person to stop, hold, restart, settle or accept
+ * a task, or answer its stuck step, in its thread, where no message of theirs
+ * in that turn asked it to (ADR-086): one button, which does it as the
+ * person's own press, and Not now. Answered, it says what became of it: done, declined, or nothing to do
  * any more and why. Althar posts it and keeps it current.
  */
 export const TaskAskItem = Schema.Struct({
@@ -2370,8 +2376,28 @@ export const TaskAskItem = Schema.Struct({
     slug: Schema.String,
     /** The task's title when it was asked. */
     title: Schema.String,
-    /** What it asks: to stop the task, or only its lead's turn; hold its plan; restart it; or settle it done, kept for later, or discarded. */
-    move: Schema.Literals(['stop', 'stop_turn', 'hold', 'restart', 'done', 'keep', 'discard']),
+    /**
+     * What it asks: to stop the task, or only its lead's turn; hold its plan; restart it; settle it done, kept for later, or
+     * discarded; accept it by merging it here, or push what merged; or answer its stuck step: accepted as it is, its review
+     * skipped, tried again, or handed on.
+     */
+    move: Schema.Literals([
+      'stop',
+      'stop_turn',
+      'hold',
+      'restart',
+      'done',
+      'keep',
+      'discard',
+      'merge_here',
+      'push_here',
+      'as_is',
+      'skip_review',
+      'again',
+      'hand_on',
+    ]),
+    /** Where it goes, where the card names it: the branch a merge here goes into, or the model a stuck step is handed to. */
+    to: Schema.optional(Schema.String),
     /** Why the coordinator asks, in a line. */
     why: Schema.NullOr(Schema.String),
     state: Schema.Literals(['open', 'done', 'declined', 'moot']),

@@ -86,6 +86,7 @@ export enum ToolKind {
   PullRequest = 'pr',
   Comment = 'comment',
   Push = 'push',
+  Skill = 'skill',
   Other = 'other',
 }
 

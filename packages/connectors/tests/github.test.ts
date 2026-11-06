@@ -327,6 +327,40 @@ describe('GitHub as a code host', () => {
     }),
   )
 
+  it.effect('gives a pull request another title or description, sending only what changes, and says why it can’t', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull() }],
+        ['PATCH', `${REPO}/pulls/12`, { json: pull({ title: 'The homepage opens on the orrery', body: 'Why it changed.' }) }],
+      ])
+      const pullChange = yield* host.change(repository, 12)
+      const both = yield* host.editChange(repository, pullChange, {
+        title: 'The homepage opens on the orrery',
+        body: 'Why it changed.',
+      })
+      assert.strictEqual(both.title, 'The homepage opens on the orrery')
+      assert.strictEqual(both.body, 'Why it changed.')
+      assert.deepStrictEqual(sent.find((request) => request.method === 'PATCH')?.body, {
+        title: 'The homepage opens on the orrery',
+        body: 'Why it changed.',
+      })
+      // The title alone leaves the description as GitHub has it: it isn't sent.
+      const titled = github([['PATCH', `${REPO}/pulls/12`, { json: pull({ title: 'Renamed' }) }]])
+      yield* titled.host.editChange(repository, pullChange, { title: 'Renamed' })
+      assert.deepStrictEqual(titled.sent[0]?.body, { title: 'Renamed' })
+      const described = github([['PATCH', `${REPO}/pulls/12`, { json: pull({ body: 'Only this' }) }]])
+      yield* described.host.editChange(repository, pullChange, { body: 'Only this' })
+      assert.deepStrictEqual(described.sent[0]?.body, { body: 'Only this' })
+      // An upstream the account can't push to refuses it, in GitHub's words.
+      const refusing = github([['PATCH', `${REPO}/pulls/12`, { status: 403, json: { message: 'Resource not accessible by integration' } }]])
+      assert.deepInclude(yield* Effect.flip(refusing.host.editChange(repository, pullChange, { title: 'Renamed' })), {
+        reason: 'forbidden',
+        status: 403,
+        message: 'Resource not accessible by integration',
+      })
+    }),
+  )
+
   it.effect('deletes a closed pull request’s branch where its head is, a fork’s too, and never an open one’s', () =>
     Effect.gen(function* () {
       const head = { ref: 'althar/mer-231', sha: 'abc', repo: { full_name: 'meridian/api' } }

@@ -1,6 +1,7 @@
 # ADR-088: The plan countdown, review rounds and new-project defaults are settings
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06):
+  allowing everything is on for every new project, and for existing ones
 - **Date:** 2026-10-31
 - **Amends:** [ADR-013](013-project-rules.md)
 - **Owner:** Repository maintainers
@@ -30,7 +31,8 @@
     never reads the defaults; its rules screen stays the place to change it.
   - **Only choices that mean something now.** Allowing everything is not a
     default: a project turns it on for itself, and only what can't be undone
-    from the task still waits (ADR-067). The lead and the reviewer are not
+    from the task still waits (ADR-067). Superseded by ADR-097: it is on for
+    every project, and seeded so. The lead and the reviewer are not
     default rules: the coordinator picks them for each plan from the models
     that are free, and no rule reads a project's choice.
   - **The card draws the countdown it has.** The plan snapshot carries
