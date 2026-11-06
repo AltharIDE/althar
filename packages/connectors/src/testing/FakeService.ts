@@ -315,6 +315,8 @@ export interface FakeControls {
   fallBehind(number: number, conflicts?: ReadonlyArray<string>): void
   /** Someone pushes to the change's branch on the host, so it is at a commit the caller hasn't read. */
   pushByHand(number: number): void
+  /** Someone changes a change's title or description on the host itself. */
+  editByHand(number: number, set: { readonly title?: string; readonly body?: string }): void
   /** The account may push to the branch of a change from a fork (an outside author's, which allows it): by default it may not. */
   allowForkPush(number: number): void
   /** Every branch brought up to date, in order, by the number of the change and the commit it is at after. */
@@ -1334,6 +1336,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       behind.set(number, { commits: (behind.get(number)?.commits ?? 0) + 1, conflicts })
     },
     pushByHand: (number) => update(number, { headSha: `${changeNumbered(number).headSha ?? 'head'}-pushed` }),
+    editByHand: (number, set) => update(number, set),
     allowForkPush: (number) => {
       pushable.add(number)
     },

@@ -1,6 +1,7 @@
 import type { ChangeRequest, Check, Comment, Review } from '@althar/connectors'
 
 import { keepsTemplate, placeSummary, untick } from './conventions'
+import { creditLine } from './credit'
 
 /*
  * What Althar writes about a task's pull request: its description, as the
@@ -120,19 +121,8 @@ export const bodyOf = (input: {
   const parts: Array<string> = []
   if (input.review?.seal != null) parts.push(input.review.seal)
   if (input.review?.note != null) parts.push(input.review.note)
-  const plain = said(input.built) ?? said(input.lead)
-  const template = input.template ?? null
-  const written = said(input.written)
-  if (template === null) {
-    const text = written ?? plain
-    if (text !== null) parts.push(text)
-  } else if (written !== null && keepsTemplate(template, written)) {
-    parts.push(untick(written).trim())
-  } else {
-    const placed = plain === null ? null : placeSummary(template, plain)
-    parts.push(untick(placed ?? template).trim())
-    if (placed === null && plain !== null) parts.push(`### Summary\n\n${plain}`)
-  }
+  const described = describedOf(input)
+  if (described !== '') parts.push(described)
   if (input.review?.details != null) parts.push(input.review.details)
   if (input.issue !== null) {
     const named = input.issue.sameHost ? input.issue.key : `[${input.issue.key}](${input.issue.url})`
@@ -143,6 +133,101 @@ export const bodyOf = (input: {
   else if (input.credit !== false) parts.push('Opened by [Althar](https://github.com/AltharIDE/althar).')
   return parts.join('\n\n')
 }
+
+/**
+ * The part of the description that is the lead's, as `bodyOf` writes it:
+ * what it wrote, in the template where there is one, else what the task
+ * built. Empty where there is nothing to say.
+ */
+export const describedOf = (input: {
+  readonly built?: string | null
+  readonly lead: string | null
+  readonly template?: string | null
+  readonly written?: string | null
+}) => {
+  const plain = said(input.built) ?? said(input.lead)
+  const template = input.template ?? null
+  const written = said(input.written)
+  if (template === null) return written ?? plain ?? ''
+  if (written !== null && keepsTemplate(template, written)) return untick(written).trim()
+  const placed = plain === null ? null : placeSummary(template, plain)
+  const filled = untick(placed ?? template).trim()
+  return placed === null && plain !== null ? `${filled}\n\n### Summary\n\n${plain}` : filled
+}
+
+/** A description given in so many words, as a lead's tool sets it: in the template, every box unticked for the person; else as written. */
+export const describedAs = (text: string, template: string | null) =>
+  template !== null && keepsTemplate(template, text) ? untick(text).trim() : text.trim()
+
+/* What Althar puts around the lead's description (`bodyOf`): the review's seal and note before it; its fold, the issue and the credit after. */
+const SEAL = /^<picture>\n[^]*?\n<\/picture>(?:\n\n|$)/
+const NOTE =
+  /^> \*\*(?:Reviewed (?:once|twice|\d+ times); the last fixes weren’t reviewed\.|The last fixes weren’t reviewed\.)\*\* The code changed after the last review pass, and no later pass read it\.(?:\n\n|$)/
+const CREDIT = /(?:^|\n\n)Opened by \[Althar\]\(https:\/\/github\.com\/AltharIDE\/althar\)[^\n]*$/
+const ISSUE = /(?:^|\n\n)(?:Issue: |Part of )(?:\[[^\]\n]+\]\([^)\s]+\)|\S+)$/
+const FOLD = '<details>\n<summary>Reviewed by '
+const FOLD_END = /<sub>Built by [^\n]*<\/sub>\n<\/details>$/
+
+/**
+ * A description as its parts: what Althar put before and after it (the
+ * review's seal and note; its fold, the issue's line and Althar's credit),
+ * and the rest between, which is the lead's, or whoever's wrote it. A
+ * description Althar didn't write is all the rest.
+ */
+export const framedOf = (body: string) => {
+  let rest = body.replace(/\r\n/g, '\n').trim()
+  const head: Array<string> = []
+  const tail: Array<string> = []
+  for (const start of [SEAL, NOTE]) {
+    const found = start.exec(rest)
+    if (found === null) continue
+    head.push(found[0].trim())
+    rest = rest.slice(found[0].length).trimStart()
+  }
+  for (const end of [CREDIT, ISSUE]) {
+    const found = end.exec(rest)
+    if (found === null) continue
+    tail.unshift(found[0].trim())
+    rest = rest.slice(0, found.index).trimEnd()
+  }
+  const fold = rest.lastIndexOf(FOLD)
+  if (fold !== -1 && (fold === 0 || rest.slice(fold - 2, fold) === '\n\n') && FOLD_END.test(rest)) {
+    tail.unshift(rest.slice(fold))
+    rest = rest.slice(0, fold).trimEnd()
+  }
+  return { head, described: rest, tail }
+}
+
+/** A description with its lead's part given anew, and what Althar put around it as it was. */
+export const withDescribed = (body: string, described: string) => {
+  const { head, tail } = framedOf(body)
+  return [...head, described.trim(), ...tail].filter((part) => part !== '').join('\n\n')
+}
+
+/**
+ * The words given for a pull request's title, as its task's title too: on
+ * one line, without an agent's credit, and without what Althar puts in front
+ * by the project's naming (the issue's key, `After #12:`), so it isn't there
+ * twice. Empty where nothing is left.
+ */
+export const titleWords = (text: string, agents: ReadonlyArray<string>, key: string | null) => {
+  let words = text
+    .split('\n')
+    .filter((line) => !creditLine(line, agents))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  for (;;) {
+    const before = words
+    words = words.replace(/^After [#!]\d+:\s*/i, '')
+    if (key !== null)
+      words = words.replace(new RegExp(`^\\[?${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]?(?:\\s*[:\\-–—]\\s*|\\s+)`, 'i'), '')
+    if (words === before) return words.trim()
+  }
+}
+
+/** Whether two descriptions say the same, as hosts may give back line ends of their own. */
+export const sameDescription = (a: string, b: string) => a.replace(/\r\n/g, '\n').trim() === b.replace(/\r\n/g, '\n').trim()
 
 /** A repository whose pull request the lead hasn't described yet, with its template if it has one. */
 export interface Undescribed {

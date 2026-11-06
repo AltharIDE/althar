@@ -4,23 +4,25 @@ import { SqlClient } from 'effect/sql'
 
 import { hostName, logForLead, readLog } from './checkLogs'
 import { Connections } from './Connections'
-import { checksOf, nameOf, signed } from './pullRequestWords'
+import { withoutAgentCredit } from './credit'
+import { checksOf, nameOf, sameDescription, signed, titleWords, withDescribed } from './pullRequestWords'
 import { ToolRefused } from './ToolServer'
 
 /*
  * What the coordinator does on the code host to the project's pull requests
  * (ADR-081): run a failed check again, read the default branch's checks,
- * mark a pull request ready, close and reopen one, and reply on one. Each
- * works on any of the project's pull requests, whoever opened them, within
- * the kind the ADR gives it:
+ * mark a pull request ready, close and reopen one, reply on one, and give
+ * one another title or description. Each works on any of the project's pull
+ * requests, whoever opened them, within the kind the ADR gives it:
  *
  * - run again, read: any pull request, and the default branch;
  * - mark ready, close, reopen: Althar's own, the ones a task opened;
  * - bring up to date: any pull request, a merge of the default branch into
  *   its branch, never a rebase and never forced;
- * - reply: Althar's own, the connected account's, and the repository's own
- *   people's. An outside author's, and closing on Bitbucket Cloud (where
- *   declining is final), are *asked-for*: they wait for the person's word,
+ * - reply, and retitle or redescribe: Althar's own, the connected account's,
+ *   and the repository's own people's. An outside author's, and closing on
+ *   Bitbucket Cloud (where declining is final), are *asked-for*: they wait
+ *   for the person's word,
  *   which is another task's (ADR-081, "The person's word"). Until that is
  *   on main they are refused here, with a line for the person.
  *
@@ -417,4 +419,88 @@ export const replyOnPullRequest = (projectId: string, input: unknown, by: string
       host.reply(repository, change.number, { body: signed(asked.body, by), threadId: asked.thread_id ?? null }),
     )
     return `Replied on ${name}${comment.url === null ? '' : `: ${comment.url}`}.`
+  })
+
+// ---- Retitling and redescribing ---------------------------------------------
+
+const EditAsked = Schema.Struct({
+  pull_request: Schema.Union([Schema.Number, Schema.String]),
+  title: Schema.optional(Schema.NullOr(Schema.String)),
+  description: Schema.optional(Schema.NullOr(Schema.String)),
+})
+
+/** The task of the project that follows a pull request, the one that opened it or was attached to it: the latest, where several did. */
+const taskFollowing = (projectId: string, url: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [row] = yield* sql<{ taskId: string }>`
+      SELECT task_id FROM external_links WHERE project_id = ${projectId} AND kind = 'change' AND lower(url) = ${url.toLowerCase()}
+      ORDER BY created_at DESC LIMIT 1`
+    return row?.taskId ?? null
+  })
+
+/**
+ * Gives a pull request another title, description, or both: on one Althar
+ * opened, or whose author is the connected account or one of the
+ * repository's people; an outside author's waits for the person. On one a
+ * task follows, as that task's lead would (`viaTask`): by the project's
+ * naming, the task's title following. On any other, as given, without the
+ * agents' credit, what Althar put around a description it wrote staying.
+ * It can be set back as it was in a step, so it is done unasked.
+ */
+export const editPullRequest = <R>(
+  projectId: string,
+  input: unknown,
+  viaTask: (
+    taskId: string,
+    edit: { readonly title?: string; readonly body?: string; readonly url: string },
+  ) => Effect.Effect<string, unknown, R>,
+  agents: ReadonlyArray<string>,
+) =>
+  Effect.gen(function* () {
+    const asked = yield* Schema.decodeUnknownEffect(EditAsked)(input).pipe(
+      Effect.mapError((error) => refused(`Althar couldn't read that: ${error.message}`)),
+    )
+    const given = {
+      ...(asked.title == null ? {} : { title: asked.title }),
+      ...(asked.description == null ? {} : { body: asked.description }),
+    }
+    if (given.title === undefined && given.body === undefined) return yield* refused('Give a title, a description, or both.')
+    const { host, repository, change, name, own } = yield* readOne(projectId, String(asked.pull_request))
+    if (!own && !(yield* authoredByOwn(host, repository, change.number, change.author)))
+      return yield* askedFor('Changing the title or description', `${name}, an outside author’s`, change.url)
+    if (change.state !== 'open') return yield* refused(`${name} is ${change.state}, so its title and description stay as they are.`)
+    const task = yield* taskFollowing(projectId, change.url)
+    if (task !== null)
+      return yield* viaTask(task, { ...given, url: change.url }).pipe(
+        Effect.catchIf(
+          (error): error is ConnectorFailed => error instanceof ConnectorFailed,
+          (error) => Effect.fail(hostSays(error)),
+        ),
+      )
+    const title = given.title === undefined ? undefined : titleWords(given.title, agents, null)
+    if (title === '') return yield* refused('Give it a title: what the change does, in a few words.')
+    const described = given.body === undefined ? undefined : withoutAgentCredit(given.body, agents).trim()
+    if (described === '') return yield* refused('Say what the description should say.')
+    const body = described === undefined ? undefined : withDescribed(change.body, described)
+    const set = {
+      ...(title === undefined || title === change.title ? {} : { title }),
+      ...(body === undefined || sameDescription(body, change.body) ? {} : { body }),
+    }
+    if (set.title === undefined && set.body === undefined) return `${name} says that already.`
+    const edited = yield* host
+      .editChange(repository, change, set)
+      .pipe(
+        Effect.mapError((error) =>
+          refused(
+            `${hostName(host)} wouldn't change ${name}: ${error.message}. Tell the person what you would set; they can set it on ${change.url}.`,
+          ),
+        ),
+      )
+    return [
+      set.title === undefined ? '' : `${name} is called “${edited.title}” now, where it was “${change.title}”.`,
+      set.body === undefined ? '' : `${name} has the new description.`,
+    ]
+      .filter((line) => line !== '')
+      .join(' ')
   })
