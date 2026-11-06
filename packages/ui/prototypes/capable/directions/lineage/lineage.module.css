@@ -1,0 +1,74 @@
+/* Scrappy: a lead-started task's lineage on the board, and the coordinator and asks in a task's thread. */
+.lineage {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  font-size: 12px;
+  color: var(--t-3);
+  text-align: left;
+}
+.lineage:hover {
+  color: var(--t-1);
+}
+.parent {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.count {
+  font-size: 12px;
+  color: var(--t-3);
+}
+/* B: the child's card under its parent's, a little in, a line joining them */
+.nested {
+  position: relative;
+  margin-top: -2px;
+  padding-left: 14px;
+}
+.nested::before {
+  content: '';
+  position: absolute;
+  top: -8px;
+  bottom: 50%;
+  left: 5px;
+  width: 8px;
+  border-bottom: 1px solid var(--line-3);
+  border-left: 1px solid var(--line-3);
+  border-bottom-left-radius: 6px;
+}
+/* a card just started on the page: it arrives where it is */
+.fresh {
+  animation: arrive var(--enter, 240ms) var(--ease-out, ease-out);
+}
+@keyframes arrive {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+.card {
+  margin: 4px 0 8px;
+}
+.lines {
+  display: grid;
+  gap: 2px;
+}
+.acts {
+  display: grid;
+  gap: 2px;
+  margin-top: 6px;
+}
+.ask {
+  margin: 4px 0;
+}
+.why {
+  margin: 0 0 4px;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.answered {
+  margin: 4px 0;
+}
