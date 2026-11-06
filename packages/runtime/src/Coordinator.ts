@@ -1083,9 +1083,9 @@ export class Coordinator extends Context.Service<
             FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${taskId ?? ''}`
           if (task === undefined) return 'Only the lead of one of the project’s tasks makes its task a change.'
           if (task.quick === 1) return task
-          if (task.reviews === 1) return 'This task reviewed someone else’s pull request and is a change now, made one as the person asked.'
           if (task.made === 1)
             return 'This task is a change already: it was made one as the person asked. Commit your work and call finish_step when it’s ready; its review and its pull request follow.'
+          if (task.reviews === 1) return 'This task reviews someone else’s pull request: it has no work of its own to make a change of.'
           if (task.changes === 1) return 'This task has a pull request already, so it is a change: there is nothing to make.'
           return 'This task was planned as a change from its start: its plan already says who reviews it and how it ends. Carry on, and call finish_step when it’s done.'
         })

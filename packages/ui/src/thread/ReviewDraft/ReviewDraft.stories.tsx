@@ -413,7 +413,8 @@ export const ToFix: Story = {
 /** Its task is fixing them now: where, as Althar decided, and the draft as it was, yours to post with a note, or discard. */
 export const BeingFixed: Story = {
   args: {
-    fixing: 'on #1212’s own branch, retry-webhooks, which Althar pushes to once it’s reviewed',
+    fixing:
+      'on a branch of its own, althar/fix-1212, with its own pull request into main: #1212’s branch is on a fork, where Althar can’t push',
     onFix: fn(),
     onNote: fn(),
   },
@@ -421,7 +422,7 @@ export const BeingFixed: Story = {
     const c = within(canvasElement)
     await expect(
       c.getByText(
-        'Being fixed on #1212’s own branch, retry-webhooks, which Althar pushes to once it’s reviewed. Post this review as it is, with a note, or discard it.',
+        'Being fixed on a branch of its own, althar/fix-1212, with its own pull request into main: #1212’s branch is on a fork, where Althar can’t push. Post this review as it is, with a note, or discard it.',
       ),
     ).toBeInTheDocument()
     await expect(c.queryByRole('button', { name: 'Fix these' })).not.toBeInTheDocument()
