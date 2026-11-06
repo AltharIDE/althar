@@ -43,15 +43,18 @@ export const surfaceDraftAt = (taskId: string, draftingMs: number = DRAFTING_MS)
 /**
  * Schedules the wake for every draft already waiting, as a launch finds them:
  * the one an earlier launch scheduled died with it. A draft made from now on
- * is armed as it is made, by the coordinator's draft_task.
+ * is armed as it is made, by the coordinator's draft_task. One whose moment
+ * went by while the launch was down needs none: a board reads it as the
+ * person's on its face, without a change to wake it.
  */
 export const armDraftDeadlines = (draftingMs: number = DRAFTING_MS) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const lifetime = yield* Effect.scope
+    const cutoff = new Date((yield* Clock.currentTimeMillis) - draftingMs - 50).toISOString()
     const drafts = yield* sql<{ id: string }>`
       SELECT k.id FROM tasks k
-      WHERE k.state = 'draft'
+      WHERE k.state = 'draft' AND k.created_at > ${cutoff}
         AND NOT EXISTS (SELECT 1 FROM task_plans p WHERE p.task_id = k.id AND p.state IN ('proposed', 'accepted'))`
     for (const draft of drafts)
       yield* Effect.forkIn(
