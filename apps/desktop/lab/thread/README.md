@@ -8,7 +8,7 @@ cd apps/desktop && ../../node_modules/.bin/vp dev --config lab/thread/vite.confi
 
 At `http://localhost:6131`. Keys 1–4, or the bar along the bottom, swap the scene: the long task once it's over, the task with its lead at work, the coordinator answering, and three coordinator threads streaming a long answer at once. `?theme=dark` draws it dark.
 
-`shoot.ts` shoots it headless at 1×, into `test-results/lab`, with the lab running (Chromium can't start in an agent's sandbox on a Mac; run it outside):
+`shoot.ts` shoots it headless at 1×, into `lab/thread/shots` (git ignores it, and the end-to-end run, which empties `test-results`, leaves it), with the lab running (Chromium can't start in an agent's sandbox on a Mac; run it outside):
 
 ```bash
 node lab/thread/shoot.ts shots after task light 1000 900   # the opening view and the whole thread

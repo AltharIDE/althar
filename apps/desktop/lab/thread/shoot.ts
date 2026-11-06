@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { chromium, type Page } from '@playwright/test'
 
 /*
- * Shoots the thread lab (README.md), headless, at 1×, into test-results/lab:
+ * Shoots the thread lab (README.md), headless, at 1×, into lab/thread/shots (which git and the end-to-end run leave alone):
  *
  *   node lab/thread/shoot.ts shots <name> [scene] [theme] [width] [height]
  *     the opening view (scrolled to the end, as a task opens) and the whole thread
@@ -17,7 +17,7 @@ import { chromium, type Page } from '@playwright/test'
  */
 
 const [mode = 'shots', name = 'shot', ...rest] = process.argv.slice(2)
-const out = join(import.meta.dirname, '../../test-results/lab')
+const out = join(import.meta.dirname, 'shots')
 mkdirSync(out, { recursive: true })
 const say = (line: string) => process.stdout.write(`${line}\n`)
 const port = process.env.LAB_PORT ?? '6131'
@@ -57,7 +57,7 @@ if (mode === 'shots') {
   }
   say(`${name}: ${count} frames, every ${every} ms`)
 } else if (mode === 'record') {
-  // A video of the page as it plays, for `seconds`, at 1×: test-results/lab/<name>.webm.
+  // A video of the page as it plays, for `seconds`, at 1×: shots/<name>.webm.
   const [scene = 'live', seconds = '14', theme = 'light'] = rest
   const size = { width: 900, height: 620 }
   const context = await browser.newContext({ viewport: size, deviceScaleFactor: 1, recordVideo: { dir: out, size } })

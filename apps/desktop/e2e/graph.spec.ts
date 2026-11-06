@@ -66,8 +66,9 @@ test('a task’s steps as a graph: a lane for each agent, a card’s report, and
     await page.keyboard.press('Escape')
     await expect(changes).toHaveCount(0)
 
-    // In the conversation, the review's finding is a line, opening it there too.
+    // In the conversation, the review is a line; opened, its finding is a line, opening it there too.
     await toConversation(page)
+    await page.getByRole('button', { name: /^Review.*1 finding/ }).click()
     await page.getByRole('button', { name: /The heading is wrong\./ }).click()
     await expect(changes.locator('article[aria-current="true"]')).toContainText('The heading is wrong.')
     await page.screenshot({ path: 'test-results/graph-findings-from-conversation.png', animations: 'disabled', scale: 'css' })
@@ -80,12 +81,13 @@ test('a task’s steps as a graph: a lane for each agent, a card’s report, and
     await expect(report).toBeVisible()
     await expect(report.getByRole('button', { name: 'Show in the conversation' })).toBeVisible()
     await page.screenshot({ path: 'test-results/graph-report.png', animations: 'disabled', scale: 'css' })
-    // Its way to the conversation: the review's report there, in view and focused.
+    // Its way to the conversation: the review's line there, in view, focused and opened.
     await report.getByRole('button', { name: 'Show in the conversation' }).click()
     await expect(page.getByRole('radiogroup', { name: 'Face' }).getByRole('radio', { name: /Conversation/ })).toBeChecked()
     const reviewed = page.locator('[data-item]:focus')
     await expect(reviewed).toBeInViewport()
-    await expect(reviewed).toContainText('Looks good')
+    await expect(reviewed).toContainText('Passed')
+    await expect(reviewed).toHaveAttribute('data-state', 'open')
     await page.getByRole('radiogroup', { name: 'Face' }).getByRole('radio', { name: /Graph/ }).click()
 
     // The round's marker goes to what started it: the request the conversation opens with.

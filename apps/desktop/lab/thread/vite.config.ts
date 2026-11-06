@@ -17,6 +17,6 @@ export default defineConfig({
   resolve: { alias: { vitest: join(import.meta.dirname, 'vitest.ts') } },
   server: { port: 6131, strictPort: true },
   // Built as the app is, for timing frames as it runs (`vp build`, then `vp preview`, both with this config).
-  build: { outDir: join(import.meta.dirname, '../../test-results/lab-build'), emptyOutDir: true, target: 'chrome140' },
+  build: { outDir: join(import.meta.dirname, 'shots/build'), emptyOutDir: true, target: 'chrome140' },
   preview: { port: 6132, strictPort: true },
 })
