@@ -1186,7 +1186,7 @@ export const handlers = Api.toLayer(
           commandId,
           api(
             Effect.flatMap(envelope('task.rename', { taskId, title }, commandId), (said) =>
-              tasks.rename({ envelope: said, taskId, title }),
+              Effect.asVoid(tasks.rename({ envelope: said, taskId, title })),
             ),
           ),
         ),

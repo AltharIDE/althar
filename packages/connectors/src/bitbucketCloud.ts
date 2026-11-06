@@ -671,6 +671,19 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         if (now.state !== 'OPEN') return changeOf(repository, now)
         return changeOf(repository, yield* http.json(PullAnswer, 'POST', `${pull(repository, change.number)}/decline`))
       }),
+    // What it has is sent back with it, as marking it ready does, so nothing but the title and description changes.
+    editChange: (repository, change, edit) =>
+      Effect.gen(function* () {
+        const now = yield* http.json(PullAnswer, 'GET', pull(repository, change.number))
+        const edited = yield* http.json(PullAnswer, 'PUT', pull(repository, change.number), {
+          title: edit.title ?? now.title,
+          description: edit.body ?? now.description ?? '',
+          reviewers: (now.reviewers ?? []).flatMap((reviewer) => (reviewer.uuid === undefined ? [] : [{ uuid: reviewer.uuid }])),
+          ...(now.close_source_branch === undefined ? {} : { close_source_branch: now.close_source_branch }),
+          ...(now.draft === undefined ? {} : { draft: now.draft }),
+        })
+        return changeOf(repository, edited)
+      }),
     // Declining is final on Bitbucket Cloud: its pull requests have no reopening.
     reopenChange: (_repository, change) =>
       Effect.fail(noReopen(product, { noun: 'pull request', short: 'PR', prefix: '#' }, change.number)),

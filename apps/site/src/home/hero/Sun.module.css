@@ -1,0 +1,7 @@
+/* The first screen's sun (Sun.tsx). It stands between the far half of the system and the near (Hero.module.css): the bodies behind it pass behind it. */
+
+.solid, .flat { position: absolute; z-index: 10; display: block; pointer-events: none; }
+.solid[hidden] { display: none; }
+.flat { overflow: visible; }
+.point { fill: #8f99ff; }
+.halo { fill: rgba(127, 139, 255, 0.28); }

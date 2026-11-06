@@ -59,14 +59,37 @@ export const OpensTheTask: Story = {
   },
 }
 
-const MOVES: ReadonlyArray<TaskMove> = ['stop', 'stop_turn', 'hold', 'restart', 'done', 'keep', 'discard']
+const MOVES: ReadonlyArray<TaskMove> = [
+  'stop',
+  'stop_turn',
+  'hold',
+  'restart',
+  'done',
+  'keep',
+  'discard',
+  'merge_here',
+  'push_here',
+  'as_is',
+  'skip_review',
+  'again',
+  'hand_on',
+]
+
+/** Where a move goes, for those that name it. */
+const TO: Partial<Record<TaskMove, string>> = { merge_here: 'main', hand_on: 'GPT-6.1 Sol' }
 
 /** Every move it can ask, and each way it ends: done, not now, or nothing to do any more. */
 export const Every: Story = {
   render: () => (
     <>
       {MOVES.map((move) => (
-        <TaskAsk key={move} title="Sketch the settings" move={move} onAnswer={() => undefined} />
+        <TaskAsk
+          key={move}
+          title="Sketch the settings"
+          move={move}
+          {...(TO[move] === undefined ? {} : { to: TO[move] })}
+          onAnswer={() => undefined}
+        />
       ))}
       <TaskAsk title="Sketch the settings" move="keep" state="done" />
       <TaskAsk title="Sketch the settings" move="discard" state="declined" />
@@ -78,5 +101,8 @@ export const Every: Story = {
     await expect(c.getByText('Kept for later.')).toBeInTheDocument()
     await expect(c.getByText('Nothing to do.')).toBeInTheDocument()
     await expect(c.getByRole('button', { name: 'Stop the turn' })).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Accept and merge' })).toBeInTheDocument()
+    await expect(c.getByText(/merging it into main on this Mac/)).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Accept it as it is' })).toBeInTheDocument()
   },
 }

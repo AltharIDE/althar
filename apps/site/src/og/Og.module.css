@@ -1,21 +1,70 @@
-/* A link preview: 1200×630, from orbit, the words white in the dark of space over the planet's edge. */
+/* A link preview: 1200×630, as the first screen opens (home/Hero.module.css): the orrery in the night sky, and under it the band of words on its rule. */
 
 .all { display: grid; gap: 32px; padding: 32px; }
 
-.card { position: relative; width: 1200px; height: 630px; overflow: hidden; isolation: isolate; background: #050608; color: #fff; }
-/* The hero's photograph, its horizon low across the card: wider than it, cut at the left. */
-.planet { position: absolute; left: -120px; top: -40px; width: 1440px; height: 810px; max-width: none; pointer-events: none; }
-
-.words { position: relative; z-index: 1; display: grid; justify-items: start; gap: 22px; padding: 46px 64px 0; }
-.sign { margin: 0; display: inline-flex; align-items: center; gap: 11px; font-weight: 650; font-size: 22px; letter-spacing: -0.02em; }
-.title {
-  margin: 0;
-  max-width: 840px;
-  font-family: 'Inter Display', var(--display);
-  font-weight: 200;
-  font-size: 62px;
-  line-height: 0.98;
-  letter-spacing: -0.05em;
+.card {
+  position: relative;
+  width: 1200px;
+  height: 630px;
+  overflow: hidden;
+  isolation: isolate;
+  background: #070605;
+  color: #fff;
+  --ink-3: #8f887e;
+  --hair: rgba(255, 244, 232, 0.11);
+  --lit: #b4bcff;
 }
-.title b { font-weight: 720; letter-spacing: -0.056em; color: #cfe0ff; }
-.lead { margin: -4px 0 0; max-width: 640px; font-size: 21px; line-height: 1.4; letter-spacing: -0.012em; color: rgba(255, 248, 240, 0.78); text-wrap: pretty; }
+
+/* The first screen's sky: a breath of warmth round the sun, and at the very foot the faintest cobalt. */
+.sky {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 34% 30% at 50% 30%, rgba(255, 226, 196, 0.045), transparent 70%),
+    radial-gradient(ellipse 60% 22% at 50% 100%, rgba(43, 59, 255, 0.13), transparent 75%);
+}
+/* The orrery, laid out smaller and scaled up (Card.tsx). */
+.zoom { position: absolute; top: 0; left: 0; z-index: 1; transform-origin: 0 0; }
+
+.sign { position: absolute; z-index: 2; top: 36px; left: 64px; margin: 0; display: inline-flex; align-items: center; gap: 11px; font-weight: 650; font-size: 22px; letter-spacing: -0.02em; }
+
+/* The band, as the first screen's: the caption on its rule, the headline at the left, its line at the right. */
+.band {
+  position: absolute;
+  z-index: 2;
+  left: 64px;
+  right: 64px;
+  bottom: 52px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 372px;
+  grid-template-areas: 'caption caption' 'head side';
+  align-items: start;
+  column-gap: 56px;
+}
+.caption {
+  grid-area: caption;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 0 0 30px;
+  font: 500 13px/1 var(--mono);
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink-3);
+}
+.caption b { font-weight: 500; color: var(--lit); }
+.rule { flex: 1; height: 1px; background: var(--hair); }
+
+.title {
+  grid-area: head;
+  margin: 0;
+  font-family: 'Inter Display', var(--display);
+  font-weight: 300;
+  font-size: 58px;
+  line-height: 0.98;
+  letter-spacing: -0.045em;
+}
+.title b { font-weight: 640; letter-spacing: -0.05em; }
+.lead { grid-area: side; margin: 4px 0 0; font-size: 19px; line-height: 1.42; letter-spacing: -0.01em; color: rgba(255, 248, 240, 0.76); text-wrap: pretty; }
