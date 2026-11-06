@@ -388,12 +388,18 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   credential helpers reset, no SSH agent, Althar's tokens sealed by the
   app, and the rules refuse reading credentials.
   [ADR-011](decisions/011-own-connectors-for-hosts-and-trackers.md).
-- [ ] **A lead that needs the person's git sign-in.** A project with private
+  Decided again on 6 November 2026 in [ADR-097](decisions/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md): Althar's way
+  stays the preferred and recorded one, and agents may use the person's own
+  sign-in and MCP servers, with what can't be undone on the person's word.
+- [x] **A lead that needs the person's git sign-in.** A project with private
   dependencies (a git URL in its lockfile, a private registry reached over
   SSH) can't install them while agents run without the person's credential
   helper and SSH agent. Leaning: a project setting that passes them to the
   lead, never to readers, off unless turned on, and said where the plan is.
   Until then such a project's setup command runs outside the agent.
+  Settled on 6 November 2026 in ADR-097: agents keep the person's `gh`,
+  `glab`, credential helpers and SSH agent where they have them set up,
+  behind a project switch that is on by default.
 - [ ] **A sandbox for agents' shells.** The environment keeps the person's
   ambient sign-ins from agents, and the rules refuse the keychain and git's
   helpers, and since DEV-69 any request that names where people keep keys
@@ -401,7 +407,7 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   Claude Code's sandbox is given those places as denied reads. But a command
   an agent's sandbox runs without asking never reaches the rules, Codex's
   sandbox reads anywhere, and a command can find such a file without naming
-  it ([the safety pass](plans/safety-pass.md)). Only running agents in a
+  it (DEV-69's safety pass). Only running agents in a
   sandbox of Althar's own closes that:
   macOS's sandbox profiles, a container, or a separate user. Also: agents'
   own API keys (03, "API keys and OAuth") should be sealed the way code hosts' tokens
@@ -548,7 +554,8 @@ never under running work.
   tools the ask list doesn't cover, never load. A hook that approves can't
   get past an ask rule; checked with a repository whose hook approves every
   tool call. What stays open is below, under trusting a repository's agent
-  settings.
+  settings. ADR-097 loads the person's own servers in every role, each with
+  an ask rule, so their calls still reach Althar.
 - [ ] **Trusting a repository's agent settings.** A repository's hooks
   (`.claude/settings.json`, `.codex/hooks.json`) and Codex project config run
   as code on the Mac whenever the agent uses a tool. Claude's SDK loads them

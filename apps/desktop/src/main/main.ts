@@ -701,7 +701,7 @@ const paintPaper = () => {
 nativeTheme.on('updated', paintPaper)
 
 /*
- * The desktop the windows sit on, and how they are dressed for it (desktopChrome.ts, ADR-097): read once the app is ready, handed
+ * The desktop the windows sit on, and how they are dressed for it (desktopChrome.ts, ADR-098): read once the app is ready, handed
  * to each window as it opens so its first frame draws its buttons where they go, and sent to every window as the desktop changes.
  * Whether the windows have the window manager's own frame is decided as the first one opens, from what is known then: a window's
  * frame can't change once it is open, and every window of a run has the same.

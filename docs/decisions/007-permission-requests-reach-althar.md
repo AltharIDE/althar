@@ -1,6 +1,12 @@
 # ADR-007: Every permission request reaches Althar
 
 - **Status:** Accepted
+- **Amended:** 2026-11-06 ([ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md)): allowing everything is
+  every project's default, so only what can't be undone becomes an attention
+  request; the reviewer of a task's change runs its tests and builds in its
+  copy, the coordinator stays read-only for tidiness, and a review of an
+  outside author's code stays held to reading. Every request still reaches
+  Althar, the person's MCP calls included where the agent can send them.
 - **Date:** 2026-09-28
 - **Owner:** Repository maintainers
 - **Context:** Althar's defaults are permissive, but the always-ask list

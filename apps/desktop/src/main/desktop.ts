@@ -1,6 +1,6 @@
 /*
  * Which desktop Althar's window sits on, and how its window is dressed for
- * it (ADR-097). The facts come from the environment, the Settings portal,
+ * it (ADR-098). The facts come from the environment, the Settings portal,
  * the desktop's own config files and, on X11, the window manager's name;
  * this file reads none of them itself, it only says what they mean: the
  * desktop and its window manager, and from them whether the window manager
@@ -293,7 +293,7 @@ export const drawnFor = (facts: DesktopFacts): ChromeDecision =>
     : { kind: 'drawn', look: 'gnome', tone: toneFor(facts) }
 
 /**
- * How the window is dressed on this desktop (ADR-097's table):
+ * How the window is dressed on this desktop (ADR-098's table):
  * - a Mac: the system's traffic lights; Windows: Althar's caption buttons, in Windows' manner.
  * - a tiling compositor or window manager: no buttons at all.
  * - GNOME and the GTK desktops whose apps draw their own title bars (Budgie, Pantheon), or GNOME's window manager under any name:

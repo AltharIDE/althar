@@ -28,7 +28,7 @@ import {
 
 /*
  * What the desktop says of the window's dress, read for every window and
- * followed where the desktop signals a change (ADR-097). Every read is
+ * followed where the desktop signals a change (ADR-098). Every read is
  * read-only, short and safe where there is no desktop at all: the
  * environment; the Settings portal through gdbus, which a Flatpak reaches
  * too (GNOME's button layout and GTK theme, the accent), followed through

@@ -1,6 +1,8 @@
 # ADR-095: Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06): skill and
+  OpenSpec files go up with the rest of a change's diff, which its review
+  reads; the Repository files switches and the held push go
 - **Date:** 2026-10-18
 - **Owner:** Repository maintainers
 - **Context:** Althar gives its leads skills from a store outside the

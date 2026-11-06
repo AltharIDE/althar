@@ -1,6 +1,10 @@
 # ADR-089: The asks and refusals left once the sandbox is the boundary are what can't be undone
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06): with
+  allowing everything every project's default and the floor gone,
+  `git reflog expire` and `git gc --prune` ask in no mode, and the readers'
+  list stays only for a review of an outside author's code; the coordinator's
+  commands meet a lead's rules, in its copies
 - **Date:** 2026-11-03
 - **Amends:** [ADR-067](067-allow-everything-asks-only-before-what-can-t-be-undone.md),
   [ADR-071](071-the-sandbox-is-the-boundary-anything-inside-it-runs.md)
@@ -82,7 +86,8 @@
     became the branch name git already writes, so no brief needs to say
     anything. **Turned down:** `git reflog expire` and `git gc --prune`
     still ask (with everything allowed they go, as ADR-067 had them). They throw away what git keeps to recover lost work, for
-    every checkout, and nothing marks what is the task's.
+    every checkout, and nothing marks what is the task's. (Since ADR-097
+    they go in every mode.)
   - **`push_to_pull_request` hands the lead the steps** where someone pushed
     to the branch elsewhere: call `fetch_from_remote` with the pull request,
     merge what it got, and push again. It used to end in "Tell the person".

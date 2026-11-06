@@ -1,6 +1,9 @@
 # ADR-078: Project leads can read the web
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06):
+  Codex's shell gets the network, the coordinator's commands reach the hosts
+  a lead's do, and the `curl` form and the coordinator's web mark go; the
+  switch and offline outside reviews stay
 - **Date:** 2026-10-31
 - **Amended:** 2026-11-01 ([ADR-081](081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md), to build for 0.7.0): the coordinator follows the switch too, and its commands still reach no network. Once an outside author's words reach its conversation, its web reads ask the person, whatever the switch says, until a fresh session starts with none of them, and so do those of a task it planned meanwhile.
 - **Owner:** Repository maintainers
@@ -18,12 +21,14 @@
     switch says. Codex remains ineligible to lead those reviews. The
     coordinator keeps its existing settings.
   - Shell network controls stay as they were. Codex’s workspace-write
-    network_access switch is all or nothing; we choose off. Claude’s domain
+    network_access switch is all or nothing; we choose off (since ADR-097, on). Claude’s domain
     allowlist cannot distinguish GET from POST; we keep the known hosts,
     rather than opening every host. OpenCode has no shell sandbox.
     Opening either sandbox network broadly would also let uploads bypass
     the rules. Instead the rules allow plain HTTP(S) curl/wget reads to
-    stdout while the switch is on, even where the rest asks. Use
+    stdout while the switch is on, even where the rest asks (gone with
+    ADR-097: with everything allowed, a host a command asks for goes
+    ahead). Use
     `curl -q -fsSL https://example.com` or
     `wget --no-config --no-netrc --no-hsts -qO- https://example.com`: local config must not turn
     the read into an upload. Compound commands, scripts, custom headers,

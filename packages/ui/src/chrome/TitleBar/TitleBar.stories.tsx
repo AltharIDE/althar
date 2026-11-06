@@ -86,7 +86,7 @@ export const TaskTakeover: Story = {
   ),
 }
 
-/* The desktops' own buttons (ADR-097), in their order and at their end, as Althar draws them where the window manager draws none. */
+/* The desktops' own buttons (ADR-098), in their order and at their end, as Althar draws them where the window manager draws none. */
 const GNOME: WindowControls = { look: 'gnome', tone: 'adwaita', start: [], end: ['minimize', 'maximize', 'close'] }
 const GNOME_CLOSE: WindowControls = { look: 'gnome', tone: 'adwaita', start: [], end: ['close'] }
 const GNOME_LEFT: WindowControls = { look: 'gnome', tone: 'adwaita', start: ['close', 'minimize', 'maximize'], end: [] }

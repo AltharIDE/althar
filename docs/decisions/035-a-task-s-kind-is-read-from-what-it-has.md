@@ -1,6 +1,11 @@
 # ADR-035: A task's kind is read from what it has, and its card has nothing to press
 
-- **Status:** Accepted
+- **Status:** Accepted; its review section partly superseded by
+  [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06): a review of a pull request by the
+  repository's own people runs its code in a worktree as a task does, an
+  outside author's stays read-only until the person says "run it", and
+  posting goes on the person's word in the thread as well as by Post
+  (recommended there, until the person settles it)
 - **Date:** 2026-10-13
 - **Owner:** Repository maintainers
 - **Context:** Every task was the same thing: a plan that implements,
@@ -62,7 +67,9 @@
     a summary and comments on lines. The person keeps or drops each comment
     and picks the verdict (never Approve for them on an outside pull
     request), then posts. A setting of their own posts reviews of their
-    team's pull requests without asking; outside ones always wait.
+    team's pull requests without asking; outside ones always wait. Since
+    ADR-097, that reading copy is an outside author's alone, and the
+    person's word in the thread posts too.
   - **A plain task is a quick task until the person asks its lead to make
     it a change.** What the coordinator starts with `start_task` (no plan to
     look over: a question, a quick look, a prototype, a release run from
@@ -141,7 +148,8 @@
   branch is made at the end of the turn that wrote, not as the file is
   written, and work a lead leaves outside its scratch folder, a screenshot
   it hasn't handed yet, gets it one. A review in reader mode can't run the
-  pull request's tests; its lead reads the checks the host ran instead.
+  pull request's tests; its lead reads the checks the host ran instead
+  (since ADR-097, only an outside author's).
 - **Related:** the triage checkpoint (PR #116's exploration) will show on a
   running card's top line, which takes any word; DEV-91 (merging once
   checks pass) will be a change's state, not a kind.

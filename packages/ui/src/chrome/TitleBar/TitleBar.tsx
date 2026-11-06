@@ -9,7 +9,7 @@ import s from './TitleBar.module.css'
  * it, so the bar keeps their space clear; `lights="drawn"` draws the
  * window's own buttons, wired to the window through `window`, for the
  * screens that have no tabs above them, in the manner, the order and at the
- * end `controls` says (the desktop's, ADR-097; Althar's dots at the start
+ * end `controls` says (the desktop's, ADR-098; Althar's dots at the start
  * where it says nothing); without `window` — in stories and prototypes —
  * they stand in, inert. What the bar holds is the
  * consumer's: the project, the rooms, the work's status, the panels. Its

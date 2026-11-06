@@ -7,7 +7,7 @@ import s from './WindowButtons.module.css'
 /*
  * The window's own buttons, where the system draws none: close, minimize,
  * and maximize or restore, in the manner of the desktop the window sits on
- * (ADR-097). Each look follows its desktop's conventions, its shapes,
+ * (ADR-098). Each look follows its desktop's conventions, its shapes,
  * sizes and hover, with glyphs of Althar's own, never the desktop's
  * artwork:
  *
@@ -32,7 +32,7 @@ export type WindowButtonName = 'close' | 'minimize' | 'maximize'
 /** A tuning of the GNOME look for a theme: adwaita (libadwaita's faint discs at rest), legacy (GTK 3's: a disc only as one is pointed at; an unknown desktop's too), yaru (Ubuntu's: an orange close). */
 export type WindowButtonsTone = 'adwaita' | 'legacy' | 'yaru'
 
-/** Which buttons a bar draws, whose manner, and at which end: as the desktop says (ADR-097). */
+/** Which buttons a bar draws, whose manner, and at which end: as the desktop says (ADR-098). */
 export interface WindowControls {
   readonly look: WindowButtonsLook
   readonly tone?: WindowButtonsTone
