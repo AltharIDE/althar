@@ -338,11 +338,11 @@ export const findTasks = Effect.fn('Search.findTasks')(function* (input: SearchI
   const standing = sql`
     r.id AS row_id, t.id AS thread_id, k.id AS task_id, k.project_id, k.title, k.slug, k.state, k.created_at, k.kept_at, ${recency} AS changed_at,
     -- Only the coordinator's own turn, which is the one that drafts a task: a lead's turn on another says nothing of its plan.
-    EXISTS (SELECT 1 FROM turn_deliveries d JOIN threads h ON h.id = d.thread_id AND h.kind = 'coordinator'
-      WHERE d.project_id = k.project_id AND d.requested_at <= k.created_at
+    EXISTS (SELECT 1 FROM turn_deliveries d
+      WHERE d.thread_id = ch.id AND d.requested_at <= k.created_at
         AND coalesce(d.ended_at, '9999') >= k.created_at) AS made_in_turn,
-    EXISTS (SELECT 1 FROM turn_deliveries d JOIN threads h ON h.id = d.thread_id AND h.kind = 'coordinator'
-      WHERE d.project_id = k.project_id AND d.requested_at <= k.created_at AND d.ended_at IS NULL) AS made_in_open_turn,
+    EXISTS (SELECT 1 FROM turn_deliveries d
+      WHERE d.thread_id = ch.id AND d.requested_at <= k.created_at AND d.ended_at IS NULL) AS made_in_open_turn,
     p.state AS plan_state, p.starts_at,
     (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') + ${sql.unsafe(issueCardsWaiting('k'))} AS waiting,
     (SELECT count(*) FROM review_drafts v WHERE v.task_id = k.id AND v.state IN ('pending', 'failed', 'uncertain')) AS drafted,
@@ -354,6 +354,7 @@ export const findTasks = Effect.fn('Search.findTasks')(function* (input: SearchI
   const joins = sql`
     ${live}
     JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+    LEFT JOIN threads ch ON ch.id = (SELECT h.id FROM threads h WHERE h.project_id = k.project_id AND h.kind = 'coordinator' LIMIT 1)
     LEFT JOIN task_plans p ON p.id = (SELECT id FROM task_plans WHERE task_id = k.id AND state IN ('proposed', 'accepted') ORDER BY proposed_at DESC LIMIT 1)
     LEFT JOIN runs n ON n.id = (SELECT id FROM runs WHERE task_id = k.id ORDER BY created_at DESC LIMIT 1)`
   const read =
