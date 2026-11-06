@@ -22,7 +22,7 @@ import { change, coordinatorSnapshot, fakeClient, fakeHost, home, models, snapsh
 import { RUNS } from './addresses'
 import s from './app.module.css'
 import { althar, coordinatorItems, launchOf, OTHER, REQUEST, repository, runnables, TASK, tasks, threadItems } from './data'
-import { type Destination, type Direction, DIRECTIONS, proto, useProto } from './state'
+import { type Destination, type Direction, DIRECTIONS, proto, sideScope, threadHere, useProto } from './state'
 
 /* ——— What the fake runtime holds. ——— */
 
@@ -154,7 +154,7 @@ const go = (direction: Direction) => {
     direction,
     pointing: null,
     draft: null,
-    page: direction === 'A' ? proto.get().page : null,
+    page: direction === 'A' || direction === 'E' ? proto.get().page : null,
     face: direction === 'A' ? false : proto.get().face,
   })
   titled(direction)
@@ -169,11 +169,19 @@ const typing = (target: EventTarget | null) =>
 
 const onTask = () => window.location.hash.startsWith(`#/threads/${TASK.threadId}`)
 
+/** Where pointing goes now: A's tab with the window, B–D's preview, E's page beside the conversation the window is on. */
+const scopeNow = (): string | null => {
+  const p = proto.get()
+  if (p.direction === 'A' || (p.direction === 'E' && p.page !== null)) return p.page
+  if (p.direction === 'E') return p.side[threadHere()] === undefined ? null : sideScope(threadHere())
+  return p.face && onTask() ? 'preview' : null
+}
+
 const onKey = (event: KeyboardEvent) => {
   const p = proto.get()
   // ⇧⌘C points at the page that has the window, as a browser's inspector does; again, it stops.
   if (commandDown(event) && event.shiftKey && event.key.toLowerCase() === 'c') {
-    const scope = p.direction === 'A' ? p.page : p.face && onTask() ? 'preview' : null
+    const scope = scopeNow()
     if (scope === null) return
     event.preventDefault()
     proto.point(p.pointing === scope ? null : scope)
@@ -186,8 +194,15 @@ const onKey = (event: KeyboardEvent) => {
     return
   }
   if (event.metaKey || event.ctrlKey || event.altKey || typing(event.target)) return
+  // E: p puts the task's run beside its conversation, and again takes it away.
+  if (p.direction === 'E' && onTask() && p.page === null && event.key === 'p') {
+    event.preventDefault()
+    if (p.side[TASK.threadId] === undefined) proto.beside(TASK.threadId, RUNS.task.address)
+    else proto.closeSide(TASK.threadId)
+    return
+  }
   // p shows the task's preview, as c, o and g show its other faces.
-  if (p.direction !== 'A' && onTask() && p.page === null) {
+  if (p.direction !== 'A' && p.direction !== 'E' && onTask() && p.page === null) {
     if (event.key === 'p') {
       event.preventDefault()
       proto.set({ face: true })
@@ -202,7 +217,7 @@ const onKey = (event: KeyboardEvent) => {
       ? DIRECTIONS[(at + 1) % DIRECTIONS.length]
       : event.key === '['
         ? DIRECTIONS[(at - 1 + DIRECTIONS.length) % DIRECTIONS.length]
-        : /^[1-4]$/.test(event.key)
+        : /^[1-5]$/.test(event.key)
           ? DIRECTIONS[Number(event.key) - 1]
           : undefined
   if (picked === undefined) return
@@ -218,7 +233,7 @@ const open = (hash: string) => {
 function Switcher() {
   const p = useProto()
   if (p.bare) return null
-  const scope = p.direction === 'A' ? p.page : p.face ? 'preview' : null
+  const scope = p.direction === 'A' || p.direction === 'E' ? scopeNow() : p.face ? 'preview' : null
   return (
     <div className={s.strip}>
       <Segmented<Direction>
@@ -242,7 +257,7 @@ function Switcher() {
       {p.direction === 'D' && <LinkButton onClick={() => proto.drive()}>The lead checks the page</LinkButton>}
       <LinkButton onClick={proto.startOver}>Start over</LinkButton>
       <span className={s.grow} />
-      {p.outside !== null ? <span className={s.outside}>→ {p.outside}</span> : <span>1–4 or [ ] switch</span>}
+      {p.outside !== null ? <span className={s.outside}>→ {p.outside}</span> : <span>1–5 or [ ] switch</span>}
     </div>
   )
 }
@@ -279,6 +294,9 @@ export const boot = () => {
   titled(shown)
   window.localStorage.removeItem('althar.tabs')
   if (window.location.hash === '' || window.location.hash === '#/') window.location.hash = `#/threads/${TASK.threadId}`
+  // E, ?side=run: the task's run open beside its conversation; ?side=<address>, another page.
+  const side = params.get('side')
+  if (side !== null && shown === 'E') proto.beside(threadHere(), side === 'run' ? RUNS.task.address : side)
   window.addEventListener('keydown', onKey)
   const router = makeRouter({ client, cache })
   const element = document.getElementById('root')

@@ -10,7 +10,7 @@ import { IconButton } from '../../../src/primitives/IconButton/IconButton'
 import { LinkButton } from '../../../src/primitives/LinkButton/LinkButton'
 import { Popover } from '../../../src/primitives/Popover/Popover'
 import { shown } from '../addresses'
-import { addressOf, type Page, proto, useProto } from '../state'
+import { addressOf, type Page, pageOf, proto, useProto } from '../state'
 import s from './Bar.module.css'
 import { glyph } from './icons'
 
@@ -30,9 +30,12 @@ export interface BarProps {
   pointable?: boolean
   /** What the person's browser opens: the address now, unless the direction says otherwise. */
   outside?: string
+  /** After Open in your browser: the ways out of where it is (E). */
+  after?: ReactNode
+  className?: string
 }
 
-export function Bar({ scope, page, host, extra, session, pointable = true, outside }: BarProps) {
+export function Bar({ scope, page, host, extra, session, pointable = true, outside, after, className }: BarProps) {
   const p = useProto()
   const address = addressOf(page)
   const path = (() => {
@@ -56,7 +59,7 @@ export function Bar({ scope, page, host, extra, session, pointable = true, outsi
   }, [address, host])
   const pointing = p.pointing === scope
   return (
-    <div className={s.bar}>
+    <div className={cx(s.bar, className)}>
       <div className={s.moves}>
         <IconButton icon="chevronL" label="Back" size="small" disabled={page.at === 0} onClick={() => proto.back(scope)} />
         <IconButton
@@ -95,6 +98,8 @@ export function Bar({ scope, page, host, extra, session, pointable = true, outsi
           onBlur={() => setEditing(false)}
           onKeyDown={(event) => {
             if (event.key !== 'Escape') return
+            // The address's own: it doesn't also close the panel it is in.
+            event.preventDefault()
             setTyped(rest)
             setEditing(false)
             event.currentTarget.blur()
@@ -122,6 +127,7 @@ export function Bar({ scope, page, host, extra, session, pointable = true, outsi
           disabled={address === ''}
           onClick={() => proto.outside(outside ?? address)}
         />
+        {after}
       </div>
     </div>
   )
@@ -197,7 +203,7 @@ export function Line({ scope }: { scope: string }) {
           <span>
             {line.host} asked for the {line.what}. Pages here never get it.
           </span>
-          <LinkButton onClick={() => proto.outside(addressOf(proto.get().preview))}>Open in your browser</LinkButton>
+          <LinkButton onClick={() => proto.outside(addressOf(pageOf(scope) ?? proto.get().preview))}>Open in your browser</LinkButton>
           <span className={s.grow} />
           {dismiss}
         </div>

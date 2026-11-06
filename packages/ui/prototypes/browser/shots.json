@@ -270,5 +270,128 @@
       "wait:800"
     ],
     "caption": "D · Done: the screenshots it took in the person's preview come back in the thread."
+  },
+  {
+    "id": "E1",
+    "page": "?d=E#/threads/th1",
+    "steps": ["key:c", "wait:600", "a[href=\"http://localhost:5321/\"]", "wait:1800"],
+    "caption": "E · The run's link in the thread opens the page on the conversation's workbench, where documents and files open: the conversation stays beside it, the page at the panel's width. The bar: back, forward, reload, the address in the task's session, Comment, Open in your browser, Open as a tab, Close."
+  },
+  {
+    "id": "E2",
+    "page": "?d=E#/threads/th1",
+    "steps": [
+      "key:c",
+      "wait:600",
+      "a[href=\"http://localhost:5321/\"]",
+      "wait:1800",
+      "button:has-text(\"Comment\")",
+      "scroll:section[aria-label^=\"Runs on\"]",
+      "pick:section[aria-label^=\"Runs on\"] > span:nth-of-type(4) [class*=\"needs\"]",
+      "type:Too long beside the other two. Keep x64 and arm64; the distributions can go on the install page."
+    ],
+    "caption": "E · Comment (⇧⌘C) points at the page: the element under the pointer outlined, a comment written beside it."
+  },
+  {
+    "id": "E3",
+    "page": "?d=E#/threads/th1",
+    "steps": [
+      "key:c",
+      "wait:600",
+      "a[href=\"http://localhost:5321/\"]",
+      "wait:1800",
+      "button:has-text(\"Comment\")",
+      "scroll:section[aria-label^=\"Runs on\"]",
+      "pick:section[aria-label^=\"Runs on\"] > span:nth-of-type(4) [class*=\"needs\"]",
+      "type:Too long beside the other two. Keep x64 and arm64; the distributions can go on the install page.",
+      "key:Enter",
+      "pick:section[aria-label^=\"Runs on\"]",
+      "type:The two lines sit tight against the hairlines. Give the band room at every width.",
+      "key:Enter",
+      "pick:section[aria-label^=\"Runs on\"] > span:nth-of-type(3) [class*=\"needs\"]",
+      "type:Windows on Arm runs it too: say arm64.",
+      "key:Enter",
+      "wait:6000",
+      "key:Escape",
+      "textarea",
+      "type:Close. Two small things on the band, then take the screenshots again."
+    ],
+    "settle": 600,
+    "caption": "E · Each comment goes in the composer beside the page, an attachment to what the person says next; the page keeps their numbered pins."
+  },
+  {
+    "id": "E4",
+    "page": "?d=E#/threads/th1",
+    "steps": [
+      "key:c",
+      "wait:600",
+      "a[href=\"http://localhost:5321/\"]",
+      "wait:1800",
+      "button:has-text(\"Comment\")",
+      "scroll:section[aria-label^=\"Runs on\"]",
+      "pick:section[aria-label^=\"Runs on\"] > span:nth-of-type(4) [class*=\"needs\"]",
+      "type:Too long beside the other two. Keep x64 and arm64; the distributions can go on the install page.",
+      "key:Enter",
+      "pick:section[aria-label^=\"Runs on\"]",
+      "type:The two lines sit tight against the hairlines. Give the band room at every width.",
+      "key:Enter",
+      "pick:section[aria-label^=\"Runs on\"] > span:nth-of-type(3) [class*=\"needs\"]",
+      "type:Windows on Arm runs it too: say arm64.",
+      "key:Enter",
+      "wait:6000",
+      "key:Escape",
+      "textarea",
+      "type:Close. Two small things on the band, then take the screenshots again.",
+      "key:Enter",
+      "wait:3400"
+    ],
+    "settle": 800,
+    "caption": "E · Sent as one message, the person's words first: each comment with its element's selector and text, the page's address and size, and a crop of the spot. The lead answers beside the page it's about."
+  },
+  {
+    "id": "E5",
+    "page": "?d=E#/threads/th1",
+    "steps": [
+      "key:c",
+      "wait:600",
+      "a[href=\"http://localhost:5321/\"]",
+      "wait:1800",
+      "a[href=\"https://althar.ai/changelog\"]",
+      "wait:5000"
+    ],
+    "caption": "E · Another link from the thread, the public changelog, opens in the same panel; Back returns to the run."
+  },
+  {
+    "id": "E6",
+    "page": "?d=E#/threads/th1",
+    "steps": ["key:c", "wait:600", "a[href=\"http://localhost:5321/\"]", "wait:1800", "a[href^=\"https://linear.app\"]", "wait:800"],
+    "caption": "E · A Linear issue asks for a sign-in: it opens in the person's browser, and the panel says so."
+  },
+  {
+    "id": "E7",
+    "page": "?d=E#/threads/th1",
+    "steps": [
+      "key:c",
+      "wait:600",
+      "a[href=\"http://localhost:5321/\"]",
+      "wait:1800",
+      "button[aria-label=\"Open as a tab\"]",
+      "wait:1500",
+      "button:has-text(\"Comment\")",
+      "scroll:section[aria-label^=\"Runs on\"]",
+      "pick:section[aria-label^=\"Runs on\"] > span:nth-of-type(4) [class*=\"needs\"]",
+      "type:Too long beside the other two. Keep x64 and arm64; the distributions can go on the install page.",
+      "key:Enter",
+      "wait:5000",
+      "key:Escape"
+    ],
+    "settle": 600,
+    "caption": "E · Open as a tab: the page takes a tab of its own after the projects', with its history; comments gather at its foot, to the task it came from. Back beside the task (the last button) returns it."
+  },
+  {
+    "id": "E8",
+    "page": "?d=E#/projects/p1?room=both",
+    "steps": ["wait:600", "a[href=\"http://localhost:5320/\"]", "wait:2000"],
+    "caption": "E · From the coordinator's conversation: main's run opens beside it, the project going to its Conversation view as the board steps aside; its comments go to the coordinator."
   }
 ]

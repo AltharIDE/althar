@@ -1,5 +1,16 @@
 // Scrappy: the glyphs a browser needs that the kit doesn't have yet, added to its own map, as building it would add them to icons.ts.
-import { ChatPlusIn, ColorFilter, CursorPointer, Laptop, Refresh, ShieldCheck, SmartphoneDevice, ViewColumns2 } from 'iconoir-react'
+import {
+  AppWindow,
+  ChatPlusIn,
+  ColorFilter,
+  CursorPointer,
+  Laptop,
+  LayoutRight,
+  Refresh,
+  ShieldCheck,
+  SmartphoneDevice,
+  ViewColumns2,
+} from 'iconoir-react'
 
 import type { IconName } from '../../../src/foundations/Icon/Icon'
 import { ICONS } from '../../../src/foundations/Icon/icons'
@@ -13,8 +24,10 @@ Object.assign(ICONS, {
   columns: ViewColumns2,
   onion: ColorFilter,
   cursor: CursorPointer,
+  tab: AppWindow,
+  dock: LayoutRight,
 })
 
 /** A glyph of the prototype's, by name, where the kit takes an IconName. */
-export const glyph = (name: 'reload' | 'comment' | 'session' | 'wide' | 'phone' | 'columns' | 'onion' | 'cursor') =>
+export const glyph = (name: 'reload' | 'comment' | 'session' | 'wide' | 'phone' | 'columns' | 'onion' | 'cursor' | 'tab' | 'dock') =>
   name as unknown as IconName

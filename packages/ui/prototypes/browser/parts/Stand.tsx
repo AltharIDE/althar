@@ -4,7 +4,7 @@ import { Icon } from '../../../src/foundations/Icon/Icon'
 import { Button } from '../../../src/primitives/Button/Button'
 import { LiveDot } from '../../../src/primitives/LiveDot/LiveDot'
 import { shown, type Verdict } from '../addresses'
-import { proto, RUNS, TASK } from '../state'
+import { proto, RUNS, SIDE, TASK } from '../state'
 import s from './Stand.module.css'
 
 /** A new tab: what runs in althar now, a press away. */
@@ -46,7 +46,7 @@ export function SignIn({ verdict, scope, first }: { verdict: Extract<Verdict, { 
         <div className={s.actions}>
           {first ? (
             <Button size="small" onClick={() => proto.closePage(scope)}>
-              Close the tab
+              {scope.startsWith(SIDE) ? 'Close' : 'Close the tab'}
             </Button>
           ) : (
             <Button size="small" onClick={() => proto.back(scope)}>

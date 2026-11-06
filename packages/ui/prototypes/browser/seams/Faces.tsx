@@ -5,6 +5,7 @@ import { useEffect } from 'react'
 import { TaskHeader as BuiltHeader, type TaskHeaderProps } from '../../../src/chrome/TaskHeader/TaskHeader'
 import { TaskFace as BuiltFace, type TaskFaceProps } from '../../../src/thread/TaskFace/TaskFace'
 import { Compare } from '../parts/Compare'
+import { BesideFace } from './Beside'
 import { Preview } from '../parts/Preview'
 import { proto, useProto } from '../state'
 
@@ -12,7 +13,7 @@ const FACE = 'preview'
 
 export function TaskHeader<F extends string>(props: TaskHeaderProps<F>) {
   const p = useProto()
-  const extra = p.direction !== 'A' && props.faces !== undefined
+  const extra = p.direction !== 'A' && p.direction !== 'E' && props.faces !== undefined
   // The preview takes the conversation's place: the task's own face goes there underneath, whatever it opened on.
   const { face: own, onFace } = props
   useEffect(() => {
@@ -41,6 +42,7 @@ export function TaskHeader<F extends string>(props: TaskHeaderProps<F>) {
 
 export function TaskFace(props: TaskFaceProps) {
   const p = useProto()
+  if (p.direction === 'E') return <BesideFace {...props} />
   if (p.direction === 'A' || !p.face) return <BuiltFace {...props} />
   return p.direction === 'C' ? <Compare /> : <Preview />
 }

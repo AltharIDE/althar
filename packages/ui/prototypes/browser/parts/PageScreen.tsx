@@ -1,11 +1,14 @@
 // Scrappy: A's page screen: a page open in Althar's browser, with the window, under the window's bar.
 import { createPortal } from 'react-dom'
 
+import { IconButton } from '../../../src/primitives/IconButton/IconButton'
+
 import { verdictOf } from '../addresses'
 import { addressOf, destinationOf, proto, TASK, useProto } from '../state'
 import { Bar, Line } from './Bar'
 import { Frame } from './Frame'
 import { Gathered } from './Gathered'
+import { glyph } from './icons'
 import s from './Screens.module.css'
 import { Absent, Blank, SignIn } from './Stand'
 
@@ -18,7 +21,26 @@ export function PageScreen({ top }: { top: number }) {
   return createPortal(
     <div className={`ch-root ${s.over}`} style={{ top, bottom: p.bare ? 0 : 44 }}>
       <div className={s.screen}>
-        <Bar scope={page.id} page={page} session="page" pointable={verdict.kind === 'page'} />
+        <Bar
+          scope={page.id}
+          page={page}
+          session="page"
+          pointable={verdict.kind === 'page'}
+          // E: a page taken out of a conversation's side goes back there.
+          {...(p.direction === 'E' && page.from !== null
+            ? {
+                after: (
+                  <IconButton
+                    icon={glyph('dock')}
+                    label={page.from.kind === 'coordinator' ? 'Back beside the conversation' : 'Back beside the task'}
+                    size="small"
+                    tooltipAlign="end"
+                    onClick={() => proto.dock(page.id)}
+                  />
+                ),
+              }
+            : {})}
+        />
         <Line scope={page.id} />
         {verdict.kind === 'page' ? (
           <Frame

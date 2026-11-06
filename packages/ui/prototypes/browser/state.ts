@@ -4,13 +4,18 @@ import { useSyncExternalStore } from 'react'
 import { normalized, RUNS, runOf, serve, verdictOf } from './addresses'
 import { items, OTHER, sentPicture, TASK } from './data'
 
-export type Direction = 'A' | 'B' | 'C' | 'D'
+export type Direction = 'A' | 'B' | 'C' | 'D' | 'E'
 
 export const DIRECTIONS: ReadonlyArray<{ value: Direction; name: string; about: string }> = [
   { value: 'A', name: 'A browser tab', about: 'Althar is where you browse while you work: any page in a tab beside the projects' },
   { value: 'B', name: 'The task’s preview', about: 'A Preview face on each task: its run, and comments to its lead' },
   { value: 'C', name: 'Compare the change', about: 'The task’s run against main’s, with the lead’s screenshots laid over the live page' },
   { value: 'D', name: 'Shared with the lead', about: 'C, with the lead using the same browser while you watch, and you taking over' },
+  {
+    value: 'E',
+    name: 'Beside the conversation',
+    about: 'Any page opens on the conversation’s right, its comments in the composer; a tab of its own or your browser if you want',
+  },
 ]
 
 /** Where comments go: a task's lead, or the project's coordinator. */
@@ -109,6 +114,9 @@ export interface Proto {
   readonly driving: Driving | null
   /** Which go of the task's branch its run serves: the lead's first, or its second after the comments. */
   readonly revision: number
+  /* E: the page open beside each conversation, by its thread, and how wide the workbench it is on is. */
+  readonly side: Readonly<Record<string, Page | undefined>>
+  readonly bench: number
 }
 
 const preview = (address: string = RUNS.task.address): Page => ({
@@ -118,6 +126,9 @@ const preview = (address: string = RUNS.task.address): Page => ({
   from: { kind: 'task', taskId: TASK.id },
   reloads: 0,
 })
+
+/** Half the window, leaving the conversation its measure: a page needs more room than a document. */
+export const benchStart = () => Math.round(Math.max(480, Math.min(window.innerWidth / 2, window.innerWidth - 440)))
 
 const fresh = (): Proto => ({
   direction: 'A',
@@ -140,6 +151,8 @@ const fresh = (): Proto => ({
   outside: null,
   driving: null,
   revision: 1,
+  side: {},
+  bench: benchStart(),
 })
 
 let state: Proto = fresh()
@@ -156,12 +169,41 @@ const nextId = (prefix: string) => `${prefix}${(made += 1)}`
 /** A page's address now. */
 export const addressOf = (page: Page) => page.history[page.at] ?? ''
 
-/** The page for a scope: a tab's (A), or the preview (B, C). */
+/** E: a page beside a conversation is that thread's. */
+export const SIDE = 'side:'
+export const sideScope = (thread: string) => `${SIDE}${thread}`
+
+/** The conversation the window is on: a task's thread, or the project's coordinator. */
+export const threadHere = () => /^#\/threads\/([^/?]+)/.exec(window.location.hash)?.[1] ?? 'thc'
+
+/** Where what is said in a thread goes. */
+export const destinationOfThread = (thread: string): Destination =>
+  thread === TASK.threadId
+    ? { kind: 'task', taskId: TASK.id }
+    : thread === OTHER.threadId
+      ? { kind: 'task', taskId: OTHER.id }
+      : { kind: 'coordinator' }
+
+const threadOf = (to: Destination | null) =>
+  to === null || to.kind === 'coordinator' ? 'thc' : to.taskId === OTHER.id ? OTHER.threadId : TASK.threadId
+
+const hashOf = (thread: string) => (thread === 'thc' ? '#/projects/p1' : `#/threads/${thread}`)
+
+/** The page for a scope: a tab's (A), the preview (B, C), or one beside a conversation (E). */
 export const pageOf = (scope: string): Page | undefined =>
-  scope === 'preview' ? state.preview : state.pages.find((one) => one.id === scope)
+  scope === 'preview'
+    ? state.preview
+    : scope.startsWith(SIDE)
+      ? state.side[scope.slice(SIDE.length)]
+      : state.pages.find((one) => one.id === scope)
 
 const changePage = (scope: string, next: (page: Page) => Page) => {
   if (scope === 'preview') return set({ preview: next(state.preview) })
+  if (scope.startsWith(SIDE)) {
+    const thread = scope.slice(SIDE.length)
+    const page = state.side[thread]
+    return page === undefined ? undefined : set({ side: { ...state.side, [thread]: next(page) } })
+  }
   set({ pages: state.pages.map((one) => (one.id === scope ? next(one) : one)) })
 }
 
@@ -234,6 +276,11 @@ export const proto = {
       const page: Page = { id: nextId('page'), history: [verdict.address], at: 0, from, reloads: 0 }
       return set({ pages: [...state.pages, page], page: page.id })
     }
+    if (state.direction === 'E') {
+      if (verdict.kind === 'file' || verdict.kind === 'scheme')
+        return flash(verdict.kind === 'file' ? 'Files don’t open in Althar’s browser' : 'Only web pages open here')
+      return proto.beside(threadHere(), verdict.address)
+    }
     if (runOf(verdict.address) === 'task') {
       proto.navigate('preview', verdict.address)
       set({ face: true })
@@ -241,12 +288,74 @@ export const proto = {
     }
     flash(`Opened in your browser: ${verdict.address}`)
   },
+  /*
+   * E: a page beside a conversation, on its workbench: a step in the page already there, or the first of one. Beside the
+   * coordinator, the project goes to its Conversation view, the board stepping aside for the page.
+   */
+  beside: (thread: string, address: string) => {
+    if (thread === 'thc') {
+      const view = [...document.querySelectorAll('header [aria-checked], header [aria-pressed]')].find(
+        (one) => one.textContent?.trim() === 'Conversation',
+      )
+      if (view instanceof HTMLElement && view.getAttribute('aria-checked') !== 'true' && view.getAttribute('aria-pressed') !== 'true')
+        view.click()
+    }
+    const scope = sideScope(thread)
+    if (state.side[thread] !== undefined) {
+      goTo(scope, address)
+    } else {
+      const page: Page = { id: scope, history: [address], at: 0, from: destinationOfThread(thread), reloads: 0 }
+      set({ side: { ...state.side, [thread]: page }, lines: { ...state.lines, [scope]: undefined } })
+    }
+  },
+  closeSide: (thread: string) => {
+    const scope = sideScope(thread)
+    set({
+      side: { ...state.side, [thread]: undefined },
+      pointing: state.pointing === scope ? null : state.pointing,
+      draft: state.draft?.scope === scope ? null : state.draft,
+    })
+  },
+  /** E: the page beside a conversation becomes a tab of its own, its history and comments with it. */
+  toTab: (thread: string) => {
+    const page = state.side[thread]
+    if (page === undefined) return
+    const scope = sideScope(thread)
+    const id = nextId('page')
+    set({
+      side: { ...state.side, [thread]: undefined },
+      pages: [...state.pages, { ...page, id }],
+      page: id,
+      comments: state.comments.map((one) => (one.scope === scope ? { ...one, scope: id } : one)),
+      lines: { ...state.lines, [id]: state.lines[scope], [scope]: undefined },
+      pointing: null,
+      draft: null,
+    })
+  },
+  /** E: a tab back beside the conversation it came from. */
+  dock: (id: string) => {
+    const page = state.pages.find((one) => one.id === id)
+    if (page === undefined) return
+    const thread = threadOf(page.from)
+    const scope = sideScope(thread)
+    set({
+      pages: state.pages.filter((one) => one.id !== id),
+      page: null,
+      side: { ...state.side, [thread]: { ...page, id: scope } },
+      comments: state.comments.map((one) => (one.scope === id ? { ...one, scope } : one)),
+      lines: { ...state.lines, [scope]: state.lines[id], [id]: undefined },
+      pointing: null,
+      draft: null,
+    })
+    window.location.assign(hashOf(thread))
+  },
   /** A new, empty tab (A), its address bar ready for typing. */
   newPage: () => {
     const page: Page = { id: nextId('page'), history: [''], at: 0, from: null, reloads: 0 }
     set({ pages: [...state.pages, page], page: page.id })
   },
   closePage: (id: string) => {
+    if (id.startsWith(SIDE)) return proto.closeSide(id.slice(SIDE.length))
     const at = state.pages.findIndex((one) => one.id === id)
     const pages = state.pages.filter((one) => one.id !== id)
     const page = state.page === id ? (pages[Math.min(at, pages.length - 1)]?.id ?? null) : state.page
@@ -321,12 +430,13 @@ export const proto = {
   discard: (scope: string) => set({ comments: state.comments.filter((one) => one.scope !== scope), draft: null, pointing: null }),
 
   /** One message to the lead (or the coordinator): the comments, their crops, and the lead answers a moment later. */
-  send: (scope: string, to: Destination) => {
+  send: (scope: string, to: Destination, said = '') => {
     const mine = state.comments.filter((one) => one.scope === scope)
     if (mine.length === 0) return
     const pictures = mine.flatMap((one, at) => (typeof one.crop === 'object' ? [sentPicture(one.crop, `comment-${at + 1}.png`)] : []))
-    const thread = to.kind === 'task' ? (to.taskId === OTHER.id ? OTHER.threadId : TASK.threadId) : 'thc'
-    const message = items.you(messageOf(mine), { state: 'delivered', interrupting: false }, [], pictures)
+    const thread = threadOf(to)
+    const words = said.trim() === '' ? messageOf(mine) : `${said.trim()}\n\n${messageOf(mine)}`
+    const message = items.you(words, { state: 'delivered', interrupting: false }, [], pictures)
     set({
       comments: state.comments.filter((one) => one.scope !== scope),
       sent: { ...state.sent, [thread]: [...(state.sent[thread] ?? []), message] },
@@ -351,7 +461,14 @@ export const proto = {
   },
   revise: () => {
     serve(2)
-    set({ revision: 2, preview: { ...state.preview, reloads: state.preview.reloads + 1 } })
+    // What shows the task's run draws it again, as its dev server reloads it.
+    const side = Object.fromEntries(
+      Object.entries(state.side).map(([thread, page]) => [
+        thread,
+        page !== undefined && runOf(addressOf(page)) === 'task' ? { ...page, reloads: page.reloads + 1 } : page,
+      ]),
+    )
+    set({ revision: 2, preview: { ...state.preview, reloads: state.preview.reloads + 1 }, side })
   },
 
   /* D: the lead uses the preview, a step at a time, until it's done or the person takes it. */

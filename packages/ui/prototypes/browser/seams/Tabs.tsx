@@ -23,7 +23,8 @@ export function ProjectTabs(props: ProjectTabsProps) {
     const bar = document.querySelector('nav[aria-label="Projects"]')?.closest('header')
     if (bar != null) setTop(bar.getBoundingClientRect().bottom)
   }, [p.page, p.direction])
-  if (p.direction !== 'A') return <Built {...props} />
+  // In E, a page has a tab only where the person took it out of the conversation's side.
+  if (p.direction !== 'A' && !(p.direction === 'E' && p.pages.length > 0)) return <Built {...props} />
   const leave = () => proto.showPage(null)
   return (
     <>
