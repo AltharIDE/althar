@@ -726,18 +726,25 @@ export class Changes extends Context.Service<
      * Merges the task's branch into each of its repositories' default
      * branches on this Mac, up to the commit the person saw in each, where it
      * has no pull request: all of them or none, and nothing pushed. Its task
-     * settles.
+     * settles. `stands`, where given, runs once the merge holds the task's and
+     * the branches' locks, before it reads or writes anything: the word it was
+     * asked on, which a wait for those locks may have outlived, checked again.
      */
     mergeHere(
       taskId: string,
       heads: ReadonlyArray<{ readonly repository: string; readonly head: string }>,
+      stands?: Effect.Effect<unknown, unknown>,
     ): Effect.Effect<ReadonlyArray<{ readonly repository: string; readonly branch: string; readonly already: boolean }>, unknown>
     /**
      * Pushes each default branch the task merged into here to the remote it
      * follows, with the person's own git sign-in (their keychain or SSH
-     * agent), not a code host's: what they would run themselves.
+     * agent), not a code host's: what they would run themselves. `stands`, as
+     * mergeHere's, once it holds the locks.
      */
-    pushHere(taskId: string): Effect.Effect<ReadonlyArray<{ readonly branch: string; readonly remote: string }>, unknown>
+    pushHere(
+      taskId: string,
+      stands?: Effect.Effect<unknown, unknown>,
+    ): Effect.Effect<ReadonlyArray<{ readonly branch: string; readonly remote: string }>, unknown>
     /**
      * Asks the remote of each of a task's branches with no pull request
      * where that branch is, as the person looks at it, in the background:
@@ -6904,8 +6911,10 @@ export class Changes extends Context.Service<
         close: (taskId, url, options) => provide(locked(taskId)(close(taskId, url, options.deleteBranch))),
         exclusive: (taskId, effect) => locked(taskId)(effect),
         merge: (taskId, head, url) => provide(locked(taskId)(merge(taskId, head, url))),
-        mergeHere: (taskId, heads) => provide(locked(taskId)(branches.withPermits(1)(mergeHere(taskId, heads)))),
-        pushHere: (taskId) => provide(locked(taskId)(branches.withPermits(1)(pushHere(taskId)))),
+        mergeHere: (taskId, heads, stands = Effect.void) =>
+          provide(locked(taskId)(branches.withPermits(1)(Effect.andThen(stands, mergeHere(taskId, heads))))),
+        pushHere: (taskId, stands = Effect.void) =>
+          provide(locked(taskId)(branches.withPermits(1)(Effect.andThen(stands, pushHere(taskId))))),
         // Once at a time for a task, whoever looks.
         askRemotes: (taskId) =>
           Effect.suspend(() => {

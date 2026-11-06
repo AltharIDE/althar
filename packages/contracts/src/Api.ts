@@ -2359,10 +2359,10 @@ export const AutomationItem = Schema.Struct({
 })
 
 /**
- * The coordinator asking the person to stop, hold, restart or settle a task,
- * in its thread, where no message of theirs in that turn asked it to
- * (ADR-086): one button, which does it as the person's own press, and Not
- * now. Answered, it says what became of it: done, declined, or nothing to do
+ * The coordinator asking the person to stop, hold, restart, settle or accept
+ * a task, or answer its stuck step, in its thread, where no message of theirs
+ * in that turn asked it to (ADR-086): one button, which does it as the
+ * person's own press, and Not now. Answered, it says what became of it: done, declined, or nothing to do
  * any more and why. Althar posts it and keeps it current.
  */
 export const TaskAskItem = Schema.Struct({
@@ -2375,8 +2375,28 @@ export const TaskAskItem = Schema.Struct({
     slug: Schema.String,
     /** The task's title when it was asked. */
     title: Schema.String,
-    /** What it asks: to stop the task, or only its lead's turn; hold its plan; restart it; or settle it done, kept for later, or discarded. */
-    move: Schema.Literals(['stop', 'stop_turn', 'hold', 'restart', 'done', 'keep', 'discard']),
+    /**
+     * What it asks: to stop the task, or only its lead's turn; hold its plan; restart it; settle it done, kept for later, or
+     * discarded; accept it by merging it here, or push what merged; or answer its stuck step: accepted as it is, its review
+     * skipped, tried again, or handed on.
+     */
+    move: Schema.Literals([
+      'stop',
+      'stop_turn',
+      'hold',
+      'restart',
+      'done',
+      'keep',
+      'discard',
+      'merge_here',
+      'push_here',
+      'as_is',
+      'skip_review',
+      'again',
+      'hand_on',
+    ]),
+    /** Where it goes, where the card names it: the branch a merge here goes into, or the model a stuck step is handed to. */
+    to: Schema.optional(Schema.String),
     /** Why the coordinator asks, in a line. */
     why: Schema.NullOr(Schema.String),
     state: Schema.Literals(['open', 'done', 'declined', 'moot']),

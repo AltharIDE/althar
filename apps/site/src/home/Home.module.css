@@ -1,2 +1,12 @@
 /* The developer page's ground: the parts bring their own. */
 .page { background: var(--n-2); }
+
+/* The Runs on band in the first screen's night, its hairlines and words as the orrery draws them; the band is its own. */
+.night {
+  --n-2: #070605;
+  --t-1: rgba(255, 248, 240, 0.88);
+  --t-3: #8f887e;
+  --t-4: rgba(255, 244, 232, 0.3);
+  --line-2: rgba(255, 244, 232, 0.11);
+  color-scheme: dark;
+}

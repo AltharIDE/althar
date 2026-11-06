@@ -181,6 +181,12 @@ const ASKED: Readonly<Record<string, string>> = {
   done: 'mark done',
   keep: 'keep for later',
   discard: 'discard',
+  merge_here: 'accept, merging here,',
+  push_here: 'push what merged here of',
+  as_is: 'accept as it is',
+  skip_review: 'skip the review of',
+  again: 'try the stuck step again on',
+  hand_on: 'hand on the stuck step of',
 }
 
 /** What the person answered on the coordinator's cards asking to stop, hold, restart or settle a task, since a place in the ledger. */

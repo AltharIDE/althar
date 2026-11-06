@@ -24,6 +24,7 @@ import { Agents, RuntimeConfig } from './Config'
 import { AttachRefused, NotFound, TaskRefused } from './errors'
 import { taskShown } from './evidence'
 import { branchOnFirstWrite } from './firstWrite'
+import { commitsOf } from './git'
 import { Instance } from './Instance'
 import { IssueDrafts, refusedDraft } from './IssueDrafts'
 import { AskedFields, fieldSchema, wantedFields } from './issueFields'
@@ -61,7 +62,7 @@ import { addDetachedWorktree, branchExists, commitOf, fetchRefs, git } from './g
 import { branchFor, ruleOf } from './conventions'
 import { draftFindingsOf, findingsOf, type FindingsPick, fixBrief, whereOf, whereWords } from './reviewFix'
 import { pullRequestWords, type Reviewed, reviewOf, reviewsIn } from './reviewing'
-import { PlanParameters, type PlanStep, Runs } from './Runs'
+import { PlanParameters, type PlanStep, Runs, type StuckInfo } from './Runs'
 import { type Disposition, passedOn, Sessions } from './Sessions'
 import { blockedModelsOf } from './preferences'
 import type { InputFile } from './sentFiles'
@@ -574,6 +575,11 @@ export class Coordinator extends Context.Service<
               w.toward AS goes_into
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             WHERE w.task_id = ${task.id} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
+          // Each branch's head now: what accepting it merges up to, named back as the head read.
+          const heads = yield* Effect.forEach(workspaces, (workspace) =>
+            workspace.branched === 1 ? Effect.map(commitsOf(workspace.path, ['HEAD']), ([head]) => head ?? null) : Effect.succeed(null),
+          )
+          const branches = workspaces.map((workspace, index) => ({ ...workspace, head: heads[index] ?? null }))
           const seen = yield* pullRequests(task.id)
           const found = task.state === 'done' && seen !== undefined ? { ...seen, unmerged: 0 } : seen
           // What it built, as its lead last said it: what to tell the person it delivered, without reading every round.
@@ -585,11 +591,15 @@ export class Coordinator extends Context.Service<
             built === null ? '' : `What it built, as its lead says it now stands:\n${built}`,
             unverified.length === 0 ? '' : `What its lead couldn't show working:\n${unverified.map((line) => `- ${line}`).join('\n')}`,
             yield* issueWords(task.id),
-            workspaces.length === 1
-              ? `${upper(branchWords(workspaces[0]))}, in ${workspaces[0]?.path ?? ''}.${towardWords(workspaces[0])}`
-              : workspaces
-                  .map((workspace) => `${workspace.name}: ${branchWords(workspace)}, in ${workspace.path}.${towardWords(workspace)}`)
+            branches.length === 1
+              ? `${upper(branchWords(branches[0]))}, in ${branches[0]?.path ?? ''}.${headWords(branches[0])}${towardWords(branches[0])}`
+              : branches
+                  .map(
+                    (workspace) =>
+                      `${workspace.name}: ${branchWords(workspace)}, in ${workspace.path}.${headWords(workspace)}${towardWords(workspace)}`,
+                  )
                   .join('\n'),
+            yield* stuckWords(task.id),
             ...results.map((row) => {
               const result = JSON.parse(row.content) as { step?: string; verdict?: string; summary?: string }
               return `${result.step ?? 'step'}${result.verdict === undefined ? '' : ` (${result.verdict})`}: ${result.summary ?? ''}`
@@ -660,6 +670,22 @@ export class Coordinator extends Context.Service<
         workspace === undefined || workspace.branched === 1
           ? `branch ${workspace?.branch ?? ''}`
           : 'no branch yet: its lead has changed nothing in the repository'
+      /** Where a branch's head is now: what accepting its task merges up to, named back as the head read. */
+      const headWords = (workspace: { readonly head: string | null } | undefined) =>
+        workspace?.head == null ? '' : ` Its head is at ${workspace.head}.`
+
+      /** A task's step stuck on the person, as its card says it, and how the coordinator answers it on their word. */
+      const stuckWords = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [call] = yield* sql<{ payload: string }>`
+            SELECT payload FROM attention_requests WHERE task_id = ${taskId} AND kind = 'stuck' AND state = 'open'
+            ORDER BY created_at DESC LIMIT 1`
+          if (call === undefined) return ''
+          const info = JSON.parse(call.payload) as StuckInfo
+          const who = [info.agentId, info.model].filter((one) => one != null).join(' on ')
+          return `Its ${info.step} step is stuck, waiting on the person: ${info.why.replaceAll('_', ' ')}${who === '' ? '' : ` (${who})`}${info.detail === null ? '' : `: ${info.detail}`}. answer_stuck_step answers its card on their word.`
+        })
       /** What a repository's work goes into, where it isn't the default branch (ADR-093). */
       const towardWords = (workspace: { readonly goesInto: string | null } | undefined) =>
         workspace?.goesInto == null ? '' : ` It works toward ${workspace.goesInto}, not the default branch.`

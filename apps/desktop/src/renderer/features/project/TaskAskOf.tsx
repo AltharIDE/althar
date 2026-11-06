@@ -8,8 +8,8 @@ import type { TaskAskContent } from '../../shared/thread'
 import s from './TaskAskOf.module.css'
 
 /*
- * The coordinator's card asking the person to stop, hold, restart or settle a
- * task, as the runtime keeps it: its button does it as the task's own would,
+ * The coordinator's card asking the person to stop, hold, restart, settle or
+ * accept a task, or answer its stuck step, as the runtime keeps it: its button does it as the task's own would,
  * Not now leaves it, and its title opens the task. What was pressed stays
  * pressed until the card comes back answered; what couldn't be done is said
  * under it.
@@ -50,6 +50,7 @@ export function TaskAskOf({
       <TaskAsk
         title={ask.title}
         move={ask.move}
+        {...(ask.to === undefined ? {} : { to: ask.to })}
         {...(ask.why === null ? {} : { why: ask.why })}
         state={ask.state}
         {...(ask.said === null ? {} : { said: ask.said })}
