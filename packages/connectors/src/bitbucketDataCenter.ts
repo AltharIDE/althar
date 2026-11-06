@@ -724,6 +724,19 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
           yield* http.json(PullAnswer, 'POST', `${pull(repository, change.number)}/reopen?version=${now.version}`, {}),
         )
       }),
+    // At the version read, with what it has sent back, as marking it ready does: reviewers left out would be taken off.
+    editChange: (repository, change, edit) =>
+      Effect.gen(function* () {
+        const now = yield* http.json(PullAnswer, 'GET', pull(repository, change.number))
+        const edited = yield* http.json(PullAnswer, 'PUT', pull(repository, change.number), {
+          version: now.version,
+          title: edit.title ?? now.title,
+          description: edit.body ?? now.description ?? '',
+          reviewers: (now.reviewers ?? []).map((reviewer) => ({ user: { name: reviewer.user.name } })),
+          ...(now.draft === undefined ? {} : { draft: now.draft }),
+        })
+        return changeOf(repository, edited)
+      }),
     deleteBranch: (repository, change) =>
       Effect.gen(function* () {
         const now = yield* http.json(PullAnswer, 'GET', pull(repository, change.number))

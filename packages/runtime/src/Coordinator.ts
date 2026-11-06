@@ -22,6 +22,7 @@ import { Agents, RuntimeConfig } from './Config'
 import { AttachRefused, NotFound, TaskRefused } from './errors'
 import { taskShown } from './evidence'
 import { branchOnFirstWrite } from './firstWrite'
+import { commitsOf } from './git'
 import { Instance } from './Instance'
 import { IssueDrafts, refusedDraft } from './IssueDrafts'
 import { AskedFields, fieldSchema, wantedFields } from './issueFields'
@@ -34,6 +35,7 @@ import { Models } from './Models'
 import { Plans } from './Plans'
 import {
   closePullRequest,
+  editPullRequest,
   markReady,
   readDefaultBranchChecks,
   replyOnPullRequest,
@@ -55,13 +57,14 @@ import { notesSection, projectOverview } from './handover'
 import { dropNote, keepNote, NOTE_LENGTH, NoteRefused, NOTES_KEPT, notesOf, sayNotes } from './notes'
 import { envelope } from './envelope'
 import { fact } from './records'
-import { PlanParameters, type PlanStep, Runs } from './Runs'
+import { PlanParameters, type PlanStep, Runs, type StuckInfo } from './Runs'
 import { type Disposition, passedOn, Sessions } from './Sessions'
 import { blockedModelsOf } from './preferences'
 import type { InputFile } from './sentFiles'
 import type { InputImage } from './sentImages'
 import { SignIns } from './SignIns'
 import { alsoPlanned, siblingsOf } from './siblings'
+import { TITLE_LENGTH } from './taskTitle'
 import { Tasks } from './Tasks'
 import { setToward } from './towards'
 import { addItem, transcript } from './threads'
@@ -77,8 +80,7 @@ import { describeModels, type Route, routeTo, usableModels } from './usableModel
  * first say something to it, on the agent you last used.
  */
 
-/** How long a task's title may be: it is read in a line, beside other things, on every screen. */
-export const TITLE_LENGTH = 60
+export { TITLE_LENGTH }
 
 /** The coordinator couldn't start on the agent it would use, and the person picks another. */
 export class CoordinatorUnavailable extends Schema.TaggedError<CoordinatorUnavailable>()('CoordinatorUnavailable', {
@@ -554,6 +556,11 @@ export class Coordinator extends Context.Service<
               w.toward AS goes_into
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             WHERE w.task_id = ${task.id} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
+          // Each branch's head now: what accepting it merges up to, named back as the head read.
+          const heads = yield* Effect.forEach(workspaces, (workspace) =>
+            workspace.branched === 1 ? Effect.map(commitsOf(workspace.path, ['HEAD']), ([head]) => head ?? null) : Effect.succeed(null),
+          )
+          const branches = workspaces.map((workspace, index) => ({ ...workspace, head: heads[index] ?? null }))
           const seen = yield* pullRequests(task.id)
           const found = task.state === 'done' && seen !== undefined ? { ...seen, unmerged: 0 } : seen
           // What it built, as its lead last said it: what to tell the person it delivered, without reading every round.
@@ -565,11 +572,15 @@ export class Coordinator extends Context.Service<
             built === null ? '' : `What it built, as its lead says it now stands:\n${built}`,
             unverified.length === 0 ? '' : `What its lead couldn't show working:\n${unverified.map((line) => `- ${line}`).join('\n')}`,
             yield* issueWords(task.id),
-            workspaces.length === 1
-              ? `${upper(branchWords(workspaces[0]))}, in ${workspaces[0]?.path ?? ''}.${towardWords(workspaces[0])}`
-              : workspaces
-                  .map((workspace) => `${workspace.name}: ${branchWords(workspace)}, in ${workspace.path}.${towardWords(workspace)}`)
+            branches.length === 1
+              ? `${upper(branchWords(branches[0]))}, in ${branches[0]?.path ?? ''}.${headWords(branches[0])}${towardWords(branches[0])}`
+              : branches
+                  .map(
+                    (workspace) =>
+                      `${workspace.name}: ${branchWords(workspace)}, in ${workspace.path}.${headWords(workspace)}${towardWords(workspace)}`,
+                  )
                   .join('\n'),
+            yield* stuckWords(task.id),
             ...results.map((row) => {
               const result = JSON.parse(row.content) as { step?: string; verdict?: string; summary?: string }
               return `${result.step ?? 'step'}${result.verdict === undefined ? '' : ` (${result.verdict})`}: ${result.summary ?? ''}`
@@ -640,6 +651,22 @@ export class Coordinator extends Context.Service<
         workspace === undefined || workspace.branched === 1
           ? `branch ${workspace?.branch ?? ''}`
           : 'no branch yet: its lead has changed nothing in the repository'
+      /** Where a branch's head is now: what accepting its task merges up to, named back as the head read. */
+      const headWords = (workspace: { readonly head: string | null } | undefined) =>
+        workspace?.head == null ? '' : ` Its head is at ${workspace.head}.`
+
+      /** A task's step stuck on the person, as its card says it, and how the coordinator answers it on their word. */
+      const stuckWords = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [call] = yield* sql<{ payload: string }>`
+            SELECT payload FROM attention_requests WHERE task_id = ${taskId} AND kind = 'stuck' AND state = 'open'
+            ORDER BY created_at DESC LIMIT 1`
+          if (call === undefined) return ''
+          const info = JSON.parse(call.payload) as StuckInfo
+          const who = [info.agentId, info.model].filter((one) => one != null).join(' on ')
+          return `Its ${info.step} step is stuck, waiting on the person: ${info.why.replaceAll('_', ' ')}${who === '' ? '' : ` (${who})`}${info.detail === null ? '' : `: ${info.detail}`}. answer_stuck_step answers its card on their word.`
+        })
       /** What a repository's work goes into, where it isn't the default branch (ADR-093). */
       const towardWords = (workspace: { readonly goesInto: string | null } | undefined) =>
         workspace?.goesInto == null ? '' : ` It works toward ${workspace.goesInto}, not the default branch.`
@@ -1005,11 +1032,12 @@ export class Coordinator extends Context.Service<
         Effect.gen(function* () {
           const { task_id: reference, title } = yield* read(Retitled, input)
           const task = yield* taskOf(access, reference)
-          yield* (yield* Tasks)
+          const followed = yield* (yield* Tasks)
             .rename({
               envelope: yield* envelope('task.rename', { taskId: task.id, title: title.trim() }, undefined, instance.coordinatorId),
               taskId: task.id,
               title,
+              follow: 'now',
             })
             .pipe(
               Effect.catch((error) =>
@@ -1027,7 +1055,10 @@ export class Coordinator extends Context.Service<
             )
           return title.trim() === task.title
             ? `${task.slug} is called that already.`
-            : `Renamed ${task.slug} to “${title.trim()}”. Its slug and branch stay as they were; the person sees the new title on its card.`
+            : [
+                `Renamed ${task.slug} to “${title.trim()}”. Its slug and branch stay as they were; the person sees the new title on its card.`,
+                ...followed,
+              ].join(' ')
         })
 
       /* ---- A quick task's lead making it a change (DEV-96, the person's decision of 14 October) ---- */
@@ -1116,10 +1147,12 @@ export class Coordinator extends Context.Service<
               // Read again where it is written: made a change meanwhile, it isn't made twice.
               const now = yield* notQuick(taskId)
               if (now !== null) return yield* new ToolRefused({ message: now })
+              // Made a change now, it has no pull request yet to follow its title.
               yield* (yield* Tasks).rename({
                 envelope: yield* envelope('task.rename', { taskId, title }, undefined, instance.systemId),
                 taskId,
                 title,
+                follow: 'none',
               })
               const under = yield* runs.makeChange(taskId, review, end, instance.systemId)
               // Made a change is a break in the lead's work: what it builds next may start afresh (ADR-038).
@@ -2051,6 +2084,26 @@ export class Coordinator extends Context.Service<
               return yield* replyOnPullRequest(access.projectId, input, Option.isNone(running) ? null : nameOf(running.value.agentId))
             }),
         ),
+        tool(
+          'edit_pull_request',
+          `Gives a pull request another title, description, or both, by its link or number, on its host. On one a task follows (it opened it, or follows it), title is the words alone, at most ${TITLE_LENGTH} characters: the project's naming puts the issue's key and the like around them, and the task's card takes the same words. description replaces what it says of the change; on one Althar opened, the review, the issue's link and Althar's line stay where they are. For a pull request Althar opened, or one by the person or by one of the repository's own people; an outside author's waits for the person's word and is refused here. It can be set back in a step, so do it unasked when a title or description no longer says what the change does, such as when the person asks a task's pull request to be retitled, and say what you changed in a line. Where the host refuses, as on a repository the account can't change, you get its words: pass them on.`,
+          {
+            type: 'object',
+            properties: {
+              pull_request: { type: 'string', description: 'Its link, or its number: #123.' },
+              title: { type: 'string' },
+              description: { type: 'string' },
+            },
+            required: ['pull_request'],
+          },
+          (access, input) =>
+            editPullRequest(
+              access.projectId,
+              input,
+              (taskId, edit) => changes.edit(taskId, edit, instance.coordinatorId),
+              agents.list.map((entry) => entry.definition.name),
+            ),
+        ),
         ...releaseTools(provide, tool),
         draftIssueTool,
         tool(
@@ -2250,7 +2303,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'rename_task',
-          `Gives a task another title, at most ${TITLE_LENGTH} characters, as the person can, when its title no longer says what it does: say what it does now, in a few words. What the person asked stays in its thread, and its slug and branch stay as they are.`,
+          `Gives a task another title, at most ${TITLE_LENGTH} characters, as the person can, when its title no longer says what it does: say what it does now, in a few words. What the person asked stays in its thread, and its slug and branch stay as they are. An open pull request Althar opened for it takes the new title too, by the project's naming; it says what became of it.`,
           {
             type: 'object',
             properties: {

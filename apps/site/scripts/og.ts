@@ -1,7 +1,7 @@
 /* Draws the link previews into public/og/. Starts the site's development server in this process, opens /og?page=<page> for each
    card in src/og/cards.tsx at twice its size, waits until the card says it is drawn, and saves what the browser
-   drew: scaled down to 1200×630, which keeps the words crisp, as a JPEG, which keeps the photograph's sky smooth and is
-   small enough that every previewer shows it. Run it after changing a card's words or its picture: `bun run og`. */
+   drew: scaled down to 1200×630, which keeps the words crisp, as a JPEG, which keeps the night sky smooth and is
+   small enough that every previewer shows it. Run it after changing a card's words, or the first screen's drawing: `bun run og`. */
 
 import { resolve } from 'node:path'
 

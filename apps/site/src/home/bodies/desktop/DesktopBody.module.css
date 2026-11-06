@@ -1,54 +1,343 @@
-/* Desktop: a claim a screen, each over the app. */
+/* The product's sections (DesktopBody.tsx): the cabin, in the orrery's night. The capsule's wall in the first screen's dark with its few stars, its milled isogrid only where a screen's light falls; a rail of stamps down it; the screens and the console behind hairlines; a window to open and one to close. Stamps in JetBrains Mono, the words in Inter. */
 
-.body { background: var(--n-2); overflow-x: clip; }
-
-.scene { padding: 150px 0 0; }
-.head {
-  display: grid;
-  justify-items: center;
-  gap: 22px;
-  max-width: 1040px;
-  margin: 0 auto;
-  padding: 0 var(--gut);
-  text-align: center;
+.body {
+  /* The changelog's warm dark and its one cobalt light. */
+  --ink: #efebe4;
+  --ink-2: #a8a197;
+  --ink-3: #8a8379;
+  --hair: rgba(255, 244, 232, 0.11);
+  --hair-2: rgba(255, 244, 232, 0.16);
+  /* The edge of a screen, a window or the console: one hairline, as Orrery draws. */
+  --frame: rgba(255, 244, 232, 0.13);
+  --lit: #b4bcff;
+  --glow: rgba(60, 76, 255, 0.9);
+  /* Orrery's ground. */
+  --dark: #070605;
+  --glass: #1c1a17;
+  /* The rail, and the stations' left and right edges. */
+  --rail: 56px;
+  --l: 112px;
+  --r: 64px;
+  --gap: 32px;
+  /* Between one station and the next. */
+  --between: 220px;
+  position: relative;
+  isolation: isolate;
+  overflow: clip;
+  padding: 104px 0 16px;
+  /* Flush under the band, as one night with the first screen; rounded only where it gives onto the footer's paper. */
+  border-radius: 0 0 32px 32px;
+  background: var(--dark);
+  color: var(--ink);
+  /* The app's pictures, behind the wall's glass: no frames of their own. */
+  --board-frame: 0 0 0 1px var(--frame), 0 30px 80px -30px rgba(0, 0, 0, 0.9), 0 0 120px -40px rgba(60, 76, 255, 0.45);
+  --talk-frame: none;
+  --bezel-fall: 0 40px 100px -40px rgba(0, 0, 0, 0.9);
+  --scene-frame: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 40px 100px -40px rgba(0, 0, 0, 0.8);
+}
+.body > .under { top: 0; bottom: 0; }
+@media (min-width: 1440px) {
+  .body { --l: max(160px, round(down, (100vw - 1320px) / 2, 1px)); --rail: calc(var(--l) - 64px); --r: var(--l); }
 }
 
-/* ---- the edge of the screen: a dark scene ---- */
-/* A dark panel, set in as the light one before it is. */
-.ink { position: relative; margin: 120px 16px 0; padding-bottom: 150px; border-radius: 30px; background: #0b0c12; }
-/* The whole dark panel is dark under the nav. */
-.ink > .under { top: 0; bottom: 0; }
-.ink .head h2 { color: #fff; }
-.ink .head p { color: rgba(255, 255, 255, 0.7); }
-/* Lit: the warm near-black a drawing lit by one light stands on, so the drawing has no edge. */
-.lit { background: #0e0b09; }
-/* The cabin: warm as the first screen, the sky's blue faint at its head and the fire's glow at its foot. */
-.cabin {
-  overflow: hidden;
-  padding-bottom: 130px;
+/* ---- the wall: Orrery's night, its few stars; the isogrid only where a screen lights its ribs; and its grain ---- */
+.wall {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
   background:
-    radial-gradient(ellipse 70% 45% at 50% 108%, rgba(255, 138, 60, 0.24), transparent 70%),
-    radial-gradient(ellipse 60% 40% at 50% -10%, rgba(80, 120, 255, 0.12), transparent 70%),
-    #0d0a08;
+    /* A warmth low down where the dawn will come. */
+    radial-gradient(ellipse 70% 700px at 50% 100%, rgba(255, 170, 110, 0.05), transparent 70%),
+    var(--wall-stars, none) 0 0 / 960px 960px;
 }
-.cabin .head p { color: rgba(255, 248, 240, 0.72); }
+.wallLit { position: absolute; inset: 0; opacity: 0.7; background: var(--wall-lit) 0 0 / 64px 110px; }
+.wallGrain { position: absolute; inset: 0; background-size: 128px 128px; opacity: 0.35; mix-blend-mode: overlay; }
 
-/* ---- the end: one line and the download, between hairlines, as the systems' band opens the page; the footer's words are the last large ones ---- */
-.end { margin-top: 170px; border-top: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2); }
-.endRow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 18px 40px; max-width: var(--max); margin: 0 auto; padding: 30px var(--gut); }
-.endLine { margin: 0; font-family: 'Inter Display', var(--display); font-size: clamp(22px, 2.3vw, 30px); font-weight: 300; line-height: 1.15; letter-spacing: -0.035em; color: var(--t-1); }
-.endLine b { font-weight: 680; letter-spacing: -0.04em; }
-/* Each sentence on a line of its own, where the line wraps. */
-.phoneBreak { display: none; }
+/* ---- a station: its stamp on the rail, its head, its screen ---- */
+.station { position: relative; margin-top: var(--between); padding: 0 var(--r) 0 var(--l); }
+.station.first { margin-top: 0; }
+/* The rail, from this station's node down to the next. */
+.station::before { content: ''; position: absolute; left: calc(var(--rail) + 5px); top: 14px; bottom: calc(-1 * var(--between) + 2px); width: 1px; background: var(--hair-2); }
+/* The rail's light, down from where you are reading. */
+.station[data-on]::before { background: linear-gradient(var(--lit), rgba(120, 132, 255, 0.4) 30%, var(--hair-2) 70%); }
+.notch::before { -webkit-mask: linear-gradient(#000 60%, transparent); mask: linear-gradient(#000 60%, transparent); }
 
+/* The stamp: the node on the rail, its number and name, a rule, the height it stands at. */
+.stamp {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 13px;
+  margin: 0 0 56px;
+  font: 500 11px/1 var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.stamp > b { font-weight: 500; color: var(--lit); }
+.node {
+  position: absolute;
+  left: calc(var(--rail) - var(--l));
+  top: 1px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--dark);
+  box-shadow: inset 0 0 0 1.5px rgba(255, 244, 232, 0.42);
+  transition: background 300ms ease, box-shadow 300ms ease;
+}
+[data-on] > .stamp .node { background: var(--lit); box-shadow: 0 0 0 4px rgba(60, 76, 255, 0.2), 0 0 14px var(--glow); }
+.rule { flex: 1; min-width: 12px; height: 1px; background: var(--hair); }
+.alt { letter-spacing: 0.1em; }
+.alt b { font-weight: 500; color: var(--ink); letter-spacing: 0.02em; }
+
+/* The head: the claim at the left, its lead at the right on its foot. */
+.head { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: var(--gap); align-items: end; }
+.title { grid-column: 1 / span 8; font-size: clamp(40px, 5.6vw, 86px); color: rgba(255, 248, 240, 0.8); }
+.title b { color: #fff; }
+.lead { grid-column: 9 / span 4; padding-bottom: 0.4em; font-size: 16px; line-height: 1.55; color: rgba(255, 248, 240, 0.64); }
+
+/* ---- a screen in the wall: its bezel, cut into the wall, its glass, and its light on the ribs ---- */
+.screen { position: relative; margin-top: 80px; }
+/* Its light, thrown on the wall round it. */
+.screen::before, .console::before, .tour::before {
+  content: '';
+  position: absolute;
+  inset: -22% -16%;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(closest-side, rgba(60, 76, 255, 0.11), rgba(60, 76, 255, 0.035) 55%, transparent);
+}
+.glass { position: relative; overflow: hidden; border-radius: 14px; background: var(--glass); box-shadow: 0 0 0 1px var(--frame), 0 50px 90px -50px rgba(0, 0, 0, 0.95); }
+/* The glass's sheen: a breath of light across its upper corner. */
+.glass::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.03), transparent 28%);
+}
+/* The picture's own place in the page, given over to the glass. */
+.glass > *, .board > * { max-width: none; margin: 0; padding: 0; }
+
+/* The coordinator: its words at the left, the conversation as a tall screen beside them. */
+.split { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: var(--gap); align-items: start; }
+.split .stamp { grid-column: 1 / -1; }
+.split .head { grid-column: 1 / span 5; grid-template-columns: minmax(0, 1fr); row-gap: 28px; align-items: start; padding-top: 24px; }
+.split .title, .split .lead { grid-column: 1; }
+.split .title { font-size: clamp(40px, 4.6vw, 76px); }
+.split .lead { max-width: 24em; padding: 0; font-size: 16.5px; }
+.split .screen { grid-column: 7 / span 6; margin-top: 0; }
+.talk { width: 100%; max-width: min(720px, (100svh - 140px) * 720 / 720); justify-self: end; }
+.talk [class*='AskOnce-module__frame'] { border-radius: 0; }
+
+/* The review, at its own measure. */
+.review { max-width: 1120px; }
+.review .glass { background: #17120f; }
+
+/* ---- the first window: the readouts across its top, the claim, and the board standing on the planet's lit edge ---- */
+.window {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: 24px;
+  background: #050403;
+  /* Its edge, one hairline, as Orrery draws; and its depth. */
+  box-shadow: inset 0 0 0 1px var(--frame), 0 60px 120px -40px rgba(0, 0, 0, 0.9);
+}
+.sky { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
+/* The stars: over the readouts and round the claim, few behind its words, none down by the lit edge. */
+.stars {
+  position: absolute;
+  inset: 0;
+  background: var(--stars) 0 0 / 480px 480px;
+  -webkit-mask: linear-gradient(#000 6%, rgba(0, 0, 0, 0.4) 18%, rgba(0, 0, 0, 0.3) 32%, transparent 48%);
+  mask: linear-gradient(#000 6%, rgba(0, 0, 0, 0.4) 18%, rgba(0, 0, 0, 0.3) 32%, transparent 48%);
+}
+/* The air over the lit edge: cobalt, a breath of violet to one side. */
+.haze {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 60% 34% at 50% 100%, rgba(43, 59, 255, 0.34), transparent 72%),
+    radial-gradient(ellipse 30% 22% at 70% 100%, rgba(122, 63, 240, 0.16), transparent 70%);
+}
+/* The night side of the planet, its edge lit: the top border of a wide ellipse thins away along its curve on its own. */
+.limb {
+  position: absolute;
+  left: -45%;
+  right: -45%;
+  top: calc(100% - 300px);
+  height: 1800px;
+  border-radius: 50%;
+  border-top: 1.5px solid #b4bcff;
+  background: linear-gradient(#060504, #040302 120px);
+  box-shadow:
+    0 -2px 10px -2px var(--glow),
+    0 -14px 50px -10px rgba(43, 59, 255, 0.55),
+    0 -60px 160px -30px rgba(43, 59, 255, 0.45);
+}
+.grain { position: absolute; inset: 0; background-size: 128px 128px; opacity: 0.55; mix-blend-mode: overlay; }
+
+.opening { padding: 30px 48px 0; }
+.opening .head { margin-top: 64px; }
+.board { position: relative; margin: 88px -24px 0; padding-bottom: 64px; }
+
+/* ---- what keeps you in flow: one console, its modules seamed into it ---- */
+.console {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 1px;
+  margin: 80px 0 0;
+  padding: 1px;
+  border-radius: 16px;
+  list-style: none;
+  background: var(--frame);
+  box-shadow: 0 50px 90px -50px rgba(0, 0, 0, 0.95);
+}
+/* The seams between the modules: one hairline. */
+.console > li:first-child { border-top-left-radius: 16px; }
+.module {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 470px;
+  overflow: hidden;
+  background: #0b0a08;
+}
+.span2 { grid-column: span 2; }
+.span3 { grid-column: span 3; }
+.span4 { grid-column: span 4; }
+.span6 { grid-column: span 6; }
+/* The console's corners, rounded as its glass is. */
+.module:nth-child(1) { border-top-left-radius: 15px; }
+.module:nth-child(2) { border-top-right-radius: 15px; }
+.module:nth-child(6) { border-bottom-left-radius: 15px; }
+.module:nth-child(7) { border-bottom-right-radius: 15px; }
+/* Its plate: the module's number, and its light. */
+.plate { display: flex; align-items: center; gap: 10px; padding: 24px 28px 0; font: 500 11px/1 var(--mono); letter-spacing: 0.12em; color: var(--ink-3); }
+.plate b { font-weight: 500; color: var(--ink-2); }
+.led { width: 6px; height: 6px; border-radius: 50%; background: #2a2420; box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.12); }
+.module:hover .led { background: var(--lit); box-shadow: 0 0 8px var(--glow); }
+.moduleHead { display: grid; gap: 8px; padding: 16px 28px 0; }
+.moduleTitle { margin: 0; font-family: 'Inter Display', var(--display); font-size: clamp(24px, 2.1vw, 30px); font-weight: 300; line-height: 1.06; letter-spacing: -0.035em; color: rgba(255, 248, 240, 0.86); text-wrap: balance; }
+.moduleTitle b { font-weight: 700; letter-spacing: -0.04em; color: #fff; }
+.moduleLead { max-width: 36em; margin: 0; font-size: 14.5px; line-height: 1.5; color: rgba(255, 248, 240, 0.6); text-wrap: pretty; }
+/* The piece at the module's foot, running off it as a screenshot would; a drawing whole in the middle; a small piece whole. */
+.piece { flex: 1; display: flex; align-items: flex-end; justify-content: center; min-height: 0; margin-top: 24px; padding: 0 28px; }
+.piece > * { width: 100%; margin-bottom: -28px; }
+.module[data-drawn] .piece { align-items: center; padding: 0 1px 1px; }
+.module[data-drawn] .piece > * { max-width: none; margin-bottom: 0; }
+.module[data-small] .piece { align-items: center; padding-bottom: 28px; }
+.module[data-small] .piece > * { margin-bottom: 0; }
+.span6 .piece > * { max-width: 1000px; }
+
+/* ---- the notch: the tour as it is, on the wall ---- */
+.tour { position: relative; margin-top: 24px; }
+.tour > * { margin-top: 64px; padding: 0; max-width: min(100%, calc((100svh - 130px) * 1.6 + 20px)); }
+
+/* ---- the last window: the planet's edge lower and flatter, the dawn along it, the last line and the download ---- */
+.endStation { margin-top: var(--between); padding: 0 16px; }
+.closing { display: grid; align-content: center; min-height: min(640px, 82svh); padding: 64px var(--r) 200px var(--l); }
+/* Lower now, the edge flatter. */
+.closing .limb { left: -140%; right: -140%; top: calc(100% - 168px); height: 3000px; }
+/* The dawn coming up along it at the right: the air warming over the sun, cobalt still beyond. */
+.closing .haze {
+  background:
+    radial-gradient(ellipse 60% 34% at 40% 100%, rgba(43, 59, 255, 0.3), transparent 72%),
+    radial-gradient(ellipse 46% 36% at 76% 100%, rgba(255, 150, 96, 0.34), transparent 70%),
+    radial-gradient(ellipse 24% 18% at 76% 92%, rgba(255, 206, 160, 0.3), transparent 70%);
+}
+.closing .stars {
+  -webkit-mask: linear-gradient(100deg, #000 30%, rgba(0, 0, 0, 0.5) 62%, transparent 80%), linear-gradient(#000 40%, transparent 72%);
+  mask: linear-gradient(100deg, #000 30%, rgba(0, 0, 0, 0.5) 62%, transparent 80%), linear-gradient(#000 40%, transparent 72%);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+}
+/* The sun, just breaking over the edge: a flare along it, white at its heart. */
+.sun { display: none; }
+.closing .sun {
+  display: block;
+  position: absolute;
+  left: 76%;
+  top: calc(100% - 156px);
+  width: 760px;
+  height: 120px;
+  translate: -50% -50%;
+  background:
+    radial-gradient(closest-side, rgba(255, 255, 255, 0.95), rgba(255, 236, 214, 0.5) 12%, rgba(255, 176, 120, 0.22) 38%, transparent),
+    radial-gradient(50% 6% at 50% 50%, rgba(255, 250, 240, 0.9), transparent);
+}
+.closing .sun::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  translate: -50% -50%;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 18px 6px rgba(255, 244, 228, 0.9), 0 0 60px 20px rgba(255, 196, 140, 0.45);
+}
+/* As the window comes up the screen, the sun comes up over the edge. */
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    .closing .sun { animation: rise linear both; animation-timeline: view(); animation-range: entry 10% contain 60%; }
+  }
+}
+@keyframes rise {
+  from { opacity: 0.25; scale: 0.45 0.6; translate: -50% -38%; }
+  to { opacity: 1; scale: 1; translate: -50% -50%; }
+}
+.endRow { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 28px 40px; }
+.endLine { margin: 0; font-family: 'Inter Display', var(--display); font-size: clamp(36px, 4.4vw, 64px); font-weight: 200; line-height: 1.02; letter-spacing: -0.045em; color: rgba(255, 248, 240, 0.8); text-wrap: balance; }
+.endLine b { font-weight: 700; letter-spacing: -0.05em; color: #fff; }
+.endGet > p { margin: 10px 0 0; }
+
+/* ---- narrower ---- */
+@media (max-width: 1099px) {
+  .body { --rail: 20px; --l: 56px; --r: 28px; --gap: 24px; --between: 160px; }
+  .title { grid-column: 1 / -1; }
+  .lead { grid-column: 1 / span 9; grid-row: 2; margin-top: 22px; padding: 0; }
+  .split { display: block; }
+  .split .head { padding-top: 0; }
+  .split .screen { margin-top: 64px; }
+  .talk { justify-self: auto; margin-inline: auto; }
+  .console { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .span2, .span3, .span4 { grid-column: span 1; }
+  .span6 { grid-column: span 2; }
+  .module:nth-child(n) { border-radius: 0; }
+  .opening { padding: 24px 28px 0; }
+}
 @media (max-width: 700px) {
-  .scene { padding-top: 96px; }
-  .ink { margin: 96px 12px 0; padding-bottom: 96px; border-radius: 24px; }
-  .cabin { padding-bottom: 72px; }
-  .end { margin-top: 110px; }
-  .endRow { flex-direction: column; align-items: stretch; gap: 22px; padding: 34px var(--gut) 36px; }
-  .endLine { font-size: 30px; line-height: 1.08; }
-  .phoneBreak { display: inline; }
+  .body { --rail: 10px; --l: 34px; --r: 16px; --between: 120px; padding-top: 72px; border-radius: 0 0 24px 24px; }
+  .opening { padding: 18px 16px 0; margin: 0 -18px 0 -24px; }
+  .window { border-radius: 24px; }
+  .opening .head { margin-top: 56px; }
+  .board { margin: 48px -16px 0; padding-bottom: 36px; }
+  .stamp { margin-bottom: 36px; gap: 10px; letter-spacing: 0.1em; }
+  .alt { display: none; }
+  .glass { border-radius: 12px; }
+  .console { grid-template-columns: minmax(0, 1fr); border-radius: 12px; }
+  .span6 { grid-column: auto; }
+  .module { min-height: 0; }
+  .plate { padding: 20px 20px 0; }
+  .moduleHead { padding: 14px 20px 0; }
+  .piece { padding: 0 20px; margin-top: 20px; }
+  .module:not([data-drawn]):not([data-small]) .piece { padding-bottom: 28px; }
+  .tour > * { margin-top: 40px; }
+  .endStation { padding: 0 10px; }
+  .closing { padding: 56px 20px 170px; min-height: 76svh; }
+  .closing .sun { left: 70%; width: 420px; }
+  .endRow { flex-direction: column; align-items: stretch; }
+  .endLine { font-size: 34px; }
   .endGet > div { display: grid; gap: 10px; }
   .endGet > div > a { justify-content: center; height: 50px; }
   .endGet > p { text-align: center; }

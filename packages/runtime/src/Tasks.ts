@@ -18,7 +18,6 @@ import { SqlClient } from 'effect/sql'
 
 import { touchCard } from './cards'
 import { Changes } from './Changes'
-import { TITLE_LENGTH } from './Coordinator'
 import { NotFound, TaskRefused } from './errors'
 import { makeScratch } from './firstWrite'
 import { branchExists, restoreDetachedWorktree, restoreWorktree } from './git'
@@ -31,7 +30,7 @@ import { Plans } from './Plans'
 import { copyReviewed, reviewOf } from './reviewing'
 import { touchQuestion } from './Questions'
 import { change, fact, timestamp } from './records'
-import { indexTask } from './Search'
+import { retitleTask } from './taskTitle'
 import { type Lead, PlanParameters, Runs } from './Runs'
 import { Sessions } from './Sessions'
 import { LeftBehind } from './LeftBehind'
@@ -199,9 +198,15 @@ export class Tasks extends Context.Service<
     reopen(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
     /**
      * Gives the task another title, in any state, and records who did. Its slug, its branch, its worktree's
-     * folder and the title of a pull request or an issue already opened for it stay as they were made.
+     * folder and an issue's title stay as they were made; each open pull request Althar opened for it takes the new
+     * title, by the project's naming: `now`, saying what became of each, else `later`, in the background, or `none`.
      */
-    rename(input: { readonly envelope: CommandEnvelope; readonly taskId: string; readonly title: string }): Effect.Effect<void, unknown>
+    rename(input: {
+      readonly envelope: CommandEnvelope
+      readonly taskId: string
+      readonly title: string
+      readonly follow?: 'now' | 'later' | 'none'
+    }): Effect.Effect<ReadonlyArray<string>, unknown>
     /**
      * The person opened the task's screen: when, kept. Seeing a task moves
      * nothing: only the person settles one that finished (`markDone`) or
@@ -564,41 +569,25 @@ export class Tasks extends Context.Service<
 
       /*
        * Only the title changes: the slug, the branch and the worktree's folder
-       * were made from the first one and other things find them by it, and a
-       * pull request or issue opened already keeps the title it was opened with.
-       * The event says who renamed it, and what it was, so the person's rename
-       * and a later coordinator's or lead's are one command.
+       * were made from the first one and other things find them by it. Each
+       * open pull request Althar opened for it follows, by the project's
+       * naming: at once, for the coordinator, which says what became of it;
+       * in the background, for the person, whose thread hears what a host
+       * refused. The event says who renamed it, and what it was, so the
+       * person's rename and a later coordinator's or lead's are one command.
        */
-      const rename = (input: { readonly envelope: CommandEnvelope; readonly taskId: string; readonly title: string }) =>
+      const rename = (input: {
+        readonly envelope: CommandEnvelope
+        readonly taskId: string
+        readonly title: string
+        readonly follow?: 'now' | 'later' | 'none'
+      }) =>
         Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const title = input.title.trim()
-          if (title === '') return yield* new TaskRefused({ taskId: input.taskId, why: 'no_title' })
-          if (title.length > TITLE_LENGTH) return yield* new TaskRefused({ taskId: input.taskId, why: 'title_too_long' })
-          const renamed = yield* sql.withTransaction(
-            Effect.gen(function* () {
-              const [task] = yield* sql<{
-                projectId: ProjectId
-                title: string
-              }>`SELECT project_id, title FROM tasks WHERE id = ${input.taskId}`
-              if (task === undefined) return yield* new NotFound({ kind: 'task', id: input.taskId })
-              if (task.title === title) return false
-              const revision = yield* change('tasks', input.taskId, { title })
-              yield* fact({
-                projectId: task.projectId,
-                aggregateType: 'task',
-                aggregateId: input.taskId,
-                revision,
-                type: 'task.renamed',
-                payload: { title, was: task.title },
-                actorId: input.envelope.actorId,
-                commandId: input.envelope.commandId,
-              })
-              yield* indexTask(input.taskId)
-              return true
-            }),
-          )
-          if (renamed) yield* touchCard(input.taskId)
+          const renamed = yield* retitleTask(input)
+          if (!renamed || input.follow === 'none') return []
+          if (input.follow === 'now') return yield* changes.followTitle(input.taskId)
+          yield* changes.followTitleLater(input.taskId)
+          return []
         })
 
       const see = (input: { readonly taskId: string }) =>

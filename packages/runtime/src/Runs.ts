@@ -3482,9 +3482,21 @@ export class Runs extends Context.Service<
           return undescribed
         })
 
-      /** The lead says its step is done: Implement, or a round of settling. */
-      const finishStep = (access: ToolAccess, input: unknown) =>
-        Effect.gen(function* () {
+      /**
+       * The lead says its step is done: Implement, or a round of settling. A
+       * description it gives reaches the task's pull requests open already,
+       * which opened with an earlier one; what became of each is said after.
+       */
+      const finishStep = (access: ToolAccess, input: unknown) => {
+        let described: ReadonlyArray<string> = []
+        /** Sets the descriptions given on the task's open pull requests, once the step is taken; what came of it is said at the end. */
+        const describe = (given: Readonly<Record<string, string>> | undefined, built: string | null) =>
+          access.taskId === null || given === undefined
+            ? Effect.void
+            : Effect.map(changes.redescribe(access.taskId, given, built), (lines) => {
+                described = lines
+              })
+        return Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           // The model this step's turn ran on, kept with its report so its round keeps its name after a switch (DEV-154).
           const model = yield* modelOf(access.sessionId)
@@ -3551,6 +3563,7 @@ export class Runs extends Context.Service<
               },
               { id: itemId },
             )
+            yield* describe(Object.keys(kept).length === 0 ? undefined : kept, built)
             // A step done is a break in the lead's work, with a run or without: its next turn may start afresh (ADR-038).
             yield* sessions.atBreak(access.threadId)
             return reply('Althar has your summary.')
@@ -3640,6 +3653,7 @@ export class Runs extends Context.Service<
             }),
           )
           if (!taken) return yield* dropped
+          yield* describe(Object.keys(kept).length === 0 ? undefined : kept, built)
           // A step done is a break in the lead's work: its next turn may start afresh (ADR-038).
           yield* sessions.atBreak(access.threadId)
           if (quiet) {
@@ -3686,7 +3700,8 @@ export class Runs extends Context.Service<
           }
           yield* conclude(current)
           return 'Althar has your summary. The task is ready for the person.'
-        })
+        }).pipe(Effect.map((said) => (described.length === 0 ? said : `${said} ${described.join(' ')}`)))
+      }
 
       /**
        * The lead shows the person pictures in its thread, at any time, with a
