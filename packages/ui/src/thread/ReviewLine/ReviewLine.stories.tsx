@@ -17,7 +17,7 @@ const FINDINGS: ReviewerFinding[] = [
 
 const said = (
   <>
-    <Reviewer verdict={Verdict.Changes} findings={FINDINGS} />
+    <Reviewer verdict={Verdict.Changes} findings={FINDINGS} said={false} />
     <Markdown source="The limiter is in the right place. Three things before this goes in, the first the one that matters." />
   </>
 )

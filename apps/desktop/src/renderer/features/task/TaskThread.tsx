@@ -367,7 +367,7 @@ export function TaskThread({ rounds, versionOf, settledOf, reviewing = null, set
             findings={block.result.findings.length}
             {...(settled === undefined ? {} : { settled })}
           >
-            <ReviewReport id={block.id} result={block.result} />
+            <ReviewReport id={block.id} result={block.result} said={false} />
             {block.settle !== null && round(block.settle)}
           </ReviewLine>
         )

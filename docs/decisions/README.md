@@ -104,3 +104,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [094](094-skills-one-store-a-curated-catalog.md) | Skills are one store on the computer, from a curated catalog, given to each lead for its session |
 | [095](095-skill-and-openspec-files-stay-off-the-repository.md) | Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them |
 | [096](096-runs-show-in-the-pill-over-the-composer-again.md) | Runs show in the pill over the composer again, in a task's and the coordinator's, in the row the lead's processes have; ADR-090's removal of it is reversed |
+| [097](097-thinking-shows-live-then-folds-reviews-are-a-line.md) | Thinking shows while it happens, under the turn's line, then folds to "Thought for 14s · what about"; streamed text comes at an even pace, a word at a time; in a task's thread a review is one line, the lead's latest handoff open under it |

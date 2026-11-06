@@ -56,6 +56,40 @@ if (mode === 'shots') {
     await page.waitForTimeout(Number(every))
   }
   say(`${name}: ${count} frames, every ${every} ms`)
+} else if (mode === 'record') {
+  // A video of the page as it plays, for `seconds`, at 1×: test-results/lab/<name>.webm.
+  const [scene = 'live', seconds = '14', theme = 'light'] = rest
+  const size = { width: 900, height: 620 }
+  const context = await browser.newContext({ viewport: size, deviceScaleFactor: 1, recordVideo: { dir: out, size } })
+  const page = await context.newPage()
+  await page.goto(url(scene, theme))
+  await page.waitForTimeout(Number(seconds) * 1000)
+  const video = page.video()
+  await context.close()
+  if (video !== null) {
+    const { rename } = await import('node:fs/promises')
+    await rename(await video.path(), join(out, `${name}.webm`))
+  }
+  say(`${name}: ${seconds}s of ${scene}`)
+} else if (mode === 'hold') {
+  // Scrolled up from the end, as a thought folds below: where what the person reads stands, before and after.
+  const page = await open('live', 'light', 900, 620)
+  await page.getByRole('button', { name: /^Thinking/ }).waitFor()
+  const scroll = scroller(page)
+  await scroll.evaluate((el) => el.scrollBy(0, -260))
+  await page.waitForTimeout(200)
+  const anchor = page.getByText('Does the back-off survive a restart?')
+  const before = (await anchor.boundingBox())?.y ?? 0
+  const top = await scroll.evaluate((el) => el.scrollTop)
+  await page
+    .getByRole('button', { name: /^Thought/ })
+    .last()
+    .waitFor()
+  await page.waitForTimeout(600)
+  const after = (await anchor.boundingBox())?.y ?? 0
+  say(
+    `scrolled up: what it read moved ${(after - before).toFixed(1)}px as the thought folded (scrollTop ${top} → ${await scroll.evaluate((el) => el.scrollTop)})`,
+  )
 } else if (mode === 'timing') {
   const scene = name === 'shot' ? 'three' : name
   const seconds = Number(rest[0] ?? '20')

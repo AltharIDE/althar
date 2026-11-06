@@ -3087,17 +3087,16 @@ describe('a task', () => {
     expect(screen.queryByText('Edit checkout.ts')).toBeNull()
     expect(screen.getByRole('button', { name: /^Worked/ })).toBeTruthy()
     expect(screen.getByText('Capped the retries at three.')).toBeTruthy()
-    // Each review is a line, the lead's latest handoff open under them; opened, the reviewer says what it found in its own voice.
-    expect(screen.queryByText('Needs changes: 3 findings.')).toBeNull()
+    // Each review is a line, its verdict in it, the lead's latest handoff open under them; opened, the reviewer says what it
+    // found in its own voice: each finding how much it matters, where, and what; then what it said.
+    expect(screen.queryByText('The retry never stops.')).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: /^Review.*3 findings/ }))
     await userEvent.click(screen.getByRole('button', { name: /^Review.*Passed/ }))
-    // The reviewer: its verdict in a sentence, each finding how much it matters, where, and what; then what it said.
-    expect(screen.getByText('Needs changes: 3 findings.')).toBeTruthy()
+    expect(screen.queryByText('Needs changes: 3 findings.')).toBeNull()
     expect(screen.getByText('The retry never stops.')).toBeTruthy()
     expect(screen.getByTitle('src/checkout.ts:12').textContent).toBe('checkout.ts:12')
     expect(screen.getByText('README.md')).toBeTruthy()
     expect(screen.getByText('One thing to fix.')).toBeTruthy()
-    expect(screen.getByText('Looks good to me.')).toBeTruthy()
     // A finding opens in the code, where it is now.
     await userEvent.click(screen.getByRole('button', { name: /The retry never stops\./ }))
     expect(await screen.findByRole('dialog', { name: 'Changes' })).toBeTruthy()

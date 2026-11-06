@@ -151,7 +151,7 @@ export const TwoReviewRounds: Story = {
           <Markdown source={RESULT} />
         </Round>
         <ReviewLine model={CODEX} verdict={Verdict.Changes} findings={3} settled="2 fixed, 1 declined">
-          <Reviewer verdict={Verdict.Changes} findings={FINDINGS} />
+          <Reviewer verdict={Verdict.Changes} findings={FINDINGS} said={false} />
           <Markdown source="The back-off is in the right place and the connector change is small. Three things before this goes in." />
           <Round model={OPUS} at="2h ago">
             <WorkLine took="3m 18s" summary="edited 2 files, read 1 file, ran 2 commands" />
@@ -160,6 +160,7 @@ export const TwoReviewRounds: Story = {
         </ReviewLine>
         <ReviewLine model={CODEX} verdict={Verdict.Changes} findings={1} settled="1 fixed">
           <Reviewer
+            said={false}
             verdict={Verdict.Changes}
             findings={[
               {
