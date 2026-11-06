@@ -103,3 +103,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [093](093-a-task-works-toward-the-project-s-branch-or-its-own.md) | A task works toward a branch, the project's Work toward or its own from its plan card: it starts there, its pull request goes there, and keeping it current, conflicts, checks, diffs and the push guard go by it; release branches are made and brought back on the person's word |
 | [094](094-skills-one-store-a-curated-catalog.md) | Skills are one store on the computer, from a curated catalog, given to each lead for its session |
 | [095](095-skill-and-openspec-files-stay-off-the-repository.md) | Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them |
+| [096](096-runs-show-in-the-pill-over-the-composer-again.md) | Runs show in the pill over the composer again, in a task's and the coordinator's, in the row the lead's processes have; ADR-090's removal of it is reversed |

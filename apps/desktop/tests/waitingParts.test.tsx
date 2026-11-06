@@ -9,7 +9,7 @@ import { titleOf } from '../src/renderer/shared/callCommand'
 import { contextMeter } from '../src/renderer/shared/ContextMeter'
 import { Holders } from '../src/renderer/shared/Holders'
 import { headsOf } from '../src/renderer/shared/mergeHere'
-import { runCardOf, runningOf } from '../src/renderer/shared/running'
+import { pillOf, runCardOf, runIdOf, runningOf } from '../src/renderer/shared/running'
 import { fakeClient, snapshot } from './fixtures'
 import { withServices } from './render'
 
@@ -73,6 +73,29 @@ describe('how full the lead’s context is', () => {
 })
 
 describe('what runs, and what waits', () => {
+  const run = {
+    ...serving,
+    id: 'proc_1',
+    taskId: 't1',
+    runnableId: null,
+    where: 'Clearing prototype',
+    name: 'Clearing prototype',
+    url: 'http://localhost:5363/',
+    startedAt: '2026-10-10T08:00:00.000Z',
+  }
+
+  it('lists a task’s running runs after what its lead left, and not one that ended', () => {
+    const rows = pillOf([serving], [run, { ...run, id: 'proc_2', ended: { at: NOW, code: 1 } }], NOW)
+    expect(rows.map((row) => row.id)).toEqual(['bg-1', 'run:proc_1'])
+    expect(rows[1]).toMatchObject({ name: 'Clearing prototype', url: 'localhost:5363', since: '1h 5m', output: false })
+    expect(runIdOf('run:proc_1')).toBe('proc_1')
+    expect(runIdOf('bg-1')).toBeNull()
+  })
+
+  it('shows one server once when the lead and a run are the same', () => {
+    expect(pillOf([serving], [{ ...run, url: 'http://localhost:5173' }], NOW).map((row) => row.id)).toEqual(['bg-1'])
+  })
+
   it('names a command by its label only where that says it shorter', () => {
     const [same, shorter] = runningOf(
       [

@@ -1,4 +1,4 @@
-import type { BackgroundCommand } from '@althar/contracts'
+import type { BackgroundCommand, Launch } from '@althar/contracts'
 import type { RunCardProps, RunningProcess } from '@althar/ui'
 
 import type { RunContent } from './thread'
@@ -44,3 +44,31 @@ export const runCardOf = (run: RunContent, now: string): Pick<RunCardProps, 'whe
     ? {}
     : { ended: { code: run.ended.code, stopped: run.ended.stopped, ...(run.ended.last === null ? {} : { last: run.ended.last }) } }),
 })
+
+/** Marks a run's row among a lead's in the pill, so the two never share an id. */
+const RUN = 'run:'
+
+/** The id of the Althar run a pill row stands for, or null for one its lead left running. */
+export const runIdOf = (rowId: string): string | null => (rowId.startsWith(RUN) ? rowId.slice(RUN.length) : null)
+
+/**
+ * What the pill over a composer lists: what the lead left running, then the runs under way (ADR-090, reversed in
+ * ADR-096). A run of the same server as one the lead left is that row, not a second. A run's output is its card's.
+ */
+export const pillOf = (
+  left: ReadonlyArray<BackgroundCommand & { readonly where?: string }>,
+  launches: ReadonlyArray<Launch>,
+  now: string,
+  { where = false }: { readonly where?: boolean } = {},
+): ReadonlyArray<RunningProcess> => {
+  const served = new Set(left.flatMap((command) => (command.ended === null && command.url != null ? [addressOf(command.url)] : [])))
+  const own = launches.filter((launch) => launch.ended === null && (launch.url == null || !served.has(addressOf(launch.url))))
+  return [
+    ...runningOf(left, now, { where }),
+    ...runningOf(
+      own.map((launch) => ({ ...launch, id: `${RUN}${launch.id}` })),
+      now,
+      { where },
+    ).map((row) => ({ ...row, output: false })),
+  ]
+}
