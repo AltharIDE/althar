@@ -19,8 +19,10 @@
     how long it has been up, and Stop. The pill over the coordinator's
     composer lists the project's runs of no task ("Run on main", a branch or
     a pull request), in the same row.
-  - **One server is one row.** A run of the same address as a process its
-    lead left running is shown as the lead's.
+  - **Each process is its own row.** A run and a process its lead left running
+    share no identity, only possibly the address they print, and one may still
+    be starting or have failed to bind; so they are never merged, and each row
+    stops its own.
   - **A run's output stays in its card** in the thread, so its row has no
     Output.
   - **How long it has been up is the whole reminder.** The row's time keeps

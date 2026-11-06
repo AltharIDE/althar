@@ -53,22 +53,19 @@ export const runIdOf = (rowId: string): string | null => (rowId.startsWith(RUN) 
 
 /**
  * What the pill over a composer lists: what the lead left running, then the runs under way (ADR-090, reversed in
- * ADR-096). A run of the same server as one the lead left is that row, not a second. A run's output is its card's.
+ * ADR-096). They are separate processes with no shared identity, so a run is never taken for a lead's row because
+ * the two say one address; each keeps its own row and its own Stop. A run's output is its card's.
  */
 export const pillOf = (
   left: ReadonlyArray<BackgroundCommand & { readonly where?: string }>,
   launches: ReadonlyArray<Launch>,
   now: string,
   { where = false }: { readonly where?: boolean } = {},
-): ReadonlyArray<RunningProcess> => {
-  const served = new Set(left.flatMap((command) => (command.ended === null && command.url != null ? [addressOf(command.url)] : [])))
-  const own = launches.filter((launch) => launch.ended === null && (launch.url == null || !served.has(addressOf(launch.url))))
-  return [
-    ...runningOf(left, now, { where }),
-    ...runningOf(
-      own.map((launch) => ({ ...launch, id: `${RUN}${launch.id}` })),
-      now,
-      { where },
-    ).map((row) => ({ ...row, output: false })),
-  ]
-}
+): ReadonlyArray<RunningProcess> => [
+  ...runningOf(left, now, { where }),
+  ...runningOf(
+    launches.filter((launch) => launch.ended === null).map((launch) => ({ ...launch, id: `${RUN}${launch.id}` })),
+    now,
+    { where },
+  ).map((row) => ({ ...row, output: false })),
+]
