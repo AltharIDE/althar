@@ -11,9 +11,10 @@ import { SqlClient } from 'effect/sql'
 import { thisDevice } from './device'
 import { Busy } from './Busy'
 import { Connections } from './Connections'
-import { touchCard, touchTask } from './cards'
+import { touchCard } from './cards'
 import { Changes } from './Changes'
 import { endWords, modelNamer, teamOf, withEffort } from './coordinatorNews'
+import { armDraftDeadlines, surfaceDraftAt } from './draftDeadlines'
 import { suggestedCoordinator } from './coordinatorChoice'
 import { Accounts } from './Accounts'
 import { AutomationRefused, Automations } from './Automations'
@@ -323,6 +324,13 @@ export class Coordinator extends Context.Service<
       // The runtime's own lifetime: a draft's deadline outlives the turn that made it.
       const lifetime = yield* Effect.scope
       const draftingMs = Duration.toMillis(config.drafting ?? Duration.millis(DRAFTING_MS))
+      // A launch arms the deadline of every draft already waiting: the wake the launch before it set died with it.
+      yield* Effect.forkIn(
+        armDraftDeadlines(draftingMs).pipe(
+          Effect.catchCause((cause) => Effect.logWarning('Could not arm the deadlines of drafts left waiting', cause)),
+        ),
+        lifetime,
+      )
       const agents = yield* Agents
       const sessions = yield* Sessions
       const projects = yield* Projects
@@ -880,16 +888,9 @@ export class Coordinator extends Context.Service<
           // Its plan comes in this turn. If it never does, every open board is told when its moment ends, so the draft
           // shows in Needs you then: a board reads again only when the feed says something changed.
           yield* Effect.forkIn(
-            Effect.gen(function* () {
-              // A moment past the cutoff, so a clock that reads the same millisecond still finds it over.
-              yield* Effect.sleep(Duration.millis(draftingMs + 50))
-              const sql = yield* SqlClient.SqlClient
-              const [still] = yield* sql<{ one: number }>`
-                SELECT 1 AS one FROM tasks k
-                WHERE k.id = ${created.taskId} AND k.state = 'draft'
-                  AND NOT EXISTS (SELECT 1 FROM task_plans p WHERE p.task_id = k.id AND p.state IN ('proposed', 'accepted'))`
-              if (still !== undefined) yield* touchTask(created.taskId)
-            }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not surface a draft whose plan never came', cause))),
+            surfaceDraftAt(created.taskId, draftingMs).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not surface a draft whose plan never came', cause)),
+            ),
             lifetime,
           )
           const from = issue === undefined ? '' : drafted.part_of === true ? `, part of ${issue.key}` : `, from ${issue.key}`

@@ -29,11 +29,11 @@ import { callTool, repository, runtime, until } from './support'
 const GB = 1024 ** 3
 
 /** The runtime, on a machine that runs `n` at once, with the queries the screens read. */
-const machine = (n: number, drafting?: Duration.Duration) =>
+const machine = (n: number, drafting?: Duration.Duration, database = ':memory:') =>
   Queries.layer.pipe(
     Layer.provideMerge(
       runtime(
-        ':memory:',
+        database,
         {},
         {
           busy: { machine: { cores: Math.ceil(n * 2.5), memory: (4 + 3 * n) * GB } },
@@ -359,6 +359,54 @@ describe('a task only drafted, its plan not yet proposed', () => {
       const home = yield* (yield* Queries).home()
       assert.isTrue(home.tasks.some((one) => one.taskId === task.id && one.phase === 'stopped'))
     }).pipe(Effect.provide(machine(4, Duration.seconds(5)))),
+  )
+
+  it.live('arms a draft left by an earlier launch, so it reaches the board when its moment passes', () =>
+    Effect.gen(function* () {
+      const database = join(mkdtempSync(join(tmpdir(), 'althar-draft-launch-')), 'profile.sqlite')
+      const drafting = Duration.seconds(2)
+      // The launch before: a task drafted with no plan, made outside any coordinator turn, whose wake died with it.
+      const left = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const context = yield* Layer.build(machine(4, drafting, database))
+          return yield* Effect.provideContext(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              const projectId = yield* project()
+              const created = yield* (yield* Projects).createTask({
+                envelope: yield* Runtime.envelope('task.create', { title: 'Left without a plan' }),
+                projectId,
+                title: 'Left without a plan',
+                description: 'A draft whose plan never came.',
+                draft: true,
+              })
+              const [latest] = yield* sql<{ cursor: number }>`SELECT coalesce(max(cursor), 0) AS cursor FROM change_log`
+              return { projectId, taskId: created.taskId, cursor: latest?.cursor ?? 0 }
+            }),
+            context,
+          )
+        }),
+      )
+      // The next launch arms it: nothing else writes to the task, so only its wake can reach the board.
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const context = yield* Layer.build(machine(4, drafting, database))
+          yield* Effect.provideContext(
+            Effect.gen(function* () {
+              const queries = yield* Queries
+              yield* until(queries.changesSince(left.cursor, 100), (changes) =>
+                changes.some((change) => change.aggregateType === 'task' && change.aggregateId === left.taskId),
+              )
+              const board = yield* Effect.orDie(queries.board(left.projectId))
+              const card = board.tasks.find((task) => task.taskId === left.taskId)
+              assert.strictEqual(card?.phase, 'stopped')
+              assert.isDefined(card?.stopped)
+            }),
+            context,
+          )
+        }),
+      )
+    }),
   )
 
   it.live('is the person’s once its moment is over, even if no plan came and no event did', () =>
