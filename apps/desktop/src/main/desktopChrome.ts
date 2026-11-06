@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, posix } from 'node:path'
 
 import { watchPortalSetting } from './colorScheme'
 import {
@@ -126,9 +126,9 @@ const isCached = (value: unknown, desktop: string): value is CachedFacts => {
 
 /** The XDG cascade for one of KDE's files: the person's own (XDG_CONFIG_HOME, else ~/.config) first, then each of XDG_CONFIG_DIRS (else /etc/xdg). */
 export const configCascade = (name: string, env: Readonly<Record<string, string | undefined>>, home: string): string[] => {
-  const own = env.XDG_CONFIG_HOME !== undefined && env.XDG_CONFIG_HOME !== '' ? env.XDG_CONFIG_HOME : join(home, '.config')
+  const own = env.XDG_CONFIG_HOME !== undefined && env.XDG_CONFIG_HOME !== '' ? env.XDG_CONFIG_HOME : posix.join(home, '.config')
   const system = (env.XDG_CONFIG_DIRS ?? '').split(':').filter((dir) => dir.startsWith('/'))
-  return [own, ...(system.length > 0 ? system : ['/etc/xdg'])].map((dir) => join(dir, name))
+  return [own, ...(system.length > 0 ? system : ['/etc/xdg'])].map((dir) => posix.join(dir, name))
 }
 
 const SHELL = ['call', '--session', '--dest', 'org.gnome.Shell', '--object-path', '/org/gnome/Shell']
