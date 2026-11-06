@@ -271,7 +271,9 @@ export const words = (
       case 'DatabaseInUse':
         return 'Another copy of Althar is using this profile.'
       case 'PushRefused': {
-        const remote = text(error, 'remote')
+        // Every field shown is redacted here, for a refusal kept before Althar hid secrets in what git said.
+        const remote = redacted(text(error, 'remote'))
+        const said = redacted(text(error, 'said'))
         const why = text(error, 'why')
         if (why === 'behind')
           return `${remote} has commits that aren’t here yet, so it didn’t take the push. Bring them in, then push again.`
@@ -282,7 +284,7 @@ export const words = (
         if (why === 'protected') {
           const needs = fieldOf(error, 'needs')
           if (Array.isArray(needs)) {
-            const held = text(error, 'said')
+            const held = said
             const many = held.includes(',')
             const named = needs
               .map((setting) => repositorySwitches[setting as keyof typeof repositorySwitches])
@@ -298,13 +300,10 @@ export const words = (
         if (why === 'unplaced')
           return `The host doesn’t say where ${remote}’s branch is, and this project’s remotes don’t settle it, so nothing was pushed.`
         if (why === 'no_push_address')
-          return `This clone’s push address for ${remote} is ‘${text(error, 'said')}’, which isn’t a repository, so nothing was pushed. Set another with git remote set-url --push.`
-        if (why === 'refused') {
-          const said = redacted(text(error, 'said'))
-          return sentence(`${remote} refused the push${said === '' ? '' : `: ${said}`}`)
-        }
+          return `This clone’s push address for ${remote} is ‘${said}’, which isn’t a repository, so nothing was pushed. Set another with git remote set-url --push.`
+        if (why === 'refused') return sentence(`${remote} refused the push${said === '' ? '' : `: ${said}`}`)
         // Where the person's own git pushed, the host by name: GitLab, not origin/a-long-branch-name.
-        const host = text(error, 'host')
+        const host = redacted(text(error, 'host'))
         const where = host === '' ? remote : host
         if (why === 'forbidden')
           return `Your account can’t push to this repository on ${where}, so nothing was pushed. Push to a fork of it, or ask its owners for access.`

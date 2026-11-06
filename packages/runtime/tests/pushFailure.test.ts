@@ -184,6 +184,19 @@ describe('a push that failed', () => {
     assert.notInclude(`${kept.message}\n${kept.detail ?? ''}`, token)
   })
 
+  it('hides a secret in what an older refusal kept, whatever it refused for', () => {
+    const token = 'ghp_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8'
+    const shown = (fields: Partial<ConstructorParameters<typeof PushRefused>[0]>) =>
+      words(new PushRefused({ taskId: 'task', remote: 'origin/fix-it', why: 'refused', ...fields }), String).message
+    const address = shown({ why: 'no_push_address', said: `https://bot:${token}@github.com/acme/orchy` })
+    assert.notInclude(address, token)
+    assert.include(address, 'isn’t a repository')
+    const held = shown({ why: 'protected', needs: ['writeSkills'], said: `.claude/skills/${token}/SKILL.md` })
+    assert.notInclude(held, token)
+    assert.include(held, 'Nothing was pushed: .claude/skills/[redacted]/SKILL.md')
+    assert.notInclude(shown({ why: 'forbidden', remote: `https://bot:${token}@github.com/acme/orchy`, host: `${token}.example` }), token)
+  })
+
   it('keeps Althar’s own stop reason separate from git’s stderr', () => {
     assert.deepInclude(pushed(failed('', { reason: 'git said more than Althar reads.' })), {
       detail: 'git said more than Althar reads.',
