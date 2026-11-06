@@ -1,4 +1,4 @@
-# ADR-096: The window is dressed for the desktop it sits on, decided by Althar, not chosen
+# ADR-097: The window is dressed for the desktop it sits on, decided by Althar, not chosen
 
 - **Status:** Accepted; refines [ADR-028](028-linux-windows-packages-and-the-keyring.md)'s frameless window off a Mac
 - **Date:** 2026-11-06

@@ -138,7 +138,7 @@ export type ProjectTabsProps = RootProps<
     onToggleMaximize?: () => void
     /** The window is maximized: the third button restores it. */
     maximized?: boolean
-    /** With lights='drawn': which buttons, whose manner, at which end (the desktop's, ADR-096); Althar's dots at the start where not given. */
+    /** With lights='drawn': which buttons, whose manner, at which end (the desktop's, ADR-097); Althar's dots at the start where not given. */
     controls?: WindowControls
     text?: Partial<ProjectTabsText>
   }

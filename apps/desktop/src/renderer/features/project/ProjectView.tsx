@@ -5,6 +5,7 @@ import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
 import type { ThreadItem } from '@althar/contracts'
 
 import {
+  Behind,
   Composer,
   DictationTray,
   LinkButton,
@@ -27,6 +28,7 @@ import { useServices } from '../../data/services'
 import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
 import { draftKey, setDraftDictated, useDraft } from '../../shared/drafts'
+import { pillOf, runIdOf } from '../../shared/running'
 import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { useModelNames } from '../../shared/modelNames'
@@ -262,6 +264,8 @@ export function ProjectView({
   const coordinator = model.coordinator
   // Every run in the project, the tasks' too: Run's list and its switcher say them.
   const launches = coordinator?.launches ?? []
+  // Those of no task are the project's own; a task's show over its own composer.
+  const projectRuns = launches.filter((launch) => launch.taskId === null)
   const offer = useForkOffer(about ?? '', model.repositories)
   // A running turn says how long it has worked so far; a plan on its countdown, when it starts; a run, how long it has been up.
   const now = useNow(
@@ -407,7 +411,25 @@ export function ProjectView({
             </>
           ) : null
         }
-        above={offer.offering !== null && <ForkOffer offer={offer} />}
+        // The project's own runs, the ones of no task, as the task's chip says its own (ADR-096).
+        above={
+          (offer.offering !== null || projectRuns.some((launch) => launch.ended === null)) && (
+            <>
+              {offer.offering !== null && <ForkOffer offer={offer} />}
+              <Behind
+                processes={pillOf([], projectRuns, now, { where: true })}
+                onStop={(id) => {
+                  const run = runIdOf(id)
+                  if (run !== null) void model.stopLaunch(run)
+                }}
+                onOpenUrl={(id) => {
+                  const url = projectRuns.find((launch) => launch.id === runIdOf(id))?.url
+                  if (url != null) window.open(url, '_blank')
+                }}
+              />
+            </>
+          )
+        }
         onSubmit={(body) => send(body, false)}
         onSendNow={(body) => send(body, true)}
         {...images.props(receiver)}

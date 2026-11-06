@@ -1,0 +1,54 @@
+/* The orrery, drawn (hero/Orrery.tsx): the stars and the orbits in fine
+   line, the sun's light and the sun (Sun.module.css), and the agents on
+   their orbits, each a small dark disc with its name. Above where it breaks
+   up, the sun's light drifts upward, but not while the orrery is held still,
+   nor while the first screen is off screen (the clock's data-off). In
+   depth: the far halves (0), the bodies behind the sun (5 to 9), its light
+   and the sun (10), the near halves (11), the bodies in front (12 to 16). */
+
+/* The dark of the sky, which each body keeps a little of round it. */
+.orrery { --ground: #070605; position: absolute; inset: 0; pointer-events: none; }
+
+.layer { position: absolute; top: 0; left: 0; z-index: 0; display: block; overflow: hidden; }
+.light { z-index: 10; }
+.before { z-index: 11; }
+/* Above where it breaks up, the light drifts upward, a dash at a time. */
+@media (prefers-reduced-motion: no-preference) {
+  .orrery:not([data-still]) .rise { animation: rise calc(var(--len) * 0.11s) linear infinite; }
+  [data-off] .rise { animation-play-state: paused; }
+}
+@keyframes rise { to { stroke-dashoffset: calc(var(--len) * -1px); } }
+.orbit path { fill: none; stroke-width: 1; }
+.orbit .ticks { stroke: #b4bcff; stroke-width: 0.9; }
+
+/* The bodies: each a small dark disc, ringed, with the agent's mark; nearer is larger and brighter (--d, 1 nearest to -1 farthest), each placed, sized and stacked by the script; until it is, the drawing is still dark, but screen readers have the list. The disc keeps a little of the dark round it, so the orbit breaks before it touches. The list makes no layer of its own, so its bodies go behind the sun and in front of it. */
+.bodies { position: absolute; inset: 0; margin: 0; padding: 0; list-style: none; }
+.body { --d: 1; position: absolute; left: 0; top: 0; width: 0; height: 0; will-change: transform; }
+.disc {
+  position: absolute;
+  left: calc(var(--size) / -2);
+  top: calc(var(--size) / -2);
+  display: grid;
+  place-items: center;
+  width: var(--size);
+  height: var(--size);
+  border-radius: 50%;
+  background: #0d0b0a;
+  box-shadow:
+    inset 0 0 0 1px rgba(196, 204, 255, calc(0.34 + 0.14 * var(--d))),
+    0 0 0 3px var(--ground);
+  color: rgba(255, 250, 242, calc(0.8 + 0.18 * var(--d)));
+}
+.name {
+  position: absolute;
+  top: -6px;
+  left: 0;
+  font: 500 10.5px/12px var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: rgba(255, 248, 240, calc(0.72 + 0.2 * var(--d)));
+  text-shadow: 0 0 3px var(--ground), 0 0 6px var(--ground);
+  opacity: 0;
+}
+.name[data-side='left'] { left: auto; right: 0; }

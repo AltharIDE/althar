@@ -137,7 +137,7 @@ const machineAddress = (email: string, agents: ReadonlyArray<string>) => {
 }
 
 /** Whether a line of a message credits an agent, or Althar: a trailer naming one, or an agent's footer. */
-const creditLine = (line: string, agents: ReadonlyArray<string>) => {
+export const creditLine = (line: string, agents: ReadonlyArray<string>) => {
   // Trailers and footers start their line: anything indented is quoted, or code.
   if (/^\s/.test(line)) return false
   const trailer = TRAILER.exec(line.trimEnd())

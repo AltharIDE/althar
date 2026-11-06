@@ -5,7 +5,7 @@ import { ProjectTabs } from '../src/chrome/ProjectTabs/ProjectTabs'
 import { TitleBar } from '../src/chrome/TitleBar/TitleBar'
 import { WindowButtons } from '../src/chrome/WindowButtons/WindowButtons'
 
-/* The window's own buttons in each desktop's manner (ADR-096): real buttons, named, in the order and at the end the desktop says. */
+/* The window's own buttons in each desktop's manner (ADR-097): real buttons, named, in the order and at the end the desktop says. */
 
 const names = () => screen.getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)
 

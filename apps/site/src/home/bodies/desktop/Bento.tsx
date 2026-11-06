@@ -77,7 +77,7 @@ const NEEDS = [
   },
 ]
 
-interface Tile {
+export interface Tile {
   id: string
   title: ReactNode
   lead: string
@@ -92,7 +92,7 @@ interface Tile {
   small?: boolean
 }
 
-const TILES: Tile[] = [
+export const TILES: Tile[] = [
   {
     id: 'accounts',
     span: 4,
@@ -222,7 +222,7 @@ const TILES: Tile[] = [
 const SPAN = { 2: s.span2, 3: s.span3, 4: s.span4, 6: s.span6 } as const
 
 /** A drawing's tone: dark or light. Each tile has its own; ?tone=dark or ?tone=light shows every one in that tone, while the mix is chosen. */
-type Tone = 'dark' | 'light'
+export type Tone = 'dark' | 'light'
 const toneAsked = (): Tone | null => {
   const asked = new URLSearchParams(window.location.search).get('tone')
   return asked === 'dark' || asked === 'light' ? asked : null

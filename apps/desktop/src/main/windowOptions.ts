@@ -23,7 +23,7 @@ export const RAISED = { light: '#fcfbf8', dark: '#25231f' } as const
 
 /**
  * `framed`, on Linux, is where the window manager draws a good frame of its own (KWin, xfwm4, Marco, Openbox: desktop.ts decides,
- * ADR-096): the system's title bar goes round the window, server-side, and the page draws no buttons of its own.
+ * ADR-097): the system's title bar goes round the window, server-side, and the page draws no buttons of its own.
  */
 export const windowOptions = (platform: NodeJS.Platform, icon: NativeImage, dark = false, framed = false) => ({
   backgroundColor: dark ? PAGE.dark : PAGE.light,

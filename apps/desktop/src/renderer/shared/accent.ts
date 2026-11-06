@@ -2,7 +2,7 @@ import type { Rgb } from '../../main/desktop'
 
 /*
  * The system's accent as the window's own (Settings › Appearance › Accent,
- * ADR-096): where the person chose the system's, its colour takes the place
+ * ADR-097): where the person chose the system's, its colour takes the place
  * of Althar's violet, for focus rings, selection, and what violet marks and
  * fills, in both schemes. Only where it stays legible: as the desktops do
  * themselves (libadwaita derives a darker accent for text on light), each

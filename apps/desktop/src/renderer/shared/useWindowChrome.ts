@@ -6,7 +6,7 @@ import { type Host, useServices } from '../data/services'
 
 /*
  * What a screen's bar needs of the window's own buttons, as the desktop the
- * window sits on has them (main/desktop.ts, ADR-096): on macOS the system
+ * window sits on has them (main/desktop.ts, ADR-097): on macOS the system
  * draws its traffic lights and only their room is kept; where the window
  * manager draws the window's frame, or a tiling compositor has none, the bar
  * draws none; elsewhere it draws them in that desktop's manner, in its order

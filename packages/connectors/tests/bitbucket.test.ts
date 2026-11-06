@@ -397,6 +397,45 @@ describe('Bitbucket Cloud as a code host', () => {
     }),
   )
 
+  it.effect('gives a pull request another title or description, sending back the rest so reviewers and its draft stay', () =>
+    Effect.gen(function* () {
+      const { host, sent } = cloud([
+        ['GET', PR, { json: pull() }],
+        ['PUT', PR, { json: pull({ title: 'Add-on settings', description: 'Why it changed.' }) }],
+      ])
+      const edited = yield* host.editChange(ace, yield* host.change(ace, 552), { title: 'Add-on settings', body: 'Why it changed.' })
+      assert.strictEqual(edited.title, 'Add-on settings')
+      assert.strictEqual(edited.body, 'Why it changed.')
+      assert.deepStrictEqual(sent.find((request) => request.method === 'PUT')?.body, {
+        title: 'Add-on settings',
+        description: 'Why it changed.',
+        reviewers: [{ uuid: '{382024ee-9961-4359-ae8f-b48b42f0432a}' }, { uuid: mitch.uuid }],
+        close_source_branch: false,
+        draft: true,
+      })
+      // The title alone keeps the description Bitbucket has.
+      const titled = cloud([
+        ['GET', PR, { json: pull({ draft: undefined, close_source_branch: undefined, reviewers: undefined }) }],
+        ['PUT', PR, { json: pull({ title: 'Renamed' }) }],
+      ])
+      yield* titled.host.editChange(ace, yield* host.change(ace, 552), { title: 'Renamed' })
+      assert.deepStrictEqual(titled.sent.find((request) => request.method === 'PUT')?.body, {
+        title: 'Renamed',
+        description: '## Notes for Atlassian Maintainers:\n\nThis is a public repo.',
+        reviewers: [],
+      })
+      // A repository the account can only read refuses it, in Bitbucket's words.
+      const refusing = cloud([
+        ['GET', PR, { json: pull() }],
+        ['PUT', PR, { status: 403, json: { type: 'error', error: { message: 'You do not have permission to edit this pull request.' } } }],
+      ])
+      assert.deepInclude(yield* Effect.flip(refusing.host.editChange(ace, yield* host.change(ace, 552), { title: 'No' })), {
+        reason: 'forbidden',
+        status: 403,
+      })
+    }),
+  )
+
   it.effect('marks a draft ready, sending back what it has so reviewers stay', () =>
     Effect.gen(function* () {
       const { host, sent } = cloud([
@@ -1391,6 +1430,50 @@ describe('Bitbucket Data Center as a code host', () => {
       assert.notProperty(yield* host.change(prj, 3), 'conflicts')
       assert.notProperty(yield* host.change(prj, 4), 'conflicts')
       assert.notProperty(yield* host.change(prj, 101), 'conflicts')
+    }),
+  )
+
+  it.effect('gives a pull request another title or description at the version it read, keeping the rest, and says why it can’t', () =>
+    Effect.gen(function* () {
+      const { host, sent } = center([
+        ['GET', PULL, { json: pr() }],
+        ['PUT', PULL, { json: pr({ title: 'Cache the tuple', version: 4 }) }],
+      ])
+      const edited = yield* host.editChange(prj, yield* host.change(prj, 101), { title: 'Cache the tuple' })
+      assert.strictEqual(edited.title, 'Cache the tuple')
+      // Everything it has goes back with it, its description and reviewers as they are, its draft too.
+      assert.deepStrictEqual(sent.find((request) => request.method === 'PUT')?.body, {
+        version: 3,
+        title: 'Cache the tuple',
+        description: 'It’s a kludge, but put the tuple from the database in the cache.',
+        reviewers: [{ user: { name: 'jcitizen' } }],
+        draft: true,
+      })
+      const described = center([
+        ['GET', PULL, { json: pr({ draft: undefined, reviewers: undefined }) }],
+        ['PUT', PULL, { json: pr({ description: 'Only this', version: 4 }) }],
+      ])
+      yield* described.host.editChange(prj, yield* host.change(prj, 101), { body: 'Only this' })
+      assert.deepStrictEqual(described.sent.find((request) => request.method === 'PUT')?.body, {
+        version: 3,
+        title: 'Talking Nerdy',
+        description: 'Only this',
+        reviewers: [],
+      })
+      // An account that may not edit it hears Data Center's words, as forbidden.
+      const refusing = center([
+        whoami('jcitizen'),
+        ['GET', PULL, { json: pr() }],
+        [
+          'PUT',
+          PULL,
+          { status: 401, json: { errors: [{ message: 'You are not permitted to access this resource', exceptionName: null }] } },
+        ],
+      ])
+      assert.deepInclude(yield* Effect.flip(refusing.host.editChange(prj, yield* host.change(prj, 101), { title: 'No' })), {
+        reason: 'forbidden',
+        message: 'You are not permitted to access this resource',
+      })
     }),
   )
 

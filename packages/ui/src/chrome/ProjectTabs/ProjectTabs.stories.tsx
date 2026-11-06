@@ -141,7 +141,7 @@ export const OnlyHome: Story = { args: { initial: [], current: null } }
 export const EveryProjectOpen: Story = { args: { initial: ALL } }
 /** In the app the system draws the lights; the bar keeps their space. */
 export const NativeLights: Story = { args: { lights: 'space' } }
-/** On GNOME: its buttons at the bar's end, close alone, as GNOME has it out of the box (ADR-096). */
+/** On GNOME: its buttons at the bar's end, close alone, as GNOME has it out of the box (ADR-097). */
 export const OnGnome: Story = { args: { controls: { look: 'gnome', tone: 'adwaita', start: [], end: ['close'] } } }
 /** On GNOME, in the dark, with minimize and maximize as the person's button-layout asks. */
 export const OnGnomeDark: Story = {

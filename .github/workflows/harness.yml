@@ -1,8 +1,9 @@
 name: harness
 
 # On a pull request, and for its entry in the merge queue: the checks and unit tests its change reaches
-# (packages/testing/src/select.ts). The coverage gate, and every test on Linux and Windows, run after merge, in
-# post-merge.yml.
+# (packages/testing/src/select.ts). In the merge queue, a change that reaches the runtime also runs its whole suite with
+# coverage, gated as after merge, so one that takes the runtime under its thresholds stays out of main. Every test on
+# Linux and Windows, and the other packages' coverage, run after merge, in post-merge.yml.
 on:
   # From queue.yml, for a pull request in the merge queue.
   workflow_call:
@@ -49,6 +50,8 @@ jobs:
     outputs:
       jobs: ${{ steps.plan.outputs.jobs }}
       any: ${{ steps.plan.outputs.any }}
+      # Whether the change reaches the runtime, whose coverage the merge queue gates.
+      runtime: ${{ contains(steps.plan.outputs.jobs, '"name":"packages/runtime') }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -98,3 +101,87 @@ jobs:
       # Tests that failed, then passed on their retry, filed as issues (packages/testing).
       - if: always()
         uses: ./.github/actions/flaky
+
+  # In the merge queue, the runtime's whole suite with coverage, in parts by file as after merge (post-merge.yml): its
+  # branches sit close to the threshold, and a change that took them under it was found only once it was on main. Each
+  # part keeps what it found as a blob report; coverage (packages/runtime) merges them and gates the whole.
+  coverage-parts:
+    name: coverage (packages/runtime ${{ matrix.shard }})
+    needs: plan
+    if: github.event_name == 'merge_group' && needs.plan.outputs.runtime == 'true'
+    runs-on: ubuntu-24.04
+    # A few times a part's usual run, so a hang fails here, not at the limit.
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1/4, 2/4, 3/4, 4/4]
+    defaults:
+      run:
+        working-directory: packages/runtime
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      # Tests with an open flaky issue run, but don't fail this job (packages/testing).
+      - uses: ./.github/actions/flaky/quarantine
+      # A part covers only what its own tests reach, so the thresholds wait for the merge.
+      - run: >-
+          bun run test:coverage --shard=${{ matrix.shard }} --reporter=default --reporter=blob --reporter=@althar/testing/reporter
+          --outputFile.blob=.vitest/blob/part-${{ strategy.job-index }}.json
+          --coverage.thresholds.lines=0 --coverage.thresholds.branches=0
+      # Kept when tests fail too, so the merged report says all that broke.
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: runtime-coverage-blob-${{ strategy.job-index }}
+          path: packages/runtime/.vitest/blob
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+      # Tests that failed, then passed on their retry, filed as issues (packages/testing).
+      - if: always()
+        uses: ./.github/actions/flaky
+
+  coverage:
+    name: coverage (packages/runtime)
+    needs: [plan, coverage-parts]
+    if: ${{ !cancelled() && github.event_name == 'merge_group' && needs.plan.outputs.runtime == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: packages/runtime
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: runtime-coverage-blob-*
+          path: packages/runtime/.vitest/blob
+          merge-multiple: true
+      # Tests with an open flaky issue run, but don't fail this job (packages/testing).
+      - uses: ./.github/actions/flaky/quarantine
+      # The parts' results and coverage as one run's, against the thresholds in vite.config.ts.
+      - run: bun run test:coverage --merge-reports=.vitest/blob --reporter=default --reporter=github-actions --reporter=@althar/testing/reporter
+      # A part that stopped before writing its report leaves out its tests, and the merge alone wouldn't say so.
+      - env:
+          PARTS: ${{ needs.coverage-parts.result }}
+        run: |
+          if [ "$PARTS" != success ]; then
+            echo "::error::A part of the runtime's tests didn't pass: $PARTS"
+            exit 1
+          fi

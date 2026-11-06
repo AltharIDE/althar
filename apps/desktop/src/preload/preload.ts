@@ -116,7 +116,7 @@ contextBridge.exposeInMainWorld('althar', {
   // Usage data stays off while it is set, whatever its switch says; the switch shows so.
   doNotTrack: doNotTrack(process.env),
   window: (action: WindowAction): void => ipcRenderer.send('althar:window', action),
-  // Which desktop, and where its window buttons go, in its own manner (ADR-096); absent on an edge page, which draws none.
+  // Which desktop, and where its window buttons go, in its own manner (ADR-097); absent on an edge page, which draws none.
   chrome: (): DesktopChrome | undefined => chrome,
   onChrome: (listener: (chrome: DesktopChrome) => void): (() => void) => {
     chromes.add(listener)

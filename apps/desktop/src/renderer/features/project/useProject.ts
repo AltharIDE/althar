@@ -22,8 +22,9 @@ import { useServices, useWatch } from '../../data/services'
 import type { OutputSoFar } from '../../shared/handed'
 import { type Outgoing, sentWith } from '../../shared/useAttachments'
 import { useOutputs } from '../../shared/useOutputs'
+import { useStreamed } from '../../shared/useStreamed'
 import { canPick } from '../../shared/agents'
-import { caughtUp, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
+import { isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
 import type { Streamed } from '../../shared/thread'
 
@@ -128,7 +129,6 @@ export const useProject = (projectId: string): ProjectModel => {
   const coordinator = thread.data ?? null
   const status = useQuery(read.status()).data
   const agents = useMemo(() => status?.agents.filter(canPick) ?? [], [status])
-  const [streaming, setStreaming] = useState<ReadonlyMap<string, Streamed>>(new Map())
   const [failed, setError] = useState<string | null>(null)
   const readFailure = thread.error ?? listed.error
   const error = failed ?? (readFailure === null ? null : messageOf(readFailure))
@@ -140,6 +140,8 @@ export const useProject = (projectId: string): ProjectModel => {
   const threadId = coordinator?.threadId ?? null
   // What the coordinator's commands have printed so far, while they run.
   const outputs = useOutputs(threadId, coordinator?.items ?? NO_ITEMS, coordinator?.session?.turnRunning ?? false)
+  // What it is still saying, while the window hears it.
+  const streaming = useStreamed(threadId, coordinator?.items ?? NO_ITEMS)
 
   /** Changes the coordinator's thread as the window keeps it; nothing before it is first read. */
   const setCoordinator = useCallback(
@@ -165,7 +167,6 @@ export const useProject = (projectId: string): ProjectModel => {
   const arrived = useCallback(
     (items: ReadonlyArray<ThreadItem>) => {
       setCoordinator((current) => ({ ...current, items: mergeItems(current.items, items) }))
-      setStreaming((current) => caughtUp(current, items))
     },
     [setCoordinator],
   )
@@ -225,18 +226,8 @@ export const useProject = (projectId: string): ProjectModel => {
       if (event.projectId === projectId) setCoordinator((current) => ({ ...current, launches: event.launches }))
       return
     }
-    if (event._tag === 'Streaming') {
-      if (event.threadId !== threadId) return
-      setStreaming((current) =>
-        new Map(current).set(event.itemId, {
-          kind: event.kind,
-          agentId: event.agentId,
-          text: event.text,
-          at: current.get(event.itemId)?.at ?? new Date().toISOString(),
-        }),
-      )
-      return
-    }
+    // What it is still saying is useStreamed's.
+    if (event._tag === 'Streaming') return
     // How full the coordinator's context is, as it says: kept on its session, which the composer shows.
     if (event._tag === 'Context') {
       if (event.threadId === threadId)
