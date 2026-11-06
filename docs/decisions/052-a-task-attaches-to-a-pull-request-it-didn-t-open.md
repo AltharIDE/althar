@@ -1,6 +1,9 @@
 # ADR-052: A task can be attached to an open pull request it didn't open
 
-- **Status:** Accepted
+- **Status:** Accepted; its rule on forks superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md)
+  (2026-11-06): a fork's pull request can be attached, and a branch whose
+  author lets maintainers edit it is pushed to on the person's word
+  (DEV-170), never forced
 - **Date:** 2026-10-17
 - **Amended:** 2026-10-31 ([ADR-081](081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md), to build for 0.7.0): every open pull request in the project's repositories is followed slowly, for the coordinator's news, with no task attached unless the person asks.
 - **Owner:** Repository maintainers
@@ -29,7 +32,8 @@
     repository itself), as the host's reading of it says (`headRepository`:
     GitHub's head repository, GitLab's source project, Bitbucket's source
     repository): one on someone else's fork is refused, since Althar can't
-    push there. Where a host doesn't say, it is refused too: a branch of the
+    push there (since ADR-097, attached where its author lets maintainers
+    edit it, and pushed to on the person's word). Where a host doesn't say, it is refused too: a branch of the
     same name on the task's repository may not be the one it merges from,
     and pushing there would move another branch, perhaps the default one.
     A link is taken only on
@@ -95,7 +99,7 @@
   - **One pull request per repository of a task:** attaching another stops
     listening to the one before there.
   - **A branch on someone else's fork isn't attached,** even where its
-    author allows maintainers to push.
+    author allows maintainers to push. Superseded by ADR-097.
   - **Where a host can't say which repository a pull request's branch is on**
     (all but GitHub, for now), it is taken as on the repository the task
     pushes to; a push elsewhere fails as git says.

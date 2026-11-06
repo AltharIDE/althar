@@ -1,6 +1,10 @@
 # ADR-071: The sandbox is the boundary: anything inside it runs
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06): with
+  allowing everything every project's default, what the rules can't read
+  goes ahead where no sandbox holds too, and the reviewer of a task's change
+  runs its tests and builds in its copy; a review of an outside author's
+  code keeps the readers' rules
 - **Date:** 2026-10-29
 - **Amends:** [ADR-019](019-coordinator-judges-permissions.md),
   [ADR-057](057-a-lead-works-outside-its-sandbox-through-althar-s-tools.md),
@@ -42,7 +46,7 @@
   Each of those refusals was then explained in a turn of its own, after the
   reply, so the coordinator posted a second reply in the person's chat.
   Review steps were refused 9 times, all worked around. They keep their
-  rules (below).
+  rules (below; since ADR-097, only a review of an outside author's code).
 - **Decision:** the OS sandbox is the boundary, not the command reader.
   - **Where a session's sandbox holds its shell commands, what it holds
     runs without being read.** Claude Code's lead, where its sandbox can
@@ -126,7 +130,10 @@
     Windows, in a Flatpak, on Linux without bubblewrap and socat or where
     they can't start a namespace, for Codex (which asks only to go beyond
     its own sandbox already), OpenCode and the rest, and for a review's
-    lead, which reads someone else's code. Git's guard holds for every
+    lead, which reads someone else's code. (Since ADR-097, with everything
+    allowed by default, today's rules there let what they can't read go
+    ahead and ask only before the irreversible list; a review's lead keeps
+    the readers' rules for an outside author's code alone.) Git's guard holds for every
     lead but on Windows (`guardHolds`): Git for Windows' `ps` can't show
     git's own words, so a pass would never let through what the person
     allowed, and the rules there ask before what it stops already.

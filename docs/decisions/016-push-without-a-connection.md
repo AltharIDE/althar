@@ -1,6 +1,9 @@
 # ADR-016: Pushing is git; a connection is what comes after
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06): the
+  person's MCP servers load in every session, and leads may push and open
+  pull requests with the person's own sign-in, Althar's push staying the
+  preferred and recorded one
 - **Date:** 2026-10-09
 - **Amended:** 2026-10-18: before any push Althar makes for a task, it
   holds back skill and OpenSpec files the task's commits changed unless the
@@ -50,6 +53,8 @@
     the agent reads: its global and home config, and the project's, from
     the repository's root down to the session's folder. The files are only
     read. Claude Code already loads only the servers it is given.
+    Superseded by ADR-097: the person's servers load for every agent, and
+    each call is read against its irreversible list.
 - **Alternatives considered:**
   - **Keep pushing behind a connection.** It is simpler, and every push
     would be recorded with a connection's receipt. But it leaves any host
@@ -58,14 +63,17 @@
   - **Let leads push and open pull requests with their own tools** (`gh`, an
     MCP server), as an opt-in per project. Althar would no longer know what
     went out or why, and a long unattended run would carry the person's
-    credentials. It stays closed.
+    credentials. It stays closed. ADR-097 opens it: the person chose not
+    to limit agents where other tools don't, and Althar notices a push it
+    didn't make by reading the branch afterwards.
   - **Treat the person's GitHub MCP server as a connection.** It would mean
     reading another tool's secrets. No.
 - **Trade-off:**
   - **Two ways to push.** The person's git when not connected, the
     connection's token when connected. Which one ran shows in the thread's
     notice, not in a receipt.
-  - **The person's MCP servers are found by name, from files Althar reads.**
+  - **The person's MCP servers are found by name, from files Althar reads**
+    (gone with ADR-097, which loads them).
     A server added another way, or one whose name has a dot in it (Codex),
     isn't caught.
   - **The page for a new pull request is a guess from the remote's address**
