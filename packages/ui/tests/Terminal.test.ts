@@ -21,9 +21,9 @@ describe('tidyTerminalLines', () => {
     expect(tidyTerminalLines(['   ✓ a', '     ✓ a/b', '', '   ✗ c'])).toEqual(['✓ a', '  ✓ a/b', '', '✗ c'])
   })
 
-  it('drops the padding wc sets a lone count in', () => {
-    expect(tidyTerminalLines(['docs/a.md', '      95'])).toEqual(['docs/a.md', '95'])
-    expect(tidyTerminalLines(['      95'])).toEqual(['95'])
+  it('drops the padding wc sets its count in, where the command ends by piping into wc', () => {
+    expect(tidyTerminalLines(['docs/a.md', '      95'], 'ls docs; ls docs/decisions | wc -l')).toEqual(['docs/a.md', '95'])
+    expect(tidyTerminalLines(['      95'], 'cat a | wc -l')).toEqual(['95'])
     expect(tidyTerminalLines(['  12 docs/a.md', '   3 docs/b.md'])).toEqual(['12 docs/a.md', ' 3 docs/b.md'])
   })
 
@@ -38,5 +38,9 @@ describe('tidyTerminalLines on structured output', () => {
     expect(tidyTerminalLines(['values:', '  - 1', '    2'])).toEqual(['values:', '  - 1', '    2'])
     expect(tidyTerminalLines(['counts:', '  total:', '      95'])).toEqual(['counts:', '  total:', '      95'])
     expect(tidyTerminalLines(['retries', '  3', '  12'])).toEqual(['retries', '  3', '  12'])
+    expect(tidyTerminalLines(['value:', '      95'])).toEqual(['value:', '      95'])
+    expect(tidyTerminalLines(['value:', '      95'], 'cat config.yaml')).toEqual(['value:', '      95'])
+    expect(tidyTerminalLines(['value:', '      95'], 'wc -l a | cat config.yaml')).toEqual(['value:', '      95'])
+    expect(tidyTerminalLines(['value:', '      95'], 'cat a | wc -l; cat config.yaml')).toEqual(['value:', '      95'])
   })
 })

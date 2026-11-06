@@ -176,6 +176,7 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
           ran={part.ran}
           exit={part.exit}
           {...(named && part.command !== null ? { command: part.command } : {})}
+          {...(part.command !== null ? { printedBy: part.command } : {})}
         />
       ) : (
         <></>

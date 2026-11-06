@@ -28,10 +28,12 @@ export interface CommandOutputProps {
   readonly exit: number | null
   /** The command, where the tool call's row names it by a label instead. */
   readonly command?: string
+  /** The command that ran, to lay its output out by (a count wc pads), whether or not it's shown. */
+  readonly printedBy?: string
 }
 
-export function CommandOutput({ threadId, itemId, ran, exit, command }: CommandOutputProps) {
-  const shown = command === undefined ? {} : { command }
+export function CommandOutput({ threadId, itemId, ran, exit, command, printedBy }: CommandOutputProps) {
+  const shown = { ...(command === undefined ? {} : { command }), ...(printedBy === undefined ? {} : { printedBy }) }
   const ended = exit === null ? {} : { exit }
   if (ran.kind === 'running') return <Running shown={shown} text={ran.text} dropped={ran.dropped} />
   // What the tool said of a failure or a stop, after what it printed.
@@ -42,7 +44,15 @@ export function CommandOutput({ threadId, itemId, ran, exit, command }: CommandO
 }
 
 /** What a running command has printed so far: the line still being written ends in the cursor. */
-function Running({ shown, text, dropped }: { shown: { readonly command?: string }; text: string; dropped: number }) {
+function Running({
+  shown,
+  text,
+  dropped,
+}: {
+  shown: { readonly command?: string; readonly printedBy?: string }
+  text: string
+  dropped: number
+}) {
   const lines = text.split('\n')
   // What follows the last newline is the line still being written.
   const live = lines.pop() ?? ''
@@ -60,7 +70,7 @@ function KeptOutput({
   threadId: string
   itemId: string
   output: Kept
-  shown: { readonly command?: string }
+  shown: { readonly command?: string; readonly printedBy?: string }
   ended: { readonly exit?: number; readonly failure?: string }
 }) {
   const { client } = useServices()

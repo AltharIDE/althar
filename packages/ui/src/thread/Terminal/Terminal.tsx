@@ -45,31 +45,32 @@ export const plainTerminalLine = (line: string) => line.replace(ANSI, '')
 
 const indentOf = (line: string) => /^[ \t]*/.exec(line)?.[0].length ?? 0
 
-/* a count right-aligned in wc's eight-wide field, as BSD wc -l prints it alone */
-const WC_COUNT = /^ +\d+$/
-const isWcCount = (line: string) => line.length === 8 && WC_COUNT.test(line)
+/* the command's last step pipes into wc with only flags, so it ends by printing a lone, padded count */
+const ENDS_IN_WC = /\|\s*wc(\s+-[a-zA-Z]+)*\s*$/
+const endsInWc = (command: string) => ENDS_IN_WC.test(command.split(/;|&&|\|\||\n/).findLast((p) => p.trim() !== '') ?? '')
 
 /**
- * Lines as a reading column shows them: the indent they all share taken
- * off, and the padding wc sets a lone count in ("      95") dropped, so it
- * doesn't read as a stray, oddly placed number. Only a count in wc's own
- * eight-wide field, after an unindented line or none, counts as one: an
- * indented number in YAML, a tree or a log keeps its place.
+ * Lines as a reading column shows them: the indent they all share taken off.
+ * Where the command that printed them ends by piping into wc, the padding wc
+ * sets its count in ("      95") comes off the last line too, so it doesn't
+ * read as a stray, oddly placed number. Nothing else is judged by its shape:
+ * an indented number in YAML, a tree or a log keeps its place.
  */
-export const tidyTerminalLines = (lines: readonly string[]): string[] => {
+export const tidyTerminalLines = (lines: readonly string[], command?: string): string[] => {
   const filled = lines.filter((l) => l.trim() !== '')
   const shared = filled.length === 0 ? 0 : Math.min(...filled.map(indentOf))
   const out = lines.map((l) => l.slice(Math.min(shared, indentOf(l))))
-  return out.map((l, i) => {
-    if (!isWcCount(lines[i] ?? '')) return l
-    const prior = out.slice(0, i).findLast((p) => p.trim() !== '')
-    return prior === undefined || indentOf(prior) === 0 ? l.trim() : l
-  })
+  if (command === undefined || !endsInWc(command)) return out
+  const last = out.findLastIndex((l) => l.trim() !== '')
+  if (last >= 0 && /^\s*\d+(\s+\d+)*\s*$/.test(out[last] ?? '')) out[last] = (out[last] ?? '').trim()
+  return out
 }
 
 export interface TerminalProps {
   /** The command that ran, as its first line. Leave it out where something above already shows it, like a Tool's row. */
   command?: string
+  /** The command that printed this, where it isn't shown here: read only to lay its output out, as a count wc pads. */
+  printedBy?: string
   /** What it printed, line by line: the end of the output, which is where a run says how it went. */
   lines: string[]
   /** What it printed before those, held back until asked for. */
@@ -100,6 +101,7 @@ export interface TerminalProps {
  */
 export function Terminal({
   command,
+  printedBy = command,
   lines,
   earlier = [],
   omitted = 0,
@@ -116,7 +118,7 @@ export function Terminal({
   const said = useContext(ExitShown)
   const code = said ? undefined : exit
   /* the line being written takes the same indent off as those before it, so it doesn't step out of line */
-  const plain = tidyTerminalLines([...earlier, ...lines, ...(live === undefined ? [] : [live])].map(plainTerminalLine))
+  const plain = tidyTerminalLines([...earlier, ...lines, ...(live === undefined ? [] : [live])].map(plainTerminalLine), printedBy)
   const before = plain.slice(0, earlier.length)
   const last = plain.slice(earlier.length, earlier.length + lines.length)
   const writing = live === undefined ? undefined : plain.at(-1)

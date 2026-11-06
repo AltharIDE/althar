@@ -77,7 +77,7 @@ export const LongOutput: Story = {
     <>
       {before}
       <Tool kind={ToolKind.Run} verb="Ran" target={SEARCH} copy={SEARCH} defaultOpen>
-        <Terminal lines={lines} earlier={earlier} exit={0} />
+        <Terminal lines={lines} earlier={earlier} exit={0} printedBy={SEARCH} />
       </Tool>
     </>
   ),
