@@ -45,17 +45,25 @@ export const plainTerminalLine = (line: string) => line.replace(ANSI, '')
 
 const indentOf = (line: string) => /^[ \t]*/.exec(line)?.[0].length ?? 0
 
+/* a count right-aligned in wc's eight-wide field, as BSD wc -l prints it alone */
+const WC_COUNT = /^ +\d+$/
+const isWcCount = (line: string) => line.length === 8 && WC_COUNT.test(line)
+
 /**
  * Lines as a reading column shows them: the indent they all share taken
- * off, and the padding a tool sets a lone count in (wc -l's "      95")
- * dropped, so it doesn't read as a stray, oddly placed number.
+ * off, and the padding wc sets a lone count in ("      95") dropped, so it
+ * doesn't read as a stray, oddly placed number. Only a count in wc's own
+ * eight-wide field, after an unindented line or none, counts as one: an
+ * indented number in YAML, a tree or a log keeps its place.
  */
 export const tidyTerminalLines = (lines: readonly string[]): string[] => {
   const filled = lines.filter((l) => l.trim() !== '')
   const shared = filled.length === 0 ? 0 : Math.min(...filled.map(indentOf))
-  return lines.map((l) => {
-    const out = l.slice(Math.min(shared, indentOf(l)))
-    return /^[ \t]+[\d.,]+[ \t]*$/.test(out) ? out.trim() : out
+  const out = lines.map((l) => l.slice(Math.min(shared, indentOf(l))))
+  return out.map((l, i) => {
+    if (!isWcCount(lines[i] ?? '')) return l
+    const prior = out.slice(0, i).findLast((p) => p.trim() !== '')
+    return prior === undefined || indentOf(prior) === 0 ? l.trim() : l
   })
 }
 
@@ -135,7 +143,7 @@ export function Terminal({
             {command}
           </Line>
         )}
-        {omitted > 0 && (open || earlier.length === 0) && <Line className={s.said}>{t.omitted(omitted)}</Line>}
+        {omitted > 0 && <Line className={s.said}>{t.omitted(omitted)}</Line>}
         {open && before.map((l, i) => line(l, `e${i}`))}
         {last.map((l, i) => line(l, `l${i}`))}
         {live !== undefined && (

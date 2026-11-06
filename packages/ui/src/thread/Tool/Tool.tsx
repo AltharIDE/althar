@@ -154,7 +154,14 @@ export function Tool({
   const head = (
     <>
       <span className={s.glyph}>{glyph}</span>
-      <span className={s.verb}>{verb}</span> {linked ? <VisuallyHidden>{shown}</VisuallyHidden> : <span className={s.target}>{shown}</span>}
+      <span className={s.verb}>{verb}</span>{' '}
+      {linked ? (
+        <VisuallyHidden>{shown}</VisuallyHidden>
+      ) : (
+        <span className={s.target} title={whole ? undefined : target}>
+          {shown}
+        </span>
+      )}
     </>
   )
   const note = (

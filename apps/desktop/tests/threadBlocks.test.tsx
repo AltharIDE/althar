@@ -164,6 +164,26 @@ describe('a turn’s work', () => {
     expect(screen.getByText(long)).toBeTruthy()
   })
 
+  it('says the command over its output where the row names the file it works on instead', async () => {
+    const command = 'wc -l docs/plan.md'
+    show([
+      items.you('Count it'),
+      items.tool({
+        title: command,
+        toolKind: 'execute',
+        command,
+        locations: [{ path: '/w/meridian/docs/plan.md' }],
+        output: { kept: true, lines: 2, bytes: 40, dropped: 0, error: null },
+        exit: 0,
+      }),
+      items.says('Counted.'),
+    ])
+    await userEvent.click(screen.getByRole('button', { name: /orked/ }))
+    await userEvent.click(screen.getByRole('button', { name: /docs\/plan\.md/ }))
+    expect(await screen.findByText(/refunds\/router/)).toBeTruthy()
+    expect(screen.getByText(command)).toBeTruthy()
+  })
+
   it('opens a file it handed back in the person’s editor', async () => {
     const openFile = vi.fn()
     show(

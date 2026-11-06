@@ -21,13 +21,22 @@ describe('tidyTerminalLines', () => {
     expect(tidyTerminalLines(['   ✓ a', '     ✓ a/b', '', '   ✗ c'])).toEqual(['✓ a', '  ✓ a/b', '', '✗ c'])
   })
 
-  it('drops the padding a tool sets a lone count in', () => {
+  it('drops the padding wc sets a lone count in', () => {
     expect(tidyTerminalLines(['docs/a.md', '      95'])).toEqual(['docs/a.md', '95'])
+    expect(tidyTerminalLines(['      95'])).toEqual(['95'])
     expect(tidyTerminalLines(['  12 docs/a.md', '   3 docs/b.md'])).toEqual(['12 docs/a.md', ' 3 docs/b.md'])
   })
 
   it('leaves lines without indent as they are', () => {
     expect(tidyTerminalLines(['a', '  b'])).toEqual(['a', '  b'])
     expect(tidyTerminalLines([])).toEqual([])
+  })
+})
+
+describe('tidyTerminalLines on structured output', () => {
+  it('keeps an indented number where it sits in YAML, a tree or a log', () => {
+    expect(tidyTerminalLines(['values:', '  - 1', '    2'])).toEqual(['values:', '  - 1', '    2'])
+    expect(tidyTerminalLines(['counts:', '  total:', '      95'])).toEqual(['counts:', '  total:', '      95'])
+    expect(tidyTerminalLines(['retries', '  3', '  12'])).toEqual(['retries', '  3', '  12'])
   })
 })
