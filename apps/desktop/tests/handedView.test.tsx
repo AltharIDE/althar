@@ -111,7 +111,7 @@ describe('what an agent hands back, on a task', () => {
     expect(await screen.findByText(/refunds\/router/)).toBeTruthy()
     expect(client.readOutput).toHaveBeenCalledWith('th1', expect.any(String))
     // What wasn't kept says so; its exit shows on the row, as a failure does.
-    await user.click(screen.getByRole('button', { name: /Run npm run lint/ }))
+    await user.click(screen.getByRole('button', { name: /Ran npm run lint/ }))
     expect(await screen.findByText(outputText.notKept)).toBeTruthy()
     expect(screen.getByText('exit 1')).toBeTruthy()
   })
@@ -137,7 +137,7 @@ describe('what an agent hands back, on a task', () => {
     })
     withServices(<Task />, client)
     await user.click(await screen.findByRole('button', { name: /orked \d/ }))
-    await user.click(screen.getByRole('button', { name: /Run npm run build/ }))
+    await user.click(screen.getByRole('button', { name: /Ran npm run build/ }))
     expect(await screen.findByText('warning: unused import')).toBeTruthy()
     expect(screen.getByText('Tool execution aborted')).toBeTruthy()
   })

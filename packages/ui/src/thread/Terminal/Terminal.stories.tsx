@@ -73,11 +73,20 @@ export const FailedWithWhy: Story = {
     await expect(c.getByText('Tool execution aborted')).toBeInTheDocument()
   },
 }
-/** Longer than Althar keeps: its start wasn't kept, and says how much. */
+/** Longer than Althar keeps: its start wasn't kept, and says how much, over the earlier lines it did keep. */
 export const StartNotKept: Story = {
   args: { lines: TEST_OUTPUT, earlier: TEST_EARLIER, omitted: 1204, exit: 0 },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText('1,204 earlier lines weren’t kept')).toBeInTheDocument()
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Show 6 earlier lines' }))
+    await expect(c.getByText('1,204 earlier lines weren’t kept')).toBeInTheDocument()
+  },
+}
+/** A tool's padding before a lone count comes off. */
+export const Tidied: Story = {
+  args: { command: 'ls docs/decisions | wc -l', lines: ['      95'], exit: 0 },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('95')).toBeInTheDocument()
   },
 }
 /** In a Tool's sheet, whose row already shows the command. */

@@ -26,7 +26,7 @@ export interface CommandOutputProps {
   readonly ran: Ran
   /** How it ended, where it says. */
   readonly exit: number | null
-  /** The command, where the tool call's row can't show all of it. */
+  /** The command, where the tool call's row names it by a label instead. */
   readonly command?: string
 }
 

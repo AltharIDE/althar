@@ -155,14 +155,16 @@ function SetupView({ setup }: { setup: SetupContent }) {
 /**
  * A tool call. A command opens to what it printed, as the kit's Terminal:
  * open while it runs, so its output streams in view, and read from what was
- * kept only once opened. One from before Althar kept output, too long for
- * its row, opens to the whole command.
+ * kept only once opened. Its row shows the command whole once opened, so the
+ * output doesn't say it again, unless the row names it by a label. One from
+ * before Althar kept output, too long for its row, opens to show it whole.
  */
 function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; threadId: string }) {
   const [open, setOpen] = useState(part.state === ToolState.Running && part.ran !== null)
   /* once opened, what it printed stays, so it doesn't vanish as the call folds */
   const [seen, setSeen] = useState(open)
-  const long = part.command !== null && (part.command.includes('\n') || part.command.length > LONG_COMMAND || part.label !== undefined)
+  const labelled = part.command !== null && part.label !== undefined
+  const long = part.command !== null && (part.command.includes('\n') || part.command.length > LONG_COMMAND)
   const body =
     part.ran !== null ? (
       seen ? (
@@ -171,13 +173,15 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
           itemId={part.id}
           ran={part.ran}
           exit={part.exit}
-          {...(long && part.command !== null ? { command: part.command } : {})}
+          {...(labelled && part.command !== null ? { command: part.command } : {})}
         />
       ) : (
         <></>
       )
-    ) : long && part.command !== null ? (
+    ) : labelled && part.command !== null ? (
       <CodeBlock code={part.command} lang={text.shell} />
+    ) : long ? (
+      <></>
     ) : undefined
   return (
     <Tool
