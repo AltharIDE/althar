@@ -831,6 +831,14 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         if (now.state === 'closed') update(change.number, { state: 'open' })
         return Effect.succeed(changeNumbered(change.number))
       }),
+    editChange: (_repository, change, edit) =>
+      Effect.andThen(called('editChange'), () => {
+        update(change.number, {
+          ...(edit.title === undefined ? {} : { title: edit.title }),
+          ...(edit.body === undefined ? {} : { body: edit.body }),
+        })
+        return Effect.succeed(changeNumbered(change.number))
+      }),
     deleteBranch: (_repository, change) =>
       Effect.andThen(called('deleteBranch'), () => {
         if (changeNumbered(change.number).state === 'open') return Effect.fail(stillOpen(product, service.words, change.number))
