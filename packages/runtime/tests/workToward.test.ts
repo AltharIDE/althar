@@ -573,4 +573,31 @@ describe('a branch the person makes from a branch list', () => {
       assert.include('message' in refused ? refused.message : '', 'can’t be called')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
+
+  it.live('is refused, with nothing pushed, for a name git doesn’t take, a host Althar isn’t connected to, or one it can’t reach', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const { projectId, repositoryId } = yield* opened(working)
+      const refusal = (branch: string, repository = repositoryId) =>
+        Effect.map(Effect.flip(makeBranch({ projectId, repositoryId: repository, branch })), (error) =>
+          error._tag === 'BranchRefused' ? error.message : error._tag,
+        )
+      assert.strictEqual(yield* refusal('release/2', 'repo_gone'), 'NotFound')
+      for (const name of ['  ', '-release']) assert.include(yield* refusal(name), 'can’t be called')
+      // Not connected to the code host its remote is on: made with git, not by Althar.
+      assert.include(yield* refusal('release/2'), 'isn’t on a code host Althar is connected to')
+      yield* connect('github', HOST)
+      github.failNext('repository', 'unreachable')
+      assert.include(yield* refusal('release/2'), 'Althar couldn’t reach meridian/api')
+      assert.strictEqual(spawnSync('git', ['rev-parse', '--verify', '-q', 'release/2'], { cwd: bare }).status, 1)
+      // Named as a ref, it is the branch.
+      assert.strictEqual(yield* makeBranch({ projectId, repositoryId, branch: 'refs/heads/release/2' }), 'release/2')
+      // A repository with no clone on this computer has nothing to make one from.
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`DELETE FROM repository_locations WHERE binding_id = ${repositoryId}`
+      assert.include(yield* refusal('release/3'), 'has no clone on this computer')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
 })

@@ -343,4 +343,34 @@ describe('the coordinator’s edit_pull_request', () => {
       )
     }).pipe(Effect.provide(runtimeWith(github)))
   })
+
+  it.live(
+    'leaves a closed one as it is, refuses a title that is only credit or a blank description, and says what it couldn’t tell',
+    () => {
+      const { working, github } = seeded()
+      return Effect.gen(function* () {
+        const { coordinator } = yield* withPullRequest(working)
+        const edit = (number: number, args: Record<string, unknown>) =>
+          callTool(coordinator, 'edit_pull_request', { pull_request: `#${number}`, ...args })
+        const closed = github.addPullRequest({ path: ['meridian', 'api'], title: 'Gave up', author: 'dana', state: 'closed' })
+        assert.strictEqual(
+          yield* edit(closed.number, { title: 'Renamed' }),
+          `PR #${closed.number} is closed, so its title and description stay as they are.`,
+        )
+        const member = github.addPullRequest({ path: ['meridian', 'api'], title: 'Their fix', author: 'dana', body: 'Old words.' })
+        const credit = 'Co-Authored-By: Claude <noreply@anthropic.com>'
+        assert.include(yield* edit(member.number, { title: credit }), 'Give it a title')
+        assert.include(yield* edit(member.number, { description: ' \n ' }), 'Say what the description should say.')
+        // What it says already changes nothing on the host.
+        const edits = github.calls.filter((call) => call === 'editChange').length
+        assert.strictEqual(yield* edit(member.number, { title: 'Their fix' }), `PR #${member.number} says that already.`)
+        assert.strictEqual(github.calls.filter((call) => call === 'editChange').length, edits)
+        // A description alone, and only it is said.
+        assert.strictEqual(yield* edit(member.number, { description: 'New words.' }), `PR #${member.number} has the new description.`)
+        // An answer lost on the way: it can't say whether it changed.
+        github.failNext('editChange', 'unreachable')
+        assert.include(yield* edit(member.number, { title: 'Fix the retry' }), "Althar couldn't tell whether GitHub changed")
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+  )
 })
