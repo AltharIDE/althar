@@ -421,6 +421,7 @@ describe('the Settings tab', () => {
 
   it('says a change to the skills reaches each lead the next time it starts, and never speaks of the runtime', async () => {
     withServices(<Settings at="skills" />, fakeClient().client)
+    expect(await screen.findByRole('heading', { name: 'Skills', level: 1 })).toBeTruthy()
     expect(await screen.findByText(/A change reaches each lead the next time it starts, in a task under way too\./)).toBeTruthy()
     expect(screen.queryByText(/keeps what it started with|runtime/)).toBeNull()
     expect(sectionText.skills.title).toBe('Skills')

@@ -35,8 +35,6 @@ export interface LaunchStep {
   label: string
   /** Who runs it: one agent, or several for a parallel review. */
   agents: readonly ModelInfo[]
-  /** Why it is in the plan. */
-  why?: string
   /** It can be skipped. */
   optional?: boolean
   /** Why it cannot be changed, in place of Skip: required by your rule. */
@@ -67,10 +65,8 @@ export interface TaskLaunchText {
   /** Each ending: in the menu, its note there, and its name as the last step of the running task. */
   end: Record<TaskEnd, ChoiceWords & { short: string }>
   endLabel: string
-  endByRule: (project: string) => string
   /** The note of the ending your rule picks, in the menu. */
   ruleNote: (project: string, note: string) => string
-  endThisTask: string
   alsoWaits: (steps: string, until: string) => string
   held: string
   startsIn: (seconds: number) => string
@@ -111,8 +107,6 @@ export const taskLaunchText: TaskLaunchText = {
   waits: (name, until) => `${name} is out; waits until ${until}`,
   end: taskEndText,
   endLabel: 'When the work is done',
-  endByRule: (project) => `by ${project}’s rule`,
-  endThisTask: 'this task only',
   ruleNote: (project, note) => `${project}’s rule. ${note}`,
   alsoWaits: (steps, until) => `${steps} waits until ${until}`,
   held: 'Held. Starts when you say',
@@ -136,7 +130,7 @@ export const taskLaunchText: TaskLaunchText = {
 
 const ENDS = [TaskEnd.DraftPr, TaskEnd.ReadyPr, TaskEnd.PushOnly] as const
 
-/** Why a step is in the plan, or why it is not running as planned. */
+/** Why a step is not running as planned: skipped, or waiting for a runtime to reset. */
 function Why({ step, limited, t }: { step: LaunchStep; limited?: { name: string; until: string }; t: TaskLaunchText }) {
   if (step.skipped) return t.skipped
   if (step.waits && limited)
@@ -146,7 +140,7 @@ function Why({ step, limited, t }: { step: LaunchStep; limited?: { name: string;
         {t.waits(limited.name, limited.until)}
       </>
     )
-  return step.why ?? null
+  return null
 }
 
 /** Under the choice of where it works: why, where the coordinator said or Local is taken, then what the choice gives up. */
@@ -413,7 +407,6 @@ export function TaskLaunch({
               </MenuRadioGroup>
             </Menu>
             {branch}
-            <span className={s.why}>{end === ruleEnd ? t.endByRule(project) : t.endThisTask}</span>
           </li>
         )}
         {hideEnd && picks && (

@@ -54,6 +54,8 @@ export interface Round {
   readonly kind: 'round'
   readonly id: string
   readonly agentId: string | null
+  /** The model its own turn ran on, where the runtime recorded it; null for rounds from before it did. */
+  readonly model: string | null
   readonly at: string
   readonly ack: Said | null
   readonly work: Work | null
@@ -81,8 +83,8 @@ export type RoundBlock =
   | { readonly kind: 'althar'; readonly id: string; readonly text: string; readonly tone: 'info' | 'warning' }
   /** Its folder went, or came back: a line across the thread, a change of scene (ADR-056). */
   | { readonly kind: 'folder'; readonly id: string; readonly text: string }
-  /** A reviewer's verdict and findings, in its own voice. */
-  | { readonly kind: 'verdict'; readonly id: string; readonly at: string; readonly result: StepResult }
+  /** A reviewer's verdict and findings, in its own voice, on the model its review ran. */
+  | { readonly kind: 'verdict'; readonly id: string; readonly at: string; readonly model: string | null; readonly result: StepResult }
   /** The pull request the task opened or pushed to. */
   | { readonly kind: 'published'; readonly id: string; readonly at: string; readonly result: StepResult }
 
@@ -154,6 +156,7 @@ const ACK_WITHIN = 3 * 60_000
 interface Gathering {
   readonly id: string
   readonly agentId: string | null
+  readonly model: string | null
   readonly at: string
   readonly steps: Array<Part | WorkStep>
   report: Round['report']
@@ -240,7 +243,15 @@ export const roundsOf = (
       case 'turn': {
         if (open === null || open.agentId !== block.agentId) {
           close(false)
-          open = { id: block.id, agentId: block.agentId, at: block.at, steps: [...pending], report: null, reportedAfter: 0 }
+          open = {
+            id: block.id,
+            agentId: block.agentId,
+            model: block.model,
+            at: block.at,
+            steps: [...pending],
+            report: null,
+            reportedAfter: 0,
+          }
           pending = []
         }
         open.steps.push(...block.parts)
@@ -251,7 +262,7 @@ export const roundsOf = (
         const result = block.result
         if (result.step === 'review') {
           close(false)
-          out.push({ kind: 'verdict', id: block.id, at: block.at, result })
+          out.push({ kind: 'verdict', id: block.id, at: block.at, model: block.result.model ?? null, result })
         } else if (result.step === 'publish') {
           close(false)
           out.push({ kind: 'published', id: block.id, at: block.at, result })
@@ -265,6 +276,7 @@ export const roundsOf = (
             open = {
               id: first?.id ?? block.id,
               agentId: open.agentId,
+              model: open.model,
               at: first === undefined ? block.at : ago(at.get(first.id) ?? now),
               steps: later,
               report: null,
@@ -278,6 +290,7 @@ export const roundsOf = (
             kind: 'round',
             id: block.id,
             agentId: result.agentId,
+            model: result.model ?? null,
             at: block.at,
             ack: null,
             work: null,
@@ -395,6 +408,7 @@ const roundOf = (open: Gathering, live: boolean, at: ReadonlyMap<string, string>
     kind: 'round',
     id: open.id,
     agentId: open.agentId,
+    model: open.model,
     at: open.at,
     ack: ack === undefined ? null : said(ack, false),
     // At work with nothing done yet, it has a line all the same: it is at work.

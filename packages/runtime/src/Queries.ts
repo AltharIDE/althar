@@ -213,6 +213,8 @@ interface ItemRow {
   readonly kind: string
   readonly content: string
   readonly agentId: string | null
+  /** The model its turn ran on, as the turn was given; null where no agent wrote it or it wasn't recorded. */
+  readonly model?: string | null
   readonly inputState: 'queued' | 'delivered' | 'superseded' | 'withdrawn' | null
   readonly disposition: string | null
   /** For a message the person said: some of it was dictated. */
@@ -465,7 +467,13 @@ const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear
  */
 export const itemOf = (row: ItemRow): ThreadItem | undefined => {
   const content = parse(row.content)
-  const base = { id: row.id, sequence: row.sequence, agentId: row.agentId, createdAt: row.createdAt }
+  const base = {
+    id: row.id,
+    sequence: row.sequence,
+    agentId: row.agentId,
+    ...(row.model == null ? {} : { model: row.model }),
+    createdAt: row.createdAt,
+  }
   switch (row.kind) {
     case 'user_message':
       return {
@@ -569,6 +577,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       const findings = field(content, 'findings')
       const round = field(content, 'round')
       const agentId = text(content, 'agentId')
+      const model = text(content, 'model')
       return {
         ...base,
         kind: 'step_result',
@@ -596,6 +605,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           ...descriptionsIn(field(content, 'descriptions')),
           ...keptViewsIn(field(content, 'keptViews')),
           agentId: agentId === '' ? null : agentId,
+          ...(model === '' ? {} : { model }),
         },
       }
     }
@@ -966,7 +976,11 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const rows = yield* sql<ItemRow>`
-            SELECT i.id, i.sequence, i.kind, i.content, s.agent_id, u.state AS input_state, u.disposition, u.dictated, i.created_at,
+            SELECT i.id, i.sequence, i.kind, i.content, s.agent_id,
+              -- The model the item's turn ran on, as its delivery recorded it; a session's own is what it is on now,
+              -- so an earlier round would take the name of the model it moved to. Else the session's, as before.
+              COALESCE(d.model, s.model) AS model,
+              u.state AS input_state, u.disposition, u.dictated, i.created_at,
               (SELECT d.outcome FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
                 WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
                 ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS decision,
@@ -988,6 +1002,7 @@ export class Queries extends Context.Service<
               WHERE thread_id = ${threadId} AND kind = 'question') x
               ON i.kind = 'tool_call' AND x.provider_session_id = i.provider_session_id AND x.tool_call_id = i.tool_call_id
             LEFT JOIN attention_requests q ON i.kind = 'question' AND q.id = json_extract(i.content, '$.attentionId')
+            LEFT JOIN turn_deliveries d ON d.id = i.delivery_id
             LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
             LEFT JOIN user_inputs u ON u.id = i.user_input_id
             WHERE i.thread_id = ${threadId}

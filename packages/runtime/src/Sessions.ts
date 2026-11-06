@@ -2242,14 +2242,6 @@ export class Sessions extends Context.Service<
                 )
               : { skills: undefined }
           const { skills } = setUp
-          const web =
-            thread.role !== 'coordinator' && !offline ? ((yield* policies.current(thread.projectId)).rules.leadsReachWeb ?? true) : false
-          const transportOptions = {
-            ...(thread.role === 'coordinator' ? {} : { web }),
-            ...(untrusted ? { untrusted } : {}),
-            ...(untrusted && offline ? { offline } : {}),
-            ...(skills === undefined ? {} : { skills: skills.folder }),
-          }
           // Whose work it is, in its environment, so all it starts is counted as that work's however it runs (MachineLoad.ts).
           const work = workOf({
             kind: thread.role === 'coordinator' ? 'coordinator' : 'task',
@@ -2270,6 +2262,14 @@ export class Sessions extends Context.Service<
                   count: SIGNED_OUT_GIT_CONFIG,
                 })
               : {}
+          const web =
+            thread.role !== 'coordinator' && !offline ? ((yield* policies.current(thread.projectId)).rules.leadsReachWeb ?? true) : false
+          const transportOptions: SessionOptions = {
+            ...(thread.role === 'coordinator' ? {} : { web }),
+            ...(untrusted ? { untrusted } : {}),
+            ...(untrusted && offline ? { offline } : {}),
+            ...(skills === undefined ? {} : { skills: skills.folder }),
+          }
           const transport = entry.transport(
             cwdOf(thread),
             { ...accounts.env(account), [WORK]: work, ...guarded },
@@ -2352,6 +2352,7 @@ export class Sessions extends Context.Service<
                 : upFront === undefined
                   ? {}
                   : { sandbox: upFront }),
+            ...(skills === undefined ? {} : { skills: skills.folder }),
           }
           // Where the session's sandbox holds its shell commands, what it holds runs without being read (ADR-071).
           const hold = definition.holds?.(reads ? 'reader' : 'lead', sessionOptions)

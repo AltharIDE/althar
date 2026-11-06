@@ -94,6 +94,16 @@ const Pipeline = Schema.Struct({
   source: Schema.optional(Schema.String),
 })
 
+/** A commit status: what GitLab's own CI posts for each job, and what a CI service outside it posts for the commit. */
+const StatusAnswer = Schema.Struct({
+  id: Schema.Number,
+  name: Schema.String,
+  status: Schema.String,
+  target_url: Schema.optional(Schema.NullOr(Schema.String)),
+  description: Schema.optional(Schema.NullOr(Schema.String)),
+})
+type StatusAnswer = typeof StatusAnswer.Type
+
 const MergeAnswer = Schema.Struct({
   id: Schema.Number,
   iid: Schema.Number,
@@ -338,6 +348,31 @@ export const jobState = (status: string, allowFailure: boolean): CheckState => {
     default:
       return 'queued'
   }
+}
+
+/**
+ * What a check is, for telling GitLab's own pipeline jobs from the same job
+ * as a commit status: its name and where it points. GitLab's commit statuses
+ * hold its pipeline's jobs as well as an outside CI's, so a job read from the
+ * pipeline is dropped from the statuses.
+ */
+const checkKey = (name: string, url: string | null | undefined) => `${name}\u0000${url ?? ''}`
+
+/** The checks a commit status posts: the newest status each name has, less those a pipeline job already says. */
+const statusChecks = (statuses: ReadonlyArray<StatusAnswer>, pipeline: ReadonlySet<string>): ReadonlyArray<Check> => {
+  const latest = new Map<string, StatusAnswer>()
+  for (const status of statuses) {
+    if (pipeline.has(checkKey(status.name, status.target_url))) continue
+    const known = latest.get(status.name)
+    if (known === undefined || known.id < status.id) latest.set(status.name, status)
+  }
+  return [...latest.values()].map((status) => ({
+    id: `status:${status.id}`,
+    name: status.name,
+    state: jobState(status.status, false),
+    url: status.target_url ?? null,
+    summary: status.description ?? null,
+  }))
 }
 
 /** What GitLab says stops a merge, in its own words, from its documentation of `detailed_merge_status`. */
@@ -1098,6 +1133,23 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
       }),
     checks: (repository, sha) =>
       Effect.gen(function* () {
+        // Commit statuses: GitLab's own CI posts one for each job, and a CI service outside it posts its own. Both are read here,
+        // and a job that is also in the pipeline below is read once.
+        const statuses = yield* paged(1, (page) =>
+          Effect.map(
+            http.cached(
+              Schema.Array(StatusAnswer),
+              `${project(repository)}/repository/commits/${encodeURIComponent(sha)}/statuses?per_page=100&page=${page}`,
+            ),
+            (rows) => ({ items: rows, next: rows.length < 100 ? undefined : page + 1 }),
+          ),
+        ).pipe(
+          // A commit the project doesn't hold, as one on a fork is, has no statuses there: its checks are its pipeline's.
+          Effect.catchIf(
+            (error) => error.reason === 'not_found',
+            () => Effect.succeed<ReadonlyArray<StatusAnswer>>([]),
+          ),
+        )
         const pipelines = yield* http.cached(Schema.Array(Pipeline), `${project(repository)}/pipelines?sha=${sha}&per_page=20`)
         // The newest of GitLab's own pipelines; one an outside CI made has no jobs to read.
         let pipeline: typeof Pipeline.Type | null | undefined = pipelines.find((found) => found.source !== 'external')
@@ -1107,7 +1159,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
           const open = requests.find((request) => request.state === 'opened' && request.sha === sha)
           pipeline = open === undefined ? null : (yield* read(repository, open.iid)).head_pipeline
         }
-        if (pipeline == null) return []
+        if (pipeline == null) return [...statusChecks(statuses, new Set())]
         const where = String(pipeline.project_id ?? repository.id)
         const jobs = yield* http.cached(Schema.Array(JobAnswer), `${api}/projects/${where}/pipelines/${pipeline.id}/jobs?per_page=100`)
         // A child pipeline, or another project's, is started by a trigger job that the jobs leave out: its result is one check.
@@ -1115,6 +1167,13 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
           Schema.Array(BridgeAnswer),
           `${api}/projects/${where}/pipelines/${pipeline.id}/bridges?per_page=100`,
         )
+        // Each job's commit status is dropped from the statuses, by the job's name and its page, or its downstream pipeline's.
+        const inPipeline = new Set<string>()
+        for (const job of jobs) inPipeline.add(checkKey(job.name, job.web_url))
+        for (const bridge of bridges) {
+          inPipeline.add(checkKey(bridge.name, bridge.web_url))
+          inPipeline.add(checkKey(bridge.name, bridge.downstream_pipeline?.web_url))
+        }
         return [
           ...jobs.map((job): Check => ({
             // The job's project and id: where its log is.
@@ -1132,6 +1191,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
             url: bridge.downstream_pipeline?.web_url ?? bridge.web_url ?? null,
             summary: null,
           })),
+          ...statusChecks(statuses, inPipeline),
         ]
       }),
     checkLog: (repository, check, whole = false) => {

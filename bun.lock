@@ -376,6 +376,7 @@
     "@althar/site": ["@althar/site@workspace:apps/site"],
 
     "@althar/skills": ["@althar/skills@workspace:packages/skills"],
+
     "@althar/testing": ["@althar/testing@workspace:packages/testing"],
 
     "@althar/ui": ["@althar/ui@workspace:packages/ui"],

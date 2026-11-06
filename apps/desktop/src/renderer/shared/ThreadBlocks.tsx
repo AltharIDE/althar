@@ -473,9 +473,14 @@ export function ThreadBlocks({
     blocks.flatMap((block) => (block.kind === 'turn' ? block.parts : [])),
     worktree,
   )
-  // A turn of the thread's own agent, on its session's model and account; another's, on its own model.
-  const turnModel = (agentId: string | null) =>
-    session != null && agentId === session.agentId ? named(agentId, session.model, session.account) : named(agentId)
+  // A turn on the model it ran on, where the runtime recorded it; an older one, on the thread's current session, as
+  // before; another agent's, on its own model.
+  const turnModel = (agentId: string | null, model: string | null = null) =>
+    agentId !== null && model !== null
+      ? named(agentId, model)
+      : session != null && agentId === session.agentId
+        ? named(agentId, session.model, session.account)
+        : named(agentId)
   // The thread's last turn, where an error ended it: it can be tried again. What the person said in it may wait after it.
   const last = blocks.findLast((block) => block.kind === 'turn' || block.kind === 'waiting')
   const ending = last?.kind === 'turn' && !last.live ? last.said.at(-1) : undefined
@@ -553,7 +558,12 @@ export function ThreadBlocks({
         // What Copy takes: what it said, open under its work.
         const said = block.said.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part.text] : [])).join('\n\n')
         return (
-          <Turn key={block.id} model={turnModel(block.agentId)} at={block.at} {...(said === '' || block.live ? {} : { copy: said })}>
+          <Turn
+            key={block.id}
+            model={turnModel(block.agentId, block.model)}
+            at={block.at}
+            {...(said === '' || block.live ? {} : { copy: said })}
+          >
             {block.work.length > 0 && (
               <WorkedFor took={block.took} live={block.live} {...(block.doing === null ? {} : { summary: block.doing })}>
                 {block.work.map((part) => (

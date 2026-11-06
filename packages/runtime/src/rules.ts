@@ -416,7 +416,11 @@ const isFolder = (path: string) => {
 
 /** Why a request may not go ahead because it reads or writes where the person keeps a secret, or nothing. */
 const secretReason = (request: PermissionRequest, cwd?: string, system: System = systemOf()): string | undefined => {
-  const command = request.kind === 'execute' || request.kind === 'other' ? (commandIn(request.rawInput) ?? request.title) : undefined
+  // A sandbox's network request names a host, not a command: nothing in it runs.
+  const command =
+    (request.kind === 'execute' || request.kind === 'other') && networkHostOf(request) === undefined
+      ? (commandIn(request.rawInput) ?? request.title)
+      : undefined
   if (command !== undefined && secretCommandReason(command, cwd, system) !== undefined) return SECRETS_REFUSED
   const { paths } = system
   return pathsOf(request).some(
@@ -446,11 +450,127 @@ const envFile = (path: string) => {
 const envKept = (path: string) =>
   kept(`Reading ${path}, outside the task's worktree, always asks: a .env file holds the person's secrets.`, 'outside', 'floor')
 
-/** The Flatpak grants the app a broad host bridge; agents must not invoke it directly. */
+const DEVICE_BRIDGE_REFUSED =
+  'Agents do not run commands on the device through Flatpak; Althar uses that bridge only for commands it prepares.'
+
+/**
+ * The Flatpak grants the app a broad host bridge; agents must not invoke it
+ * directly, nor the ssh Althar's own git runs through it, which signs in with
+ * the person's SSH agent (ADR-073).
+ */
 const deviceBridgeReason = (words: ReadonlyArray<string>): string | undefined =>
-  (words[0] ?? '').split('/').at(-1) === 'flatpak-spawn'
-    ? 'Agents do not run commands on the device through Flatpak; Althar uses that bridge only for commands it prepares.'
-    : undefined
+  ['flatpak-spawn', 'althar-host-ssh'].includes((words[0] ?? '').split('/').at(-1) ?? '') ? DEVICE_BRIDGE_REFUSED : undefined
+
+/** That ssh, or the bridge itself, named in a command line. */
+const DEVICE_BRIDGE_NAMED = /althar-host-ssh|flatpak-spawn/i
+
+/**
+ * It as an assignment's value, which the words a command is read as don't
+ * keep: `GIT_SSH_COMMAND=…`, `-c core.sshCommand=…`, `GIT_CONFIG_VALUE_0=…`,
+ * or `X=…` for a later `$X`.
+ */
+const DEVICE_BRIDGE_ASSIGNED = /[\w.]=(?:['"`]|\$\()*[^\s;&|'"]*(?:althar-host-ssh|flatpak-spawn)/i
+
+/**
+ * Or a value a substitution finds, whose spaces don't end it:
+ * `core.sshCommand="$(command -v althar-host-ssh)"`, or with backticks.
+ */
+const DEVICE_BRIDGE_SUBSTITUTED = /[\w.]=['"]?(?:\$\(|`)[^;&|]*?(?:althar-host-ssh|flatpak-spawn)/i
+
+/** A shell given a script to run, or `eval`, which runs single-quoted text after all. */
+const RUNS_A_SCRIPT = /\b(?:(?:ba|da|z|k)?sh\s+(?:-\w+\s+)*-\w*c\b|eval\b)/
+
+/**
+ * A `git commit` or `git tag` message about to start: `-m `, `-am`,
+ * `--message=`, after the command's start and nothing but its own words,
+ * which may be quoted (`-c user.name='A Name'`, `--author="…"`) but not
+ * substituted. Any other program may run the single-quoted text it's given
+ * (`python3 -c '…'`, `echo '…' | sh`), and the list of those has no end.
+ */
+const MESSAGE_FOLLOWS =
+  /(?:^\s*|[;&|(]\s*)git(?:\s+-[cC]\s+(?:[^\s;&|'"`$\\]|'[^']*'|"[^"`$\\]*")+)*\s+(?:commit|tag)\b(?:[^;&|'"`$\\]|'[^']*'|"[^"`$\\]*")*?\s(?:-[a-zA-Z]*m\s*|--message[=\s]\s*)$/
+
+/**
+ * The line as the shell substitutes in it, as far as a message goes: a
+ * `git commit` or `git tag` message in single quotes, such as one quoting
+ * the command, substitutes nothing, unless the line hands it to a shell to
+ * run. Other single-quoted text is kept, as source something may run. A
+ * shell or `eval` named only in a message runs nothing. A comment is left
+ * out as the shell leaves it, and a message never runs across a line, so
+ * neither a comment, a heredoc's text nor a `$'…'` can fake its start.
+ */
+const substitutedIn = (command: string): string => {
+  let kept = ''
+  let doubled = false
+  // Whether a word starts here: after a blank or operator the shell reads as
+  // one, not an escaped one such as `\ `.
+  let wordStarts = true
+  for (let at = 0; at < command.length; at++) {
+    const char = command.charAt(at)
+    if (char === '\\') {
+      // `\` and a newline join two lines, as if neither were there.
+      if (command[at + 1] !== '\n') {
+        kept += command.slice(at, at + 2)
+        wordStarts = false
+      }
+      at++
+    } else if (char === '"') {
+      doubled = !doubled
+      kept += char
+      wordStarts = false
+    } else if (char === '#' && !doubled && wordStarts) {
+      // A comment, to the line's end.
+      const end = command.indexOf('\n', at)
+      at = (end === -1 ? command.length : end) - 1
+    } else if (char === '$' && command[at + 1] === "'" && !doubled) {
+      // `$'…'`, where `\'` doesn't end it: kept as written.
+      let end = at + 2
+      while (end < command.length && command[end] !== "'") end += command[end] === '\\' ? 2 : 1
+      kept += command.slice(at, end + 1)
+      at = end
+      wordStarts = false
+    } else if (char === "'" && !doubled) {
+      // Single-quoted text, as far as its closing quote, or the line's end.
+      const closing = command.indexOf("'", at + 1)
+      const end = closing === -1 ? command.length : closing
+      const quoted = command.slice(at, end + 1)
+      kept += MESSAGE_FOLLOWS.test(kept) && !quoted.includes('\n') ? "''" : quoted
+      at = end
+      wordStarts = false
+    } else {
+      kept += char
+      wordStarts = !doubled && /[\s;&|()]/.test(char)
+    }
+  }
+  return RUNS_A_SCRIPT.test(kept) ? command : kept
+}
+
+/** git's ssh, or config from the environment, set on the line, whatever it is set to: `GIT_SSH_COMMAND=$(…)`. */
+const GIT_RUNS_SET = /\bGIT_(?:SSH\w*|CONFIG\w*)=/i
+
+/** A path in a git folder, or a git config file. */
+const GIT_CONFIG_PATH = /(?:^|\/)\.git(?:\/|$)|\.gitconfig$|(?:^|\/)git\/config$|config\.worktree$/
+
+/**
+ * A command line that has git run the device's ssh, or the bridge, as it is
+ * now or once it's kept in a config for a later plain `git fetch`: set as a
+ * variable or with `-c`, with `git config` (its ssh settings, an alias), or
+ * written into a git folder. A line that only names it, a search or a commit
+ * message, sets nothing and runs nothing.
+ */
+const deviceSshReason = (command: string): string | undefined => {
+  if (!DEVICE_BRIDGE_NAMED.test(command)) return undefined
+  if (
+    [DEVICE_BRIDGE_ASSIGNED, GIT_RUNS_SET].some((pattern) => pattern.test(command)) ||
+    DEVICE_BRIDGE_SUBSTITUTED.test(substitutedIn(command))
+  )
+    return DEVICE_BRIDGE_REFUSED
+  const sets = parseCommandLine(command).commands.some((written) => {
+    const words = unwrap(written)
+    return gitCall(words, '/')?.subcommand === 'config' || words.some((word) => GIT_CONFIG_PATH.test(word))
+  })
+  return sets ? DEVICE_BRIDGE_REFUSED : undefined
+}
 
 /** What `gh` and `glab` may do: their read-only commands, by command and subcommand. */
 const HOST_LOOKS: Readonly<Record<string, ReadonlySet<string>>> = {
@@ -518,6 +638,25 @@ export const commandIn = (rawInput: unknown): string | undefined => {
 }
 
 const quoteWord = (word: string) => (/^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`)
+
+/**
+ * The host a sandbox's network request is for (Claude Code's
+ * `SandboxNetworkAccess`), or none. Its raw input names a host and no
+ * command, and the request's title is that host: claude-agent-acp's
+ * presentation gives a network request the host as its subject
+ * (permissions/presentation.ts), where a tool that merely takes a `host`
+ * argument keeps its own title and is read as what it says it does. A host is
+ * never read as a shell command, however it is spelled (a port, an
+ * underscore); a line that does name a command is read as one.
+ */
+const networkHostOf = (request: PermissionRequest): string | undefined => {
+  if (request.kind !== 'execute' && request.kind !== 'other') return undefined
+  if (commandIn(request.rawInput) !== undefined) return undefined
+  const host = field(request.rawInput, 'host')
+  if (typeof host !== 'string') return undefined
+  const name = host.trim()
+  return name !== '' && request.title.trim() === name ? name : undefined
+}
 
 const PATH_KEYS = ['file_path', 'filePath', 'path', 'notebook_path', 'old_path', 'new_path', 'destination', 'source', 'target']
 
@@ -2118,18 +2257,13 @@ const RUNNERS = ['make', 'just', 'task', 'rake', 'mage']
 
 const DEPLOY_WORD = /^(deploy|publish|release)([:._-]|$)/
 
-/** A word that reads as a host's name, as a sandbox's network request gives it, not a script's: `release-assets.githubusercontent.com`. */
-const hostName = (word: string) =>
-  /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/i.test(word) && !/\.(sh|bash|zsh|py|js|mjs|cjs|ts|rb|pl|ps1)$/i.test(word)
-
 /** Whether a command deploys or publishes, as its program and subcommand say. */
 const deploys = (words: ReadonlyArray<string>): boolean => {
   const [first = '', ...rest] = words
   const program = first.slice(first.lastIndexOf('/') + 1)
   const [sub = '', next = ''] = rest.filter((word) => !word.startsWith('-'))
-  // A script named for it: `./deploy.sh`, `scripts/release`. Not a host a network request is for, alone, which is no
-  // script: `release-assets.githubusercontent.com`, where Electron downloads its build from.
-  if (DEPLOY_WORD.test(program) && program !== 'release' && !(rest.length === 0 && hostName(first))) return true
+  // A script named for it: `./deploy.sh`, `scripts/release`.
+  if (DEPLOY_WORD.test(program) && program !== 'release') return true
   if (DEPLOYERS[program]?.test(sub) === true) return true
   if (program === 'vercel' && rest.includes('--prod')) return true
   if (program === 'gh' && sub === 'release' && next === 'create') return true
@@ -3027,7 +3161,7 @@ const allowedBy = (
       ? kinds.flatMap((each) => (each.rule === 'unclear' ? [] : [{ kind: each.rule }]))
       : undefined
   if (request.kind !== 'execute' && request.kind !== 'other') return byKinds(found)
-  const text = commandOf(request)
+  const text = networkHostOf(request) ?? commandOf(request)
   const { commands, opaque } = eachCommand(text, context)
   if (opaque) return undefined
   const whole = rules.find((rule) => exactly(rule) && rule.pattern === text.trim())
@@ -3121,7 +3255,11 @@ export const readsWeb = (command: string): boolean => {
 
 /** What the rules keep for the person in a request, whatever the project says of it: every kind it is, and why. */
 const keptOf = (request: PermissionRequest, context: RuleContext): ReadonlyArray<Kept> => {
-  if (request.kind === 'execute' || request.kind === 'other') return commandKinds(commandOf(request), context)
+  if (request.kind === 'execute' || request.kind === 'other') {
+    // A network request names a host: none of the command kinds (a deploy, a push) are what it does.
+    if (networkHostOf(request) !== undefined) return []
+    return commandKinds(commandOf(request), context)
+  }
   const paths = pathsOf(request)
   // A `.env` file the task doesn't own, read or changed: the person's checkout's, say.
   const envs = paths.filter(envFile)
@@ -3167,6 +3305,8 @@ const lastingOf = (request: PermissionRequest, context: RuleContext): Kept | und
   const lasting = (kinds: ReadonlyArray<Kept>) =>
     kinds.find((each) => each.irreversible === true && each.rule !== 'unclear' && each.blind !== true)
   if (request.kind !== 'execute' && request.kind !== 'other') return lasting(keptOf(request, context))
+  // A host is no command, so none of what a command could do that can't be undone.
+  if (networkHostOf(request) !== undefined) return undefined
   return lasting(commandKinds(withoutQuotedHeredocs(commandOf(request), takesScript), context))
 }
 
@@ -3208,14 +3348,22 @@ const LOOKS: ReadonlyArray<PermissionRequest['kind']> = ['read', 'search', 'thin
 export const decide = (request: PermissionRequest, context: RuleContext): Verdict => {
   const project = context.project ?? MVP_RULES
   const system = systemOf(context)
+  const network = networkHostOf(request)
+  // A network request meets the person's named rules by its host, as a command meets them by its words.
   const named =
-    request.kind === 'execute' || request.kind === 'other' ? commandRule(commandOf(request), project.commands, system) : undefined
-  if (request.kind === 'execute' || request.kind === 'other') {
+    network !== undefined
+      ? commandRule(network, project.commands, system)
+      : request.kind === 'execute' || request.kind === 'other'
+        ? commandRule(commandOf(request), project.commands, system)
+        : undefined
+  if (network === undefined && (request.kind === 'execute' || request.kind === 'other')) {
     // A code host is reached through Althar: `gh` and `glab` only look, and no one reads credentials, wherever they are in the command.
-    const refused = lineReadings(commandOf(request), system)
-      .flatMap((line) => line.commands.flatMap((words) => readings(unwrap(words))))
-      .map((words) => credentialReason(words) ?? hostReason(words) ?? deviceBridgeReason(words))
-      .find((reason) => reason !== undefined)
+    const refused =
+      deviceSshReason(commandOf(request)) ??
+      lineReadings(commandOf(request), system)
+        .flatMap((line) => line.commands.flatMap((words) => readings(unwrap(words))))
+        .map((words) => credentialReason(words) ?? hostReason(words) ?? deviceBridgeReason(words))
+        .find((reason) => reason !== undefined)
     if (refused !== undefined) return { verdict: 'deny', reason: refused }
   }
   // Nor the files people keep keys and sign-ins in, whatever the request does with them.
@@ -3261,7 +3409,10 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
   if (floor !== undefined) return ask(floor.reason, false)
   // Reads, and changes to the task's own files, go through, as they would in any agent's sandbox.
   const ownFiles = CHANGES.includes(request.kind) && found.length === 0
-  const routine = LOOKS.includes(request.kind) || ownFiles || (project.web === true && found.length === 0 && readsWeb(commandOf(request)))
+  const routine =
+    LOOKS.includes(request.kind) ||
+    ownFiles ||
+    (network === undefined && project.web === true && found.length === 0 && readsWeb(commandOf(request)))
   const reason =
     asked?.reason ??
     (everyRunAnswered(project) && !routine
@@ -3482,7 +3633,8 @@ export type TallyKind = (typeof TALLY_KINDS)[number]
  */
 export const tallyKindOf = (request: PermissionRequest, context: RuleContext): TallyKind => {
   const system = systemOf(context)
-  const runs = request.kind === 'execute' || request.kind === 'other'
+  const network = networkHostOf(request)
+  const runs = (request.kind === 'execute' || request.kind === 'other') && network === undefined
   if (runs) {
     const words = lineReadings(commandOf(request), system).flatMap((line) => line.commands.flatMap((each) => readings(unwrap(each))))
     if (words.some((each) => credentialReason(each) !== undefined || deviceBridgeReason(each) !== undefined)) return 'credentials'
@@ -3490,7 +3642,13 @@ export const tallyKindOf = (request: PermissionRequest, context: RuleContext): T
   }
   if (secretOf(request, context, system) !== undefined) return 'credentials'
   const project = context.project ?? MVP_RULES
-  if (runs && commandRule(commandOf(request), project.commands, system) !== undefined) return 'command'
+  const named =
+    network !== undefined
+      ? commandRule(network, project.commands, system)
+      : runs
+        ? commandRule(commandOf(request), project.commands, system)
+        : undefined
+  if (named !== undefined) return 'command'
   const found = keptOf(request, context)
   const firmest = found.find((each) => each.irreversible === true) ?? found.find((each) => each.floor === true) ?? found[0]
   return firmest?.rule ?? 'other'
@@ -3594,7 +3752,7 @@ const prefixOf = (words: ReadonlyArray<string>): string | null => {
 export const alwaysOf = (request: PermissionRequest, context: RuleContext): Always => {
   const project = context.project ?? MVP_RULES
   const runs = request.kind === 'execute' || request.kind === 'other'
-  const text = runs ? commandOf(request).trim() : ''
+  const text = networkHostOf(request) ?? (runs ? commandOf(request).trim() : '')
   const command = text !== '' && text.length <= COMMAND_KEPT ? text : null
   const found = keptOf(request, context)
   const kind = found.flatMap((each) => (each.rule === 'unclear' ? [] : [each.rule]))[0] ?? null
@@ -5048,6 +5206,8 @@ const envOutsideIn = (command: string, cwd: string) => {
  * words the shell expands.
  */
 const readerLineReason = (command: string, options: ReaderOptions): string | undefined => {
+  const deviceSsh = deviceSshReason(command)
+  if (deviceSsh !== undefined) return deviceSsh
   if (options.trusted === true) {
     if (options.cwd !== undefined && envOutsideIn(command, options.cwd)) return ENV_REFUSED
     const found = substitutionsIn(command)

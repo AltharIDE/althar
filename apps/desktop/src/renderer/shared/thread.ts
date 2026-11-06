@@ -100,6 +100,8 @@ export type Block =
       readonly kind: 'turn'
       readonly id: string
       readonly agentId: string | null
+      /** The model its turn ran on, where the runtime recorded it: the round keeps it when the session moves on. */
+      readonly model: string | null
       readonly at: string
       /** Everything it did and said, in order. */
       readonly parts: ReadonlyArray<Part>
@@ -117,7 +119,14 @@ export type Block =
       readonly handed: Handed
     }
   | { readonly kind: 'divider'; readonly id: string; readonly text: string }
-  | { readonly kind: 'step'; readonly id: string; readonly at: string; readonly result: StepResult }
+  | {
+      readonly kind: 'step'
+      readonly id: string
+      readonly at: string
+      /** The model its step ran on, where the runtime recorded it. */
+      readonly model: string | null
+      readonly result: StepResult
+    }
   | { readonly kind: 'card'; readonly id: string; readonly card: TaskCardContent }
   /** Something heard from outside: a comment on the task's pull request, its checks, its merge. */
   | { readonly kind: 'arrival'; readonly id: string; readonly at: string; readonly arrival: ArrivalContent }
@@ -457,7 +466,7 @@ export const blocksOf = (
   let restartedAt = -1
   /** When each turn began and last grew, by its id. */
   const spans = new Map<string, { from: string; to: string }>()
-  const add = (agentId: string | null, at: string, part: Part) => {
+  const add = (agentId: string | null, at: string, part: Part, model: string | null = null) => {
     const last = blocks.at(-1)
     if (last?.kind === 'turn' && last.agentId === agentId) {
       blocks[blocks.length - 1] = { ...last, parts: [...last.parts, part] }
@@ -469,6 +478,7 @@ export const blocksOf = (
       kind: 'turn',
       id: part.id,
       agentId,
+      model,
       at: ago(at),
       parts: [part],
       work: [],
@@ -521,7 +531,7 @@ export const blocksOf = (
         const last = blocks.at(-1)
         const span = last?.kind === 'turn' ? spans.get(last.id) : undefined
         if (last?.kind === 'turn' && span !== undefined) spans.set(last.id, { ...span, to: item.createdAt })
-        blocks.push({ kind: 'step', id: item.id, at: ago(item.createdAt), result: item.content })
+        blocks.push({ kind: 'step', id: item.id, at: ago(item.createdAt), model: item.content.model ?? null, result: item.content })
         continue
       }
       case 'task':
@@ -569,7 +579,7 @@ export const blocksOf = (
           continue
         }
     }
-    add(item.agentId, item.createdAt, partOf(item, streaming, turnRunning, worktree, outputs))
+    add(item.agentId, item.createdAt, partOf(item, streaming, turnRunning, worktree, outputs), item.model ?? null)
   }
   // A message the store has placed but the window hasn't read yet shows from its first words.
   const read = new Set(source.items.map((item) => item.id))
