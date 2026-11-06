@@ -5,7 +5,7 @@ import { Ids, newId, type ProjectId } from '@althar/domain'
 import type { MessageSender } from '@althar/contracts'
 import { scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Cause, Deferred, Effect, Fiber, Option, Stream } from 'effect'
+import { Cause, Deferred, Duration, Effect, Fiber, Option, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 import { TestClock } from 'effect/testing'
 
@@ -21,6 +21,27 @@ import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { ToolRefused, ToolServer, type ToolAccess } from '../src/ToolServer'
 import { callTool, callToolAtOnce, repository, runtime, task, turns, until } from './support'
+
+/**
+ * A runtime whose background loops don't wake within the days these tests move the TestClock by: each wake costs real
+ * time, so a day at the default cadences (a sample every two seconds, a listen, a stall look and a merge-line look
+ * every thirty) takes as long as a minute of waiting on a busy machine.
+ */
+const slowDays = (database?: string) => {
+  const never = Duration.hours(1000)
+  return runtime(
+    database,
+    {},
+    {
+      busy: { sample: never },
+      listenEvery: never,
+      mergeLineEvery: never,
+      stalls: { every: never },
+      automations: { tick: never },
+      usage: { every: never },
+    },
+  )
+}
 
 /** A live turn in the store, without an agent process; calls use the real HTTP MCP server. */
 const setup = (role: 'coordinator' | 'lead' = 'coordinator') =>
@@ -472,7 +493,7 @@ describe('the person’s word through the tool boundary', () => {
       yield* TestClock.adjust('23 hours')
       yield* s.errands.remind(s.access.projectId)
       assert.lengthOf(yield* reminders, 1)
-    }).pipe(Effect.provide(runtime())),
+    }).pipe(Effect.provide(slowDays())),
   )
 
   it.effect('a quiet errand says what it waits on once a day without a live session', () =>
@@ -499,7 +520,7 @@ describe('the person’s word through the tool boundary', () => {
       assert.lengthOf(lines, 2)
       assert.isTrue(lines.some((line) => line.content.includes('checks head-a')))
       assert.isTrue(lines.every((line) => !line.content.includes('[{')))
-    }).pipe(Effect.provide(runtime())),
+    }).pipe(Effect.provide(slowDays())),
   )
 })
 
