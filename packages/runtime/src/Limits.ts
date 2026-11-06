@@ -180,7 +180,7 @@ export class Limits extends Context.Service<
      * on the thread, where given: of an automation's run, those on a plan),
      * the soonest back.
      */
-    out(agentId: string, projectId?: string, threadId?: string): Effect.Effect<Option.Option<Out>, Failure>
+    out(agentId: string, projectId?: string, threadId?: string, model?: string): Effect.Effect<Option.Option<Out>, Failure>
     /** Whether the project moves work on to the agent's next account when one runs out: the person's to turn on (ADR-012). */
     rotates(projectId: string): Effect.Effect<boolean, Failure>
     /** Whether an account is out now, and until when. */
@@ -558,10 +558,10 @@ export class Limits extends Context.Service<
           return (yield* ranked({ ...input, only: input.agentId }))[0]?.model ?? (yield* preferredModel(input))
         })
 
-      const out = (agentId: string, projectId?: string, threadId?: string) =>
+      const out = (agentId: string, projectId?: string, threadId?: string, model?: string) =>
         Effect.gen(function* () {
           const outs: Array<Out> = []
-          for (const account of yield* runnable(agentId, projectId, yield* automated(threadId))) {
+          for (const account of yield* runnable(agentId, projectId, yield* automated(threadId), model)) {
             const found = yield* outOf(account)
             if (Option.isNone(found)) return Option.none<Out>()
             outs.push(found.value)

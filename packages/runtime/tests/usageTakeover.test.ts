@@ -13,9 +13,10 @@ import { Automations } from '../src/Automations'
 import { Agents } from '../src/Config'
 import { Accounts } from '../src/Accounts'
 import { Instance } from '../src/Instance'
-import { Limits } from '../src/Limits'
+import { Limits, type ModelChoice } from '../src/Limits'
 import { Models } from '../src/Models'
 import { Plans } from '../src/Plans'
+import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
@@ -153,6 +154,33 @@ const noCall = Effect.gen(function* () {
     yield* sql`SELECT id FROM attention_requests WHERE state = 'open' OR (kind = 'stuck' AND json_extract(payload, '$.why') = 'usage_limit')`
   assert.lengthOf(calls, 0)
 })
+
+const automationFor = (projectId: string, lead: ModelChoice, review: ModelChoice | null = null) =>
+  Effect.gen(function* () {
+    const instance = yield* Instance
+    return yield* (yield* Automations).make({
+      projectId: projectId as ProjectId,
+      actorId: instance.personId,
+      definition: {
+        name: 'Subscription run',
+        prompt: 'Finish this run [lead:finish] [review:pass]',
+        schedule: { every: 'week', days: [1], at: '09:00' },
+        zone: 'Europe/London',
+        lead,
+        work: { kind: 'task', review, end: null },
+        allowEverything: true,
+        minutes: 45,
+        late: 'once',
+      },
+    })
+  })
+const automationRuns = (automationId: string) =>
+  Effect.flatMap(
+    SqlClient.SqlClient,
+    (sql) =>
+      sql<{ threadId: string; taskId: string; state: string }>`SELECT h.id AS thread_id, o.task_id, o.state FROM automation_occurrences o
+    JOIN threads h ON h.task_id = o.task_id AND h.kind = 'task' WHERE o.automation_id = ${automationId}`,
+  )
 
 describe('automatic usage takeover by model', () => {
   it.live('continues a turn on another maker’s strongest plan model with its brief, commits and unfinished work', () => {
@@ -439,4 +467,89 @@ describe('automatic usage takeover by model', () => {
       ),
     )
   })
+  for (const step of ['lead', 'review'] as const) {
+    it.live(`starts an automation with a subscription-backed ${step}, and refuses its per-use route`, () =>
+      Effect.gen(function* () {
+        const { projectId } = yield* startTask()
+        const instance = yield* Instance
+        const automations = yield* Automations
+        const choices = (model: string) =>
+          step === 'lead'
+            ? { lead: { agentId: 'opencode', model }, review: null }
+            : { lead: { agentId: 'claude-code', model: claude.id }, review: { agentId: 'opencode', model } }
+        const paid = choices(third.id)
+        const id = yield* automationFor(projectId, paid.lead, paid.review)
+        yield* automations.runNow(id, instance.personId)
+        const [run] = yield* until(automationRuns(id), (all) => all[0]?.state === 'made')
+        const sql = yield* SqlClient.SqlClient
+        const sessions = yield* sql<{ agentId: string; model: string | null }>`
+          SELECT s.agent_id, s.model FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
+          WHERE t.task_id = ${run!.taskId} AND t.kind = ${step === 'lead' ? 'task' : 'step'}`
+        assert.deepInclude(sessions, { agentId: 'opencode', model: third.id })
+        const perUse = choices('opencode-zen/gpt-strong')
+        const refusedId = yield* automationFor(projectId, perUse.lead, perUse.review)
+        const refused = yield* Effect.flip(automations.runNow(refusedId, instance.personId))
+        assert.deepInclude(refused, {
+          _tag: 'AutomationRefused',
+          message: 'Automations run only on a plan for now, and its agent pays per use.',
+        })
+        yield* noCall
+      }).pipe(Effect.provide(withAgents({}, ['opencode'], true))),
+    )
+  }
+
+  for (const fallback of ['move', 'wait'] as const) {
+    it.live(
+      `does not rotate back onto an exhausted subscription account: ${fallback}s when ${fallback === 'move' ? 'another model is free' : 'nothing is free'}`,
+      () => {
+        const back = Date.now() + 3_600_000
+        let failures = 0
+        return Effect.gen(function* () {
+          const { projectId } = yield* startTask()
+          const instance = yield* Instance
+          const automations = yield* Automations
+          yield* (yield* Policies).setAccounts(projectId as ProjectId, { rotate: true }, instance.personId)
+          const id = yield* automationFor(projectId, { agentId: 'opencode', model: third.id })
+          yield* automations.runNow(id, instance.personId)
+          const [run] = yield* until(automationRuns(id), (all) => all.length > 0)
+          if (fallback === 'move') {
+            yield* until(automationRuns(id), (all) => all[0]?.state === 'made')
+            assert.deepStrictEqual(yield* agentsOn(run!.threadId), [
+              { agentId: 'opencode', model: third.id },
+              { agentId: 'claude-code', model: claude.id },
+            ])
+          } else {
+            yield* until(cards(projectId), (all) => all.some((card) => card.taskId === run!.taskId && card.waits?.why === 'nothing_free'))
+            // Let the held-step scheduler run: the account must not be retried before reset.
+            yield* Effect.sleep('250 millis')
+            assert.deepStrictEqual(yield* agentsOn(run!.threadId), [{ agentId: 'opencode', model: third.id }])
+          }
+          assert.strictEqual(failures, 1)
+          const out = yield* (yield* Limits).out('opencode', projectId, run!.threadId, third.id)
+          assert.isTrue(Option.isSome(out))
+          const notices = (yield* items(run!.threadId)).filter((item) => item.kind === 'notice' && item.content.about === 'limit')
+          assert.lengthOf(notices, 1)
+          yield* noCall
+        }).pipe(
+          Effect.provide(
+            withAgents(
+              {
+                opencode: {
+                  models: [third],
+                  outOfUsage: {
+                    until: back,
+                    beforeLimit: async () => {
+                      failures++
+                    },
+                  },
+                },
+              },
+              fallback === 'move' ? ['opencode'] : ['opencode', 'claude-code', 'codex'],
+              true,
+            ),
+          ),
+        )
+      },
+    )
+  }
 })
