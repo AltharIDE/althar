@@ -146,6 +146,24 @@ export class Errands extends Context.Service<
     resume(access: ToolAccess, id: string, messageId: string): Effect.Effect<string, ToolRefused>
     cancel(access: ToolAccess, id: string, messageId: string): Effect.Effect<string, ToolRefused>
     execute(tool: string, access: ToolAccess, action: AskedAction): Effect.Effect<string, ToolRefused>
+    /**
+     * Whether the person's word for an action still stands, as execute checks
+     * it before acting and again after its read: the turn is live, the message
+     * is theirs in it, and no paused or called-off errand of that word holds
+     * the action (by its tool and target and arguments, or, given, its task).
+     * Their words, else refused. An action that waits for a lock checks again
+     * once it holds it, before it writes anything.
+     */
+    stands(
+      tool: string,
+      access: ToolAccess,
+      action: {
+        readonly messageId: string | undefined
+        readonly target: string
+        readonly request: Readonly<Record<string, unknown>>
+        readonly taskId?: string
+      },
+    ): Effect.Effect<string, ToolRefused>
     /** The shared news watch calls this even when a poll has no changes. No session or agent place is held. */
     remind(projectId: string): Effect.Effect<void, ToolRefused>
     /** Every poll change touching a target refreshes this clock; wake its thread separately for a fresh/terminal read. */
@@ -299,6 +317,30 @@ export class Errands extends Context.Service<
             return id
           }),
         )
+      const stands = (
+        tool: string,
+        access: ToolAccess,
+        action: {
+          readonly messageId: string | undefined
+          readonly target: string
+          readonly request: Readonly<Record<string, unknown>>
+          readonly taskId?: string
+        },
+      ) =>
+        Effect.gen(function* () {
+          const current = yield* turn(access)
+          if (current.turnId === null) return yield* refused('An asked-for tool runs only during a live turn.')
+          if (action.messageId === undefined) return yield* refused("Name the person's message, or an errand and its step.")
+          const words = yield* word(access, action.messageId)
+          const taskId = action.taskId ?? null
+          const [held] = yield* sql<{ id: string }>`SELECT e.id FROM errands e JOIN errand_steps s ON s.errand_id = e.id
+            WHERE e.project_id = ${access.projectId} AND e.thread_id = ${access.threadId} AND e.message_id = ${action.messageId}
+              AND e.state IN ('paused', 'cancelled') AND s.tool = ${tool}
+              AND ((s.target = ${action.target} AND s.request = ${stable(action.request)}) OR (${taskId} IS NOT NULL AND s.task_id = ${taskId}))
+            LIMIT 1`
+          if (held !== undefined) return yield* refused('This word’s errand was paused or called off. The person needs to say so again.')
+          return words
+        })
       const execute = (tool: string, access: ToolAccess, action: AskedAction) => {
         // The same external intent shares a receipt across messages, sessions and errands.
         // Include a task revision or operation generation in request for an action that may legitimately recur.
@@ -313,18 +355,10 @@ export class Errands extends Context.Service<
             let errand: ErrandRow | undefined
             let step: StepRow | undefined
             const authorize = Effect.gen(function* () {
+              if (action.errandId === undefined)
+                return yield* stands(tool, access, { messageId: action.messageId, target: action.target, request: action.request })
               const current = yield* turn(access)
               if (current.turnId === null) return yield* refused('An asked-for tool runs only during a live turn.')
-              if (action.errandId === undefined) {
-                if (action.messageId === undefined) return yield* refused("Name the person's message, or an errand and its step.")
-                const words = yield* word(access, action.messageId)
-                const [held] = yield* sql<{ id: string }>`SELECT e.id FROM errands e JOIN errand_steps s ON s.errand_id = e.id
-                  WHERE e.project_id = ${access.projectId} AND e.thread_id = ${access.threadId} AND e.message_id = ${action.messageId}
-                    AND e.state IN ('paused', 'cancelled') AND s.tool = ${tool} AND s.target = ${action.target} AND s.request = ${stable(action.request)} LIMIT 1`
-                if (held !== undefined)
-                  return yield* refused('This word’s errand was paused or called off. The person needs to say so again.')
-                return words
-              }
               errand = yield* owned(access, action.errandId)
               const steps = yield* stepsOf(errand.id)
               step = steps.find((s) => s.stepKey === action.step)
@@ -582,6 +616,7 @@ export class Errands extends Context.Service<
             }),
           ),
         execute: (tool, access, action) => provide(execute(tool, access, action)),
+        stands: (tool, access, action) => provide(stands(tool, access, action)),
         news: (id) =>
           provide(
             sql.withTransaction(
