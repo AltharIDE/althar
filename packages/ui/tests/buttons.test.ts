@@ -42,6 +42,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/WorkLine/WorkLine.tsx': 'the line that folds a round’s work; what it looked at, as thumbnails',
   'thread/Checked/Checked.tsx': 'the row of a check, which folds what it printed',
   'thread/Tool/Tool.tsx': 'the rows that fold a call or a run of them, and the path as a link',
+  'thread/Terminal/Terminal.tsx': 'the line over a command’s output that folds its earlier lines',
   'thread/Permission/Permission.tsx': 'the allowed line, which folds',
   'thread/Document/Document.tsx': 'the fold at the foot of a document',
   'thread/Step/Step.tsx': 'the caret that opens a step',
