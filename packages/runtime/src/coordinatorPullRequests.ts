@@ -493,7 +493,9 @@ export const editPullRequest = <R>(
       .pipe(
         Effect.mapError((error) =>
           refused(
-            `${hostName(host)} wouldn't change ${name}: ${error.message}. Tell the person what you would set; they can set it on ${change.url}.`,
+            error.reason === 'unreachable' || error.reason === 'invalid_response'
+              ? `Althar couldn't tell whether ${hostName(host)} changed ${name}: ${error.message}. Read it before saying it changed or didn't.`
+              : `${hostName(host)} wouldn't change ${name}: ${error.message}. Tell the person what you would set; they can set it on ${change.url}.`,
           ),
         ),
       )

@@ -30,7 +30,9 @@ describe('a pull request’s description given anew', () => {
     const framed = framedOf(opened)
     assert.strictEqual(framed.described, 'Four looks, A to D.\n\nOne of them stays.')
     assert.lengthOf(framed.head, 2)
-    assert.lengthOf(framed.tail, 3)
+    assert.lengthOf(framed.tail, 1)
+    assert.isTrue(framed.tail[0]?.startsWith('<details>\n<summary>Reviewed by '))
+    assert.isTrue(framed.tail[0]?.endsWith('Opened by [Althar](https://github.com/AltharIDE/althar).'))
     assert.strictEqual(
       withDescribed(opened, 'The homepage opens on the orrery.'),
       bodyOf({ lead: null, issue, written: 'The homepage opens on the orrery.', review }),
@@ -50,6 +52,22 @@ describe('a pull request’s description given anew', () => {
     )
     assert.strictEqual(withDescribed('Someone’s own words.\n\nAnd more.', 'New words.'), 'New words.')
     assert.strictEqual(withDescribed('', 'New words.'), 'New words.')
+  })
+
+  it('keeps Althar’s end, and what someone added after it on the host, where a new description is given', () => {
+    const review = { seal: null, details: detailsOf(RECORD), note: null }
+    const opened = bodyOf({ lead: null, issue, written: 'Four looks.', review })
+    const added = `${opened}\n\nThanks, merging after the release.`
+    const expected = `${bodyOf({ lead: null, issue, written: 'One look.', review })}\n\nThanks, merging after the release.`
+    assert.strictEqual(withDescribed(added, 'One look.'), expected)
+    // Only the issue's line and the credit, with a line after them.
+    const plain = `${bodyOf({ lead: 'Four looks.', issue })}\nEdited by hand.`
+    assert.strictEqual(withDescribed(plain, 'One look.'), `${bodyOf({ lead: 'One look.', issue })}\nEdited by hand.`)
+    // A lead's own “Part of” line, with its words going on after it, is the lead's.
+    assert.strictEqual(
+      withDescribed('Part of #12\n\nMore words.\n\nOpened by [Althar](https://github.com/AltharIDE/althar).', 'New.'),
+      'New.\n\nOpened by [Althar](https://github.com/AltharIDE/althar).',
+    )
   })
 
   it('fills the template’s boxes unticked where it keeps the template, and leaves other words as written', () => {

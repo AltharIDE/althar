@@ -73,7 +73,7 @@ import {
 import { coAuthorOn, creditBranch, type Memory, recallMade, rememberMade, withoutAgentCredit } from './credit'
 import { envelope } from './envelope'
 import { evidencePaths, taskShown } from './evidence'
-import { AttachRefused, CantMerge, ChangedSinceSeen, GitFailed, NoChangeToOpen, NotFound, PushRefused } from './errors'
+import { AttachRefused, CantMerge, ChangedSinceSeen, GitFailed, NoChangeToOpen, NotFound, OutwardUncertain, PushRefused } from './errors'
 import { conventionsAt, ruleOf, titleFor } from './conventions'
 import { baseBranch, forkOf, workRemotes } from './forks'
 import { makeKeyedLock } from './keyedLock'
@@ -3225,8 +3225,10 @@ export class Changes extends Context.Service<
 
       /**
        * The description Althar last set on a pull request, as its host gave it
-       * back, by the receipts of its opening and its edits; null where it set
-       * none, as on one a task was attached to.
+       * back, by the receipts of its opening and of its edits that set one: an
+       * edit of the title alone echoes whatever the description was, someone
+       * else's words too, so it never counts. Null where it set none, as on
+       * one a task was attached to.
        */
       const lastSetBody = (link: LinkRow, url: string) =>
         Effect.gen(function* () {
@@ -3234,7 +3236,8 @@ export class Changes extends Context.Service<
           const [row] = yield* sql<{ body: string | null }>`
             SELECT json_extract(m.response, '$.body') AS body FROM mutation_receipts m JOIN work_items w ON w.id = m.work_item_id
             WHERE m.state = 'confirmed' AND m.response IS NOT NULL AND (
-              (m.operation = 'edit_change' AND w.subject_type = 'external_link' AND w.subject_id = ${link.id})
+              (m.operation = 'edit_change' AND w.subject_type = 'external_link' AND w.subject_id = ${link.id}
+                AND json_extract(m.request, '$.body') IS NOT NULL)
               OR (m.operation = 'open_change' AND w.subject_type = 'task' AND w.subject_id = ${link.taskId}
                 AND lower(json_extract(m.response, '$.url')) = ${url.toLowerCase()}))
             ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1`
@@ -3281,10 +3284,20 @@ export class Changes extends Context.Service<
           return edited
         })
 
-      /** A host's refusal, in its words, for whoever asked the edit. */
-      const editRefused = (host: CodeHost, name: string, url: string, error: ConnectorFailed) =>
+      /**
+       * Whether an edit's answer was lost on the way, so the host may have
+       * made it: its receipt stays uncertain, and nobody may say it didn't.
+       */
+      const editUnsure = (error: unknown) =>
+        error instanceof OutwardUncertain ||
+        (error instanceof ConnectorFailed && (error.reason === 'unreachable' || error.reason === 'invalid_response'))
+
+      /** A host's refusal, in its words, for whoever asked the edit; or, where its answer was lost, that nobody knows yet. */
+      const editRefused = (host: CodeHost, name: string, url: string, error: ConnectorFailed | OutwardUncertain) =>
         new ToolRefused({
-          message: `${hostName(host)} wouldn't change ${name}: ${error.message}. Its title and description stay as they were, and so does the task's title. Tell the person what you would set; they can set it on ${url}.`,
+          message: editUnsure(error)
+            ? `Althar couldn't tell whether ${hostName(host)} changed ${name}${error instanceof ConnectorFailed ? `: ${error.message}` : ''}. The task's title stays as it was. Read it with read_pull_request before saying it changed or didn't; edit_pull_request sets it again if it should.`
+            : `${hostName(host)} wouldn't change ${name}: ${(error as ConnectorFailed).message}. Its title and description stay as they were, and so does the task's title. Tell the person what you would set; they can set it on ${url}.`,
         })
 
       const edit = (taskId: string, asked: { readonly title?: string; readonly body?: string; readonly url?: string }, by: ActorId) =>
@@ -3318,8 +3331,8 @@ export class Changes extends Context.Service<
           if (set.title !== undefined || set.body !== undefined)
             yield* editOnHost(link, { snapshot, host, repository, now }, set).pipe(
               Effect.catchIf(
-                (error) => error instanceof ConnectorFailed,
-                (error) => Effect.fail(editRefused(host, name, now.url, error as ConnectorFailed)),
+                (error) => error instanceof ConnectorFailed || error instanceof OutwardUncertain,
+                (error) => Effect.fail(editRefused(host, name, now.url, error as ConnectorFailed | OutwardUncertain)),
               ),
             )
           // The task is called what its pull request is, in the words given: its card follows once the host took them.
@@ -3368,7 +3381,11 @@ export class Changes extends Context.Service<
             }).pipe(
               Effect.catch((error) =>
                 Effect.sync(() => {
-                  refused.push(`${nameOf(seen)} kept its title: ${refusalOf(error) ?? 'Althar couldn’t reach it.'}`)
+                  refused.push(
+                    editUnsure(error)
+                      ? `Althar couldn’t tell whether ${nameOf(seen)} took the task’s title: its host’s answer was lost. Look at it before saying either way.`
+                      : `${nameOf(seen)} kept its title: ${refusalOf(error) ?? 'Althar couldn’t reach it.'}`,
+                  )
                 }),
               ),
               contained('Changes.followTitle', () => {
@@ -3449,7 +3466,13 @@ export class Changes extends Context.Service<
               yield* editOnHost(link, { snapshot, host, repository, now }, { body })
               return `${name} has your new description.`
             }).pipe(
-              Effect.catch((error) => Effect.succeed(`${name} kept its description: ${refusalOf(error) ?? 'Althar couldn’t reach it.'}`)),
+              Effect.catch((error) =>
+                Effect.succeed(
+                  editUnsure(error)
+                    ? `Althar couldn't tell whether ${name} took your new description: its host's answer was lost. Read it with read_pull_request before saying either way.`
+                    : `${name} kept its description: ${refusalOf(error) ?? 'Althar couldn’t reach it.'}`,
+                ),
+              ),
               contained('Changes.redescribe', () => `${name} kept its description: Althar couldn’t reach it.`),
             )
             if (line !== null) lines.push(line)
@@ -7061,9 +7084,13 @@ export class Changes extends Context.Service<
               const named = asked.pull_request == null ? null : String(asked.pull_request).trim().toLowerCase()
               const matching = seen.filter((candidate) => named !== null && isNamed(candidate, named))
               const [one] = matching
-              if (seen.length > 1 && (one === undefined || matching.length > 1))
+              // A name given must be one of the task's, with one pull request as with several: another's is never edited.
+              if ((named !== null || seen.length > 1) && (one === undefined || matching.length > 1))
                 return yield* new ToolRefused({
-                  message: `This task has several pull requests: ${seen.map(shortNameOf).join(', ')}. Say which with pull_request, as one of those.`,
+                  message:
+                    seen.length > 1
+                      ? `This task has several pull requests: ${seen.map(shortNameOf).join(', ')}. Say which with pull_request, as one of those.`
+                      : `This task's pull request is ${seen.map(nameOf).join('')}, and it edits only its own. Leave pull_request out, or name it so.`,
                 })
               return yield* locked(taskId)(
                 edit(

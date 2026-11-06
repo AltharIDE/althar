@@ -163,37 +163,51 @@ export const describedAs = (text: string, template: string | null) =>
 const SEAL = /^<picture>\n[^]*?\n<\/picture>(?:\n\n|$)/
 const NOTE =
   /^> \*\*(?:Reviewed (?:once|twice|\d+ times); the last fixes weren’t reviewed\.|The last fixes weren’t reviewed\.)\*\* The code changed after the last review pass, and no later pass read it\.(?:\n\n|$)/
-const CREDIT = /(?:^|\n\n)Opened by \[Althar\]\(https:\/\/github\.com\/AltharIDE\/althar\)[^\n]*$/
-const ISSUE = /(?:^|\n\n)(?:Issue: |Part of )(?:\[[^\]\n]+\]\([^)\s]+\)|\S+)$/
+const CREDIT = /(?:^|\n\n)Opened by \[Althar\]\(https:\/\/github\.com\/AltharIDE\/althar\)[^\n]*(?=\n|$)/g
+const ISSUE = /(?:^|\n\n)(?:Issue: |Part of )(?:\[[^\]\n]+\]\([^)\s]+\)|\S+)(?=\n\n|$)/g
 const FOLD = '<details>\n<summary>Reviewed by '
-const FOLD_END = /<sub>Built by [^\n]*<\/sub>\n<\/details>$/
+
+/** The last paragraph in `text` that `line` matches, where it starts and ends; null where none does. */
+const lastParagraph = (text: string, line: RegExp) => {
+  let last: { readonly start: number; readonly end: number } | null = null
+  for (const found of text.matchAll(line)) {
+    const start = found.index + (found[0].startsWith('\n\n') ? 2 : 0)
+    last = { start, end: found.index + found[0].length }
+  }
+  return last
+}
 
 /**
  * A description as its parts: what Althar put before and after it (the
  * review's seal and note; its fold, the issue's line and Althar's credit),
  * and the rest between, which is the lead's, or whoever's wrote it. A
- * description Althar didn't write is all the rest.
+ * description Althar didn't write is all the rest. What someone added on the
+ * host after Althar's end stays with it, in the tail: a new description
+ * replaces only the lead's part.
  */
 export const framedOf = (body: string) => {
   let rest = body.replace(/\r\n/g, '\n').trim()
   const head: Array<string> = []
-  const tail: Array<string> = []
   for (const start of [SEAL, NOTE]) {
     const found = start.exec(rest)
     if (found === null) continue
     head.push(found[0].trim())
     rest = rest.slice(found[0].length).trimStart()
   }
-  for (const end of [CREDIT, ISSUE]) {
-    const found = end.exec(rest)
-    if (found === null) continue
-    tail.unshift(found[0].trim())
-    rest = rest.slice(0, found.index).trimEnd()
-  }
+  // Althar's end starts at the first of its parts: the fold, wherever it closes; the issue's line, where the credit or the end follows it at once; the credit.
+  const credit = lastParagraph(rest, CREDIT)
+  const issue = lastParagraph(rest, ISSUE)
   const fold = rest.lastIndexOf(FOLD)
-  if (fold !== -1 && (fold === 0 || rest.slice(fold - 2, fold) === '\n\n') && FOLD_END.test(rest)) {
-    tail.unshift(rest.slice(fold))
-    rest = rest.slice(0, fold).trimEnd()
+  const starts = [
+    credit?.start ?? -1,
+    issue !== null && (issue.end === rest.length || (credit !== null && credit.start === issue.end + 2)) ? issue.start : -1,
+    fold !== -1 && (fold === 0 || rest.slice(fold - 2, fold) === '\n\n') && rest.includes('\n</details>', fold) ? fold : -1,
+  ].filter((at) => at !== -1)
+  const tail: Array<string> = []
+  if (starts.length > 0) {
+    const cut = Math.min(...starts)
+    tail.push(rest.slice(cut).trim())
+    rest = rest.slice(0, cut).trimEnd()
   }
   return { head, described: rest, tail }
 }

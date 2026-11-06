@@ -74,6 +74,16 @@ const withPullRequest = (working: string) =>
     }
   })
 
+/** As `withPullRequest`, with the slug of the task's repository, which a lead's descriptions go by. */
+const withSlug = (working: string) =>
+  Effect.gen(function* () {
+    const made = yield* withPullRequest(working)
+    const sql = yield* SqlClient.SqlClient
+    const [binding] = yield* sql<{ slug: string }>`
+      SELECT b.slug FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id WHERE w.task_id = ${made.taskId}`
+    return { ...made, lead: { ...made.lead, coordinatorAccess: made.coordinator }, slug: binding?.slug ?? '' }
+  })
+
 const titleOf = (taskId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -166,6 +176,36 @@ describe('a lead’s edit_pull_request', () => {
       assert.strictEqual(yield* titleOf(taskId), before.task)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
+
+  it.live('says it couldn’t tell where the host’s answer was lost, rather than that nothing changed', () => {
+    const { working, github } = seeded()
+    return Effect.gen(function* () {
+      const { lead, taskId } = yield* withPullRequest(working)
+      const before = yield* titleOf(taskId)
+      github.failNext('editChange', 'unreachable')
+      const said = yield* callTool(lead, 'edit_pull_request', { title: 'The homepage opens on the orrery' })
+      assert.include(said, "Althar couldn't tell whether GitHub changed PR #1")
+      assert.include(said, 'Read it with read_pull_request before saying it changed or didn')
+      assert.notInclude(said, 'stay as they were')
+      assert.strictEqual(yield* titleOf(taskId), before)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('edits only its own pull request: one it names that isn’t its own is refused, with one as with several', () => {
+    const { working, github } = seeded()
+    return Effect.gen(function* () {
+      const { lead } = yield* withPullRequest(working)
+      const edits = github.calls.filter((call) => call === 'editChange').length
+      const said = yield* callTool(lead, 'edit_pull_request', { pull_request: 'web#4', title: 'Elsewhere' })
+      assert.include(said, "This task's pull request is PR #1, and it edits only its own.")
+      assert.strictEqual(github.calls.filter((call) => call === 'editChange').length, edits)
+      // Named as its own, it goes ahead.
+      assert.include(
+        yield* callTool(lead, 'edit_pull_request', { pull_request: '#1', title: 'Retry twice' }),
+        'is called “Retry twice” now',
+      )
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
 })
 
 describe('a task renamed, its pull request following', () => {
@@ -224,6 +264,42 @@ describe('a lead’s later description', () => {
       assert.strictEqual(github.changes[0]?.body, 'Written by hand.')
       // Another repository's description is none of this one's.
       assert.deepStrictEqual(yield* changes.redescribe(taskId, { web: 'Elsewhere.' }, null), [])
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('isn’t set over the person’s description after Althar retitled the pull request alone', () => {
+    const { working, github } = seeded()
+    return Effect.gen(function* () {
+      const { lead, taskId, slug } = yield* withSlug(working)
+      github.editByHand(1, { body: 'Written by hand.' })
+      // A title alone, by the lead or a rename: its answer carries the person's words, which aren't Althar's to replace.
+      yield* callTool(lead, 'edit_pull_request', { title: 'Retry twice' })
+      yield* callTool(lead.coordinatorAccess, 'rename_task', { task_id: taskId, title: 'Retry three times' })
+      assert.strictEqual(github.changes[0]?.title, 'Retry three times')
+      const [left] = yield* (yield* Changes).redescribe(taskId, { [slug]: 'Retries three times.' }, null)
+      assert.include(left, 'was changed on GitHub since Althar set it')
+      assert.strictEqual(github.changes[0]?.body, 'Written by hand.')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('reaches it from finish_step, which says so', () => {
+    const { working, github } = seeded()
+    return Effect.gen(function* () {
+      const { lead, leadThread } = yield* withSlug(working)
+      // A later round, as the lead's own session finishes a step after its pull request opened.
+      const sql = yield* SqlClient.SqlClient
+      const [session] = yield* sql<{ id: string }>`
+        SELECT id FROM provider_sessions WHERE thread_id = ${leadThread} ORDER BY started_at DESC LIMIT 1`
+      const said = yield* callTool({ ...lead, sessionId: session?.id ?? '' }, 'finish_step', {
+        summary: 'Cut it down.',
+        built: 'Retries twice.',
+        descriptions: [{ text: 'Retries twice now, and no more.' }],
+      })
+      assert.strictEqual(
+        said,
+        'Althar has your summary. Nothing on the branch changed this round, so the task is back where it was. PR #1 has your new description.',
+      )
+      assert.strictEqual(github.changes[0]?.body, `Retries twice now, and no more.\n\n${CREDIT}`)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })
