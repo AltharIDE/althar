@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { Activity } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { type AgentStatus, ApiError, type LimitCall, type StuckStep, type ThreadSnapshot } from '@althar/contracts'
+import { type AgentStatus, ApiError, type LimitCall, PAGE, type StuckStep, type ThreadSnapshot } from '@althar/contracts'
 import { TaskStatus, TrackStep } from '@althar/ui'
 
 import { text as stuckWords } from '../src/renderer/features/task/StuckCall'
@@ -15,7 +15,7 @@ import { numberOf, reachOf, reviewedUnfurl } from '../src/renderer/features/task
 import { agents, card, change, changed, fakeClient, fakeHost, items, models, snapshot, status, streamed, usual } from './fixtures'
 import type { ChangedFile } from '@althar/contracts'
 import { clock } from '../src/renderer/shared/time'
-import { reads } from '../src/renderer/data/reads'
+import { keys, reads } from '../src/renderer/data/reads'
 import { ServicesProvider } from '../src/renderer/data/services'
 import { servicesFor, withServices } from './render'
 
@@ -3427,6 +3427,31 @@ describe('the face a task opens on', () => {
     vi.mocked(client.getThread).mockClear()
     view.rerender(kept('visible'))
     await waitFor(() => expect(client.getThread).toHaveBeenCalledWith('th1', { limit: 0, fresh: true }))
+  })
+
+  it('never shows what its lead was saying as its screen hid under a message sent a page later (`KeptScreens`)', async () => {
+    const reply = { ...items.says('Found the race.', 'claude-code', 'old'), sequence: 2 }
+    const getThread = vi.fn(async () => snapshot({ items: [{ ...items.you('Find the race'), sequence: 1 }, reply] }))
+    const { client, emit } = fakeClient({ getThread })
+    const services = servicesFor(client)
+    const kept = (mode: 'visible' | 'hidden') => (
+      <ServicesProvider value={services}>
+        <Activity mode={mode}>
+          <Task />
+        </Activity>
+      </ServicesProvider>
+    )
+    const view = render(kept('visible'))
+    await screen.findByText('Found the race.')
+    act(() => emit(streamed('old', 'Found the race. It was in the merge')))
+    expect(await screen.findByText('Found the race. It was in the merge')).toBeTruthy()
+    // The person goes elsewhere while it says the rest; a page more is said, then their new message.
+    view.rerender(kept('hidden'))
+    getThread.mockResolvedValue(snapshot({ items: [{ ...items.you('Now fix the other one'), sequence: 2 + PAGE }], earlier: true }))
+    view.rerender(kept('visible'))
+    await act(async () => services.cache.refetchQueries({ queryKey: keys.thread('th1') }))
+    await screen.findByText('Now fix the other one')
+    expect(screen.queryByText(/It was in the merge/)).toBeNull()
   })
 
   it('shows the conversation, not the outputs, for a prototype that is ready', async () => {

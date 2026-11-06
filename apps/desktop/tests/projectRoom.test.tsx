@@ -1,9 +1,9 @@
-import { act, renderHook, screen, waitFor, within } from '@testing-library/react'
+import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Activity, type ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type CodeFound, type CoordinatorSnapshot, type WatchEvent } from '@althar/contracts'
+import { ApiError, type CodeFound, type CoordinatorSnapshot, PAGE, type WatchEvent } from '@althar/contracts'
 import { Room } from '@althar/ui'
 
 import type { Client } from '../src/renderer/data/client'
@@ -13,7 +13,8 @@ import { useConnections } from '../src/renderer/features/connections/useConnecti
 import { hostNameOf, partsOf, trackersOf, trackerUrlOf } from '../src/renderer/features/project/front'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
-import { card, change, changed, connectionList, coordinatorSnapshot, fakeClient, items } from './fixtures'
+import { keys } from '../src/renderer/data/reads'
+import { card, change, changed, connectionList, coordinatorSnapshot, fakeClient, items, streamed } from './fixtures'
 import { servicesFor, useSettingsOf, withServices } from './render'
 
 /*
@@ -126,6 +127,107 @@ describe('the Talk room’s model, once the thread is read', () => {
     vi.mocked(client.getCoordinator).mockClear()
     act(() => emit(changed('session', 's1', 'thc', 'p1')))
     await waitFor(() => expect(client.getCoordinator).toHaveBeenCalledWith('p1', { limit: 0 }))
+  })
+
+  describe('what the coordinator was still saying when the window stopped hearing it', () => {
+    // A reply heard part way, then a page and more said since: the thread is read again from its newest page, without the reply.
+    const unheard = async (stop: (screen: { emit: (event: WatchEvent) => void; rewatch: () => void; hide: () => void }) => void) => {
+      const reply = { ...items.says('I’ve planned it as you asked.', 'claude-code', 'old'), sequence: 2 }
+      const getCoordinator = vi.fn(async () =>
+        coordinatorSnapshot({ session, items: [{ ...items.you('Load earlier turns'), sequence: 1 }, reply] }),
+      )
+      const { client, emit, rewatch } = fakeClient({ getCoordinator })
+      const services = servicesFor(client)
+      let mode: 'visible' | 'hidden' = 'visible'
+      const { result, rerender } = renderHook(() => useProject('p1'), {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <ServicesProvider value={services}>
+            <Activity mode={mode}>{children}</Activity>
+          </ServicesProvider>
+        ),
+      })
+      await waitFor(() => expect(result.current.coordinator?.items).toHaveLength(2))
+      act(() => emit(streamed('old', 'I’ve planned it as you asked. Earlier turns load as you scroll. A small indicator app', 'thc')))
+      expect(result.current.streaming.get('old')?.text).toMatch(/indicator app$/)
+      stop({
+        emit,
+        rewatch: () => act(() => rewatch()),
+        hide: () => {
+          mode = 'hidden'
+          rerender()
+        },
+      })
+      // The store wrote the rest of the reply, and a page more since; the person sent something, and a new turn runs.
+      const newer = [
+        { ...items.you('The coordinator should be able to also accept and merge tasks'), sequence: 2 + PAGE },
+        { ...items.tool({ title: 'git fetch', toolKind: 'execute', status: 'in_progress' }), sequence: 3 + PAGE },
+      ]
+      getCoordinator.mockResolvedValue(coordinatorSnapshot({ session: { ...session, turnRunning: true }, items: newer, earlier: true }))
+      mode = 'visible'
+      rerender()
+      await act(async () => services.cache.refetchQueries({ queryKey: keys.coordinator('p1') }))
+      await waitFor(() => expect(result.current.coordinator?.items.map((item) => item.id)).toEqual(newer.map((item) => item.id)))
+      return result.current.streaming
+    }
+
+    it('goes once the screen is hidden (`KeptScreens`), and doesn’t show under the turn that runs after', async () => {
+      expect([...(await unheard(({ hide }) => hide())).keys()]).toEqual([])
+    })
+
+    it('goes once the watch listens again after it broke', async () => {
+      expect([...(await unheard(({ rewatch }) => rewatch())).keys()]).toEqual([])
+    })
+
+    it('never shows under the person’s new message, in the turn that answers it', async () => {
+      const reply = { ...items.says('I’ve planned it as you asked.', 'claude-code', 'old'), sequence: 2 }
+      const getCoordinator = vi.fn(async () =>
+        coordinatorSnapshot({ session, items: [{ ...items.you('Load earlier turns'), sequence: 1 }, reply] }),
+      )
+      const { client, emit } = fakeClient({ getCoordinator })
+      const services = servicesFor(client)
+      const shown = (mode: 'visible' | 'hidden') => (
+        <ServicesProvider value={services}>
+          <Activity mode={mode}>
+            <Project room={Room.Talk} />
+          </Activity>
+        </ServicesProvider>
+      )
+      const { rerender } = render(shown('visible'))
+      await screen.findByText('I’ve planned it as you asked.')
+      act(() => emit(streamed('old', 'I’ve planned it as you asked. A small indicator app', 'thc')))
+      expect(await screen.findByText('I’ve planned it as you asked. A small indicator app')).toBeTruthy()
+      // The person goes to a task while it says the rest; meanwhile a page more is said, then their new message, and a turn on it.
+      rerender(shown('hidden'))
+      getCoordinator.mockResolvedValue(
+        coordinatorSnapshot({
+          session: { ...session, turnRunning: true, turnStartedAt: new Date().toISOString() },
+          items: [
+            { ...items.you('The coordinator should be able to also accept and merge tasks'), sequence: 2 + PAGE },
+            { ...items.tool({ title: 'git fetch', toolKind: 'execute', status: 'in_progress' }), sequence: 3 + PAGE },
+          ],
+          earlier: true,
+        }),
+      )
+      rerender(shown('visible'))
+      await act(async () => services.cache.refetchQueries({ queryKey: keys.coordinator('p1') }))
+      await screen.findByText('The coordinator should be able to also accept and merge tasks')
+      expect(screen.queryByText(/A small indicator app/)).toBeNull()
+    })
+  })
+
+  it('lets go of words streamed once the thread, read whole again, holds them all', async () => {
+    const getCoordinator = vi.fn(async () => coordinatorSnapshot({ items: [{ ...items.says('Hel', 'claude-code', 'm'), sequence: 1 }] }))
+    const { client, emit } = fakeClient({ getCoordinator })
+    const services = servicesFor(client)
+    const { result } = renderHook(() => useProject('p1'), {
+      wrapper: ({ children }: { children: ReactNode }) => <ServicesProvider value={services}>{children}</ServicesProvider>,
+    })
+    await waitFor(() => expect(result.current.coordinator).not.toBeNull())
+    act(() => emit(streamed('m', 'Hello', 'thc')))
+    expect(result.current.streaming.has('m')).toBe(true)
+    getCoordinator.mockResolvedValue(coordinatorSnapshot({ items: [{ ...items.says('Hello there', 'claude-code', 'm'), sequence: 1 }] }))
+    await act(async () => services.cache.refetchQueries({ queryKey: keys.coordinator('p1') }))
+    await waitFor(() => expect(result.current.streaming.has('m')).toBe(false))
   })
 
   it('compacts the coordinator’s context', async () => {
