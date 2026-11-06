@@ -72,7 +72,8 @@
   decided on its own and each sounding reasonable. Together they made Althar
   the most locked down of the tools like it. Read from their source the same
   day, Orca and T3 Code run agents with full access by default, with the
-  person's MCP servers, skills and `gh`, and no sandbox. The person's
+  person's MCP servers, skills and `gh`, and no sandbox (the plan names
+  the files and settings that show it). The person's
   direction had already said otherwise than the limits: a task is a loose
   container of parts (13 October), and Althar is permissive by default, with
   only crossings that can't be undone asking (29 October).
