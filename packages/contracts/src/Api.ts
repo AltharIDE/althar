@@ -1721,11 +1721,13 @@ export const Unshipped = Schema.Struct({
 export type Unshipped = typeof Unshipped.Type
 
 /**
- * Where a task stands, as the coordinator's thread shows it. `kept` is a
- * finished task that isn't a change, which the person kept for later: out of
- * Needs you as it is, not settled.
+ * Where a task stands, as the coordinator's thread shows it. `drafting` is a
+ * task drafted before its plan is proposed: off the board until the plan comes,
+ * as its card in the coordinator's thread is. `kept` is a finished task that
+ * isn't a change, which the person kept for later: out of Needs you as it is,
+ * not settled.
  */
-export const TaskPhase = Schema.Literals(['planned', 'held', 'running', 'waiting', 'ready', 'kept', 'stopped', 'settled'])
+export const TaskPhase = Schema.Literals(['drafting', 'planned', 'held', 'running', 'waiting', 'ready', 'kept', 'stopped', 'settled'])
 export type TaskPhase = typeof TaskPhase.Type
 
 /**
@@ -1858,7 +1860,8 @@ export const TaskCard = Schema.Struct({
   phase: TaskPhase,
   /**
    * Stopped, no agent on it: what stopped its lead, and when. Absent while it isn't stopped; `by` is null where nothing says,
-   * `at` where nothing says when. Only a task an agent worked on is stopped: one whose lead is on its way is under way.
+   * `at` where nothing says when. Only a task an agent worked on is stopped, or one drafted whose plan never came: one whose
+   * lead is on its way is under way.
    */
   stopped: Schema.optional(
     Schema.NullOr(

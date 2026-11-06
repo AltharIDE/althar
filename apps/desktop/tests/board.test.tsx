@@ -168,6 +168,29 @@ describe('the board’s lanes', () => {
     expect(yoursOf(lanes)).toBe(3)
   })
 
+  it('keeps a task only drafted off the board until its plan comes', () => {
+    const drafted = task({
+      taskId: 't8',
+      threadId: 'th8',
+      title: 'Not planned yet',
+      slug: 'not-planned-yet',
+      phase: 'drafting',
+      state: 'draft',
+    })
+    const lanes = lanesOf(board({ tasks: [...board().tasks, drafted], calls: [] }))
+    const shown = [
+      ...lanes.next,
+      ...lanes.running,
+      ...lanes.waiting.map(({ task: work }) => work),
+      ...lanes.stopped,
+      ...lanes.ready,
+      ...lanes.kept,
+      ...lanes.settled,
+    ]
+    expect(shown.map((work) => work.taskId)).not.toContain('t8')
+    expect(yoursOf(lanes)).toBe(2)
+  })
+
   it('keeps a task under way, out of Needs you, until the call it waits on is read (DEV-173)', () => {
     const lanes = lanesOf(board({ calls: [] }))
     expect(lanes.waiting).toEqual([])

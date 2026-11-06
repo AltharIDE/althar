@@ -67,7 +67,7 @@ import { graphOf, type RunRows, type StepRow } from './graph'
 import { taskFindingsOf } from './taskFindings'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { answeredIn, handedOf, issueCardsWaiting, kindOf } from './kinds'
-import { BETWEEN_AGENTS_MS, betweenAgents, byItself, isMergeable } from './needsYou'
+import { BETWEEN_AGENTS_MS, betweenAgents, byItself, isMergeable, stillDrafting } from './needsYou'
 import { documentKept, documentText, outputText } from './reading'
 import { type CodeRoot, type CodeRoots, findCode, readCode } from './code'
 import type { Artifacts } from './Artifacts'
@@ -1972,6 +1972,9 @@ export class Queries extends Context.Service<
             state: string
             settledAt: string | null
             keptAt: string | null
+            createdAt: string
+            madeInTurn: number
+            madeInOpenTurn: number
             branch: string | null
             planId: string | null
             planState: string | null
@@ -2001,7 +2004,15 @@ export class Queries extends Context.Service<
             local: number
             toward: string | null
           }>`
-            SELECT k.project_id, t.id AS thread_id, k.title, k.slug, k.state, k.settled_at, k.kept_at, ${sql.unsafe(SHOWN_BRANCH)},
+            SELECT k.project_id, t.id AS thread_id, k.title, k.slug, k.state, k.settled_at, k.kept_at, k.created_at,
+              -- The turn that made it, where one covers its making: still open, or over. A draft's plan comes in that turn,
+              -- and once the turn is over without one, the draft is the person's.
+              EXISTS (SELECT 1 FROM turn_deliveries d
+                WHERE d.project_id = k.project_id AND d.requested_at <= k.created_at
+                  AND coalesce(d.ended_at, '9999') >= k.created_at) AS made_in_turn,
+              EXISTS (SELECT 1 FROM turn_deliveries d
+                WHERE d.project_id = k.project_id AND d.requested_at <= k.created_at AND d.ended_at IS NULL) AS made_in_open_turn,
+              ${sql.unsafe(SHOWN_BRANCH)},
               p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at, p.proposed_at,
               r.state AS run_state, r.created_at AS run_at, r.plan_id AS run_plan,
               -- Its latest attempt: carried on after a stop, the run is timed from there, not across the time it stood still.
@@ -2142,6 +2153,17 @@ export class Queries extends Context.Service<
               ?.state !== 'interrupted'
           // Its round over, Althar opening its next pull request by itself: under way until it opens or can't (ADR-034).
           const opening = yield* (yield* Changes).openingNext(taskId)
+          // A task only drafted, before its plan: no plan proposed or accepted, no run, no turn, never an agent. It is off the
+          // board until its plan is proposed, as its card in the coordinator's thread is. While the turn that made it runs its
+          // plan is on its way; once that turn is over without one, or after a time, it is the person's, as stopped.
+          const drafting =
+            task.state === 'draft' &&
+            task.planState === null &&
+            task.runState === null &&
+            task.turns === 0 &&
+            task.firstSession === null &&
+            stillDrafting(task.createdAt, yield* Clock.currentTimeMillis) &&
+            (task.madeInOpenTurn === 1 || task.madeInTurn === 0)
           const ready = ((): TaskPhase => {
             if (task.state === 'abandoned') return 'settled'
             if (task.planState === 'proposed') return task.startsAt === null ? 'held' : 'planned'
@@ -2149,6 +2171,8 @@ export class Queries extends Context.Service<
             // again until its lead is done with the note, and a merged task whose lead works on it again is running.
             if (task.waiting > 0) return 'waiting'
             if (busy || queued || resolving !== undefined || opening) return 'running'
+            // Drafted, its plan not yet proposed: nowhere on the board yet.
+            if (drafting) return 'drafting'
             // A review has no run: drafted, it is the person's to post, as a change is to accept. Posted, and written to again, it
             // is open once more: its lead answered, it is finished as a quick task is, the person's to settle (ADR-051).
             if (task.state === 'open' && (draftWaits !== undefined || reviewing?.posted != null)) return 'ready'
@@ -2192,7 +2216,7 @@ export class Queries extends Context.Service<
                   const [run] = yield* sql<{ endedAt: string | null }>`
                     SELECT ended_at AS endedAt FROM runs WHERE task_id = ${taskId} ORDER BY created_at DESC LIMIT 1`
                   // Null where nothing says when: the card then shows no time.
-                  const at = until ?? turn?.endedAt ?? run?.endedAt ?? task.runAt ?? task.firstSession
+                  const at = until ?? turn?.endedAt ?? run?.endedAt ?? task.runAt ?? task.firstSession ?? task.createdAt
                   if (turn === undefined || turn.state !== 'interrupted')
                     return { by: run?.endedAt == null ? null : ('althar' as const), at }
                   // Interrupted in a turn in which the person refused a call: they declined it; else they interrupted.
@@ -2601,7 +2625,7 @@ export class Queries extends Context.Service<
           const from = since ?? looked ?? new Date((yield* Clock.currentTimeMillis) - FIRST_LOOK).toISOString()
           const rows = yield* sql<{ id: string; projectId: string; state: string; createdAt: string; settledAt: string | null }>`
             SELECT k.id, k.project_id, k.state, k.created_at, k.settled_at FROM tasks k JOIN projects p ON p.id = k.project_id
-            WHERE p.archived_at IS NULL AND (k.state = 'open' OR k.id IN (
+            WHERE p.archived_at IS NULL AND (k.state IN ('open', 'draft') OR k.id IN (
               -- A merged task the board still shows can be ready again, with commits after its pull request in none yet.
               SELECT id FROM (
                 SELECT id, state, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY settled_at DESC, id DESC) AS place

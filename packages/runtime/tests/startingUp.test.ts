@@ -9,6 +9,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Instance } from '../src/Instance'
 import { Launches } from '../src/Launches'
+import { DRAFTING_MS } from '../src/needsYou'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -174,6 +175,107 @@ describe('a task not yet started', () => {
       assert.strictEqual(card?.phase, 'running')
       assert.isUndefined(card?.stopped)
       assert.isUndefined(card?.settingUp)
+    }).pipe(Effect.provide(machine(4))),
+  )
+})
+
+/** A task drafted with no plan yet: the coordinator's `draft_task`, before `propose_plan`. */
+const drafted = (projectId: ProjectId, title: string) =>
+  Effect.gen(function* () {
+    return yield* (yield* Projects).createTask({
+      envelope: yield* Runtime.envelope('task.create', { title }),
+      projectId,
+      title,
+      draft: true,
+    })
+  })
+
+/** A coordinator's turn in this project, open from `since` until the test ends it. */
+const coordinatorTurn = (projectId: string, since: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [thread] = yield* sql<{ id: string }>`
+      SELECT id FROM threads WHERE project_id = ${projectId} AND kind = 'coordinator' LIMIT 1`
+    const sessionId = 'sess_00000000000000000000000000000001'
+    const turnId = 'turn_00000000000000000000000000000001'
+    yield* sql`INSERT INTO provider_sessions ${sql.insert({
+      id: sessionId,
+      projectId,
+      threadId: thread?.id ?? '',
+      agentId: 'codex',
+      state: 'active',
+      startedAt: since,
+    })}`
+    yield* sql`INSERT INTO turn_deliveries ${sql.insert({
+      id: turnId,
+      projectId,
+      threadId: thread?.id ?? '',
+      providerSessionId: sessionId,
+      controllerGeneration: 1,
+      state: 'delivered',
+      requestedAt: since,
+      origin: 'person',
+    })}`
+    return turnId
+  })
+
+describe('a task only drafted, its plan not yet proposed', () => {
+  it.live('is drafting, not stopped, and planned once its plan is proposed', () =>
+    Effect.gen(function* () {
+      const projectId = yield* project()
+      const task = yield* drafted(projectId, 'A drafted task')
+      const card = yield* cardOf(projectId, task.taskId)
+      assert.strictEqual(card?.phase, 'drafting')
+      assert.isUndefined(card?.stopped)
+      // Nor on the home, which counts what waits on the person and what runs.
+      const home = yield* (yield* Queries).home()
+      assert.isFalse(home.tasks.some((one) => one.taskId === task.taskId))
+      yield* (yield* Plans).propose({
+        projectId,
+        taskId: task.taskId,
+        steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+        reason: null,
+        actorId: yield* person,
+        end: null,
+      })
+      const planned = yield* cardOf(projectId, task.taskId)
+      assert.strictEqual(planned?.phase, 'planned')
+      assert.isUndefined(planned?.stopped)
+    }).pipe(Effect.provide(machine(4))),
+  )
+
+  it.live('stays off the board while the turn that drafted it runs, then waits on the person once it ends without a plan', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const projectId = yield* project()
+      const since = new Date(Date.now() - 1_000).toISOString()
+      const turnId = yield* coordinatorTurn(projectId, since)
+      const task = yield* drafted(projectId, 'A drafted task')
+      // Still within the moment a draft gets, yet the turn that made it says whether its plan is on its way.
+      const drafting = yield* cardOf(projectId, task.taskId)
+      assert.strictEqual(drafting?.phase, 'drafting')
+      assert.isUndefined(drafting?.stopped)
+      // The turn ends without a plan: now it is the person's, before that moment is over.
+      yield* sql`UPDATE turn_deliveries SET state = 'completed', ended_at = ${new Date().toISOString()} WHERE id = ${turnId}`
+      const stopped = yield* cardOf(projectId, task.taskId)
+      assert.strictEqual(stopped?.phase, 'stopped')
+      assert.isDefined(stopped?.stopped)
+    }).pipe(Effect.provide(machine(4))),
+  )
+
+  it.live('is the person’s after a while, if no plan comes and no turn covers it', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const projectId = yield* project()
+      const task = yield* drafted(projectId, 'A drafted task whose plan never came')
+      const old = new Date(Date.now() - DRAFTING_MS - 1_000).toISOString()
+      yield* sql`UPDATE tasks SET created_at = ${old} WHERE id = ${task.taskId}`
+      const card = yield* cardOf(projectId, task.taskId)
+      assert.strictEqual(card?.phase, 'stopped')
+      assert.strictEqual(card?.stopped?.at, old)
+      // Then it is on the home too, where the person sees what waits on them.
+      const home = yield* (yield* Queries).home()
+      assert.isTrue(home.tasks.some((one) => one.taskId === task.taskId && one.phase === 'stopped'))
     }).pipe(Effect.provide(machine(4))),
   )
 })
