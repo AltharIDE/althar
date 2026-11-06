@@ -95,4 +95,60 @@ describe('a task’s thread', () => {
     expect(now).toHaveBeenCalledWith('/work/notes.csv')
     expect(before).not.toHaveBeenCalled()
   })
+
+  it('shows what the lead thinks under its line while it works, but not while it settles a review', () => {
+    const thinking: Round = {
+      ...round('r3', 'unused'),
+      result: null,
+      live: true,
+      work: {
+        id: 'work:r3',
+        steps: [{ kind: 'thought', id: 't1', text: 'Where does the poll start?', took: null, live: true }],
+        took: '12s',
+        live: true,
+        counts: '',
+        now: null,
+      },
+    }
+    const show = shown({ threadId: 'th1', versionOf: () => '', rounds: [thinking] })
+    expect(screen.getByRole('button', { name: /^Thinking/ })).toBeTruthy()
+    expect(screen.getByText('Where does the poll start?')).toBeTruthy()
+    show({ threadId: 'th1', versionOf: () => '', rounds: [thinking], settling: true })
+    // Folded away under the line: the person sees the work line alone.
+    expect(screen.getByRole('button', { name: /^Thinking/ }).closest('[data-state="closed"]')).not.toBeNull()
+  })
+
+  it('draws a review as one line, what became of its findings in it, and a review running as a line at the end', async () => {
+    const review = {
+      kind: 'verdict' as const,
+      id: 'v1',
+      at: '5 min ago',
+      model: null,
+      settle: null,
+      result: {
+        step: 'review' as const,
+        round: 0,
+        summary: 'Three things.',
+        change: null,
+        verdict: 'changes_requested' as const,
+        findings: [{ severity: 'major' as const, file: null, line: null, claim: 'The retry never stops.' }],
+        built: null,
+        evidence: [],
+        unverified: null,
+        agentId: 'codex',
+      },
+    }
+    shown({
+      threadId: 'th1',
+      versionOf: () => '',
+      rounds: [review],
+      settledOf: (id) => (id === 'v1' ? '1 fixed' : undefined),
+      reviewing: { model: { id: 'gpt', name: 'GPT-5.2', short: 'GPT-5.2', runtime: 'codex', efforts: [] }, took: '1m 4s' },
+    })
+    const line = screen.getByRole('button', { name: /^Review.*1 finding.*1 fixed/ })
+    expect(screen.queryByText('Three things.')).toBeNull()
+    await userEvent.click(line)
+    expect(screen.getByText('Three things.')).toBeTruthy()
+    expect(screen.getByText('1m 4s').closest('[data-review]')?.querySelector('[aria-busy="true"]')).not.toBeNull()
+  })
 })

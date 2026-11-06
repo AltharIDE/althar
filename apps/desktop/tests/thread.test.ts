@@ -320,8 +320,9 @@ describe('work, folded', () => {
     const [, turn] = blocksOf(source(thread, true), new Map(), at, '2026-09-29T12:01:12.000Z')
     expect(turn).toMatchObject({ live: true, took: '1m 12s', doing: 'Reading src/a.ts' })
     expect(counts(turn)).toEqual({ work: ['tool'], said: ['message'] })
+    // Thinking, it says nothing on the line: the thought itself streams under it, live.
     const thinking = blocksOf(source([items.thinks('Hm')], true), new Map(), at)[0]
-    expect(thinking).toMatchObject({ doing: 'Thinking' })
+    expect(thinking).toMatchObject({ doing: null, work: [{ kind: 'thought', live: true }] })
     const planning = blocksOf(source([items.plan([{ content: 'Test', status: 'pending' }])], true), new Map(), at)[0]
     expect(planning).toMatchObject({ doing: 'Planning' })
     const noted = blocksOf(source([items.notice({ title: 'Hm' })], true), new Map(), at)[0]
@@ -361,6 +362,51 @@ describe('work, folded', () => {
     expect(blocks.map((block) => block.kind)).toEqual(['turn', 'step', 'turn'])
     expect(counts(blocks[2])).toEqual({ work: ['tool', 'message'], said: ['message'] })
     expect(blocks[2]).toMatchObject({ said: [{ text: 'Branch coverage clears 90%.' }] })
+  })
+})
+
+describe('thinking, as it goes and once it is done', () => {
+  const after = (item: ThreadItem, seconds: number): ThreadItem => ({
+    ...item,
+    createdAt: new Date(Date.parse(NOW) + seconds * 1000).toISOString(),
+  })
+  const parts = (block: Block | undefined) => (block?.kind === 'turn' ? block.parts : [])
+
+  it('says how long each thought took, until what came next, and nothing for one under a second or the last of a turn', () => {
+    const thread = [
+      after(items.thinks('Where is the call?'), 0),
+      after(items.tool({}), 14),
+      after(items.thinks('Quick.'), 15),
+      after(items.says('Found it.'), 15.5),
+      after(items.thinks('Trailing.'), 20),
+    ]
+    const [turn] = blocksOf(source(thread), new Map(), at)
+    expect(parts(turn).flatMap((part) => (part.kind === 'thought' ? [part.took] : []))).toEqual(['14s', null, null])
+    expect(parts(turn).some((part) => 'live' in part && part.live === true)).toBe(false)
+  })
+
+  it('marks what a running turn is writing now live, thought or message, and nothing before it', () => {
+    const thinking = [after(items.says('On it.'), 0), after(items.thinks('Where is'), 3)]
+    const [turn] = blocksOf(source(thinking, true), new Map(), at, after(items.says(''), 9).createdAt)
+    expect(parts(turn).map((part) => [part.kind, 'live' in part ? part.live : undefined])).toEqual([
+      ['message', undefined],
+      ['thought', true],
+    ])
+    // Still thinking, how long isn't said yet.
+    expect(parts(turn).at(-1)).toMatchObject({ took: null })
+    const writing = [after(items.thinks('Where is the call?'), 0), after(items.says('Found'), 6)]
+    const [answering] = blocksOf(source(writing, true), new Map(), at)
+    expect(parts(answering).map((part) => [part.kind, 'live' in part ? part.live : undefined])).toEqual([
+      ['thought', undefined],
+      ['message', true],
+    ])
+    expect(parts(answering)[0]).toMatchObject({ took: '6s' })
+  })
+
+  it('shows a message the store hasn’t placed yet live, from its first words', () => {
+    const streaming = new Map<string, Streamed>([['m9', { kind: 'agent_thought', agentId: 'claude-code', text: 'Hm', at: NOW }]])
+    const [turn] = blocksOf(source([items.you('Go')], true), streaming, at).filter((block) => block.kind === 'turn')
+    expect(parts(turn)).toMatchObject([{ kind: 'thought', id: 'm9', text: 'Hm', live: true }])
   })
 })
 

@@ -564,7 +564,8 @@ describe('a task’s thread in rounds, on its screen', () => {
     )
     const names = (await screen.findAllByRole('article')).map((one) => one.getAttribute('aria-label'))
     expect(names).toContain('Claude Opus')
-    expect(names).toContain('Claude Sonnet')
+    // The review, a line of its own, on its own model.
+    expect(screen.getByRole('button', { name: /Review.*Claude Sonnet.*Passed/ })).toBeTruthy()
   })
 
   it('shows the lead thinking under its name before its first word, with the round before it as it was', async () => {

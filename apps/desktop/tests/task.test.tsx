@@ -236,8 +236,10 @@ describe('a task', () => {
     expect(screen.getByText('Context is filling up')).toBeTruthy()
     // Its rounds are named by model, the agent said on hover.
     expect(screen.getAllByText('gpt-5.2-codex').length).toBeGreaterThan(0)
-    await userEvent.click(screen.getByRole('button', { name: 'Thought' }))
-    expect(screen.getByText('Where is the call?')).toBeTruthy()
+    // A thought folds to its line, what it was about beside it; opened, all of it.
+    expect(screen.getAllByText('Where is the call?')).toHaveLength(1)
+    await userEvent.click(screen.getByRole('button', { name: /^Thought/ }))
+    expect(screen.getAllByText('Where is the call?')).toHaveLength(2)
     // Escape, with nothing else open, goes back to the project.
     ;(document.activeElement as HTMLElement | null)?.blur()
     await userEvent.keyboard('{Escape}')
@@ -673,6 +675,10 @@ describe('a task', () => {
         .getAllByRole('listitem')
         .map((step) => step.textContent),
     ).toEqual(['Implement, done', 'Review, now'])
+    // In the thread, the review running is a line at its end, with who reviews, and nothing of its thinking.
+    const review = screen.getByText('Review', { selector: '[data-review] span' }).closest('[data-review]')
+    expect(review?.querySelector('[aria-busy="true"]')).not.toBeNull()
+    expect(within(review as HTMLElement).getByText('gpt-5.2-codex')).toBeTruthy()
     // While its plan runs, where it stands says who does each step, and how long it has run in all.
     const standing = screen.getByText('Reviewing').parentElement
     if (standing === null) throw new Error('Where it stands has no element of its own')
@@ -3081,6 +3087,10 @@ describe('a task', () => {
     expect(screen.queryByText('Edit checkout.ts')).toBeNull()
     expect(screen.getByRole('button', { name: /^Worked/ })).toBeTruthy()
     expect(screen.getByText('Capped the retries at three.')).toBeTruthy()
+    // Each review is a line, the lead's latest handoff open under them; opened, the reviewer says what it found in its own voice.
+    expect(screen.queryByText('Needs changes: 3 findings.')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: /^Review.*3 findings/ }))
+    await userEvent.click(screen.getByRole('button', { name: /^Review.*Passed/ }))
     // The reviewer: its verdict in a sentence, each finding how much it matters, where, and what; then what it said.
     expect(screen.getByText('Needs changes: 3 findings.')).toBeTruthy()
     expect(screen.getByText('The retry never stops.')).toBeTruthy()

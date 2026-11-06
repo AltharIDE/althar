@@ -39,29 +39,60 @@
     background-position: -125% 0;
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  /* still after the beat, but without the fade */
-  .thinking {
-    animation-duration: 1ms;
-  }
-  .shimmer {
-    animation: none;
-    color: var(--t-3);
-    background: none;
-  }
-}
 
+/* one line: what it is on while it thinks, how long it thought and what about once done */
 .row {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 7px;
+  max-width: 100%;
   height: 24px;
   font-size: 12.5px;
   color: var(--t-3);
+  text-align: left;
 }
 .row:hover {
   color: var(--t-1);
 }
+.label {
+  flex: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* a new heading, or the thought folding to its line, comes in by a fade, where it was watched thinking */
+.relabelled {
+  animation: relabel var(--enter) var(--ease-out);
+}
+@keyframes relabel {
+  from {
+    opacity: 0;
+  }
+}
+.shimmer.label {
+  flex: 0 1 auto;
+}
+.shimmer.relabelled {
+  animation:
+    relabel var(--enter) var(--ease-out),
+    shimmer 2.2s linear infinite;
+}
+.about {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t-4);
+}
+.row:hover .about {
+  color: var(--t-3);
+}
+.about::before {
+  content: '·';
+  margin-right: 7px;
+}
+
 .body {
   margin: 4px 0 2px 5px;
   padding: 2px 0 2px 14px;
@@ -69,4 +100,45 @@
   font-size: 12.5px;
   line-height: 1.6;
   color: var(--t-3);
+}
+/* while it thinks, a window on its last few lines: the newest at the bottom, the oldest fading out at the top */
+.glimpse {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  max-height: calc(12.5px * 1.6 * 6 + 4px);
+  overflow: hidden;
+}
+.over {
+  mask-image: linear-gradient(to bottom, transparent 0, #000 calc(12.5px * 1.6 * 1.5));
+}
+/* what it thought, a size down and quiet, whatever its markdown says */
+.body .words {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--t-3);
+  --t-1: var(--t-3);
+  --t-2: var(--t-3);
+}
+.body .words > * {
+  margin-bottom: 6px;
+}
+.body .words > :last-child {
+  margin-bottom: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* still after the beat, but without the fade */
+  .thinking {
+    animation-duration: 1ms;
+  }
+  .shimmer,
+  .shimmer.relabelled {
+    animation: none;
+    color: var(--t-3);
+    background: none;
+  }
+  .relabelled {
+    animation: none;
+  }
 }

@@ -20,6 +20,12 @@ import { took } from './time'
  * The thread's items are read as blocks (thread.ts), in stretches that end
  * at a report, so what was said after a report stays after it; then each run
  * of one agent's turns is a round.
+ *
+ * A review is a line of the thread (TaskThread draws it so): the person
+ * rarely needs what it said. The lead settling it is the round after it,
+ * and folds into that line too once a later round of the lead's hands the
+ * work over again; the lead's latest handoff, on the work or on settling a
+ * review, always stands open.
  */
 
 /** A message, with what it handed back beside it: the documents and files its work wrote or pointed at, and its own pictures. */
@@ -27,6 +33,8 @@ export interface Said {
   readonly id: string
   readonly text: string
   readonly handed: Handed
+  /** Still being written. */
+  readonly live?: boolean
 }
 
 /** One thing in a round's work, in order: a step, what it said on the way, or what Althar did along the way. */
@@ -83,8 +91,18 @@ export type RoundBlock =
   | { readonly kind: 'althar'; readonly id: string; readonly text: string; readonly tone: 'info' | 'warning' }
   /** Its folder went, or came back: a line across the thread, a change of scene (ADR-056). */
   | { readonly kind: 'folder'; readonly id: string; readonly text: string }
-  /** A reviewer's verdict and findings, in its own voice, on the model its review ran. */
-  | { readonly kind: 'verdict'; readonly id: string; readonly at: string; readonly model: string | null; readonly result: StepResult }
+  /**
+   * A reviewer's verdict and findings, in its own voice, on the model its review ran; with the lead's round settling them,
+   * where a later round of the lead's handed the work over since.
+   */
+  | {
+      readonly kind: 'verdict'
+      readonly id: string
+      readonly at: string
+      readonly model: string | null
+      readonly result: StepResult
+      readonly settle: Round | null
+    }
   /** The pull request the task opened or pushed to. */
   | { readonly kind: 'published'; readonly id: string; readonly at: string; readonly result: StepResult }
 
@@ -262,7 +280,7 @@ export const roundsOf = (
         const result = block.result
         if (result.step === 'review') {
           close(false)
-          out.push({ kind: 'verdict', id: block.id, at: block.at, model: block.result.model ?? null, result })
+          out.push({ kind: 'verdict', id: block.id, at: block.at, model: block.result.model ?? null, result, settle: null })
         } else if (result.step === 'publish') {
           close(false)
           out.push({ kind: 'published', id: block.id, at: block.at, result })
@@ -347,6 +365,29 @@ export const roundsOf = (
     }
   })
   close(turnRunning)
+  return withSettled(out)
+}
+
+/** Whether a block is a round its lead reported in, on its work or on settling a review: a handoff. */
+const handsOver = (block: RoundBlock | undefined): block is Round =>
+  block?.kind === 'round' && (block.report?.result.step === 'implement' || block.report?.result.step === 'settle')
+
+/**
+ * Each review with the round its lead settled it in, right after it, where a
+ * later round handed the work over again: the latest handoff stands open.
+ */
+const withSettled = (blocks: ReadonlyArray<RoundBlock>): ReadonlyArray<RoundBlock> => {
+  const latest = blocks.findLastIndex(handsOver)
+  const out: Array<RoundBlock> = []
+  for (let at = 0; at < blocks.length; at++) {
+    const block = blocks[at]
+    const next = blocks[at + 1]
+    if (block === undefined) continue
+    if (block.kind === 'verdict' && handsOver(next) && next.report?.result.step === 'settle' && !next.live && at + 1 < latest) {
+      out.push({ ...block, settle: next })
+      at += 1
+    } else out.push(block)
+  }
   return out
 }
 
@@ -398,6 +439,7 @@ const roundOf = (open: Gathering, live: boolean, at: ReadonlyMap<string, string>
   const said = (message: (typeof messages)[number], withFiles: boolean): Said => ({
     id: message.id,
     text: message.text,
+    ...(message.live === true ? { live: true } : {}),
     handed: handedBy([...(withFiles ? files : []), { id: message.id, pictures: message.pictures, files: message.files }], worktree),
   })
   const lastStep = work.at(-1)

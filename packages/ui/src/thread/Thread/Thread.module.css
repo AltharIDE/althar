@@ -25,6 +25,12 @@
 .thread > [data-rhythm='mark'] + [data-rhythm='mark'] {
   margin-top: 2px;
 }
+.thread > * + [data-rhythm='line'] {
+  margin-top: 22px;
+}
+.thread > [data-rhythm='line'] + [data-rhythm='line'] {
+  margin-top: 4px;
+}
 
 .measure {
   width: 100%;
