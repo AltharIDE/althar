@@ -800,7 +800,7 @@ export class TaskActions extends Context.Service<
         ),
         tool(
           'answer_stuck_step',
-          'Answers a task\'s stuck step as its card\'s buttons do, on the person\'s word: their message in this turn (message, from read_turn). as_is is a review\'s "Accept it as it is" (out of rounds) and skip_review its "Skip the review": either goes on without another review, and the task is ready. again tries the step again on the agent it had ("Review again"); hand_on hands it to another agent (agent, and model and effort where you pick them: "Review with another model"). read_task and list_tasks show which tasks are stuck and why. In a turn the person\'s message didn\'t start, a card asks them. One call for each task.',
+          'Answers a task\'s stuck step as its card\'s buttons do, on the person\'s word: their message in this turn (message, from read_turn). as_is is a review\'s "Accept it as it is" (out of rounds) and skip_review its "Skip the review": either goes on without another review, and the task is ready. again tries the step again on the agent it had ("Review again"); hand_on hands it to another agent (agent, and model and effort where you pick them: "Review with another model"). read_task says whether a task has a stuck step, and why. In a turn the person\'s message didn\'t start, a card asks them. One call for each task.',
           {
             type: 'object',
             properties: {
