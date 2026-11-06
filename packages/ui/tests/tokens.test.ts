@@ -79,6 +79,10 @@ const SAME_IN_EVERY_THEME = new Set([
   '--mark-umber',
   '--paper-plain',
   '--bot',
+  // A desktop's own close colours (Windows' red, Ubuntu's orange) and the white on them, as that desktop keeps them in both schemes.
+  '--window-close',
+  '--window-close-yaru',
+  '--on-window-close',
 ])
 
 describe('the dark theme as a set of tokens', () => {
