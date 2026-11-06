@@ -385,6 +385,21 @@ describe('thinking, as it goes and once it is done', () => {
     expect(parts(turn).some((part) => 'live' in part && part.live === true)).toBe(false)
   })
 
+  it('times a turn’s last thought until the turn ended, where it ended thinking, as one stopped', () => {
+    const thread = [after(items.you('Go'), 0), after(items.says('On it.'), 1), after(items.thinks('Where is the call?'), 2)]
+    const turnOf = (ended: string | null) =>
+      blocksOf({ ...source(thread), turnEnded: ended }, new Map(), at).find((block) => block.kind === 'turn')
+    const ended = after(items.says(''), 14).createdAt
+    expect(parts(turnOf(ended)).at(-1)).toMatchObject({ kind: 'thought', took: '12s' })
+    expect(turnOf(ended)).toMatchObject({ took: '13s' })
+    // Not known, it says only that it thought.
+    expect(parts(turnOf(null)).at(-1)).toMatchObject({ took: null })
+    // Asked again since, the end said is a later turn's.
+    const askedAgain = [...thread, after(items.you('And?'), 5)]
+    const [turn] = blocksOf({ ...source(askedAgain), turnEnded: ended }, new Map(), at).filter((block) => block.kind === 'turn')
+    expect(parts(turn).at(-1)).toMatchObject({ took: null })
+  })
+
   it('marks what a running turn is writing now live, thought or message, and nothing before it', () => {
     const thinking = [after(items.says('On it.'), 0), after(items.thinks('Where is'), 3)]
     const [turn] = blocksOf(source(thinking, true), new Map(), at, after(items.says(''), 9).createdAt)

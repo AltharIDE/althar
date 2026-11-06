@@ -15,7 +15,7 @@ import { type CodeShell, useThreadShell } from '../Shell/Shell'
 import { Table, type TableText } from '../Table/Table'
 import { closedFence, isDiagram } from './drawing'
 import { CodeBlock, Diagram, type DiagramText } from './Diagram'
-import { blocksOf, type Lexed, lexOn } from './lexed'
+import { blocksOf, type Lexed, lexAll, lexOn } from './lexed'
 import s from './Markdown.module.css'
 import { streamable } from './streaming'
 
@@ -149,14 +149,16 @@ export function Markdown({
   const [lexed, setLexed] = useState<Lexed | null>(null)
   const read = !streaming ? null : lexed !== null && lexed.text === shown ? lexed : lexOn(shown, lexed)
   if (read !== null && read !== lexed) setLexed(read)
-  const blocks = useMemo(() => blocksOf(read?.tokens ?? Lexer.lex(shown)), [read, shown])
+  const whole = useMemo(() => (streaming ? null : lexAll(shown)), [streaming, shown])
+  const doc = read ?? whole ?? lexAll(shown)
+  const blocks = useMemo(() => blocksOf(doc.tokens), [doc])
   const code = useThreadShell().code
   const finds = code !== undefined
   // The names in what is still being written are looked for once its words are whole, as each block is: a path half-written
   // names nothing. So they are read again only as a block settles.
   const named = read === null ? blocks : read.settled
   const names = useMemo(() => (finds ? codeNamesIn(blocksOf(named).slice(from, to)) : []), [finds, named, from, to])
-  const drawn = blocks.slice(from, to).map((b, i) => <Block key={i} token={b} base={headingLevel} t={t} />)
+  const drawn = blocks.slice(from, to).map((b, i) => <Block key={i} token={b} defs={doc.defs} base={headingLevel} t={t} />)
   return (
     <div className={cx(s.md, size === 'panel' && s.panel, className)} aria-busy={streaming || undefined} {...rest}>
       {code !== undefined && names.length > 0 ? (
@@ -177,15 +179,30 @@ function WithCode({ code, names, children }: { code: CodeShell; names: readonly 
   return <Found.Provider value={value}>{children}</Found.Provider>
 }
 
-/** A top-level block, drawn again only when its source changed: the words still streaming in redraw the block they are in. */
+interface BlockProps {
+  readonly token: Token
+  /** The definitions the text's links were read with (lexed.ts): where they change, a link may now go somewhere. */
+  readonly defs: string
+  readonly base: HeadingLevel
+  readonly t: MarkdownText
+}
+
+/**
+ * A block, drawn again only when what it is read from changed: the words still streaming in redraw the block they are in. The
+ * same source of the same kind, read with the same definitions, reads the same.
+ */
 const Block = memo(
-  function Block({ token, base, t }: { token: Token; base: HeadingLevel; t: MarkdownText }): ReactNode {
-    return <BlockOf token={token} base={base} t={t} />
+  function Block(props: BlockProps): ReactNode {
+    return <BlockOf {...props} />
   },
-  (before, after) => before.token.raw === after.token.raw && before.base === after.base && before.t === after.t,
+  (before, after) =>
+    before.defs === after.defs &&
+    before.base === after.base &&
+    before.t === after.t &&
+    (before.token === after.token || (before.token.type === after.token.type && before.token.raw === after.token.raw)),
 )
 
-function BlockOf({ token, base, t }: { token: Token; base: HeadingLevel; t: MarkdownText }): ReactNode {
+function BlockOf({ token, defs, base, t }: BlockProps): ReactNode {
   if (!known(token)) return token.raw
   switch (token.type) {
     case 'heading':
@@ -205,7 +222,11 @@ function BlockOf({ token, base, t }: { token: Token; base: HeadingLevel; t: Mark
             </span>
           )}
           {item.tokens.map((c, j) =>
-            c.type === 'text' ? <span key={j}>{inline(c.tokens ?? [c], t)}</span> : <Block key={j} token={c} base={base} t={t} />,
+            c.type === 'text' ? (
+              <span key={j}>{inline(c.tokens ?? [c], t)}</span>
+            ) : (
+              <Block key={j} token={c} defs={defs} base={base} t={t} />
+            ),
           )}
         </li>
       ))
@@ -225,7 +246,7 @@ function BlockOf({ token, base, t }: { token: Token; base: HeadingLevel; t: Mark
       return (
         <blockquote>
           {token.tokens.map((c, j) => (
-            <Block key={j} token={c} base={base} t={t} />
+            <Block key={j} token={c} defs={defs} base={base} t={t} />
           ))}
         </blockquote>
       )

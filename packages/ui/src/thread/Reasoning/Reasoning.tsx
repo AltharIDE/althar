@@ -72,6 +72,8 @@ export interface ReasoningProps extends Disclosable {
    * is done. Opened, all of it shows.
    */
   live?: boolean
+  /** Thinking now, but folded all the same, as the lead's is while it settles a review: its line says what it is on; it opens when asked. */
+  quiet?: boolean
   /** What it thought, where it isn't markdown. */
   children?: ReactNode
   text?: Partial<ReasoningText>
@@ -89,6 +91,7 @@ export function Reasoning({
   source,
   summary,
   live = false,
+  quiet = false,
   children,
   text,
   open,
@@ -119,7 +122,7 @@ export function Reasoning({
   const label = live ? (heading ?? t.thinking) : took === undefined || took === '' ? t.thoughtBriefly : t.thought(took)
   return (
     <Disclosure
-      open={live || opened}
+      open={(live && !quiet) || opened}
       onOpenChange={() => setOpened(!opened)}
       rhythm={Rhythm.Fold}
       busy={live}

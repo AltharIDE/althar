@@ -96,7 +96,7 @@ describe('a task’s thread', () => {
     expect(before).not.toHaveBeenCalled()
   })
 
-  it('shows what the lead thinks under its line while it works, but not while it settles a review', () => {
+  it('shows what the lead thinks under its line while it works, but not while it settles a review', async () => {
     const thinking: Round = {
       ...round('r3', 'unused'),
       result: null,
@@ -116,6 +116,14 @@ describe('a task’s thread', () => {
     show({ threadId: 'th1', versionOf: () => '', rounds: [thinking], settling: true })
     // Folded away under the line: the person sees the work line alone.
     expect(screen.getByRole('button', { name: /^Thinking/ }).closest('[data-state="closed"]')).not.toBeNull()
+    // Its work opened, the thought in it is a line still, streaming folded, until it is opened itself.
+    await userEvent.click(screen.getByRole('button', { name: /^Working/ }))
+    const [thought, ...more] = screen.getAllByRole('button', { name: /^Thinking/ }).filter((button) => button.closest('[inert]') === null)
+    expect(more).toEqual([])
+    expect(thought?.getAttribute('aria-expanded')).toBe('false')
+    if (thought === undefined) return
+    await userEvent.click(thought)
+    expect(thought.getAttribute('aria-expanded')).toBe('true')
   })
 
   it('draws a review as one line, what became of its findings in it, and a review running as a line at the end', async () => {

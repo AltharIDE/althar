@@ -199,8 +199,8 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
   )
 }
 
-/** A part of a turn as the thread draws it: what it said, a thought, a tool call, its plan, a notice. */
-export function PartView({ part, threadId }: { part: Part; threadId: string }) {
+/** A part of a turn as the thread draws it: what it said, a thought, a tool call, its plan, a notice. Quiet, a thought stays folded as it streams. */
+export function PartView({ part, threadId, quiet = false }: { part: Part; threadId: string; quiet?: boolean }) {
   switch (part.kind) {
     case 'message':
       // Its names are read as they were when it was said.
@@ -212,7 +212,7 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
     case 'thought':
       return (
         <SaidIn.Provider value={part.id}>
-          <Reasoning source={part.text} live={part.live === true} {...(part.took == null ? {} : { took: part.took })} />
+          <Reasoning source={part.text} live={part.live === true} quiet={quiet} {...(part.took == null ? {} : { took: part.took })} />
         </SaidIn.Provider>
       )
     case 'tool':

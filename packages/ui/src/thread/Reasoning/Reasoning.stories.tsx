@@ -49,6 +49,8 @@ export const BeforeTheFirstWord: Story = { render: () => <Thinking>Reading the w
 export const Live: Story = { args: { live: true, source: `${THOUGHT} ${THOUGHT}`, took: undefined } }
 /** Thinking now, as Codex does: under its latest heading. */
 export const LiveUnderItsHeading: Story = { args: { live: true, source: SUMMARY, took: undefined } }
+/** Thinking, folded all the same: the lead's, as it settles a review. Its line says what it is on; it opens when asked. */
+export const LiveQuiet: Story = { args: { live: true, quiet: true, source: SUMMARY, took: undefined } }
 
 /** It streams as it thinks, then folds to its line when it moves on, and starts again. */
 export const ThinkingThenFolding: Story = {
@@ -85,6 +87,7 @@ export const AllStates: Story = {
         { state: 'thinking, longer than usual', node: <Thinking took="34s" slow /> },
         { state: 'live', node: <Reasoning source={THOUGHT} live /> },
         { state: 'live, under its heading', node: <Reasoning source={SUMMARY} live /> },
+        { state: 'live, quiet', node: <Reasoning source={SUMMARY} live quiet /> },
         ...(['folded', 'hover', 'focus', 'pressed'] as const).map((state) => ({
           state,
           force: state === 'folded' ? undefined : state,

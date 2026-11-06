@@ -666,9 +666,19 @@ export const blocksOf = (
   })
   // Each turn folds its work; the one still running says what it is doing now.
   const live = runningTurn === -1 ? -1 : merged.findLastIndex((block) => block.kind === 'turn')
+  // The last turn, over, ran until the runtime says it ended, where that is after its last part and nothing came since but its
+  // step's result: a turn stopped while it thought thought until then. Others ran until their last part.
+  const lastOver = merged.findLastIndex((block) => block.kind === 'turn')
+  const endOf = (index: number, span: { from: string; to: string }) => {
+    const ended = source.turnEnded
+    if (index !== lastOver || index === live || ended == null || Date.parse(ended) <= Date.parse(span.to)) return span.to
+    const since = merged.slice(index + 1).every((block) => block.kind === 'step')
+    return since && (askedWhen == null || Date.parse(askedWhen) <= Date.parse(span.to)) ? ended : span.to
+  }
   const drawn = merged.map((block, index): Block => {
     if (block.kind !== 'turn') return block
-    const span = spans.get(block.id)
+    const known = spans.get(block.id)
+    const span = known === undefined ? undefined : { ...known, to: endOf(index, known) }
     const running = index === live
     const parts = timed(block.parts, atOf, running, span?.to)
     const { work, said } = splitOf(parts, !running && merged[index + 1]?.kind === 'step')

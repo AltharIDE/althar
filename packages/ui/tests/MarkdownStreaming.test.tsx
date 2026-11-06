@@ -112,7 +112,7 @@ describe('markdown read as it grows', () => {
       const text = ANSWER.slice(0, cut)
       const before: Lexed | null = read
       read = lexOn(text, before)
-      expect(blocksOf(read.tokens).map((token) => token.raw)).toEqual(blocksOf(Lexer.lex(text)).map((token) => token.raw))
+      expect(blocksOf(read.tokens)).toEqual(blocksOf(Lexer.lex(text)))
       if (before !== null && read.settled[0] !== undefined && read.settled[0] === before.settled[0]) kept += 1
     }
     // Most cuts read on from what settled, rather than all of it.
@@ -123,6 +123,27 @@ describe('markdown read as it grows', () => {
     const first = lexOn('One.\n\nTwo.\n\nThree', null)
     const again = lexOn('Uno.\n\nTwo.\n\nThree', first)
     expect(blocksOf(again.tokens).map((token) => token.raw.trim())).toEqual(['Uno.', 'Two.', 'Three'])
+  })
+
+  it('reads a link by its definition, written after it or before, as reading all of it would', () => {
+    const text =
+      '[docs][ref] first.\n\n[ref]: https://example.com\n\nThen [again][ref], and [other][two].\n\n> [two]: https://two.example\n\nEnd.'
+    let read: Lexed | null = null
+    for (let cut = 1; cut <= text.length; cut++) {
+      read = lexOn(text.slice(0, cut), read)
+      expect(blocksOf(read.tokens)).toEqual(blocksOf(Lexer.lex(text.slice(0, cut))))
+    }
+  })
+
+  it('draws a link once its definition arrives after it, and whole once it stops', () => {
+    const start = '[docs][ref] are here.\n\nAnother paragraph'
+    const view = render(<Markdown source={start} streaming />)
+    expect(view.container.querySelector('a')).toBeNull()
+    const done = `${start}\n\n[ref]: https://example.com`
+    view.rerender(<Markdown source={done} streaming />)
+    view.rerender(<Markdown source={done} />)
+    expect(view.container.querySelector('a')?.getAttribute('href')).toBe('https://example.com/')
+    expect(view.container.querySelector('a')?.textContent).toMatch(/^docs/)
   })
 
   it('draws a message as it streams, and whole once it stops', () => {

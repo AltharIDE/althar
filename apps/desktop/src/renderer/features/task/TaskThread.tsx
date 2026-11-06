@@ -71,8 +71,18 @@ export interface TaskThreadProps extends Shared {
   readonly settling?: boolean
 }
 
-/** One step of a round's work, in its sheet. */
-function StepView({ step, threadId, worktree }: { step: WorkStep; threadId: string; worktree: string | null }) {
+/** One step of a round's work, in its sheet. Quiet, its thoughts stay folded as they stream, until asked. */
+function StepView({
+  step,
+  threadId,
+  worktree,
+  quiet = false,
+}: {
+  step: WorkStep
+  threadId: string
+  worktree: string | null
+  quiet?: boolean
+}) {
   switch (step.kind) {
     case 'message':
       return <WorkSaid source={step.text} />
@@ -87,7 +97,7 @@ function StepView({ step, threadId, worktree }: { step: WorkStep; threadId: stri
         </>
       )
     default:
-      return <PartView part={step} threadId={threadId} />
+      return <PartView part={step} threadId={threadId} quiet={quiet} />
   }
 }
 
@@ -221,7 +231,7 @@ const RoundView = memo(function RoundView({
         >
           {work.steps.length === 0
             ? undefined
-            : work.steps.map((step) => <StepView key={step.id} step={step} threadId={threadId} worktree={worktree} />)}
+            : work.steps.map((step) => <StepView key={step.id} step={step} threadId={threadId} worktree={worktree} quiet={quiet} />)}
         </WorkLine>
       )}
       <RuleReceipt parts={block.parts} {...(project === undefined ? {} : { project })} />
