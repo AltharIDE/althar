@@ -932,6 +932,23 @@ describe('how Althar looks, on the Settings tab', () => {
     await waitFor(() => expect(checked()).toEqual(['Dark']))
   })
 
+  it('offers Althar’s accent or the system’s, Althar’s to begin with, and says when the system’s can’t be used', async () => {
+    // GNOME's yellow: too light to read on Althar's paper, kept as the system's only in name.
+    const chrome = { kind: 'mac', family: 'mac', layout: { start: [], end: [] }, accent: { r: 245, g: 194, b: 17 } } as const
+    const host = fakeHost({ chrome: () => chrome, onChrome: () => () => undefined })
+    withServices(<Settings at="appearance" />, fakeClient().client, host)
+    const choice = await screen.findByRole('radiogroup', { name: 'Accent colour' })
+    expect(
+      within(choice)
+        .getAllByRole('radio')
+        .map((radio) => radio.textContent),
+    ).toEqual(['Althar’s', 'The Mac’s'])
+    expect(screen.queryByText(/wouldn’t be readable here/)).toBeNull()
+    await userEvent.click(within(choice).getByRole('radio', { name: 'The Mac’s' }))
+    await waitFor(() => expect(host.setPreference).toHaveBeenCalledWith('accent', 'system'))
+    expect(await screen.findByText('The Mac’s accent colour wouldn’t be readable here, so Althar keeps its own.')).toBeTruthy()
+  })
+
   it('offers where Althar shows in another app, on a Mac with a notch, and keeps a choice', async () => {
     const host = fakeHost()
     withServices(<Settings at="appearance" />, fakeClient().client, host)
