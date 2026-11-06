@@ -93,6 +93,23 @@ interface MoveArgs {
   readonly heads?: ReadonlyArray<HeadSeen> | undefined
   readonly attentionId?: string | undefined
   readonly answer?: StuckAnswer | undefined
+  /**
+   * The person's word, checked again just before the move writes anything,
+   * and once a merge or push holds its locks: a turn that ended, or an errand
+   * of that word paused or called off meanwhile, stops it (Errands.stands).
+   */
+  readonly stands?: Effect.Effect<unknown, ToolRefused> | undefined
+}
+
+/** The tool each move done on the person's word is asked through, as errands name it. */
+const TOOL_OF: Partial<Record<TaskMove, string>> = {
+  done: 'accept_task',
+  merge_here: 'accept_task',
+  push_here: 'push_accepted_task',
+  as_is: 'answer_stuck_step',
+  skip_review: 'answer_stuck_step',
+  again: 'answer_stuck_step',
+  hand_on: 'answer_stuck_step',
 }
 
 /** Done, or nothing to do and why: the task already stands so, or the move doesn't apply where it stands. */
@@ -291,13 +308,14 @@ export class TaskActions extends Context.Service<
           const standing = yield* standingOf(task.id)
           const can = actionsOf(standing)
           const said = (type: string) => envelope(type, { taskId: task.id }, undefined, actorId)
+          const stands = args.stands ?? Effect.void
           const nothing = (why: string): Outcome => ({ done: false, said: why })
           const did = (what = `${DID[move](task.slug)}.`): Outcome => ({ done: true, said: what })
           switch (move) {
             case 'merge_here': {
               if (standing.state !== 'open') return nothing(`${task.slug} is settled already.`)
               // As the card's Accept: up to the heads read, all of its repositories or none, nothing pushed; merged, it settles.
-              const merged = yield* changes.mergeHere(task.id, args.heads ?? []).pipe(
+              const merged = yield* changes.mergeHere(task.id, args.heads ?? [], stands).pipe(
                 Effect.map((done) => ({ done })),
                 Effect.catchIf(
                   (error): error is CantMerge => error instanceof CantMerge,
@@ -312,7 +330,7 @@ export class TaskActions extends Context.Service<
               )
             }
             case 'push_here': {
-              const pushed = yield* changes.pushHere(task.id).pipe(
+              const pushed = yield* changes.pushHere(task.id, stands).pipe(
                 Effect.map((done) => ({ done })),
                 Effect.catchIf(
                   (error): error is PushRefused => error instanceof PushRefused,
@@ -332,6 +350,7 @@ export class TaskActions extends Context.Service<
               if (call === undefined || (args.attentionId !== undefined && call.id !== args.attentionId))
                 return nothing(`${task.slug} has no stuck step waiting on the person any more.`)
               if (args.answer === undefined) return nothing(`Althar couldn’t tell what to answer ${task.slug}’s stuck step.`)
+              yield* stands
               yield* runs.answerStuck({
                 envelope: yield* envelope('attention.answer_stuck', { attentionId: call.id, answer: args.answer }, undefined, actorId),
                 attentionId: call.id,
@@ -410,6 +429,7 @@ export class TaskActions extends Context.Service<
                 return nothing(
                   `${task.slug} is a change: it is done once its pull request merges. Merge it, or discard it to settle it without.`,
                 )
+              yield* stands
               return (yield* tasks.markDone({ envelope: yield* said('task.mark_done'), taskId: task.id }))
                 ? did(`Marked ${task.slug} done: it is in Settled, and what it left running stops.`)
                 : nothing(`${task.slug} can’t be marked done yet: it is still at work, or something on it waits on the person.`)
@@ -468,7 +488,7 @@ export class TaskActions extends Context.Service<
        * paired device. Undefined in any other turn: news, a lead, Althar or a
        * socket started it, and a card asks the person instead.
        */
-      const wordOf = (access: ToolAccess, message: string | undefined) =>
+      const wordOf = (access: ToolAccess, message: string | undefined, task: Task, move: TaskMove) =>
         Effect.gen(function* () {
           const turn = yield* errands.turn(access)
           if (access.role !== 'coordinator' || !turn.byPerson) return undefined
@@ -476,9 +496,14 @@ export class TaskActions extends Context.Service<
             return yield* new ToolRefused({
               message: "Name the person's message in this turn that asks it (message, from read_turn): this acts only on their own word.",
             })
-          const sql = yield* SqlClient.SqlClient
-          const [input] = yield* sql<{ body: string }>`SELECT body FROM user_inputs WHERE id = ${message}`
-          return input?.body ?? ''
+          // As merge_pull_request's word: the turn live, and no errand of it paused or called off, now and again before it acts.
+          const stands = errands.stands(TOOL_OF[move] ?? move, access, {
+            messageId: message,
+            target: task.slug,
+            request: { move },
+            taskId: task.id,
+          })
+          return { words: yield* stands, stands }
         })
 
       /**
@@ -503,9 +528,16 @@ export class TaskActions extends Context.Service<
           const task = typeof reference === 'string' ? yield* taskOf(access.projectId, reference) : reference
           const args = asked.args ?? {}
           // What can't be undone names the person's message, as merging does: checked against the live turn, never taken on trust.
-          const words = asked.word === true ? yield* wordOf(access, asked.message) : yield* personsWords(access)
-          if (words !== undefined) {
-            const outcome = yield* perform(task, move, instance.coordinatorId, args)
+          const plain = asked.word === true ? undefined : yield* personsWords(access)
+          const word =
+            asked.word === true
+              ? yield* wordOf(access, asked.message, task, move)
+              : plain === undefined
+                ? undefined
+                : { words: plain, stands: undefined }
+          if (word !== undefined) {
+            const { words } = word
+            const outcome = yield* perform(task, move, instance.coordinatorId, { ...args, stands: word.stands })
             if (!outcome.done) return `Nothing changed: ${outcome.said}`
             yield* line(task.projectId, access.threadId, `${DID[move](`“${task.title}”`)}, as you asked: ${quoted(words)}`)
             yield* line(task.projectId, task.threadId, `The coordinator ${DID_HERE[move]}, as you asked: ${quoted(words)}`)

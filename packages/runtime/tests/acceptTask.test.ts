@@ -5,14 +5,19 @@ import { join } from 'node:path'
 import { makeFakeService } from '@althar/connectors/testing'
 import { Ids, newId, type ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect } from 'effect'
+import { Deferred, Duration, Effect, Fiber, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Changes } from '../src/Changes'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
+import { Errands } from '../src/Errands'
 import { Instance } from '../src/Instance'
 import { MergeLine } from '../src/MergeLine'
+import { Plans } from '../src/Plans'
+import { setPlansAndReviews } from '../src/plansAndReviews'
 import { Projects } from '../src/Projects'
+import { Queries } from '../src/Queries'
 import { timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
@@ -85,6 +90,24 @@ const stateOf = (taskId: string) =>
     Effect.flatMap(SqlClient.SqlClient, (sql) => sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${taskId}`),
     ([row]) => row?.state,
   )
+
+/** The runtime with the queries screens read, as the API has it. */
+const withQueries = (...args: Parameters<typeof runtime>) => Queries.layer.pipe(Layer.provideMerge(runtime(...args)))
+
+/**
+ * Holds the task's lock, as a merge or push under way does, until released:
+ * what a call asked meanwhile waits for it.
+ */
+const holding = (taskId: string) =>
+  Effect.gen(function* () {
+    const held = yield* Deferred.make<void>()
+    const release = yield* Deferred.make<void>()
+    const fiber = yield* Effect.forkChild(
+      (yield* Changes).exclusive(taskId, Effect.andThen(Deferred.succeed(held, undefined), Deferred.await(release))),
+    )
+    yield* Deferred.await(held)
+    return Effect.andThen(Deferred.succeed(release, undefined), Fiber.join(fiber))
+  })
 
 const titles = (threadId: string) => Effect.map(notices(threadId), (rows) => rows.map((row) => row['title'] ?? ''))
 
@@ -165,6 +188,61 @@ describe('accept_task, for a task with no pull request', () => {
     }).pipe(Effect.provide(runtime()))
   })
 
+  it.live('merges nothing where the person’s turn ended while it waited for the task’s lock', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const c = yield* coordinatorOf(root)
+      const task = yield* changed(c.projectId, 'Add a retry', 'retry.ts')
+      const tip = git(root, 'rev-parse', 'main')
+      const message = yield* c.turn('Accept the retry')
+      // Something else holds the task: the accept, asked in the turn, waits behind it.
+      const release = yield* holding(task.taskId)
+      const asked = yield* Effect.forkChild(callTool(c.access, 'accept_task', { task: task.slug, head: task.head, message }))
+      yield* Effect.sleep(Duration.millis(300))
+      // The turn ends before the lock is let go: the word it was asked on is no longer live.
+      yield* sql`UPDATE turn_deliveries SET state = 'completed', ended_at = ${yield* timestamp} WHERE thread_id = ${c.threadId} AND state = 'delivered'`
+      yield* release
+      assert.match(yield* Fiber.join(asked), /runs only during a live turn/)
+      assert.strictEqual(git(root, 'rev-parse', 'main'), tip)
+      assert.strictEqual(yield* stateOf(task.taskId), 'open')
+    }).pipe(Effect.provide(runtime()))
+  })
+
+  it.live('acts on no word whose errand was paused, even one paused while it waited for the task’s lock', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const errands = yield* Errands
+      const c = yield* coordinatorOf(root)
+      const task = yield* changed(c.projectId, 'Add a retry', 'retry.ts')
+      const tip = git(root, 'rev-parse', 'main')
+      const message = yield* c.turn('Accept the retry once its checks pass')
+      // The coordinator kept the word as an errand for this task.
+      const errand = yield* errands.keep(c.access, message, [
+        {
+          key: 'accept',
+          tool: 'accept_task',
+          taskId: task.taskId,
+          target: task.slug,
+          request: { head: task.head },
+          waits: [{ kind: 'checks', target: task.slug }],
+        },
+      ])
+      const release = yield* holding(task.taskId)
+      const asked = yield* Effect.forkChild(callTool(c.access, 'accept_task', { task: task.slug, head: task.head, message }))
+      yield* Effect.sleep(Duration.millis(300))
+      // The errand is paused (a new objection) while the accept waits: it no longer acts on that word.
+      yield* errands.pause(c.access, errand, 'Its review found something new.')
+      yield* release
+      assert.match(yield* Fiber.join(asked), /paused or called off/)
+      assert.strictEqual(git(root, 'rev-parse', 'main'), tip)
+      assert.strictEqual(yield* stateOf(task.taskId), 'open')
+      // Asked again on the same word, it is refused at once.
+      assert.match(yield* callTool(c.access, 'accept_task', { task: task.slug, head: task.head, message }), /paused or called off/)
+      assert.strictEqual(git(root, 'rev-parse', 'main'), tip)
+    }).pipe(Effect.provide(runtime()))
+  })
+
   it.live('in a news turn, leaves a card; pressed, it merges at the head read and settles', () => {
     const root = repository()
     return Effect.gen(function* () {
@@ -216,49 +294,121 @@ describe('answer_stuck_step', () => {
       return row
     })
 
-  it.live('accepts a review out of rounds as it is on the person’s word, and in a news turn asks on a card', () => {
+  /** A task planned for Claude Code to implement and Codex to review, as its description scripts them, started at once. */
+  const planned = (projectId: ProjectId, title: string, description: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const plans = yield* Plans
+      const actor = (yield* Instance).personId
+      const created = yield* (yield* Projects).createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId,
+        title,
+        description,
+        draft: true,
+      })
+      const planId = yield* plans.propose({
+        projectId,
+        taskId: created.taskId,
+        steps: [
+          { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
+          { key: 'review', agentId: 'codex', model: null, skipped: false },
+        ],
+        reason: null,
+        actorId: actor,
+      })
+      yield* plans.start(planId, actor)
+      const [task] = yield* sql<{ slug: string; threadId: string }>`
+        SELECT k.slug, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${created.taskId}`
+      return { taskId: created.taskId, slug: task?.slug ?? '', threadId: task?.threadId ?? '' }
+    })
+  /** The task's open stuck call, once its run makes one: its id, step and why. */
+  const stuckCall = (taskId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const [call] = yield* until(
+        sql<{ id: string; payload: string }>`
+          SELECT id, payload FROM attention_requests WHERE task_id = ${taskId} AND kind = 'stuck' AND state = 'open'`,
+        (rows) => rows.length === 1,
+      )
+      return { id: call?.id ?? '', ...(JSON.parse(call?.payload ?? '{}') as { step: string; why: string }) }
+    })
+  /** Where the task stands on the board. */
+  const phaseOf = (projectId: string, taskId: string) =>
+    Effect.gen(function* () {
+      const board = yield* Effect.orDie((yield* Queries).board(projectId))
+      return board.tasks.find((task) => task.taskId === taskId)?.phase
+    })
+  /** The agents of the task's reviewers, in the order they started. */
+  const reviewers = (taskId: string) =>
+    Effect.flatMap(
+      SqlClient.SqlClient,
+      (sql) => sql<{ agentId: string }>`
+        SELECT s.agent_id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
+        WHERE t.task_id = ${taskId} AND t.kind = 'step' AND t.node_key = 'review' ORDER BY s.started_at, s.rowid`,
+    )
+
+  it.live('accepts a review out of rounds as it is on the person’s word, and the task is ready; in a news turn, a card asks', () => {
     const root = repository()
     return Effect.gen(function* () {
+      yield* setPlansAndReviews({ roundsOut: 'ask' })
       const c = yield* coordinatorOf(root)
-      const one = yield* changed(c.projectId, 'Add a retry', 'retry.ts')
-      const two = yield* changed(c.projectId, 'Cap retries', 'cap.ts')
-      const first = yield* stuck(c.projectId, one.taskId, { step: 'review', why: 'round_limit' })
-      const second = yield* stuck(c.projectId, two.taskId, { step: 'review', why: 'round_limit' })
-      // read_task says it is stuck, and how to answer it.
+      // Its reviewer asks for changes every round, so the review runs out of rounds and waits on the person.
+      const task = yield* planned(c.projectId, 'Add a retry', '[lead:finish] [review:always]')
+      const call = yield* stuckCall(task.taskId)
+      assert.deepStrictEqual([call.step, call.why], ['review', 'round_limit'])
       assert.match(
-        yield* callTool(c.access, 'read_task', { task: one.slug }),
+        yield* callTool(c.access, 'read_task', { task: task.slug }),
         /Its review step is stuck, waiting on the person: round limit/,
       )
 
-      const message = yield* c.turn('Accept the stuck ones as they are')
-      assert.match(
-        yield* callTool(c.access, 'answer_stuck_step', { task: one.slug, answer: 'as_is', message }),
-        /^Accepted .* as it is: the task goes on without another review/,
-      )
-      assert.deepInclude(yield* answered(first), { state: 'answered', reason: 'Abandon' })
-      assert.include(yield* titles(c.threadId), 'Accepted “Add a retry” as it is, as you asked: “Accept the stuck ones as they are”')
-      assert.include(
-        yield* titles(one.threadId),
-        'The coordinator accepted this task as it is, as you asked: “Accept the stuck ones as they are”',
-      )
-      // Answered, there is nothing more to answer.
-      assert.match(
-        yield* callTool(c.access, 'answer_stuck_step', { task: one.slug, answer: 'as_is', message }),
-        /^Nothing changed: .* no stuck step/,
-      )
-
-      // A news turn can't answer it: a card asks the person, and the call stays open until they press it.
+      // A news turn can't answer it: a card asks the person, and the step stays stuck.
       yield* c.turn('The review is out of rounds.', 'news')
       assert.match(
-        yield* callTool(c.access, 'answer_stuck_step', { task: two.slug, answer: 'again' }),
+        yield* callTool(c.access, 'answer_stuck_step', { task: task.slug, answer: 'as_is' }),
         /no message from the person, so nothing changed/,
       )
-      assert.deepInclude(yield* answered(second), { state: 'open' })
+      assert.deepInclude((yield* asks(c.threadId))[0], { move: 'as_is', state: 'open' })
+      assert.strictEqual((yield* stuckCall(task.taskId)).id, call.id)
+
+      // On the person's word it is accepted as it is: the run goes on without another review, and the task is ready.
+      const message = yield* c.turn('Accept it as it is')
+      assert.match(
+        yield* callTool(c.access, 'answer_stuck_step', { task: task.slug, answer: 'as_is', message }),
+        /^Accepted .* as it is: the task goes on without another review/,
+      )
+      yield* until(
+        Effect.map(phaseOf(c.projectId, task.taskId), (phase) => (phase === 'ready' ? [phase] : [])),
+        (rows) => rows.length === 1,
+      )
+      assert.include(yield* titles(c.threadId), 'Accepted “Add a retry” as it is, as you asked: “Accept it as it is”')
+      assert.include(yield* titles(task.threadId), 'The coordinator accepted this task as it is, as you asked: “Accept it as it is”')
+      // Answered, the card has nothing left to do.
       const [card] = yield* asks(c.threadId)
-      assert.deepInclude(card, { move: 'again', state: 'open' })
       yield* (yield* TaskActions).answer(card?.id ?? '', true, (yield* Instance).personId)
-      assert.deepInclude(yield* answered(second), { state: 'answered', reason: 'Hand the step to codex' })
-    }).pipe(Effect.provide(runtime()))
+      assert.deepInclude((yield* asks(c.threadId))[0], { state: 'moot' })
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.millis(50) })))
+  })
+
+  it.live('hands a review that never reports to the agent the person names, whose reviewer starts', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const c = yield* coordinatorOf(root)
+      // Its reviewer never reports, so the review waits on the person.
+      const task = yield* planned(c.projectId, 'Cap retries', '[lead:finish]')
+      const call = yield* stuckCall(task.taskId)
+      assert.deepStrictEqual([call.step, call.why], ['review', 'no_report'])
+      const message = yield* c.turn('Review it with Claude instead')
+      assert.match(
+        yield* callTool(c.access, 'answer_stuck_step', { task: task.slug, answer: 'hand_on', agent: 'claude-code', message }),
+        /review step goes to claude-code/,
+      )
+      const started = yield* until(reviewers(task.taskId), (rows) => rows.length === 2)
+      assert.deepStrictEqual(
+        started.map((one) => one.agentId),
+        ['codex', 'claude-code'],
+      )
+    }).pipe(Effect.provide(withQueries()))
   })
 
   it.live('refuses what the card doesn’t offer, and an agent Althar doesn’t have', () => {
