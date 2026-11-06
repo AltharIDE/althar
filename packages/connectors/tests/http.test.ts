@@ -1,8 +1,8 @@
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Exit, Schema } from 'effect'
+import { Effect, Exit, Logger, Schema } from 'effect'
 
 import { ConnectorFailed } from '../src/errors'
-import { ETAG_TEXT_KEPT, ETAGS_KEPT, failureOf, makeHttp } from '../src/http'
+import { ETAG_TEXT_KEPT, ETAGS_KEPT, failureOf, makeHttp, PAGES_FOLLOWED, paged } from '../src/http'
 import type { Product } from '../src/model'
 import { stubFetch } from './stub'
 
@@ -503,6 +503,35 @@ describe('what a service lets an account ask of it', () => {
       // A 304 without the headers keeps what was last said.
       yield* http.cached(Thing, 'https://api.test/thing')
       assert.deepStrictEqual([http.allowance().limit, http.allowance().remaining, http.allowance().counted], [2000, 1500, 2])
+    }),
+  )
+})
+
+describe('a listing read page after page', () => {
+  it.effect('stops at its bound, and says the rest was left unread only when there was more', () =>
+    Effect.gen(function* () {
+      const logged: Array<unknown> = []
+      const logger = Logger.make(({ message }) => logged.push(message))
+      let asked = 0
+      const bounded = yield* paged(1, (page: number) =>
+        Effect.sync(() => {
+          asked = page
+          return { items: [page], next: page + 1 }
+        }),
+      ).pipe(Effect.provide(Logger.layer([logger])))
+      assert.deepStrictEqual(
+        bounded,
+        Array.from({ length: PAGES_FOLLOWED }, (_, index) => index + 1),
+      )
+      assert.strictEqual(asked, PAGES_FOLLOWED)
+      assert.lengthOf(logged, 1)
+
+      logged.length = 0
+      const whole = yield* paged(1, (page: number) => Effect.succeed({ items: [page], next: page < 3 ? page + 1 : undefined })).pipe(
+        Effect.provide(Logger.layer([logger])),
+      )
+      assert.deepStrictEqual(whole, [1, 2, 3])
+      assert.lengthOf(logged, 0)
     }),
   )
 })

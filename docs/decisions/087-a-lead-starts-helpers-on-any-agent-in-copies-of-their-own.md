@@ -708,4 +708,3 @@ On 2026-11-03 they settled the last:
 6. **Agents' own helpers:** their background ones switched off on every agent
    where Althar can, in-turn ones kept where the agent allows; on Codex and
    OpenCode, `start_helper` for work in the background.
-

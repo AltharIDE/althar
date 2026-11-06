@@ -85,6 +85,9 @@ describe('the models every agent offers', () => {
         plain('openai/gpt-6-sol', 'OpenAI/6 Sol'),
         plain('gemini-3-pro', '3 Pro'),
         plain('v2', '2'),
+        plain('opencode-go/deepseek-v4.1-flash', 'opencode-go/DeepSeek V4.1 Flash'),
+        plain('opencode-zen/deepseek-v4.1-flash', 'opencode-zen/DeepSeek V4.1 Flash'),
+        plain('opencode-go/glm-5.3', 'opencode-go/GLM-5.3'),
       ],
       model: null,
       effort: null,
@@ -116,6 +119,13 @@ describe('the models every agent offers', () => {
       '2',
     ])
     expect(alone.models.find((info) => info.id === 'opencode:openai/gpt-6-sol')?.name).toBe('GPT-6 Sol')
+    // A chip never carries a raw provider id: the plain name, the provider in words only where the model is offered twice.
+    expect([named('opencode:opencode-go/deepseek-v4.1-flash'), named('opencode:opencode-zen/deepseek-v4.1-flash')]).toEqual([
+      expect.objectContaining({ short: 'DeepSeek V4.1 Flash', route: 'OpenCode Go' }),
+      expect.objectContaining({ short: 'DeepSeek V4.1 Flash', route: 'OpenCode Zen' }),
+    ])
+    expect(named('opencode:opencode-go/glm-5.3')).toMatchObject({ short: 'GLM-5.3' })
+    expect(named('opencode:opencode-go/glm-5.3')?.route).toBeUndefined()
     // Each model has effort levels of its own, and some none; levels an agent runs together are written apart.
     expect([named('opencode:local')?.efforts, named('opencode:v2')?.efforts]).toEqual([['Extra high'], []])
     expect([effortName(both, 'opencode:local', 'xhigh'), effortId(both, 'opencode:local', 'Extra high')]).toEqual(['Extra high', 'xhigh'])

@@ -256,11 +256,11 @@ describe('what a file names', () => {
 describe('this repository', () => {
   const known = graph(repository(join(import.meta.dirname, '../../..')))
   /**
-   * Code in a string isn't an import: samples a story shows, a file a spec writes into a test repository, prototypes,
-   * and this file's own small repository.
+   * Illustrative code isn't part of the import graph: samples a story shows, skill catalog examples, a file a spec
+   * writes into a test repository, prototypes, and this file's own small repository.
    */
   const sample = (one: string) =>
-    /^(?:packages\/ui\/src\/fixtures\/|packages\/ui\/prototypes\/|apps\/desktop\/e2e\/outputs\.spec\.ts:|packages\/testing\/tests\/select\.test\.ts:)/.test(
+    /^(?:packages\/skills\/catalog\/|packages\/ui\/src\/fixtures\/|packages\/ui\/prototypes\/|apps\/desktop\/e2e\/outputs\.spec\.ts:|packages\/testing\/tests\/select\.test\.ts:)/.test(
       one,
     )
 

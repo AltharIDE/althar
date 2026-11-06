@@ -3486,6 +3486,8 @@ export class Runs extends Context.Service<
       const finishStep = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // The model this step's turn ran on, kept with its report so its round keeps its name after a switch (DEV-154).
+          const model = yield* modelOf(access.sessionId)
           // A review's lead has no step to finish: it ends with its draft, and is refused every tool but a review's (Reviews.ts).
           const {
             summary,
@@ -3539,7 +3541,14 @@ export class Runs extends Context.Service<
             yield* addItem(
               { projectId: access.projectId as ProjectId, threadId: access.threadId },
               'step_result',
-              { step: 'implement', summary, ...builds, ...descriptions, ...(yield* shows) },
+              {
+                step: 'implement',
+                summary,
+                ...builds,
+                ...descriptions,
+                ...(model === null ? {} : { model }),
+                ...(yield* shows),
+              },
               { id: itemId },
             )
             // A step done is a break in the lead's work, with a run or without: its next turn may start afresh (ADR-038).
@@ -3609,7 +3618,19 @@ export class Runs extends Context.Service<
               // Read before the looks at git above: stopped and resumed meanwhile, the report is dropped.
               if (!(yield* keeps(current, attempt.id, { step, summary }))) return false
               yield* ended(current, attempt, 'succeeded', { summary, ...(answered ? { answered } : {}) })
-              yield* result(current, { step, round: attempt.iteration, summary, ...builds, ...descriptions, ...showing }, itemId)
+              yield* result(
+                current,
+                {
+                  step,
+                  round: attempt.iteration,
+                  summary,
+                  ...builds,
+                  ...descriptions,
+                  ...(model === null ? {} : { model }),
+                  ...showing,
+                },
+                itemId,
+              )
               // What became of each finding, as the lead says: the input to the next round, and to what reviews learn.
               if (step === 'settle') yield* settleFindings(current, attempt.id, settled)
               // A step that needed the person and reported after all no longer does.
@@ -3754,6 +3775,8 @@ export class Runs extends Context.Service<
       const reportReview = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // The model this review ran on, kept with its verdict so its round keeps its name after a switch (DEV-154).
+          const model = yield* modelOf(access.sessionId)
           const reviewed = yield* read(Reviewed, input)
           const findings = (reviewed.findings ?? []).map(({ title, ...finding }): Finding => {
             const line = titleOf(title)
@@ -3798,6 +3821,7 @@ export class Runs extends Context.Service<
                 summary: reviewed.summary,
                 findings,
                 agentId: reviewer?.agentId ?? null,
+                ...(model === null ? {} : { model }),
               })
               return ids
             }),

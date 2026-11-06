@@ -80,6 +80,7 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [070](070-failing-checks-go-to-the-lead-whoever-has-looked.md) | Failing checks go to the lead, whoever has looked, and it tells a failure of its own from one broken on main |
 | [071](071-the-sandbox-is-the-boundary-anything-inside-it-runs.md) | The sandbox is the boundary: what it holds runs unread, what crosses meets the rules, and git stops what can't be undone |
 | [072](072-a-lead-s-commits-push-as-its-turn-ends.md) | A lead's commits push as its turn ends, unless the project says otherwise, and wait for the person only where someone else pushed |
+| [073](073-git-over-ssh-in-the-flatpak-goes-through-the-device.md) | git over SSH in the Flatpak: Althar's own goes through the device's ssh, ssh in the sandbox trusts pinned code hosts, and nothing asks |
 | [074](074-ci-gates-a-merge-on-linux-and-a-release-on-everything.md) | CI gates a merge on Linux, and a release on everything: Windows, coverage and the packages after merge |
 | [075](075-an-intel-mac-build-beside-apple-silicon.md) | An Intel Mac build beside Apple silicon's, each with only its own processor's binaries, in one update feed |
 | [076](076-a-pull-request-shows-the-review-its-change-had.md) | A pull request shows the review its change had, as a seal in its corner and the review folded at its end |
@@ -100,3 +101,5 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [091](091-a-task-works-local-in-the-person-s-checkout-or-in-a-worktree.md) | A task works Local, in the person's own checkout, one task at a time, or in a worktree of its own: a project default the coordinator overrides per task; Althar asks before switching a checkout and never stashes or resets it |
 | [092](092-conflicts-and-failed-checks-send-a-task-back-to-work.md) | Conflicts and failed checks send a task back to work, one ask for both, on unless the person turned it off or stopped it; waiting on the person always says why |
 | [093](093-a-task-works-toward-the-project-s-branch-or-its-own.md) | A task works toward a branch, the project's Work toward or its own from its plan card: it starts there, its pull request goes there, and keeping it current, conflicts, checks, diffs and the push guard go by it; release branches are made and brought back on the person's word |
+| [094](094-skills-one-store-a-curated-catalog.md) | Skills are one store on the computer, from a curated catalog, given to each lead for its session |
+| [095](095-skill-and-openspec-files-stay-off-the-repository.md) | Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them |

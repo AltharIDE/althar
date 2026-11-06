@@ -98,7 +98,6 @@ const launchSteps = (plan: Plan, named: NameModel, reviews: boolean): ReadonlyAr
     id: step.key,
     label: text.label[reviews ? 'review' : step.key],
     agents: [named(step.agentId, step.model)],
-    ...(step.key === 'implement' && plan.reason !== null ? { why: plan.reason } : {}),
     optional: step.key === 'review',
     skipped: step.skipped,
   }))
@@ -185,7 +184,7 @@ function PlanCard({
       // Where the repository's host isn't connected, the task ends on its branch, and there is no ending to pick.
       {...(end === null ? { hideEnd: true } : { end: ENDS[end], onEndChange: (next: TaskEnd) => change(steps, endOf(next)) })}
       // A draft pull request is where tasks end until projects have rules for it, so no rule is named.
-      text={{ endByRule: () => '', ruleNote: (_project, note) => note }}
+      text={{ ruleNote: (_project, note) => note }}
       // Where it works, until it starts: the coordinator's choice, the person's to change (ADR-091).
       {...(worksIn === undefined
         ? {}

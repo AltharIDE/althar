@@ -10,8 +10,9 @@ import { useServices } from '../../data/services'
 /*
  * A project's settings' view model: its name and ink, changed in place, its
  * rules, whether its leads resolve conflicts and its tasks move their issues
- * to In Progress, the notes its coordinator keeps, and removing it. A new
- * name or ink shows at once, and goes to the runtime one change
+ * along, whether skill and OpenSpec files a task commits may stay in
+ * its repositories and be pushed, the notes its coordinator keeps, and
+ * removing it. A new name or ink shows at once, and goes to the runtime one change
  * after another; the tabs and the home hear it through the change feed, and
  * the projects are read again at once too, so it shows everywhere before the
  * feed is heard. One that didn't hold goes back, and says why. So do the
@@ -21,9 +22,12 @@ import { useServices } from '../../data/services'
  */
 
 /** A rule the settings switch in place. */
-export type RuleSwitch = 'resolveConflicts' | 'pushCommits' | 'postScreenshots' | 'moveIssues'
+export type RuleSwitch = 'resolveConflicts' | 'pushCommits' | 'postScreenshots' | 'moveIssues' | 'repositoryFiles'
 /** A rule set from General: one of its switches, or where new tasks start (ADR-091). */
 export type GeneralRule = RuleSwitch | 'worksIn'
+
+/** One of the three permissions for skill and OpenSpec files in its repositories. */
+export type RepositoryFile = keyof ProjectRulesView['repositoryFiles']
 
 export interface ProjectSettingsModel {
   readonly project: ProjectSummary | null
@@ -48,15 +52,16 @@ export interface ProjectSettingsModel {
   readonly setResolveConflicts: (on: boolean) => void
   /** Turns on or off the project's leads' commits going up on their own as each turn ends (ADR-072). */
   readonly setPushCommits: (on: boolean) => void
-  /** Allows native web reads for new lead and reviewer sessions (ADR-078). */
   /** Turns on or off a task's screenshots going up to its pull request on their own, kept as Outputs shows them (ADR-077). */
   readonly setPostScreenshots: (on: boolean) => void
   /** Looks at each open task now for a conflict with its default branch, under the project's rules (ADR-030). */
   readonly lookForConflicts: () => void
   /** Since it was last asked: looking (`asked`), or why it couldn't. */
   readonly looked: 'asked' | { readonly failed: string } | null
-  /** Moves a task's issue to In Progress as the task starts, or stops doing so. */
+  /** Moves a task's issue along with it: to In Progress as it starts, In Review and Done with its pull request. */
   readonly setMoveIssues: (on: boolean) => void
+  /** Allows or holds back skill or OpenSpec files in a task's commits, or pushing them: each a new revision of its rules. */
+  readonly setRepositoryFile: (file: RepositoryFile, on: boolean) => void
   /** Where new tasks start: Local, in the person's checkout, or a worktree of their own (ADR-091). */
   readonly setWorksIn: (worksIn: WorksIn) => void
   /** Which rule didn't hold, and why. */
@@ -129,13 +134,13 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
   // Shown switched at once; the rules as kept once saved, or as they were, with why, when it isn't.
   const [ruleFailed, setRuleFailed] = useState<{ readonly rule: GeneralRule; readonly message: string } | null>(null)
   const setRule = useCallback(
-    <R extends GeneralRule>(rule: R, on: ProjectRulesView[R]) => {
+    <R extends GeneralRule>(rule: R, value: ProjectRulesView[R]) => {
       const key = keys.rules(projectId)
       setRuleFailed(null)
-      cache.setQueryData<ProjectRulesView>(key, (now) => (now === undefined ? now : { ...now, [rule]: on }))
+      cache.setQueryData<ProjectRulesView>(key, (now) => (now === undefined ? now : { ...now, [rule]: value }))
       queue.current = queue.current.then(async () => {
         try {
-          cache.setQueryData(key, await client.setProjectRules({ projectId, [rule]: on }))
+          cache.setQueryData(key, await client.setProjectRules({ projectId, [rule]: value }))
         } catch (failure) {
           setRuleFailed({ rule, message: messageOf(failure) })
           await cache.invalidateQueries({ queryKey: key, exact: true })
@@ -153,6 +158,14 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
   const setPushCommits = useCallback((on: boolean) => setRule('pushCommits', on), [setRule])
   const setPostScreenshots = useCallback((on: boolean) => setRule('postScreenshots', on), [setRule])
   const setMoveIssues = useCallback((on: boolean) => setRule('moveIssues', on), [setRule])
+  // The three are one rule: each switch sends all three, the one switched as now chosen, the others as last shown.
+  const setRepositoryFile = useCallback(
+    (file: RepositoryFile, on: boolean) => {
+      const now = cache.getQueryData<ProjectRulesView>(keys.rules(projectId))?.repositoryFiles
+      if (now !== undefined) setRule('repositoryFiles', { ...now, [file]: on })
+    },
+    [cache, projectId, setRule],
+  )
   const setWorksIn = useCallback((worksIn: WorksIn) => setRule('worksIn', worksIn), [setRule])
 
   const taken: Partial<Record<ProjectInk, string>> = {}
@@ -235,6 +248,7 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     lookForConflicts,
     looked,
     setMoveIssues,
+    setRepositoryFile,
     setWorksIn,
     ruleFailed,
     removing,

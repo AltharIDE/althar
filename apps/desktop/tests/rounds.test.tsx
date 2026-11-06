@@ -67,6 +67,11 @@ describe('a task’s thread in rounds', () => {
     expect(round?.work?.took).toBe('7m 0s')
   })
 
+  it('keeps a round from before models were recorded without one, to be named as it was', () => {
+    const round = roundOf(read([items.you('Go'), items.says('Done.')]))
+    expect(round?.model).toBeNull()
+  })
+
   it('takes no acknowledgement from what the lead said only after changing something, or long after', () => {
     const late = roundOf(read([items.you('Go'), when(items.tool({}), 0), when(items.says('Reading.'), 5), when(items.says('Done.'), 6)]))
     expect(late?.ack).toBeNull()
@@ -543,6 +548,23 @@ describe('a task’s thread in rounds, on its screen', () => {
     const quiet = await screen.findByRole('button', { name: /worked 0s/ })
     expect(within(quiet).getByText('Claude Opus')).toBeTruthy()
     await waitFor(() => expect(screen.getByText(/^Working · /)).toBeTruthy())
+  })
+
+  it('names each round by the model its own turn ran on, not the one the session moved to', async () => {
+    const base = snapshot()
+    show(
+      [
+        items.you('Add a retry'),
+        { ...items.says('On it.'), model: 'opus' },
+        { ...items.step({ step: 'implement', built: 'A retry.' }), model: 'opus' },
+        items.step({ step: 'review', verdict: 'pass', summary: 'It holds.', agentId: 'claude-code', model: 'sonnet' }),
+      ],
+      // The session has moved on to the review: the earlier round must not take its new model's name.
+      { session: base.session === null ? null : { ...base.session, model: 'sonnet' } },
+    )
+    const names = (await screen.findAllByRole('article')).map((one) => one.getAttribute('aria-label'))
+    expect(names).toContain('Claude Opus')
+    expect(names).toContain('Claude Sonnet')
   })
 
   it('shows the lead thinking under its name before its first word, with the round before it as it was', async () => {

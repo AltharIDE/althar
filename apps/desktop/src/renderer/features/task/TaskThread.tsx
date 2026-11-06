@@ -248,9 +248,14 @@ const YouView = memo(
 export function TaskThread({ rounds, versionOf, ...shared }: TaskThreadProps) {
   const { threadId, worktree = null, openFile, session, project, onTryAgain, onCompact, onSignIn } = shared
   const named = useModelNames()
-  // A turn of the thread's own agent, on its session's model and account; another's, on its own model.
-  const modelOf = (agentId: string | null) =>
-    session != null && agentId === session.agentId ? named(agentId, session.model, session.account) : named(agentId)
+  // A round on the model its own turn ran, as the runtime recorded it; an older one without, on the thread's current
+  // session, as before.
+  const modelOf = (agentId: string | null, model: string | null = null) =>
+    agentId !== null && model !== null
+      ? named(agentId, model)
+      : session != null && agentId === session.agentId
+        ? named(agentId, session.model, session.account)
+        : named(agentId)
   // Opening a file goes through one function that stays, so a round drawn before opens it as the person now does.
   const opening = useRef(openFile)
   useLayoutEffect(() => {
@@ -286,7 +291,7 @@ export function TaskThread({ rounds, versionOf, ...shared }: TaskThreadProps) {
       <RoundView
         key={block.id}
         block={block}
-        model={modelOf(block.agentId)}
+        model={modelOf(block.agentId, block.model)}
         retakes={retakes}
         versions={Object.fromEntries(documentsOf(block).map((whole) => [whole, versionOf(whole)]))}
         threadId={threadId}
@@ -327,7 +332,13 @@ export function TaskThread({ rounds, versionOf, ...shared }: TaskThreadProps) {
         )
       case 'verdict':
         return (
-          <Round key={block.id} model={named(block.result.agentId)} at={block.at} part="Review" data-item={block.id}>
+          <Round
+            key={block.id}
+            model={block.model === null ? named(block.result.agentId) : named(block.result.agentId, block.model)}
+            at={block.at}
+            part="Review"
+            data-item={block.id}
+          >
             <ReviewReport id={block.id} result={block.result} />
           </Round>
         )

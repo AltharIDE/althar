@@ -173,6 +173,7 @@ describe('GitLab answers that leave things out', () => {
   it.effect('has no address for a trigger job that gives none, and reads its child pipeline’s state', () =>
     Effect.gen(function* () {
       const { host } = gitlab([
+        ['GET', `${PROJECT}/repository/commits/abc/statuses?per_page=100&page=1`, { json: [] }],
         ['GET', `${PROJECT}/pipelines?sha=abc&per_page=20`, { json: [{ id: 2, sha: 'abc', source: 'push' }] }],
         ['GET', `${PROJECT}/pipelines/2/jobs?per_page=100`, { json: [] }],
         [

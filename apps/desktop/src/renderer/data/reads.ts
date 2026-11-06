@@ -43,6 +43,8 @@ export const keys = {
   automations: (projectId: string) => ['automations', projectId] as const,
   /** One automation, for its own page. */
   automation: (automationId: string) => ['automation', automationId] as const,
+  /** The skills store: read before the skills show, and again as a skill changes, in this window or another (feed.ts). */
+  skills: ['skills'] as const,
   /** Finished tasks' folders on this computer, and the disk they are on: read again as the feed says they changed. */
   folders: ['folders'] as const,
   /** Tasks found by words, in a project or (null) in every one. */
@@ -149,6 +151,7 @@ export const reads = (client: Client) => ({
     queryOptions({ queryKey: keys.automations(projectId), queryFn: () => client.getAutomations(projectId) }),
   automation: (automationId: string) =>
     queryOptions({ queryKey: keys.automation(automationId), queryFn: () => client.getAutomation(automationId), gcTime: 5 * 60_000 }),
+  skills: () => queryOptions({ queryKey: keys.skills, queryFn: () => client.listSkills() }),
   // Read again every second or so while their sizes are still being measured; after that, as the feed says.
   folders: () =>
     queryOptions({

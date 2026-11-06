@@ -582,6 +582,7 @@ describe('GitLab as a code host', () => {
   it.effect('reads the checks on a head from its newest pipeline’s jobs', () =>
     Effect.gen(function* () {
       const { host } = gitlab([
+        ['GET', `${PROJECT}/repository/commits/abc/statuses?per_page=100&page=1`, { json: [] }],
         [
           'GET',
           `${PROJECT}/pipelines?sha=abc&per_page=20`,
@@ -665,9 +666,70 @@ describe('GitLab as a code host', () => {
     }),
   )
 
+  it.effect('folds in statuses an outside CI posted, less the pipeline jobs GitLab lists among them', () =>
+    Effect.gen(function* () {
+      const unit = job(17007488983, 'unit', 'success')
+      const { host } = gitlab([
+        [
+          'GET',
+          `${PROJECT}/repository/commits/abc/statuses?per_page=100&page=1`,
+          {
+            json: [
+              // GitLab's own job, which the pipeline's jobs say too, at the same page.
+              { id: 20, name: 'unit', status: 'success', target_url: unit.web_url },
+              // An outside CI's, posted twice: the newer one is what its check is.
+              { id: 22, name: 'ci/jenkins', status: 'failed', target_url: 'https://ci.example/jobs/7', description: '2 failed' },
+              { id: 21, name: 'ci/jenkins', status: 'running', target_url: 'https://ci.example/jobs/7' },
+            ],
+          },
+        ],
+        [
+          'GET',
+          `${PROJECT}/pipelines?sha=abc&per_page=20`,
+          { json: [{ id: 2, sha: 'abc', ref: 'main', status: 'success', source: 'push' }] },
+        ],
+        ['GET', `${PROJECT}/pipelines/2/jobs?per_page=100`, { json: [unit] }],
+        ['GET', `${PROJECT}/pipelines/2/bridges?per_page=100`, { json: [] }],
+      ])
+      assert.deepStrictEqual(yield* host.checks(repository, 'abc'), [
+        { id: 'job:34675721:17007488983', name: 'unit', state: 'passed', url: unit.web_url, summary: null },
+        { id: 'status:22', name: 'ci/jenkins', state: 'failed', url: 'https://ci.example/jobs/7', summary: '2 failed' },
+      ])
+    }),
+  )
+
+  it.effect('reads an outside CI’s statuses on a commit that has no pipeline', () =>
+    Effect.gen(function* () {
+      const { host } = gitlab([
+        [
+          'GET',
+          `${PROJECT}/repository/commits/abc/statuses?per_page=100&page=1`,
+          { json: [{ id: 9, name: 'ci/buildkite', status: 'running', target_url: 'https://buildkite.example/9' }] },
+        ],
+        ['GET', `${PROJECT}/pipelines?sha=abc&per_page=20`, { json: [] }],
+        ['GET', `${PROJECT}/repository/commits/abc/merge_requests`, { json: [] }],
+      ])
+      assert.deepStrictEqual(yield* host.checks(repository, 'abc'), [
+        { id: 'status:9', name: 'ci/buildkite', state: 'running', url: 'https://buildkite.example/9', summary: null },
+      ])
+      // A commit the project doesn't hold, as a fork's is, has no statuses there: its checks are its pipeline's, if any.
+      const elsewhere = gitlab([
+        [
+          'GET',
+          `${PROJECT}/repository/commits/def/statuses?per_page=100&page=1`,
+          { status: 404, json: { message: '404 Commit Not Found' } },
+        ],
+        ['GET', `${PROJECT}/pipelines?sha=def&per_page=20`, { json: [] }],
+        ['GET', `${PROJECT}/repository/commits/def/merge_requests`, { json: [] }],
+      ])
+      assert.deepStrictEqual(yield* elsewhere.host.checks(repository, 'def'), [])
+    }),
+  )
+
   it.effect('finds a merged results pipeline through the head’s merge request', () =>
     Effect.gen(function* () {
       const { host } = gitlab([
+        ['GET', `${PROJECT}/repository/commits/abc/statuses?per_page=100&page=1`, { json: [] }],
         ['GET', /\/pipelines\?sha=/, { json: [] }],
         [
           'GET',
@@ -682,6 +744,7 @@ describe('GitLab as a code host', () => {
         ['GET', `${API}/projects/45049979/pipelines/7/jobs?per_page=100`, { json: [job(1, 'unit', 'running')] }],
         ['GET', `${API}/projects/45049979/pipelines/7/bridges?per_page=100`, { json: [] }],
         ['GET', `${PROJECT}/repository/commits/def/merge_requests`, { json: [request({ sha: 'other' })] }],
+        ['GET', `${PROJECT}/repository/commits/def/statuses?per_page=100&page=1`, { json: [] }],
       ])
       assert.deepStrictEqual(
         (yield* host.checks(repository, 'abc')).map((check) => [check.id, check.state]),

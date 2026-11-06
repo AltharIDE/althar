@@ -50,7 +50,7 @@ jobs:
       - uses: ./.github/actions/flaky/quarantine
       # @althar/testing has no coverage gate of its own: its tests run plain.
       - env:
-          PACKAGES: packages/connectors packages/contracts packages/domain packages/persistence-sqlite packages/provider-adapters packages/testing apps/cli
+          PACKAGES: packages/connectors packages/contracts packages/domain packages/persistence-sqlite packages/provider-adapters packages/skills packages/testing apps/cli
         run: |
           failed=''
           for package in $PACKAGES; do
