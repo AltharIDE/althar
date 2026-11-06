@@ -16,7 +16,7 @@ import s from './WindowButtons.module.css'
  * - gnome: round, flat buttons with a faint disc that deepens on hover, as
  *   GNOME's header bars have.
  * - kde: thin glyphs, a chevron down to minimize and up to maximize, a disc
- *   on hover, red under close, as KDE's Breeze has.
+ *   on hover, a soft red disc with a dark glyph under close, as KDE's Breeze has.
  * - windows: rectangular caption buttons the bar's full height, red under
  *   close on hover, as Windows has.
  *

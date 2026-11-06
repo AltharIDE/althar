@@ -27,7 +27,7 @@ export const GnomeCloseOnly: Story = { args: { look: 'gnome', tone: 'adwaita', b
 export const GnomeLegacy: Story = { args: { look: 'gnome', tone: 'legacy' } }
 /** Ubuntu's Yaru: close turns orange as it is pointed at. */
 export const GnomeYaru: Story = { args: { look: 'gnome', tone: 'yaru' } }
-/** KDE's Breeze: a chevron down to minimize, up to maximize, red under close. */
+/** KDE's Breeze: a chevron down to minimize, up to maximize, a soft red disc under close, its glyph dark. */
 export const Kde: Story = { args: { look: 'kde' } }
 /** Maximized on KDE: the diamond restores. */
 export const KdeMaximized: Story = { args: { look: 'kde', maximized: true } }

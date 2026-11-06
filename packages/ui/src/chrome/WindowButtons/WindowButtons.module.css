@@ -154,7 +154,7 @@
   outline-offset: 1px;
 }
 
-/* KDE: thin glyphs, a disc as one is pointed at, red under close; 20px, 4px apart */
+/* KDE: thin glyphs, a disc as one is pointed at, a soft red one under close with a dark glyph; 20px, 4px apart */
 .kde {
   gap: 4px;
   color: var(--t-2);
@@ -183,13 +183,13 @@
 }
 .kde .close:hover,
 .kde .close:active {
-  color: var(--on-window-close);
+  color: var(--on-window-close-soft);
 }
 .kde .close:hover::before {
-  background: var(--window-close);
+  background: var(--window-close-soft);
 }
 .kde .close:active::before {
-  background: color-mix(in srgb, var(--window-close) 82%, black);
+  background: var(--window-close-soft-pressed);
 }
 .kde .glyph {
   width: 16px;
