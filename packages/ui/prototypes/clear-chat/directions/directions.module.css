@@ -1,0 +1,21 @@
+/* Scrappy: the little the directions draw of their own; the rest is the kit's. */
+.danger {
+  color: var(--danger);
+}
+.noMark {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+}
+.kept {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--t-2);
+}
+.kept li + li {
+  margin-top: 2px;
+}
+.choices {
+  margin-top: 4px;
+}
