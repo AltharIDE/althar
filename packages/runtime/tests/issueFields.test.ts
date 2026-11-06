@@ -391,6 +391,22 @@ describe("an issue's fields read against its tracker", () => {
     }),
   )
 
+  it.effect('says what is so already of an issue with none of them, and labels only added or only taken off', () =>
+    Effect.gen(function* () {
+      const { priority: _priority, components: _components, ...rest } = ISSUE
+      const bare: Issue = { ...rest, priority: null, labels: [], estimate: null, due: null }
+      const none = yield* read({ priority: 'none', estimate: null, due: null, components: [] }, { issue: bare })
+      assert.deepStrictEqual(none.change, {})
+      assert.deepStrictEqual(none.already, ['no priority', 'estimate none', 'components none', 'no due date'])
+      // Labels asked only to add, then only to take off: one it hasn't is nothing to take off.
+      const adding = yield* read({ labels: { add: ['ui'] } })
+      assert.deepStrictEqual(adding.change, { labels: { add: [UI], remove: [] } })
+      const removing = yield* read({ labels: { remove: ['bug', 'ui'] } })
+      assert.deepStrictEqual(removing.change, { labels: { add: [], remove: [BUG] } })
+      assert.deepStrictEqual((yield* read({ labels: {} })).change, {})
+    }),
+  )
+
   it.effect('files a new issue with what it is asked, as nothing is so already', () =>
     Effect.gen(function* () {
       const result = yield* read(

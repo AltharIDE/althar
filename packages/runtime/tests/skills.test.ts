@@ -11,7 +11,7 @@ import { SqlClient } from 'effect/sql'
 
 import { type Failure, Failures, failuresLayer } from '../src/Failures'
 import { onlyReads, Sessions } from '../src/Sessions'
-import { runSkills } from '../src/Skills'
+import { listSkills, runSkills } from '../src/Skills'
 import { items, launches, notices, runtime, sessionMetas, task, until } from './support'
 
 /*
@@ -368,6 +368,57 @@ describe('setting skills up for several leads at once', () => {
         ],
       )
       yield* Effect.forEach(runs, (run) => run.release, { concurrency: 'unbounded' })
+    }),
+  )
+})
+
+describe('the skills the window lists', () => {
+  const listed = (config: NonNullable<RuntimeOptions['skills']>) => listSkills(config).pipe(Effect.provide(failuresLayer))
+
+  it.live('says what each skill’s own SKILL.md says, and the catalog’s licence where it says none', () =>
+    Effect.gen(function* () {
+      const store = yield* Effect.promise(() =>
+        makeStore({
+          alpha: { 'SKILL.md': '---\nname: alpha\ndescription: Use when testing alpha.\nlicense: MIT\n---\nDo alpha.\n' },
+          beta: skill('beta'),
+        }),
+      )
+      const list = yield* listed(store)
+      assert.strictEqual(list.catalogRevision, 'fixture-1')
+      assert.deepStrictEqual(
+        list.skills.map((one) => [one.id, one.description, one.license, 'problem' in one ? one.problem : null]),
+        [
+          ['alpha', 'Use when testing alpha.', 'MIT', null],
+          // One whose SKILL.md names no licence has the catalog's.
+          ['beta', 'Use when testing beta.', 'Apache-2.0', null],
+        ],
+      )
+    }),
+  )
+
+  it.live('lists an install whose record doesn’t read, given to no run, and the rest without a catalog that loads', () =>
+    Effect.gen(function* () {
+      const store = yield* Effect.promise(() => makeStore({ alpha: skill('alpha') }))
+      const path = join(store.root, 'installs.json')
+      const file = JSON.parse(readFileSync(path, 'utf8')) as { installs: Array<unknown> }
+      writeFileSync(path, JSON.stringify({ ...file, installs: [...file.installs, { id: 'gamma', active: 'yes' }] }))
+      writeFileSync(join(store.catalog, 'catalog.json'), '{ not json')
+      const list = yield* listed(store)
+      assert.isNull(list.catalogRevision)
+      assert.deepStrictEqual(
+        list.skills.map((one) => [one.id, one.active, one.license, 'problem' in one ? one.problem : null]),
+        [
+          ['alpha', true, null, null],
+          ['gamma', false, null, "Althar can't read what it keeps of this skill, so runs aren't given it."],
+        ],
+      )
+    }),
+  )
+
+  it.live('gives no skills to an agent with no way to be given them', () =>
+    Effect.gen(function* () {
+      const store = yield* Effect.promise(() => makeStore({ alpha: skill('alpha') }))
+      assert.isUndefined(yield* runSkills(store, { id: 'claude-code', skills: null }, 'run-1', []))
     }),
   )
 })
