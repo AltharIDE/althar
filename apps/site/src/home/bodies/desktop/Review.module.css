@@ -7,8 +7,11 @@
   overflow: hidden;
   container-type: inline-size;
   /* Its edges melt into the section, so the drawing's own ground shows no frame. */
-  mask-image: linear-gradient(to right, transparent, #000 4%, #000 96%, transparent), linear-gradient(transparent, #000 5%, #000 95%, transparent);
+  mask-image: var(--review-mask, linear-gradient(to right, transparent, #000 4%, #000 96%, transparent), linear-gradient(transparent, #000 5%, #000 95%, transparent));
   mask-composite: intersect;
+  /* A look's frame for it (home/looks): none on the dark section. */
+  border-radius: var(--review-radius, 0);
+  box-shadow: var(--review-frame, none);
 }
 
 @media (max-width: 700px) {
