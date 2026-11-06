@@ -25,7 +25,7 @@ export interface OpenFailedProps {
   reason: string
   onRetry: () => void
   /** Off a Mac, the window's own buttons in the bar; on macOS the system draws its lights. */
-  lights?: 'space' | 'drawn'
+  lights?: 'space' | 'drawn' | 'none'
   window?: TitleBarWindow
   text?: Partial<OpenFailedText>
 }

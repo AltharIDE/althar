@@ -15,9 +15,9 @@ describe('the window’s chrome, by platform', () => {
     })
   })
 
-  it('goes frameless elsewhere, with Althar’s icon on Linux', () => {
-    expect(windowOptions('linux', icon)).toEqual({ backgroundColor: '#f4f2ec', frame: false, icon })
-    expect(windowOptions('win32', icon)).toEqual({ backgroundColor: '#f4f2ec', frame: false })
+  it('uses the native frame elsewhere, with Althar’s icon on Linux', () => {
+    expect(windowOptions('linux', icon)).toEqual({ backgroundColor: '#f4f2ec', frame: true, icon })
+    expect(windowOptions('win32', icon)).toEqual({ backgroundColor: '#f4f2ec', frame: true })
   })
 
   it('keeps a trimmed menu off a Mac for its accelerators, and leaves macOS’s own menu bar alone', () => {

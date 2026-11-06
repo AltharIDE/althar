@@ -107,6 +107,9 @@ export const projectTabsText: ProjectTabsText = {
 export type ProjectTabsProps = RootProps<
   'header',
   {
+    home?: boolean
+    onCloseHome?: () => void
+    onOpenHome?: () => void
     tabs: readonly ProjectTab[]
     /** The tab that has the window: a project's id, or null for the home. The settings' own tab, where it has the window, says so itself. */
     current: string | null
@@ -167,6 +170,9 @@ const tabShift = (dragging: Dragging | null, id: string): CSSProperties | undefi
 }
 
 export function ProjectTabs({
+  home = true,
+  onCloseHome,
+  onOpenHome,
   tabs,
   current: route,
   onSelect,
@@ -261,20 +267,23 @@ export function ProjectTabs({
       )}
       <nav className={s.nav} aria-label={t.label}>
         <ul className={s.pinned}>
-          <li className={cx(s.tab, s.home, current === null && s.current)}>
-            <button
-              type="button"
-              className={s.select}
-              aria-current={current === null ? 'page' : undefined}
-              onClick={() => onSelect(null)}
-              onPointerEnter={() => onPreview?.(null)}
-              onFocus={() => onPreview?.(null)}
-            >
-              <Logo size={15} className={s.logo} />
-              <span className={s.name}>{t.home}</span>
-              <Yours n={yours} text={t} />
-            </button>
-          </li>
+          {home && (
+            <li className={cx(s.tab, s.home, current === null && s.current)}>
+              <button
+                type="button"
+                className={s.select}
+                aria-current={current === null ? 'page' : undefined}
+                onClick={() => onSelect(null)}
+                onPointerEnter={() => onPreview?.(null)}
+                onFocus={() => onPreview?.(null)}
+              >
+                <Logo size={15} className={s.logo} />
+                <span className={s.name}>{t.home}</span>
+                <Yours n={yours} text={t} />
+              </button>
+              {onCloseHome && <IconButton icon="close" label={t.close(t.home)} size="small" className={s.close} onClick={onCloseHome} />}
+            </li>
+          )}
           {settings !== undefined && (
             <li className={cx(s.tab, s.project, onSettings && s.current)}>
               <button type="button" className={s.select} aria-current={onSettings ? 'page' : undefined} onClick={settings.onSelect}>
@@ -329,6 +338,7 @@ export function ProjectTabs({
             ))}
           </Menu>
         )}
+        {!home && onOpenHome && <ChromeButton icon="corner" label={t.home} compact onClick={onOpenHome} />}
         {offered.length === 0 && onNewProject && (
           <ChromeButton icon="plus" label={t.newProject} kbd={t.newProjectKbd} compact className={s.plus} onClick={onNewProject} />
         )}

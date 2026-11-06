@@ -15,7 +15,7 @@ export function ProfileInUseView({ failure, host }: { readonly failure: StoreFai
     <ProfileInUse
       reason={failure.reason}
       onTryAgain={() => void host.tryAgain()}
-      lights={darwin ? 'space' : 'drawn'}
+      lights={darwin ? 'space' : 'none'}
       {...(darwin
         ? {}
         : {

@@ -32,7 +32,11 @@ export const text = {
   newProject: 'New project',
 }
 
+const EMPTY_PLACES: Readonly<Record<string, Place>> = {}
+
 export interface TabsModel {
+  readonly home: boolean
+  readonly closeHome: () => void
   readonly tabs: ReadonlyArray<ProjectTab>
   /** The projects without a tab. */
   readonly others: ReadonlyArray<ProjectTab>
@@ -135,7 +139,7 @@ export const useTabs = (): TabsModel => {
     const project = byId.get(id)
     return project === undefined ? [] : [tabOf(project)]
   })
-  const places = kept?.places ?? {}
+  const places = kept?.places ?? EMPTY_PLACES
   // Every open tab's place stays in the window's cache, read ahead, so going to one never waits on the runtime.
   const preview = useWarmTabs(open, places)
   // And the home's, once there are projects: going back to it never waits either.
@@ -169,7 +173,23 @@ export const useTabs = (): TabsModel => {
     leaving(draft.id, go(afterClosing([...open, draft.id], draft.id), places))
   }
 
+  const home = kept?.home !== false || (where.kind === 'home' && open.length === 0)
+  const first = open[0]
+  // A launch starts at /: honor dismissal by returning to the first kept project.
+  useEffect(() => {
+    if (where.kind === 'home' && kept?.home === false && first !== undefined) void go(first, places)
+  }, [where.kind, kept, first, go, places])
+
   return {
+    home,
+    closeHome: () => {
+      if (open.length === 0 && !onNew && kept?.settings === undefined) return
+      store.change((was) => ({ ...was, home: false }))
+      if (where.kind === 'home') {
+        if (first !== undefined) void go(first, places)
+        else if (kept?.settings !== undefined) void navigate({ to: '/settings/$section', params: { section: kept.settings } })
+      }
+    },
     tabs: making === null ? tabs : [...tabs, making],
     others: (projects ?? []).filter((project) => !open.includes(project.id)).map(tabOf),
     current: onNew ? (draft?.id ?? null) : current,
@@ -178,6 +198,7 @@ export const useTabs = (): TabsModel => {
     none: (projects !== null && projects.length === 0) || welcoming,
     settings: { open: onSettings || kept?.settings !== undefined, current: onSettings },
     select: (id) => {
+      if (id === null && kept?.home === false) store.change((was) => ({ ...was, home: true }))
       if (id !== null && id === making?.id) return void navigate({ to: '/new' })
       void go(id, places)
     },

@@ -98,7 +98,6 @@ function TabsBar({
   onQuick: (open: boolean) => void
 }) {
   const { host } = useServices()
-  const chrome = useWindowChrome()
   const update = useUpdate()
   const online = useOnline()
   const load = useLoad(tabs.tabs.length > 0 || tabs.others.length > 0)
@@ -106,6 +105,9 @@ function TabsBar({
   return (
     <ProjectTabs
       tabs={tabs.tabs}
+      home={tabs.home}
+      onCloseHome={tabs.tabs.length > 0 || tabs.settings.open ? tabs.closeHome : undefined}
+      onOpenHome={() => select(null)}
       current={current}
       yours={tabs.yours}
       others={tabs.others}
@@ -129,13 +131,9 @@ function TabsBar({
           <QuickSettings open={quick} onOpenChange={onQuick} onSettings={tabs.openSettings} />
         </>
       }
-      // macOS draws its traffic lights over the bar; elsewhere the bar draws the window's own buttons.
-      lights={host.platform === 'darwin' ? 'space' : 'drawn'}
+      // Other systems draw a native title bar above the page.
+      lights={host.platform === 'darwin' ? 'space' : 'none'}
       text={{ newProjectKbd: modKey('N') }}
-      maximized={chrome.window?.maximized === true}
-      onCloseWindow={() => host.window('close')}
-      onMinimize={() => host.window('minimize')}
-      onToggleMaximize={() => host.window('toggle-maximize')}
     />
   )
 }
@@ -214,7 +212,7 @@ export function TabsFrame({ children }: { children: ReactNode }) {
         return
       }
       if (primaryDown(event) && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key)) {
-        const id = byNumber(ids, Number(event.key))
+        const id = byNumber(ids, Number(event.key), tabs.home)
         if (id === undefined) return
         event.preventDefault()
         select(id)
@@ -223,14 +221,19 @@ export function TabsFrame({ children }: { children: ReactNode }) {
       if (event.ctrlKey && !event.metaKey && !event.altKey && event.key === 'Tab') {
         event.preventDefault()
         // The settings' tab, while open, is a stop between the home's and the projects'.
-        const next = beside(settingsOpen ? [SETTINGS_STOP, ...ids] : ids, onSettings ? SETTINGS_STOP : current, event.shiftKey ? -1 : 1)
+        const next = beside(
+          settingsOpen ? [SETTINGS_STOP, ...ids] : ids,
+          onSettings ? SETTINGS_STOP : current,
+          event.shiftKey ? -1 : 1,
+          tabs.home,
+        )
         if (next === SETTINGS_STOP) openSettings()
         else select(next)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [order, current, select, newProject, openSettings, settingsOpen, onSettings, none])
+  }, [order, current, select, newProject, openSettings, settingsOpen, onSettings, none, tabs.home])
   return (
     <CarriedBack.Provider value={back}>
       <VisitContext.Provider value={tabs.visit}>

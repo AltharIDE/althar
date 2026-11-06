@@ -68,7 +68,7 @@ const openedBefore = (() => {
   }
 })()
 
-/** The launch's place when the window couldn't open: its own bar carries the window's buttons, so its third says maximize or restore. */
+/** The launch's place when the window couldn't open, under the system's window controls. */
 function FailedOpen({ reason }: { reason: string }) {
   // Subscribed only while this screen is the one shown, not for the window's whole life.
   const maximized = useMaximized(window.althar)
@@ -77,8 +77,7 @@ function FailedOpen({ reason }: { reason: string }) {
     <OpenFailed
       reason={reason}
       onRetry={() => window.location.reload()}
-      // Off a Mac the window's own buttons sit in this bar too, so the window can still be closed here.
-      lights={darwin ? 'space' : 'drawn'}
+      lights={darwin ? 'space' : 'none'}
       {...(darwin
         ? {}
         : {
