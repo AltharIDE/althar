@@ -45,6 +45,10 @@ See [ADR-004](../decisions/004-coordinator-is-an-agent-session.md).
   and does on a task what the person can in the window (accept, merge on
   their word, stop, hold, restart, settle, review again, and so on). Leads
   can do most of it too (ADR-097, its second phase);
+- changes the project's settings and Althar's own, as the person can on the
+  Settings screens: at once, each with a line and Undo, except that what
+  loosens what asks goes only on the person's own message in the turn
+  ([ADR-097](../decisions/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md#settings), its second phase; leads have it too);
 - keeps the project's notes: decisions the person makes in conversation that
   the code doesn't show, which every session of it starts with
   ([ADR-031](../decisions/031-coordinator-handed-over-before-it-fills.md));
@@ -182,6 +186,8 @@ coordinator's denied edit tools, apart.
 | `order_tasks` | Orders a batch | Command |
 | `message_lead` | Sends a message to a task's lead, queued or as an interrupt | Command |
 | `keep_note`, `list_notes`, `drop_note` | The project's notes: a decision the person made, in a sentence; at most 40 (ADR-031) | Command |
+| `read_settings` | From ADR-097's second phase: a section of the project's settings or Althar's, or all of them, each setting with its words as the screen shows them, its value, the values it takes, and whether changing it loosens what asks; leads have it too | Read |
+| `change_settings` | From ADR-097's second phase: changes a section's settings through the call its screen makes, with a line and Undo in the thread. Tightening and every plain change at once; a change that loosens what asks (Rules, Never and Ask me, a server switched back on, the team's reviews posted unasked) only where it names the person's own message in the turn, else a card; signing out, leaving a repository out and removing the project on their word; signing in, connecting and adding a repository open the walk-in or the picker for them ([ADR-097](../decisions/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md#settings)); leads have it too | Command |
 | `recommend_lead` | Records a lead recommendation and its reasons | Command |
 
 A lead's own tools, beside `finish_step` and its pull request's, do what its
@@ -404,7 +410,10 @@ Reviews and IssueChanges, and structured question-answer summaries, remain
 system input: they report a decision rather than authorizing another action.
 New RPC calls are refused to a socket until the contract marks them
 `SocketAllowed` (ADR-048).
-Permission answers and widening rules remain the person's calls.
+Permission answers and widening rules remain the person's calls: from
+ADR-097's second phase an agent's `change_settings` loosens what asks only
+where it names the person's own message in the turn, recorded by its
+sender as any asked-for tool's word is.
 
 Each delivered turn records `person`, `news`, or `system` as its origin.
 `Sessions.send` accepts an explicit `origin: 'news'` for a quiet wake.

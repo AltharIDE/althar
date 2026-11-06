@@ -5,8 +5,9 @@
   person's own sign-in and MCP servers, leads act on any of the project's
   pull requests with the coordinator's tools, the web mark goes, a tag asks
   once, and a reply on a pull request no task of Althar's opened or follows
-  is asked-for, as speaking for the person to others. The four limits, the
-  person's word and errands stay
+  is asked-for, as speaking for the person to others, and agents change
+  Althar's settings, loosening what asks only on the person's message. The
+  four limits, the person's word and errands stay
 - **Date:** 2026-10-31; reworked around one rule on 2026-11-01
 - **Amends:** [ADR-011](011-own-connectors-for-hosts-and-trackers.md),
   [ADR-024](024-signed-releases-and-updates.md),
@@ -256,7 +257,7 @@ a task's lead ([Leads](#leads-under-the-same-rule)).
 | Can be undone in a step | Whenever its work calls for it | Run a failed check again; mark one of Althar's pull requests ready; bring a branch up to date with the default branch, by a merge; close or reopen one of Althar's own, where the host can reopen it; reply on Althar's or the repository's own people's; take a pull request out of the queue before it merges; stop, hold, restart or settle a task; read anything the account can read |
 | **Asked-for:** can't be undone, and the person asked for it | In the turn their message started, or for an errand kept from it, with no card ([The person's word](#the-persons-word)) | Merge; enter the merge queue or turn on auto-merge; push, move or delete a tag; approve a run's `release` environment; publish a release; start a workflow; post a review; delete a branch; turn an automation on; discard a task; comment on an issue; reply on, or close, an outside author's pull request; close one on Bitbucket Cloud, where declining is final; any other write through the gated call |
 | Can't be undone, and the person didn't ask | Never. It says so in a line in its chat, or, where there is a decision to make, on DEV-173's card | The same, prompted by what it read or by news |
-| Never | Only the person, in Althar's Settings or on the host (ADR-048) | Althar's rules, allow everything, accounts and connections; the host's settings, in the [never list](#on-the-code-host); approving a pull request a task opened, making a status or a check run, dismissing a review; answering its own permission request |
+| Never | Only the person, in Althar's Settings or on the host (ADR-048) | Althar's rules, allow everything, accounts and connections (since ADR-097, an agent changes Althar's settings: loosening what asks on the person's message, signing in and out still theirs); the host's settings, in the [never list](#on-the-code-host); approving a pull request a task opened, making a status or a check run, dismissing a review; answering its own permission request |
 
 - **What an action does in that repository decides its kind,** not its
   name. Here a `v*` tag builds a draft and waits for the `release`
@@ -325,7 +326,10 @@ task's lead in the same way ([Leads](#leads-under-the-same-rule)).
   and over a card for every ask.
 - **Still the window's press,** as ADR-048 has it: answering a permission
   request or a question, and widening what agents may do: the fourth limit
-  and the second ([The rule](#the-rule)).
+  and the second ([The rule](#the-rule)). Since [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md#settings), an agent's
+  change to Althar's own settings that loosens what asks goes on the
+  person's message in the turn, as an asked-for tool; the host's settings
+  stay the second limit's.
 
 ## On the code host
 
@@ -877,7 +881,7 @@ decision's, and its reason says which.
 | **The person's word** | | | |
 | Merging, pushing and posting a review are the person's press | ADR-048 | Lifted for what they ask | Their message is their word; an approval of a task's own pull request stays theirs, on the host: the fourth limit |
 | Answering a permission request or a question is the person's press | ADR-019, ADR-048 | Kept | An agent answering its own would approve its own work: the fourth limit |
-| Widening what agents may do is the person's, in Settings | ADR-048 | Kept | The second limit |
+| Widening what agents may do is the person's, in Settings | ADR-048 | Kept; since ADR-097, Althar's settings loosen on the person's message through an agent's call too | The second limit |
 | A client on the local socket can't answer for the person | ADR-048 | Kept, and widened | Its messages aren't the person's word either |
 | *New:* a turn the person didn't start does nothing that can't be undone, except an errand's next step | [The person's word](#the-persons-word) | Added | The first limit: news, and what it reads, can't set off a merge by themselves |
 | A step's turns, fix rounds, review rounds and stuck checks are capped | `Stalls.ts`; `Changes.ts`; `Runs.ts` | Kept | Not a limit on what: each hands the work to the person rather than refusing it |

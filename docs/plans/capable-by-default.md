@@ -83,6 +83,14 @@ ADR-097 has the whole of it. In short:
    tidiness, not safety. Leads may start tasks. The coordinator directs
    leads and does what the person can in the window. Merging two tasks into
    one is out of scope.
+
+   That takes in the settings: the coordinator and leads read and change
+   the project's and Althar's own, everything the Settings screens show,
+   through `read_settings` and `change_settings`. Each change is said in a
+   line and can be undone. One that loosens what asks (Rules, Never and
+   Ask me, the irreversible list, a server switched back on) needs the
+   person's own message in that turn, as the asked-for tools do, so no
+   agent can free itself from an ask; tightening goes at once.
 4. **The coordinator is optional.** Tasks start from the board, the
    composer or a lead.
 5. **Kept:** the sandbox's write boundary, git's guard, no secret files, no
@@ -102,6 +110,7 @@ flowchart TB
       A3[Publish, release tags, teardown, merge]
       A4[Posting to others' PRs and issues]
       A5[Running an outside author's code]
+      A6[A settings change that loosens what asks]
     end
     subgraph Refused["Refused"]
       R1[Secret files, the keychain]
@@ -114,6 +123,7 @@ flowchart TB
       F4[Running and screenshotting the app, in any role]
       F5[Reading any PR and issue in the project's repositories]
       F6[Starting and moving tasks, leads and coordinator alike]
+      F7[Any other settings change, with a line and Undo]
     end
 ```
 
@@ -148,6 +158,8 @@ the code at `6fa8c335e`; file and line references were checked there.
   (`ownTools.ts`, `Config.ts`). A repository's own config loads where the
   agent's trust would load it, never from an outside author's pull request.
   Settings lists each server, with a switch everywhere and per project.
+  The switches are the person's on the screen until phase 2's
+  `change_settings` reaches them.
 - MCP calls and the list: an ask rule per person's server for Claude Code
   (`mcp__<server>`), the agent's own per-tool ask elsewhere where it has
   one, and the adapter keeping the tool and server claude-agent-acp sends
@@ -206,6 +218,46 @@ lasted of it).
   or a lead without it; its plan and models come from the person's
   defaults. Its session starts when the person talks to it, or news it acts
   on wakes it. With the task "Small changes finish in minutes, not 40".
+- **Settings, as the person changes them** (ADR-097's
+  [Settings](../decisions/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md#settings)).
+  One pair, `read_settings` and `change_settings`, in both roles, beside
+  `keep_note`, `set_run_command`, `keep_run` and the automation tools
+  (`Launches.ts:1151-1183`, `Coordinator.ts`), which stay.
+  - **What it covers:** every section the screens list (`SECTIONS` in
+    `settings/sections.ts`, `PROJECT_SECTIONS` in
+    `projectSettings/sections.ts`), the agent's own project and Althar's,
+    through the call each screen makes: `RenameProject`,
+    `SetProjectRules` against the revision read, `SetUsageLimit`,
+    `SetProjectAccounts`, `SetProjectTracker`, `SetRepository` (its role,
+    work toward and setup), `SetPlansAndReviews`,
+    `SetNewProjectDefaults`, `SetPostTeamReviews`, `SetCoAuthor`,
+    `SetReviewSeal`, `SetAgentsAtOnce`, `SetFolderWait`,
+    `SetAutomationsPaused`, `SetSkillActive`, `SetDefaultEffort`,
+    `SetModelBlocked`, and phase 1's MCP switches (`Api.ts:3577-4427`).
+    A test walks both lists and fails on a setting a screen shows that
+    `read_settings` doesn't.
+  - **Loosening is Althar's to read:** the contract marks each setting
+    with the way it loosens (the mode's order, a list's taking out or
+    adding, a switch's on or off), and a change that loosens anything goes
+    only where the call names the person's own message in the turn
+    (`byPerson`, as ADR-081's asked-for tools); in another turn, a card.
+    Secrets, signing out, removing a connection or an account, leaving a
+    repository out (`LeaveOutRepository`) and taking the project out of
+    Althar (`RemoveProject`) stay the person's: the first refused, the rest
+    asked-for. Signing in, connecting and adding a repository
+    (`AddRepositories` takes a folder the person picked) open the walk-in or
+    the picker for them.
+  - **A line and Undo:** each change is a line in the agent's thread, the
+    setting, before and after, with Undo; Settings shows who changed a
+    setting last. A rules revision records whose it was (today
+    `SetProjectRules` records the person's, `Api.ts:4187`), and the
+    person's words where it acted on them. An agent's undo goes as any
+    change.
+  - **Tests:** a tightening and a plain change go at once with their line;
+    a loosening without the person's words is a card, and with them goes,
+    quoting them; a change that tightens one rule and loosens another is a
+    loosening; undoing a tightening waits for the person; a lead's change
+    shows in Settings at once.
 - **The reviewer of a task's change** runs tests and builds in its copy
   (ADR-071's review steps).
 - **Helpers** (ADR-087, when built) get their lead's MCP servers and skills.
@@ -308,7 +360,7 @@ once phases 1 to 4 have shown what it needs.
 | Git guard hooks on pushes | A script can hide a force push |
 | Asked-for tools only on the person's own message (ADR-081); a command or an MCP call on the list on a card | News and PR text can't merge, publish or post, as far as Althar sees the call |
 | Secret files and the keychain are refused | Leaked credentials can't be taken back |
-| No agent answers its own permission request, or approves its own work | Otherwise none of the above holds |
+| No agent answers its own permission request, approves its own work, or loosens what asks without the person's words | Otherwise none of the above holds |
 | An outside author's code doesn't run without the person's word, and none of its repository's settings or hooks load | A stranger's code on the person's machine |
 | Cost caps (40 turns, 6 hours, review rounds, helpers' counts) | Money, not safety |
 | The coordinator changes no code | Tidiness: a change is a task, with a branch, a review and a record |

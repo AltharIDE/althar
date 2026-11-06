@@ -8,7 +8,8 @@
   optional; read-only is tidiness),
   [ADR-011](011-own-connectors-for-hosts-and-trackers.md) (agents without the
   person's sign-in; tools only on the task's repository),
-  [ADR-013](013-project-rules.md) (what asks by default),
+  [ADR-013](013-project-rules.md) (what asks by default; revisions as the
+  person's alone),
   [ADR-016](016-push-without-a-connection.md) (the person's MCP servers
   switched off; leads never pushing themselves),
   [ADR-026](026-connecting-walks-the-person-in.md) (agents run with `gh` and
@@ -40,7 +41,8 @@
   [ADR-078](078-project-leads-can-read-the-web.md) (Codex's network, the
   `curl` form),
   [ADR-081](081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md)
-  (no host sign-in, leads' reach, the web mark, tags asking twice),
+  (no host sign-in, leads' reach, the web mark, tags asking twice; Althar's
+  rules as the person's alone),
   [ADR-086](086-the-coordinator-moves-a-task-on-the-person-s-word-or-asks-on-a-card.md)
   (a card for a task move),
   [ADR-087](087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md)
@@ -93,7 +95,11 @@
   as, you know, if it does make a change and it makes things a little bit
   messy, but not because of a security thing … Anything that I'm able to do
   on the UI, the coordinator should be able to do. And most likely … maybe
-  even the lead."
+  even the lead." Later the same day they took the settings in too: the
+  coordinator, and leads from the same pool, change the project's settings
+  and Althar's own, as the person can on the Settings screens. Today an
+  agent keeps the project's notes, how it runs and its automations, and
+  nothing else there.
 - **Decision:** an agent Althar starts works as the person's own agent, with
   their MCP servers, their skills, their sign-ins, the network and the
   project's tools, in every role. It asks only before what can't be taken
@@ -111,11 +117,16 @@
   4. **Leads and the coordinator share one pool** of tools, MCP servers and
      skills. Leads ship code and the coordinator doesn't change code, which
      is tidiness, not safety ([One pool](#one-pool-for-leads-and-the-coordinator)).
-  5. **The coordinator is optional**
+  5. **The coordinator and leads change settings,** the project's and
+     Althar's own, everything the Settings screens show, through one pair
+     of tools. Each change is said in a line and can be undone; one that
+     loosens what asks needs the person's own message in that turn
+     ([Settings](#settings)).
+  6. **The coordinator is optional**
      ([The coordinator](#the-coordinator-is-optional)).
-  6. **What stays** is a short list, each line for a reason no tool takes
+  7. **What stays** is a short list, each line for a reason no tool takes
      away ([What stays](#what-stays-and-why)).
-  7. **Two questions the person hasn't settled** take the plan's
+  8. **Two questions the person hasn't settled** take the plan's
      recommendations, marked so
      ([Recommended](#recommended-not-yet-settled)).
 - **Alternatives considered:**
@@ -143,6 +154,11 @@
     and an edit in the coordinator's throwaway copy has none of them.
   - **Merging two tasks into one:** wanted once, then set aside on 6
     November as a rabbit hole. Out of scope.
+  - **Settings as the person's alone,** as ADR-081 had Althar's rules: the
+    person wants the coordinator to do whatever they can in the window.
+    What made it the person's, that an agent could free itself from an
+    ask, is kept by the one exception for loosening.
+  - **One settings tool per section:** [below](#settings).
 - **Trade-off:**
   - **The person's credentials sit in unattended sessions.** With their `gh`,
     git sign-in and MCP servers, a lead steered by a page, a comment or a
@@ -167,9 +183,15 @@
   - **Leads starting tasks, and acting on tasks, cost usage** the person
     didn't ask for task by task. The cost caps and the places among agents
     at work hold it.
+  - **Agents change settings unasked.** A lead steered by a page could
+    rename the project, turn a rule tighter, or raise review rounds and
+    agents at once, which spends more of the person's plan. Each change is
+    a line with Undo, and none that loosens what asks goes without the
+    person's words.
 - **Revisit when:** an agent loses work, publishes, merges or speaks for the
   person through an MCP call or a sign-in Althar didn't see; the person
-  meets cards they didn't want, with everything allowed; an agent's hooks
+  meets cards they didn't want, with everything allowed; agents change
+  settings the person keeps undoing; an agent's hooks
   let MCP calls past Althar for good (then the broker); a project is shared,
   and it matters whose sign-in and whose word count; the person settles the
   two [recommendations](#recommended-not-yet-settled) otherwise.
@@ -193,7 +215,7 @@ Only this list asks, in every role, sandbox or not:
 | **Publishing, releases, teardown and merging** | Publishing a package; a release, a release tag, and moving or deleting a tag; tearing down (`destroy`, `kubectl delete` and the like, ADR-089); merging a pull request, entering a merge queue or turning on auto-merge | It reaches every user, updater or environment at once, and a registry never takes a version back |
 | **Speaking for the person to others** | Posting a review or a comment on a pull request or issue that no task of Althar's opened, follows or came from; replying to an outside author; a message to anyone through another service (an MCP server's Slack message or email) | Their notification can't be called back |
 | **Secrets and the keychain** | Reading where keys and sign-ins are kept (`~/.ssh`, `~/.aws`, token files: `SECRET_PLACES`), and the keychain's `security` or git's helpers called directly. Refused, not asked: there is no answer the person would want to give | A credential sent to a model's provider can't be taken back |
-| **An agent answering its own permission request** | Refused, whoever asks; as is anything else that approves an agent's own work: approving a pull request a task opened, making a commit status or a check run, dismissing a review (ADR-081's fourth limit), and widening what agents may do (Althar's rules and switches, the host's protection, access and settings) | Otherwise none of the above holds |
+| **An agent answering its own permission request** | Refused, whoever asks; as is anything else that approves an agent's own work: approving a pull request a task opened, making a commit status or a check run, dismissing a review (ADR-081's fourth limit), and widening what the host lets agents do (its protection, access and settings). Loosening Althar's own rules and switches isn't refused: it goes only on the person's own message ([Settings](#settings)) | Otherwise none of the above holds |
 
 **Asking is the person's word, and nothing else's.** Althar's own tools for
 what's on the list (merging, tags, releases, posting) are asked-for: they
@@ -419,9 +441,115 @@ where work that spans tasks lives by its brief, not by a rule: batches, the
 merge line, releases (ADR-081).
 
 **The person's own, still:** answering a permission request or a question,
-and widening what agents may do: the project's rules and its switches,
-accounts, connections, and the MCP server and skill switches (ADR-048,
-ADR-081's second limit).
+and loosening what asks, which an agent's change to the settings does only
+on their message ([Settings](#settings)).
+
+## Settings
+
+The coordinator does on the Settings screens what the person can, and so do
+leads, from the same pool: the settings of the project each works in, and
+Althar's own.
+
+**Recommended: one pair of tools, `read_settings` and `change_settings`,**
+not one per section. One per section would put some sixteen more tools in
+every session of every role, and a new setting would wait on a tool of its
+own. The pair names a section and a setting as the screens' addresses do
+(`project/rules`, `althar/plans-and-reviews`), so a setting to come is there
+once its screen has it.
+
+- `read_settings` gives one section's settings, or every section's: each
+  with its words as the screen shows them, its value, the values it takes,
+  and whether a change to it would loosen what asks.
+- `change_settings` takes a section and what of it changes, in the shape the
+  screen sends, and goes through the call the screen makes
+  (`SetProjectRules` against the revision it read, `SetPlansAndReviews`,
+  `SetSkillActive` and the rest), so the screen shows the change at once.
+- One tool per section would show the agent each section's schema before
+  it calls; the pair gives the same in `read_settings`'s first answer.
+
+| Screen | What it covers | A change |
+| --- | --- | --- |
+| The project's General | Its name; where new tasks start (locally or in a worktree); work toward; resolving conflicts, pushing the lead's commits, posting screenshots and moving issues, each automatically | At once |
+| Code and issues | Its repositories, and each one's role; its tracker, and where drafts go | At once; adding a repository or connecting a host or a tracker, and leaving a repository out, are [the person's](#what-stays-the-persons) |
+| Rules | The mode under the switch; Allow everything, for the project or a task; Never and Ask me; commands that run outside the sandbox, and hosts it reaches; Leads can reach the web; Agents use my code host sign-in; which of the person's accounts its work runs on, and the usage limit; how a task ends | Tightening at once; loosening on the person's message |
+| Running | What it runs; its setup before each task; worktrees; branch and pull request names | At once. A setup runs outside any sandbox, as one a lead records already does (ADR-080) |
+| Notes | Its notes | At once, as `keep_note` does |
+| Agents | Which agent and model each role uses, efforts, models turned off | At once |
+| Skills, and MCP servers (from phase 1) | Each skill's and each server's switch, everywhere or for a project | Off at once. A server switched back on is loosening: it hands agents a sign-in again |
+| Code hosts and trackers | Connections | [The person's](#what-stays-the-persons) |
+| Work on this computer | Agents at once; keeping awake; CPU and memory in the bar; opening at login; pausing all automations; when finished tasks' folders go | At once; un-pausing automations on the person's word, as resuming one is |
+| Plans and reviews | The plan's countdown; review rounds; what a task does when they run out | At once |
+| New projects | What a new project's rules start from: the mode, the usage limit, moving to an agent's next account, how a task ends | The mode as in Rules; the rest at once |
+| Reviews and pull requests | Posting reviews of the team's pull requests without asking; Althar as co-author; the review seal | Posting without asking, turned on, is loosening; the rest at once |
+| Notifications, Appearance, Editor | Sounds, and when; light or dark, the icon, where what needs the person shows; the editor | At once |
+
+About has nothing to set.
+
+**What loosens what asks.** A change loosens what asks where, after it,
+something that would have asked or been refused goes ahead, or an agent
+reaches what it couldn't:
+
+- in Rules: the mode toward fewer asks (Ask me, then the coordinator
+  decides, then allowed); Allow everything on, for the project or a task; a
+  rule taken out of Never or Ask me, or moved from Never to Ask me, a kind
+  of the irreversible list among them; a command added to what runs outside
+  the sandbox, or a host to what it reaches; Leads can reach the web, or
+  Agents use my code host sign-in, turned on;
+- elsewhere: an MCP server switched back on; the team's reviews posted
+  without asking; automations un-paused; New projects' mode toward fewer
+  asks.
+
+Althar decides which a change is, not the agent: the contract marks each
+setting with the way it loosens (an order for the mode, taking out or adding
+for a list, on or off for a switch), and a change that loosens anything is
+loosening as a whole. A setting with no mark is plain. Secrets stay refused
+whatever is set: no setting opens `SECRET_PLACES` or the keychain. The
+host's own settings (its protection, access and secrets) aren't Althar's,
+and stay refused, as ADR-081's never list has them.
+
+**Loosening goes on the person's own message, in that turn,** as an
+asked-for tool does ([What asks](#what-asks)): `change_settings` names the
+words it acts on, Althar checks they are the person's own message in the
+turn (`byPerson`), and the line quotes them. In any other turn it is a card
+the person answers. The judge never answers it, and no agent does.
+Otherwise an agent could get past an ask by changing the rule that made it
+ask, which is approving itself. The person's word comes from the window or
+a paired device, as ADR-048 has it.
+
+**Tightening, and every other change, goes at once.** An agent may turn
+Allow everything off, add a Never rule or pause the automations: asking
+more can be undone, and the person sees it.
+
+**Each change is said in a line, and can be undone.** The line is in the
+thread of the agent that made it: the setting, what it was, what it is now,
+and Undo. Settings shows who changed each setting last, and when. Undo puts
+back what was there, as a change of its own: the person's press is their
+own word, and an agent's undo goes as any change does, so undoing a
+tightening waits for the person's message. A change is recorded as the
+agent's, with the person's words where it acted on them; until now each
+revision of the rules was recorded as the person's (ADR-013). The rules keep
+their revisions; the other sections keep what was there in the line.
+
+```mermaid
+flowchart LR
+    C["change_settings"] --> L{"Loosens what asks?<br/>Althar compares before and after"}
+    L -->|no| G["At once, with a line and Undo"]
+    L -->|yes| W{"Names the person's own message<br/>in this turn?"}
+    W -->|yes| G2["At once, with a line<br/>quoting them, and Undo"]
+    W -->|no| K["A card for the person"]
+```
+
+### What stays the person's
+
+- **Signing out, removing a connection or an account, leaving a
+  repository out, and taking the project out of Althar** go on the
+  person's word, as asked-for tools do: only they can undo them.
+- **Signing in, connecting and adding a repository** need them there
+  anyway, in a browser, with a key or picking a folder: the tool opens the
+  walk-in or the picker, as Connect and Add do, and they finish it
+  (ADR-026).
+- **Answering a permission request or a question** stays theirs alone
+  (ADR-019).
 
 ## The coordinator is optional
 
@@ -440,7 +568,7 @@ finish in minutes.
 | The irreversible list asks in every mode, never judged ([above](#what-asks)) | Lost work, a merge, a publish or a word to others can't be taken back |
 | git's guard hooks on pushes and branch moves (ADR-071, ADR-089) | A script can hide a force push |
 | Secret files and the keychain are refused | Leaked credentials can't be taken back |
-| No agent answers its own permission request, or approves its own work | Otherwise none of the above holds |
+| No agent answers its own permission request, approves its own work, or loosens what asks without the person's words ([Settings](#settings)) | Otherwise none of the above holds |
 | Asked-for tools go only on the person's own message (ADR-081); a command or an MCP call on the list asks on a card, [as far as Althar sees it](#what-it-cant-catch) | News, pull request text and a lead's words can't merge, publish or post |
 | An outside author's code doesn't run without the person's word, and none of its repository's settings, hooks or MCP config load ([below](#recommended-not-yet-settled)) | A stranger's code on the person's machine |
 | Cost caps: a step's turns and hours, review rounds, helpers' counts (ADR-081, ADR-087, ADR-088) | Money, not safety |
@@ -473,7 +601,7 @@ the network, screenshots, and a draft that carries pictures.
 | --- | --- | --- |
 | 004 | The coordinator as the one way work starts; read-only as a safety boundary | It changes no code, for tidiness |
 | 011 | Agents run without the person's sign-ins; `gh` and `glab` writes refused; Althar's tools reach only the task's repository | Althar's connectors; its push and pull request steps, preferred |
-| 013 | The six kinds asking by default; "changing the code host" as what no project can change | Reading credentials; the person's Never, Ask me and command rules |
+| 013 | The six kinds asking by default; "changing the code host" as what no project can change; each revision recorded as the person's | Reading credentials; the person's Never, Ask me and command rules |
 | 016 | The person's MCP servers switched off by name; leads never pushing themselves | Pushing with the person's git where nothing is connected |
 | 026 | Agents running with `gh` and `glab` signed out | Althar's copy of the token never reaching agents |
 | 027 | No SSH agent or signed-in tool reaching an agent | What crosses is built, not inherited; Althar's git through the device's ssh |
@@ -489,7 +617,7 @@ the network, screenshots, and a draft that carries pictures.
 | 071 | Today's rules where no sandbox holds; review steps' rules | The sandbox as the boundary; the guard |
 | 073 | ADR-011's boundary on agents' ssh | The device's ssh for Althar's git, the pinned hosts, nothing asking |
 | 078 | Codex's shell without the network; the `curl` form | The project's switch; outside reviews offline |
-| 081 | No host sign-in; leads only on their task's pull requests; the web mark; a tag asking twice; replies to the team's people unasked | The four limits, the person's word, errands, the merge line |
+| 081 | No host sign-in; leads only on their task's pull requests; the web mark; a tag asking twice; replies to the team's people unasked; Althar's rules and switches as the person's alone | The four limits, the person's word, errands, the merge line; loosening Althar's rules on their word |
 | 086 | A card for a task move outside the person's turn | The lines in both threads; discarding deletes nothing |
 | 087 | Helpers without the person's MCP servers and skills | Copies of their own, pushing nothing, the caps |
 | 088 | Allowing everything as no default | The settings, read where they apply |

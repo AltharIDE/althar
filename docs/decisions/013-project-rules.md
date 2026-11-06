@@ -5,7 +5,8 @@
   partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06): allowing
   everything is every project's default, the built-in Ask me list is
   ADR-097's irreversible list, and changing the code host is no longer
-  beyond what a project can change
+  beyond what a project can change; and agents change the rules too,
+  tightening at once and loosening only on the person's own message
 - **Date:** 2026-10-04
 - **Amended:** 2026-10-10: the usage limit row offers "Ask me". The step
   waits for the person, with each account that could take it over and when
@@ -131,7 +132,9 @@
     so.
   - **Each change is a revision, recorded as the person's.** The rules as
     they are decide the next request; a run cites the revision it started
-    under.
+    under. (Since [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md#settings), recorded as whoever
+    made it: an agent may change the rules too, tightening at once and
+    loosening only on the person's own message, which the revision quotes.)
   - **The screen offers only what Althar does.**
     - "The lead decides", the modes with a model as judge in other tools,
       comes when the lead answers requests.
