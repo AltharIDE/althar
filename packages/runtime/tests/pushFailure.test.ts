@@ -153,6 +153,37 @@ describe('a push that failed', () => {
     assert.deepInclude(pushed(failed('', { timedOut: true, timeout: 10_000 })), { why: 'unanswered' })
   })
 
+  it('keeps no secret a remote or git’s trace echoed, in its sentence or under Details', () => {
+    const token = 'ghp_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8'
+    const refused = pushed(
+      failed(
+        [
+          `> Authorization: Basic ${token}`,
+          `remote: Token ${token} may not push here.`,
+          ` ! [remote rejected] fix-it -> fix-it (pre-receive hook declined)`,
+          `error: failed to push some refs to 'https://bot:${token}@github.com/acme/orchy.git'`,
+        ].join('\n'),
+      ),
+    )
+    assert.strictEqual(refused.why, 'refused')
+    assert.notInclude(refused.message, token)
+    assert.include(refused.message, '[redacted]')
+    assert.notInclude(refused.detail ?? '', token)
+    assert.include(refused.detail ?? '', 'pre-receive hook declined')
+    // One kept before Althar hid them is hidden as it's shown.
+    const kept = words(
+      new PushRefused({
+        taskId: 'task',
+        remote: 'origin/fix-it',
+        why: 'refused',
+        said: `Token ${token} refused`,
+        detail: `remote: ${token}`,
+      }),
+      String,
+    )
+    assert.notInclude(`${kept.message}\n${kept.detail ?? ''}`, token)
+  })
+
   it('keeps Althar’s own stop reason separate from git’s stderr', () => {
     assert.deepInclude(pushed(failed('', { reason: 'git said more than Althar reads.' })), {
       detail: 'git said more than Althar reads.',

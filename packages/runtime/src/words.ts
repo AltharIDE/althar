@@ -299,7 +299,10 @@ export const words = (
           return `The host doesn’t say where ${remote}’s branch is, and this project’s remotes don’t settle it, so nothing was pushed.`
         if (why === 'no_push_address')
           return `This clone’s push address for ${remote} is ‘${text(error, 'said')}’, which isn’t a repository, so nothing was pushed. Set another with git remote set-url --push.`
-        if (why === 'refused') return sentence(`${remote} refused the push${text(error, 'said') === '' ? '' : `: ${text(error, 'said')}`}`)
+        if (why === 'refused') {
+          const said = redacted(text(error, 'said'))
+          return sentence(`${remote} refused the push${said === '' ? '' : `: ${said}`}`)
+        }
         // Where the person's own git pushed, the host by name: GitLab, not origin/a-long-branch-name.
         const host = text(error, 'host')
         const where = host === '' ? remote : host
@@ -388,8 +391,14 @@ export const words = (
   // A merge that conflicts says in which files, for the window to have the lead settle them, or say it is.
   if (reason === 'CantMerge') return { reason, message, why: text(error, 'why'), detail: text(error, 'detail') }
   // A push refused says why, for the window to offer what puts it right: bringing the remote's commits in.
+  // Its Details are redacted as they were kept, and again here, for one kept before Althar hid secrets in them.
   if (reason === 'PushRefused')
-    return { reason, message, why: text(error, 'why'), ...(text(error, 'detail') === '' ? {} : { detail: text(error, 'detail') }) }
+    return {
+      reason,
+      message,
+      why: text(error, 'why'),
+      ...(text(error, 'detail') === '' ? {} : { detail: redacted(text(error, 'detail')) }),
+    }
   // A git failure that said anything keeps it all, and how it ended, for a quiet Details under its line.
   if (reason === 'GitFailed') {
     const code = fieldOf(error, 'code')
@@ -398,7 +407,7 @@ export const words = (
       text(error, 'stderr').trim() === ''
         ? ''
         : pushDetailOf({
-            stderr: redacted(text(error, 'stderr')),
+            stderr: text(error, 'stderr'),
             ...(typeof code === 'number' ? { code } : {}),
             ...(text(error, 'signal') === '' ? {} : { signal: text(error, 'signal') }),
             ...(fieldOf(error, 'timedOut') === true ? { timedOut: true } : {}),

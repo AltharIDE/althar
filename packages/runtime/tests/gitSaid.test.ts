@@ -226,6 +226,12 @@ describe('the log’s fields for a git failure', () => {
     })
   })
 
+  it('hides a secret in where it ran, as in its arguments and what git said', () => {
+    const token = 'glpat-' + 'A1b2C3d4E5f6G7h8I9j0'
+    const fields = gitFields(Cause.fail(new GitFailed({ args: ['status'], cwd: `/w/${token}/orchy`, stderr: '' })))
+    assert.strictEqual(fields['git_cwd'], '/w/[redacted]/orchy')
+  })
+
   it('has none for another cause', () => {
     assert.deepStrictEqual(gitFields(Cause.fail(new Error('other'))), {})
   })

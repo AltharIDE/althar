@@ -146,7 +146,7 @@ export const gitFields = (cause: Cause.Cause<unknown>): Readonly<Record<string, 
   if (failure === undefined) return {}
   return {
     git_args: redacted(failure.args.join(' ')),
-    git_cwd: failure.cwd,
+    git_cwd: redacted(failure.cwd),
     git_stderr: redacted(failure.stderr),
     ...(failure.code === undefined ? {} : { git_code: String(failure.code) }),
   }
