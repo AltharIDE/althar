@@ -92,7 +92,7 @@ export const lowWords = (input: {
   if (input.to !== undefined)
     return `${input.from} has ${roomWords(input.room, input.now)}. ${input.to.agent} takes ${work} instead${
       input.to.model === null ? '' : `, on ${input.to.model}`
-    }${input.to.ownWork === true ? ', and reviews its own work' : ''}.`
+    }${input.to.ownWork === true && (input.step === 'implement' || input.step === 'review') ? ', with the review by the same maker' : ''}.`
   const back = input.room.resetsAt === null ? `until ${input.from} has room again` : `until ${whenWords(input.room.resetsAt, input.now)}`
   return `${input.from} has ${roomWords(input.room, input.now, false)}. ${capitalized(work)} ${step?.waits ?? 'waits'} ${back}.`
 }
@@ -136,7 +136,7 @@ export const outWords = (input: {
   readonly now: number
   /** The step it was on; none outside one. */
   readonly step?: keyof typeof outStep
-  /** Who takes over, on which model; `ownWork` where it is the other step's agent, so it reviews what it wrote. */
+  /** Who takes over, on which model; `ownWork` where the review and implementation use the same maker. */
   readonly to?: { readonly agent: string; readonly model: string | null; readonly ownWork?: boolean }
   readonly waits?: 'step' | 'message'
   /** The project moves work on, but no other model was free to take it. */
@@ -148,7 +148,7 @@ export const outWords = (input: {
   if (input.to !== undefined)
     return `${out}${back === null ? '' : `, until ${back}`}. ${input.to.agent} takes ${step === undefined ? '' : `${step.work} `}over${
       input.to.model === null ? '' : `, on ${input.to.model}`
-    }${input.to.ownWork === true ? ', and reviews its own work' : ''}.`
+    }${input.to.ownWork === true && (input.step === 'implement' || input.step === 'review') ? ', with the review by the same maker' : ''}.`
   if (input.waits === undefined) return `${out}${back === null ? '' : `, until ${back}`}.`
   const until = back === null ? `until ${input.from} is back` : `until ${back}`
   if (input.waits === 'message') return `${out}. Your message waits ${until}.`
@@ -219,7 +219,8 @@ export class Limits extends Context.Service<
     /**
      * The strongest free model on a plan, besides the agents given. Models
      * from the other step's maker come last, even on another agent. Room
-     * comes before strength; known scores before preferences. Never spends
+     * comes before strength; within five points of the strongest, a known
+     * different maker is preferred, then score and preferences. Never spends
      * on a key unasked. The chosen model travels with its agent.
      */
     free(input: {
@@ -385,12 +386,26 @@ export class Limits extends Context.Service<
               (rows) => rows.length > 0,
             )
 
-      /** Those of the accounts their agent's status says a plan pays for; none, PlanOnly, saying why. */
-      const onPlan = (list: ReadonlyArray<Account>) =>
+      /** A subscription pays for this model, whether on the account or its model's provider. */
+      const planPays = (account: Account, model?: string) =>
         Effect.gen(function* () {
+          const status = yield* signIns.account(account)
+          if (status.paidBy === 'plan') return true
+          const providers = agents.list.find((entry) => entry.definition.id === account.agentId)?.definition.signIn.providers
+          const through = model === undefined ? undefined : providers?.of(model)
+          if (through === undefined || !providers?.plans?.includes(through)) return false
+          return ((yield* signIns.providers(account, status)) ?? []).some((one) => one.id === through && one.refusedAt === null)
+        })
+
+      /** Accounts a plan pays for on this model; none is PlanOnly, saying why. */
+      const onPlan = (list: ReadonlyArray<Account>, model?: string) =>
+        Effect.gen(function* () {
+          const kept: Array<Account> = []
           const paidBy: Array<'plan' | 'key' | 'unknown'> = []
-          for (const account of list) paidBy.push((yield* signIns.account(account)).paidBy)
-          const kept = list.filter((_, index) => paidBy[index] === 'plan')
+          for (const account of list) {
+            paidBy.push((yield* signIns.account(account)).paidBy)
+            if (yield* planPays(account, model)) kept.push(account)
+          }
           return kept.length > 0 ? kept : yield* new PlanOnly({ message: planOnlyWords(paidBy) })
         })
 
@@ -400,13 +415,13 @@ export class Limits extends Context.Service<
        * plan. Where the project doesn't rotate, only the first of them, whose
        * being out of usage puts the agent out.
        */
-      const runnable = (agentId: string, projectId?: string, planOnly = false) =>
+      const runnable = (agentId: string, projectId?: string, planOnly = false, model?: string) =>
         Effect.gen(function* () {
           const rotate = yield* rotating(projectId)
           const found: Array<Account> = []
           for (const account of yield* allowed(agentId, projectId)) {
             const check = yield* signIns.account(account)
-            if (check.status === 'signed_out' || (planOnly && check.paidBy !== 'plan')) continue
+            if (check.status === 'signed_out' || (planOnly && !(yield* planPays(account, model)))) continue
             found.push(account)
             if (!rotate) break
           }
@@ -465,10 +480,17 @@ export class Limits extends Context.Service<
                     projectId: input.projectId,
                     ...(input.planned === undefined ? {} : { planned: input.planned }),
                   })
-            const known = (offered?.models ?? []).filter((one) => !isAgentDefault(one) && !offered?.blocked.includes(one.id))
-            // Until the agent's models are known it can still take work on its own default.
+            const available = (offered?.models ?? []).filter((one) => !offered?.blocked.includes(one.id))
+            const known = available.filter((one) => !isAgentDefault(one))
+            // A default-only agent can still take work; blocking every offered model cannot.
             const candidates =
-              known.length > 0 ? known : offered?.models.length ? [] : [{ id: preferred, name: preferred ?? entry.definition.name }]
+              known.length > 0
+                ? known
+                : available.some(isAgentDefault)
+                  ? [{ id: null, name: entry.definition.name }]
+                  : offered?.models.length
+                    ? []
+                    : [{ id: preferred, name: preferred ?? entry.definition.name }]
             for (const model of candidates) {
               const fact = model.id === null ? null : facts.of(entry.definition, { id: model.id, name: model.name })
               const maker = makerOf(fact, agentId, model.id === null ? undefined : { id: model.id, name: model.name })
@@ -490,12 +512,7 @@ export class Limits extends Context.Service<
                 const through = model.id === null ? undefined : entry.definition.signIn.providers?.of(model.id)
                 const providers = through === undefined ? [] : ((yield* signIns.providers(account, status)) ?? [])
                 if (providers.some((one) => one.id === through && one.refusedAt !== null)) continue
-                const plan =
-                  status.paidBy === 'plan' ||
-                  (through !== undefined &&
-                    (entry.definition.signIn.providers?.plans ?? []).includes(through) &&
-                    providers.some((one) => one.id === through))
-                if (!plan) continue
+                if (!(yield* planPays(account, model.id ?? undefined))) continue
                 const reading = yield* roomOf(account, model.id === null ? undefined : `${model.id} ${model.name}`)
                 if (Option.isSome(reading) && reading.value.leftPercent <= 0) continue
                 const low = nearly(reading)
@@ -510,18 +527,25 @@ export class Limits extends Context.Service<
                 model: model.id,
                 ownWork,
                 accountId,
-                sameMaker: fromMaker !== null && maker === fromMaker,
+                sameMaker: fromMaker !== null && (maker === null || maker === fromMaker),
                 low: room,
                 score,
                 preferred: model.id === preferred || (preferred === null && model.id === offered?.model),
               })
             }
           }
+          // Within each review/room class, a different maker wins only among
+          // models within five score points of its strongest candidate. Compare
+          // to that maximum (not pairwise) so the ordering stays transitive.
+          const comparable = (candidate: (typeof found)[number]) =>
+            candidate.score >=
+            Math.max(...found.filter((one) => one.ownWork === candidate.ownWork && one.low === candidate.low).map((one) => one.score)) - 5
           return found.toSorted(
             (a, b) =>
               Number(a.ownWork) - Number(b.ownWork) ||
-              Number(a.sameMaker) - Number(b.sameMaker) ||
               Number(a.low) - Number(b.low) ||
+              Number(comparable(b)) - Number(comparable(a)) ||
+              Number(a.sameMaker) - Number(b.sameMaker) ||
               b.score - a.score ||
               Number(b.preferred) - Number(a.preferred),
           )
@@ -548,7 +572,7 @@ export class Limits extends Context.Service<
       const nearlyOut = (agentId: string, projectId?: string, model?: string, threadId?: string) =>
         Effect.gen(function* () {
           const low: Array<Room> = []
-          for (const account of yield* runnable(agentId, projectId, yield* automated(threadId))) {
+          for (const account of yield* runnable(agentId, projectId, yield* automated(threadId), model)) {
             if (Option.isSome(yield* outOf(account))) continue
             const room = yield* roomOf(account, model)
             if (!nearly(room)) return Option.none<Room>()
@@ -578,11 +602,11 @@ export class Limits extends Context.Service<
             if (input.accountId !== undefined) {
               const given = yield* accounts.get(input.accountId)
               if (given.agentId !== input.agentId) return yield* new NotFound({ kind: 'account', id: input.accountId })
-              if (planOnly) yield* onPlan([given])
+              if (planOnly) yield* onPlan([given], input.model)
               return given
             }
             const all = yield* allowed(input.agentId, input.projectId)
-            const list = planOnly ? yield* onPlan(all) : all
+            const list = planOnly ? yield* onPlan(all, input.model) : all
             const rotate = yield* rotating(input.projectId)
             // One it can run on: not signed out, and, where the project rotates, not out of usage.
             const runs = (account: Account) =>

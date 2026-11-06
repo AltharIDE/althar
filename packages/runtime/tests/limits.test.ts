@@ -342,7 +342,7 @@ describe('an agent out of usage', () => {
       const lines = yield* reviewerOut
       assert.include(
         lines,
-        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake claude-code takes the review over, on Small, and reviews its own work.`,
+        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake claude-code takes the review over, on Small, with the review by the same maker.`,
       )
     }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: { until: back } } }, ['opencode'])))
   })

@@ -9,6 +9,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Automations } from '../src/Automations'
 import { Agents } from '../src/Config'
 import { Accounts } from '../src/Accounts'
 import { Instance } from '../src/Instance'
@@ -25,6 +26,7 @@ const claude = { id: 'claude-strong', name: 'Claude Strong' }
 const weak = { id: 'gpt-weak', name: 'GPT Weak' }
 const sol = { id: 'gpt-strong', name: 'GPT Strong' }
 const third = { id: 'opencode-go/deepseek-strong', name: 'OpenCode Go/DeepSeek Strong' }
+const unscored = { id: 'unknown', name: 'New Model' }
 const sameMaker = { id: 'opencode-go/claude-strong', name: 'OpenCode Go/Claude Strong' }
 
 // The same cached Artificial Analysis scores list_models reads. The strongest
@@ -278,7 +280,7 @@ describe('automatic usage takeover by model', () => {
       yield* ready(task.projectId)
       assert.deepStrictEqual(yield* agentsOn(task.threadId), [
         { agentId: 'claude-code', model: claude.id },
-        { agentId: 'opencode', model: third.id },
+        { agentId: 'opencode', model: sameMaker.id },
       ])
       yield* noCall
     }).pipe(
@@ -286,7 +288,7 @@ describe('automatic usage takeover by model', () => {
         withAgents(
           {
             'claude-code': { outOfUsage: { until: back } },
-            opencode: { models: [third, { id: 'opencode-zen/gpt-strong', name: 'OpenCode Zen/GPT Strong' }] },
+            opencode: { models: [third, sameMaker, { id: 'opencode-zen/gpt-strong', name: 'OpenCode Zen/GPT Strong' }] },
           },
           ['codex', 'opencode'],
           true,
@@ -318,7 +320,7 @@ describe('automatic usage takeover by model', () => {
           withRoom: true,
           planned: { agentId: 'claude-code', model: claude.id },
         }))?.model,
-        third.id,
+        sameMaker.id,
       )
       const models = yield* Models
       yield* models.setModelBlocked({ agentId: 'codex', model: weak.id, blocked: true })
@@ -351,4 +353,90 @@ describe('automatic usage takeover by model', () => {
       ),
     ),
   )
+  it.live('keeps comparable strength ahead of a weak or unscored different maker', () =>
+    Effect.gen(function* () {
+      const task = yield* startTask()
+      const limits = yield* Limits
+      const models = yield* Models
+      const input = { besides: ['claude-code'], projectId: task.projectId, planned: { agentId: 'claude-code', model: claude.id } }
+      assert.strictEqual((yield* limits.free(input))?.model, sameMaker.id)
+      yield* models.setModelBlocked({ agentId: 'codex', model: weak.id, blocked: true })
+      assert.strictEqual((yield* limits.free(input))?.model, sameMaker.id)
+      assert.strictEqual(yield* limits.modelFor({ agentId: 'opencode', projectId: task.projectId }), sameMaker.id)
+    }).pipe(Effect.provide(withAgents({ codex: { models: [weak] }, opencode: { models: [unscored, sameMaker] } }))),
+  )
+
+  it.live('takes over on a default-only agent, unless its default is blocked', () =>
+    Effect.gen(function* () {
+      const task = yield* startTask()
+      const limits = yield* Limits
+      const models = yield* Models
+      assert.deepInclude(yield* limits.free({ besides: ['claude-code', 'codex'], projectId: task.projectId }), {
+        agentId: 'opencode',
+        model: null,
+      })
+      yield* models.setModelBlocked({ agentId: 'opencode', model: 'default', blocked: true })
+      assert.isUndefined(yield* limits.free({ besides: ['claude-code', 'codex'], projectId: task.projectId }))
+    }).pipe(Effect.provide(withAgents({ opencode: { models: [{ id: 'default', name: 'Default (recommended)' }] } }))),
+  )
+
+  it.live('continues an automation on a subscribed provider whose account otherwise pays per use', () => {
+    const back = Date.now() + 3_600_000
+    return Effect.gen(function* () {
+      const { projectId } = yield* startTask()
+      const instance = yield* Instance
+      const automations = yield* Automations
+      const automationId = yield* automations.make({
+        projectId: projectId as ProjectId,
+        actorId: instance.personId,
+        definition: {
+          name: 'Carry on',
+          prompt: 'Finish this run [lead:finish]',
+          schedule: { every: 'week', days: [1], at: '09:00' },
+          zone: 'Europe/London',
+          lead: { agentId: 'claude-code', model: claude.id },
+          work: { kind: 'task', review: null, end: null },
+          allowEverything: true,
+          minutes: 45,
+          late: 'once',
+        },
+      })
+      yield* automations.runNow(automationId, instance.personId)
+      const sql = yield* SqlClient.SqlClient
+      const [run] = yield* until(
+        sql<{ threadId: string; state: string }>`SELECT h.id AS thread_id, o.state FROM automation_occurrences o
+        JOIN threads h ON h.task_id = o.task_id AND h.kind = 'task' WHERE o.automation_id = ${automationId}`,
+        (all) => all[0]?.state === 'made',
+      )
+      assert.deepStrictEqual(yield* agentsOn(run!.threadId), [
+        { agentId: 'claude-code', model: claude.id },
+        { agentId: 'opencode', model: third.id },
+      ])
+      const limits = yield* Limits
+      const accounts = yield* Accounts
+      const [account] = yield* accounts.of('opencode')
+      // Explicit and inferred account selection use the same provider payment rule.
+      assert.strictEqual(
+        (yield* limits.pick({ agentId: 'opencode', threadId: run!.threadId, model: third.id, accountId: account!.id })).id,
+        account!.id,
+      )
+      assert.strictEqual((yield* limits.pick({ agentId: 'opencode', threadId: run!.threadId, model: third.id })).id, account!.id)
+      assert.strictEqual(
+        (yield* Effect.flip(limits.pick({ agentId: 'opencode', threadId: run!.threadId, model: 'opencode-zen/gpt-strong' })))._tag,
+        'PlanOnly',
+      )
+      yield* noCall
+    }).pipe(
+      Effect.provide(
+        withAgents(
+          {
+            'claude-code': { outOfUsage: { until: back } },
+            opencode: { models: [third, { id: 'opencode-zen/gpt-strong', name: 'OpenCode Zen/GPT Strong' }] },
+          },
+          ['codex', 'opencode'],
+          true,
+        ),
+      ),
+    )
+  })
 })
