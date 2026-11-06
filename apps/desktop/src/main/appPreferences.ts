@@ -39,6 +39,14 @@ const appearance: Kind<Appearance> = {
   holds: (value): value is Appearance => value === 'light' || value === 'dark' || value === 'system',
 }
 
+/** Which accent the window's focus rings, chosen fills and selection take: Althar's violet, or the system's where it keeps them legible. */
+export type AccentSource = 'althar' | 'system'
+
+const accent: Kind<AccentSource> = {
+  starts: 'althar',
+  holds: (value): value is AccentSource => value === 'althar' || value === 'system',
+}
+
 export const PREFERENCES = {
   /** Keeps the Mac from sleeping while any work runs or waits; the display may still sleep. */
   keepAwake: onOff(true),
@@ -66,6 +74,8 @@ export const PREFERENCES = {
   crashReports: onOff(true),
   /** Light or dark, or as the system is. The main process sets Electron's nativeTheme by it, and the windows follow the scheme that gives. */
   appearance,
+  /** Althar's accent or the system's. */
+  accent,
   /** Althar opens at login, in the background, with no window, so automations run after a restart (loginItem.ts). */
   openAtLogin: onOff(false),
 } as const

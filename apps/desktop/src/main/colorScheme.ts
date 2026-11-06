@@ -13,9 +13,12 @@ export const parseScheme = (text: string): Scheme | undefined => {
   return value === undefined ? undefined : (Number(value) as Scheme)
 }
 
+/** Whether a line of `gdbus monitor` is the portal's change of one setting: its namespace and key, exactly. */
+export const isSettingChange = (line: string, namespace: string, key: string): boolean =>
+  line.includes('SettingChanged') && line.includes(`'${namespace}', '${key}'`)
+
 /** Whether a line of `gdbus monitor` is the portal's change of the colour scheme: this setting's namespace and key, exactly. */
-export const isSchemeChange = (line: string): boolean =>
-  line.includes('SettingChanged') && line.includes("'org.freedesktop.appearance', 'color-scheme'")
+export const isSchemeChange = (line: string): boolean => isSettingChange(line, 'org.freedesktop.appearance', 'color-scheme')
 
 /** How long to wait before starting the monitor again after it ended `failures` times in a row: a second, doubling, at most a minute. */
 export const restartAfter = (failures: number): number => Math.min(60_000, 1000 * 2 ** failures)
@@ -23,17 +26,99 @@ export const restartAfter = (failures: number): number => Math.min(60_000, 1000 
 /** Whether the panel is dark. Chromium cannot say on Linux, and most panels are dark: light only where the desktop says light. */
 export const darkPanel = (scheme: Scheme | undefined): boolean => scheme !== 2
 
+/** One setting followed through the shared monitor: how it is read, who hears it, and where its own snapshot stands. */
+interface Follower {
+  readonly namespace: string
+  readonly key: string
+  readonly read: (text: string) => void
+  readonly snapshot: (afterSubscribing: boolean) => void
+  /** The monitor ended: the next snapshot isn't final, and a change heard before no longer outranks it. */
+  readonly lost: () => void
+}
+
 /**
- * Follows the desktop's light/dark setting through the Settings portal, which a Flatpak sandbox can reach and Electron's own
- * nativeTheme does not report on Linux. Calls `changed` with each scheme it learns; `undefined` where there is no portal.
- * Needs gdbus (in the Flatpak runtime); without it nothing is reported and the caller's default stands.
+ * The Settings portal watched once for every setting followed (the scheme, the accent, GNOME's button layout and theme): one
+ * `gdbus monitor` child, started with the first follower and ended with the last, started again after a pause that grows if
+ * it ends while anyone follows (the bus restarts, gdbus is killed).
  */
-export const watchColorScheme = (changed: (scheme: Scheme | undefined) => void): (() => void) => {
+const portalMonitor = (() => {
+  const followers = new Set<Follower>()
   let monitor: ChildProcess | undefined
+  let restart: NodeJS.Timeout | undefined
+  let failures = 0
+  const listen = () => {
+    restart = undefined
+    let child: ChildProcess
+    try {
+      child = spawn('gdbus', ['monitor', ...PORTAL], { stdio: ['ignore', 'pipe', 'ignore'] })
+    } catch {
+      // No gdbus: each follower's default stands.
+      return
+    }
+    monitor = child
+    let pending = ''
+    let gone = false
+    const started = Date.now()
+    child.stdout?.on('data', (chunk: Buffer) => {
+      for (const follower of followers) follower.snapshot(true)
+      const lines = (pending + chunk.toString()).split('\n')
+      pending = lines.pop() ?? ''
+      for (const line of lines)
+        for (const follower of followers) {
+          if (!isSettingChange(line, follower.namespace, follower.key)) continue
+          // The signal's value is what follows the key.
+          follower.read(line.slice(line.indexOf(`'${follower.key}'`) + follower.key.length + 2))
+        }
+    })
+    const ended = () => {
+      if (gone) return
+      gone = true
+      if (monitor !== child) return
+      monitor = undefined
+      if (followers.size === 0) return
+      // Only a monitor that stayed up a while was a working one: a banner and an exit is a failure, and the pause grows.
+      if (Date.now() - started > 30_000) failures = 0
+      for (const follower of followers) {
+        follower.snapshot(false)
+        follower.lost()
+      }
+      restart = setTimeout(listen, restartAfter(failures++))
+      restart.unref()
+    }
+    child.on('error', ended)
+    child.on('close', ended)
+    child.unref()
+  }
+  return (follower: Follower): (() => void) => {
+    followers.add(follower)
+    if (monitor === undefined && restart === undefined) listen()
+    return () => {
+      followers.delete(follower)
+      if (followers.size > 0) return
+      clearTimeout(restart)
+      restart = undefined
+      failures = 0
+      const child = monitor
+      monitor = undefined
+      child?.kill()
+    }
+  }
+})()
+
+/**
+ * Follows one of the Settings portal's settings, which a Flatpak sandbox can reach and Electron doesn't report on Linux: calls
+ * `changed` with each value it learns, as `parse` reads what gdbus prints; `undefined` where the portal has none, or there is no
+ * portal. Needs gdbus (in the Flatpak runtime too); without it nothing is reported and the caller's default stands.
+ */
+export const watchPortalSetting = <T>(
+  namespace: string,
+  key: string,
+  parse: (text: string) => T | undefined,
+  changed: (value: T | undefined) => void,
+): (() => void) => {
   let stopped = false
   // A change the monitor reports is newer than the snapshot read after it: the snapshot never overwrites one.
   let heard = false
-
   // The snapshot is read once the monitor says it is listening (it prints a line then). A second without word reads it anyway,
   // for a gdbus that prints nothing, and the monitor's first word reads it again: that one is taken after the subscription, so
   // it is final, and the answer of an earlier read no longer counts.
@@ -45,69 +130,40 @@ export const watchColorScheme = (changed: (scheme: Scheme | undefined) => void):
     const mine = ++latest
     execFile(
       'gdbus',
-      ['call', ...PORTAL, '--method', 'org.freedesktop.portal.Settings.ReadOne', 'org.freedesktop.appearance', 'color-scheme'],
+      ['call', ...PORTAL, '--method', 'org.freedesktop.portal.Settings.ReadOne', namespace, key],
       { timeout: 5000 },
       (error, out) => {
-        if (!stopped && !heard && mine === latest) changed(error === null ? parseScheme(out) : undefined)
+        if (!stopped && !heard && mine === latest) changed(error === null ? parse(out) : undefined)
       },
     )
   }
-  // The monitor is a child that can end (the bus restarts, gdbus is killed): it is started again after a pause that grows, and
-  // the snapshot is read again once it speaks, as a change in the gap would be missed.
-  let failures = 0
-  let restart: NodeJS.Timeout | undefined
-  const listen = () => {
-    let child: ChildProcess
-    try {
-      child = spawn('gdbus', ['monitor', ...PORTAL], { stdio: ['ignore', 'pipe', 'ignore'] })
-    } catch {
-      // No gdbus: the default stands.
-      return
-    }
-    monitor = child
-    let pending = ''
-    let gone = false
-    const started = Date.now()
-    child.stdout?.on('data', (chunk: Buffer) => {
-      snapshot(true)
-      const lines = (pending + chunk.toString()).split('\n')
-      pending = lines.pop() ?? ''
-      for (const line of lines) {
-        if (!isSchemeChange(line)) continue
-        const scheme = parseScheme(line)
-        if (scheme === undefined || stopped) continue
-        heard = true
-        changed(scheme)
-      }
-    })
-    const ended = () => {
-      if (gone) return
-      gone = true
-      if (stopped) return
-      // Only a monitor that stayed up a while was a working one: a banner and an exit is a failure, and the pause grows.
-      if (Date.now() - started > 30_000) failures = 0
-      snapshot(false)
+  const leave = portalMonitor({
+    namespace,
+    key,
+    snapshot,
+    read: (text) => {
+      const value = parse(text)
+      if (value === undefined || stopped) return
+      heard = true
+      changed(value)
+    },
+    lost: () => {
       confirmed = false
       heard = false
-      restart = setTimeout(listen, restartAfter(failures++))
-      restart.unref()
-    }
-    child.on('error', ended)
-    child.on('close', ended)
-    child.unref()
-  }
-  listen()
-
+    },
+  })
   const timer = setTimeout(() => snapshot(false), 1000)
   timer.unref()
-
   return () => {
     stopped = true
     clearTimeout(timer)
-    clearTimeout(restart)
-    monitor?.kill()
+    leave()
   }
 }
+
+/** Follows the desktop's light/dark setting through the Settings portal (`watchPortalSetting`). */
+export const watchColorScheme = (changed: (scheme: Scheme | undefined) => void): (() => void) =>
+  watchPortalSetting('org.freedesktop.appearance', 'color-scheme', parseScheme, changed)
 
 /**
  * One watch of the desktop's scheme for everything that follows it (the windows' theme, the tray's mark), started with

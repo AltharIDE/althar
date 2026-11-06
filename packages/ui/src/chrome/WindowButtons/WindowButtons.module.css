@@ -68,3 +68,187 @@
   border-radius: 50%;
   outline-offset: -4px;
 }
+
+/* ---- the desktops' own manners (ADR-098): glyphs always shown, in the bar's ink ---- */
+
+.gnome,
+.kde,
+.windows {
+  flex: none;
+  display: flex;
+  align-items: center;
+  color: var(--t-1);
+}
+.gnome button,
+.kde button,
+.windows button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: default;
+}
+.gnome .glyph,
+.kde .glyph,
+.windows .glyph {
+  position: relative;
+  overflow: visible;
+  opacity: 1;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* GNOME: round, flat, 24px, 6px apart; libadwaita's faint disc at rest, deeper as it is pointed at and pressed */
+.gnome {
+  gap: 6px;
+}
+.gnome button {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+}
+.gnome button::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  transition: background var(--fast) var(--ease);
+}
+.gnome button:hover::before {
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+.gnome button:active::before {
+  background: color-mix(in srgb, currentColor 26%, transparent);
+}
+.gnome .glyph {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.5;
+}
+/* GTK 3's themes and an unknown desktop: no disc at rest, only as it is pointed at */
+.gnome[data-tone='legacy'] button::before {
+  background: transparent;
+}
+.gnome[data-tone='legacy'] button:hover::before {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.gnome[data-tone='legacy'] button:active::before {
+  background: color-mix(in srgb, currentColor 22%, transparent);
+}
+/* Yaru: close in Ubuntu's orange as it is pointed at, its glyph white on it */
+.gnome[data-tone='yaru'] .close:hover::before,
+.gnome[data-tone='yaru'] .close:active::before {
+  background: var(--window-close-yaru);
+}
+.gnome[data-tone='yaru'] .close:hover,
+.gnome[data-tone='yaru'] .close:active {
+  color: var(--on-window-close);
+}
+.gnome button:focus-visible {
+  outline-offset: 1px;
+}
+
+/* KDE: thin glyphs, a disc as one is pointed at, a soft red one under close with a dark glyph; 20px, 4px apart */
+.kde {
+  gap: 4px;
+  color: var(--t-2);
+}
+.kde button {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+}
+.kde button::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  border-radius: 50%;
+  background: transparent;
+  transition: background var(--fast) var(--ease);
+}
+.kde button:hover {
+  color: var(--t-1);
+}
+.kde button:hover::before {
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+.kde button:active::before {
+  background: color-mix(in srgb, currentColor 28%, transparent);
+}
+.kde .close:hover,
+.kde .close:active {
+  color: var(--on-window-close-soft);
+}
+.kde .close:hover::before {
+  background: var(--window-close-soft);
+}
+.kde .close:active::before {
+  background: var(--window-close-soft-pressed);
+}
+.kde .glyph {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.25;
+}
+.kde button:focus-visible {
+  outline-offset: 0;
+}
+
+/* Windows: caption buttons the bar's full height, 46px wide, square to the window's edge; red under close */
+.windows {
+  align-self: stretch;
+  gap: 0;
+}
+.windows[data-side='end'] {
+  margin-right: calc(-1 * var(--bar-pad-end, 12px));
+}
+.windows[data-side='start'] {
+  margin-left: calc(-1 * var(--bar-pad-start, 12px));
+}
+.windows button {
+  width: 46px;
+  height: 100%;
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+.windows button:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+.windows button:active {
+  background: color-mix(in srgb, currentColor 5%, transparent);
+}
+.windows .close:hover {
+  background: var(--window-close);
+  color: var(--on-window-close);
+}
+.windows .close:active {
+  background: color-mix(in srgb, var(--window-close) 88%, white);
+  color: var(--on-window-close);
+}
+.windows .glyph {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1;
+  stroke-linecap: butt;
+  stroke-linejoin: miter;
+}
+.windows button:focus-visible {
+  outline-offset: -3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lights button::before,
+  .glyph,
+  .gnome button::before,
+  .kde button::before,
+  .windows button {
+    transition: none;
+  }
+}

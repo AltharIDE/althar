@@ -108,6 +108,14 @@
   --lift-pop: 0 1px 2px rgba(60, 50, 30, 0.06), 0 10px 24px -12px var(--shadow); /* popovers and menus */
   /* shadows are neutral and short: paper lifting off paper, never a glow */
   --traffic: #d0cbc0;
+  /* under a desktop's close button as it is pointed at (Windows'), white glyph on it: the same in both schemes */
+  --window-close: #c42b1c;
+  --window-close-yaru: #e95420; /* Ubuntu's orange, where Yaru is the theme */
+  --on-window-close: #ffffff;
+  /* KDE's softer close: a light red disc as it is pointed at, deeper pressed, a dark glyph on it (7.9:1, 6:1 pressed) */
+  --window-close-soft: #f0909a;
+  --window-close-soft-pressed: #e66f7c;
+  --on-window-close-soft: #2a0b0f;
 
   /* ---- Frost --------------------------------------------------------------
      A panel the page shows through, the way the Mac's Control Center is:

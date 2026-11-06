@@ -21,11 +21,15 @@ export const PAGE = { light: '#f4f2ec', dark: '#1c1a17' } as const
 /** A raised sheet's colour (the kit's --n-1), light and dark: the menu bar's sheet, which draws its own paper. */
 export const RAISED = { light: '#fcfbf8', dark: '#25231f' } as const
 
-export const windowOptions = (platform: NodeJS.Platform, icon: NativeImage, dark = false) => ({
+/**
+ * `framed`, on Linux, is where the window manager draws a good frame of its own (KWin, xfwm4, Marco, Openbox: desktop.ts decides,
+ * ADR-098): the system's title bar goes round the window, server-side, and the page draws no buttons of its own.
+ */
+export const windowOptions = (platform: NodeJS.Platform, icon: NativeImage, dark = false, framed = false) => ({
   backgroundColor: dark ? PAGE.dark : PAGE.light,
   ...(platform === 'darwin'
     ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 16, y: 14 } }
-    : { frame: false, ...(platform === 'linux' ? { icon } : {}) }),
+    : { frame: platform === 'linux' && framed, ...(platform === 'linux' ? { icon } : {}) }),
 })
 
 /** The menu off a Mac: accelerators without a bar; null on macOS, which keeps the system's own menu bar. */
