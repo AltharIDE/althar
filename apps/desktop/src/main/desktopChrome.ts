@@ -16,6 +16,7 @@ import {
   parseGnomeLayout,
   parseIni,
   parsePortalAccent,
+  parseQuoted,
   parseShellVersion,
   parseThemeName,
   parseXpropName,
@@ -31,7 +32,8 @@ import {
  * read-only, short and safe where there is no desktop at all: the
  * environment; the Settings portal through gdbus, which a Flatpak reaches
  * too (GNOME's button layout and GTK theme, the accent), followed through
- * its SettingChanged; KDE's own files, read as text through the XDG
+ * its SettingChanged, with gsettings for the layout where the portal
+ * doesn't give it; KDE's own files, read as text through the XDG
  * cascade; GNOME Shell's version from its D-Bus property; and on X11 the
  * window manager's own name, from xprop. No desktop program is ever run:
  * plasmashell, kreadconfig6 and their kind are GUI programs that abort
@@ -42,8 +44,11 @@ import {
  * in the profile, and what they find now follows.
  */
 
-/** The only programs these reads run: gdbus and xprop, command-line tools that open no window. */
-export const PROBES = ['gdbus', 'xprop'] as const
+/**
+ * The only programs these reads run: gdbus, xprop and gsettings, command-line tools that open no window and need no display
+ * (gsettings reads dconf's database, and only where the portal doesn't give GNOME's button layout).
+ */
+export const PROBES = ['gdbus', 'xprop', 'gsettings'] as const
 
 /** How long a probe may take before it counts as unknown. */
 export const PROBE_TIMEOUT = 2000
@@ -172,10 +177,30 @@ export const followDesktopChrome = (sources: ChromeSources): FollowedChrome => {
       }),
     )
   }
+  const probe = (command: (typeof PROBES)[number], args: readonly string[]) =>
+    sources.run(command, args, PROBE_TIMEOUT).catch(() => undefined)
   if (linux) {
-    portal('layout', 'org.gnome.desktop.wm.preferences', 'button-layout', parseGnomeLayout, (layout) => {
-      if (layout !== undefined) set({ gnomeLayout: layout })
-    })
+    // GNOME's button layout, followed through the portal. Where the portal doesn't give it (none running, or one that doesn't
+    // expose the key), it is read once from gsettings, and the first window waits for that too; a change then shows next launch.
+    // Only on the desktops whose windows take GNOME's key: the others keep theirs elsewhere (KDE's in kwinrc), or draw a frame.
+    const gnomeKey = base.family === 'gnome' || base.family === 'budgie' || base.family === 'pantheon' || base.family === 'unity'
+    waiting.add('layout')
+    let firstLayout = true
+    stops.push(
+      sources.watchPortal('org.gnome.desktop.wm.preferences', 'button-layout', parseGnomeLayout, (layout) => {
+        if (layout !== undefined) set({ gnomeLayout: layout })
+        if (!firstLayout) return
+        firstLayout = false
+        if (layout !== undefined || !gnomeKey) return settle('layout')
+        void probe('gsettings', ['get', 'org.gnome.desktop.wm.preferences', 'button-layout']).then((out) => {
+          // gsettings prints a string quoted, `'appmenu:close'`; anything else isn't its answer.
+          const read = out === undefined || parseQuoted(out) === undefined ? undefined : parseGnomeLayout(out)
+          // The portal may have spoken since; its word, followed live, wins.
+          if (read !== undefined && look.gnomeLayout === undefined) set({ gnomeLayout: read })
+          settle('layout')
+        })
+      }),
+    )
     portal('theme', 'org.gnome.desktop.interface', 'gtk-theme', parseThemeName, (theme) => {
       if (theme !== undefined) learn({ gtkTheme: theme })
     })
@@ -200,8 +225,6 @@ export const followDesktopChrome = (sources: ChromeSources): FollowedChrome => {
     if (isCached(kept, desktop)) learn(kept.facts)
     settle('cache')
   })
-  const probe = (command: (typeof PROBES)[number], args: readonly string[]) =>
-    sources.run(command, args, PROBE_TIMEOUT).catch(() => undefined)
   const reads: Array<Promise<unknown>> = []
   if (linux && base.session === 'x11') {
     reads.push(

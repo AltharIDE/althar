@@ -37,6 +37,42 @@ describe('the system’s accent, kept legible', () => {
     expect(contrast(WHITE, darkFill)).toBeGreaterThanOrEqual(4.5)
   })
 
+  // GNOME 47's accents, Breeze's blue and Windows' default: every state of every token it gives keeps contrast with what it meets.
+  const SYSTEM_ACCENTS = [
+    '#3584e4',
+    '#2190a4',
+    '#3a944a',
+    '#c88800',
+    '#ed5b00',
+    '#e62d42',
+    '#d56199',
+    '#9141ac',
+    '#6f8396',
+    '#3daee9',
+    '#0078d4',
+  ]
+  const RAISED = { light: hexToRgb('#fcfbf8'), dark: hexToRgb('#25231f') }
+  it.each(SYSTEM_ACCENTS)('keeps every state of %s legible, hovered and pressed included, in both schemes', (hex) => {
+    const tokens = accentTokens(hexToRgb(hex))
+    if (tokens === undefined) return
+    for (const scheme of ['light', 'dark'] as const) {
+      const token = (name: string) => hexToRgb(tokens[scheme][name] ?? '#000000')
+      for (const fill of ['--signal-fill', '--signal-fill-hover', '--signal-fill-pressed'])
+        expect(contrast(WHITE, token(fill)), `${scheme} ${fill}`).toBeGreaterThanOrEqual(4.5)
+      for (const text of ['--signal', '--signal-bright', '--signal-pressed'])
+        for (const surface of [PAGE[scheme], RAISED[scheme]])
+          expect(contrast(token(text), surface), `${scheme} ${text}`).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+
+  it('keeps GNOME’s blue’s dark hover readable under white words, still lighter than its fill', () => {
+    const dark = accentTokens(GNOME_BLUE)?.dark
+    const fill = hexToRgb(dark?.['--signal-fill'] ?? '#ffffff')
+    const hover = hexToRgb(dark?.['--signal-fill-hover'] ?? '#ffffff')
+    expect(contrast(WHITE, hover)).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(WHITE, hover)).toBeLessThan(contrast(WHITE, fill))
+  })
+
   it('keeps Althar’s own where the system’s is too light or too dark to read as itself', () => {
     // GNOME's yellow and a near-black: either would have to move too far from itself.
     expect(accentTokens(hexToRgb('#f5c211'))).toBeUndefined()

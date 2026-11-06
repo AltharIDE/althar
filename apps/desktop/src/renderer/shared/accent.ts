@@ -82,10 +82,13 @@ export const shifted = (color: Rgb, by: number): Rgb => {
 
 /**
  * The nearest shade of `color` that keeps `ratio` against every one of `against`: itself where it already does, else moved
- * darker or lighter (whichever the surfaces call for) a step at a time up to MAX_SHIFT; nothing where none does.
+ * darker or lighter (whichever the surfaces call for) a step at a time up to MAX_SHIFT; nothing where none does. With `states`,
+ * the lightness offsets its hover and pressed shades take from it, each of those must keep the ratio too, so a hover that
+ * lightens a fill never lightens it past legible.
  */
-export const legibleShade = (color: Rgb, against: readonly Rgb[], ratio: number): Rgb | undefined => {
-  const keeps = (shade: Rgb) => against.every((surface) => contrast(shade, surface) >= ratio)
+export const legibleShade = (color: Rgb, against: readonly Rgb[], ratio: number, states: readonly number[] = []): Rgb | undefined => {
+  const legible = (shade: Rgb) => against.every((surface) => contrast(shade, surface) >= ratio)
+  const keeps = (shade: Rgb) => legible(shade) && states.every((by) => legible(shifted(shade, by)))
   if (keeps(color)) return color
   // Lighter on dark surfaces, darker on light ones.
   const direction = against.every((surface) => luminance(surface) > luminance(color)) ? -1 : 1
@@ -98,46 +101,50 @@ export const legibleShade = (color: Rgb, against: readonly Rgb[], ratio: number)
 
 const rgba = ({ r, g, b }: Rgb, alpha: number) => `rgba(${r}, ${g}, ${b}, ${alpha})`
 
+/** How far each scheme's state shades move from the colour they come from, in OKLab lightness. */
+const STATES = {
+  light: { textBright: -0.04, textPressed: -0.08, fillHover: -0.04, fillPressed: -0.08 },
+  dark: { textBright: 0.04, textPressed: -0.04, fillHover: 0.03, fillPressed: -0.03 },
+} as const
+
 /** The kit's violet tokens, from the system's accent, for one scheme; nothing where any of them can't be made legible. */
 const tokensFor = (accent: Rgb, scheme: 'light' | 'dark'): Record<string, string> | undefined => {
   const surfaces = SURFACES[scheme]
-  // Violet as words and marks on the page and on sheets.
-  const text = legibleShade(accent, [hexToRgb(surfaces.page), hexToRgb(surfaces.raised)], 4.5)
-  // Violet as a fill with white words on it.
-  const fill = legibleShade(accent, [WHITE], 4.5)
+  const by = STATES[scheme]
+  // Violet as words and marks on the page and on sheets, its brighter and pressed shades as well.
+  const text = legibleShade(accent, [hexToRgb(surfaces.page), hexToRgb(surfaces.raised)], 4.5, [by.textBright, by.textPressed])
+  // Violet as a fill with white words on it, hovered and pressed as well.
+  const fill = legibleShade(accent, [WHITE], 4.5, [by.fillHover, by.fillPressed])
   // A focus ring on an ink fill.
   const onInk = legibleShade(accent, [hexToRgb(surfaces.ink)], 3)
   if (text === undefined || fill === undefined || onInk === undefined) return undefined
   const hex = rgbToHex
+  const states = {
+    '--signal': hex(text),
+    '--signal-bright': hex(shifted(text, by.textBright)),
+    '--signal-pressed': hex(shifted(text, by.textPressed)),
+    '--signal-fill': hex(fill),
+    '--signal-fill-hover': hex(shifted(fill, by.fillHover)),
+    '--signal-fill-pressed': hex(shifted(fill, by.fillPressed)),
+    '--on-ink-focus': hex(onInk),
+  }
   return scheme === 'light'
     ? {
-        '--signal': hex(text),
-        '--signal-bright': hex(shifted(text, -0.04)),
+        ...states,
         '--signal-dim': rgba(text, 0.1),
         '--selection': rgba(text, 0.1),
         '--signal-line': rgba(text, 0.32),
         '--signal-hover': rgba(text, 0.16),
         '--signal-paper': `color-mix(in oklab, ${hex(accent)} 7%, #ffffff)`,
-        '--signal-pressed': hex(shifted(text, -0.08)),
-        '--signal-fill': hex(fill),
-        '--signal-fill-hover': hex(shifted(fill, -0.04)),
-        '--signal-fill-pressed': hex(shifted(fill, -0.08)),
-        '--on-ink-focus': hex(onInk),
       }
     : {
-        '--signal': hex(text),
-        '--signal-bright': hex(shifted(text, 0.04)),
+        ...states,
         '--signal-dim': rgba(text, 0.13),
         '--selection': rgba(text, 0.34),
         '--signal-line': rgba(text, 0.42),
         '--signal-hover': rgba(text, 0.22),
         '--signal-paper': `color-mix(in oklab, ${hex(text)} 7%, var(--n-1))`,
         '--signal-raised': `color-mix(in oklab, ${hex(text)} 5%, var(--paper))`,
-        '--signal-pressed': hex(shifted(text, -0.04)),
-        '--signal-fill': hex(fill),
-        '--signal-fill-hover': hex(shifted(fill, 0.03)),
-        '--signal-fill-pressed': hex(shifted(fill, -0.03)),
-        '--on-ink-focus': hex(onInk),
       }
 }
 

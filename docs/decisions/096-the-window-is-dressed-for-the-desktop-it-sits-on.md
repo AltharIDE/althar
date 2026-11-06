@@ -24,12 +24,16 @@
     `I3SOCK`), which wins over the desktop's name; on X11 the window manager's
     own `_NET_WM_NAME` through `xprop`, which wins over both; GNOME Shell's
     version from its `ShellVersion` D-Bus property; the GTK theme, GNOME's
-    `button-layout` and the accent through the Settings portal; KWin's
+    `button-layout` and the accent through the Settings portal, with
+    `gsettings get org.gnome.desktop.wm.preferences button-layout` once
+    where the portal doesn't give the layout (then a change shows on the
+    next launch); KWin's
     buttons and decoration and KDE's colour scheme from `kwinrc` and
     `kdeglobals`, read as text through the XDG cascade (`XDG_CONFIG_HOME`,
     then `XDG_CONFIG_DIRS`, else `~/.config` and `/etc/xdg`).
-  - **Only `gdbus` and `xprop` are ever run**, with a timeout, with no
-    shell; a desktop program never is. Probing once ran `plasmashell
+  - **Only `gdbus`, `xprop` and `gsettings` are ever run**, with a
+    timeout, with no shell: command-line tools that need no display
+    (`gsettings` reads dconf's database). A desktop program never is. Probing once ran `plasmashell
     --version` and `kreadconfig6`: both are Qt GUI programs, which abort
     without a usable display (coredumps on the person's Plasma 6), and
     `kreadconfig6` opens a `kdialog` where it can't write its own config.
@@ -85,9 +89,12 @@
     the system's title bar). The first plan; dropped on the person's word:
     Althar can tell, and a setting that needs a restart is a poor one.
   - **Running the desktop's tools** (`plasmashell --version`,
-    `gnome-shell --version`, `kreadconfig6`, `gsettings`) for versions and
-    settings: they are GUI programs, crash without a display and may open
-    dialogs. Their files and D-Bus say the same.
+    `gnome-shell --version`, `kreadconfig6`) for versions and settings:
+    they are GUI programs, crash without a display and may open dialogs.
+    Their files and D-Bus say the same. `gsettings` is not one of them and
+    is kept, as the layout's fallback only: the portal is followed live
+    and also reaches a Flatpak, where `gsettings` would read the sandbox's
+    own settings.
   - **Electron's `titleBarOverlay` on Windows**, which draws Windows' own
     caption buttons with Snap Layouts: its colours and height are set from
     main and must be kept in step with the page's scheme and zoom, and it

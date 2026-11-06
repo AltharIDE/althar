@@ -18,7 +18,7 @@ import {
 } from '../src/main/desktopChrome'
 
 /*
- * Every source here is a fixture: environments, file texts and what gdbus or xprop would print. Nothing touches this computer's
+ * Every source here is a fixture: environments, file texts and what gdbus, xprop or gsettings would print. Nothing touches this computer's
  * own desktop, config or session bus, and the child_process the system's sources use is a fake that records what they would run.
  */
 
@@ -49,7 +49,6 @@ const FORBIDDEN = [
   'kwriteconfig5',
   'kwriteconfig6',
   'kdialog',
-  'gsettings',
   'zenity',
   'qdbus',
 ]
@@ -229,6 +228,46 @@ describe('reading the desktop', () => {
     expect(heard).toEqual([{ r: 232, g: 17, b: 35 }])
   })
 
+  const GSETTINGS_LAYOUT = 'gsettings get org.gnome.desktop.wm.preferences button-layout'
+
+  it('on GNOME without the layout in the portal: reads it from gsettings, and the first window waits for it', async () => {
+    const { sources, ran } = sourcesOf({ env: GNOME_WAYLAND, prints: { [GSETTINGS_LAYOUT]: "'close,minimize:'\n" } })
+    const followed = followDesktopChrome(sources)
+    const first = await followed.first(1000)
+    expect(chromeOf(first, false).layout).toEqual({ start: ['close', 'minimize'], end: [] })
+    expect(ran.filter((one) => one.command === 'gsettings')).toHaveLength(1)
+  })
+
+  it('reads no gsettings where the portal gives the layout', async () => {
+    const { sources, ran } = sourcesOf({
+      env: GNOME_WAYLAND,
+      prints: { [GSETTINGS_LAYOUT]: "'close:'" },
+      portal: { 'org.gnome.desktop.wm.preferences button-layout': "(<<'appmenu:minimize,close'>>,)" },
+    })
+    const first = await followDesktopChrome(sources).first(1000)
+    expect(chromeOf(first, false).layout).toEqual({ start: [], end: ['minimize', 'close'] })
+    expect(ran.map((one) => one.command)).not.toContain('gsettings')
+  })
+
+  it.each([
+    ['fails', undefined],
+    ['prints something malformed', "'close;minimize:maximize'"],
+    ['prints nothing', ''],
+  ])('keeps GNOME’s own layout, close alone at the end, where gsettings %s', async (_how, out) => {
+    const { sources } = sourcesOf({ env: GNOME_WAYLAND, ...(out === undefined ? {} : { prints: { [GSETTINGS_LAYOUT]: out } }) })
+    const first = await followDesktopChrome(sources).first(1000)
+    expect(chromeOf(first, false).layout).toEqual({ start: [], end: ['close'] })
+  })
+
+  it('asks gsettings nothing on KDE, whose layout is kwinrc’s, or another desktop that keeps its own', async () => {
+    for (const desktop of ['KDE', 'XFCE', 'X-Cinnamon', 'MATE']) {
+      const { sources, ran } = sourcesOf({ env: { XDG_CURRENT_DESKTOP: desktop, XDG_SESSION_TYPE: 'wayland' } })
+      await followDesktopChrome(sources).first(1000)
+      await settled()
+      expect(ran.map((one) => one.command)).not.toContain('gsettings')
+    }
+  })
+
   it('settles the first window’s wait after its time even where nothing answers', async () => {
     const { sources } = sourcesOf({ env: GNOME_WAYLAND })
     const silent = followDesktopChrome({ ...sources, watchPortal: () => () => undefined })
@@ -270,7 +309,7 @@ describe('the system’s own reads', () => {
     unknown: {},
   }
 
-  it.each(Object.entries(SESSIONS))('on %s, runs no desktop program: only gdbus and xprop', async (_name, env) => {
+  it.each(Object.entries(SESSIONS))('on %s, runs no desktop program: only gdbus, xprop and gsettings', async (_name, env) => {
     const home = await mkdtemp(join(tmpdir(), 'chrome-'))
     const followed = followDesktopChrome(systemSources({ platform: 'linux', env: { ...env, XDG_CONFIG_DIRS: home }, home, profile: home }))
     await followed.first(200)
