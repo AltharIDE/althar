@@ -46,6 +46,10 @@
   [ADR-095](095-skill-and-openspec-files-stay-off-the-repository.md) (skill
   and OpenSpec files held back). Each says at its top what of it this
   replaces.
+- **Amends:** [ADR-007](007-permission-requests-reach-althar.md) (what
+  becomes an attention request; readers that run tests),
+  [ADR-019](019-coordinator-judges-permissions.md) (the judge is a mode the
+  person picks)
 - **Owner:** Repository maintainers
 - **Context:** People use agents for what they can do: their own MCP
   servers, their own skills, running the app, posting what they found. On 6
@@ -178,16 +182,19 @@ Only this list asks, in every role, sandbox or not:
 | --- | --- | --- |
 | **Lost work or history** | A force push (`+ref` and `--mirror` included); a push to the default branch, or deleting it; deleting, or moving by force, another branch whose commits are on no other ref, here or on the remote; discarding changes in another checkout, the person's own above all (git that throws work away there, replacing a file there); deleting or moving away what's outside the task's worktree, and removing a worktree that isn't the task's | What was there is gone, for the person and for every checkout that shares it |
 | **Publishing, releases, teardown and merging** | Publishing a package; a release, a release tag, and moving or deleting a tag; tearing down (`destroy`, `kubectl delete` and the like, ADR-089); merging a pull request, entering a merge queue or turning on auto-merge | It reaches every user, updater or environment at once, and a registry never takes a version back |
-| **Speaking for the person to others** | Posting a review or a comment on a pull request or issue that isn't the task's own; replying to an outside author; a message to anyone through another service (an MCP server's Slack message or email) | Their notification can't be called back |
+| **Speaking for the person to others** | Posting a review or a comment on a pull request or issue that no task of Althar's opened, follows or came from; replying to an outside author; a message to anyone through another service (an MCP server's Slack message or email) | Their notification can't be called back |
 | **Secrets and the keychain** | Reading where keys and sign-ins are kept (`~/.ssh`, `~/.aws`, token files: `SECRET_PLACES`), and the keychain's `security` or git's helpers called directly. Refused, not asked: there is no answer the person would want to give | A credential sent to a model's provider can't be taken back |
 | **An agent answering its own permission request** | Refused, whoever asks; as is anything else that approves an agent's own work: approving a pull request a task opened, making a commit status or a check run, dismissing a review (ADR-081's fourth limit), and widening what agents may do (Althar's rules and switches, the host's protection, access and settings) | Otherwise none of the above holds |
 
-**Asking is the person's word, and nothing else's.** For an Althar tool, an
-MCP call or a command that is on the list, the person's own message in the
-turn is their word: in a turn it started, it goes ahead with a line saying
-what it did and which words it acted on (ADR-081, `byPerson`). In any other
-turn it is a card in the thread. The coordinator's judge never answers it,
-and no agent does (ADR-019).
+**Asking is the person's word, and nothing else's.** Althar's own tools for
+what's on the list (merging, tags, releases, posting) are asked-for: they
+name the words they act on, so the person's own message in the turn is their
+word, and the tool goes ahead with a line saying what it did and which words
+(ADR-081, `byPerson`); in any other turn it is a card. A command or an MCP
+call on the list names no words, so it asks on a card, as a command does
+today (ADR-067), even in a turn the person started. That is one reason the
+briefs prefer Althar's tools. The coordinator's judge never answers any of
+it, and no agent does (ADR-019).
 
 **Everything else goes ahead, unasked:** commands the rules can't read
 (scripts, heredocs, variables), with a sandbox or without one; writing
@@ -214,9 +221,9 @@ flowchart TB
     I -->|no| A{"The person's Ask me?"}
     A -->|no| G["Goes ahead"]
     A -->|yes| C
-    I -->|yes| W{"A turn the person's<br/>own message started?"}
+    I -->|yes| W{"An Althar tool, in a turn<br/>the person's own message started?"}
     W -->|yes| G2["Goes ahead, with a line<br/>quoting their words"]
-    W -->|no| C["A card for the person"]
+    W -->|"no: a command, an MCP call,<br/>or another turn"| C["A card for the person"]
 ```
 
 ## The person's own setup, in every role
@@ -265,25 +272,33 @@ a permission request, and Althar reads it by server, tool and arguments.**
 - **How each call reaches Althar.** Each session gets an ask rule for each
   of the person's servers (Claude Code's `mcp__<server>` rules, which win
   over the person's allow rules as Bash's ask rule does), or the agent's own
-  per-tool ask where it has one (OpenCode's permission patterns, Codex's
-  approval for MCP tools). Each call then arrives as ACP's
-  `session/request_permission` with the tool's name and its arguments, as
-  commands do today (ADR-007).
+  per-tool ask where it has one (OpenCode's permission patterns). Each call
+  then arrives as ACP's `session/request_permission`, as commands do
+  (ADR-007), and Althar keeps what it says of the call: claude-agent-acp
+  puts the tool's name and its server in the request's `_meta`, which
+  Althar's adapter drops today (`AgentConnection.ts`), so a foreign MCP call
+  is read as a command from its title, matches no kind and goes ahead.
+  codex-acp sends Codex's approval of an MCP call there only as a fallback,
+  so which of Codex's calls reach Althar is read in phase 1. Copilot, Kimi
+  Code and Mistral Vibe load the person's servers already; their calls ask
+  as their modes have them (03).
 - **How Althar reads it.** Most calls go ahead at once, with the rules'
   quiet line under the turn. A call is on the list where it plainly is one:
   - by its tool, for the servers people use for their hosts and trackers
     (GitHub's, GitLab's, Linear's and Atlassian's own servers): a merge, a
     release, a tag, a ref deleted or forced, a file written to the default
-    branch, a review or comment on a pull request or issue that isn't the
-    task's own;
+    branch, a review or comment on a pull request or issue that no task of
+    Althar's opened, follows or came from;
   - by what its name says, for any server: a merge, a publish or a release,
     a deletion, a force, or sending, posting or replying to someone;
   - by its arguments, for a server's general call (a `graphql` or `api`
     tool): a GraphQL mutation or a REST method and path, placed as ADR-081
     places Althar's own gated call.
-- **On the list, it is asked-for:** it goes ahead in a turn the person's
-  own message started, with a line naming the call and their words, and is
-  a card in any other turn. What widens what agents may do (a repository's
+- **On the list, it asks** as a command on the list does: a card, never
+  judged, even in a turn the person started, since the call names none of
+  their words. Althar's own tool for the same thing (`merge_pull_request`,
+  `push_tag`, `post_review`) goes on their message with no card. What widens
+  what agents may do (a repository's
   settings, protection, access, secrets, webhooks, the families of ADR-081's
   never list) is refused, as through Althar's own call.
 - **Recorded either way:** each call's server, tool and how it was answered
@@ -300,10 +315,11 @@ a permission request, and Althar reads it by server, tool and arguments.**
   per-tool ask for MCP, or one whose own settings answer before Althar's
   ask can. Each agent's case is read in phase 1, and an agent whose MCP
   calls can't be held goes in its registry entry's `knownGaps`.
-- **Steering, in a turn the person started:** what the agent reads there
-  could take it to a call they didn't mean, which then has their word.
-  ADR-081 accepted the same for Althar's own tools; the line in the thread
-  is where they see it.
+- **Steering:** a page, a comment or a pull request could take the agent
+  to a call the person didn't mean. On the list, the card shows it before it
+  goes; off the list (a reply on the task's own pull request, a read), it
+  goes ahead, with its line in the thread, as ADR-081 accepted for Althar's
+  own tools.
 
 What slips past goes ahead, as an unreadable command does. An MCP broker
 of Althar's own, under the alternatives above, is the way to close it, if
@@ -410,7 +426,7 @@ finish in minutes.
 | git's guard hooks on pushes and branch moves (ADR-071, ADR-089) | A script can hide a force push |
 | Secret files and the keychain are refused | Leaked credentials can't be taken back |
 | No agent answers its own permission request, or approves its own work | Otherwise none of the above holds |
-| Asked-for tools, and MCP calls read as on the list, go only on the person's own message (ADR-081), [as far as Althar sees them](#what-it-cant-catch) | News, pull request text and a lead's words can't merge, publish or post |
+| Asked-for tools go only on the person's own message (ADR-081); a command or an MCP call on the list asks on a card, [as far as Althar sees it](#what-it-cant-catch) | News, pull request text and a lead's words can't merge, publish or post |
 | An outside author's code doesn't run without the person's word, and none of its repository's settings, hooks or MCP config load ([below](#recommended-not-yet-settled)) | A stranger's code on the person's machine |
 | Cost caps: a step's turns and hours, review rounds, helpers' counts (ADR-081, ADR-087, ADR-088) | Money, not safety |
 

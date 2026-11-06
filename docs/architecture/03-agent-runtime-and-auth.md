@@ -851,9 +851,10 @@ including the always-ask list
 - Cancelling a turn answers the requests still waiting with `cancelled`, as
   ACP asks of the client, whether or not the agent withdraws them.
 - Althar answers from the project rules
-  ([ADR-013](../decisions/013-project-rules.md)). With the default mode,
-  nearly everything is allowed without the user; only what the rules keep for
-  the user becomes an attention request. The rules see what reaches
+  ([ADR-013](../decisions/013-project-rules.md)). Allowing everything is
+  every project's default ([ADR-097](../decisions/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md)): only what can't be
+  undone becomes an attention request, and the person's own Never and Ask me
+  rules hold. The other modes are the person's choice to be asked more. The rules see what reaches
   Althar, which is what agents ask to do beyond their sandbox. Every answer is recorded on the task. What the
   project's allow rules let through shows under its turn as one quiet line,
   saying which rule; the person's Allow always and Deny always keep such a
@@ -877,7 +878,7 @@ What keeps each agent asking, whatever its own settings say:
 
 | Agent | How | Checked against |
 |---|---|---|
-| Claude Code | Every session gets ask rules for Bash, Edit, Write, MultiEdit, NotebookEdit, with WebFetch/WebSearch allowed for project leads when web access is on (otherwise asking), has bypass mode turned off for its whole life, loads only the MCP servers Althar gives it (`strictMcpConfig`), and runs its shell in Claude's sandbox, all through the adapter's `_meta.claudeCode.options`. Ask rules win over allow rules from any settings file, and over a hook that approves | A repository whose `.claude/settings.json` allows those tools, defaults to `bypassPermissions`, and has a hook that approves every tool call |
+| Claude Code | Every session gets ask rules for Bash, Edit, Write, MultiEdit, NotebookEdit, with WebFetch/WebSearch allowed for project leads when web access is on (otherwise asking), has bypass mode turned off for its whole life, loads only the MCP servers Althar gives it (`strictMcpConfig`; from ADR-097's first phase, the person's servers too, each with an ask rule so its calls reach Althar), and runs its shell in Claude's sandbox, all through the adapter's `_meta.claudeCode.options`. Ask rules win over allow rules from any settings file, and over a hook that approves | A repository whose `.claude/settings.json` allows those tools, defaults to `bypassPermissions`, and has a hook that approves every tool call |
 | Codex | Mode `workspace-write`, whose reviewer is the person. The default `agent` mode sends requests to an automatic reviewer instead, and was seen to write outside the workspace without asking | Writing outside the workspace, which it asks for |
 | OpenCode | Inline config (`OPENCODE_CONFIG_CONTENT`) that sets edits and commands to ask, and webfetch/websearch to allow for project leads when web access is on (otherwise asking), for its built-in agents too, and lets it carry on after a rejection (`experimental.continue_loop_on_deny`) | A repository whose `opencode.json` allows everything |
 
@@ -887,7 +888,7 @@ So where an agent has a sandbox, it keeps commands inside the worktree:
 
 - Codex's, in `workspace-write`, with the network off. Its only network
   setting (`network_access`) is all or nothing, with no localhost-only form, so
-  it stays off.
+  it stays off, until ADR-097's first phase turns it on.
 - Claude Code's, switched on for every session. A command that stays inside
   runs without asking. One that needs the network asks per host. A write
   outside is blocked, and Claude reports it instead of retrying outside the
@@ -917,8 +918,11 @@ pull request reviews remain offline (ADR-058); Codex remains ineligible to
 lead them. The coordinator’s settings are unchanged. Changes apply to new
 sessions; restart an existing session after changing the switch.
 
-Shell networking stays constrained: Codex’s all-or-nothing switch stays off,
-and Claude’s known-host allowlist stays in place. Neither can grant GETs
+Shell networking stays constrained (until ADR-097's first phase, which gives
+Codex's shell the network and drops the `curl` form below, since with
+everything allowed a host a command asks for goes ahead): Codex’s
+all-or-nothing switch stays off, and Claude’s known-host allowlist stays in
+place. Neither can grant GETs
 without also granting POSTs and uploads. Instead the rules allow plain
 HTTP(S) reads to stdout, such as `curl -q -fsSL https://example.com` and
 `wget --no-config --no-netrc --no-hsts -qO- https://example.com`, while the project switch is on.
@@ -934,6 +938,8 @@ A lead reading a private repository could be steered by a web page into
 leaking code through a URL or search query. Read-only requests still carry
 that risk. The project switch and offline outside reviews mitigate it;
 credential denials and the rules for irreversible operations remain.
+ADR-097 drops the coordinator's web mark (ADR-081) and leaves this switch
+as the person's control for that leak.
 
 **Known commands and hosts, from the start.** Some commands can't work inside
 Claude's sandbox on a Mac (a browser, Electron, a test runner, `ps`), and
@@ -1046,7 +1052,11 @@ call, a script's that went on after it included; the sandbox's refusal on
 a call that failed.
 
 A command that has to leave its sandbox reaches Althar as a request, and
-the rules read it as a shell would, into commands and words. They ask about:
+the rules read it as a shell would, into commands and words. With
+everything allowed, the default, only what they read as irreversible asks
+([below](#what-asks-with-everything-allowed)). In the other modes, until
+ADR-097's first phase makes the built-in list the irreversible one, they
+ask about:
 
 - pushes to the default branch, force pushes, pushes of every branch or of
   tags, and deleting a branch other than the task's;
@@ -1061,13 +1071,59 @@ the rules read it as a shell would, into commands and words. They ask about:
 
 They refuse, for every role, a request that names where the person keeps
 keys and sign-ins (`~/.ssh`, `~/.aws`, `~/.npmrc` and the like), and Claude
-Code sessions are given those places as denied reads. What could lose work
-(a force push, a push to the default branch, deleting outside the worktree,
-git throwing away work in another checkout or replacing a file there,
-dropping a stash entry, a delete whose target shows only when it runs) asks
-even with everything allowed, and the coordinator never judges it; always
-allowing writes outside the worktree doesn't cover it
-([the safety pass](../plans/safety-pass.md)).
+Code sessions are given those places as denied reads.
+
+#### What asks with everything allowed
+
+Only what the rules read as irreversible
+([ADR-067](../decisions/067-allow-everything-asks-only-before-what-can-t-be-undone.md),
+[ADR-089](../decisions/089-the-asks-and-refusals-left-are-what-can-t-be-undone.md),
+[ADR-097](../decisions/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md)), and the coordinator never judges it:
+
+- a force push (`+ref` and `--mirror` included), a push to the default
+  branch or deleting it, and deleting or moving by force another branch
+  whose commits are on no other ref, here or on the remote;
+- git throwing away work in another checkout, or replacing a file there,
+  and removing a worktree that isn't the task's;
+- deleting or moving away what's outside the worktree;
+- tearing down and publishing (`destroy`, `kubectl delete`, `npm publish`
+  and the like), short of a dry run;
+- from ADR-097's first phase, merging, release tags and speaking for the
+  person to others, as the rules read commands and MCP calls, beside
+  Althar's own asked-for tools.
+
+What the rules can't read goes ahead (ADR-067's amendment), and so do the
+stash, `git reflog expire` and `gc --prune`, and reading a `.env` outside
+the worktree. In the other modes the whole floor asks today (the stash
+entries that aren't the task's, what git keeps to recover lost work, a
+`.env` outside, writing outside); ADR-097's first phase drops the floor
+there too.
+
+#### MCP calls and the person's sign-in
+
+From ADR-097's first phase, every role loads the person's own MCP servers,
+and from its third, agents keep the person's `gh`, `glab` and git sign-in
+where they have one. Neither goes round the list above where Althar can see
+it:
+
+- **An MCP call reaches Althar as a permission request** where the agent
+  can send it there: Claude Code by an ask rule for each of the person's
+  servers, the others by their own per-tool asks. Today Althar's adapter
+  keeps a request's title, kind, input and paths, and drops the `_meta`
+  where claude-agent-acp names the tool and its server
+  (`AgentConnection.ts`), so a foreign MCP call is read as a command,
+  matches no kind and goes ahead. The rules will read a call by server,
+  tool and arguments; what is plainly a merge, a publish, a forced or
+  deleted ref, or a post to someone else asks on a card, as a command on the
+  list does: unlike Althar's own tool for it, the call names none of the
+  person's words. A call Althar can't see,
+  or whose name doesn't say what it does, goes ahead, as an unreadable
+  command does.
+- **`gh` and `glab` are read as git is:** what's on the list asks, the rest
+  goes ahead, and git's guard stops a force push, a push to the default
+  branch and deleting another branch whatever sign-in pushes. Althar reads
+  the task's branch after the lead's turn, so a push it didn't make is
+  recorded as the lead's own.
 
 Where they can't tell where a push goes or where an edit writes, they ask.
 
@@ -1206,8 +1262,9 @@ input or action changes, the digest changes and the decision no longer applies.
 Examples requiring Althar-level handling include:
 
 - destructive Git operations;
-- external messages, issue transitions, deployments, or merges;
-- using a new repository binding or MCP server;
+- external messages, issue transitions, teardown, publishing, or merges,
+  through Althar's tools, a command or an MCP call (ADR-097);
+- using a new repository binding;
 - introducing a skill script;
 - increasing budget or loop bounds;
 - graph patches that expand authority.
@@ -1225,7 +1282,9 @@ Controls:
 - delimit source-derived instructions and record their origin;
 - constrain Althar-owned filesystem operations to registered roots;
 - allowlist child environment variables;
-- require explicit grants for MCP tools and external mutations;
+- read every MCP call against what can't be undone, and keep what can't
+  be undone on the host to the person's word (ADR-097): the person's own
+  servers load, so their outputs are untrusted input like the rest;
 - record the exact brief, skills, and instructions sent to the agent;
 - treat provider claims about completed actions as observations until verified.
 

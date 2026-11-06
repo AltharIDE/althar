@@ -362,8 +362,8 @@ Never more than its lead, and only in its copy.
   reviewer. Its web reads follow the project's switch (ADR-078).
 - **It pushes nothing and acts on nothing outside** (kept by ADR-097 as
   tidiness: a helper's work comes back through its lead; its MCP servers
-  are its lead's, and what can't be undone among their calls needs the
-  person's word, which a helper's turn never is). Its git runs Althar's
+  are its lead's, and what can't be undone among their calls asks the
+  person, in the lead's thread under its name, as its commands do). Its git runs Althar's
   guard with every push refused (`pushGuard.ts`); it has none of Althar's
   tools that act on the code host or the tracker. It has those that read
   (`read_issue`, `read_pull_request`, `read_checks`, `read_check_log`),

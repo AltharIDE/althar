@@ -3,11 +3,16 @@
 ## Decision
 
 Each project has a coordinator: the agent you talk to about the project as a
-whole. It plans work and hands it out. It never writes code.
+whole. It plans work, hands it out and directs the leads. It never writes
+code. It is optional: a task also starts from the board, the composer or a
+lead, and the coordinator stays the place for triage, routing, launching a
+batch from the tracker, and merging ([ADR-097](../decisions/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md)).
 
 > The coordinator is an ordinary agent session with Althar's tools and
 > read-only access to the repositories. Althar keeps its conversation. The
-> provider session is disposable.
+> provider session is disposable. Leads and the coordinator share one pool
+> of tools, the person's MCP servers and skills; the coordinator changes no
+> code, for tidiness, not safety (ADR-097, from its second phase).
 
 See [ADR-004](../decisions/004-coordinator-is-an-agent-session.md).
 
@@ -36,6 +41,10 @@ See [ADR-004](../decisions/004-coordinator-is-an-agent-session.md).
 - runs the project for the person, with no agent, when they ask, and keeps how
   it runs when Althar can't tell (ADR-023);
 - follows the work, and passes messages to a task's lead;
+- directs leads: tells one what to do next or to push, coordinates several,
+  and does on a task what the person can in the window (accept, merge on
+  their word, stop, hold, restart, settle, review again, and so on). Leads
+  can do most of it too (ADR-097, its second phase);
 - keeps the project's notes: decisions the person makes in conversation that
   the code doesn't show, which every session of it starts with
   ([ADR-031](../decisions/031-coordinator-handed-over-before-it-fills.md));
@@ -43,9 +52,12 @@ See [ADR-004](../decisions/004-coordinator-is-an-agent-session.md).
   fresh read-only session using its agent and model, without delaying the
   conversation ([ADR-019](../decisions/019-coordinator-judges-permissions.md)).
 
-It never edits a repository, installs or builds, or merges, even for a
-one-line change. A change is always a task with a lead, and so is trying
-something out that needs the project set up. Althar refuses the coordinator's
+It never edits a repository, even for a one-line change: a change is always
+a task with a lead, with a branch, a review and a record. That is tidiness,
+not safety (ADR-097). It merges only on the person's word
+([below](#merging-on-the-persons-word)). Until ADR-097's second phase it
+doesn't install or build either, so trying something out that needs the
+project set up is a task; from then it may, in its copies. Althar refuses the coordinator's
 commands that change anything beyond its own copies, for its role, and its
 brief says so, so it doesn't take that for the person saying no. What a task has built is in that task's worktree, so the coordinator
 asks its lead to try it.
@@ -58,6 +70,7 @@ flowchart LR
     Thread --> Brief["Brief"]
     Brief --> Session["Coordinator session<br/>any agent, over ACP"]
     Session <-->|"MCP"| Tools["Althar tools"]
+    Session <-->|"MCP"| Own["The person's MCP servers (ADR-097)"]
     Tools --> Runtime["Runtime commands and queries"]
     Session -.->|"reads"| Repos["Copies of its own"]
     Runtime --> Tasks["Tasks, leads, and steps"]
@@ -71,6 +84,10 @@ role: its brief, its tools, and its read-only rule.
 
 Read-only is enforced by what the coordinator can reach, not by its prompt,
 in three layers ([ADR-004](../decisions/004-coordinator-is-an-agent-session.md)).
+Since ADR-097 that keeps it tidy rather than safe: a change in a throwaway
+copy has no branch, review or record. Its second phase lets the coordinator
+install and run tests in its copies and gives its sandbox a lead's hosts; a
+review of an outside author's code keeps all three layers.
 A reviewer, the other role that only reads, gets the same, but for what the
 coordinator may run in copies of its own
 ([ADR-058](../decisions/058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md)).
@@ -117,7 +134,10 @@ coordinator may run in copies of its own
 ## Althar tools
 
 Althar gives the coordinator an MCP server at `session/new`. Names are
-provisional.
+provisional. From ADR-097's second phase leads get the same tools, the
+commands to start and move tasks included, and the coordinator gets the
+leads' (below): one pool, with only a lead's own task and worktree, and the
+coordinator's denied edit tools, apart.
 
 | Tool | What it does | Kind |
 |---|---|---|
@@ -147,16 +167,16 @@ provisional.
 | `propose_plan` | Steps, a model per step and, where it matters, an effort that model offers, optional steps. An effort it doesn't offer is refused with the ones it does; left out, the step starts at the person's default for the model, or else the model's own | Command |
 | `start_task` | Drafts a mini task and starts it at once: one lead, at an effort as `propose_plan` takes one, no review, nothing outside the project when it is done; a plain task (a quick task), with no branch until its lead changes the repository, and then one that stays on this Mac | Command |
 | `find_pull_requests` | The pull requests in the project's repositories, whoever opened them: open unless said, by author, words in the title, those asking the person's review, or drafts; at most 30 a repository, newest change first. A line each, with its title quoted as data and never its description, and whether Althar opened it (for which task) or a task reviews it already. Each host's list call (`CodeHost.listChanges`), read-only | Read |
-| `review_pull_request` | Starts a review of someone else's pull request, by its link or its number in the project's repository, with the lead it picks: a task on a read-only copy of the pull request's head, whose lead drafts a review the person posts ([06](06-integrations-and-skills.md#reviewing-someone-elses-pull-request)). Asked again, the task still reviewing it; once that one is done, a new review | Command |
+| `review_pull_request` | Starts a review of someone else's pull request, by its link or its number in the project's repository, with the lead it picks: a task on a read-only copy of the pull request's head, whose lead drafts a review the person posts (ADR-097: an outside author's; a team's gets a worktree and runs its code, from its fourth phase) ([06](06-integrations-and-skills.md#reviewing-someone-elses-pull-request)). Asked again, the task still reviewing it; once that one is done, a new review | Command |
 | `list_automations` | The project's automations on this computer: when each runs, what each run does, where it stands, and how its last run went ([ADR-061](../decisions/061-automations-start-ordinary-tasks-on-a-schedule.md)) | Read |
 | `propose_automation`, `change_automation` | An automation as the person asked for it, or a change to one: a name, the prompt each run is asked, days and a time or every hour, the lead, and what each run ends in (nothing, a draft or ready pull request, or reviews of each new pull request). Each on a card in its thread; nothing runs until the person turns it on, and a change that reaches further needs them to turn it on again, with Undo | Command |
 | `pause_automation` | Pauses one when the person says, since it only stops | Command |
 | `resume_automation`, `run_automation_now` | At once in a turn the person's message started, with a line in the thread; otherwise a small card the person presses, since both spend their plan and the coordinator reads text from outside ([ADR-086](../decisions/086-the-coordinator-moves-a-task-on-the-person-s-word-or-asks-on-a-card.md)) | Command |
-| `stop_task`, `hold_task`, `restart_task`, `settle_task` | The person's own buttons on a task, by its slug: Stop (or with `turn`, only its lead's turn), Hold a plan counting down, Start, Resume or Reopen, and done, keep for later or discard (done and keep only for a task that isn't a change). In a turn the person's message started, at once, with a line quoting their words in the coordinator's thread and the task's; in any other, a `task_ask` card with one button that does it as their press, and Not now. Discarding keeps the worktree and branch (ADR-056). `TaskActions.ts` ([ADR-086](../decisions/086-the-coordinator-moves-a-task-on-the-person-s-word-or-asks-on-a-card.md)) | Command |
+| `stop_task`, `hold_task`, `restart_task`, `settle_task` | The person's own buttons on a task, by its slug: Stop (or with `turn`, only its lead's turn), Hold a plan counting down, Start, Resume or Reopen, and done, keep for later or discard (done and keep only for a task that isn't a change). In a turn the person's message started, at once, with a line quoting their words in the coordinator's thread and the task's; in any other, a `task_ask` card with one button that does it as their press, and Not now (ADR-097's second phase: at once in any turn, with the lines, since each can be undone). Discarding keeps the worktree and branch (ADR-056). `TaskActions.ts` ([ADR-086](../decisions/086-the-coordinator-moves-a-task-on-the-person-s-word-or-asks-on-a-card.md)) | Command |
 | `rename_task` | Gives a task another title, as the person can, where its title no longer says what it does; its slug and branch stay, and what the person asked stays in its thread | Command |
 | `make_it_a_change` | A lead's, not the coordinator's: offered only on a quick task not made a change yet, and refused, with why, on any other. Called when the person asks to turn what the lead made into a real thing: a title for what it does now, a reviewer named as `propose_plan` names one (none only where the person said so), and a pull request, a draft or ready for review. Makes its branch where it has none; renames the task and gives its plan, and the run under way, the review and the ending, or opens a round with them where its last run had ended; its thread and the coordinator's news say so. The lead's next `finish_step` goes through the review, then the pull request opens ([ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md)) | Command |
 | `run_project` | Runs the project with no agent, its default or one of what it runs by name: the default branch in a copy of its own, or a task's worktree (ADR-023, ADR-044) | Command |
-| `screenshot` | A picture of a page served on this computer, a run's or a dev server's, drawn offscreen by the desktop app at a viewport, whole or one element; leads have it too (ADR-057) | Read |
+| `screenshot` | A picture of a page served on this computer (any address, from ADR-097's first phase), a run's or a dev server's, drawn offscreen by the desktop app at a viewport, whole or one element; leads have it too (ADR-057) | Read |
 | `set_run_command` | Keeps how a repository runs, its own way to run, for Althar to run it; leads have it too (ADR-023) | Command |
 | `keep_run` | Keeps something more for the project to run by a name and a command, or drops it; leads have it too (ADR-044) | Command |
 | `order_tasks` | Orders a batch | Command |
@@ -182,7 +202,8 @@ review's lead doesn't have it: its draft is what it hands the person.
 The same server serves every session. The read tools are how a lead, a step,
 or an agent that took over a task reads the record its brief left out. Command
 tools are granted per role; a lead gets none of the coordinator's commands,
-and reads the project's other tasks as below.
+and reads the project's other tasks as below. ADR-097's second phase ends
+that split: leads may start tasks and act on them.
 
 ## What a lead sees of other tasks
 
@@ -201,7 +222,8 @@ work to them, and one more:
 
 Only tasks of the same project are found (`taskOf` reads by project). Nothing
 among these tools messages another lead, changes another task or writes in
-another folder: leads still talk to each other only through the coordinator.
+another folder: leads still talk to each other only through the coordinator,
+until ADR-097's second phase gives them the coordinator's commands.
 A review of someone else's pull request isn't given them, since its lead
 reads that pull request's untrusted words and reaches the web, and so reads
 none of the person's work in progress.
@@ -341,8 +363,9 @@ when a batch it planned needs its next task is open.
 
 - The coordinator can run on any agent, and switches like a lead: the new
   agent takes over the whole thread.
-- It is always on and runs on your plan, so its default model matters for
-  cost. Which default is open.
+- It runs on your plan, so its default model matters for cost. Which
+  default is open. A project can do without it (ADR-097): its session
+  starts when the person talks to it, or news it acts on wakes it.
 - When its account runs out, it switches under the project rule like any
   session. Tasks keep running; the coordinator never blocks a task.
 
@@ -361,7 +384,8 @@ in the tools assumes one coordinator: every command carries its actor.
 
 ## Verification gates
 
-- The coordinator cannot change a repository even if its agent tries.
+- The coordinator cannot change a repository even if its agent tries (for
+  tidiness, ADR-097).
 - Every tool call is a recorded, idempotent command with an actor.
 - Rebuilding the session loses no turn of the thread.
 - A handover happens between turns, never in one, and leaves plans, drafts
