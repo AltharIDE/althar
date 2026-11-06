@@ -21,6 +21,7 @@ import { Installs, type OnDevice } from './Installs'
 import type { LoadOptions } from './MachineLoad'
 import type { PlanUsageOptions } from './PlanUsage'
 import type { ModelFactsOptions } from './ModelFacts'
+import type { SkillsConfig } from './Skills'
 
 /** A screenshot an agent asks for: the page, the viewport it is drawn at, and what of it, all of it or one element. */
 export interface Shot {
@@ -54,6 +55,13 @@ export interface RuntimeOptions {
    * nothing is kept, and the thread says so.
    */
   readonly artifactsRoot?: string
+  /**
+   * The shared skills store and the local catalog that seeds it. A task's lead, on any agent whose registry entry
+   * says how (`skills`), is given the active skills for its session alone. Without it, no run has Althar-selected skills. This is one switch for the whole
+   * runtime: there are no per-project bindings or selection yet, so every project's lead gets the same active set.
+   * The per-project `repositoryFiles` rules only govern what reaches a repository, not what a run is given.
+   */
+  readonly skills?: SkillsConfig
   /** Where agents Althar downloads at the person's asking are kept (`Installs.ts`): `<root>/<agent>`. Without it, it downloads none. */
   readonly agentsRoot?: string
   /**
@@ -262,7 +270,8 @@ export interface AgentEntry {
   /**
    * How to reach it from a working directory, with an account's home in its
    * environment (ADR-012); `untrusted`, as the lead of a review of someone
-   * else's pull request, with what keeps that repository's config from running.
+   * else's pull request, with what keeps that repository's config from running;
+   * `skills`, with the run's skills folder where the agent finds it in its environment.
    */
   readonly transport: (cwd: string, env?: Readonly<Record<string, string>>, options?: SessionOptions) => Transport
 }
@@ -341,6 +350,10 @@ export class Agents extends Context.Service<
                 inSandbox: inFlatpakSandbox(spec),
               }) ?? {}
             const held = options.untrusted === true ? { ...readingUntrusted, ...definition.reviewing?.env?.({ ...spec.env, ...own }) } : {}
+            // The run's skills, where the agent finds them through its environment: what it would have, with the folder added.
+            const via = definition.skills?.via
+            const skills =
+              options.skills !== undefined && via?.kind === 'env' ? via.env(options.skills, { ...spec.env, ...own, ...held }) : {}
             return {
               _tag: 'Process' as const,
               spec: {
@@ -350,7 +363,8 @@ export class Agents extends Context.Service<
                   ...withoutSignIns(signedOut),
                   ...own,
                   ...held,
-                  ...definition.sessionEnv?.({ ...spec.env, ...own, ...held }, options),
+                  ...skills,
+                  ...definition.sessionEnv?.({ ...spec.env, ...own, ...held, ...skills }, options),
                   ...env,
                 },
               },

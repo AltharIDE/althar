@@ -5,12 +5,16 @@ import {
   LinkButton,
   ProjectIdentity,
   type ProjectInk,
+  RepositoryFiles,
+  repositoryFilesWords,
   Segmented,
   SettingGroup,
   SettingList,
   SettingRow,
   SettingSwitch,
 } from '@althar/ui'
+
+import { device } from '../../shared/device'
 
 import { contractInk, kitInk } from '../../shared/inks'
 import s from './ProjectSettings.module.css'
@@ -23,8 +27,10 @@ import { useWorkToward } from '../../shared/useWorkToward'
  * is drawn in, changed in place; then where new tasks start (ADR-091), the
  * branch they work toward in each repository (ADR-093), and
  * the switches every task follows, each with one line on when it acts. One
- * that didn't hold says why under it. Allowing everything and what agents may
- * do without asking are rules, so they are with the rules.
+ * that didn't hold says why under it. Whether skill and OpenSpec files a task
+ * commits may stay in its repositories' commits, and be pushed, are three
+ * switches below, each off until turned on. Allowing everything and what
+ * agents may do without asking are rules, so they are with the rules.
  */
 
 export const text = {
@@ -62,7 +68,11 @@ export const text = {
     title: 'Move issues along with their tasks',
     line: 'To In Progress, In Review, then Done',
   },
+  repositoryFiles: 'Repository files',
 }
+
+/** The repository files' words, with this device named as the rest of the window names it. */
+const filesText = repositoryFilesWords(device.this)
 
 /** A switch's note: when it acts, what it does now where it can, and why it didn't hold where it didn't. */
 function SwitchNote({ line, now, failed }: { line?: string; now?: ReactNode; failed: string | null }) {
@@ -217,6 +227,16 @@ export function GeneralSection({
               />
             ))}
           </SettingList>
+        </SettingGroup>
+      )}
+      {rules !== null && (
+        <SettingGroup title={text.repositoryFiles} headingLevel={HEADING.part}>
+          <RepositoryFiles
+            value={rules.repositoryFiles}
+            onChange={model.setRepositoryFile}
+            text={filesText}
+            {...(model.ruleFailed?.rule === 'repositoryFiles' ? { error: model.ruleFailed.message } : {})}
+          />
         </SettingGroup>
       )}
     </>

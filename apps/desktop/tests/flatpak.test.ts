@@ -32,21 +32,14 @@ describe('the Flatpak manifest', () => {
     expect(finish).not.toMatch(/^\s*-\s+--talk-name=org\.freedesktop\.portal\.Secret/m)
   })
 
-  it("reaches the person's skill folders read-only, and nothing else of the home", () => {
+  it('gives the sandbox neither the SSH agent’s socket nor ~/.ssh, and ships the ssh that stands for them (ADR-073)', () => {
     const finish = manifest.slice(manifest.indexOf('finish-args:'), manifest.indexOf('modules:'))
-    expect([...finish.matchAll(/^\s*-\s+--filesystem=(.+)$/gm)].map((grant) => grant[1])).toEqual([
-      '~/.claude/skills:ro',
-      '~/.codex/skills:ro',
-      '~/.agents/skills:ro',
-      '~/.config/opencode/skills:ro',
-    ])
-  })
-
-  it("runs Codex out on the device in the person's own home, where it finds ~/.agents/skills itself", () => {
-    const bridge = readFileSync(join(import.meta.dirname, '..', 'flatpak', 'codex-host.sh'), 'utf8')
-    expect(bridge).toContain('--env="HOME=${home:-')
-    expect(bridge).toContain('--clear-env')
-    // The account's home, by name: $CODEX_HOME/skills is how it finds the ones in ~/.codex/skills.
-    expect(bridge).toMatch(/for name in CODEX_HOME /)
+    expect(finish).not.toMatch(/^\s*-\s+--socket=ssh-auth/m)
+    expect(finish).not.toMatch(/^\s*-\s+--filesystem=[^\n]*\.ssh/m)
+    expect(manifest).toContain('- install -Dm644 known_hosts /app/share/althar/ssh/known_hosts\n')
+    expect(manifest).toContain('- install -Dm755 ssh.sh /app/bin/ssh\n')
+    // The path git.ts names for Althar's own git.
+    expect(manifest).toContain('- install -Dm755 host-ssh.sh /app/bin/althar-host-ssh\n')
+    for (const file of ['known_hosts', 'ssh.sh', 'host-ssh.sh']) expect(manifest).toContain(`        path: ${file}\n`)
   })
 })
