@@ -64,6 +64,13 @@
     as plain `bun`, failing sign-in and sessions alike. In a reader role,
     commands reach Althar's reader rules, which refuse direct and wrapped
     `flatpak-spawn` commands.
+  - **The person's skill folders are in the sandbox, read-only.** The manifest
+    asks for `~/.claude/skills`, `~/.codex/skills`, `~/.agents/skills` and
+    `~/.config/opencode/skills` as `:ro`, each at the same path, and nothing
+    else of the home. Without them the bundled Claude Code, the one agent that
+    runs inside, never sees the person's skills, and an account's home has none
+    to link. A skill that is a link to somewhere else stays out of reach, and a
+    folder made after the app started shows at its next start.
   - **The desktop's tray carries the edge's icon.** The manifest asks for
     `--talk-name=org.kde.StatusNotifierWatcher`, so the StatusNotifierItem
     Electron registers for the tray (edgeWindows.ts) reaches the desktop's

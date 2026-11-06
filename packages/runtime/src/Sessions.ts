@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { type CommandEnvelope, Ids, newId, type ProjectId, type WorksIn } from '@althar/domain'
 import { Commands, type CommandIdReused, Ledger, type RevisionConflict, type RowNotFound } from '@althar/persistence-sqlite'
 import {
+  adapterNode,
   type AgentConnection,
   type AgentDefinition,
   type AgentExited,
@@ -13,11 +14,13 @@ import {
   type AgentSession,
   connect,
   type ConfigOption,
+  inFlatpakSandbox,
   type PermissionDecision,
   type PermissionRequest,
   type Question,
   type SessionEvent,
   type SessionOptions,
+  skillsIn,
   type StopReport,
 } from '@althar/provider-adapters'
 import {
@@ -1656,6 +1659,7 @@ export class Sessions extends Context.Service<
             deliveryId: turnId,
             folders: foldersOf(thread),
             sandboxed: running.requestContext.sandbox !== undefined,
+            ...(thread.role === 'task' ? { lead: running.entry.definition.name } : {}),
           })
           // What it was saying between turns ends here: what follows belongs after this turn's input.
           yield* running.settleBetween
@@ -2612,11 +2616,28 @@ export class Sessions extends Context.Service<
             sessionId,
             folders: foldersOf(thread),
             sandboxed: requestContext.sandbox !== undefined,
+            ...(thread.role === 'task' ? { lead: definition.name } : {}),
           })
           const heard = yield* betweenTurns(between, scope)
           running.settleBetween = heard.close
           // A turn that already started records itself; between turns, this one does.
           running.recording ??= between
+          // An agent that doesn't say what it could see: read where it reads, out on the device as a Flatpak's home is the device's by path (ADR-027). A review's lead loads none of the repository's.
+          const launched = definition.launch(adapterNode())
+          if (thread.role === 'task' && thread.review === null && definition.skillFolders !== undefined)
+            yield* between
+              .record({
+                _tag: 'SkillsSeen',
+                skills: skillsIn(
+                  definition.skillFolders({
+                    env: launched.onDevice === undefined ? process.env : {},
+                    homeDir: homedir(),
+                    cwd: thread.cwd,
+                    inSandbox: inFlatpakSandbox(launched),
+                  }),
+                ),
+              })
+              .pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record the skills an agent could see', cause)))
           yield* Effect.forkIn(
             run(
               Stream.runForEach(agent.events, (event) =>
