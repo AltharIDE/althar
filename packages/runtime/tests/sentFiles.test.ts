@@ -200,8 +200,9 @@ describe('files sent with a message, asked of the runtime', () => {
         )
         assert.isTrue(existsSync(join(request, 'logs', 'a.log')))
 
-        // With the task's folder gone, none of them can be.
-        rmSync(worktree?.path ?? '', { recursive: true, force: true })
+        // With the task's folder removed, none of them can be. Marked so, as Althar's cleanup does: its lead still works in it,
+        // which Windows won't let a folder be deleted from.
+        yield* sql`UPDATE workspaces SET state = 'cleaned', cleaned_at = ${new Date().toISOString()} WHERE path = ${worktree?.path ?? ''}`
         assert.deepStrictEqual(yield* provided(setup, requestFilesForTurn(threadId, taskId)), { files: [], gone: 2 })
         assert.strictEqual(yield* refusal(setup, keepFiles(threadId, [{ grant: yield* grant(join(from, 'spec.pdf')) }])), 'nowhere')
       }),
