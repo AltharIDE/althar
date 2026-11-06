@@ -32,6 +32,7 @@ import { type BoardModel, headVersion } from './useBoard'
 export const text = {
   label: 'Beside the board',
   phase: {
+    drafting: 'Being planned',
     planned: 'Up next',
     held: 'Up next',
     running: 'Running',
