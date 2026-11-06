@@ -1975,8 +1975,6 @@ export class Queries extends Context.Service<
             settledAt: string | null
             keptAt: string | null
             createdAt: string
-            madeInTurn: number
-            madeInOpenTurn: number
             branch: string | null
             planId: string | null
             planState: string | null
@@ -2007,14 +2005,6 @@ export class Queries extends Context.Service<
             toward: string | null
           }>`
             SELECT k.project_id, t.id AS thread_id, k.title, k.slug, k.state, k.settled_at, k.kept_at, k.created_at,
-              -- The coordinator's turn that made it, where one covers its making: still open, or over. A draft's plan comes
-              -- in that turn, and once it is over without one the draft is the person's. Only the coordinator drafts: a lead's
-              -- turn on another task, open or over, says nothing of this draft's plan.
-              EXISTS (SELECT 1 FROM turn_deliveries d JOIN threads h ON h.id = d.thread_id AND h.kind = 'coordinator'
-                WHERE d.project_id = k.project_id AND d.requested_at <= k.created_at
-                  AND coalesce(d.ended_at, '9999') >= k.created_at) AS made_in_turn,
-              EXISTS (SELECT 1 FROM turn_deliveries d JOIN threads h ON h.id = d.thread_id AND h.kind = 'coordinator'
-                WHERE d.project_id = k.project_id AND d.requested_at <= k.created_at AND d.ended_at IS NULL) AS made_in_open_turn,
               ${sql.unsafe(SHOWN_BRANCH)},
               p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at, p.proposed_at,
               r.state AS run_state, r.created_at AS run_at, r.plan_id AS run_plan,
@@ -2069,6 +2059,19 @@ export class Queries extends Context.Service<
             LEFT JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id ORDER BY created_at DESC LIMIT 1)
             WHERE k.id = ${taskId}`
           if (task === undefined) return undefined
+          // The coordinator's turn that made it, where one covers its making: still open, or over. A draft's plan comes in
+          // that turn, and once it is over without one the draft is the person's. Only the coordinator drafts: a lead's turn
+          // on another task, open or over, says nothing of this draft's plan. Read by thread and time, so each uses an index.
+          const [madeIn] = yield* sql<{ madeInTurn: number; madeInOpenTurn: number }>`
+            SELECT
+              EXISTS (SELECT 1 FROM turn_deliveries d
+                WHERE d.thread_id = h.id AND d.requested_at <= ${task.createdAt}
+                  AND coalesce(d.ended_at, '9999') >= ${task.createdAt}) AS madeInTurn,
+              EXISTS (SELECT 1 FROM turn_deliveries d
+                WHERE d.thread_id = h.id AND d.requested_at <= ${task.createdAt} AND d.ended_at IS NULL) AS madeInOpenTurn
+            FROM threads h WHERE h.project_id = ${task.projectId} AND h.kind = 'coordinator' LIMIT 1`
+          const madeInTurn = madeIn?.madeInTurn ?? 0
+          const madeInOpenTurn = madeIn?.madeInOpenTurn ?? 0
           const [latest] = yield* sql<{ content: string }>`
             SELECT content FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'step_result'
               AND json_extract(content, '$.step') IN ('implement', 'settle') ORDER BY sequence DESC LIMIT 1`
@@ -2166,7 +2169,7 @@ export class Queries extends Context.Service<
             task.turns === 0 &&
             task.firstSession === null &&
             stillDrafting(task.createdAt, yield* Clock.currentTimeMillis, draftingMs) &&
-            (task.madeInOpenTurn === 1 || task.madeInTurn === 0)
+            (madeInOpenTurn === 1 || madeInTurn === 0)
           const ready = ((): TaskPhase => {
             if (task.state === 'abandoned') return 'settled'
             if (task.planState === 'proposed') return task.startsAt === null ? 'held' : 'planned'
