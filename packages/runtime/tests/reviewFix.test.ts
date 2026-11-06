@@ -198,6 +198,28 @@ describe('a review made a change that fixes what it found', () => {
         yield* callTool(lead, 'make_it_a_change', { title: 'Again', review: REVIEW, output: 'draft' }),
         'The review is a change now',
       )
+      // The session that read it keeps to reading until it stops, settle_task included; a fresh one is a task's lead.
+      for (const tool of ['finish_step', 'settle_task', 'set_run_command'])
+        assert.include(yield* callTool(lead, tool, {}), 'this one only read it')
+      const [fresh] = yield* until(
+        sql<{ id: string }>`
+          SELECT id FROM provider_sessions WHERE thread_id = ${started.threadId}
+            AND rowid > (SELECT rowid FROM provider_sessions WHERE id = ${lead.sessionId})`,
+        (rows) => rows.length > 0,
+      )
+      assert.isDefined(fresh)
+      const ran = yield* callTool({ ...lead, sessionId: fresh!.id }, 'set_run_command', {})
+      assert.notInclude(ran, 'only read it')
+      assert.notInclude(ran, 'isn’t for a review')
+      // Its pull request, with its fixes, is reviewed afresh when asked: the fix drafts no review.
+      const again = yield* (yield* Reviews).start({
+        envelope: yield* Runtime.envelope('review.start', {}),
+        projectId,
+        pullRequest: '#1',
+        lead: { agentId: 'claude-code', model: null },
+      })
+      assert.isFalse(again.already)
+      assert.notStrictEqual(again.taskId, started.taskId)
     }).pipe(Effect.provide(withQueries(github)))
   })
 
@@ -271,7 +293,10 @@ describe('a review made a change that fixes what it found', () => {
       assert.notInclude(description, 'No test covers the courier failing.')
       assert.include(description, 'Sends the order back when the courier can’t deliver it.')
       assert.include(description, 'Fix the blocking one and the naming nit.')
-      assert.include(description, 'fixed, with its commit, or declined, with why')
+      assert.include(
+        description,
+        'In finish_step’s summary, give each a line of its own, by its number: fixed, with the commit that fixed it, or set aside, with why.',
+      )
     }).pipe(Effect.provide(withQueries(github)))
   })
 })

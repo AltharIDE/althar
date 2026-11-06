@@ -1006,11 +1006,15 @@ flowchart TD
   says which before work starts. The pull request's own branch where it is
   on the repository itself, the account can push there, and its author is
   one of the repository's people: the task attaches to the pull request
-  (ADR-052), by its number, at its head, so it follows its reviews, checks
+  (ADR-052), exactly the one it reviewed (its connection, repository and
+  number, never a fork's pull request of the same number), at its head, so
+  it follows its reviews, checks
   and conflicts, and its plan ends with the branch pushed. Otherwise a branch
   of its own, with its own pull request into the reviewed pull request's
   branch, or into its base for one from a fork (Althar never pushes to a
-  fork, ADR-052), or where the person said so (`into: base`). An outside
+  fork, ADR-052, even where its author allows maintainers to and the person
+  says `their_branch`: the line says so), or where the person said so
+  (`into: base`). An outside
   author's branch, even on the repository, is pushed to only on the person's
   word (`their_branch`), as `update_branch` asks. Where attaching is refused
   after all, its work goes on its own branch, and the thread says why.
@@ -1028,8 +1032,10 @@ flowchart TD
   named, by their number in the draft or `all`), the review's summary, the
   pull request's description as its author's words, marked as data from
   outside where it is, and what the person said. Each finding gets an
-  outcome in the lead's report, as a settle's does: fixed, with its commit,
-  or declined, with why. It is renamed for what the change does ("Fix #12:
+  outcome, a line of its own in the implement step's summary: fixed, with
+  its commit, or set aside, with why. They aren't findings rows, which only
+  a review in the task's own run makes, so finish_step's `findings` stay for
+  settling the review that follows. It is renamed for what the change does ("Fix #12:
   …" where nothing else is named).
 - **Its plan** no longer only reads (`reads` goes): an implement step, its
   lead's agent and model, then the review the lead or the coordinator names,

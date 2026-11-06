@@ -273,6 +273,12 @@ export type Published = ReadonlyArray<PublishedOne>
 export interface AttachInput {
   readonly taskId: string
   readonly pullRequest: string
+  /**
+   * The pull request exactly, as a review keeps it: on this connection, of
+   * this repository (the task's own, or the one its fork came from), whatever
+   * `pullRequest` says. Never the fork's pull request of the same number.
+   */
+  readonly exactly?: { readonly connectionId: string; readonly path: ReadonlyArray<string>; readonly number: number } | undefined
   readonly start?: boolean | undefined
   readonly actorId: ActorId
 }
@@ -1734,6 +1740,17 @@ export class Changes extends Context.Service<
           const same = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) => a.join('/').toLowerCase() === b.join('/').toLowerCase()
           const asked = input.pullRequest.trim()
           const chosen = yield* Effect.gen(function* () {
+            const exactly = input.exactly
+            if (exactly !== undefined) {
+              const place = places.find(
+                (one) =>
+                  one.found.connectionId === exactly.connectionId &&
+                  (same(one.found.path, exactly.path) || (one.fork !== null && same(one.fork.upstream.path, exactly.path))),
+              )
+              if (place === undefined)
+                return yield* refuse(`That pull request is on ${exactly.path.join('/')}, which isn’t one of the task’s repositories.`)
+              return { ...place, path: exactly.path, number: exactly.number }
+            }
             if (/^https?:\/\//i.test(asked)) {
               const resolved = yield* connections.resolve(asked)
               if (resolved === null)

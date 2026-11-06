@@ -76,6 +76,8 @@ export interface ReviewDraftText {
   fixing: (where: string) => string
   /** Adds a line to the summary saying fixes are coming. */
   addNote: string
+  /** Posted, and its task is fixing what it found now: where, as Althar decided. */
+  fixingPosted: (where: string) => string
   postAgain: string
   /** The edit form's name. */
   editing: string
@@ -125,6 +127,7 @@ export const reviewDraftText: ReviewDraftText = {
   fix: 'Fix these',
   fixing: (where) => `Being fixed ${where}. Post this review as it is, with a note, or discard it.`,
   addNote: 'Add a note that fixes are coming',
+  fixingPosted: (where) => `Its findings are being fixed ${where}.`,
   postAgain: 'Post again',
   editing: 'Edit the review draft',
   summaryLabel: 'Summary',
@@ -279,6 +282,12 @@ export function ReviewDraft({
             </a>
           )}
           {onFix && fixing === undefined && <LinkButton onClick={onFix}>{t.fix}</LinkButton>}
+          {fixing !== undefined && (
+            <span className={s.fixingPosted}>
+              <Icon name="branch" size={12} className={s.lock} />
+              <span>{t.fixingPosted(fixing)}</span>
+            </span>
+          )}
         </article>
       )
     }

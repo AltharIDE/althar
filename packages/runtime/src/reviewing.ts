@@ -102,6 +102,22 @@ export const reviewOf = (taskId: string) =>
   })
 
 /**
+ * Whether `sessionId` is the session that read a review made a change since:
+ * one that started before the task was made one. It keeps a review lead's
+ * tools until it stops as its turn ends, in a copy that only reads; the fresh
+ * lead the run starts after it is a task's like any other.
+ */
+export const handingOver = (taskId: string, sessionId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [reading] = yield* sql<{ id: string }>`
+      SELECT s.id FROM provider_sessions s JOIN record_events e ON e.aggregate_type = 'task' AND e.aggregate_id = ${taskId}
+        AND e.type = 'task.made_change' AND json_extract(e.payload, '$.from') = 'review'
+      WHERE s.id = ${sessionId} AND s.started_at <= e.occurred_at LIMIT 1`
+    return reading !== undefined
+  })
+
+/**
  * Makes a review's copy in a new folder: the pull request's head, checked
  * out detached in a repository of its own (`addReadCopy`), with its head and
  * where its change starts as refs of the copy's (`refs/althar/review/…`). The

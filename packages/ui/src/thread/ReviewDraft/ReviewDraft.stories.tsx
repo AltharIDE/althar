@@ -414,7 +414,7 @@ export const ToFix: Story = {
 export const BeingFixed: Story = {
   args: {
     fixing:
-      'on a branch of its own, althar/fix-1212, with its own pull request into main: #1212’s branch is on a fork, where Althar can’t push',
+      'on a branch of its own, althar/fix-1212, with its own pull request into main: #1212’s branch is on a fork, which Althar doesn’t push to',
     onFix: fn(),
     onNote: fn(),
   },
@@ -422,7 +422,7 @@ export const BeingFixed: Story = {
     const c = within(canvasElement)
     await expect(
       c.getByText(
-        'Being fixed on a branch of its own, althar/fix-1212, with its own pull request into main: #1212’s branch is on a fork, where Althar can’t push. Post this review as it is, with a note, or discard it.',
+        'Being fixed on a branch of its own, althar/fix-1212, with its own pull request into main: #1212’s branch is on a fork, which Althar doesn’t push to. Post this review as it is, with a note, or discard it.',
       ),
     ).toBeInTheDocument()
     await expect(c.queryByRole('button', { name: 'Fix these' })).not.toBeInTheDocument()
@@ -439,5 +439,22 @@ export const PostedToFix: Story = {
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('button', { name: 'Fix these' }))
     await expect(args.onFix).toHaveBeenCalled()
+  },
+}
+
+/** Posted, and its findings are being fixed now: where, under the line. */
+export const PostedBeingFixed: Story = {
+  args: {
+    state: ReviewDraftState.Posted,
+    review: POSTED_REVIEW,
+    fixing: 'on #1212’s own branch, retry-webhooks, which Althar pushes to once it’s reviewed',
+    onFix: fn(),
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(
+      c.getByText('Its findings are being fixed on #1212’s own branch, retry-webhooks, which Althar pushes to once it’s reviewed.'),
+    ).toBeInTheDocument()
+    await expect(c.queryByRole('button', { name: 'Fix these' })).not.toBeInTheDocument()
   },
 }

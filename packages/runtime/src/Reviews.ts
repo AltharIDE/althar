@@ -21,7 +21,17 @@ import { logForLead, logPage, readLog } from './checkLogs'
 import { checksLine, checksOf, commentLine, nameOf, quoted, reviewLine, signed, standing } from './pullRequestWords'
 import { change, fact, timestamp } from './records'
 import { automationOf, linkTask } from './automated'
-import { copyReviewed, LOGS_SHOWN, type ReviewOf, reviewedOf, reviewOf, type Reviewed, SAID_SHOWN } from './reviewing'
+import {
+  copyReviewed,
+  handingOver,
+  LOGS_SHOWN,
+  madeChangeIn,
+  type ReviewOf,
+  reviewedOf,
+  reviewOf,
+  type Reviewed,
+  SAID_SHOWN,
+} from './reviewing'
 import { indexTask } from './Search'
 import { Sessions } from './Sessions'
 import { LeftBehind } from './LeftBehind'
@@ -419,11 +429,13 @@ export class Reviews extends Context.Service<
             if (pull.state !== 'open') return yield* refused(`That ${name} is ${pull.state}, so there’s nothing to review.`)
             const outside = fromOutside(pull)
             const author = pull.author?.login ?? 'ghost'
-            // One already reviewing it, still open, is the one: asked twice, nothing starts twice.
+            // One already reviewing it, still open, is the one: asked twice, nothing starts twice. Not one made a change that fixes
+            // what it found, which keeps its link but drafts no review: the pull request with its fixes is reviewed afresh.
             const [already] = yield* sql<{ taskId: string; slug: string; threadId: string }>`
               SELECT k.id AS task_id, k.slug, t.id AS thread_id FROM external_links x
               JOIN tasks k ON k.id = x.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
               WHERE x.project_id = ${input.projectId} AND x.kind = 'review' AND x.url = ${pull.url} AND k.state = 'open'
+                AND NOT ${sql.unsafe(madeChangeIn('k'))}
               ORDER BY k.created_at DESC LIMIT 1`
             // An automation's review posts itself where the person let its reviews; anyone else's, where their setting does.
             const [automated] =
@@ -1168,17 +1180,23 @@ export class Reviews extends Context.Service<
       // A review's lead reads the pull request and drafts its review, and nothing else: every lead tool that isn't one a review
       // is given (`inReview`) is refused to it, listed or not, as it could change the project or reach outside it (keep how the
       // project runs, which Althar later runs outside any sandbox; reply or push; finish a step). Read from the task each call.
+      // The session that read a review made a change since keeps to these until it stops: the fresh lead after it has the rest.
+      // Of a review's own, only what reads is left to it then: settle_task would settle the change.
+      const onlyReads = (tool: { readonly inReview?: boolean; readonly name: string }) =>
+        tool.inReview === true && tool.name !== 'settle_task' && tool.name !== 'draft_review'
       yield* toolServer.guard('lead', (tool, access) =>
-        tool.inReview === true
+        onlyReads(tool)
           ? Effect.succeed(null)
-          : provide(reviewOf(access.taskId ?? '')).pipe(
-              Effect.map((review) =>
-                review === null
-                  ? null
-                  : `This task reviews someone else’s pull request: you read it, with read_pull_request for what it says, and finish it with draft_review, which the person posts. ${tool.name} isn’t for a review.`,
-              ),
-              Effect.orElseSucceed(() => 'Althar couldn’t tell whether this task may use that. Try again, or tell the person.'),
-            ),
+          : provide(
+              Effect.gen(function* () {
+                const taskId = access.taskId ?? ''
+                if (yield* handingOver(taskId, access.sessionId))
+                  return `This review is a change now, which a fresh session starts on in a worktree of its own once your turn ends: this one only read it, so ${tool.name} isn’t for it. End your turn.`
+                if (tool.inReview !== true && (yield* reviewOf(taskId)) !== null)
+                  return `This task reviews someone else’s pull request: you read it, with read_pull_request for what it says, and finish it with draft_review, which the person posts. ${tool.name} isn’t for a review.`
+                return null
+              }),
+            ).pipe(Effect.orElseSucceed(() => 'Althar couldn’t tell whether this task may use that. Try again, or tell the person.')),
       )
 
       yield* toolServer.serve('lead', [
