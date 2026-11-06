@@ -270,7 +270,7 @@ export enum PermissionPolicy {
 
 /** What happens to a task when its runtime's account runs out. */
 export enum LimitPolicy {
-  /** Move the work to the next agent free. */
+  /** Move the work to the best free model. */
   Move = 'move',
   /** Keep its place and resume after the reset. */
   Wait = 'wait',

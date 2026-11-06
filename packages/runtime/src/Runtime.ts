@@ -110,11 +110,8 @@ export const layer = (options: RuntimeLayerOptions) => {
   // The models each agent offers, read from its sessions, or asked of it once: sessions name them to the coordinator.
   // Whether the computer is online, as the app says, and whether an agent's service answers (ADR-060).
   const connected = startupLayer('connectivity', Connectivity.layer).pipe(Layer.provideMerge(base))
-  const able = Layer.mergeAll(
-    startupLayer('limits', Limits.layer),
-    startupLayer('models', Models.layer),
-    startupLayer('planusage', PlanUsage.layer),
-  ).pipe(
+  const able = Layer.mergeAll(startupLayer('limits', Limits.layer), startupLayer('planusage', PlanUsage.layer)).pipe(
+    Layer.provideMerge(startupLayer('models', Models.layer)),
     Layer.provideMerge(
       startupLayer('signins', SignIns.layer).pipe(
         Layer.provideMerge(

@@ -3083,7 +3083,11 @@ export class Sessions extends Context.Service<
                 repository.baseCommit === null ? '' : yield* quiet(git(repository.worktree, 'diff', '--stat', repository.baseCommit))
               const status = yield* quiet(git(repository.worktree, 'status', '--short'))
               const named = (text: string) => (several && text !== '' ? `${repository.name}:\n${text}` : text)
-              return { changed: named(changed), status: named(status) }
+              const commits =
+                why.kind === 'start' || repository.baseCommit === null
+                  ? ''
+                  : yield* quiet(git(repository.worktree, 'log', '--oneline', '-20', `${repository.baseCommit}..HEAD`))
+              return { changed: named(changed), status: named(status), commits: named(commits) }
             }),
           )
           // Whether each branch is published, as Althar knows it, not as an unfetched remote says: its pull request's head, else what
@@ -3123,6 +3127,7 @@ export class Sessions extends Context.Service<
             }),
           )
           const changed = states.flatMap((state) => (state.changed === '' ? [] : [state.changed])).join('\n')
+          const commits = states.flatMap((state) => (state.commits === '' ? [] : [state.commits])).join('\n')
           const status = states.flatMap((state) => (state.status === '' ? [] : [state.status])).join('\n')
           const where = (repository: TaskRepository) =>
             `${repository.worktree}, ${repository.branched === 0 ? 'with no branch yet, at' : `on the branch ${repository.branch}, which started from`} ${repository.baseRef}${repository.baseCommit === null ? '' : ` at ${repository.baseCommit.slice(0, 12)}`}${repository.toward === null ? '' : `. Its work goes into ${repository.toward}, not ${repository.defaultBranch}: its pull request goes there, and ${repository.toward} is what you bring in to keep it current`}${repository.within === null ? '' : `. The project is its folder ${repository.within}: start there, and change the rest of the repository where the task needs it`}`
@@ -3240,6 +3245,7 @@ export class Sessions extends Context.Service<
             // A question shows on the person's cards as its headline; the whole of it is in the thread (Questions.ts).
             'When you ask the person something, make the question one line, the decision in a few words, with options where there are any; put the background in what you write just before, which stays in the thread.',
             ...(entries.length === 0 ? [] : [`The plan:\n${entries.map((entry) => `- [${entry.status}] ${entry.content}`).join('\n')}`]),
+            ...(commits === '' ? [] : [`Commits so far:\n${cap(commits)}`]),
             ...(changed === '' ? [] : [`Changed since the start:\n${cap(changed)}`]),
             ...(status === '' ? [] : [`Not yet committed:\n${cap(status)}`]),
             ...(yield* threadSoFar(thread.threadId)),

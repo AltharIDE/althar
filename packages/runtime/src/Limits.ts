@@ -1,4 +1,4 @@
-import { modelName } from '@althar/contracts'
+import { isAgentDefault, modelName } from '@althar/contracts'
 import { type ConfigOption, leftOf, tightestWindow, type UsageWindow, type WindowKind } from '@althar/provider-adapters'
 import type { ProjectId } from '@althar/domain'
 import { Clock, Context, Duration, Effect, Layer, Option, Schema } from 'effect'
@@ -10,6 +10,10 @@ import { NotFound } from './errors'
 import { accountsOf, Policies } from './Policies'
 import { timestamp } from './records'
 import { SignIns } from './SignIns'
+import { Models } from './Models'
+import { ModelFacts } from './ModelFacts'
+import { makerOf } from './modelMaker'
+import { Installs, isInstalled } from './Installs'
 
 /*
  * Usage limits (docs/architecture/03 and 05, ADR-012): which accounts are
@@ -155,6 +159,16 @@ export const outWords = (input: {
 /** Words that open a sentence. */
 export const capitalized = (words: string) => `${words.charAt(0).toUpperCase()}${words.slice(1)}`
 
+export interface ModelChoice {
+  readonly agentId: string
+  readonly model: string | null
+}
+
+export interface Takeover extends ModelChoice {
+  readonly ownWork: boolean
+  readonly accountId: string
+}
+
 type Failure = SqlError.SqlError | Schema.SchemaError
 
 export class Limits extends Context.Service<
@@ -203,19 +217,19 @@ export class Limits extends Context.Service<
       readonly planOnly?: boolean
     }): Effect.Effect<Account, Failure | NotFound | PlanOnly>
     /**
-     * The first agent free to take work over, besides those given: signed in
-     * on a plan, not out, in the agents' order; one the work would rather not
-     * go to (the other step's) only if none else is free. One with room comes
-     * before one nearly out, which is taken only where `withRoom` isn't asked.
-     * An agent paid per use, on a key, is never moved to unasked: that spends
-     * the person's money.
+     * The strongest free model on a plan, besides the agents given. Models
+     * from the other step's maker come last, even on another agent. Room
+     * comes before strength; known scores before preferences. Never spends
+     * on a key unasked. The chosen model travels with its agent.
      */
-    free(
-      besides: ReadonlyArray<string>,
-      rather?: ReadonlyArray<string>,
-      projectId?: string,
-      withRoom?: boolean,
-    ): Effect.Effect<string | undefined, Failure>
+    free(input: {
+      readonly besides: ReadonlyArray<string>
+      readonly projectId?: string
+      readonly withRoom?: boolean
+      readonly planned?: ModelChoice
+      readonly from?: ModelChoice
+      readonly other?: ModelChoice
+    }): Effect.Effect<Takeover | undefined, Failure>
     /**
      * Who could take over work a usage limit stopped, as the person picks
      * (the project's rule asks): every account of every agent the project
@@ -238,14 +252,14 @@ export class Limits extends Context.Service<
      */
     canTakeOver(choices: ReadonlyArray<{ readonly agentId: string; readonly accountId: string }>): Effect.Effect<boolean, Failure>
     /**
-     * The model an agent takes work over on: the one the plan named for it on
-     * the step, else the last it ran in the project, else its own default.
+     * The strongest free model on the agent, using the takeover ranking.
+     * Same-agent account rotation preserves the plan's selected model.
      */
     modelFor(input: {
       readonly agentId: string
       readonly projectId: string
       readonly planned?: { readonly agentId: string; readonly model: string | null }
-    }): Effect.Effect<string | null, SqlError.SqlError>
+    }): Effect.Effect<string | null, Failure>
     /**
      * An agent's name, with the account's where it has more than one, and a
      * model's as a list of every agent's models names it, from the agent's
@@ -258,7 +272,11 @@ export class Limits extends Context.Service<
     ): Effect.Effect<{ readonly agent: string; readonly model: string | null }, SqlError.SqlError>
   }
 >()('@althar/runtime/Limits') {
-  static readonly layer: Layer.Layer<Limits, never, SqlClient.SqlClient | Agents | SignIns | Accounts | Policies> = Layer.effect(
+  static readonly layer: Layer.Layer<
+    Limits,
+    never,
+    SqlClient.SqlClient | Agents | SignIns | Accounts | Policies | Models | ModelFacts | Installs
+  > = Layer.effect(
     Limits,
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -266,6 +284,9 @@ export class Limits extends Context.Service<
       const signIns = yield* SignIns
       const accounts = yield* Accounts
       const policies = yield* Policies
+      const models = yield* Models
+      const facts = yield* ModelFacts
+      const installs = yield* Installs
 
       /** The agent's accounts the project allows, in the person's order: every one, unless its rules name some. */
       const allowed = (agentId: string, projectId?: string) =>
@@ -392,7 +413,7 @@ export class Limits extends Context.Service<
           return found
         })
 
-      const modelFor = (input: {
+      const preferredModel = (input: {
         readonly agentId: string
         readonly projectId: string
         readonly planned?: { readonly agentId: string; readonly model: string | null }
@@ -403,6 +424,114 @@ export class Limits extends Context.Service<
             SELECT model FROM provider_sessions WHERE project_id = ${input.projectId} AND agent_id = ${input.agentId} AND model IS NOT NULL
             ORDER BY started_at DESC LIMIT 1`
           return last?.model ?? null
+        })
+
+      /** One ranking for both picking an agent and picking its model. */
+      const ranked = (input: {
+        readonly projectId?: string
+        readonly planned?: ModelChoice
+        readonly from?: ModelChoice
+        readonly other?: ModelChoice
+        readonly besides?: ReadonlyArray<string>
+        readonly only?: string
+        readonly withRoom?: boolean
+      }) =>
+        Effect.gen(function* () {
+          const catalog = yield* models.catalog
+          const makerFor = (choice: ModelChoice | undefined) => {
+            if (choice === undefined) return null
+            const agent = agents.list.find((entry) => entry.definition.id === choice.agentId)
+            const offered = catalog.find((one) => one.agentId === choice.agentId)
+            const model = offered?.models.find((one) => one.id === (choice.model ?? offered.model))
+            return makerOf(agent === undefined || model === undefined ? null : facts.of(agent.definition, model), choice.agentId, model)
+          }
+          const otherMaker = makerFor(input.other)
+          const fromMaker = makerFor(input.from ?? input.planned)
+          const found: Array<Takeover & { low: boolean; sameMaker: boolean; score: number; preferred: boolean }> = []
+          for (const entry of agents.list) {
+            const agentId = entry.definition.id
+            if (
+              input.besides?.includes(agentId) ||
+              (input.only !== undefined && input.only !== agentId) ||
+              !isInstalled(installs, entry.definition)
+            )
+              continue
+            const offered = catalog.find((one) => one.agentId === agentId)
+            const preferred =
+              input.projectId === undefined
+                ? null
+                : yield* preferredModel({
+                    agentId,
+                    projectId: input.projectId,
+                    ...(input.planned === undefined ? {} : { planned: input.planned }),
+                  })
+            const known = (offered?.models ?? []).filter((one) => !isAgentDefault(one) && !offered?.blocked.includes(one.id))
+            // Until the agent's models are known it can still take work on its own default.
+            const candidates =
+              known.length > 0 ? known : offered?.models.length ? [] : [{ id: preferred, name: preferred ?? entry.definition.name }]
+            for (const model of candidates) {
+              const fact = model.id === null ? null : facts.of(entry.definition, { id: model.id, name: model.name })
+              const maker = makerOf(fact, agentId, model.id === null ? undefined : { id: model.id, name: model.name })
+              const ownWork =
+                input.other !== undefined &&
+                (otherMaker !== null && maker !== null ? maker === otherMaker : agentId === input.other.agentId)
+              // Scores are the same Artificial Analysis indices list_models shows. Coding
+              // and agentic weigh equally for a task step; intelligence breaks a tie.
+              const score =
+                fact === null
+                  ? -1
+                  : ((fact.coding ?? fact.intelligence ?? -1) + (fact.agentic ?? fact.intelligence ?? -1)) / 2 +
+                    (fact.intelligence ?? 0) / 1000
+              let room: boolean | undefined
+              let accountId: string | undefined
+              for (const account of yield* byRoom(yield* runnable(agentId, input.projectId), model.id ?? undefined)) {
+                if (Option.isSome(yield* outOf(account))) continue
+                const status = yield* signIns.account(account)
+                const through = model.id === null ? undefined : entry.definition.signIn.providers?.of(model.id)
+                const providers = through === undefined ? [] : ((yield* signIns.providers(account, status)) ?? [])
+                if (providers.some((one) => one.id === through && one.refusedAt !== null)) continue
+                const plan =
+                  status.paidBy === 'plan' ||
+                  (through !== undefined &&
+                    (entry.definition.signIn.providers?.plans ?? []).includes(through) &&
+                    providers.some((one) => one.id === through))
+                if (!plan) continue
+                const reading = yield* roomOf(account, model.id === null ? undefined : `${model.id} ${model.name}`)
+                if (Option.isSome(reading) && reading.value.leftPercent <= 0) continue
+                const low = nearly(reading)
+                if (accountId === undefined || (room === true && !low)) {
+                  room = low
+                  accountId = account.id
+                }
+              }
+              if (room === undefined || accountId === undefined || (input.withRoom === true && room)) continue
+              found.push({
+                agentId,
+                model: model.id,
+                ownWork,
+                accountId,
+                sameMaker: fromMaker !== null && maker === fromMaker,
+                low: room,
+                score,
+                preferred: model.id === preferred || (preferred === null && model.id === offered?.model),
+              })
+            }
+          }
+          return found.toSorted(
+            (a, b) =>
+              Number(a.ownWork) - Number(b.ownWork) ||
+              Number(a.sameMaker) - Number(b.sameMaker) ||
+              Number(a.low) - Number(b.low) ||
+              b.score - a.score ||
+              Number(b.preferred) - Number(a.preferred),
+          )
+        })
+
+      const modelFor = (input: { readonly agentId: string; readonly projectId: string; readonly planned?: ModelChoice }) =>
+        Effect.gen(function* () {
+          // Same-agent account rotation keeps the step's selected model.
+          if (input.planned?.agentId === input.agentId && input.planned.model !== null) return input.planned.model
+          return (yield* ranked({ ...input, only: input.agentId }))[0]?.model ?? (yield* preferredModel(input))
         })
 
       const out = (agentId: string, projectId?: string, threadId?: string) =>
@@ -482,22 +611,12 @@ export class Limits extends Context.Service<
             const [first] = list
             return first ?? (yield* new NotFound({ kind: 'account', id: input.agentId }))
           }),
-        free: (besides, rather = [], projectId, withRoom = false) =>
-          Effect.gen(function* () {
-            const candidates = agents.list.map((entry) => entry.definition.id).filter((agentId) => !besides.includes(agentId))
-            // The first nearly out, taken only where none has room.
-            let low: string | undefined
-            // Those the work would rather not go to come last.
-            for (const agentId of [...candidates.filter((id) => !rather.includes(id)), ...candidates.filter((id) => rather.includes(id))]) {
-              // Another agent takes work over unasked only on an account its plan pays for.
-              for (const account of yield* runnable(agentId, projectId)) {
-                if ((yield* signIns.account(account)).paidBy !== 'plan') continue
-                if (Option.isSome(yield* outOf(account))) continue
-                if (!nearly(yield* roomOf(account))) return agentId
-                low ??= agentId
-              }
-            }
-            return withRoom ? undefined : low
+        free: (input) =>
+          Effect.map(ranked(input), (list) => {
+            const first = list[0]
+            return first === undefined
+              ? undefined
+              : { agentId: first.agentId, model: first.model, ownWork: first.ownWork, accountId: first.accountId }
           }),
         choices: (input) =>
           Effect.gen(function* () {
@@ -505,7 +624,7 @@ export class Limits extends Context.Service<
             const rather = input.rather ?? []
             const found: Array<{ readonly agentId: string; readonly accountId: string; readonly model: string | null }> = []
             for (const agentId of [...ids.filter((id) => !rather.includes(id)), ...ids.filter((id) => rather.includes(id))]) {
-              const model = yield* modelFor({
+              const model = yield* preferredModel({
                 agentId,
                 projectId: input.projectId,
                 ...(input.planned === undefined ? {} : { planned: input.planned }),
@@ -537,7 +656,8 @@ export class Limits extends Context.Service<
             const options =
               latest === undefined ? [] : ((JSON.parse(latest.config) as { options?: ReadonlyArray<ConfigOption> }).options ?? [])
             const offered = options.flatMap((option) => option.choices ?? []).find((choice) => choice.value === model)
-            return { agent, model: offered === undefined ? model : modelName(agent, { id: model, name: offered.name }).name }
+            const catalog = (yield* models.catalog).find((one) => one.agentId === agentId)?.models.find((one) => one.id === model)
+            return { agent, model: modelName(agent, { id: model, name: catalog?.name ?? offered?.name ?? model }).name }
           }),
       })
     }),

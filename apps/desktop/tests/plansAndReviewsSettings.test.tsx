@@ -62,7 +62,7 @@ describe('new projects', () => {
     withServices(<Settings section="new-projects" />, client)
     const page = screen.getByRole('main')
     expect((await within(page).findByRole('combobox', { name: 'Permission requests' })).textContent).toBe('Allow, except what you keep')
-    expect(within(page).getByRole('combobox', { name: 'When an account runs out' }).textContent).toBe('Move to the next agent')
+    expect(within(page).getByRole('combobox', { name: 'When an account runs out' }).textContent).toBe('Move to the best free model')
     expect(within(page).getByRole('combobox', { name: 'When a task is done' }).textContent).toBe('Open a draft pull request')
     await choose(page, 'Permission requests', 'The coordinator decides')
     expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ permissions: 'coordinator' })

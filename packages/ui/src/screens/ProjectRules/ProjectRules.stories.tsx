@@ -391,7 +391,7 @@ export const ChoosingALimit: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
     const page = within(document.body)
-    await userEvent.click(c.getByRole('button', { name: 'moves to the next agent free' }))
+    await userEvent.click(c.getByRole('button', { name: 'moves to the best free model' }))
     await expect(await page.findAllByRole('menuitemradio')).toHaveLength(3)
     await userEvent.click(page.getByRole('menuitemradio', { name: 'Ask me' }))
     await expect(args.onLimitChange).toHaveBeenCalledWith(LimitPolicy.Ask)
