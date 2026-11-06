@@ -1,9 +1,10 @@
 // Scrappy: E's seams on the real screens: a conversation's face with the page beside it on its workbench, and its composer with
-// the page's comments in it, sent with what the person writes.
+// the page's comments in it, sent with what the person writes, each with its card on hover.
 import { Composer as BuiltComposer, type ComposerProps } from '../../../src/composer/Composer/Composer'
 import { TaskFace as BuiltFace, type TaskFaceProps } from '../../../src/thread/TaskFace/TaskFace'
 import { shown } from '../addresses'
 import { Beside, benchWidth } from '../parts/Beside'
+import { Chips } from '../parts/Chips'
 import { destinationOfThread, proto, sideScope, threadHere, useProto } from '../state'
 
 export function BesideFace(props: TaskFaceProps) {
@@ -28,20 +29,22 @@ export function BesideComposer(props: ComposerProps) {
     props.onChange?.('')
   }
   return (
-    <BuiltComposer
-      {...props}
-      files={[
-        ...comments.map((one, at) => ({
-          id: one.id,
-          name: `${at + 1}. ${one.note}`,
-          meta: pages > 1 ? `${one.label} · ${shown(one.address)}` : one.label,
-          reading: one.crop === 'drawing',
-        })),
-        ...(props.files ?? []),
-      ]}
-      onRemoveFile={(id) => (mine.has(id) ? proto.remove(id) : props.onRemoveFile?.(id))}
-      onSubmit={send}
-      onSendNow={send}
-    />
+    <Chips comments={comments}>
+      <BuiltComposer
+        {...props}
+        files={[
+          ...comments.map((one, at) => ({
+            id: one.id,
+            name: `${at + 1}. ${one.note}`,
+            meta: pages > 1 ? `${one.label} · ${shown(one.address)}` : one.label,
+            reading: one.crop === 'drawing',
+          })),
+          ...(props.files ?? []),
+        ]}
+        onRemoveFile={(id) => (mine.has(id) ? proto.remove(id) : props.onRemoveFile?.(id))}
+        onSubmit={send}
+        onSendNow={send}
+      />
+    </Chips>
   )
 }

@@ -275,7 +275,7 @@
     "id": "E1",
     "page": "?d=E#/threads/th1",
     "steps": ["key:c", "wait:600", "a[href=\"http://localhost:5321/\"]", "wait:1800"],
-    "caption": "E · The run's link in the thread opens the page on the conversation's workbench, where documents and files open: the conversation stays beside it, the page at the panel's width. The bar: back, forward, reload, the address in the task's session, Comment, Open in your browser, Open as a tab, Close."
+    "caption": "E · The run's link in the thread opens the page on the conversation's workbench, where documents and files open: the conversation stays beside it, the page at the panel's width. The bar: back, forward, reload, the address in the task's session, Viewport, Comment, Open in your browser, Open as a tab, Close."
   },
   {
     "id": "E2",
@@ -393,5 +393,134 @@
     "page": "?d=E#/projects/p1?room=both",
     "steps": ["wait:600", "a[href=\"http://localhost:5320/\"]", "wait:2000"],
     "caption": "E · From the coordinator's conversation: main's run opens beside it, the project going to its Conversation view as the board steps aside; its comments go to the coordinator."
+  },
+  {
+    "id": "E9",
+    "page": "?d=E#/threads/th1",
+    "steps": [
+      "key:c",
+      "wait:600",
+      "a[href=\"http://localhost:5321/\"]",
+      "wait:1800",
+      "button:has-text(\"Comment\")",
+      "scroll:section[aria-label^=\"Runs on\"]",
+      "pick:section[aria-label^=\"Runs on\"] > span:nth-of-type(4) [class*=\"needs\"]",
+      "type:Too long beside the other two. Keep x64 and arm64; the distributions can go on the install page.",
+      "key:Enter",
+      "pick:section[aria-label^=\"Runs on\"]",
+      "type:The two lines sit tight against the hairlines. Give the band room at every width.",
+      "key:Enter",
+      "pick:section[aria-label^=\"Runs on\"] > span:nth-of-type(3) [class*=\"needs\"]",
+      "type:Windows on Arm runs it too: say arm64.",
+      "key:Enter",
+      "wait:6000",
+      "key:Escape",
+      "wait:800",
+      "over:button[aria-label^=\"Comment 1\"]",
+      "wait:900"
+    ],
+    "settle": 500,
+    "caption": "E · Each comment in the composer carries its crop where a file's glyph would be; hovering one opens its card: the spot as cropped, the comment, and the element as the page drew it (element, text, size, font, colour, the page at its size, the selector). Clicking it opens the comment again on the page.",
+    "clip": {
+      "x": 0,
+      "y": 130,
+      "width": 660,
+      "height": 630
+    }
+  },
+  {
+    "id": "E10",
+    "page": "?d=E#/threads/th1",
+    "steps": ["key:c", "wait:600", "a[href=\"http://localhost:5321/\"]", "wait:1800", "button[aria-label=\"Viewport\"]", "wait:500"],
+    "caption": "E · Viewport, in the page's bar: the panel's own size, or a desktop's, a laptop's, a tablet's or a phone's.",
+    "clip": {
+      "x": 640,
+      "y": 90,
+      "width": 640,
+      "height": 240
+    }
+  },
+  {
+    "id": "E11",
+    "page": "?d=E#/threads/th1",
+    "steps": [
+      "key:c",
+      "wait:600",
+      "a[href=\"http://localhost:5321/\"]",
+      "wait:1800",
+      "button[aria-label=\"Viewport\"]",
+      "[role=\"menuitemradio\"]:has-text(\"Phone\")",
+      "wait:1800"
+    ],
+    "caption": "E · At a phone's 390 × 844, drawn whole in a well, a little smaller where the panel is shorter; the button says the size. Comments pointed here are cropped and sent at that size.",
+    "clip": {
+      "x": 640,
+      "y": 44,
+      "width": 640,
+      "height": 716
+    }
+  },
+  {
+    "id": "E12",
+    "page": "?d=E#/threads/th1",
+    "steps": [
+      "key:c",
+      "wait:600",
+      "a[href=\"http://localhost:5321/\"]",
+      "wait:1800",
+      "button[aria-label=\"Viewport\"]",
+      "[role=\"menuitemradio\"]:has-text(\"Desktop\")",
+      "wait:1800"
+    ],
+    "caption": "E · At a desktop's 1440 × 900, the page laid out as on a big screen and drawn smaller to fit the panel.",
+    "clip": {
+      "x": 640,
+      "y": 44,
+      "width": 640,
+      "height": 716
+    }
+  },
+  {
+    "id": "E13",
+    "page": "?d=E#/threads/th1",
+    "steps": ["key:c", "wait:600", "a[href=\"http://localhost:5321/\"]", "wait:1800", "button[aria-label=\"Its own session\"]", "wait:500"],
+    "caption": "E · The page's session says how long its cookies are kept, with a way to change it.",
+    "clip": {
+      "x": 640,
+      "y": 90,
+      "width": 640,
+      "height": 300
+    }
+  },
+  {
+    "id": "E14",
+    "page": "?d=E#/settings/browser",
+    "steps": ["wait:600"],
+    "caption": "E · Settings › Browser: where links from threads open (a task's run always opens beside its conversation), how long pages keep cookies, and clearing every page's at once."
+  },
+  {
+    "id": "E15",
+    "page": "?d=E#/threads/th1",
+    "steps": [
+      "key:c",
+      "wait:600",
+      "a[href=\"http://localhost:5321/\"]",
+      "wait:1800",
+      "button[aria-label=\"Viewport\"]",
+      "[role=\"menuitemradio\"]:has-text(\"Phone\")",
+      "wait:1800",
+      "button:has-text(\"Comment\")",
+      "scroll:section[aria-label^=\"Runs on\"]",
+      "pick:section[aria-label^=\"Runs on\"] > span:nth-of-type(4) [class*=\"needs\"]",
+      "type:On a phone this wraps to three lines; keep it to one.",
+      "key:Enter",
+      "wait:5000",
+      "key:Escape",
+      "wait:400",
+      "over:button[aria-label^=\"Comment 1\"]",
+      "wait:900"
+    ],
+    "settle": 500,
+    "caption": "E · Pointed at phone size: the pin on the phone, and the comment's card says the page was at 390 × 844; the lead gets that size with the crop."
   }
 ]

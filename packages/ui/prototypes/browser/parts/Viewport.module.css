@@ -1,0 +1,10 @@
+/* Scrappy: the page under the bar; at a device's size, in a well with room round it. */
+.page {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.device {
+  padding: 14px;
+  background: var(--well);
+}

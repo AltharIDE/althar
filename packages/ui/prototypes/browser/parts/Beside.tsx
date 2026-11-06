@@ -12,6 +12,7 @@ import { Bar, Line } from './Bar'
 import s from './Beside.module.css'
 import { Frame } from './Frame'
 import { glyph } from './icons'
+import { pageSizeOf, ViewportMenu, Well } from './Viewport'
 import { Absent, Blank, SignIn } from './Stand'
 
 /** What the conversation keeps of the window beside it: a readable measure. */
@@ -37,6 +38,7 @@ export function Beside({ thread, page, over }: { thread: string; page: Page; ove
   const whole = over !== undefined && p.bench > over.room - over.keep
   const max = over === undefined ? Math.max(360, window.innerWidth - TALK) : whole ? over.room : over.room - over.keep
   const width = over === undefined ? benchWidth(p.bench) : whole ? max : Math.min(p.bench, max)
+  const size = pageSizeOf(p.viewports[scope])
   return (
     <Workbench
       width={width}
@@ -61,21 +63,25 @@ export function Beside({ thread, page, over }: { thread: string; page: Page; ove
             session={thread === 'thc' ? 'page' : 'task'}
             pointable={verdict.kind === 'page'}
             className={s.bar}
+            {...(verdict.kind === 'page' ? { extra: <ViewportMenu scope={scope} /> } : {})}
             after={<IconButton icon={glyph('tab')} label="Open as a tab" size="small" onClick={() => proto.toTab(thread)} />}
           />
         }
       >
         <Line scope={scope} />
         {verdict.kind === 'page' ? (
-          <Frame
-            key={page.id}
-            scope={scope}
-            address={address}
-            src={verdict.src}
-            reloads={page.reloads}
-            onFollow={(next) => proto.navigate(scope, next)}
-            onTitle={(title) => proto.title(scope, title)}
-          />
+          <Well scope={scope}>
+            <Frame
+              key={page.id}
+              scope={scope}
+              address={address}
+              src={verdict.src}
+              reloads={page.reloads}
+              onFollow={(next) => proto.navigate(scope, next)}
+              onTitle={(title) => proto.title(scope, title)}
+              {...size}
+            />
+          </Well>
         ) : verdict.kind === 'signin' ? (
           <SignIn verdict={verdict} scope={scope} first={page.at === 0} />
         ) : verdict.kind === 'absent' ? (

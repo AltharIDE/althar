@@ -1,5 +1,5 @@
 // Scrappy: every shot in shots.json, headless, at 1×, into the task's scratch folder: node shoot.mjs [id…]
-// A step: a selector to click; key:<key>; type:<text>; wait:<ms>; hover:<x>,<y>; click:<x>,<y>; wheel:<dy>;
+// A shot may clip to {x, y, width, height}. A step: a selector to click; key:<key>; type:<text>; wait:<ms>; hover:<x>,<y>; click:<x>,<y>; wheel:<dy>;
 // in the page's frame (frame:main or frame:task picks which, task by default): scroll:<css>, point:<css>, pick:<css>.
 import { mkdirSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -58,7 +58,7 @@ for (const shot of shots.filter((one) => only.length === 0 || only.includes(one.
       await page.waitForTimeout(350)
     }
     await page.waitForTimeout(shot.settle ?? 400)
-    await page.screenshot({ path: resolve(out, `${shot.id}.png`) })
+    await page.screenshot({ path: resolve(out, `${shot.id}.png`), ...(shot.clip ? { clip: shot.clip } : {}) })
     process.stdout.write(`${shot.id}  ${errors.length === 0 ? 'ok' : errors.join(' | ')}\n`)
   } catch (error) {
     process.stdout.write(`${shot.id}  failed: ${String(error).split('\n')[0]}\n`)

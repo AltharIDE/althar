@@ -3,10 +3,13 @@ import {
   AppWindow,
   ChatPlusIn,
   ColorFilter,
+  Computer,
+  Cookie,
   CursorPointer,
   Laptop,
   LayoutRight,
   Refresh,
+  ScaleFrameEnlarge,
   ShieldCheck,
   SmartphoneDevice,
   ViewColumns2,
@@ -26,8 +29,25 @@ Object.assign(ICONS, {
   cursor: CursorPointer,
   tab: AppWindow,
   dock: LayoutRight,
+  fit: ScaleFrameEnlarge,
+  desktop: Computer,
+  cookie: Cookie,
 })
 
 /** A glyph of the prototype's, by name, where the kit takes an IconName. */
-export const glyph = (name: 'reload' | 'comment' | 'session' | 'wide' | 'phone' | 'columns' | 'onion' | 'cursor' | 'tab' | 'dock') =>
-  name as unknown as IconName
+export const glyph = (
+  name:
+    | 'reload'
+    | 'comment'
+    | 'session'
+    | 'wide'
+    | 'phone'
+    | 'columns'
+    | 'onion'
+    | 'cursor'
+    | 'tab'
+    | 'dock'
+    | 'fit'
+    | 'desktop'
+    | 'cookie',
+) => name as unknown as IconName

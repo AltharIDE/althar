@@ -6,7 +6,7 @@ import { Button } from '../../../src/primitives/Button/Button'
 import { Tooltip } from '../../../src/primitives/HoverCard/HoverCard'
 import { cx } from '../../../src/lib/cx'
 import { followed } from '../addresses'
-import { type Comment, proto, useProto } from '../state'
+import { type Comment, type Look, proto, useProto } from '../state'
 import s from './Frame.module.css'
 import { find, labelOf, selectorOf, textOf } from './point'
 
@@ -49,6 +49,33 @@ export interface FrameProps {
 }
 
 const PIN = 20
+
+/** One pixel to paint a colour on and read it back: any colour the page wrote (oklch, a name) as sRGB. */
+const pixel = document.createElement('canvas').getContext('2d', { willReadFrequently: true })
+
+/** A colour as #6b6b6b, with its opacity where it has some; null where it is clear. */
+const hex = (color: string): string | null => {
+  if (pixel === null) return color
+  pixel.clearRect(0, 0, 1, 1)
+  pixel.fillStyle = '#000'
+  pixel.fillStyle = color
+  pixel.fillRect(0, 0, 1, 1)
+  const [r = 0, g = 0, b = 0, a = 0] = pixel.getImageData(0, 0, 1, 1).data
+  if (a === 0) return null
+  const two = (n: number) => n.toString(16).padStart(2, '0')
+  return `#${two(r)}${two(g)}${two(b)}${a === 255 ? '' : ` at ${Math.round((a / 255) * 100)}%`}`
+}
+
+/** How the page drew it: its type, its colour, and its own background, where it has one. */
+const lookOf = (el: Element, view: Window): Look => {
+  const style = view.getComputedStyle(el)
+  const family = style.fontFamily.split(',')[0]?.replace(/["']/g, '').trim() ?? ''
+  return {
+    font: [style.fontSize, style.fontWeight, family].filter((one) => one !== '').join(' · '),
+    color: hex(style.color) ?? style.color,
+    background: hex(style.backgroundColor),
+  }
+}
 
 export function Frame({
   scope,
@@ -216,6 +243,7 @@ export function Frame({
       box: { x: rect.left, y: rect.top, w: rect.width, h: rect.height },
       viewport: { w: view.innerWidth, h: view.innerHeight },
       scroll: view.scrollY,
+      look: lookOf(el, view),
     })
   }
 

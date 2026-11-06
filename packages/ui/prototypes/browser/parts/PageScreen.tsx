@@ -9,6 +9,7 @@ import { Bar, Line } from './Bar'
 import { Frame } from './Frame'
 import { Gathered } from './Gathered'
 import { glyph } from './icons'
+import { pageSizeOf, ViewportMenu, Well } from './Viewport'
 import s from './Screens.module.css'
 import { Absent, Blank, SignIn } from './Stand'
 
@@ -18,6 +19,7 @@ export function PageScreen({ top }: { top: number }) {
   if (page === undefined) return null
   const address = addressOf(page)
   const verdict = verdictOf(address)
+  const size = pageSizeOf(p.viewports[page.id])
   return createPortal(
     <div className={`ch-root ${s.over}`} style={{ top, bottom: p.bare ? 0 : 44 }}>
       <div className={s.screen}>
@@ -26,6 +28,7 @@ export function PageScreen({ top }: { top: number }) {
           page={page}
           session="page"
           pointable={verdict.kind === 'page'}
+          {...(p.direction === 'E' && verdict.kind === 'page' ? { extra: <ViewportMenu scope={page.id} /> } : {})}
           // E: a page taken out of a conversation's side goes back there.
           {...(p.direction === 'E' && page.from !== null
             ? {
@@ -43,15 +46,18 @@ export function PageScreen({ top }: { top: number }) {
         />
         <Line scope={page.id} />
         {verdict.kind === 'page' ? (
-          <Frame
-            key={page.id}
-            scope={page.id}
-            address={address}
-            src={verdict.src}
-            reloads={page.reloads}
-            onFollow={(next) => proto.navigate(page.id, next)}
-            onTitle={(title) => proto.title(page.id, title)}
-          />
+          <Well scope={page.id}>
+            <Frame
+              key={page.id}
+              scope={page.id}
+              address={address}
+              src={verdict.src}
+              reloads={page.reloads}
+              onFollow={(next) => proto.navigate(page.id, next)}
+              onTitle={(title) => proto.title(page.id, title)}
+              {...size}
+            />
+          </Well>
         ) : verdict.kind === 'signin' ? (
           <SignIn verdict={verdict} scope={page.id} first={page.at === 0} />
         ) : verdict.kind === 'absent' ? (

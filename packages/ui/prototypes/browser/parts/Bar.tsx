@@ -10,7 +10,7 @@ import { IconButton } from '../../../src/primitives/IconButton/IconButton'
 import { LinkButton } from '../../../src/primitives/LinkButton/LinkButton'
 import { Popover } from '../../../src/primitives/Popover/Popover'
 import { shown } from '../addresses'
-import { addressOf, type Page, pageOf, proto, useProto } from '../state'
+import { addressOf, KEEPS, type Page, pageOf, proto, useProto } from '../state'
 import s from './Bar.module.css'
 import { glyph } from './icons'
 
@@ -157,6 +157,12 @@ function Session({ scope, session, address }: { scope: string; session: 'page' |
               ? 'Cookies and storage of its own, apart from Althar, your browser and other tasks.'
               : 'Cookies and storage of its own, apart from Althar and your browser.'}
           </li>
+          {p.direction === 'E' && (
+            <li>
+              Cookies kept {KEEPS.find((one) => one.value === p.cookies)?.label.toLowerCase()}.{' '}
+              <LinkButton onClick={() => window.location.assign('#/settings/browser')}>Change</LinkButton>
+            </li>
+          )}
           <li>Never the camera, microphone, location or notifications.</li>
           <li>Sign-ins open in your browser.</li>
         </ul>

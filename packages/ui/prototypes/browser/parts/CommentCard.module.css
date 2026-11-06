@@ -1,0 +1,70 @@
+/* Scrappy: a comment's card, on hover: the crop, the comment, then the element's facts. */
+.card {
+  display: grid;
+  gap: 10px;
+  text-align: left;
+}
+.crop {
+  display: block;
+  width: 100%;
+  max-height: 180px;
+  object-fit: contain;
+  object-position: left top;
+  border-radius: 5px;
+  box-shadow: 0 0 0 1px var(--line-2);
+  background: var(--n-0);
+}
+.drawing {
+  display: grid;
+  place-items: center;
+  height: 64px;
+  border-radius: 5px;
+  background: var(--well);
+}
+.note {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--t-1);
+}
+.n {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: 50% 50% 50% 2px;
+  background: var(--ink-fill);
+  color: var(--on-ink);
+  font: 600 10.5px/1 var(--font);
+}
+.facts {
+  font-size: 11.5px;
+}
+.facts code {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.selector {
+  overflow-wrap: anywhere;
+  color: var(--t-2);
+}
+.color {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}

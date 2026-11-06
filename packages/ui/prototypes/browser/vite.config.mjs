@@ -29,6 +29,11 @@ const seams = [
   // E: the coordinator's conversation and composer, with a page beside them.
   { importer: 'features/project/ProjectView.tsx', id: '@althar/ui', to: 'seams/projectUi.ts' },
   { importer: 'features/project/ProjectView.tsx', id: '../../shared/ThreadHost', to: 'seams/threadHost.tsx' },
+  // E: Settings › Browser, where links open and how long cookies are kept.
+  { importer: 'features/settings/SettingsPage.tsx', id: './sections', to: 'seams/sections.ts' },
+  { importer: 'features/settings/route.tsx', id: './sections', to: 'seams/sections.ts' },
+  { importer: 'features/tabs/tabs.ts', id: '../settings/sections', to: 'seams/sections.ts' },
+  { importer: 'features/settings/SettingsPage.tsx', id: '@althar/ui', to: 'seams/settingsUi.tsx' },
   // Pictures by their digest: the crops and shots this server keeps, in place of the app's althar-picture: scheme.
   { importer: 'renderer/shared/evidence.ts', id: '../../main/pictureAddress', to: 'seams/pictureAddress.ts' },
   { importer: 'renderer/shared/images.ts', id: '../../main/pictureAddress', to: 'seams/pictureAddress.ts' },

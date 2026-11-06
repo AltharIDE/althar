@@ -1,0 +1,29 @@
+/* Scrappy: over the composer's own chip: the crop where its glyph is, and the chip itself, up to its ✕, the card's trigger. */
+.host {
+  display: contents;
+}
+.thumb {
+  position: absolute;
+  top: 15px;
+  left: 10px;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  object-fit: cover;
+  object-position: left top;
+  background: var(--n-0);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  pointer-events: none;
+}
+.over {
+  position: absolute;
+  inset: 0 32px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px 0 0 8px;
+  background: none;
+  cursor: pointer;
+}
+.over:focus-visible {
+  outline-offset: -2px;
+}

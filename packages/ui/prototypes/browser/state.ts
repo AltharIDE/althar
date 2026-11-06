@@ -33,6 +33,16 @@ export interface Page {
   readonly title?: string
 }
 
+/** How the element looks, as the page drew it: what the person sees on hovering its comment. */
+export interface Look {
+  /** 13px · 500 · Inter */
+  readonly font: string
+  /** #6b6b6b */
+  readonly color: string
+  /** Its own background, where it has one. */
+  readonly background: string | null
+}
+
 /** What was pointed at: the element, as the lead will read it, and where on the page it was. */
 export interface Picked {
   readonly scope: string
@@ -47,6 +57,7 @@ export interface Picked {
   readonly box: { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
   readonly viewport: { readonly w: number; readonly h: number }
   readonly scroll: number
+  readonly look: Look
 }
 
 export interface Crop {
@@ -69,6 +80,28 @@ export type Line =
   | { readonly kind: 'file'; readonly path: string }
   | { readonly kind: 'permission'; readonly what: string; readonly host: string }
   | { readonly kind: 'sent'; readonly count: number; readonly to: Destination }
+
+/** E: the size the page is drawn at: the panel's own, or a device's, drawn smaller where it doesn't fit. */
+export type Viewport = 'fit' | 'desktop' | 'laptop' | 'tablet' | 'phone'
+
+export const VIEWPORTS: ReadonlyArray<{ value: Viewport; name: string; w: number; h: number }> = [
+  { value: 'desktop', name: 'Desktop', w: 1440, h: 900 },
+  { value: 'laptop', name: 'Laptop', w: 1280, h: 800 },
+  { value: 'tablet', name: 'Tablet', w: 820, h: 1180 },
+  { value: 'phone', name: 'Phone', w: 390, h: 844 },
+]
+
+export const sizeOf = (viewport: Viewport | undefined) => VIEWPORTS.find((one) => one.value === viewport) ?? null
+
+/** How long a page's cookies are kept: Settings › Browser. */
+export type Keep = 'closed' | 'quit' | 'done' | 'sites'
+
+export const KEEPS: ReadonlyArray<{ value: Keep; label: string }> = [
+  { value: 'closed', label: 'Until the page closes' },
+  { value: 'quit', label: 'Until Althar quits' },
+  { value: 'done', label: 'Until the task is done' },
+  { value: 'sites', label: 'As long as each site asks' },
+]
 
 export type Mode = 'side' | 'swipe' | 'onion'
 export type Width = 'wide' | 'narrow'
@@ -117,6 +150,11 @@ export interface Proto {
   /* E: the page open beside each conversation, by its thread, and how wide the workbench it is on is. */
   readonly side: Readonly<Record<string, Page | undefined>>
   readonly bench: number
+  /** E: the size each page beside a conversation is drawn at, by its scope. */
+  readonly viewports: Readonly<Record<string, Viewport | undefined>>
+  /** Settings › Browser: how long pages' cookies are kept, and where links from threads open. */
+  readonly cookies: Keep
+  readonly links: 'beside' | 'browser'
 }
 
 const preview = (address: string = RUNS.task.address): Page => ({
@@ -153,6 +191,9 @@ const fresh = (): Proto => ({
   revision: 1,
   side: {},
   bench: benchStart(),
+  viewports: {},
+  cookies: 'done',
+  links: 'beside',
 })
 
 let state: Proto = fresh()
@@ -279,6 +320,8 @@ export const proto = {
     if (state.direction === 'E') {
       if (verdict.kind === 'file' || verdict.kind === 'scheme')
         return flash(verdict.kind === 'file' ? 'Files don’t open in Althar’s browser' : 'Only web pages open here')
+      // Settings › Browser can send links out; a run still opens beside the conversation it came from.
+      if (state.links === 'browser' && runOf(verdict.address) === null) return flash(`Opened in your browser: ${verdict.address}`)
       return proto.beside(threadHere(), verdict.address)
     }
     if (runOf(verdict.address) === 'task') {
@@ -316,6 +359,9 @@ export const proto = {
       draft: state.draft?.scope === scope ? null : state.draft,
     })
   },
+  /** E: the size a page is drawn at; the panel's own is none. */
+  viewport: (scope: string, viewport: Viewport) =>
+    set({ viewports: { ...state.viewports, [scope]: viewport === 'fit' ? undefined : viewport } }),
   /** E: the page beside a conversation becomes a tab of its own, its history and comments with it. */
   toTab: (thread: string) => {
     const page = state.side[thread]
@@ -328,6 +374,7 @@ export const proto = {
       page: id,
       comments: state.comments.map((one) => (one.scope === scope ? { ...one, scope: id } : one)),
       lines: { ...state.lines, [id]: state.lines[scope], [scope]: undefined },
+      viewports: { ...state.viewports, [id]: state.viewports[scope], [scope]: undefined },
       pointing: null,
       draft: null,
     })
@@ -344,6 +391,7 @@ export const proto = {
       side: { ...state.side, [thread]: { ...page, id: scope } },
       comments: state.comments.map((one) => (one.scope === id ? { ...one, scope } : one)),
       lines: { ...state.lines, [scope]: state.lines[id], [id]: undefined },
+      viewports: { ...state.viewports, [scope]: state.viewports[id], [id]: undefined },
       pointing: null,
       draft: null,
     })

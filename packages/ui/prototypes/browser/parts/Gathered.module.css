@@ -51,42 +51,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.card {
-  display: grid;
-  gap: 8px;
-}
-.crop {
-  display: block;
-  width: 100%;
-  max-height: 180px;
-  object-fit: contain;
-  object-position: left top;
-  border-radius: 5px;
-  box-shadow: 0 0 0 1px var(--line-2);
-  background: var(--n-0);
-}
-.drawing {
-  display: grid;
-  place-items: center;
-  height: 64px;
-  border-radius: 5px;
-  background: var(--well);
-}
-.facts {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 12px;
-  color: var(--t-3);
-}
-.facts code {
-  font: 500 11.5px var(--mono);
-  color: var(--t-1);
-}
-.on {
-  font-family: var(--mono);
-  font-size: 11.5px;
-}
 .grow {
   flex: 1;
 }

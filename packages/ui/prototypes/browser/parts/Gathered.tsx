@@ -7,35 +7,13 @@ import { HoverCard } from '../../../src/primitives/HoverCard/HoverCard'
 import { IconButton } from '../../../src/primitives/IconButton/IconButton'
 import { LinkButton } from '../../../src/primitives/LinkButton/LinkButton'
 import { Menu, MenuGroup, MenuItem } from '../../../src/primitives/Menu/Menu'
-import { Spinner } from '../../../src/primitives/Spinner/Spinner'
 import { TaskGlyph } from '../../../src/primitives/TaskGlyph/TaskGlyph'
 import { TaskStatus } from '../../../src/foundations/vocabulary'
-import { shown } from '../addresses'
-import { type Comment, type Destination, OTHER, proto, TASK, useComments, useProto } from '../state'
+import { type Destination, OTHER, proto, TASK, useComments, useProto } from '../state'
+import { CommentCard } from './CommentCard'
 import s from './Gathered.module.css'
 
 const nameOf = (to: Destination) => (to.kind === 'coordinator' ? 'althar’s coordinator' : to.taskId === TASK.id ? TASK.title : OTHER.title)
-
-/** A crop the server drew, by its digest. */
-export const cropSrc = (digest: string) => `/__shot/${digest}`
-
-function Crop({ comment }: { comment: Comment }) {
-  if (comment.crop === 'drawing')
-    return (
-      <span className={s.drawing}>
-        <Spinner size="small" />
-      </span>
-    )
-  if (comment.crop === 'failed') return null
-  return (
-    <img
-      className={s.crop}
-      src={cropSrc(comment.crop.digest)}
-      alt=""
-      style={{ aspectRatio: `${comment.crop.width} / ${comment.crop.height}` }}
-    />
-  )
-}
 
 export interface GatheredProps {
   scope: string
@@ -71,19 +49,7 @@ export function Gathered({ scope, to, onTo, onOpenSent, openLabel }: GatheredPro
       <ol className={s.chips}>
         {comments.map((one, at) => (
           <li key={one.id}>
-            <HoverCard
-              placement="above"
-              width={360}
-              card={
-                <span className={s.card}>
-                  <Crop comment={one} />
-                  <span className={s.facts}>
-                    <code>{one.label}</code>
-                    <span className={s.on}>{shown(one.address)}</span>
-                  </span>
-                </span>
-              }
-            >
+            <HoverCard placement="above" width={340} card={<CommentCard comment={one} n={at + 1} />}>
               <button type="button" className={s.chip} onClick={() => proto.edit(one.id)}>
                 <span className={s.n}>{at + 1}</span>
                 <span className={s.note}>{one.note}</span>
