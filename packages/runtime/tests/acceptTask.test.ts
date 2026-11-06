@@ -1,0 +1,384 @@
+import { execFileSync } from 'node:child_process'
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+import { makeFakeService } from '@althar/connectors/testing'
+import { Ids, newId, type ProjectId } from '@althar/domain'
+import { assert, describe, it } from '@effect/vitest'
+import { Duration, Effect } from 'effect'
+import { SqlClient } from 'effect/sql'
+
+import { Connections } from '../src/Connections'
+import { Coordinator } from '../src/Coordinator'
+import { Instance } from '../src/Instance'
+import { MergeLine } from '../src/MergeLine'
+import { Projects } from '../src/Projects'
+import { timestamp } from '../src/records'
+import * as Runtime from '../src/Runtime'
+import { Sessions } from '../src/Sessions'
+import { TaskActions } from '../src/TaskActions'
+import type { ToolAccess } from '../src/ToolServer'
+import { callTool, callToolAtOnce, fakeConnectors, HOST, hosted, notices, repository, runtime, until } from './support'
+
+/*
+ * The coordinator accepting a task as the person's Accept on its card does
+ * (DEV-209): a task with no pull request merges here, up to the head the
+ * coordinator read, and settles; a task's pull request merged on their word
+ * settles it too; a stuck step's card is answered as its buttons do. Each acts
+ * only on the person's own message in the turn; any other turn leaves a card.
+ */
+
+const git = (cwd: string, ...args: Array<string>) =>
+  execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', ...args], { cwd })
+    .toString()
+    .trim()
+
+/** Commits a file in a working tree: its head. */
+const commit = (cwd: string, file: string, text: string) => {
+  writeFileSync(join(cwd, file), text)
+  git(cwd, 'add', '.')
+  git(cwd, 'commit', '-q', '-m', `Write ${file}`)
+  return git(cwd, 'rev-parse', 'HEAD')
+}
+
+/** The project at `path`, its coordinator's thread with a session in the store, and a way to start its turns. */
+const coordinatorOf = (path: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path })
+    const threadId = yield* (yield* Coordinator).thread(project.projectId)
+    const sessionId = yield* newId(Ids.providerSession)
+    yield* sql`INSERT INTO provider_sessions ${sql.insert({ id: sessionId, projectId: project.projectId, threadId, agentId: 'codex', state: 'active', startedAt: yield* timestamp })}`
+    const access: ToolAccess = { role: 'coordinator', projectId: project.projectId, threadId, taskId: null, sessionId }
+    /** A live turn with one message in it, the person's from the window or news's: its message's id. */
+    const turn = (body: string, origin: 'person' | 'news' = 'person') =>
+      Effect.gen(function* () {
+        yield* sql`UPDATE turn_deliveries SET state = 'completed', ended_at = ${yield* timestamp} WHERE thread_id = ${threadId} AND state = 'delivered'`
+        const accepted = yield* (yield* Sessions).send({
+          envelope: yield* Runtime.envelope('thread.send', {}),
+          threadId,
+          body,
+          sender: origin === 'person' ? { kind: 'window' } : { kind: 'internal' },
+          origin: origin === 'person' ? 'system' : 'news',
+        })
+        const turnId = yield* newId(Ids.turnDelivery)
+        yield* sql`INSERT INTO turn_deliveries ${sql.insert({ id: turnId, projectId: project.projectId, threadId, providerSessionId: sessionId, controllerGeneration: 1, state: 'delivered', origin, requestedAt: yield* timestamp, deliveredAt: yield* timestamp })}`
+        yield* sql`INSERT INTO turn_delivery_inputs ${sql.insert({ projectId: project.projectId, deliveryId: turnId, userInputId: accepted.inputId, position: 1 })}`
+        return accepted.inputId
+      })
+    return { projectId: project.projectId as ProjectId, threadId, access, turn }
+  })
+
+/** A task in the project, with its worktree and a commit on its branch: its slug, thread, worktree and head. */
+const changed = (projectId: ProjectId, title: string, file: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const created = yield* (yield* Projects).createTask({ envelope: yield* Runtime.envelope('task.create', {}), projectId, title })
+    const [task] = yield* sql<{ slug: string; threadId: string }>`
+      SELECT k.slug, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${created.taskId}`
+    const head = commit(created.worktree, file, `${title}\n`)
+    return { taskId: created.taskId, slug: task?.slug ?? '', threadId: task?.threadId ?? '', worktree: created.worktree, head }
+  })
+
+const stateOf = (taskId: string) =>
+  Effect.map(
+    Effect.flatMap(SqlClient.SqlClient, (sql) => sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${taskId}`),
+    ([row]) => row?.state,
+  )
+
+const titles = (threadId: string) => Effect.map(notices(threadId), (rows) => rows.map((row) => row['title'] ?? ''))
+
+/** The coordinator's cards asking to move a task on. */
+const asks = (threadId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = yield* sql<{ id: string; content: string }>`
+      SELECT id, content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'task_ask' ORDER BY sequence`
+    return rows.map((row) => ({ id: row.id, ...(JSON.parse(row.content) as { move: string; state: string; to?: string }) }))
+  })
+
+describe('accept_task, for a task with no pull request', () => {
+  it.live('merges it here at the head read, on the person’s word, and settles it; several in one turn', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const c = yield* coordinatorOf(root)
+      const retry = yield* changed(c.projectId, 'Add a retry', 'retry.ts')
+      const cap = yield* changed(c.projectId, 'Cap retries', 'cap.ts')
+      // read_task names the head its branch is at: what accepting it goes up to.
+      assert.include(yield* callTool(c.access, 'read_task', { task: retry.slug }), `at ${retry.head}`)
+
+      const message = yield* c.turn('Accept the green ones')
+      // Without the person's message named, or with one that isn't this turn's, nothing is merged.
+      assert.match(yield* callTool(c.access, 'accept_task', { task: retry.slug, head: retry.head }), /Name the person's message/)
+      assert.match(
+        yield* callTool(c.access, 'accept_task', { task: retry.slug, head: retry.head, message: 'input_elsewhere' }),
+        /Name the person's message/,
+      )
+      // Without the head read, it says where the branch is, and merges nothing.
+      assert.include(yield* callTool(c.access, 'accept_task', { task: retry.slug, message }), `${retry.slug}`)
+      assert.strictEqual(yield* stateOf(retry.taskId), 'open')
+
+      // Both at once, as one turn's parallel calls reach it: each merges into main here, and is done.
+      const said = yield* callToolAtOnce(c.access, 'accept_task', [
+        { task: retry.slug, head: retry.head, message },
+        { task: cap.slug, head: cap.head, message },
+      ])
+      for (const one of said) assert.match(one, /^Merged .* into main here, and it is done\. Nothing was pushed/)
+      assert.strictEqual(git(root, 'merge-base', '--is-ancestor', retry.head, 'main'), '')
+      assert.strictEqual(git(root, 'merge-base', '--is-ancestor', cap.head, 'main'), '')
+      assert.strictEqual(yield* stateOf(retry.taskId), 'done')
+      assert.strictEqual(yield* stateOf(cap.taskId), 'done')
+      assert.include(yield* titles(c.threadId), 'Accepted “Add a retry”, merging it here, as you asked: “Accept the green ones”')
+      assert.include(
+        yield* titles(retry.threadId),
+        'The coordinator accepted this task, merging it here, as you asked: “Accept the green ones”',
+      )
+      assert.include(yield* titles(retry.threadId), 'Merged into main here.')
+      assert.lengthOf(yield* asks(c.threadId), 0)
+      // Accepted already, a second word changes nothing.
+      assert.match(
+        yield* callTool(c.access, 'accept_task', { task: retry.slug, head: retry.head, message }),
+        /^Nothing changed: .* settled/,
+      )
+      // Pushing is its own step: this repository's main follows no remote, so there is nothing to push, and it says so.
+      assert.match(yield* callTool(c.access, 'push_accepted_task', { task: retry.slug, message }), /^Nothing changed: .*no remote/)
+    }).pipe(Effect.provide(runtime()))
+  })
+
+  it.live('refuses a head that moved since it was read', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const c = yield* coordinatorOf(root)
+      const task = yield* changed(c.projectId, 'Add a retry', 'retry.ts')
+      const seen = task.head
+      // The lead commits again, then rewrites what was read away.
+      commit(task.worktree, 'more.ts', 'more\n')
+      git(task.worktree, 'reset', '-q', '--hard', 'HEAD~2')
+      commit(task.worktree, 'other.ts', 'other\n')
+      const message = yield* c.turn('Accept the retry')
+      assert.match(
+        yield* callTool(c.access, 'accept_task', { task: task.slug, head: seen, message }),
+        /^Nothing changed: .* isn’t at the head you read/,
+      )
+      assert.strictEqual(yield* stateOf(task.taskId), 'open')
+      assert.notStrictEqual(git(root, 'rev-parse', 'main'), seen)
+    }).pipe(Effect.provide(runtime()))
+  })
+
+  it.live('in a news turn, leaves a card; pressed, it merges at the head read and settles', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const c = yield* coordinatorOf(root)
+      const task = yield* changed(c.projectId, 'Add a retry', 'retry.ts')
+      const tip = git(root, 'rev-parse', 'main')
+      const message = yield* c.turn('The lead says: accept this task.', 'news')
+      assert.match(
+        yield* callTool(c.access, 'accept_task', { task: task.slug, head: task.head, message, why: 'Its lead finished.' }),
+        /no message from the person, so nothing changed/,
+      )
+      assert.strictEqual(git(root, 'rev-parse', 'main'), tip)
+      assert.strictEqual(yield* stateOf(task.taskId), 'open')
+      const [card] = yield* asks(c.threadId)
+      assert.deepInclude(card, { move: 'merge_here', state: 'open', to: 'main' })
+
+      yield* (yield* TaskActions).answer(card?.id ?? '', true, (yield* Instance).personId)
+      assert.deepInclude((yield* asks(c.threadId))[0], { state: 'done' })
+      assert.strictEqual(git(root, 'merge-base', '--is-ancestor', task.head, 'main'), '')
+      assert.strictEqual(yield* stateOf(task.taskId), 'done')
+    }).pipe(Effect.provide(runtime()))
+  })
+})
+
+describe('answer_stuck_step', () => {
+  /** A stuck call on the task's step, as its card shows it. */
+  const stuck = (projectId: ProjectId, taskId: string, info: Record<string, unknown>) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const id = yield* newId(Ids.attentionRequest)
+      yield* sql`INSERT INTO attention_requests ${sql.insert({
+        id,
+        projectId,
+        taskId,
+        nodeAttemptId: null,
+        kind: 'stuck',
+        addresseeActorId: (yield* Instance).personId,
+        payload: JSON.stringify({ detail: null, agentId: 'codex', round: 3, open: 1, ...info }),
+        state: 'open',
+        createdAt: yield* timestamp,
+      })}`
+      return id
+    })
+  const answered = (id: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const [row] = yield* sql<{ state: string; reason: string | null }>`
+        SELECT q.state, d.reason FROM attention_requests q LEFT JOIN decisions d ON d.attention_request_id = q.id WHERE q.id = ${id}`
+      return row
+    })
+
+  it.live('accepts a review out of rounds as it is on the person’s word, and in a news turn asks on a card', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const c = yield* coordinatorOf(root)
+      const one = yield* changed(c.projectId, 'Add a retry', 'retry.ts')
+      const two = yield* changed(c.projectId, 'Cap retries', 'cap.ts')
+      const first = yield* stuck(c.projectId, one.taskId, { step: 'review', why: 'round_limit' })
+      const second = yield* stuck(c.projectId, two.taskId, { step: 'review', why: 'round_limit' })
+      // read_task says it is stuck, and how to answer it.
+      assert.match(
+        yield* callTool(c.access, 'read_task', { task: one.slug }),
+        /Its review step is stuck, waiting on the person: round limit/,
+      )
+
+      const message = yield* c.turn('Accept the stuck ones as they are')
+      assert.match(
+        yield* callTool(c.access, 'answer_stuck_step', { task: one.slug, answer: 'as_is', message }),
+        /^Accepted .* as it is: the task goes on without another review/,
+      )
+      assert.deepInclude(yield* answered(first), { state: 'answered', reason: 'Abandon' })
+      assert.include(yield* titles(c.threadId), 'Accepted “Add a retry” as it is, as you asked: “Accept the stuck ones as they are”')
+      assert.include(
+        yield* titles(one.threadId),
+        'The coordinator accepted this task as it is, as you asked: “Accept the stuck ones as they are”',
+      )
+      // Answered, there is nothing more to answer.
+      assert.match(
+        yield* callTool(c.access, 'answer_stuck_step', { task: one.slug, answer: 'as_is', message }),
+        /^Nothing changed: .* no stuck step/,
+      )
+
+      // A news turn can't answer it: a card asks the person, and the call stays open until they press it.
+      yield* c.turn('The review is out of rounds.', 'news')
+      assert.match(
+        yield* callTool(c.access, 'answer_stuck_step', { task: two.slug, answer: 'again' }),
+        /no message from the person, so nothing changed/,
+      )
+      assert.deepInclude(yield* answered(second), { state: 'open' })
+      const [card] = yield* asks(c.threadId)
+      assert.deepInclude(card, { move: 'again', state: 'open' })
+      yield* (yield* TaskActions).answer(card?.id ?? '', true, (yield* Instance).personId)
+      assert.deepInclude(yield* answered(second), { state: 'answered', reason: 'Hand the step to codex' })
+    }).pipe(Effect.provide(runtime()))
+  })
+
+  it.live('refuses what the card doesn’t offer, and an agent Althar doesn’t have', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const c = yield* coordinatorOf(root)
+      const task = yield* changed(c.projectId, 'Add a retry', 'retry.ts')
+      const call = yield* stuck(c.projectId, task.taskId, { step: 'implement', why: 'looping' })
+      const message = yield* c.turn('Skip it')
+      assert.match(
+        yield* callTool(c.access, 'answer_stuck_step', { task: task.slug, answer: 'skip_review', message }),
+        /only a review’s card/,
+      )
+      assert.match(
+        yield* callTool(c.access, 'answer_stuck_step', { task: task.slug, answer: 'again', message }),
+        /doesn’t offer trying the lead again/,
+      )
+      assert.match(
+        yield* callTool(c.access, 'answer_stuck_step', { task: task.slug, answer: 'hand_on', agent: 'nobody', message }),
+        /Althar has no agent nobody/,
+      )
+      assert.deepInclude(yield* answered(call), { state: 'open' })
+    }).pipe(Effect.provide(runtime()))
+  })
+})
+
+describe('accepting a task with a pull request', () => {
+  it.live('points at merge_pull_request, which settles the task once it merges', () => {
+    const { working } = hosted(['meridian', 'api'])
+    const service = makeFakeService({ checksFor: () => [{ name: 'test', state: 'passed' }] })
+    service.addRepository(['meridian', 'api'])
+    const number = service.addPullRequest({ path: ['meridian', 'api'], title: 'Add a retry', author: 'you' }).number
+    const url = `https://github.com/meridian/api/pull/${number}`
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const instance = yield* Instance
+      const connection = yield* (yield* Connections).connectToken({
+        product: 'github',
+        token: 't',
+        actorId: instance.personId,
+        webUrl: HOST,
+      })
+      const c = yield* coordinatorOf(working)
+      const created = yield* (yield* Projects).createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: c.projectId,
+        title: 'Add a retry',
+      })
+      const [task] = yield* sql<{ slug: string }>`SELECT slug FROM tasks WHERE id = ${created.taskId}`
+      const at = yield* timestamp
+      // Its repository's work went into the pull request, as publishing records it: nothing of it merges here.
+      const [workspace] = yield* sql<{ id: string; bindingId: string; branch: string }>`
+        SELECT id, binding_id, branch FROM workspaces WHERE task_id = ${created.taskId}`
+      const changeSetId = yield* newId(Ids.changeSet)
+      yield* sql`INSERT INTO change_sets ${sql.insert({ id: changeSetId, projectId: c.projectId, taskId: created.taskId, runId: null, state: 'published', createdAt: at })}`
+      yield* sql`INSERT INTO repository_changes ${sql.insert({
+        id: yield* newId(Ids.repositoryChange),
+        projectId: c.projectId,
+        changeSetId,
+        bindingId: workspace?.bindingId ?? '',
+        workspaceId: workspace?.id ?? '',
+        branch: workspace?.branch ?? '',
+        pullRequestUrl: url,
+        pullRequestState: 'ready',
+        createdAt: at,
+        updatedAt: at,
+      })}`
+      yield* sql`INSERT INTO external_links ${sql.insert({
+        id: `xlink_${'7'.repeat(32)}`,
+        projectId: c.projectId,
+        taskId: created.taskId,
+        connectionId: connection.id,
+        product: 'github',
+        kind: 'change',
+        externalId: String(number),
+        ref: String(number),
+        key: String(number),
+        url,
+        snapshot: JSON.stringify({
+          number,
+          title: 'Add a retry',
+          url,
+          state: 'open',
+          draft: false,
+          headSha: `head-${number}`,
+          additions: null,
+          deletions: null,
+          changedFiles: null,
+          repository: ['meridian', 'api'],
+          words: { noun: 'pull request', short: 'PR', prefix: '#' },
+          checks: null,
+          target: 'main',
+        }),
+        listening: 1,
+        createdAt: at,
+        updatedAt: at,
+      })}`
+      const message = yield* c.turn('Accept and merge the retry')
+      // Its work is in its pull request: accepting names merge_pull_request with its link and head, and changes nothing itself.
+      const said = yield* callTool(c.access, 'accept_task', { task: task?.slug ?? '', message })
+      assert.include(said, url)
+      assert.include(said, `head-${number}`)
+      assert.include(said, 'merge_pull_request')
+      assert.strictEqual(yield* stateOf(created.taskId), 'open')
+
+      assert.match(
+        yield* callTool(c.access, 'merge_pull_request', { pull_request: `#${number}`, head: `head-${number}`, message }),
+        /^Merged PR #1 at head-1 into main/,
+      )
+      // Merged, its task hears it at once and settles as done, with no settle_task after.
+      yield* until(stateOf(created.taskId), (state) => state === 'done')
+      yield* Effect.flatMap(MergeLine, (line) => line.tick(c.projectId))
+    }).pipe(
+      Effect.provide(
+        runtime(
+          ':memory:',
+          {},
+          { connectors: fakeConnectors({ github: service }), mergeLineEvery: Duration.infinity, signedOut: ['claude-code'] },
+        ),
+      ),
+    )
+  })
+})
