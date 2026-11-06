@@ -18,7 +18,8 @@ import { ReportDialog } from './features/report/ReportDialog'
 import { ProfileInUseView } from './features/update/ProfileInUseView'
 import { UpdateStoppedView } from './features/update/UpdateStoppedView'
 import { followScheme } from './shared/scheme'
-import { useMaximized } from './shared/useWindowChrome'
+import { SystemAccent } from './shared/SystemAccent'
+import { useHostChrome } from './shared/useWindowChrome'
 import { keepWindowErrors } from './shared/windowErrors'
 
 /*
@@ -70,27 +71,10 @@ const openedBefore = (() => {
 
 /** The launch's place when the window couldn't open: its own bar carries the window's buttons, so its third says maximize or restore. */
 function FailedOpen({ reason }: { reason: string }) {
-  // Subscribed only while this screen is the one shown, not for the window's whole life.
-  const maximized = useMaximized(window.althar)
-  const darwin = window.althar.platform === 'darwin'
-  return (
-    <OpenFailed
-      reason={reason}
-      onRetry={() => window.location.reload()}
-      // Off a Mac the window's own buttons sit in this bar too, so the window can still be closed here.
-      lights={darwin ? 'space' : 'drawn'}
-      {...(darwin
-        ? {}
-        : {
-            window: {
-              onClose: () => window.althar.window('close'),
-              onMinimize: () => window.althar.window('minimize'),
-              onToggleMaximize: () => window.althar.window('toggle-maximize'),
-              maximized,
-            },
-          })}
-    />
-  )
+  // Subscribed only while this screen is the one shown, not for the window's whole life. Off a Mac the window's own buttons sit
+  // in this bar too, as the desktop has them, so the window can still be closed here.
+  const chrome = useHostChrome(window.althar)
+  return <OpenFailed reason={reason} onRetry={() => window.location.reload()} {...chrome} />
 }
 
 function Window() {
@@ -126,6 +110,7 @@ function Window() {
     >
       {opened !== null && (
         <ServicesProvider value={opened.services}>
+          <SystemAccent />
           <RouterProvider router={opened.router} />
         </ServicesProvider>
       )}

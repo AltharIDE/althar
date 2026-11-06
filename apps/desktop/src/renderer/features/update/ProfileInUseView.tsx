@@ -1,7 +1,7 @@
 import { ProfileInUse } from '@althar/ui/screens'
 
 import type { Host, StoreFailure } from '../../data/services'
-import { useMaximized } from '../../shared/useWindowChrome'
+import { useHostChrome } from '../../shared/useWindowChrome'
 
 /*
  * What the window shows instead of opening when another Althar, or the
@@ -9,23 +9,6 @@ import { useMaximized } from '../../shared/useWindowChrome'
  * runs): the kit's page, with a way to try again once that one is closed.
  */
 export function ProfileInUseView({ failure, host }: { readonly failure: StoreFailure; readonly host: Host }) {
-  const maximized = useMaximized(host)
-  const darwin = host.platform === 'darwin'
-  return (
-    <ProfileInUse
-      reason={failure.reason}
-      onTryAgain={() => void host.tryAgain()}
-      lights={darwin ? 'space' : 'drawn'}
-      {...(darwin
-        ? {}
-        : {
-            window: {
-              onClose: () => host.window('close'),
-              onMinimize: () => host.window('minimize'),
-              onToggleMaximize: () => host.window('toggle-maximize'),
-              maximized,
-            },
-          })}
-    />
-  )
+  const chrome = useHostChrome(host)
+  return <ProfileInUse reason={failure.reason} onTryAgain={() => void host.tryAgain()} {...chrome} />
 }

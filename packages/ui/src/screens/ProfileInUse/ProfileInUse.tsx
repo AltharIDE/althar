@@ -1,6 +1,7 @@
 import { useId } from 'react'
 
 import { TitleBar, type TitleBarWindow } from '../../chrome/TitleBar/TitleBar'
+import type { WindowControls } from '../../chrome/WindowButtons/WindowButtons'
 import { Logo } from '../../foundations/Logo/Logo'
 import { Button } from '../../primitives/Button/Button'
 import s from './ProfileInUse.module.css'
@@ -31,17 +32,19 @@ export interface ProfileInUseProps {
   /** Tries to open the profile again. */
   onTryAgain: () => void
   /** Off a Mac, draw the window's own controls; on macOS the system draws its lights. */
-  lights?: 'space' | 'drawn'
+  lights?: 'space' | 'drawn' | 'none'
   window?: TitleBarWindow
+  /** With lights='drawn': which buttons, whose manner, at which end (the desktop's). */
+  controls?: WindowControls
   text?: Partial<ProfileInUseText>
 }
 
-export function ProfileInUse({ reason, onTryAgain, lights = 'space', window, text }: ProfileInUseProps) {
+export function ProfileInUse({ reason, onTryAgain, lights = 'space', window, controls, text }: ProfileInUseProps) {
   const t = { ...profileInUseText, ...text }
   const titleId = useId()
   return (
     <div className={s.screen}>
-      <TitleBar lights={lights} {...(window === undefined ? {} : { window })}>
+      <TitleBar lights={lights} {...(window === undefined ? {} : { window })} {...(controls === undefined ? {} : { controls })}>
         {null}
       </TitleBar>
       <main className={s.body} aria-labelledby={titleId}>

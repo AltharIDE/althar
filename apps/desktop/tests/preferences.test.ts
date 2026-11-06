@@ -30,8 +30,15 @@ describe('the app’s preferences kept in the profile', () => {
       usageData: true,
       crashReports: true,
       appearance: 'light',
+      accent: 'althar',
       openAtLogin: false,
     })
+  })
+
+  it('hold the accent’s two sources, and nothing else', () => {
+    expect(holds('accent', 'system')).toBe(true)
+    expect(holds('accent', 'althar')).toBe(true)
+    expect(holds('accent', '#3584e4')).toBe(false)
   })
 
   it('hold light, dark or the system’s for the appearance, and nothing else', () => {

@@ -1,6 +1,7 @@
 import { useId } from 'react'
 
 import { TitleBar, type TitleBarWindow } from '../../chrome/TitleBar/TitleBar'
+import type { WindowControls } from '../../chrome/WindowButtons/WindowButtons'
 import { Logo } from '../../foundations/Logo/Logo'
 import { Button } from '../../primitives/Button/Button'
 import s from './DataNotMoved.module.css'
@@ -49,12 +50,24 @@ export interface DataNotMovedProps {
   /** Reports the problem. Without it, nothing offers to. */
   onReport?: () => void
   /** Off a Mac, draw the window's own controls; on macOS the system draws its lights. */
-  lights?: 'space' | 'drawn'
+  lights?: 'space' | 'drawn' | 'none'
   window?: TitleBarWindow
+  /** With lights='drawn': which buttons, whose manner, at which end (the desktop's). */
+  controls?: WindowControls
   text?: Partial<DataNotMovedText>
 }
 
-export function DataNotMoved({ stopped, backup, reason, onShowBackup, onReport, lights = 'space', window, text }: DataNotMovedProps) {
+export function DataNotMoved({
+  stopped,
+  backup,
+  reason,
+  onShowBackup,
+  onReport,
+  lights = 'space',
+  window,
+  controls,
+  text,
+}: DataNotMovedProps) {
   const t = { ...dataNotMovedText, ...text }
   const titleId = useId()
   const copyId = useId()
@@ -62,7 +75,7 @@ export function DataNotMoved({ stopped, backup, reason, onShowBackup, onReport, 
   const safe = stopped === 'copying' ? t.notCopied : backup === null ? t.untouched : t.copied
   return (
     <div className={s.screen}>
-      <TitleBar lights={lights} {...(window === undefined ? {} : { window })}>
+      <TitleBar lights={lights} {...(window === undefined ? {} : { window })} {...(controls === undefined ? {} : { controls })}>
         {null}
       </TitleBar>
       <main className={s.body} aria-labelledby={titleId}>

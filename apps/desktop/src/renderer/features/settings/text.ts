@@ -2,6 +2,8 @@ import { chord, type CoAuthorCommit, keys, modKey, type ReviewSealSample } from 
 
 import { device, platform } from '../../shared/device'
 
+const capital = (words: string) => `${words.slice(0, 1).toUpperCase()}${words.slice(1)}`
+
 /* What Althar's settings say, in the quick settings from the window's bar and on the Settings tab. */
 
 export const text = {
@@ -76,6 +78,11 @@ export const text = {
   themeLight: 'Light',
   themeDark: 'Dark',
   themeSystem: `Match ${device.the}`,
+  accent: 'Accent colour',
+  accentAlthar: 'Althar’s',
+  accentSystem: `${capital(device.the)}’s`,
+  accentNone: `${capital(device.the)} doesn’t set an accent colour, so Althar keeps its own.`,
+  accentIllegible: `${capital(device.the)}’s accent colour wouldn’t be readable here, so Althar keeps its own.`,
   icon: 'App icon',
   edge: 'In other apps',
   edgeNote: 'Where what needs you shows',
