@@ -32,8 +32,10 @@ const seams = [
   // The project's Rules: A's list of what asks, B's shorter charter.
   { importer: 'features/rules/RulesSection.tsx', id: '@althar/ui/screens', to: 'seams/rulesScreens.tsx' },
   { importer: 'features/rules/RulesSection.tsx', id: '@althar/ui', to: 'seams/rulesUi.tsx' },
-  // Althar's Settings: the Skills section as MCP servers and skills.
+  // Althar's Settings: the Skills section as MCP servers and skills; What asks, as a section of its own.
   { importer: 'features/settings/SettingsPage.tsx', id: '@althar/ui', to: 'seams/settingsUi.tsx' },
+  { importer: 'features/settings/SettingsPage.tsx', id: './sections', to: 'seams/settingsSections.ts' },
+  { importer: 'features/settings/route.tsx', id: './sections', to: 'seams/settingsSections.ts' },
   // A thread's tool rows: an MCP call says its server.
   { importer: 'shared/ThreadBlocks.tsx', id: '@althar/ui', to: 'seams/threadUi.tsx' },
   // The task's header: in the sketches, its parts.

@@ -136,3 +136,47 @@
   flex: none;
   white-space: nowrap;
 }
+
+/* —— B: in Settings, and the project's own —— */
+.same {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin: 0 0 22px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+.differ {
+  display: grid;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.differ li {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.differName {
+  flex: none;
+  width: 84px;
+  color: var(--t-1);
+  font-weight: 520;
+}
+.differWhat {
+  flex: 1;
+  color: var(--t-2);
+}
+.differWhat code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.differLink {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+}

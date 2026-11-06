@@ -154,7 +154,7 @@ const goDirection = (direction: Direction) => {
   remember()
 }
 
-/** Keys 1 to 5 pick a surface, A, B, C and T a direction, [ and ] step through them; never while typing, or inside a menu or dialog. */
+/** Keys 1 to 6 pick a surface, A to D and T a direction, [ and ] step through them; never while typing, or inside a menu or dialog. */
 const onKey = (event: KeyboardEvent) => {
   if (event.metaKey || event.ctrlKey || event.altKey) return
   const target = event.target instanceof Element ? event.target : null
@@ -211,7 +211,7 @@ function Switcher() {
       ))}
       <LinkButton onClick={proto.startOver}>Start over</LinkButton>
       <span className={s.grow} />
-      <span className={s.keys}>1–6 · A B C T · [ ]</span>
+      <span className={s.keys}>1–6 · A–D T · [ ]</span>
     </div>
   )
 }
@@ -233,7 +233,7 @@ export const boot = () => {
   // ?s=rules&d=B opens on a surface and direction, once: taken off the address, so the router doesn't read it.
   const params = new URLSearchParams(window.location.search)
   const kept = JSON.parse(window.sessionStorage.getItem('capable') ?? '{}') as { s?: string; d?: string }
-  const surface = SURFACES.find((one) => one.value === (params.get('s') ?? kept.s))?.value ?? 'start'
+  const surface = SURFACES.find((one) => one.value === (params.get('s') ?? kept.s))?.value ?? SURFACES[0]!.value
   const named = params.get('d') ?? kept.d ?? null
   const direction = fitting(surface, (named === 'Today' ? 'Today' : (named?.toUpperCase() ?? 'A')) as Direction)
   proto.set({ surface, direction, bare: params.has('bare'), composing: params.has('open') })

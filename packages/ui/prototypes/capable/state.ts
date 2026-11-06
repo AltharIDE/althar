@@ -3,8 +3,8 @@ import { useSyncExternalStore } from 'react'
 
 import { type Draft, freshDraft } from './directions/start/pieces'
 
-export type Surface = 'start' | 'lineage' | 'rules' | 'tools' | 'tune' | 'parts'
-export type Direction = 'A' | 'B' | 'C' | 'Today'
+export type Surface = 'start' | 'lineage' | 'rules' | 'tools' | 'tune' | 'parts' | 'sketches'
+export type Direction = 'A' | 'B' | 'C' | 'D' | 'Today'
 
 export interface Place {
   readonly label: string
@@ -19,7 +19,6 @@ export interface SurfaceInfo {
   readonly places: ReadonlyArray<Place>
 }
 
-const BOTH = '#/projects/p1?room=both'
 const BOARD = '#/projects/p1?room=board'
 const PARENT = '#/threads/th-adr'
 const CHILD = '#/threads/th-codex-net'
@@ -30,27 +29,11 @@ const MCP = '#/threads/th-design'
 const REVIEW = '#/threads/th-review'
 const TALK = '#/projects/p1?room=talk'
 const GENERAL = '#/projects/p1?room=settings&section=general'
+const ACCOUNT = '#/settings/what-asks'
+const MANY = '#/threads/th-runs'
 
-/** The surfaces in the strip's order, keys 1 to 6, each with its directions, keys A, B, C (and T for today). */
+/** The surfaces in the strip's order, keys 1 to 6, each with its directions, keys A to D (and T for today). New task (start) is set aside: the person keeps starting tasks with the coordinator for now. */
 export const SURFACES: ReadonlyArray<SurfaceInfo> = [
-  {
-    value: 'start',
-    name: 'New task',
-    places: [
-      { label: 'Board', hash: BOTH },
-      { label: 'Board alone', hash: BOARD },
-    ],
-    directions: [
-      { value: 'A', name: 'A dialog', about: 'New task opens a dialog over the board: words or Linear issues, model, review, branch' },
-      {
-        value: 'B',
-        name: 'The composer',
-        about: 'The project’s composer starts a task or talks to the coordinator, by a switch at its edge',
-      },
-      { value: 'C', name: 'On the board', about: 'A card at the top of the board you write into, started where it is' },
-      { value: 'Today', name: 'Today', about: 'Only the coordinator starts tasks, after its countdown' },
-    ],
-  },
   {
     value: 'lineage',
     name: 'Leads and the coordinator',
@@ -77,12 +60,17 @@ export const SURFACES: ReadonlyArray<SurfaceInfo> = [
     value: 'rules',
     name: 'What asks',
     places: [
-      { label: 'Rules', hash: RULES },
+      { label: 'Project’s Rules', hash: RULES },
+      { label: 'Your Settings', hash: ACCOUNT },
       { label: 'An ask in a task', hash: ASK },
     ],
     directions: [
-      { value: 'A', name: 'Four kinds', about: 'Rules lead with the four kinds that still ask, then your own Never and Ask' },
-      { value: 'B', name: 'The charter, shorter', about: 'Today’s sentences, with what can’t be undone as their first and the modes gone' },
+      { value: 'A', name: 'In the project', about: 'Chosen: Rules lead with the four kinds that still ask, then your own Never and Ask' },
+      {
+        value: 'B',
+        name: 'In your Settings',
+        about: 'The four kinds and your own commands live in Settings, the same in every project; a project keeps only its own',
+      },
       { value: 'Today', name: 'Today', about: 'Rules as built: a mode, Allow everything as a switch, six kinds' },
     ],
   },
@@ -96,27 +84,20 @@ export const SURFACES: ReadonlyArray<SurfaceInfo> = [
     directions: [
       {
         value: 'A',
-        name: 'By where found',
-        about: 'Servers and skills listed by the config they came from, each with a switch and its roles',
+        name: 'A column per agent',
+        about: 'The role table you chose, with a column for each of your agents: tick one to add it there',
       },
-      { value: 'B', name: 'By role', about: 'A table of what each role gets: lead, reviewer, coordinator' },
-      { value: 'Today', name: 'Today', about: 'Althar’s skills only; none of your MCP servers' },
-    ],
-  },
-  {
-    value: 'parts',
-    name: 'Sketches',
-    places: [
-      { label: 'A change’s parts', hash: PARENT },
-      { label: 'A review', hash: REVIEW },
-      { label: 'A push by an agent', hash: CHILD },
-    ],
-    directions: [
       {
-        value: 'A',
-        name: 'Sketch',
-        about: 'Parts as chips on a task’s header, a review that says whether it runs the code, an agent’s own push',
+        value: 'B',
+        name: 'Marks in the row',
+        about: 'The role table, each server with its agents’ marks, faint where it’s missing, and Add to …',
       },
+      {
+        value: 'C',
+        name: 'One switch',
+        about: 'The role table, with one switch that keeps your agents the same, and what’s left to settle',
+      },
+      { value: 'Today', name: 'Today', about: 'Althar’s skills only; none of your MCP servers' },
     ],
   },
   {
@@ -131,11 +112,39 @@ export const SURFACES: ReadonlyArray<SurfaceInfo> = [
       {
         value: 'A',
         name: 'A line each',
-        about: 'What the coordinator changed is a line each in its thread, with Undo; Settings says who changed a row',
+        about: 'Chosen: what the coordinator changed is a line each in its thread, with Undo; Settings says who changed a row',
       },
-      { value: 'B', name: 'One card', about: 'A turn’s changes are one card, with Settings at its head; Settings says who changed a row' },
       { value: 'Today', name: 'Today', about: 'Only you change settings' },
     ],
+  },
+  {
+    value: 'parts',
+    name: 'A task’s parts',
+    places: [
+      { label: 'Three parts', hash: PARENT },
+      { label: 'Ten parts', hash: MANY },
+      { label: 'A review', hash: REVIEW },
+    ],
+    directions: [
+      { value: 'A', name: 'After the title', about: 'The first three follow the title in the bar; the rest behind “N more”' },
+      { value: 'B', name: 'A row under the bar', about: 'A row of their own, each with where it stands; what doesn’t fit behind “N more”' },
+      { value: 'C', name: 'One button', about: 'Parts, with its count, beside the faces; it opens every part by group' },
+      {
+        value: 'D',
+        name: 'Beside the thread',
+        about: 'The same button opens them in the free margin beside the thread, open until closed',
+      },
+      { value: 'Today', name: 'Today', about: 'Files, Run and the menu; a pull request is attached from the menu' },
+    ],
+  },
+  {
+    value: 'sketches',
+    name: 'Sketches',
+    places: [
+      { label: 'A review', hash: REVIEW },
+      { label: 'A push by an agent', hash: CHILD },
+    ],
+    directions: [{ value: 'A', name: 'Sketch', about: 'A review that says whether it runs the code; an agent’s own push' }],
   },
 ]
 
@@ -177,10 +186,12 @@ export interface Proto {
   readonly handed: string | null
   /** B: the task being written in the project's composer. */
   readonly composer: Draft
+  /** A task's parts, D: the rail beside the thread open. */
+  readonly rail: boolean
 }
 
 let state: Proto = {
-  surface: 'start',
+  surface: 'lineage',
   direction: 'A',
   bare: false,
   composing: false,
@@ -191,6 +202,7 @@ let state: Proto = {
   off: [],
   handed: null,
   composer: freshDraft(),
+  rail: true,
 }
 const listeners = new Set<() => void>()
 
@@ -206,7 +218,8 @@ export const proto = {
     listeners.add(listener)
     return () => listeners.delete(listener)
   },
-  startOver: () => set({ composing: false, started: [], childHeld: false, answered: {}, off: [], to: 'task', composer: freshDraft() }),
+  startOver: () =>
+    set({ composing: false, started: [], childHeld: false, answered: {}, off: [], to: 'task', composer: freshDraft(), rail: true }),
   start: (tasks: ReadonlyArray<Omit<Started, 'id' | 'at'>>) =>
     set({
       composing: false,

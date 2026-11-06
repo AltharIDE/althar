@@ -13,13 +13,6 @@ const only = process.argv.slice(2)
 
 /* ——— What the person does, as clicks. ——— */
 const press = (page, name) => page.getByRole('button', { name, exact: true }).first().click()
-const radio = (page, name) => page.getByRole('radio', { name, exact: true }).first().click()
-const type = async (page, words) => {
-  const dialog = page.getByRole('dialog')
-  const field = ((await dialog.count()) > 0 ? dialog : page).locator('textarea').first()
-  await field.click()
-  await field.fill(words)
-}
 const settle = (page, ms = 500) => page.waitForTimeout(ms)
 /** Scrolls what holds these words to the middle of the window. */
 const to = (page, words, block = 'center') =>
@@ -42,200 +35,66 @@ const unfold = async (page) => {
       .catch(() => undefined)
 }
 
-const BOTH = '#/projects/p1?room=both'
 const BOARD = '#/projects/p1?room=board'
 const WIDE = 1440
 
+const RULES = '#/projects/p1?room=settings&section=rules'
+const FEW = '#/threads/th-adr'
+const MANY = '#/threads/th-runs'
+/** Only the window's bar and what's just under it. */
+const BAR = { x: 0, y: 0, width: 1280, height: 140 }
+
 const shots = [
-  // 1 · Starting a task without the coordinator.
-  { id: '1a-1-dialog', s: 'start', d: 'A', hash: BOTH, width: WIDE, go: (page) => press(page, 'New task') },
-  {
-    id: '1a-2-dialog-words',
-    s: 'start',
-    d: 'A',
-    hash: BOTH,
-    width: WIDE,
-    go: async (page) => {
-      await press(page, 'New task')
-      await type(page, 'Redesign the plan card’s header so the model chip and the countdown don’t wrap at 900px')
-    },
-  },
-  {
-    id: '1a-3-dialog-linear',
-    s: 'start',
-    d: 'A',
-    hash: BOTH,
-    width: WIDE,
-    go: async (page) => {
-      await press(page, 'New task')
-      await radio(page, 'From Linear')
-      await page.getByText('DEV-202', { exact: false }).first().click()
-      await page.getByText('DEV-203', { exact: false }).first().click()
-    },
-  },
-  {
-    id: '1a-4-dialog-small',
-    s: 'start',
-    d: 'A',
-    hash: BOTH,
-    width: WIDE,
-    go: async (page) => {
-      await press(page, 'New task')
-      await radio(page, 'Small change')
-      await type(page, 'The Codex sign-in row in Settings truncates without a tooltip')
-    },
-  },
-  {
-    id: '1a-5-model',
-    s: 'start',
-    d: 'A',
-    hash: BOTH,
-    width: WIDE,
-    go: async (page) => {
-      await press(page, 'New task')
-      await type(page, 'Redesign the plan card’s header so the model chip and the countdown don’t wrap at 900px')
-      await page
-        .getByRole('button', { name: /^Lead:/ })
-        .first()
-        .click()
-    },
-  },
-  {
-    id: '1a-6-started',
-    s: 'start',
-    d: 'A',
-    hash: BOTH,
-    width: WIDE,
-    go: async (page) => {
-      await press(page, 'New task')
-      await radio(page, 'From Linear')
-      await page.getByText('DEV-202', { exact: false }).first().click()
-      await page.getByText('DEV-203', { exact: false }).first().click()
-      await page.getByRole('button', { name: /^Start 3 tasks/ }).click()
-      await settle(page, 900)
-    },
-  },
-  {
-    id: '1b-1-composer',
-    s: 'start',
-    d: 'B',
-    hash: BOTH,
-    width: WIDE,
-    go: async (page) => {
-      await press(page, 'New task')
-      await type(page, 'The Codex sign-in row in Settings truncates without a tooltip')
-    },
-  },
-  {
-    id: '1b-2-composer-linear',
-    s: 'start',
-    d: 'B',
-    hash: BOTH,
-    width: WIDE,
-    go: async (page) => {
-      await press(page, 'New task')
-      await page
-        .getByRole('button', { name: /From Linear/ })
-        .first()
-        .click()
-      await page.getByRole('menuitemcheckbox', { name: /DEV-201/ }).click()
-      await page.getByRole('menuitemcheckbox', { name: /DEV-202/ }).click()
-    },
-  },
-  {
-    id: '1b-3-composer-started',
-    s: 'start',
-    d: 'B',
-    hash: BOTH,
-    width: WIDE,
-    go: async (page) => {
-      await press(page, 'New task')
-      await page.getByRole('button', { name: 'Small change' }).first().click()
-      await type(page, 'The Codex sign-in row in Settings truncates without a tooltip')
-      await page.locator('textarea').first().press('Enter')
-      await settle(page, 900)
-    },
-  },
-  { id: '1c-1-board', s: 'start', d: 'C', hash: BOARD, width: WIDE, go: () => undefined },
-  {
-    id: '1c-2-board-writing',
-    s: 'start',
-    d: 'C',
-    hash: BOARD,
-    width: WIDE,
-    height: 900,
-    go: async (page) => {
-      await page
-        .getByRole('button', { name: /^New task/ })
-        .last()
-        .click()
-      await type(page, 'The Codex sign-in row in Settings truncates without a tooltip')
-    },
-  },
-  {
-    id: '1c-3-board-started',
-    s: 'start',
-    d: 'C',
-    hash: BOARD,
-    width: WIDE,
-    go: async (page) => {
-      await page
-        .getByRole('button', { name: /^New task/ })
-        .last()
-        .click()
-      await type(page, 'The Codex sign-in row in Settings truncates without a tooltip')
-      await page
-        .getByRole('button', { name: /^Start/ })
-        .last()
-        .click()
-      await settle(page, 900)
-    },
-  },
-  { id: '1t-today', s: 'start', d: 'Today', hash: BOTH, width: WIDE, go: () => undefined },
+  // 1 · A task a lead started; the coordinator in a task's thread.
+  { id: '1a-1-board', s: 'lineage', d: 'A', hash: BOARD, width: WIDE, go: () => undefined },
+  { id: '1a-2-parent', s: 'lineage', d: 'A', hash: FEW, height: 1000, go: (page) => to(page, 'ADR-097 is drafted', 'start') },
+  { id: '1a-3-child', s: 'lineage', d: 'A', hash: '#/threads/th-codex-net', go: () => undefined },
+  { id: '1b-1-board', s: 'lineage', d: 'B', hash: BOARD, width: WIDE, go: () => undefined },
+  { id: '1b-2-parent', s: 'lineage', d: 'B', hash: FEW, height: 1000, go: (page) => to(page, 'ADR-097 is drafted', 'start') },
+  { id: '1b-3-parent-end', s: 'lineage', d: 'B', hash: FEW, height: 900, go: (page) => to(page, 'woke the lead') },
 
-  // 2 · A task a lead started; the coordinator in a task's thread.
-  { id: '2a-1-board', s: 'lineage', d: 'A', hash: BOARD, width: WIDE, go: () => undefined },
+  // 2 · What asks: in the project (A, chosen) or in your Settings (B).
+  { id: '2a-1-rules', s: 'rules', d: 'A', hash: RULES, height: 1300, go: () => undefined },
+  { id: '2a-2-ask', s: 'rules', d: 'A', hash: MANY, height: 900, go: () => undefined },
+  { id: '2b-1-settings', s: 'rules', d: 'B', hash: '#/settings/what-asks', height: 820, go: () => undefined },
+  { id: '2b-2-rules', s: 'rules', d: 'B', hash: RULES, height: 980, go: () => undefined },
   {
-    id: '2a-2-parent',
-    s: 'lineage',
-    d: 'A',
-    hash: '#/threads/th-adr',
-    height: 1000,
-    go: (page) => to(page, 'ADR-097 is drafted', 'start'),
-  },
-  { id: '2a-3-child', s: 'lineage', d: 'A', hash: '#/threads/th-codex-net', go: () => undefined },
-  { id: '2b-1-board', s: 'lineage', d: 'B', hash: BOARD, width: WIDE, go: () => undefined },
-  {
-    id: '2b-2-parent',
-    s: 'lineage',
+    id: '2b-3-rules-differ',
+    s: 'rules',
     d: 'B',
-    hash: '#/threads/th-adr',
-    height: 1000,
-    go: (page) => to(page, 'ADR-097 is drafted', 'start'),
+    hash: RULES,
+    height: 760,
+    go: async (page) => {
+      await press(page, 'A kind works differently here')
+      await page.getByRole('menuitem', { name: 'Speaking for you' }).click()
+      await to(page, 'This project’s own', 'start')
+    },
   },
-  { id: '2b-3-parent-end', s: 'lineage', d: 'B', hash: '#/threads/th-adr', height: 900, go: (page) => to(page, 'woke the lead') },
 
-  // 3 · What asks.
-  { id: '3a-1-rules', s: 'rules', d: 'A', hash: '#/projects/p1?room=settings&section=rules', height: 1300, go: () => undefined },
-  { id: '3a-2-ask', s: 'rules', d: 'A', hash: '#/threads/th-runs', height: 900, go: () => undefined },
-  { id: '3b-1-rules', s: 'rules', d: 'B', hash: '#/projects/p1?room=settings&section=rules', height: 1100, go: () => undefined },
-  { id: '3b-2-ask', s: 'rules', d: 'B', hash: '#/threads/th-runs', height: 900, go: () => undefined },
-  { id: '3t-2-ask-today', s: 'rules', d: 'Today', hash: '#/threads/th-runs', height: 900, go: () => undefined },
-
-  // 4 · MCP servers and skills.
-  { id: '4a-1-settings', s: 'tools', d: 'A', hash: '#/settings/skills', height: 1700, go: () => undefined },
+  // 3 · MCP servers and skills: the role table (chosen), and three ways to sync your agents.
+  { id: '3a-1-settings', s: 'tools', d: 'A', hash: '#/settings/skills', height: 1000, go: () => undefined },
+  { id: '3a-2-differs', s: 'tools', d: 'A', hash: '#/settings/skills', keep: true, go: (page) => press(page, 'Differs') },
+  { id: '3a-3-added', s: 'tools', d: 'A', hash: '#/settings/skills', go: (page) => press(page, 'Add them all') },
   {
-    id: '4a-2-settings-who',
+    id: '3b-1-settings',
     s: 'tools',
-    d: 'A',
+    d: 'B',
     hash: '#/settings/skills',
-    go: async (page) => {
-      await page.getByRole('button', { name: 'Every role' }).first().click()
-    },
+    keep: true,
+    go: (page) => page.getByRole('row').filter({ hasText: 'figma' }).hover(),
   },
-  { id: '4b-1-settings', s: 'tools', d: 'B', hash: '#/settings/skills', height: 1100, go: () => undefined },
+  { id: '3c-1-off', s: 'tools', d: 'C', hash: '#/settings/skills', go: () => undefined },
   {
-    id: '4a-3-thread',
+    id: '3c-2-on',
+    s: 'tools',
+    d: 'C',
+    hash: '#/settings/skills',
+    height: 900,
+    clip: { x: 324, y: 200, width: 916, height: 560 },
+    go: (page) => page.getByRole('switch', { name: 'Keep your agents’ servers the same' }).click(),
+  },
+  {
+    id: '3-4-thread',
     s: 'tools',
     d: 'A',
     hash: '#/threads/th-design',
@@ -245,28 +104,12 @@ const shots = [
       await unfold(page)
     },
   },
-  { id: '4b-3-thread', s: 'tools', d: 'B', hash: '#/threads/th-design', height: 900, go: (page) => unfold(page) },
-  { id: '4t-3-thread-today', s: 'tools', d: 'Today', hash: '#/threads/th-design', height: 900, go: (page) => unfold(page) },
 
-  // 5 · Sketches.
+  // 4 · Settings an agent changed (A, chosen).
+  { id: '4a-1-coordinator', s: 'tune', d: 'A', hash: '#/projects/p1?room=talk', go: () => undefined },
+  { id: '4a-2-settings', s: 'tune', d: 'A', hash: '#/projects/p1?room=settings&section=general', height: 760, go: () => undefined },
   {
-    id: '5-1-parts',
-    s: 'parts',
-    d: 'A',
-    hash: '#/threads/th-adr',
-    go: async (page) => {
-      await page.getByRole('button', { name: 'Add' }).first().click()
-    },
-  },
-  { id: '5-2-review', s: 'parts', d: 'A', hash: '#/threads/th-review', go: () => undefined },
-  { id: '5-3-self-push', s: 'parts', d: 'A', hash: '#/threads/th-codex-net', go: () => undefined },
-
-  // 6 · Settings an agent changed.
-  { id: '6a-1-coordinator', s: 'tune', d: 'A', hash: '#/projects/p1?room=talk', go: () => undefined },
-  { id: '6b-1-coordinator', s: 'tune', d: 'B', hash: '#/projects/p1?room=talk', go: () => undefined },
-  { id: '6a-2-settings', s: 'tune', d: 'A', hash: '#/projects/p1?room=settings&section=general', height: 760, go: () => undefined },
-  {
-    id: '6a-3-rules-allowed',
+    id: '4a-3-rules-allowed',
     s: 'tune',
     d: 'A',
     hash: '#/projects/p1?room=talk',
@@ -278,6 +121,37 @@ const shots = [
       })
     },
   },
+
+  // 5 · A task's parts: the faces, Run and the menu stay where they are; the parts go elsewhere.
+  { id: '5t-1-today', s: 'parts', d: 'Today', hash: MANY, clip: BAR, go: () => undefined },
+  { id: '5a-1-few', s: 'parts', d: 'A', hash: FEW, clip: BAR, go: () => undefined },
+  {
+    id: '5a-2-many',
+    s: 'parts',
+    d: 'A',
+    hash: MANY,
+    keep: true,
+    clip: { x: 0, y: 0, width: 1280, height: 560 },
+    go: (page) => press(page, '7 more'),
+  },
+  { id: '5b-1-few', s: 'parts', d: 'B', hash: FEW, clip: BAR, go: () => undefined },
+  { id: '5b-2-many', s: 'parts', d: 'B', hash: MANY, clip: BAR, go: () => undefined },
+  { id: '5b-3-review', s: 'parts', d: 'B', hash: '#/threads/th-review', clip: BAR, go: () => undefined },
+  {
+    id: '5c-1-many',
+    s: 'parts',
+    d: 'C',
+    hash: MANY,
+    keep: true,
+    clip: { x: 0, y: 0, width: 1280, height: 640 },
+    go: (page) => page.getByRole('button', { name: /^Parts/ }).click(),
+  },
+  { id: '5d-1-few', s: 'parts', d: 'D', hash: FEW, height: 640, go: () => undefined },
+  { id: '5d-2-many', s: 'parts', d: 'D', hash: MANY, height: 640, go: () => undefined },
+
+  // 6 · Sketches.
+  { id: '6-1-review', s: 'sketches', d: 'A', hash: '#/threads/th-review', go: () => undefined },
+  { id: '6-2-self-push', s: 'sketches', d: 'A', hash: '#/threads/th-codex-net', go: () => undefined },
 ]
 
 const browser = await chromium.launch()
@@ -290,7 +164,7 @@ for (const shot of shots.filter((one) => only.length === 0 || only.some((id) => 
   try {
     await shot.go(page)
     // Off the buttons, so no tooltip stands over what was done.
-    if (!/model|who|linear|parts/.test(shot.id)) {
+    if (shot.keep !== true) {
       await page.mouse.move(2, (shot.height ?? 820) - 2)
       await page.evaluate(
         () =>
@@ -303,7 +177,7 @@ for (const shot of shots.filter((one) => only.length === 0 || only.some((id) => 
   } catch (error) {
     errors.push(String(error).split('\n')[0])
   }
-  await page.screenshot({ path: resolve(out, `${shot.id}.png`) })
+  await page.screenshot({ path: resolve(out, `${shot.id}.png`), ...(shot.clip === undefined ? {} : { clip: shot.clip }) })
   process.stdout.write(`${shot.id}  ${errors.length === 0 ? 'ok' : errors.join(' | ')}\n`)
   await page.close()
 }

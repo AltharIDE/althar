@@ -1,11 +1,215 @@
-/* Scrappy, surface 5: sketches. */
-.parts {
+/* Scrappy, surfaces 5 and 6: a task's parts, four ways; and the sketches. */
+
+/* —— a part's tone: what waits on you, what failed, what runs —— */
+:is(.titleChip, .rowChip, .item)[data-tone='you'] > :first-child {
+  color: var(--signal);
+}
+:is(.titleChip, .rowChip, .item)[data-tone='bad'] > :first-child {
+  color: var(--danger);
+}
+:is(.titleChip, .rowChip, .item)[data-tone='live'] > :first-child {
+  color: var(--live);
+}
+
+/* —— A: after the title —— */
+.afterTitle {
+  flex: none;
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  margin-right: 6px;
-  padding-right: 8px;
-  border-right: 1px solid var(--line-2);
+  margin-left: 2px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line-2);
+}
+.titleChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--t-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.titleChip:hover {
+  background: var(--line);
+  color: var(--t-1);
+}
+.titleChip > :first-child {
+  color: var(--t-3);
+}
+
+/* —— B: a row under the bar —— */
+.row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--n-1);
+  overflow: hidden;
+}
+.rowChip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 99px;
+  background: var(--n-2);
+  font: inherit;
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.rowChip[hidden] {
+  display: none;
+}
+.rowChip:hover {
+  background: var(--n-3);
+}
+.rowChip > :first-child {
+  color: var(--t-3);
+}
+.rowName {
+  color: var(--t-1);
+  font-weight: 520;
+}
+.rowDetail {
+  color: var(--t-3);
+}
+.rowAdd {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 99px;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--t-3);
+  cursor: pointer;
+}
+.rowAdd:hover {
+  background: var(--line);
+  color: var(--t-1);
+}
+
+/* —— C and D: every part, by group —— */
+.list {
+  display: grid;
+  gap: 12px;
+  padding: 10px 8px 12px;
+}
+.listHead {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 0 8px;
+}
+.listTitle {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 560;
+  color: var(--t-1);
+}
+.group {
+  display: grid;
+  gap: 2px;
+}
+.groupName {
+  margin: 0;
+  padding: 0 8px 2px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--t-3);
+}
+.items {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.item:hover {
+  background: var(--line);
+}
+.itemGlyph {
+  display: grid;
+  place-items: center;
+  color: var(--t-3);
+}
+.itemName {
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--t-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.itemDetail {
+  grid-column: 2;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.item[data-tone='you'] .itemDetail {
+  color: var(--signal);
+}
+.item[data-tone='bad'] .itemDetail {
+  color: var(--danger);
+}
+
+/* —— D: beside the thread, in the wide window's free margin —— */
+.railAnchor {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  height: 0;
+}
+.rail {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 248px;
+  max-height: calc(100vh - 200px);
+  overflow: auto;
+  border-radius: 12px;
+  background: var(--n-1);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+}
+/* the faces, between the parts and Run, never moving */
+.faces {
+  flex: none;
+  margin: 0 8px 0 6px;
 }
 .reviewHead {
   display: flex;

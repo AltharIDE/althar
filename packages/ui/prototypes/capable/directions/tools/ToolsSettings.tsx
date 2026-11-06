@@ -13,6 +13,8 @@ import { SettingGroup, SettingList, SettingRow } from '../../../../src/setup/Pre
 import box from '../../../../src/primitives/CheckList/CheckList.module.css'
 import { proto, useProto } from '../../state'
 import { type Found, PROJECTS, type Reach, reachOf, reachWords, ROLES, type Role, SERVERS, SKILLS, SOURCES, type SourceId } from './found'
+import { AGENTS, AgentCell, AgentMarks, Drift, KeepSame, syncText as syncTextOf, useSync } from './Sync'
+import sync from './sync.module.css'
 import s from './tools.module.css'
 
 export const toolsText = {
@@ -158,10 +160,13 @@ export function ToolsBySource() {
 }
 
 /** B: one table, a row each, a column for each role; above it, which project it is for. */
-export function ToolsByRole() {
+export function ToolsByRole({ mode }: { mode?: 'columns' | 'marks' | 'switch' }) {
   const p = useProto()
   const { reach, set } = useReaches()
   const [scope, setScope] = useState<'every' | 'althar'>('every')
+  const agents = useSync()
+  const [kept, setKept] = useState(false)
+  const columns = mode === 'columns'
   const tick = (one: Found, role: Role) => {
     const now = reach(one)
     const inScope = scope === 'every' || now.projects.includes('althar')
@@ -184,7 +189,7 @@ export function ToolsByRole() {
   const rows = (title: string, list: ReadonlyArray<Found>) => (
     <>
       <tr className={s.groupRow}>
-        <th scope="rowgroup" colSpan={4}>
+        <th scope="rowgroup" colSpan={columns ? 7 : 4}>
           {title}
         </th>
       </tr>
@@ -195,11 +200,15 @@ export function ToolsByRole() {
               <span className={s.nameLine}>
                 {markOf(one)}
                 <span className={s.name}>{one.name}</span>
-                <span className={s.sources} title={one.sources.map((id) => `${SOURCES[id].name}: ${SOURCES[id].path}`).join('\n')}>
-                  {one.sources.map((id) => (
-                    <Fragment key={id}>{sourceMark(id)}</Fragment>
-                  ))}
-                </span>
+                {columns && SERVERS.includes(one) ? null : mode !== undefined && SERVERS.includes(one) ? (
+                  <AgentMarks found={one} sync={agents} links={mode === 'marks'} />
+                ) : (
+                  <span className={s.sources} title={one.sources.map((id) => `${SOURCES[id].name}: ${SOURCES[id].path}`).join('\n')}>
+                    {one.sources.map((id) => (
+                      <Fragment key={id}>{sourceMark(id)}</Fragment>
+                    ))}
+                  </span>
+                )}
               </span>
               <span className={SERVERS.includes(one) ? s.runs : s.about}>{one.runs}</span>
             </div>
@@ -209,6 +218,16 @@ export function ToolsByRole() {
               {tick(one, role.id)}
             </td>
           ))}
+          {columns &&
+            (SERVERS.includes(one) ? (
+              AGENTS.map((agent, at) => (
+                <td key={agent.id} className={`${s.tick} ${at === 0 ? sync.first : ''}`}>
+                  <AgentCell found={one} agent={agent} sync={agents} />
+                </td>
+              ))
+            ) : (
+              <td colSpan={3} className={`${s.tick} ${sync.first}`} />
+            ))}
         </tr>
       ))}
     </>
@@ -226,8 +245,21 @@ export function ToolsByRole() {
           ]}
         />
       </div>
+      {mode !== undefined && <Drift sync={agents} line={mode !== 'switch'} />}
+      {mode === 'switch' && <KeepSame sync={agents} on={kept} onChange={setKept} />}
       <table className={s.table}>
         <thead>
+          {columns && (
+            <tr>
+              <td />
+              <th scope="colgroup" colSpan={3} className={sync.overHead}>
+                <span>{syncTextOf.inAlthar}</span>
+              </th>
+              <th scope="colgroup" colSpan={3} className={sync.overHead}>
+                <span>{syncTextOf.inAgents}</span>
+              </th>
+            </tr>
+          )}
           <tr>
             <th scope="col" className={s.corner}>
               <VisuallyHidden>{toolsText.name}</VisuallyHidden>
@@ -237,6 +269,15 @@ export function ToolsByRole() {
                 {role.plural}
               </th>
             ))}
+            {columns &&
+              AGENTS.map((agent, at) => (
+                <th key={agent.id} scope="col" className={`${sync.agentHead} ${at === 0 ? sync.first : ''}`}>
+                  <span>
+                    <BrandMark brand={agent.brand} size={12} />
+                    {agent.name}
+                  </span>
+                </th>
+              ))}
           </tr>
         </thead>
         <tbody>

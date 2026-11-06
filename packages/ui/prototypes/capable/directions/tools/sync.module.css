@@ -1,0 +1,165 @@
+/* Scrappy, surface 3: the same server in each of the person's agents. */
+
+/* —— over the table —— */
+.drift {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+.driftLine {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--t-1);
+}
+
+/* —— A: a column per agent —— */
+.agentHead {
+  padding: 0 0 8px 14px !important;
+  font-size: 12px;
+  color: var(--t-3);
+  white-space: nowrap;
+  text-align: center !important;
+}
+.agentHead > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.overHead {
+  padding: 0 0 4px 14px !important;
+  font-size: 11.5px;
+  font-weight: 500 !important;
+  color: var(--t-3);
+  text-align: center !important;
+  white-space: nowrap;
+}
+.overHead > span {
+  display: block;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line-2);
+}
+.first {
+  padding-left: 22px !important;
+  border-left: 1px solid var(--line);
+}
+.none {
+  color: var(--t-4);
+}
+.differs {
+  height: 22px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 99px;
+  background: var(--signal-dim);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--signal);
+  cursor: pointer;
+}
+.differs:hover {
+  background: var(--signal-line);
+}
+.signIn {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.way {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* —— B: marks in the row —— */
+.marks {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 4px;
+}
+.mark {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+}
+.mark[data-here='missing'],
+.mark[data-here='project'] {
+  opacity: 0.28;
+  filter: grayscale(1);
+}
+.mark[data-here='signIn'],
+.mark[data-here='differs'] {
+  box-shadow: inset 0 0 0 1.25px var(--signal-line);
+}
+:global(tr:hover) .addTo {
+  opacity: 1;
+}
+.addTo {
+  margin-left: 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.marks .differs,
+.marks .signIn {
+  margin-left: 8px;
+}
+
+/* —— C: one switch —— */
+.keep {
+  display: grid;
+  margin: 0 0 18px;
+  border-radius: 12px;
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.keepRow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+}
+.keepText {
+  flex: 1;
+  display: grid;
+  gap: 2px;
+}
+.keepTitle {
+  font-size: 13.5px;
+  color: var(--t-1);
+}
+.keepNote {
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.settle {
+  display: grid;
+  gap: 2px;
+  padding: 8px 16px 10px;
+  border-top: 1px solid var(--line);
+}
+.settleTitle {
+  padding: 2px 0 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--t-3);
+}
+.settleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  font-size: 13px;
+  color: var(--t-2);
+}
+.settleWhat {
+  flex: 1;
+}
+.settleWhat strong {
+  font-weight: 540;
+  color: var(--t-1);
+}
