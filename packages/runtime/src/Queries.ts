@@ -52,6 +52,7 @@ import { Clock, Context, Deferred, Duration, Effect, Layer, Option, Schema } fro
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Busy, type Line } from './Busy'
+import { markOf, openItem, viewOf } from './chatView'
 import { ModelFacts } from './ModelFacts'
 import { PlanUsage } from './PlanUsage'
 import { checkoutWaitOf, PlanParameters, planWaits, reviewerChange } from './Runs'
@@ -142,6 +143,9 @@ const saidOf = (item: { readonly id: string; readonly kind: string; readonly con
       return text === undefined ? null : { itemId: item.id, text, relayed }
     },
   })
+
+/** How many open items, at most, a cleared view carries in from before its mark. */
+const CARRIED = 200
 
 /** How many items further back, at most, a page of a task's thread reaches for the start of its first round: one enormous round loads in pages. */
 const ROUND_REACH = 2_000
@@ -1047,6 +1051,8 @@ export class Queries extends Context.Service<
           readonly before?: number
           /** The first sequence read, where the page starts at a given item. */
           readonly from?: number
+          /** Only items that are still open: what a cleared view carries into the thread (`openItem`). */
+          readonly open?: boolean
           readonly itemId?: string
           readonly limit: number
           readonly reports?: boolean
@@ -1089,6 +1095,7 @@ export class Queries extends Context.Service<
               AND ${where.itemId === undefined ? sql`(u.state IS NULL OR u.state <> 'withdrawn')` : sql`i.id = ${where.itemId}`}
               AND ${where.before === undefined ? sql`1 = 1` : sql`i.sequence < ${where.before}`}
               AND ${where.from === undefined ? sql`1 = 1` : sql`i.sequence >= ${where.from}`}
+              AND ${where.open === true ? sql.unsafe(openItem) : sql`1 = 1`}
               AND ${where.reports === true ? sql`i.kind = 'step_result'` : sql`1 = 1`}
             ORDER BY i.sequence DESC LIMIT ${where.limit + 1}`
           // One more than asked for says whether there are earlier ones.
@@ -2844,10 +2851,24 @@ export class Queries extends Context.Service<
         })
 
       /** A page of a thread's items, as screens show them; a task's starts at a round (`fromRound`). */
-      const pageOf = (threadId: string, page: { readonly before?: number; readonly limit?: number }, rounds = false) =>
+      const pageOf = (
+        threadId: string,
+        page: {
+          readonly before?: number
+          readonly limit?: number
+          readonly from?: number
+          readonly until?: number
+          readonly open?: boolean
+        },
+        rounds = false,
+      ) =>
         Effect.gen(function* () {
+          // A page ends before `until`, and before the one asked for, whichever is first.
+          const before = page.until === undefined ? page.before : Math.min(page.before ?? page.until, page.until)
           const read = yield* itemRows(threadId, {
-            ...(page.before === undefined ? {} : { before: page.before }),
+            ...(before === undefined ? {} : { before }),
+            ...(page.from === undefined ? {} : { from: page.from }),
+            ...(page.open === true ? { open: true } : {}),
             limit: page.limit ?? PAGE,
           })
           const { items, earlier } = rounds ? yield* fromRound(threadId, read) : read
@@ -3206,11 +3227,27 @@ export class Queries extends Context.Service<
           const [project] = yield* sql<{ name: string }>`SELECT name FROM projects WHERE id = ${projectId}`
           if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
           const threadId = yield* coordinators.thread(projectId)
+          // A cleared view starts at its mark, or, with the earlier conversation open, ends before it.
+          const mark = yield* markOf(threadId)
+          const within = mark === null ? {} : mark.earlierShown ? { until: mark.from } : { from: mark.from }
           // Its cards, the agent on it, the one it would start on and the project's host, read at the same time.
-          const [{ items, earlier }, session, suggested, host] = yield* Effect.all(
-            [pageOf(threadId, page), sessionOf(threadId), coordinators.suggested(projectId), hostOf(projectId)],
+          const [read, session, suggested, host, view] = yield* Effect.all(
+            [
+              pageOf(threadId, { ...page, ...within }),
+              sessionOf(threadId),
+              coordinators.suggested(projectId),
+              hostOf(projectId),
+              viewOf(threadId),
+            ],
             { concurrency: 'unbounded' },
           )
+          // What is still open stays in a cleared view: carried in at its start, once the page reaches it.
+          const carried =
+            mark === null || mark.earlierShown || read.earlier
+              ? []
+              : yield* pageOf(threadId, { until: mark.from, limit: CARRIED, open: true }).pipe(Effect.map((one) => one.items))
+          const { earlier } = read
+          const items = [...carried, ...read.items]
           // What it used today, since this computer's midnight, of each account it ran on (ADR-084).
           const midnight = new Date(yield* Clock.currentTimeMillis)
           midnight.setHours(0, 0, 0, 0)
@@ -3225,6 +3262,7 @@ export class Queries extends Context.Service<
             suggested,
             items,
             earlier,
+            view,
             host,
             runnables: yield* launches.runnables(projectId, null).pipe(Effect.orElseSucceed(() => [])),
             // Every run in the project, the tasks' too: the coordinator's screen is the project's.
@@ -3246,6 +3284,7 @@ export class Queries extends Context.Service<
           return yield* sql<ThreadChange>`
             SELECT c.cursor, c.aggregate_type, c.aggregate_id, c.project_id,
               CASE c.aggregate_type
+                WHEN 'thread' THEN c.aggregate_id
                 WHEN 'thread_item' THEN (SELECT thread_id FROM thread_items WHERE id = c.aggregate_id)
                 WHEN 'turn_delivery' THEN (SELECT thread_id FROM turn_deliveries WHERE id = c.aggregate_id)
                 WHEN 'provider_session' THEN (SELECT thread_id FROM provider_sessions WHERE id = c.aggregate_id)

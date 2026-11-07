@@ -10,7 +10,7 @@ import s from './Dialog.module.css'
  * happens, what it needs, and its buttons, the one that does it last. Built
  * on Radix's dialog, which keeps focus inside and closes on Escape or a
  * click outside. Mount it to open it; closing gives focus back to what had it
- * as it opened, where that is still on the page. With `onSubmit` it is a
+ * as it opened, where that is still on the page, else to `returnFocus`. With `onSubmit` it is a
  * form: Enter in a field submits it. One that steps through pages of its
  * own, as a walk in to a service does, has a way back before its title,
  * which Escape takes first, and its pages bring their own buttons.
@@ -35,6 +35,8 @@ export interface DialogProps {
   onBack?: () => void
   /** Something in it is under way: a press outside doesn't close it. Escape still does, or steps back. */
   holding?: boolean
+  /** Where focus goes as it closes when what had it as it opened is gone by then, such as a button in a popover that closed. */
+  returnFocus?: () => HTMLElement | null
   /** Makes it a form, submitted by Enter in a field or a submit button. */
   onSubmit?: () => void
   width?: number
@@ -52,6 +54,7 @@ export function Dialog({
   onClose,
   onBack,
   holding = false,
+  returnFocus,
   onSubmit,
   width = 420,
   tall = false,
@@ -100,6 +103,7 @@ export function Dialog({
           onCloseAutoFocus={(event) => {
             event.preventDefault()
             if (opener instanceof HTMLElement && opener.isConnected) opener.focus()
+            else returnFocus?.()?.focus()
           }}
           asChild={onSubmit !== undefined}
         >

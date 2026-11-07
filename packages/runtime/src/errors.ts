@@ -79,6 +79,11 @@ export class NoSession extends Schema.TaggedError<NoSession>()('NoSession', {
   threadId: Schema.String,
 }) {}
 
+/** The coordinator's view has nothing in it to clear. */
+export class NothingToClear extends Schema.TaggedError<NothingToClear>()('NothingToClear', {
+  threadId: Schema.String,
+}) {}
+
 export class RetryRefused extends Schema.TaggedError<RetryRefused>()('RetryRefused', {}) {}
 
 /** The agent could not be started, or its session could not be set up. */

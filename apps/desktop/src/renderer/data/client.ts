@@ -294,6 +294,14 @@ export interface Client {
   readonly tryAgain: (threadId: string) => Promise<void>
   /** Asks the thread's agent to compact its context, after what it was told before. */
   readonly compact: (threadId: string) => Promise<void>
+  /** Clears the view of the coordinator's thread: it starts here, and the coordinator keeps the conversation. */
+  readonly clearView: (threadId: string) => Promise<void>
+  /** Reads the conversation before a cleared view in the thread's place, or puts it away. */
+  readonly showEarlier: (threadId: string, open: boolean) => Promise<void>
+  /** Takes back a cleared view: the whole thread shows again. */
+  readonly undoClearView: (threadId: string) => Promise<void>
+  /** Ends the coordinator's session and deletes its conversation. It can't be undone. */
+  readonly forgetConversation: (threadId: string) => Promise<void>
   /** Stops a task: every agent on it, and the step it was on waits until it is resumed. */
   readonly stopTask: (taskId: string) => Promise<void>
   /** Whether a task's lead resolves conflicts on its own otherwise than its project says; null goes back to the project. */
@@ -786,6 +794,10 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
     tryAgain: (threadId) => command((commandId) => api.TryAgain({ commandId, threadId })),
     compact: (threadId) => command((commandId) => api.CompactContext({ commandId, threadId })),
+    clearView: (threadId) => command((commandId) => api.ClearView({ commandId, threadId })),
+    showEarlier: (threadId, open) => command((commandId) => api.ShowEarlier({ commandId, threadId, open })),
+    undoClearView: (threadId) => command((commandId) => api.UndoClearView({ commandId, threadId })),
+    forgetConversation: (threadId) => command((commandId) => api.ForgetConversation({ commandId, threadId })),
     stopTask: (taskId) => command((commandId) => api.StopTask({ commandId, taskId })),
     setTaskResolveConflicts: (input) => command((commandId) => api.SetTaskResolveConflicts({ commandId, ...input })),
     resolveConflictsNow: (taskId) => command((commandId) => api.ResolveConflictsNow({ commandId, taskId })),

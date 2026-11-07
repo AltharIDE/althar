@@ -65,6 +65,7 @@ import { ForkOffer, useForkOffer } from '../repositories/ForkOffer'
 import type { ProjectSettingsModel } from '../projectSettings/useProjectSettings'
 import { kitInk } from '../../shared/inks'
 import { Card, type CardActions } from './Card'
+import { useClearChat } from './ClearChat'
 import { TaskAskOf } from './TaskAskOf'
 import { FirstConnectionsView } from './FirstConnectionsView'
 import { ChangesCard, type ChangesActions } from '../../shared/ChangesCard'
@@ -348,7 +349,13 @@ export function ProjectView({
 
   // The agent what the person says goes to, and whether it takes images.
   const receiver = { name: agentName(chosen?.agentId ?? null), takes: takesImages(models, chosen?.agentId ?? null) }
+  const clearing = useClearChat(model)
   const send = (body: string, now: boolean) => {
+    // Asking to clear the chat is not said to the coordinator.
+    if (clearing.command(body)) {
+      setDraft('')
+      return
+    }
     // Images that can't go yet hold the message back, and the composer says why.
     const own = images.take(receiver)
     if (own === null) return
@@ -482,7 +489,7 @@ export function ProjectView({
         onUnqueue={(id) => void model.takeBack(id)}
         text={{ queued: text.queue, sendNowKey: modKey(keys.return) }}
         placeholder={busy ? text.placeholderBusy : text.placeholder}
-        meter={contextMeter(session, named, model.compact, { usage: coordinator?.usage, heading: text.usageHeading })}
+        meter={contextMeter(session, named, model.compact, { usage: coordinator?.usage, heading: text.usageHeading }, clearing.ring)}
         picker={
           model.agents.length > 0 &&
           chosen !== null && (
@@ -637,12 +644,13 @@ export function ProjectView({
                   <TaskFace
                     className={s.face}
                     composer={composer}
+                    head={clearing.head}
                     // Beside the board, the conversation has no room to share: what it opens goes over the board instead.
                     {...(room === Room.Both ? {} : { panel: shown.workbench(null), panelWidth: shown.bench.width })}
                   >
                     <Thread label={text.conversation} busy={busy}>
                       {/* A new project's first word: what its tasks will need later, while its conversation hasn't begun. */}
-                      {coordinator.items.length === 0 && !coordinator.earlier && (
+                      {coordinator.items.length === 0 && !coordinator.earlier && !coordinator.view.cleared && (
                         <FirstConnectionsView
                           projectId={projectId}
                           project={model.project?.name ?? coordinator.project.name}
@@ -657,6 +665,7 @@ export function ProjectView({
                         version={coordinator.items}
                         loading={model.loadingEarlier}
                       />
+                      {clearing.line}
                       {/* The coordinator only reads: what it hands back is pictures, which open in the lightbox; it writes no documents. */}
                       <ThreadShellProvider value={shown.shell}>
                         <ThreadBlocks
@@ -710,6 +719,7 @@ export function ProjectView({
                   </TaskFace>
                 )}
                 {shown.lightbox}
+                {clearing.dialog}
                 {room === Room.Both && (
                   <ResizeHandle
                     value={both.width}

@@ -310,6 +310,8 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
     | {
         readonly kind: 'agent_message' | 'agent_thought'
         readonly id: string
+        /** Where the thread places it, which a window reads against the view's mark. */
+        readonly sequence: number
         /** The id the agent gave this message, where it gives one. */
         messageId: string | undefined
         /** It is the agent's answer, or a word on the way, where the agent says (Codex). */
@@ -367,9 +369,13 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
         yield* flush
       if (gathering !== undefined) return { open: gathering, fresh: false }
       // The item is placed when its first chunk arrives, so the thread keeps the order things happened in.
+      const id = yield* addItem(place, kind, said({ text, answer }))
+      const sql = yield* SqlClient.SqlClient
+      const [placed] = yield* sql<{ sequence: number }>`SELECT sequence FROM thread_items WHERE id = ${id}`
       const open = {
         kind,
-        id: yield* addItem(place, kind, said({ text, answer })),
+        id,
+        sequence: placed?.sequence ?? 0,
         messageId,
         answer,
         text,
@@ -585,7 +591,8 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   }
 
   /** The message being gathered, as far as it has come: what a watching client shows while it streams. */
-  const current = () => (gathering === undefined ? undefined : { id: gathering.id, kind: gathering.kind, text: gathering.text })
+  const current = () =>
+    gathering === undefined ? undefined : { id: gathering.id, sequence: gathering.sequence, kind: gathering.kind, text: gathering.text }
 
   /** Commands' output that grew since this was last asked, each as far as it has come. */
   const outputsSoFar = (): ReadonlyArray<OutputSoFar> =>
