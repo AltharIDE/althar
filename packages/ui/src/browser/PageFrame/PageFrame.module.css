@@ -1,0 +1,158 @@
+/* The page's place: the panel's own size, or a device's in a well. The native view the host lays over it covers the place. */
+.frame {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--paper);
+}
+.well {
+  background: var(--well);
+}
+.place {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+/* where nothing has loaded yet */
+.emptyState {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  max-width: 260px;
+  text-align: center;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+.emptyState p {
+  margin: 0;
+}
+.emptyIcon {
+  color: var(--t-4);
+}
+
+/* where the page is drawn: the host's view goes here; while it is away, its picture */
+.page {
+  position: absolute;
+  overflow: hidden;
+  background: var(--paper);
+}
+.fill {
+  inset: 0;
+}
+.well .page {
+  border-radius: 6px;
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift);
+}
+.still {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  user-select: none;
+}
+
+/* the element a comment is about, outlined on the page's picture */
+.outline {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid var(--signal);
+  border-radius: 3px;
+  background: var(--signal-dim);
+  pointer-events: none;
+}
+.name {
+  position: absolute;
+  left: -2px;
+  bottom: calc(100% + 4px);
+  display: inline-flex;
+  gap: 6px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--signal-fill);
+  color: var(--on-signal);
+  font: 500 11px/16px var(--mono);
+  white-space: nowrap;
+}
+.size {
+  opacity: 0.72;
+}
+
+.box {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  width: var(--w);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 10px;
+  padding: 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: var(--lift-pop);
+  animation: in var(--enter) var(--ease-out);
+}
+@keyframes in {
+  from {
+    opacity: 0;
+    transform: scale(var(--scale-pop));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .box {
+    animation: fade var(--enter) var(--ease-out);
+  }
+  @keyframes fade {
+    from {
+      opacity: 0;
+    }
+  }
+}
+.n {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--signal-fill);
+  color: var(--on-signal);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.field {
+  min-height: 58px;
+  max-height: 160px;
+  resize: none;
+  border: 0;
+  outline: 0;
+  padding: 1px 0 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--t-1);
+}
+.field::placeholder {
+  color: var(--t-3);
+}
+.actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.remove {
+  margin-right: auto;
+  color: var(--danger);
+}

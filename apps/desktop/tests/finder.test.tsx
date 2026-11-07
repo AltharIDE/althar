@@ -188,6 +188,7 @@ describe('finding a task', () => {
 
 describe('a found task, as the finder lists it', () => {
   it('says where it stands in a word', () => {
+    expect(stateOf(found({ phase: 'drafting' }))).toBe(FoundState.Planned)
     expect(stateOf(found({ phase: 'planned' }))).toBe(FoundState.Planned)
     expect(stateOf(found({ phase: 'held' }))).toBe(FoundState.Planned)
     expect(stateOf(found({ phase: 'running' }))).toBe(FoundState.Running)

@@ -162,11 +162,11 @@ Next, decided with the user on 3 October 2026, as designed in docs 03 and 05.
   - **Move on.** With accounts, where the project rotates (off until the
     person turns it on), the work first goes to the same agent's next
     account that the project allows, signed in and not out, on the same
-    model; the person added it, so a key pays as well as a plan. Then it goes to the next free agent: signed in on a plan,
-    not out, in the agents' order, and not the other step's agent unless
-    nothing else is free (the thread then says it reviews its own work). An
-    agent paid per use, on a key, is never moved to unasked: that spends the
-    person's money; the person can still hand work to it. Its model is chosen as below, at the person's
+    model; the person added it, so a key pays as well as a plan. Then it goes to the best free model on a plan,
+    not out, with the other step's maker last so review stays cross-maker
+    whenever possible. A subscribed model provider counts even on an
+    otherwise key-paid account; a per-use model is never chosen unasked.
+    When review has to use the same maker, the thread says so. Its model is chosen as below, at the person's
     default effort for it. It takes over from a brief in the same worktree,
     and a step runs again on it, as when the person hands a step over. The
     thread says it in one line: who is out, when it resets, who took over
@@ -261,17 +261,32 @@ sign-out worked, and only ever a folder right under the accounts root.
 
 ## Which model the next agent runs
 
-When work moves to another agent, its model, in this order:
+When work moves to another agent, `Limits.free` and `modelFor` use one
+ranking over signed-in, allowed, unblocked model routes paid by a plan,
+including subscriptions on a model's provider. Models with no usage left
+are excluded. Agents offering only their default remain eligible unless it
+is blocked.
 
-1. **The plan's choice.** The model the plan named for that agent on this
-   step, if it named one.
-2. **The person's last.** The model the person last used with that agent in
-   this project, since that is the choice they made, on their plan.
-3. **The agent's default.** Its own default, as its CLI would start, which
-   respects the person's own config.
+1. **Keep review cross-maker.** Models from the other step's maker come
+   last, even when they run through a different agent.
+2. **Room for the step.** Prefer models that are not nearly out.
+3. **Comparable strength.** Use the Artificial Analysis coding and agentic
+   indices `list_models` shows, with intelligence breaking a tie. Within
+   five points of the strongest model in that class, prefer a known
+   different maker from the model being replaced, then the higher score.
+   A weak or unscored model cannot win just because its maker differs.
+4. **The person's preferences.** Equal scores use the plan's choice for
+   that agent, else the last model used on it in the project, else the
+   agent's offered default choice.
 
-Later, match the tier of the model it replaces, strongest for strongest,
-from a small table of known model families. The move is said in the thread:
-which agent reached its limit, when it resets, and which agent and model
-took over and why. The next agent is the next free one in the order of the
-person's connections, as the kit already words it.
+The chosen account and model travel together; session startup applies the
+same plan-payment rule, including for automations. Same-agent account
+rotation preserves the step's selected model. The replacement gets the
+step's brief, commit subjects, changes and recent turns in the same
+workspace. It keeps the current step through the original agent's reset;
+at the next step the planned lead returns if it has room.
+
+One thread line names who reached the limit, when it resets, and who took
+over on which model. Same-maker review fallback is named as such; the
+fixes step never claims to be reviewing its own work. With nothing free,
+the existing wait applies; the existing ask and wait rules remain.

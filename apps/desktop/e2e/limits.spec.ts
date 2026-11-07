@@ -46,18 +46,18 @@ const startWhileOut = async (out: string, { asks = false, waits = false }: { rea
   await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
   if (waits) {
     await projectSettings(page, 'Rules')
-    await page.getByRole('button', { name: 'moves to the next agent free', exact: true }).click()
+    await page.getByRole('button', { name: 'moves to the strongest model with usage left', exact: true }).click()
     await page.getByRole('menuitemradio', { name: 'Wait for the reset' }).click()
     await expect(page.getByRole('listitem', { name: 'Limits' })).toContainText('When an account runs out, the work waits for the reset')
     await backToWork(page)
   }
   if (asks) {
     await projectSettings(page, 'Rules')
-    await page.getByRole('button', { name: 'moves to the next agent free', exact: true }).click()
+    await page.getByRole('button', { name: 'moves to the strongest model with usage left', exact: true }).click()
     await page.getByRole('menuitemradio', { name: 'Ask me' }).click()
     const limits = page.getByRole('listitem', { name: 'Limits' })
     await expect(limits).toContainText(
-      'When an account runs out, the work waits for you to move it to a model that’s free, or to wait for the reset.',
+      'When an account runs out, the work waits for you to move it to a model with usage left, or to wait for the reset.',
     )
     await limits.scrollIntoViewIfNeeded()
     await page.screenshot({ path: 'test-results/limit-ask-rules.png', animations: 'disabled' })

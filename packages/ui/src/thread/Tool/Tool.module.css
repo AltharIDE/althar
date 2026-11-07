@@ -106,7 +106,11 @@ button.toggle::after {
   font-variant-numeric: tabular-nums;
 }
 .exit {
-  font: 600 11px var(--mono);
+  font: 500 11px var(--mono);
+  color: var(--danger);
+}
+/* failed: the cross in the glyph's place says it at a glance; the row stays ink */
+.failed .glyph {
   color: var(--danger);
 }
 .caret {
@@ -178,7 +182,8 @@ button.toggle::after {
 .out {
   margin: 4px 0 8px 24px;
 }
-.sheetable .out {
+.sheetable .out,
+.out:empty {
   margin: 0;
 }
 /* what a sheet holds sits flush in it */
@@ -193,22 +198,53 @@ button.toggle::after {
   border-radius: 0;
 }
 
-/* the copy button unfolds into the header when the sheet opens */
+/* Copy, and the caret of a row that opens, are for when the row is in hand: they show on hover or focus, and the caret while it is open */
+.copy,
+.caret {
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.caret {
+  transition:
+    opacity var(--fast) var(--ease),
+    transform var(--fold) var(--ease-fold);
+}
 .copy {
   position: relative;
+  z-index: 1;
   flex: none;
-  max-width: 0;
-  margin-left: -8px;
-  overflow: hidden;
-  opacity: 0;
-  transition:
-    max-width var(--fold) var(--ease-fold),
-    opacity var(--base) var(--ease);
+  margin: 0 -4px 0 -2px;
 }
-.sheet .copy {
-  max-width: 150px;
-  margin: 0 -2px 0 2px;
+.row:hover > :is(.copy, .caret),
+.row:has(:focus-visible) > :is(.copy, .caret),
+.tool[data-state='open'] > .row > .caret {
   opacity: 1;
+}
+
+/* a command opened: whole, each line of it wrapping under its own start */
+.whole {
+  align-items: flex-start;
+  height: auto;
+  min-height: 30px;
+}
+.whole .toggle {
+  align-items: flex-start;
+  padding-block: 6px;
+  line-height: 18px;
+}
+.whole .glyph {
+  height: 18px;
+}
+.whole .target {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 18px;
+}
+.whole > .copy {
+  margin-top: 3px;
+}
+.whole > .caret {
+  margin-top: 10px;
 }
 
 .sheet {
@@ -229,33 +265,6 @@ button.toggle::after {
 }
 .sheet > .row:has(> button.toggle:hover) {
   background: var(--n-1);
-}
-
-/* a dark finish for commands, when the host asks for it */
-:global([data-term='dark']) .sheet.run {
-  background: var(--term);
-  box-shadow: inset 0 0 0 1px var(--term);
-}
-:global([data-term='dark']) .sheet.run > .row {
-  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.07);
-}
-:global([data-term='dark']) .sheet.run > .row button.toggle {
-  color: var(--term-t3);
-}
-:global([data-term='dark']) .sheet.run > .row:has(> button.toggle:hover) {
-  background: var(--term-raised);
-}
-:global([data-term='dark']) .sheet.run :is(.verb, .target) {
-  color: var(--term-t1);
-}
-:global([data-term='dark']) .sheet.run :is(.glyph, .meta, .took, .caret) {
-  color: var(--term-t4);
-}
-:global([data-term='dark']) .sheet.run.running :is(.verb, .meta) {
-  color: var(--term-live);
-}
-:global([data-term='dark']) .sheet.run .exit {
-  color: var(--term-danger);
 }
 
 .groupRow {
@@ -292,7 +301,8 @@ button.toggle::after {
 @media (prefers-reduced-motion: reduce) {
   .tool,
   .row,
-  .copy {
+  .copy,
+  .caret {
     transition: none;
   }
 }

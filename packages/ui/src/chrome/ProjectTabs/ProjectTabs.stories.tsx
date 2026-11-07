@@ -242,6 +242,21 @@ export const WithSettings: Story = {
   },
 }
 
+/** A page in a tab of its own, after the projects': named by its title, with the window while it is pressed; its × closes it. */
+export const WithAPage: Story = {
+  args: {
+    current: null,
+    pages: [{ id: 'task_refunds', title: 'Refunds · Acme', current: true, onSelect: fn(), onClose: fn() }],
+  },
+  play: async ({ canvasElement }) => {
+    const nav = within(within(canvasElement).getByRole('navigation', { name: 'Projects' }))
+    const pages = within(nav.getByRole('list', { name: 'Pages' }))
+    await expect(pages.getByRole('button', { name: 'Refunds · Acme' })).toHaveAttribute('aria-current', 'page')
+    await expect(nav.getByRole('button', { name: /^Home/ })).not.toHaveAttribute('aria-current')
+  },
+}
+export const WithAPageDark: Story = { ...WithAPage, globals: { theme: 'dark' } }
+
 /** With another project to open, New project is the + menu's last item; with none, the + starts one at once. */
 export const StartingANewProject: Story = {
   args: { onNewProject: fn() },

@@ -249,6 +249,31 @@ function Codespan({ text }: { text: string }) {
 }
 
 /** A link's words, where no name opens a file: a button can't be inside a link. */
+/**
+ * A link in a message: where the thread's host takes links, a plain press
+ * opens it as the host chooses (beside the conversation, or in the person's
+ * browser); with a modifier, or any other button, it opens in a new tab.
+ */
+function Link({ href, title, newTab, children }: { href: string; title: string | undefined; newTab: string; children: ReactNode }) {
+  const { openLink, linkNote } = useThreadShell()
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      title={title}
+      onClick={(event) => {
+        if (openLink === undefined || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+        event.preventDefault()
+        openLink(href)
+      }}
+    >
+      <InLink>{children}</InLink>
+      <VisuallyHidden> {openLink === undefined ? newTab : (linkNote ?? newTab)}</VisuallyHidden>
+    </a>
+  )
+}
+
 function InLink({ children }: { children: ReactNode }) {
   const found = useContext(Found)
   const value = useMemo(() => ({ ...found, inLink: true }), [found])
@@ -276,10 +301,9 @@ function Inline({ token, t }: { token: Token; t: MarkdownText }): ReactNode {
       const href = safeHref(token.href)
       if (!href) return inline(token.tokens, t)
       return (
-        <a href={href} target="_blank" rel="noreferrer" title={token.title ?? undefined}>
-          <InLink>{inline(token.tokens, t)}</InLink>
-          <VisuallyHidden> {t.newTab}</VisuallyHidden>
-        </a>
+        <Link href={href} title={token.title ?? undefined} newTab={t.newTab}>
+          {inline(token.tokens, t)}
+        </Link>
       )
     }
     case 'image':

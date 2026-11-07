@@ -381,7 +381,7 @@ export const LimitAsks: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByRole('listitem', { name: 'Limits' })).toHaveTextContent(
-      'When an account runs out, the work waits for you to move it to a model that’s free, or to wait for the reset.',
+      'When an account runs out, the work waits for you to move it to a model with usage left, or to wait for the reset.',
     )
   },
 }
@@ -391,7 +391,7 @@ export const ChoosingALimit: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
     const page = within(document.body)
-    await userEvent.click(c.getByRole('button', { name: 'moves to the next agent free' }))
+    await userEvent.click(c.getByRole('button', { name: 'moves to the strongest model with usage left' }))
     await expect(await page.findAllByRole('menuitemradio')).toHaveLength(3)
     await userEvent.click(page.getByRole('menuitemradio', { name: 'Ask me' }))
     await expect(args.onLimitChange).toHaveBeenCalledWith(LimitPolicy.Ask)

@@ -24,6 +24,9 @@ import { readyOf, standingCalls } from '../../shared/calls'
  * While the person points at Up next or Running, or drags a row of the line,
  * a task that would move between the two stays where it was (`Held`), and
  * moves once they look away.
+ *
+ * A task only drafted, before its plan is proposed, is on neither lane: it
+ * shows once its plan comes, as its card in the coordinator's thread does.
  */
 
 /** A task that waits on the person, with the call it waits on: the oldest, where it has several. One whose call isn't read yet isn't among them. */
