@@ -1130,6 +1130,9 @@ export function TaskView({
                     })
                   }
                   onMarkReady={(url) => void model.markReady(url)}
+                  onMarkAllReady={(urls) => void model.markAllReady(urls)}
+                  merging={model.merging}
+                  mergeRefused={model.mergeRefused}
                   onPostScreenshots={model.postScreenshots}
                   onOpenFile={changes.show}
                   conflict={model.conflict}
@@ -1214,6 +1217,7 @@ export function TaskView({
                     worktree={snapshot.task.worktree}
                     {...(openFile === undefined ? {} : { openFile })}
                     session={session}
+                    retryable={snapshot.retryable}
                     project={snapshot.project.name}
                     // A failed turn is tried again here, unless its step waits on the person, whose call has its ways on.
                     {...(busy || stuckOpen ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}

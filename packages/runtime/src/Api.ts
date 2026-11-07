@@ -47,7 +47,7 @@ import {
   uninstall,
 } from '@althar/skills'
 import { codeRootOf } from './code'
-import { NotFound, ProjectRefused } from './errors'
+import { NotFound, ProjectRefused, RetryRefused } from './errors'
 import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
@@ -1106,7 +1106,15 @@ export const handlers = Api.toLayer(
       // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
       Interrupt: ({ commandId, threadId }) =>
         once(commandId, api(Effect.andThen(pullRequests.leadStopped({ threadId }, 'interrupted'), sessions.interrupt(threadId)))),
-      TryAgain: ({ commandId, threadId }) => once(commandId, api(Effect.asVoid(sessions.tryAgain(threadId)))),
+      TryAgain: ({ commandId, threadId }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              if (!(yield* sessions.tryAgain(threadId))) return yield* new RetryRefused()
+            }),
+          ),
+        ),
       CompactContext: ({ commandId, threadId }) =>
         once(
           commandId,

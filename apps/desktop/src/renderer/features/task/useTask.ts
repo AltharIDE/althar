@@ -86,6 +86,10 @@ export interface TaskModel {
   readonly dismissConflict: () => void
   /** The pull request a push was refused by for commits on it that aren't on the branch, by its address; null otherwise. */
   readonly refused: string | null
+  /** Of its pull requests being accepted in turn, the one merging now, by its address; null otherwise. */
+  readonly merging: string | null
+  /** The pull request whose merge the error is about, by its address, so its card says why there; null otherwise. */
+  readonly mergeRefused: string | null
   /** An action is on its way to the runtime. */
   readonly pending: boolean
   /** Which of them, where it is one of the outputs' (see `doing`): the others wait, but aren't working. */
@@ -262,6 +266,8 @@ export const useTask = (threadId: string): TaskModel => {
   const [acting, setActing] = useState<Doing | null>(null)
   const [conflict, setConflict] = useState<string | null>(null)
   const [refused, setRefused] = useState<string | null>(null)
+  const [merging, setMerging] = useState<string | null>(null)
+  const [mergeFailed, setMergeFailed] = useState<string | null>(null)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [newest] = useState(newestReads)
@@ -351,6 +357,10 @@ export const useTask = (threadId: string): TaskModel => {
       ),
     [client, cache, threadId, newest, readItems, fail],
   )
+
+  /** Whether its pull request at `url` has merged, as the runtime has it now. */
+  const landed = async (url: string) =>
+    (await client.getThread(threadId, { limit: 0 })).task.changes.some((change) => change.url === url && change.state === 'merged')
 
   const readFiles = useCallback(
     () =>
@@ -532,6 +542,8 @@ export const useTask = (threadId: string): TaskModel => {
     conflict,
     dismissConflict: () => setConflict(null),
     refused,
+    merging,
+    mergeRefused: error === null ? null : mergeFailed,
     pending,
     doing: acting,
     loadingEarlier,
@@ -677,9 +689,10 @@ export const useTask = (threadId: string): TaskModel => {
             (failure: unknown) => messageOf(failure),
           ),
     markAllReady: (urls) =>
-      onTask(async (taskId) => {
-        for (const url of urls) await client.markReady(taskId, url)
-      }),
+      act(async () => {
+        if (snapshot === null) return
+        for (const url of urls) await client.markReady(snapshot.task.id, url)
+      }, doing.markAllReady),
     openChange: () => act(async () => (snapshot === null ? undefined : client.openChange(snapshot.task.id)), doing.openChange),
     markDone: () => act(async () => (snapshot === null ? undefined : client.markTaskDone(snapshot.task.id)), doing.markDone),
     keep: () => act(async () => (snapshot === null ? undefined : client.keepTaskForLater(snapshot.task.id)), doing.keep),
@@ -708,8 +721,24 @@ export const useTask = (threadId: string): TaskModel => {
       }, doing.pushBranch),
     accept: (changes) =>
       act(async () => {
+        setMergeFailed(null)
         if (snapshot === null) return
-        for (const change of changes) await merge({ taskId: snapshot.task.id, head: change.head, url: change.url })
+        try {
+          for (const [at, change] of changes.entries()) {
+            setMerging(change.url)
+            try {
+              await merge({ taskId: snapshot.task.id, head: change.head, url: change.url })
+            } catch (failure) {
+              setMergeFailed(change.url)
+              throw failure
+            }
+            // The next builds on this one, so it merges only once this one has landed: not while its host's merge queue still
+            // holds it, nor while its host is still landing it. Pressed again, what is left merges from there.
+            if (at < changes.length - 1 && !(await landed(change.url))) return
+          }
+        } finally {
+          setMerging(null)
+        }
       }, doing.accept),
     push: (head, url) =>
       act(

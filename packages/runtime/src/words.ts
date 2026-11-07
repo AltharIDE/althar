@@ -216,6 +216,8 @@ export const words = (
         return noteRefused[text(error, 'why') as NoteRefused['why']] ?? 'Althar can’t keep that note.'
       case 'SessionRunning':
         return 'An agent is already working on this task.'
+      case 'RetryRefused':
+        return 'There is no failed turn or lost connection to try again.'
       case 'NoSession':
         return 'The task isn’t running.'
       case 'InstallFailed':
@@ -566,6 +568,7 @@ export const expected = new Set([
   'UnknownAgent',
   'SessionRunning',
   'NoSession',
+  'RetryRefused',
   'AttentionClosed',
   'AlwaysNotOffered',
   'QuestionUnanswered',

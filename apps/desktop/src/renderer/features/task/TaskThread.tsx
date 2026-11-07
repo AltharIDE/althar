@@ -316,7 +316,7 @@ export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing
     block !== last || block.failed === null
       ? null
       : {
-          again: onTryAgain !== undefined,
+          again: shared.retryable === true && onTryAgain !== undefined,
           compact: onCompact !== undefined,
           signIn: onSignIn === undefined ? null : (block.agentId ?? session?.agentId ?? null),
         }

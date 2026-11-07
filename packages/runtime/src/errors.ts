@@ -79,6 +79,8 @@ export class NoSession extends Schema.TaggedError<NoSession>()('NoSession', {
   threadId: Schema.String,
 }) {}
 
+export class RetryRefused extends Schema.TaggedError<RetryRefused>()('RetryRefused', {}) {}
+
 /** The agent could not be started, or its session could not be set up. */
 export class SessionFailed extends Schema.TaggedError<SessionFailed>()('SessionFailed', {
   agentId: Schema.String,

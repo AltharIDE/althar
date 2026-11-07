@@ -977,7 +977,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
               if (reported !== undefined) {
                 const turn = yield* Ref.get(state.current)
                 if (Option.isSome(turn) && reported.severity === 'error') turn.value.failure = reported.classified
-                return [{ _tag: 'AgentFailure' as const, severity: reported.severity, classified: reported.classified }]
+                return [{ _tag: 'AgentFailure' as const, ...reported }]
               }
             }
             return events
