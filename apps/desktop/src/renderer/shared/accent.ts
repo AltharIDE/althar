@@ -128,9 +128,18 @@ const tokensFor = (accent: Rgb, scheme: 'light' | 'dark'): Record<string, string
     '--signal-fill-pressed': hex(shifted(fill, by.fillPressed)),
     '--on-ink-focus': hex(onInk),
   }
+  // Light: violet as words on its own wash (a status chip) needs a shade of its own, the wash lightening what is under the words.
+  const wash = (surface: Rgb): Rgb => ({
+    r: Math.round(text.r * 0.1 + surface.r * 0.9),
+    g: Math.round(text.g * 0.1 + surface.g * 0.9),
+    b: Math.round(text.b * 0.1 + surface.b * 0.9),
+  })
+  const ink = legibleShade(text, [wash(hexToRgb(surfaces.page)), wash(hexToRgb(surfaces.raised))], 4.5)
+  if (scheme === 'light' && ink === undefined) return undefined
   return scheme === 'light'
     ? {
         ...states,
+        '--signal-ink': hex(ink!),
         '--signal-dim': rgba(text, 0.1),
         '--selection': rgba(text, 0.1),
         '--signal-line': rgba(text, 0.32),
