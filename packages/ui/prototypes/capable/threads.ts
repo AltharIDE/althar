@@ -55,7 +55,7 @@ export const threads: Record<string, () => Own> = {
             mark('§mcpfail', 2),
             at(
               items.says(
-                'The tour’s second card sits 12px lower than its story, and its title wraps at 900px. Posted that on #612 with three screenshots. DEV-188 stays where it is until Linear is signed in; I’ll move it then.',
+                'The tour’s second card sits 12px lower than its story, and its title wraps at 900px. Posted that on #612 with three screenshots.',
               ),
               1,
             ),

@@ -209,12 +209,7 @@ export const coordinatorTalk = (): ThreadItem[] => [
   at(items.you('Plan the ADR for agents working as my own. Opus 5.5, xhigh.'), 52),
   at(items.says('Planned **ADR: agents work as the person’s own** on Opus 5.5 at xhigh, reviewed by GPT-6.1 Sol.'), 51),
   at(items.card(TASKS.adr(), 'card-adr'), 51),
-  ...(proto.get().surface === 'sketches'
-    ? [
-        at(items.notice({ title: '§capable-now', source: 'runtime' }, null), 1),
-        at(items.notice({ title: '§away', source: 'runtime' }, null), 0),
-      ]
-    : []),
+  ...(proto.get().surface === 'sketches' ? [at(items.notice({ title: '§away', source: 'runtime' }, null), 0)] : []),
   ...(proto.get().surface === 'tune' ? tuning() : []),
 ]
 

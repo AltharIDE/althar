@@ -272,7 +272,6 @@ const shots = [
   { id: '6-1-review', s: 'sketches', d: 'A', hash: '#/threads/th-review', go: () => undefined },
   { id: '6-2-self-push', s: 'sketches', d: 'A', hash: '#/threads/th-codex-net', go: () => undefined },
   { id: '6-3-small', s: 'sketches', d: 'A', hash: '#/threads/th-typo', go: () => undefined },
-  { id: '6-4-first-time', s: 'sketches', d: 'A', hash: '#/projects/p1?room=talk', height: 1000, go: () => undefined },
   { id: '6-5-server-fails', s: 'sketches', d: 'A', hash: '#/threads/th-design', go: () => undefined },
   { id: '6-6-batch', s: 'sketches', d: 'A', hash: '#/threads/th-adr', go: (page) => to(page, 'Starting 4 tasks') },
 ]

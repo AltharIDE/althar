@@ -129,48 +129,9 @@ li[data-done] > .dot {
   color: var(--t-4);
 }
 
-/* —— the first time: a line each, with where to change it —— */
-.close {
-  margin-left: auto;
-}
-.lines {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  line-height: 1.45;
-  color: var(--t-2);
-}
-.lines li {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-}
-.lines li > span {
-  flex: 1;
-}
-.lines li > button {
-  flex: none;
-  font-size: 12.5px;
-}
-
-/* —— a server that fails: the call, then its fix —— */
-.call {
-  display: grid;
-  gap: 4px;
-  margin: 2px 0 8px;
-}
-.call[data-failed] .fix > span {
-  color: var(--danger);
-}
-.fix {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0 0 0 22px;
-  font-size: 12.5px;
-  color: var(--t-2);
+/* —— a server that fails: Althar's line under the call —— */
+.server {
+  margin: 6px 0 10px;
 }
 
 /* —— a lead that started several —— */

@@ -1,6 +1,6 @@
 // Scrappy: the pieces a thread's marks stand for, beyond surface 2's, by the surface and direction shown.
 import { ActCard, Seen } from './tools/Calls'
-import { Batch, CapableNow, FastLane, ServerFails, WhileAway } from './parts/More'
+import { Batch, FastLane, ServerFails, WhileAway } from './parts/More'
 import { Origin, ReviewHead, SelfPush } from './parts/Sketches'
 import { Loosen, SettingsChanges } from './tune/Tune'
 import { useProto } from '../state'
@@ -15,7 +15,6 @@ export function Marked({ mark }: { mark: string }) {
   if (mark === '§reviewhead') return p.surface === 'sketches' ? <ReviewHead outside /> : null
   const sketch = p.surface === 'sketches'
   if (mark === '§fast') return sketch ? <FastLane /> : null
-  if (mark === '§capable-now') return sketch ? <CapableNow /> : null
   if (mark === '§away') return sketch ? <WhileAway /> : null
   if (mark === '§mcpfail') return sketch ? <ServerFails /> : null
   if (mark === '§batch') return sketch ? <Batch /> : null

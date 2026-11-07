@@ -145,7 +145,6 @@ export const SURFACES: ReadonlyArray<SurfaceInfo> = [
       { label: 'A review', hash: REVIEW },
       { label: 'A push by an agent', hash: CHILD },
       { label: 'A small change', hash: '#/threads/th-typo' },
-      { label: 'The first time', hash: TALK },
       { label: 'A server fails', hash: MCP },
       { label: 'A lead starts 4', hash: PARENT },
     ],
@@ -154,7 +153,7 @@ export const SURFACES: ReadonlyArray<SurfaceInfo> = [
         value: 'A',
         name: 'Sketch',
         about:
-          'One state each, not yet choices: a review that runs or reads; an agent’s own push; a small change; the first time; while you were away; a server that fails; a lead that starts several',
+          'One state each, not yet choices: a review that runs or reads; an agent’s own push; a small change; while you were away; a server that fails; a lead that starts several',
       },
     ],
   },

@@ -6,9 +6,9 @@ import { Icon, type IconName } from '../../../../src/foundations/Icon/Icon'
 import { BrandMark } from '../../../../src/foundations/Marks/Marks'
 import { ToolKind, ToolState } from '../../../../src/foundations/vocabulary'
 import { Button } from '../../../../src/primitives/Button/Button'
-import { IconButton } from '../../../../src/primitives/IconButton/IconButton'
 import { LinkButton } from '../../../../src/primitives/LinkButton/LinkButton'
 import { LiveDot } from '../../../../src/primitives/LiveDot/LiveDot'
+import { AltharLine } from '../../../../src/thread/AltharLine/AltharLine'
 import { Tool } from '../../../../src/thread/Tool/Tool'
 import { ServerName } from '../tools/Calls'
 import s from './more.module.css'
@@ -50,44 +50,6 @@ export function FastLane() {
           </Button>
         </div>
       )}
-    </div>
-  )
-}
-
-/** The first time after the change: what is different, each line with where to change it, and a project the person had set to ask stays so. */
-export function CapableNow() {
-  const [gone, setGone] = useState(false)
-  if (gone) return null
-  const to = (hash: string) => () => window.location.assign(hash)
-  return (
-    <div className={s.card} data-tone="signal">
-      <p className={s.head}>
-        <span className={s.title}>Agents can do more now</span>
-        <IconButton icon="close" label="Close" size="small" tooltipAlign="end" className={s.close} onClick={() => setGone(true)} />
-      </p>
-      <ul className={s.lines}>
-        <li>
-          <span>
-            They go ahead without asking. Only what can’t be undone asks: lost work, publishing and merging, speaking for you, secrets.
-          </span>
-          <LinkButton onClick={to('#/projects/p1?room=settings&section=rules')}>What asks</LinkButton>
-        </li>
-        <li>
-          <span>
-            Your <strong>7 MCP servers</strong> and <strong>9 skills</strong> load in every role.
-          </span>
-          <LinkButton onClick={to('#/settings/mcp')}>Choose which</LinkButton>
-        </li>
-        <li>
-          <span>Leads can start tasks. Each shows under the task that started it.</span>
-        </li>
-        <li>
-          <span>
-            <strong>site</strong> still asks first, as you set it.
-          </span>
-          <LinkButton onClick={to('#/projects/p2?room=settings&section=rules')}>Change</LinkButton>
-        </li>
-      </ul>
     </div>
   )
 }
@@ -150,12 +112,12 @@ export function WhileAway() {
   )
 }
 
-/** A call to the person's server that failed because the lead's agent isn't signed in: the call, in red, and the fix under it. Once signed in, the lead tries it again. */
+/** A call to the person's server that failed because the lead's agent isn't signed in: the call as it ran, and Althar's line on what is the person's, with Sign in. Once signed in, the lead makes the call again. */
 export function ServerFails() {
   const [fixed, setFixed] = useState(false)
   const linear = <ServerName server={{ name: 'Linear', brand: Brand.Linear }} />
   return (
-    <div className={s.call} data-failed={!fixed || undefined}>
+    <>
       <Tool
         kind={ToolKind.Comment}
         verb={fixed ? 'Moved' : 'Move'}
@@ -164,14 +126,11 @@ export function ServerFails() {
         meta={linear}
       />
       {!fixed && (
-        <p className={s.fix}>
-          <span>Claude Code isn’t signed in to Linear.</span>
-          <Button size="small" onClick={() => setFixed(true)}>
-            Sign in
-          </Button>
-        </p>
+        <AltharLine tone="warning" className={s.server}>
+          Claude Code isn’t signed in to Linear, so DEV-188 wasn’t moved. <LinkButton onClick={() => setFixed(true)}>Sign in</LinkButton>
+        </AltharLine>
       )}
-    </div>
+    </>
   )
 }
 
