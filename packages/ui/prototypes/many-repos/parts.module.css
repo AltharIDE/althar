@@ -1,0 +1,371 @@
+/* Scrappy: only what the directions add to the change card; the rest is the card's own styles, in the kit's tokens. */
+
+.dash {
+  width: 7px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: var(--t-4);
+}
+.bad {
+  color: var(--danger);
+}
+.end {
+  margin-left: auto;
+}
+
+/* ——— A repository by name, quieter where it heads its files ——— */
+
+.quietName {
+  font-weight: 500;
+}
+.byRepo {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.repoHeading {
+  margin: 0 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.repoHeadingButton {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.repoHeadingButton:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ——— A: a row per repository ——— */
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.row {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.rowHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 24px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+/* each repository's own press, shown as the pointer comes to its row, or a key to it */
+.rowAct {
+  margin-left: auto;
+  margin-right: -8px;
+  opacity: 0;
+  transition: opacity var(--fast, 0.12s) ease-out;
+}
+.row:hover .rowAct,
+.row:focus-within .rowAct {
+  opacity: 1;
+}
+/* its line under its name, the mark under the host's */
+.under {
+  padding-left: 0;
+}
+
+/* ——— B: a summary over a section per repository ——— */
+
+.overall {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.overall > :last-child {
+  color: var(--t-1);
+}
+.sections {
+  border-top: 1px solid var(--line);
+}
+.section + .section {
+  border-top: 1px solid var(--line);
+}
+.sectionHead {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto 14px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 18px;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: var(--t-1);
+  cursor: pointer;
+}
+.sectionHead:hover {
+  background: var(--hover-faint);
+}
+.sectionHead > :first-child {
+  color: var(--t-3);
+}
+.sectionName {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.sectionMark {
+  display: inline-flex;
+  justify-content: center;
+}
+.sectionBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 18px 14px 40px;
+}
+.sectionActs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 2px;
+}
+.foot {
+  padding-top: 10px;
+  padding-bottom: 12px;
+}
+
+/* ——— C: the order they merge in, as stops on one track ——— */
+
+.track {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.stop {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  padding-bottom: 10px;
+}
+.stop:last-child {
+  padding-bottom: 0;
+}
+/* the track from one stop down to the next */
+.stop:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  top: 22px;
+  bottom: 2px;
+  left: 8.25px;
+  width: 1.5px;
+  border-radius: 1px;
+  background: var(--line-2);
+}
+.linkDone::before {
+  background: var(--ok) !important;
+}
+.node {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 3px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--line-3);
+  border-radius: 99px;
+  background: var(--paper);
+  font-size: 10px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-2);
+}
+.stopOpen .node {
+  border-color: var(--t-3);
+  color: var(--t-1);
+}
+.stopDraft .node {
+  border-style: dashed;
+  border-color: var(--t-4);
+  color: var(--t-3);
+}
+.stopHeld .node {
+  border-style: dashed;
+  border-color: var(--signal);
+  color: var(--signal);
+}
+.stopBad .node {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.stopMerged .node {
+  border-color: var(--ok);
+  background: var(--ok);
+  color: var(--paper);
+}
+.stopMerging .node {
+  border-color: transparent;
+}
+.stopBody {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.split {
+  flex: 1 1 0;
+}
+.split > :first-child {
+  flex: 1;
+  justify-content: center;
+}
+.tabs {
+  align-self: flex-start;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* wide, as alone on the page: a little more room between rows */
+@container (min-width: 520px) {
+  .sectionHead {
+    padding: 8px 22px;
+  }
+  .sectionBody {
+    padding: 0 22px 16px 44px;
+  }
+  .split {
+    flex: none;
+  }
+}
+
+/* ——— The page around the app: not the app's. ——— */
+
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 48px;
+  padding: 0 16px;
+  overflow-x: auto;
+  border-top: 1px solid var(--line);
+  background: var(--paper);
+  font-size: 11.5px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+.frame {
+  height: calc(100% - 48px);
+}
+.bare {
+  height: 100%;
+}
+.narrowFrame {
+  width: 900px;
+  margin: 0 auto;
+  box-shadow:
+    1px 0 0 var(--line),
+    -1px 0 0 var(--line);
+}
+.select {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  background: var(--paper);
+  font: inherit;
+  font-size: 12px;
+  color: var(--t-1);
+}
+
+/* every state of a direction, side by side, at the width the task's screen gives the card */
+.gallery {
+  height: 100%;
+  overflow-y: auto;
+  background: var(--canvas, var(--bg));
+}
+.galleryInner {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 360px);
+  gap: 36px 28px;
+  justify-content: center;
+  padding: 28px 32px 64px;
+}
+.galleryCell {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.galleryCaption {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--t-2);
+}
+.galleryCaption span {
+  font-weight: 450;
+  color: var(--t-3);
+}
+.galleryCell > div {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* the real Outputs in a cell: its page's padding and scroll left to the gallery */
+.gallery :global(.gallery-outputs) [class*='__outputs__'] {
+  overflow: visible;
+}
+.gallery :global(.gallery-outputs) [class*='__outputsChanged__'] {
+  display: block;
+  max-width: none;
+  padding: 0;
+}
+
+/* its host's own page, beside the line that says it isn't connected: the quiet way round */
+.web {
+  flex: none;
+  margin-left: auto;
+  font-size: 12px;
+}
+
+/* a sentence, such as why its host refused it, wraps rather than being cut */
+.sentence {
+  align-items: flex-start;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  line-height: 18px;
+}
+.sentence > span:nth-child(2) {
+  white-space: normal;
+  text-wrap: pretty;
+}
+.sentence > :first-child {
+  height: 18px;
+  align-items: center;
+}
