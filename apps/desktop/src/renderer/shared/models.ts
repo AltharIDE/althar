@@ -47,6 +47,47 @@ export const choiceOf = (key: string): { readonly agentId: string; readonly mode
   return { agentId: key.slice(0, at), model: model === '' ? null : model }
 }
 
+/** A model's id without the provider an agent puts before it: `opencode-go/deepseek-v4.1-flash` is `deepseek-v4.1-flash`. */
+const bareModel = (id: string): string => (id.includes('/') ? id.slice(id.indexOf('/') + 1) : id)
+
+/** Words a model's id doesn't say in lower case, for a name nothing else knows: DeepSeek, GPT, GLM. */
+const SAID: Readonly<Record<string, string>> = {
+  anthropic: 'Anthropic',
+  claude: 'Claude',
+  deepseek: 'DeepSeek',
+  gemini: 'Gemini',
+  glm: 'GLM',
+  gpt: 'GPT',
+  grok: 'Grok',
+  kimi: 'Kimi',
+  llama: 'Llama',
+  minimax: 'MiniMax',
+  mistral: 'Mistral',
+  moonshot: 'Moonshot',
+  openai: 'OpenAI',
+  qwen: 'Qwen',
+  xai: 'xAI',
+}
+
+/** A model's id as people read it, where nothing else names it: `opencode-go/deepseek-v4.1-flash` is "DeepSeek V4.1 Flash". */
+const readableModelName = (id: string): string =>
+  bareModel(id)
+    .split(/[-_\s:]+/)
+    .filter((word) => word !== '')
+    .map((word) => SAID[word.toLowerCase()] ?? capital(word))
+    .join(' ')
+
+/** A model as a catalog offers it, by its id as it was stored: the same model with or without the provider before its id. */
+const offeredIn = (catalog: Catalog, agentId: string, model: string): ModelInfo | undefined => {
+  const exact = catalog.models.find((info) => info.id === keyOf(agentId, model))
+  if (exact !== undefined) return exact
+  const bare = bareModel(model)
+  return catalog.models.find((info) => {
+    const choice = choiceOf(info.id)
+    return choice.agentId === agentId && choice.model !== null && bareModel(choice.model) === bare
+  })
+}
+
 /** Who made a model, from the words in its id and name. */
 const MAKERS: ReadonlyArray<readonly [RegExp, Lab]> = [
   [/claude|opus|sonnet|haiku|anthropic/, Lab.Anthropic],
@@ -227,12 +268,11 @@ export const infoOf = (catalog: Catalog, choice: { readonly agentId: string; rea
   const asked = choice.model ?? offered?.model ?? null
   const model = offered === undefined ? asked : (standsFor(offered.models, asked) ?? asked)
   const found =
-    catalog.models.find((info) => info.id === keyOf(choice.agentId, model)) ??
-    catalog.models.find((info) => info.id === keyOf(choice.agentId, null))
+    model === null ? catalog.models.find((info) => info.id === keyOf(choice.agentId, null)) : offeredIn(catalog, choice.agentId, model)
   if (found !== undefined) return found
-  // A model the agent no longer lists, or an agent this picker doesn't offer: its id, as it was set, or the agent's name.
+  // A model the agent no longer lists, or an agent this picker doesn't offer: its name as people read it, or the agent's own.
   const agentName = catalog.runtimes.find((runtime) => runtime.id === choice.agentId)?.name ?? choice.agentId
-  const name = model ?? agentName
+  const name = model === null ? agentName : readableModelName(model)
   const mark = makerOf(choice.agentId, name)
   return {
     id: keyOf(choice.agentId, model),
@@ -248,8 +288,10 @@ export const infoOf = (catalog: Catalog, choice: { readonly agentId: string; rea
 /** A model's name as its agent gives it, for a line that already names the agent; null for the agent's own default. */
 export const modelName = (catalog: Catalog, agentId: string, model: string | null): string | null => {
   if (model === null) return null
-  const offered = catalog.agents.get(agentId)?.models.find((candidate) => candidate.id === model)
-  if (offered === undefined) return model
+  const offered = catalog.agents
+    .get(agentId)
+    ?.models.find((candidate) => candidate.id === model || bareModel(candidate.id) === bareModel(model))
+  if (offered === undefined) return readableModelName(model)
   return /^default\b/i.test(offered.name) ? null : nameOf('', offered).name
 }
 
