@@ -164,6 +164,29 @@ const EVENTS: Readonly<Record<ReviewVerdict, ReviewEvent>> = { approve: 'approve
 const VERDICT_WORDS: Readonly<Record<ReviewVerdict, string>> = { approve: 'approve', changes: 'request changes', comment: 'comment' }
 
 /** The verdict a draft starts with: the lead's, but never Approve chosen for the person on an outside pull request. */
+/**
+ * Where a merged change starts, its head already in its target: the first
+ * parent of the merge that brought it in, its target's tip before the merge.
+ * A target that only moved up to the head (a fast-forward) keeps no merge
+ * commit, so the host's base commit stands where it is one of the head's
+ * ancestors; else the head, as before.
+ */
+const preMergeBase = (cwd: string, baseRef: string, head: string, hostBase: string | null): Effect.Effect<string> =>
+  Effect.gen(function* () {
+    const first = yield* gitOutcome(cwd, 'rev-list', '--ancestry-path', '--reverse', `${head}..${baseRef}`)
+    const brought = first.code === 0 ? first.stdout.split('\n').filter((line) => line !== '')[0] : undefined
+    if (brought !== undefined) {
+      const parents = yield* gitOutcome(cwd, 'rev-list', '--parents', '-n', '1', brought)
+      const [parent] = (parents.code === 0 ? parents.stdout.split(' ') : []).slice(1)
+      if (parent !== undefined) return parent
+    }
+    if (hostBase !== null && hostBase !== head && hostBase !== baseRef) {
+      const known = yield* gitOutcome(cwd, 'merge-base', '--is-ancestor', hostBase, head)
+      if (known.code === 0) return hostBase
+    }
+    return head
+  })
+
 export const startingVerdict = (suggested: ReviewVerdict, outside: boolean): ReviewVerdict | null =>
   outside && suggested === 'approve' ? null : suggested
 
@@ -445,7 +468,13 @@ export class Reviews extends Context.Service<
             if (Option.isNone(head)) return yield* refused(`Althar couldn’t fetch the ${name}’s code. Try again, or tell the person.`)
             // Where its change starts: where its head meets its base; or, for histories that never meet, its base.
             const met = yield* gitOutcome(place.binding.repository, 'merge-base', `${ref}/base`, head.value)
-            const baseCommit = met.code === 0 ? met.stdout : yield* commitOf(place.binding.repository, `${ref}/base`)
+            const mergeBase = met.code === 0 ? met.stdout : yield* commitOf(place.binding.repository, `${ref}/base`)
+            // Merged, its head is in its target's history now: its change starts where its merge met the target, not at
+            // the head, or a review after the merge would read nothing.
+            const baseCommit =
+              pull.state === 'merged' && mergeBase === head.value
+                ? yield* preMergeBase(place.binding.repository, `${ref}/base`, head.value, pull.baseSha)
+                : mergeBase
 
             const reviewed: Reviewed = {
               repository: place.path,

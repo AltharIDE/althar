@@ -2439,16 +2439,28 @@ export class Runs extends Context.Service<
           const live = Option.filter(yield* sessions.running(run.threadId), (session) => !session.stopping)
           // One on an account that is out of usage hands over, to the same agent's next account where it has one (ADR-012).
           const spent = Option.isSome(live) && Option.isSome(yield* limits.outAccount(live.value.accountId))
+          // Auto weighs a lead kept on its step's model too, not only one starting afresh: the plan's usage may cross over while it runs.
+          const planModel = agentId === undefined && implement !== undefined ? (implement.model ?? null) : null
+          const moved =
+            planModel !== null && Option.isSome(live) && !spent && (yield* modelOf(live.value.sessionId)) === planModel
+              ? yield* lighterModel(run, live.value.agentId, planModel)
+              : undefined
           if (
             Option.isSome(live) &&
             !spent &&
             (agentId === undefined || live.value.agentId === agentId) &&
             (accountId === undefined || live.value.accountId === accountId)
           ) {
-            // Kept, it moves to a model asked for now; the plan's, or one the person set on it since, stays. One that won't move starts afresh.
-            if (yield* onModel(run.threadId, live.value.sessionId, model)) return live.value.sessionId
+            // Kept, it moves to a model asked for now, or the lighter one Auto picked; the plan's, or one the person set on it since, stays.
+            // One that won't move starts afresh.
+            const wantedModel = moved?.model ?? model
+            if (yield* onModel(run.threadId, live.value.sessionId, wantedModel)) return live.value.sessionId
             yield* Effect.ignore(sessions.stop(run.threadId))
-            return yield* sessions.start({ threadId: run.threadId, agentId: live.value.agentId, ...(model == null ? {} : { model }) })
+            return yield* sessions.start({
+              threadId: run.threadId,
+              agentId: live.value.agentId,
+              ...(wantedModel == null ? {} : { model: wantedModel }),
+            })
           }
           if (Option.isSome(live))
             return yield* sessions.switchAgent({

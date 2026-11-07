@@ -68,6 +68,7 @@ import { statements as skills } from './0063_skills'
 import { statements as taskParents } from './0064_task_parents'
 import { statements as settingChanges } from './0065_setting_changes'
 import { statements as fastLane } from './0066_fast_lane'
+import { statements as reviewsAfterMerge } from './0067_reviews_after_merge'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -153,6 +154,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0064_task_parents', statements: taskParents },
   { key: '0065_setting_changes', statements: settingChanges },
   { key: '0066_fast_lane', statements: fastLane },
+  { key: '0067_reviews_after_merge', statements: reviewsAfterMerge },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

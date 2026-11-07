@@ -1,3 +1,7 @@
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { assert, describe, it } from '@effect/vitest'
 import type { ProjectId } from '@althar/domain'
 import { Duration, Effect, Layer } from 'effect'
@@ -6,14 +10,17 @@ import { SqlClient } from 'effect/sql'
 import { FastLane } from '../src/fastLane'
 import { Ids, newId } from '@althar/domain'
 import { Instance } from '../src/Instance'
-import { lighterOf, MOVE_AT, planName, usedPercent, windowWords } from '../src/modelMoves'
+import { AutoModels, lighterOf, MOVE_AT, planName, usedPercent, windowWords } from '../src/modelMoves'
+import { Models } from '../src/Models'
+import { PlanUsage } from '../src/PlanUsage'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
+import { Sessions } from '../src/Sessions'
 import { changedWords, smallChangeOf, smallChangeSkips, smallChangeSteps } from '../src/smallChange'
 import { addItem } from '../src/threads'
 import * as Runtime from '../src/Runtime'
-import { repository, runtime } from './support'
+import { repository, runtime, until } from './support'
 
 /** The fast lane (README section 6): a change of a few lines, its plan and the card its thread shows. */
 describe('a small change', () => {
@@ -216,16 +223,23 @@ describe('keeping the model Auto moved from', () => {
       })
       const itemId = yield* addItem({ projectId: project.projectId as ProjectId, threadId: created.threadId }, 'model_move', {
         taskId: created.taskId,
-        from: { agentId: 'claude-code', model: 'claude-opus-5' },
-        to: { agentId: 'claude-code', model: 'claude-sonnet-5' },
+        from: { agentId: 'claude-code', model: 'large' },
+        to: { agentId: 'claude-code', model: 'small' },
         why: { percent: 92, plan: 'Claude', window: 'the week', resetsAt: '2026-11-12T09:00:00.000Z' },
         kept: false,
       })
+      // Its lead is on the lighter model Auto moved it to, in a turn of its own.
+      const sessions = yield* Sessions
+      yield* sessions.start({ threadId: created.threadId, agentId: 'claude-code', model: 'small' })
       const fastLane = yield* FastLane
       yield* fastLane.keepTheModel(itemId)
       const [kept] = yield* sql<{ agentId: string; model: string }>`
         SELECT agent_id AS agentId, model FROM task_model_keeps WHERE task_id = ${created.taskId}`
-      assert.deepStrictEqual(kept, { agentId: 'claude-code', model: 'claude-opus-5' })
+      assert.deepStrictEqual(kept, { agentId: 'claude-code', model: 'large' })
+      // Keep puts the lead that is running back too, not only the steps after it.
+      const [now] = yield* sql<{ model: string | null }>`
+        SELECT model FROM provider_sessions WHERE thread_id = ${created.threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
+      assert.strictEqual(now?.model, 'large')
       const afterKeep = yield* (yield* Queries).item(created.threadId, itemId)
       assert.strictEqual(afterKeep.kind === 'model_move' && afterKeep.content.kept, true)
       yield* fastLane.undoTheModelMove(itemId)
@@ -275,5 +289,106 @@ describe('Auto’s lighter model', () => {
     assert.strictEqual(windowWords('five_hour'), 'five hours')
     assert.strictEqual(planName('claude-code'), 'Claude')
     assert.strictEqual(planName('codex'), 'ChatGPT')
+  })
+
+  it.live('moves a lead whose session is still running when its plan crosses the mark, and says why once', () => {
+    const cache = join(mkdtempSync(join(tmpdir(), 'althar-facts-')), 'models.json')
+    writeFileSync(
+      cache,
+      JSON.stringify({
+        data: [
+          { id: 'fake/large', benchmarks: { artificial_analysis: { intelligence_index: 60 } } },
+          { id: 'fake/small', benchmarks: { artificial_analysis: { intelligence_index: 40 } } },
+        ],
+      }),
+    )
+    return Effect.gen(function* () {
+      const projects = yield* Projects
+      const plans = yield* Plans
+      const instance = yield* Instance
+      const sessions = yield* Sessions
+      const sql = yield* SqlClient.SqlClient
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const created = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'The Run menu says Strat',
+        draft: true,
+      })
+      const planId = yield* plans.propose({
+        projectId: project.projectId as ProjectId,
+        taskId: created.taskId,
+        steps: [
+          { key: 'implement', agentId: 'claude-code', model: 'large', skipped: false },
+          { key: 'review', agentId: 'codex', model: null, skipped: true },
+        ],
+        reason: null,
+        actorId: instance.personId,
+        reviewAfterMerge: false,
+        // Held long enough that the countdown can't start it before the test does.
+        startsIn: Duration.hours(1),
+      })
+      // Its lead is already on it, on the plan's model, as a step under way leaves it.
+      yield* sessions.start({ threadId: created.threadId, agentId: 'claude-code', model: 'large' })
+      // What it is on is known, and the plan is read as 92% used, before the step begins on the session already there.
+      const catalog = yield* Models
+      yield* until(
+        Effect.map(catalog.catalog, (all) => all.find((one) => one.agentId === 'claude-code')),
+        (one) => one !== undefined && one.probing === false,
+      )
+      yield* (yield* PlanUsage).now(true)
+      yield* plans.start(planId, instance.personId)
+      const [moved] = yield* until(
+        Effect.map((yield* Queries).thread(created.threadId, { limit: 50 }), (thread) =>
+          thread.items.filter((item) => item.kind === 'model_move'),
+        ),
+        (rows) => rows.length === 1,
+      )
+      assert.deepInclude(moved?.content, {
+        from: { agentId: 'claude-code', model: 'large' },
+        to: { agentId: 'claude-code', model: 'small' },
+        why: { percent: 92, plan: 'Claude', window: 'the week', resetsAt: '2026-11-12T09:00:00.000Z' },
+        kept: false,
+      })
+      const [now] = yield* sql<{ model: string | null }>`
+        SELECT model FROM provider_sessions WHERE thread_id = ${created.threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
+      assert.strictEqual(now?.model, 'small')
+      // A step after it on the same two models says nothing new.
+      const again = yield* (yield* Queries).thread(created.threadId, { limit: 50 })
+      assert.lengthOf(
+        again.items.filter((item) => item.kind === 'model_move'),
+        1,
+      )
+    }).pipe(
+      Effect.provide(
+        Queries.layer.pipe(
+          Layer.provideMerge(
+            runtime(
+              ':memory:',
+              {},
+              {
+                modelFacts: { url: 'https://openrouter.test/models', cache, fetch: async () => Response.json({ data: [] }) },
+                usage: {
+                  every: Duration.zero,
+                  kept: Duration.zero,
+                  readEndpoint: async (sourceId) =>
+                    sourceId === 'claude-oauth'
+                      ? {
+                          kind: 'usage',
+                          stale: false,
+                          usage: {
+                            windows: [{ kind: 'weekly', usedPercent: 92, resetsAt: '2026-11-12T09:00:00.000Z' }],
+                            source: 'endpoint',
+                            observedAt: new Date().toISOString(),
+                          },
+                        }
+                      : { kind: 'none' },
+                },
+              },
+            ),
+          ),
+        ),
+      ),
+    )
   })
 })

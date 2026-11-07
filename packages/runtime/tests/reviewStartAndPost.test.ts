@@ -3,18 +3,21 @@ import { writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
-import type { ProjectId } from '@althar/domain'
+import { Ids, newId, type ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
+import { FastLane } from '../src/fastLane'
 import { Instance } from '../src/Instance'
+import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Reviews } from '../src/Reviews'
 import { Sessions } from '../src/Sessions'
+import { smallChangeSteps } from '../src/smallChange'
 import { Tasks } from '../src/Tasks'
 import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
@@ -44,6 +47,32 @@ const pullRequest = (at: { readonly working: string; readonly bare: string }, gi
   git(at.working, 'checkout', '-q', 'main')
   git(at.working, 'push', '-q', at.bare, `${head}:refs/pull/1/head`)
   return github.addPullRequest({ path: ['meridian', 'api'], title: 'Send back', author: 'ninemate', headSha: head })
+}
+
+/**
+ * A pull request that merged with a merge commit: its head is in main's
+ * history, after main moved on, so where it met main is not its head.
+ */
+const mergedPullRequest = (at: { readonly working: string; readonly bare: string }, github: FakeService) => {
+  git(at.working, 'checkout', '-q', '--detach', 'main')
+  writeFileSync(join(at.working, 'send.ts'), 'export const sendBack = () => 1\n')
+  git(at.working, 'add', '.')
+  git(at.working, 'commit', '-q', '-m', 'Send back')
+  const head = git(at.working, 'rev-parse', 'HEAD')
+  git(at.working, 'checkout', '-q', 'main')
+  writeFileSync(join(at.working, 'README.md'), '# Meridian, later\n')
+  git(at.working, 'commit', '-q', '-am', 'Later')
+  const before = git(at.working, 'rev-parse', 'HEAD')
+  git(at.working, 'merge', '-q', '--no-ff', head, '-m', 'Merge send back')
+  git(at.working, 'push', '-q', at.bare, `${head}:refs/pull/1/head`, 'main:refs/heads/main')
+  const pull = github.addPullRequest({
+    path: ['meridian', 'api'],
+    title: 'Send back',
+    author: 'ninemate',
+    headSha: head,
+    state: 'merged',
+  })
+  return { pull, head, before }
 }
 
 /** A connected GitHub and the repository opened as a project. */
@@ -199,6 +228,124 @@ describe('a review, at its edges', () => {
       const [copy] = yield* sql<{ state: string; baseCommit: string | null }>`
         SELECT state, base_commit FROM workspaces WHERE task_id = ${started.taskId}`
       assert.deepStrictEqual(copy, { state: 'ready', baseCommit: main })
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('reads a merged change from where its merge met its target, not from its head', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull, head, before } = mergedPullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId } = yield* opened(at.working)
+      const started = yield* (yield* Reviews).start({
+        envelope: yield* Runtime.envelope('review.start', {}),
+        projectId,
+        pullRequest: '#1',
+        lead: { agentId: 'claude-code', model: null },
+        afterMerge: true,
+      })
+      const sql = yield* SqlClient.SqlClient
+      const [reviewed] = yield* sql<{ head: string; baseCommit: string }>`
+        SELECT json_extract(snapshot, '$.head') AS head, json_extract(snapshot, '$.baseCommit') AS baseCommit
+        FROM external_links WHERE task_id = ${started.taskId} AND kind = 'review'`
+      // Its head is in main's history now: the change starts at the first parent of the merge that brought it in.
+      assert.deepStrictEqual([reviewed?.head, reviewed?.baseCommit], [head, before])
+      const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${started.taskId}`
+      assert.strictEqual(git(workspace?.path ?? '', 'rev-parse', 'HEAD'), head)
+      assert.include(git(workspace?.path ?? '', 'diff', '--name-only', before), 'send.ts')
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+})
+
+describe('the review after a merge', () => {
+  it.live('says in the task why it hasn’t started and goes again until it does', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull, head } = mergedPullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId } = yield* opened(at.working)
+      const projects = yield* Projects
+      const plans = yield* Plans
+      const fastLane = yield* FastLane
+      const sql = yield* SqlClient.SqlClient
+      const actor = (yield* Instance).personId
+      const created = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId,
+        title: 'The Run menu says Strat',
+        draft: true,
+      })
+      yield* plans.propose({
+        projectId,
+        taskId: created.taskId,
+        steps: smallChangeSteps({
+          lead: { agentId: 'claude-code', model: null },
+          review: { agentId: 'claude-code', model: null },
+        }),
+        reason: null,
+        actorId: actor,
+        reviewAfterMerge: true,
+        startsIn: Duration.hours(1),
+      })
+      const when = '2026-11-06T14:03:00.000Z'
+      yield* sql`
+        INSERT INTO external_links ${sql.insert({
+          id: yield* newId(Ids.externalLink),
+          projectId,
+          taskId: created.taskId,
+          product: 'github',
+          kind: 'change',
+          externalId: String(pull.number),
+          ref: `meridian/api#${pull.number}`,
+          key: `${pull.number}`,
+          url: `${HOST}/meridian/api/pull/${pull.number}`,
+          snapshot: JSON.stringify({
+            number: pull.number,
+            title: pull.title,
+            url: pull.url,
+            state: 'merged',
+            draft: false,
+            headSha: head,
+            additions: 1,
+            deletions: 0,
+            changedFiles: 1,
+            repository: ['meridian', 'api'],
+            words: { noun: 'pull request', short: 'PR', prefix: '#' },
+          }),
+          listening: 0,
+          createdAt: when,
+          updatedAt: when,
+        })}`
+      // The host is down for a moment as the merge is heard.
+      github.failNext('changeToReview', 'unreachable')
+      yield* fastLane.reviewMerged(created.taskId)
+      const [waiting] = yield* sql<{ title: string; attempts: number }>`
+        SELECT json_extract(content, '$.title') AS title, json_extract(content, '$.attempts') AS attempts
+        FROM thread_items WHERE thread_id = ${created.threadId} AND kind = 'notice'
+          AND json_extract(content, '$.reviewAfterMerge') = 1`
+      assert.strictEqual(waiting?.attempts, 1)
+      assert.include(waiting?.title ?? '', 'The review after the merge didn’t start')
+      assert.notInclude(waiting?.title ?? '', 'FastLaneRefused')
+      const [none] = yield* sql<{ n: number }>`
+        SELECT count(*) AS n FROM external_links WHERE kind = 'review' AND url = ${pull.url}`
+      assert.strictEqual(none?.n, 0)
+      // It is owed still, so a launch that stopped after the merge finds it and goes again.
+      const [owed] = yield* sql<{ attempts: number }>`
+        SELECT attempts FROM reviews_after_merge WHERE task_id = ${created.taskId}`
+      assert.strictEqual(owed?.attempts, 1)
+      yield* fastLane.retryPendingReviews()
+      const [made] = yield* sql<{ n: number }>`
+        SELECT count(*) AS n FROM external_links WHERE kind = 'review' AND url = ${pull.url}`
+      assert.strictEqual(made?.n, 1)
+      const [said] = yield* sql<{ n: number }>`
+        SELECT count(*) AS n FROM thread_items WHERE thread_id = ${created.threadId} AND kind = 'notice'
+          AND json_extract(content, '$.reviewAfterMerge') = 1`
+      assert.strictEqual(said?.n, 0)
+      const [done] = yield* sql<{ one: number }>`
+        SELECT 1 AS one FROM reviews_after_merge WHERE task_id = ${created.taskId}`
+      assert.isUndefined(done)
     }).pipe(Effect.provide(withQueries(github)))
   })
 })
