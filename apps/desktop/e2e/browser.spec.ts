@@ -272,6 +272,19 @@ test('a task’s run opens beside its thread, isolated; a comment pointed on it 
     await page.keyboard.press('p')
     await expect(panel.getByRole('textbox', { name: 'Address' })).toHaveValue(address)
 
+    // The page belongs to the conversation: Outputs and Graph leave it out, its space with it, and Conversation brings it back as it was.
+    await expect(page.getByRole('radio', { name: /Graph/ })).toBeVisible()
+    await page.keyboard.press('o')
+    await expect(panel).toHaveCount(0)
+    await expect.poll(async () => (await drawn(electronApp)).length).toBe(0)
+    await page.keyboard.press('g')
+    await expect(panel).toHaveCount(0)
+    await expect.poll(async () => (await drawn(electronApp)).length).toBe(0)
+    await page.keyboard.press('c')
+    await expect(panel.getByRole('textbox', { name: 'Address' })).toHaveValue(address)
+    await expect.poll(async () => (await drawn(electronApp)).length).toBe(1)
+    expect(await inPage(electronApp, 'location.href')).toBe(`http://${address}/`)
+
     // Comment points at the page; a press on the banner opens the comment box over a picture of it.
     await panel.getByRole('button', { name: 'Comment' }).click()
     await expect(panel.getByRole('button', { name: 'Comment' })).toHaveAttribute('aria-pressed', 'true')
