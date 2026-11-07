@@ -30,6 +30,7 @@ import { Busy } from './Busy'
 import { Changes } from './Changes'
 import { Agents, RuntimeConfig } from './Config'
 import { Connections } from './Connections'
+import { BranchNotFound } from './errors'
 import { coAuthorOn, setCoAuthor } from './credit'
 import { FolderCleanup } from './FolderCleanup'
 import { Instance } from './Instance'
@@ -405,7 +406,18 @@ export class SettingsTools extends Context.Service<
               if (typeof change['ink'] === 'string') yield* projects.setInk(projectId, change['ink'] as ProjectInk)
               if (change['workToward'] !== undefined)
                 for (const { repository, value } of yield* byName(projectId, change['workToward'] as Values))
-                  yield* projects.setRepository({ projectId, repositoryId: repository.id, workToward: value as string | null })
+                  yield* projects.setRepository({ projectId, repositoryId: repository.id, workToward: value as string | null }).pipe(
+                    // As the screen says it: a branch new tasks work toward is one the repository has.
+                    Effect.catchIf(
+                      (error) => error instanceof BranchNotFound,
+                      () =>
+                        Effect.fail(
+                          new ToolRefused({
+                            message: `${repository.name} has no branch ${String(value)}: new tasks work toward one it has.`,
+                          }),
+                        ),
+                    ),
+                  )
               const rules = pick(change, ['worksIn', 'resolveConflicts', 'pushCommits', 'postScreenshots', 'moveIssues'])
               const given = Object.fromEntries(Object.entries(rules).filter(([, value]) => value !== undefined))
               if (Object.keys(given).length > 0) yield* writeRules(projectId, given, actorId)

@@ -1,4 +1,5 @@
 import { ProjectInk } from '@althar/contracts'
+import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 
@@ -73,6 +74,7 @@ const opened = Effect.gen(function* () {
       const turnId = yield* newId(Ids.turnDelivery)
       yield* sql`INSERT INTO turn_deliveries ${sql.insert({ id: turnId, projectId, threadId: access.threadId, providerSessionId: access.sessionId, controllerGeneration: 1, state: 'delivered', origin: person ? 'person' : 'news', requestedAt: yield* timestamp, deliveredAt: yield* timestamp })}`
       yield* sql`INSERT INTO turn_delivery_inputs ${sql.insert({ projectId, deliveryId: turnId, userInputId: accepted.inputId, position: 1 })}`
+      return accepted.inputId
     })
   return { projectId, coordinator, lead, turn }
 })
@@ -348,6 +350,410 @@ describe('settings, for the coordinator and leads', () => {
         /has no setting secrets/,
       )
       assert.match(yield* callTool(lead, 'change_settings', { section: 'project/nowhere', change: {} }), /There is no section/)
+    }).pipe(Effect.provide(withQueries())),
+  )
+})
+
+/** A change's id, from what change_settings says of it. */
+const undoId = (said: string) => /undo: (\S+)\.$/.exec(said)?.[1] ?? ''
+
+describe('each section of the settings, as agents change it', () => {
+  it.live('finds a section by its bare name, and refuses a change it can’t read', () =>
+    Effect.gen(function* () {
+      const { coordinator, turn } = yield* opened
+      yield* turn(coordinator, 'news', false)
+      assert.match(yield* callTool(coordinator, 'read_settings', { section: 'rules' }), /^project\/rules — Rules\n/)
+      assert.match(yield* callTool(coordinator, 'read_settings', { section: '/althar/reviews' }), /^althar\/reviews — /)
+      assert.match(
+        yield* callTool(coordinator, 'read_settings', { section: 'nowhere' }),
+        /There is no section nowhere\. The sections: project\/general/,
+      )
+      // A section with nothing to set says what it holds, and why it isn't changed here.
+      assert.match(yield* callTool(coordinator, 'read_settings', { section: 'notes' }), /- notes: \[\] \(read only here\)/)
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { section: 'althar/editor', change: { theme: 'dark' } }),
+        /^Editor has nothing to change here\. Kept in the window/,
+      )
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { change: { rounds: 2 } }),
+        /^Name the section and give what of it changes/,
+      )
+      assert.match(yield* callTool(coordinator, 'change_settings', { section: 'althar/plans-and-reviews' }), /^Name the section/)
+      // A value the screen wouldn't take is refused, by the setting, and nothing changes.
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { section: 'project/general', change: { ink: 'purple' } }),
+        /^Althar couldn't read ink: /,
+      )
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { section: 'althar/plans-and-reviews', change: { rounds: 4 } }),
+        /^Althar couldn't read rounds: /,
+      )
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { section: 'althar/plans-and-reviews', change: { rounds: 3 } }),
+        /^Nothing changed: Plans and reviews is so already\./,
+      )
+      // Where the change fails in Althar, the agent hears that much, not the error.
+      assert.strictEqual(
+        yield* callTool(coordinator, 'change_settings', {
+          section: 'project/code',
+          change: { tracker: { connectionId: 'conn_none', container: null } },
+        }),
+        'Althar could not do that. Try again, or tell the person.',
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('project/general and project/running change each repository by its name, and refuse one the project hasn’t', () =>
+    Effect.gen(function* () {
+      const { projectId, lead, turn } = yield* opened
+      yield* turn(lead, 'carry on', false)
+      const repositories = yield* (yield* Projects).repositories(projectId)
+      const name = repositories[0]?.name ?? ''
+      assert.match(
+        yield* callTool(lead, 'change_settings', { section: 'project/general', change: { workToward: { [name]: 'release/1' } } }),
+        new RegExp(`^${name} has no branch release/1: new tasks work toward one it has\\.`),
+      )
+      execFileSync('git', ['branch', 'release/1'], { cwd: repositories[0]?.path ?? '' })
+      const toward = yield* callTool(lead, 'change_settings', {
+        section: 'project/general',
+        change: { workToward: { [name]: 'release/1' }, worksIn: 'checkout' },
+      })
+      assert.include(toward, `Work toward: {"${name}":null} → {"${name}":"release/1"}`)
+      assert.include(toward, 'New tasks start: worktree → checkout')
+      assert.strictEqual((yield* (yield* Projects).repositories(projectId))[0]?.workToward, 'release/1')
+      assert.match(
+        yield* callTool(lead, 'change_settings', { section: 'project/general', change: { workToward: { elsewhere: null } } }),
+        new RegExp(`^The project has no repository called elsewhere\\. Its repositories: ${name}\\.`),
+      )
+
+      const setup = yield* callTool(lead, 'change_settings', {
+        section: 'project/running',
+        change: { setup: { [name]: { copy: ['.env'], commands: ['bun install'] } }, branchPattern: 'work/{slug}', titlePattern: null },
+      })
+      // A pattern already none isn't a change; the rest are, each in words.
+      assert.include(setup, 'Setup before each task: ')
+      assert.include(setup, 'Branch names: none → work/{slug}')
+      assert.notInclude(setup, 'Pull request titles')
+      const running = yield* callTool(lead, 'read_settings', { section: 'project/running' })
+      assert.include(running, '"commands":["bun install"]')
+      assert.include(running, '- branchPattern (Branch names): "work/{slug}"')
+      assert.strictEqual((yield* rulesNow(projectId)).branchPattern, 'work/{slug}')
+      // Null puts back what Althar works out: no copies, no commands.
+      yield* callTool(lead, 'change_settings', { section: 'project/running', change: { setup: { [name]: null } } })
+      assert.deepStrictEqual((yield* (yield* Projects).repositories(projectId))[0]?.setup, { copy: [], commands: [] })
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('project/code sets a repository’s role, and leaves branches upstream to the person', () =>
+    Effect.gen(function* () {
+      const { projectId, coordinator, turn } = yield* opened
+      yield* turn(coordinator, 'news', false)
+      const name = (yield* (yield* Projects).repositories(projectId))[0]?.name ?? ''
+      // Where its work goes is a fork's: for a repository that isn't one, only the role changes.
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', {
+          section: 'project/code',
+          change: { repositories: { [name]: { role: 'frontend', changeTarget: 'fork' } } },
+        }),
+        /^Changed Code and issues: Repositories: /,
+      )
+      assert.strictEqual((yield* (yield* Projects).repositories(projectId))[0]?.role, 'frontend')
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', {
+          section: 'project/code',
+          change: { repositories: { [name]: { changeTarget: 'upstream_branch' } } },
+        }),
+        new RegExp(`^Branches upstream are the person's to choose for ${name}`),
+      )
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', {
+          section: 'project/code',
+          change: { repositories: { [name]: { role: 'docs' } }, tracker: null },
+        }),
+        /Repositories: .*"role":"frontend".* → .*"role":"docs"/,
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('project/rules: the sandbox’s lists, commands and the rest, each loosening named', () =>
+    Effect.gen(function* () {
+      const { projectId, coordinator, turn } = yield* opened
+      yield* turn(coordinator, 'news', false)
+      const sandboxed =
+        (yield* callTool(coordinator, 'read_settings', { section: 'project/rules' })).match(
+          /- sandboxCommands \([^)]*\): (\[[^\]]*\])/,
+        )?.[1] ?? '[]'
+      const outside = JSON.parse(sandboxed) as Array<string>
+      assert.isAbove(outside.length, 0)
+      // Taking a command back into the sandbox tightens: at once, as the screen's edit of what Althar worked out.
+      const fewer = yield* callTool(coordinator, 'change_settings', {
+        section: 'project/rules',
+        change: { sandboxCommands: outside.slice(1) },
+      })
+      assert.match(fewer, /^Changed Rules: Commands that run outside the sandbox: /)
+      assert.deepStrictEqual((yield* rulesNow(projectId)).sandbox?.commands?.removed, outside.slice(0, 1))
+      // A host added loosens: a card, with nothing changed.
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { section: 'project/rules', change: { sandboxHosts: ['example.com'] } }),
+        /loosens what asks \(Hosts the sandbox reaches\)/,
+      )
+      assert.isUndefined((yield* rulesNow(projectId)).sandbox?.hosts)
+
+      // A command named never, then ask, tightens; moved on to allow, or an exact one taken out, loosens.
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', {
+          section: 'project/rules',
+          change: {
+            commands: [
+              { pattern: 'npm publish', decision: 'never' },
+              { pattern: 'rm -rf /', decision: 'ask', match: 'exact' },
+            ],
+          },
+        }),
+        /^Changed Rules: Commands: none → /,
+      )
+      const allowed = yield* callTool(coordinator, 'change_settings', {
+        section: 'project/rules',
+        change: { commands: [{ pattern: 'npm publish', decision: 'allow' }] },
+      })
+      assert.match(allowed, /loosens what asks \(the command npm publish, the command rm -rf \/\)/)
+
+      // Plain settings, each in words: none, a list, and what an agent's accounts are.
+      const plain = yield* callTool(coordinator, 'change_settings', {
+        section: 'project/rules',
+        change: { usageLimit: 'wait', end: 'ready', onlyAccounts: { codex: ['work'] }, rotateAccounts: true, permissions: 'ask' },
+      })
+      assert.include(plain, 'How a task ends: none → ready')
+      assert.include(plain, 'Accounts its work runs on: none → {"codex":["work"]}')
+      assert.include(plain, 'What no rule keeps: rules → ask')
+      // Toward fewer asks, and a file Althar keeps turned on, loosen.
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { section: 'project/rules', change: { permissions: 'coordinator' } }),
+        /loosens what asks \(What no rule keeps\)/,
+      )
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', {
+          section: 'project/rules',
+          change: { repositoryFiles: { writeSkills: true, writeOpenSpec: false, pushProtected: false } },
+        }),
+        /loosens what asks \(Skill and OpenSpec files\)/,
+      )
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { section: 'project/rules', change: { onlyAccounts: null, end: null } }),
+        /How a task ends: ready → none/,
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('a loosening goes on the person’s message it names, and waits where the one named isn’t theirs in the turn', () =>
+    Effect.gen(function* () {
+      const { projectId, lead, turn } = yield* opened
+      const asked = yield* turn(lead, 'Let the sandbox reach example.com', true)
+      assert.match(
+        yield* callTool(lead, 'change_settings', {
+          section: 'project/rules',
+          change: { sandboxHosts: ['example.com'] },
+          message_id: 'input_elsewhere',
+        }),
+        /waits for them on a card/,
+      )
+      const went = yield* callTool(lead, 'change_settings', {
+        section: 'project/rules',
+        change: { sandboxHosts: ['example.com'] },
+        message_id: asked,
+      })
+      assert.match(went, /^Changed Rules: Hosts the sandbox reaches: none → example\.com/)
+      assert.deepStrictEqual((yield* rulesNow(projectId)).sandbox?.hosts?.added, ['example.com'])
+      const said = yield* lines(lead.threadId)
+      assert.deepStrictEqual(
+        said.map((line) => [line.state, line.words]),
+        [
+          ['asked', null],
+          ['done', 'Let the sandbox reach example.com'],
+        ],
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('Althar’s own: agents, this computer, new projects and reviews', () =>
+    Effect.gen(function* () {
+      const { coordinator, turn } = yield* opened
+      yield* turn(coordinator, 'news', false)
+      // Agents: an effort by "agent/model", and a model turned off and on again.
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { section: 'althar/agents', change: { efforts: { opus: 'high' } } }),
+        /^Name each as "agent\/model": opus isn't\./,
+      )
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { section: 'althar/agents', change: { efforts: { 'codex/gpt-test': 'high' } } }),
+        /^Changed Agents: Default efforts: /,
+      )
+      assert.include(yield* callTool(coordinator, 'read_settings', { section: 'althar/agents' }), '"codex/gpt-test":"high"')
+      const off = yield* callTool(coordinator, 'change_settings', {
+        section: 'althar/agents',
+        change: { turnedOff: { 'claude-code': [], codex: ['gpt-6.1-luna'], opencode: [] } },
+      })
+      assert.match(off, /Models turned off: /)
+      assert.include(yield* callTool(coordinator, 'read_settings', { section: 'althar/agents' }), '"codex":["gpt-6.1-luna"]')
+      yield* callTool(coordinator, 'change_settings', {
+        section: 'althar/agents',
+        change: { turnedOff: { 'claude-code': [], codex: [], opencode: [] } },
+      })
+      assert.include(yield* callTool(coordinator, 'read_settings', { section: 'althar/agents' }), '"codex":[]')
+
+      // This computer: a count of its own, when folders go, and automations paused at once, but un-paused only on a card.
+      const mac = yield* callTool(coordinator, 'change_settings', {
+        section: 'althar/this-mac',
+        change: { agentsAtOnce: 4, folderWait: 'week', automationsPaused: true },
+      })
+      assert.include(mac, 'Agents at once: none → 4')
+      assert.include(mac, 'When finished tasks’ folders go: smart → week')
+      assert.include(mac, 'Pause all automations: off → on')
+      assert.match(yield* callTool(coordinator, 'read_settings', { section: 'althar/this-mac' }), /agentsAtOnce \(Agents at once\): 4\./)
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { section: 'althar/this-mac', change: { automationsPaused: false } }),
+        /loosens what asks \(Pause all automations\)/,
+      )
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { section: 'althar/this-mac', change: { agentsAtOnce: null } }),
+        /Agents at once: 4 → none/,
+      )
+
+      // New projects: asking more is plain; asking less is the person's.
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { section: 'althar/new-projects', change: { permissions: 'ask', end: 'ready' } }),
+        /^Changed New projects/,
+      )
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { section: 'althar/new-projects', change: { permissions: 'rules' } }),
+        /loosens what asks \(What no rule keeps\)/,
+      )
+
+      // Reviews: the seal and its look.
+      const seal = yield* callTool(coordinator, 'change_settings', {
+        section: 'althar/reviews',
+        change: { reviewSeal: false, reviewSealStyle: 'wax' },
+      })
+      assert.include(seal, 'The review seal: on → off')
+      assert.include(seal, 'The seal’s look: ring → wax')
+      // Althar's own changes show in Settings with no project, the coordinator's by its name.
+      const changed = yield* (yield* SettingsTools).changed(null)
+      assert.includeMembers(
+        changed.map((one) => `${one.section}#${one.key}`),
+        ['althar/reviews#reviewSeal', 'althar/reviews#reviewSealStyle', 'althar/this-mac#agentsAtOnce'],
+      )
+      assert.isTrue(changed.every((one) => one.by.kind === 'coordinator'))
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('skills are refused where Althar has no store of them', () =>
+    Effect.gen(function* () {
+      const { lead, turn } = yield* opened
+      yield* turn(lead, 'carry on', false)
+      assert.match(yield* callTool(lead, 'read_settings', { section: 'althar/skills' }), /- skills \(Skills on\): \{\}/)
+      assert.match(
+        yield* callTool(lead, 'change_settings', { section: 'althar/skills', change: { skills: { 'frontend-design': false } } }),
+        /^Skills are off in this Althar\./,
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('undoing and answering: what is gone, settled or changed since is left as it is', () =>
+    Effect.gen(function* () {
+      const { projectId, coordinator, lead, turn } = yield* opened
+      const sql = yield* SqlClient.SqlClient
+      const settings = yield* SettingsTools
+      yield* turn(lead, 'carry on', false)
+      yield* turn(coordinator, 'news', false)
+      assert.match(yield* callTool(lead, 'change_settings', { undo: 'set_none' }), /^There is no change set_none to undo\./)
+
+      // An agent's undo of a change undone already.
+      const done = yield* callTool(lead, 'change_settings', { section: 'althar/reviews', change: { coAuthor: false } })
+      yield* callTool(lead, 'change_settings', { undo: undoId(done) })
+      assert.match(
+        yield* callTool(lead, 'change_settings', { undo: undoId(done) }),
+        /^That change is undone already: there is nothing to undo\./,
+      )
+
+      // The person's Undo on a line changed again since does nothing, and says so; on a card it is nothing.
+      const name = yield* callTool(lead, 'change_settings', { section: 'althar/reviews', change: { reviewSealStyle: 'colophon' } })
+      yield* callTool(coordinator, 'change_settings', { section: 'althar/reviews', change: { reviewSealStyle: 'wax' } })
+      const [row] = yield* sql<{ itemId: string }>`SELECT item_id FROM setting_changes WHERE id = ${undoId(name)}`
+      yield* settings.undo(row?.itemId ?? '')
+      const line = (yield* lines(lead.threadId)).at(-1)
+      assert.strictEqual(line?.state, 'moot')
+      assert.strictEqual(line?.said, 'It changed again since, so Undo left it as it is.')
+      yield* settings.undo(row?.itemId ?? '')
+      assert.strictEqual((yield* lines(lead.threadId)).at(-1)?.state, 'moot')
+
+      // The person declines a card: nothing changes, and pressing it again does nothing either.
+      yield* callTool(lead, 'change_settings', { section: 'project/rules', change: { allowEverything: true } })
+      const card = (yield* lineIds(lead.threadId)).at(-1) ?? ''
+      yield* settings.answer(card, false)
+      yield* settings.answer(card, true)
+      assert.strictEqual((yield* lines(lead.threadId)).at(-1)?.state, 'declined')
+      assert.isFalse((yield* rulesNow(projectId)).allowEverything === true)
+      yield* settings.undo(card)
+      yield* settings.answer('item_none', true)
+
+      // The person's Undo of Althar's own setting, kept with no project: found by its thread's.
+      const seal = yield* callTool(lead, 'change_settings', { section: 'althar/reviews', change: { reviewSeal: false } })
+      const [sealRow] = yield* sql<{
+        itemId: string
+        projectId: string | null
+      }>`SELECT item_id, project_id FROM setting_changes WHERE id = ${undoId(seal)}`
+      assert.isNull(sealRow?.projectId)
+      yield* settings.undo(sealRow?.itemId ?? '')
+      assert.match(yield* callTool(lead, 'read_settings', { section: 'althar/reviews' }), /reviewSeal \(The review seal\): true/)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('a change kept for a section Althar no longer has, or with no line, is undone as far as it can be', () =>
+    Effect.gen(function* () {
+      const { projectId, coordinator, turn } = yield* opened
+      const sql = yield* SqlClient.SqlClient
+      const settings = yield* SettingsTools
+      yield* turn(coordinator, 'news', false)
+      const at = yield* timestamp
+      const row = (id: string, section: string, itemId: string | null, before: string, after: string) =>
+        sql`INSERT INTO setting_changes ${sql.insert({
+          id,
+          projectId: null,
+          section,
+          change: after,
+          before,
+          after,
+          byKind: 'coordinator',
+          byTaskId: null,
+          threadId: coordinator.threadId,
+          itemId,
+          words: null,
+          loosens: 0,
+          state: 'done',
+          createdAt: at,
+          updatedAt: at,
+        })}`
+      // A section gone: an agent's undo says so, the person's leaves it, and Settings names none of it.
+      yield* row('set_gone', 'althar/gone', 'item_gone', '{"x":1}', '{"x":2}')
+      assert.match(yield* callTool(coordinator, 'change_settings', { undo: 'set_gone' }), /^There is no section althar\/gone\. /)
+      yield* settings.undo('item_gone')
+      const [gone] = yield* sql<{ state: string }>`SELECT state FROM setting_changes WHERE id = 'set_gone'`
+      assert.strictEqual(gone?.state, 'moot')
+      assert.notInclude(
+        (yield* settings.changed(null)).map((one) => one.section),
+        'althar/gone',
+      )
+
+      // A change with no line in a thread is undone all the same.
+      yield* callTool(coordinator, 'change_settings', { section: 'althar/reviews', change: { coAuthor: false } })
+      yield* row('set_lineless', 'althar/reviews', null, '{"coAuthor":true}', '{"coAuthor":false}')
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { undo: 'set_lineless' }),
+        /^Undid Reviews and pull requests: Althar as co-author: off → on/,
+      )
+      const [lineless] = yield* sql<{ state: string }>`SELECT state FROM setting_changes WHERE id = 'set_lineless'`
+      assert.strictEqual(lineless?.state, 'undone')
+      assert.isDefined(projectId)
     }).pipe(Effect.provide(withQueries())),
   )
 })
