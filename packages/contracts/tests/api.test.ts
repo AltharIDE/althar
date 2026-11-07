@@ -564,6 +564,7 @@ describe('the API', () => {
               StartPlan: () => Effect.void,
               HoldPlan: () => Effect.void,
               ChangePlan: () => Effect.void,
+              ChangeTeam: () => Effect.void,
               ChangeIssueDraft: () => Effect.void,
               FileIssueDraft: () => Effect.void,
               DiscardIssueDraft: () => Effect.void,

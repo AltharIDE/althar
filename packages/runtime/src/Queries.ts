@@ -53,7 +53,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import { Busy, type Line } from './Busy'
 import { ModelFacts } from './ModelFacts'
 import { PlanUsage } from './PlanUsage'
-import { checkoutWaitOf, PlanParameters, planWaits } from './Runs'
+import { checkoutWaitOf, PlanParameters, planWaits, reviewerChange } from './Runs'
 import { localTakenFor } from './local'
 import { towardChoicesOf } from './towards'
 import { Agents, RuntimeConfig } from './Config'
@@ -2347,6 +2347,8 @@ export class Queries extends Context.Service<
             // What a plain task handed back, small on its card while it waits for the person.
             handed: kind === 'plain' ? yield* handedFor(task.threadId, latest?.content ?? null, task.runAt) : null,
             reviewing,
+            // Once its plan has begun, when a change of its reviewer would take effect: the person's dialog reads it.
+            ...(task.planState === 'accepted' && task.state === 'open' ? { reviewerChange: yield* reviewerChange(taskId) } : {}),
             plan:
               task.planId === null
                 ? null
@@ -3018,10 +3020,15 @@ export class Queries extends Context.Service<
           const card: TaskCard | undefined = yield* cardFor(head.taskId, links)
           const session = yield* sessionOf(threadId)
           // Who leads it when no lead runs: the last on its thread, else its plan's.
-          const [last] = yield* sql<{ agentId: string; model: string | null; account: string | null }>`
-            SELECT s.agent_id, s.model, a.name AS account FROM provider_sessions s LEFT JOIN agent_accounts a ON a.id = s.account_id
+          const [last] = yield* sql<{ agentId: string; model: string | null; account: string | null; startedAt: string }>`
+            SELECT s.agent_id, s.model, a.name AS account, s.started_at FROM provider_sessions s LEFT JOIN agent_accounts a ON a.id = s.account_id
             WHERE s.thread_id = ${threadId} ORDER BY s.started_at DESC, s.rowid DESC LIMIT 1`
           const planned = card?.plan?.steps.find((step) => step.key === 'implement')
+          // Its lead changed since its last session began, with no lead running to change: the plan's lead is who leads it next.
+          const [changedLead] = yield* sql<{ at: string | null }>`
+            SELECT json_extract(parameters, '$.leadChanged') AS at FROM task_plans
+            WHERE task_id = ${head.taskId} AND state IN ('proposed', 'accepted') ORDER BY proposed_at DESC LIMIT 1`
+          const leadMoved = last !== undefined && changedLead?.at != null && changedLead.at > last.startedAt && !session?.held
           // What the person can do to it as a whole, from where it stands.
           const standing = yield* standingOf(head.taskId)
           // Its folder, removed once it finished or on its way back (ADR-056).
@@ -3083,7 +3090,14 @@ export class Queries extends Context.Service<
               steps: card?.plan?.steps ?? [],
               // Its graph is a part of its own: one that can't be read leaves the face out, not the thread.
               ...Option.match(graph, { onNone: () => ({}), onSome: (rounds) => ({ graph: rounds }) }),
-              lead: last ?? (planned === undefined ? null : { agentId: planned.agentId, model: planned.model, account: null }),
+              lead:
+                leadMoved && planned !== undefined
+                  ? { agentId: planned.agentId, model: planned.model, account: null }
+                  : last === undefined
+                    ? planned === undefined
+                      ? null
+                      : { agentId: planned.agentId, model: planned.model, account: null }
+                    : { agentId: last.agentId, model: last.model, account: last.account },
               step: card?.step ?? null,
               startedAt: card?.startedAt ?? null,
               stepAt: onStep?.admittedAt ?? null,

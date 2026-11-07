@@ -21,7 +21,10 @@ import { ENDS, endOf } from '../project/Card'
  * ChangePlan, then StartPlan for one that starts now. A plan held or on its
  * countdown can change and start; one started whose first step waits for a
  * free agent, nothing of it begun, can still change (`planWaits`), as its
- * card says. Once its lead has worked on it, its team is the task's own.
+ * card says. Once it has begun, its team still changes until it is settled, through
+ * ChangeTeam: its lead from its next turn, its reviewer until its review round
+ * starts, from the next round during one, and not once its review is done. Merged,
+ * it stays as it is.
  */
 
 export const text = {
@@ -36,21 +39,33 @@ export const text = {
   noReview: 'no review',
   /** Its team can't change any more: it started with the team it had. */
   begun: 'It started with the team it had.',
+  /** A task that has begun: when each change takes effect. */
+  nextTurn: 'From its next turn.',
+  nextRound: 'From the next round.',
+  reviewDone: 'The review is done, so the reviewer stays.',
+  merged: 'It’s merged, so its team stays.',
+  settled: 'It’s settled, so its team stays.',
 }
 
 type Plan = NonNullable<BoardTask['plan']>
 
 /** A task whose team can change, as the board reads it. */
-export type Teamed = Pick<BoardTask, 'taskId' | 'title' | 'phase' | 'plan' | 'planWaits' | 'queued' | 'reviewing'>
+export type Teamed = Pick<
+  BoardTask,
+  'taskId' | 'title' | 'phase' | 'plan' | 'planWaits' | 'queued' | 'reviewing' | 'kind' | 'change' | 'reviewerChange'
+>
 
 /**
  * What changing its team does where it stands: `starts`, a plan held or on its countdown, which can start now too; `waits`,
- * started, its first step waiting for a free agent with nothing begun, which only changes. Null where its team can't change.
+ * started, its first step waiting for a free agent with nothing begun, which only changes; `begun`, at work or after, which
+ * changes its lead from its next turn and its reviewer while its review allows. Null where its team can't change: a task
+ * settled or abandoned.
  */
-export const teamChangeOf = (task: Teamed): 'starts' | 'waits' | null => {
+export const teamChangeOf = (task: Teamed): 'starts' | 'waits' | 'begun' | null => {
   if (task.plan === null) return null
   if (task.phase === 'planned' || task.phase === 'held') return 'starts'
-  return task.planWaits === true && task.queued !== null ? 'waits' : null
+  if (task.planWaits === true && task.queued !== null) return 'waits'
+  return task.phase === 'drafting' || task.phase === 'settled' ? null : 'begun'
 }
 
 /** A task of a project's board whose team can change, by its id; null while the board is read, or where it can't, or with no task. */
@@ -144,6 +159,7 @@ export function ChangeTeam({
   onClose: () => void
 }) {
   const { client, cache } = useServices()
+  const named = useModelNames()
   // The task as it opened: what the dialog shows once it can no longer change.
   const [first] = useState(task)
   const [edits, setEdits] = useState<Edits>({})
@@ -158,9 +174,13 @@ export function ChangeTeam({
   if (first === null || firstPlan === null) return null
   const now = task ?? first
   const plan = now.plan ?? firstPlan
+  const how = task === null ? null : teamChangeOf(task)
+  // A task that has begun changes through ChangeTeam, until it is merged or settled.
+  const begun = teamChangeOf(first) === 'begun'
+  const merged = begun && now.change?.state === 'merged'
+  const gone = how === null || merged
   const steps = withEdits(plan.steps, edits)
   const ending = end === undefined ? plan.end : end
-  const gone = task === null || teamChangeOf(task) === null
   // Only the agents the plan allows: a review's lead only reads, so an agent that can't be held to that isn't offered.
   const allowed = plan.agents
   const offered = allowed === undefined ? agents : agents.filter((agent) => allowed.includes(agent.id))
@@ -169,8 +189,11 @@ export function ChangeTeam({
     setBusy(true)
     setError(null)
     try {
-      await client.changePlan(plan.id, steps, ending)
-      if (andStart) await client.startPlan(plan.id)
+      if (begun) await client.changeTeam(now.taskId, steps)
+      else {
+        await client.changePlan(plan.id, steps, ending)
+        if (andStart) await client.startPlan(plan.id)
+      }
       void cache.invalidateQueries({ queryKey: keys.board(projectId) })
       onClose()
     } catch (failure) {
@@ -178,37 +201,59 @@ export function ChangeTeam({
       setBusy(false)
     }
   }
+  // A review its task has, or a change that can still have one; a plain task or a review shows only what it has.
+  const reviewShown = (step: PlanStep) =>
+    !begun || (now.reviewing == null && (!step.skipped ? true : now.kind === 'change' && now.reviewerChange !== 'never'))
   const reviews = now.reviewing != null
   const label = (key: PlanStep['key']) => stepText.label[reviews ? 'review' : key]
   return (
     <TeamDialog
       task={now.title}
-      steps={steps.map((step) => ({
-        id: step.key,
-        label: label(step.key),
-        picker: (
-          <ModelChoice
-            owner={label(step.key)}
-            agents={offered}
-            projectId={projectId}
-            value={choiceOf(step)}
-            onChange={(choice) => put(step.key, { ...choice, skipped: false })}
-            {...(step.key === 'review' ? { onRemove: () => put('review', { skipped: true }) } : {})}
-            variant="field"
-            placement="below"
-          />
-        ),
-        ...(step.key === 'implement' && plan.reason !== null ? { why: plan.reason } : {}),
-        skipped: step.skipped,
-        ...(step.key === 'review' ? { onAdd: () => put('review', { skipped: false }) } : {}),
-      }))}
-      // Where the repository's host isn't connected, the task ends on its branch, and there is no ending to pick.
-      {...(ending === null ? {} : { end: { value: ENDS[ending], onChange: (next) => setEnd(endOf(next)) } })}
+      steps={steps
+        .filter((step) => step.key !== 'review' || reviewShown(step))
+        .map((step) => {
+          const locked = begun && step.key === 'review' && now.reviewerChange === 'never'
+          return {
+            id: step.key,
+            label: label(step.key),
+            picker: (
+              <ModelChoice
+                owner={label(step.key)}
+                agents={offered}
+                projectId={projectId}
+                value={choiceOf(step)}
+                onChange={(choice) => put(step.key, { ...choice, skipped: false })}
+                {...(step.key === 'review' ? { onRemove: () => put('review', { skipped: true }) } : {})}
+                variant="field"
+                placement="below"
+              />
+            ),
+            ...(locked ? { locked: named(step.agentId, step.model).name } : {}),
+            ...(begun
+              ? {
+                  why: locked
+                    ? text.reviewDone
+                    : step.key === 'implement'
+                      ? text.nextTurn
+                      : now.reviewerChange === 'next_round'
+                        ? text.nextRound
+                        : undefined,
+                }
+              : step.key === 'implement' && plan.reason !== null
+                ? { why: plan.reason }
+                : {}),
+            skipped: step.skipped,
+            ...(step.key === 'review' && !locked ? { onAdd: () => put('review', { skipped: false }) } : {}),
+          }
+        })}
+      // Where the repository's host isn't connected, the task ends on its branch, and there is no ending to pick; a task
+      // that has begun keeps the ending it has.
+      {...(ending === null || begun ? {} : { end: { value: ENDS[ending], onChange: (next) => setEnd(endOf(next)) } })}
       {...(gone ? {} : { onSave: () => void save(false) })}
-      {...(!gone && teamChangeOf(now) === 'starts' ? { onStart: () => void save(true) } : {})}
+      {...(!gone && how === 'starts' ? { onStart: () => void save(true) } : {})}
       onClose={onClose}
       busy={busy}
-      error={gone ? text.begun : error}
+      error={merged ? text.merged : how === null ? (begun ? text.settled : text.begun) : error}
     />
   )
 }
