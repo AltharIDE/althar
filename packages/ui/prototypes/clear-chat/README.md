@@ -8,7 +8,7 @@ From the repository's root:
 cd packages/ui && ./node_modules/.bin/vp dev --config prototypes/clear-chat/vite.config.mjs
 ```
 
-Then <http://localhost:5363/>. The strip under the window switches the direction (keys 1 to 4, or `[` and `]`); Start over puts the conversation back as it was. `?d=B` opens on a direction, `bare` leaves out the strip, and `node shoot.mjs` takes every state into `.althar/scratch/clear-chat`.
+Then <http://localhost:5363/>. The strip under the window switches the direction (keys 1 to 4, or `[` and `]`); Start over puts the conversation back as it was. `?d=B` opens on a direction, `bare` leaves out the strip, and `node shoot.mjs` takes every state into `.althar/scratch/clear-chat`; `node verify.mjs` checks undo, the earlier chat, a forgotten brief line, Focus and a wipe against the running page.
 
 ## What changed from the first round
 
