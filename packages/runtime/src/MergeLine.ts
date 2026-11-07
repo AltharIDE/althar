@@ -21,7 +21,7 @@ import { checksOf, nameOf } from './pullRequestWords'
 import { timestamp } from './records'
 import { addItem } from './threads'
 import { ActionNotPerformed, ToolRefused } from './toolErrors'
-import { type Tool, type ToolAccess, ToolServer } from './ToolServer'
+import { POOL, type Tool, type ToolAccess, ToolServer } from './ToolServer'
 
 /*
  * The coordinator merging on the person's word (ADR-081, task 5): a pull
@@ -849,7 +849,8 @@ export class MergeLine extends Context.Service<
           call: leaveTool,
         },
       ]
-      yield* toolServer.serve('coordinator', tools)
+      // Leads and the coordinator alike (ADR-097); merging still only on the person's own message.
+      yield* toolServer.serve(POOL, tools)
 
       /* ---- The sweep: what Althar does by itself, and the news it wakes the coordinator with ---- */
 

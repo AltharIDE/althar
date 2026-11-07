@@ -284,6 +284,9 @@ const DiffAsked = Schema.Struct({
 const Noted = Schema.Struct({ note: Schema.String })
 const Dropped = Schema.Struct({ id: Schema.String })
 const Passed = Schema.Struct({ task: Schema.String, message: Schema.String, now: Schema.optional(Schema.Boolean) })
+const Relead = Schema.Struct({ task: Schema.String, lead: StepPick, message: Schema.optional(Schema.String) })
+const OnTask = Schema.Struct({ task: Schema.String })
+const PartOf = Schema.Struct({ task: Schema.String, part_of: Schema.Boolean })
 
 const read = <A>(schema: Schema.Codec<A, unknown>, input: unknown) =>
   Schema.decodeUnknownEffect(schema)(input).pipe(
@@ -1402,6 +1405,128 @@ export class Coordinator extends Context.Service<
           return `Planned ${task.slug}.${where} It starts in 25 seconds unless the person holds or changes it; they see it as a card, so there's no need to describe the plan again.`
         })
 
+      /* ---- The window's buttons on a task's lead (ADR-097, "Matching the window") ---- */
+
+      /** A line in the caller's thread and the task's, as the moves say what they did. */
+      const saidOn = (
+        access: ToolAccess,
+        task: { readonly id: string; readonly title: string; readonly threadId: string },
+        what: string,
+        here: string,
+      ) =>
+        Effect.gen(function* () {
+          const own = access.role === 'lead' && task.id === access.taskId
+          const words = yield* personsWords(access)
+          const as = words === undefined ? '' : `, as you asked: ${quoted(words)}`
+          const by = own
+            ? 'Its lead'
+            : access.role === 'lead'
+              ? `The lead of “${(yield* ownTitle(access)) ?? 'another task'}”`
+              : 'The coordinator'
+          if (access.threadId !== task.threadId)
+            yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: `${what}${as}`,
+            })
+          yield* addItem({ projectId: access.projectId as ProjectId, threadId: task.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: `${by} ${here}${as}`,
+          })
+        })
+
+      /**
+       * Puts a task's lead on another model, effort or agent, as the task's model picker and Hand over do: a session of the
+       * new agent, briefed with the thread so far, with what you say as its first turn. A step held for an agent's usage
+       * limit goes to it at once, as the held card's Hand over does.
+       */
+      const changeLead = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(Relead, input)
+          const task = yield* taskOf(access, asked.task)
+          if (task.id === access.taskId)
+            return yield* new ToolRefused({ message: `${task.slug} is your own task: the person changes who leads it.` })
+          const lead = yield* stepOf(access.projectId, asked.lead)
+          const named = `${lead.agentId}${lead.model === null ? '' : ` on ${lead.model}`}`
+          const sql = yield* SqlClient.SqlClient
+          const [held] = yield* sql<{ one: number }>`
+            SELECT 1 AS one FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+            JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.id} AND a.state = 'held' AND a.hold_reason = 'usage_limit' LIMIT 1`
+          if (held !== undefined) {
+            const answer = { kind: 'retry' as const, agentId: lead.agentId, ...(lead.model === null ? {} : { model: lead.model }) }
+            yield* (yield* Runs).handOverHeld({
+              envelope: yield* envelope('task.hand_over_held', { taskId: task.id, answer }, undefined, instance.coordinatorId),
+              taskId: task.id,
+              answer,
+            })
+            yield* saidOn(access, task, `Handed “${task.title}” to ${named}`, `handed this task’s held step to ${named}`)
+            return `${task.slug}'s step, held for a usage limit, goes to ${named} now. Both threads have a line saying so.`
+          }
+          const body = asked.message?.trim()
+          yield* sessions
+            .switchAgent({
+              threadId: task.threadId,
+              agentId: lead.agentId,
+              ...(lead.model === null ? {} : { model: lead.model }),
+              ...(lead.effort === undefined ? {} : { effort: lead.effort }),
+              ...(body === undefined || body === ''
+                ? {}
+                : {
+                    message: {
+                      envelope: yield* envelope('thread.send', { threadId: task.threadId, body }, undefined, instance.coordinatorId),
+                      body: passedOn(body, yield* ownTitle(access)),
+                    },
+                  }),
+            })
+            .pipe(
+              Effect.mapError((error) =>
+                error instanceof ToolRefused
+                  ? error
+                  : new ToolRefused({ message: `Althar couldn't hand ${task.slug} to ${named}: ${error._tag}. Tell the person.` }),
+              ),
+            )
+          yield* saidOn(access, task, `Put ${named} on “${task.title}”`, `put ${named} on this task`)
+          return `${task.slug}'s lead is ${named} now, briefed with its thread so far. Both threads have a line saying so.`
+        })
+
+      /** Tries a task lead's last turn again where it failed, as its Try again does: what was said in it goes again. */
+      const tryAgain = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const task = yield* taskOf(access, (yield* read(OnTask, input)).task)
+          const again = yield* sessions
+            .tryAgain(task.threadId)
+            .pipe(Effect.mapError((error) => new ToolRefused({ message: `Althar couldn't try ${task.slug} again: ${error._tag}.` })))
+          if (!again) return `Nothing changed: ${task.slug}'s lead's last turn didn't fail.`
+          yield* saidOn(access, task, `Tried “${task.title}” again`, 'tried its lead’s last turn again')
+          return `${task.slug}'s lead's last turn goes again. Both threads have a line saying so.`
+        })
+
+      /** Has a task's lead compact its context, as the task's Compact does: a turn of its own, after what it was told before. */
+      const compactLead = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const task = yield* taskOf(access, (yield* read(OnTask, input)).task)
+          yield* sessions
+            .compact({
+              envelope: yield* envelope('thread.compact', { threadId: task.threadId }, undefined, instance.coordinatorId),
+              threadId: task.threadId,
+            })
+            .pipe(Effect.mapError(() => new ToolRefused({ message: `No agent is on ${task.slug} to compact.` })))
+          yield* saidOn(access, task, `Compacted the context of “${task.title}”`, 'had its lead compact its context')
+          return `${task.slug}'s lead compacts its context after what it was told before.`
+        })
+
+      /** Whether a task does only part of its issue, as its issue's switch says: merged, the issue is commented on, not closed. */
+      const setPartOf = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(PartOf, input)
+          const task = yield* taskOf(access, asked.task)
+          yield* issues.setPart(task.id, asked.part_of)
+          const how = asked.part_of ? 'does only part of its issue' : 'does all of its issue'
+          yield* saidOn(access, task, `“${task.title}” ${how} now`, `set this task as one that ${how}`)
+          return `${task.slug} ${how} now: ${asked.part_of ? 'as its pull request merges, Althar comments on the issue and leaves it open' : 'its pull request merging closes the issue'}.`
+        })
+
       const message = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const { task: reference, message: body, now } = yield* read(Passed, input)
@@ -2316,6 +2441,46 @@ export class Coordinator extends Context.Service<
             required: ['task', 'message'],
           },
           message,
+        ),
+        tool(
+          'change_lead',
+          "Puts another model, effort or agent on a task's lead, as the task's model picker and Hand over do: a new session of that agent, briefed with the thread so far, and message, where you give one, as its first turn. Name the model as list_models writes it. A step held for an agent's usage limit goes to it at once, as the held card's Hand over does. It acts at once, with a line in your thread and the task's.",
+          {
+            type: 'object',
+            properties: {
+              task: { type: 'string', description: "The task's slug." },
+              lead: {
+                type: 'object',
+                properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort },
+                required: ['model'],
+              },
+              message: { type: 'string', description: 'What the new lead is told first, after its brief.' },
+            },
+            required: ['task', 'lead'],
+          },
+          changeLead,
+        ),
+        tool(
+          'try_again',
+          "Tries a task lead's last turn again where it failed, as the task's Try again does: what was said in it goes again, to the agent on the task, started again where it went. Nothing where its last turn didn't fail.",
+          { type: 'object', properties: { task: { type: 'string' } }, required: ['task'] },
+          tryAgain,
+        ),
+        tool(
+          'compact_lead',
+          "Has a task's lead compact its context, as the task's Compact does: a turn of its own, after what it was told before, so a long thread goes on with room. For a lead whose context is filling up.",
+          { type: 'object', properties: { task: { type: 'string' } }, required: ['task'] },
+          compactLead,
+        ),
+        tool(
+          'set_part_of_issue',
+          "Sets whether a task does only part of the issue it came from, as its issue's switch does: part_of true, and as its pull request merges Althar comments on the issue with what landed and leaves it open; false, and merging closes it.",
+          {
+            type: 'object',
+            properties: { task: { type: 'string' }, part_of: { type: 'boolean' } },
+            required: ['task', 'part_of'],
+          },
+          setPartOf,
         ),
         tool(
           'keep_note',

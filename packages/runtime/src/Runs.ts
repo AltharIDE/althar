@@ -77,7 +77,8 @@ import { LeftBehind } from './LeftBehind'
 import { type GiveUp, watchStalls } from './Stalls'
 import type { Tried } from './stallWatch'
 import { addItem } from './threads'
-import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
+import { coordinatorFolderAt } from './coordinatorFolder'
+import { POOL, ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
 import { signedOutWords, summarize } from './words'
 
 /*
@@ -3711,14 +3712,19 @@ export class Runs extends Context.Service<
        */
       const showPictures = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
-          if (access.taskId === null) return yield* new ToolRefused({ message: 'This tool is for a task’s lead.' })
           const sql = yield* SqlClient.SqlClient
           const { pictures: given } = yield* read(Shown, input)
-          const worktrees = yield* worktreesOf(access.taskId)
-          const shown = yield* readShown(
-            given,
-            worktrees.map((worktree) => worktree.path),
-          )
+          // A lead's from its worktrees; the coordinator's from its copies (ADR-097: one tool set).
+          const folders =
+            access.role === 'coordinator'
+              ? yield* Effect.gen(function* () {
+                  const [project] = yield* sql<{ slug: string }>`SELECT slug FROM projects WHERE id = ${access.projectId}`
+                  return project === undefined ? [] : [coordinatorFolderAt((yield* RuntimeConfig).worktreeRoot, project.slug)]
+                })
+              : access.taskId === null
+                ? yield* new ToolRefused({ message: 'This tool is for a task’s lead or the coordinator.' })
+                : (yield* worktreesOf(access.taskId)).map((worktree) => worktree.path)
+          const shown = yield* readShown(given, folders)
           const itemId = yield* newId(Ids.threadItem)
           const pictures = yield* keepShown({ projectId: access.projectId as ProjectId, itemId, folders: [] }, shown)
           const [session] = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE id = ${access.sessionId}`
@@ -3975,9 +3981,12 @@ export class Runs extends Context.Service<
           },
           finishStep,
         ),
+      ])
+      // Showing pictures is in the shared set (ADR-097): a lead's from its worktree, the coordinator's from its copies.
+      yield* toolServer.serve(POOL, [
         tool(
           'show_pictures',
-          `Shows the person pictures in the task's thread, at any time, with a step open or none: when they ask to see something, show it this way rather than naming the files. Each is a PNG, JPEG, GIF or WebP file in the worktree (its scratch folder too), by its path, with a caption saying what it shows; up to ${SHOWN_MOST} at once, in the order given, each up to 20 MB. Althar keeps a copy, so they stay once the worktree is gone; the files needn't be committed. What shows your step's work still goes in finish_step's evidence when you finish it.`,
+          `Shows the person pictures in your thread, at any time, with a step open or none: when they ask to see something, show it this way rather than naming the files. Each is a PNG, JPEG, GIF or WebP file in your folder (a lead's worktree and its scratch folder; the coordinator's copies), by its path, with a caption saying what it shows; up to ${SHOWN_MOST} at once, in the order given, each up to 20 MB. Althar keeps a copy, so they stay once the worktree is gone; the files needn't be committed. What shows your step's work still goes in finish_step's evidence when you finish it.`,
           {
             type: 'object',
             properties: {
@@ -3986,7 +3995,7 @@ export class Runs extends Context.Service<
                 items: {
                   type: 'object',
                   properties: {
-                    path: { type: 'string', description: 'The picture, from the worktree.' },
+                    path: { type: 'string', description: 'The picture, from your folder.' },
                     caption: { type: 'string', description: 'What it shows, in a line: "The settings page in the dark theme".' },
                   },
                   required: ['path', 'caption'],
