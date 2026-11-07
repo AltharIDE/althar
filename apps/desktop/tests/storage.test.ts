@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { measure, storageSizes, type Size } from '../src/main/storage'
+import { measure, showPlace, storageSizes, type Size } from '../src/main/storage'
 
 /* The size walk behind About › Storage: it counts what is there, once, and never leaves the folder. */
 
@@ -95,6 +95,36 @@ describe('measuring a folder', () => {
     const now = () => (ticks++ === 0 ? 0 : 1_000)
     const size = done(await measure(root, { timeout: 500, now }))
     expect(size.approximate).toBe(true)
+  })
+})
+
+describe('time running out during a walk', () => {
+  it('stops inside a big directory and says the size is approximate', async () => {
+    const root = await folder()
+    for (let n = 0; n < 300; n++) await file(join(root, `f${n}`), 4_000)
+    const full = done(await measure(root))
+    let ticks = 0
+    // Time is up on the fourth look at the clock: after the walk began, in the middle of the directory's entries.
+    const now = () => (ticks++ < 4 ? 0 : 1_000)
+    const partial = done(await measure(root, { timeout: 500, now }))
+    expect(partial.approximate).toBe(true)
+    expect(partial.bytes).toBeLessThan(full.bytes)
+    expect(partial.bytes).toBeGreaterThan(0)
+  })
+})
+
+describe('showing a place in the file manager', () => {
+  const where = { profile: '/p', logs: '/p/logs', worktrees: '/w' }
+  it('opens the folder the place names, and no other', async () => {
+    const opened: string[] = []
+    await showPlace(where, 'worktrees', async (path) => {
+      opened.push(path)
+      return ''
+    })
+    expect(opened).toEqual(['/w'])
+  })
+  it('fails with what the system said where it could not open it', async () => {
+    await expect(showPlace(where, 'logs', async () => 'no file manager')).rejects.toThrow('no file manager')
   })
 })
 

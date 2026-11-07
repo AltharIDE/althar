@@ -20,7 +20,7 @@ import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
 import { loginItemOf, openedAtLogin, opensAtLogin } from './loginItem'
 import { startLogs } from './logs'
-import { isPlace, storageSizes } from './storage'
+import { isPlace, showPlace, storageSizes } from './storage'
 import { setAppMenu } from './menu'
 import { dockCount, notificationsShown, soundOf, tells } from './notify'
 import { idle, isQuitAnswer, type QuitAnswer, type QuitQuestion, type Work, workIn } from './quitWork'
@@ -924,8 +924,7 @@ ipcMain.handle('althar:storage-size', (_event, place: unknown, refresh: unknown)
 })
 ipcMain.handle('althar:storage-show', async (_event, place: unknown) => {
   if (!isPlace(place)) throw new Error(`Althar keeps nothing in ${String(place)}.`)
-  const failed = await shell.openPath(storage.places()[place])
-  if (failed !== '') throw new Error(failed)
+  await showPlace(storage.places(), place, (path) => shell.openPath(path))
 })
 
 // The icon the person chose, or null where there is no Dock to show one; and a new one, shown on the Dock, then kept. Anything else fails, and the window says so.

@@ -37,6 +37,8 @@ export interface MeasureOptions {
 
 export const MEASURE_TIMEOUT = 30_000
 const PARALLEL = 8
+/** Entries read at once in a directory; the clock is looked at between batches. */
+const BATCH = 64
 
 const onDisk = (stats: Stats) => (stats.blocks > 0 ? stats.blocks * 512 : stats.size)
 
@@ -74,9 +76,24 @@ export const measure = async (root: string, options: MeasureOptions = {}): Promi
   if (top.isDirectory()) {
     const waiting: string[] = [root]
     let busy = 0
-    await new Promise<void>((done) => {
+    // Set once time is up: what is still reading stops counting, and the answer is what was counted by then.
+    let over = false
+    await new Promise<void>((finish) => {
+      let finished = false
+      const done = () => {
+        if (finished) return
+        finished = true
+        clearTimeout(timer)
+        finish()
+      }
+      // A single slow directory can't hold the answer past the limit: the clock is read between small batches, and this ends the wait even inside one read.
+      const timer = setTimeout(() => {
+        over = true
+        approximate = true
+        done()
+      }, timeout)
       const pump = () => {
-        while (busy < parallel && waiting.length > 0) {
+        while (!over && busy < parallel && waiting.length > 0) {
           if (late()) {
             approximate = true
             waiting.length = 0
@@ -99,27 +116,40 @@ export const measure = async (root: string, options: MeasureOptions = {}): Promi
           unreadable++
           return
         }
-        await Promise.all(
-          names.map(async (entry) => {
-            const path = join(folder, entry.name)
-            if (excluded.has(path)) return
-            let stats: Stats
-            try {
-              // lstat: a symlink is itself, never what it points to.
-              stats = await lstat(path)
-            } catch {
-              unreadable++
-              return
-            }
-            count(stats)
-            if (stats.isDirectory()) waiting.push(path)
-          }),
-        )
+        for (let from = 0; from < names.length; from += BATCH) {
+          if (over || late()) {
+            approximate = true
+            return
+          }
+          await Promise.all(
+            names.slice(from, from + BATCH).map(async (entry) => {
+              const path = join(folder, entry.name)
+              if (excluded.has(path)) return
+              let stats: Stats
+              try {
+                // lstat: a symlink is itself, never what it points to.
+                stats = await lstat(path)
+              } catch {
+                unreadable++
+                return
+              }
+              if (over) return
+              count(stats)
+              if (stats.isDirectory()) waiting.push(path)
+            }),
+          )
+        }
       }
       pump()
     })
   }
   return { state: 'done', bytes, approximate, unreadable }
+}
+
+/** Opens a place in the system's file manager; fails with what the system said where it couldn't. */
+export const showPlace = async (places: Readonly<Record<PlaceId, string>>, place: PlaceId, openPath: (path: string) => Promise<string>) => {
+  const failed = await openPath(places[place])
+  if (failed !== '') throw new Error(failed)
 }
 
 /** A place Althar keeps things, by the id the window asks for it with. */
