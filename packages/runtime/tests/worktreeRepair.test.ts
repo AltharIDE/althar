@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Logger } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { git as runtimeGit, repairWorktree } from '../src/git'
@@ -12,7 +12,7 @@ import { Projects } from '../src/Projects'
 import { reviewCopyOf } from '../src/reviewCopy'
 import * as Runtime from '../src/Runtime'
 import { linkBroke, linkOf, takenFrom } from '../src/worktreeLinks'
-import { WorktreeRepair } from '../src/WorktreeRepair'
+import { takenWords, unrepairedWords, WorktreeRepair } from '../src/WorktreeRepair'
 import { Queries } from '../src/Queries'
 import { repository, runtime } from './support'
 
@@ -58,6 +58,24 @@ const relativeWorktrees = (() => {
 const repaired = (main: string, folder: string) => Effect.runPromise(repairWorktree(main, folder))
 
 describe('a worktree whose link broke', () => {
+  it('says no secret a folder, a repository or a branch is named with', () => {
+    const token = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789'
+    const folder = `/work/${token}/app`
+    const root = `/repos/${token}`
+    const branch = `althar/${token}`
+    const all = [
+      unrepairedWords(folder, false, root, branch, `fatal: not a git repository: ${folder}/.git`),
+      unrepairedWords(folder, true, root, null, 'fatal: nope'),
+      takenWords(folder, false, root, branch, { folder: `/old/${token}/app` }),
+      takenWords(folder, false, root, branch, { branch: `other/${token}` }),
+    ]
+    for (const words of all) {
+      const text = `${words.title} ${words.description}`
+      assert.notInclude(text, token)
+      assert.include(text, '[redacted]')
+    }
+  })
+
   it('is told by git’s own fatal or error line, not by a host’s or a hook’s that says the same', () => {
     assert.isTrue(linkBroke('fatal: gitfile does not point to a valid repository: /x/.git\n'))
     assert.isTrue(linkBroke('warning: something\nfatal: not a git repository: /x/.git/worktrees/y\n'))
@@ -388,9 +406,18 @@ describe('a task’s worktree whose link broke, in the runtime', () => {
       const started = Effect.gen(function* () {
         return yield* (yield* WorktreeRepair).sweep
       }).pipe(Effect.provide(Layer.fresh(WorktreeRepair.layer)))
+      const warned: Array<string> = []
+      const logger = Logger.make(({ logLevel, message }) => {
+        if (logLevel === 'Warn') warned.push(String(Array.isArray(message) ? message[0] : message))
+      })
       // Its own sweep as it starts looks first: what this one is handed may be nothing.
-      for (let start = 0; start < 3; start++) yield* started
+      for (let start = 0; start < 3; start++) yield* started.pipe(Effect.provide(Logger.layer([logger])))
       assert.lengthOf(yield* folderLines(task.threadId), 1)
+      // Nor warned of in the log again.
+      assert.deepStrictEqual(
+        warned.filter((line) => /repair a worktree/.test(line)),
+        ['Could not repair a worktree’s link to its repository'],
+      )
       assert.deepStrictEqual(
         (yield* factsOf(task.workspaceId)).map((one) => one.type),
         ['workspace.repair_failed'],

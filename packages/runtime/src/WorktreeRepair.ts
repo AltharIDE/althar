@@ -11,7 +11,7 @@ import { taskThreadOf } from './bringBack'
 import { RuntimeConfig } from './Config'
 import { GitFailed } from './errors'
 import { mendingUnder, repairWorktree } from './git'
-import { gitLine, gitSummary, homeShortened } from './gitSaid'
+import { gitLine, gitSummary, homeShortened, redacted } from './gitSaid'
 import { Instance } from './Instance'
 import { fact } from './records'
 import { reviewCopyOf } from './reviewCopy'
@@ -70,24 +70,27 @@ export interface Repaired {
 export const repairedWords = (folder: boolean, copy: boolean) =>
   folder && copy ? 'Folder link repaired, and its review copy’s' : copy ? 'Review copy’s folder link repaired' : 'Folder link repaired'
 
+/** A path or name as the thread shows it: the home folder shortened, and no secret in it, as a branch or folder may be named with one. */
+const shown = (text: string) => redacted(homeShortened(text))
+
 const stop = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`)
 
 /** The way out where a task's own folder can't be joined to its repository again: its work is on its branch, the folder left as it is. */
 const wayOut = (folder: string, root: string, branch: string | null) =>
   branch === null
-    ? `Its commits are safe in the repository, and the folder is left as it is, uncommitted changes and all. To work in it again, move the folder aside and add it back with git worktree add ${homeShortened(folder)} in ${homeShortened(root)}.`
-    : `Its commits are safe on its branch, ${branch}, and the folder is left as it is, uncommitted changes and all. To work in it again, move the folder aside and add it back with git worktree add ${homeShortened(folder)} ${branch} in ${homeShortened(root)}.`
+    ? `Its commits are safe in the repository, and the folder is left as it is, uncommitted changes and all. To work in it again, move the folder aside and add it back with git worktree add ${shown(folder)} in ${shown(root)}.`
+    : `Its commits are safe on its branch, ${shown(branch)}, and the folder is left as it is, uncommitted changes and all. To work in it again, move the folder aside and add it back with git worktree add ${shown(folder)} ${shown(branch)} in ${shown(root)}.`
 
 /** The way out for the copy a task's reviews read: nothing of the work is in it, and the next review makes it again. */
 const copyWayOut = (folder: string) =>
-  `Nothing of the task’s work is in it: remove the folder, ${homeShortened(folder)}, and Althar makes it again at the next review.`
+  `Nothing of the task’s work is in it: remove the folder, ${shown(folder)}, and Althar makes it again at the next review.`
 
 /** What the thread says where git couldn't repair a folder's link: the fact, the way out, then what git said. */
 export const unrepairedWords = (folder: string, copy: boolean, root: string, branch: string | null, said: string) => ({
   title: copy
     ? 'The copy this task’s reviews read lost its link to the repository, and Althar couldn’t restore it.'
     : 'This task’s folder lost its link to the repository, and Althar couldn’t restore it.',
-  description: `${copy ? copyWayOut(folder) : wayOut(folder, root, branch)} Git said: ${stop(said)}`,
+  description: `${copy ? copyWayOut(folder) : wayOut(folder, root, branch)} Git said: ${stop(redacted(said))}`,
 })
 
 /** What it says where the repair would take another's record, so nothing was changed. */
@@ -95,11 +98,11 @@ export const takenWords = (folder: string, copy: boolean, root: string, branch: 
   const which = copy ? 'The copy this task’s reviews read' : 'This task’s folder'
   return 'folder' in taken
     ? {
-        title: `${which} is linked to another copy, at ${homeShortened(taken.folder)}, so Althar left both as they are.`,
+        title: `${which} is linked to another copy, at ${shown(taken.folder)}, so Althar left both as they are.`,
         description: 'If that copy is from an old profile, remove it and restart Althar.',
       }
     : {
-        title: `${which} is linked to another branch in the repository, ${taken.branch}, so Althar left it as it is.`,
+        title: `${which} is linked to another branch in the repository, ${shown(taken.branch)}, so Althar left it as it is.`,
         description: copy ? copyWayOut(folder) : wayOut(folder, root, branch),
       }
 }
@@ -156,11 +159,11 @@ export class WorktreeRepair extends Context.Service<
               const [last] = yield* sql<{ type: string; payload: string }>`
                 SELECT type, payload FROM record_events
                 WHERE aggregate_id = ${worktree.id} AND type IN ('workspace.repaired', 'workspace.repair_failed')
-                  AND json_extract(payload, '$.folder') = ${done.folder}
+                  AND json_extract(payload, '$.folder') = ${redacted(done.folder)}
                 ORDER BY rowid DESC LIMIT 1`
               if (!done.repaired && last?.type === 'workspace.repair_failed') {
                 const was = JSON.parse(last.payload) as { why?: string; said?: string }
-                if (was.why === done.why && was.said === done.said) return false
+                if (was.why === done.why && was.said === redacted(done.said)) return false
               }
               const [row] = yield* sql<{ revision: number }>`SELECT revision FROM workspaces WHERE id = ${worktree.id}`
               if (row === undefined) return false
@@ -171,7 +174,7 @@ export class WorktreeRepair extends Context.Service<
                 aggregateId: worktree.id,
                 revision,
                 type: done.repaired ? 'workspace.repaired' : 'workspace.repair_failed',
-                payload: { folder: done.folder, copy: done.copy, why: done.why, said: done.said },
+                payload: { folder: redacted(done.folder), copy: done.copy, why: done.why, said: redacted(done.said) },
                 actorId: instance.systemId,
               })
               return true
@@ -222,14 +225,27 @@ export class WorktreeRepair extends Context.Service<
             why,
             repaired: false,
             said:
-              'folder' in taken ? `its record is another folder’s: ${taken.folder}` : `its record is on another branch: ${taken.branch}`,
+              'folder' in taken
+                ? `its record is another folder’s: ${taken.folder}`
+                : `its record is on another branch: ${shown(taken.branch)}`,
             words: takenWords(folder, copy, worktree.root, worktree.branch, taken),
           }
           unrepaired.add(folder)
-          yield* Effect.logWarning('Did not repair a worktree’s link: the record it names is another worktree’s').pipe(
-            Effect.annotateLogs({ task: worktree.taskId, workspace: worktree.id, folder, copy, why, repository: worktree.root, ...taken }),
-          )
-          return yield* recorded(worktree, done)
+          const one = yield* recorded(worktree, done)
+          // Said once, as the record is: the same refusal at each start isn't news.
+          if (one.news)
+            yield* Effect.logWarning('Did not repair a worktree’s link: the record it names is another worktree’s').pipe(
+              Effect.annotateLogs({
+                task: worktree.taskId,
+                workspace: worktree.id,
+                folder: redacted(folder),
+                copy,
+                why,
+                repository: redacted(worktree.root),
+                ...('folder' in taken ? { taken_folder: redacted(taken.folder) } : { taken_branch: redacted(taken.branch) }),
+              }),
+            )
+          return one
         })
 
       /** Records it, and hands it on to be said where it is news. */
@@ -268,19 +284,26 @@ export class WorktreeRepair extends Context.Service<
             said: failed === null ? (Result.isSuccess(ran) ? ran.success : ran.failure.stderr) : gitSummary(failed),
             ...(failed === null ? {} : { words: unrepairedWords(folder, copy, worktree.root, worktree.branch, gitLine(failed.stderr)) }),
           }
+          const fields = {
+            task: worktree.taskId,
+            workspace: worktree.id,
+            folder: redacted(folder),
+            copy,
+            why,
+            repository: redacted(worktree.root),
+          }
           if (failed === null) {
             repairedHere.set(folder, yield* Clock.currentTimeMillis)
             unrepaired.delete(folder)
-            yield* Effect.logInfo('Repaired a worktree’s link to its repository').pipe(
-              Effect.annotateLogs({ task: worktree.taskId, workspace: worktree.id, folder, copy, why, repository: worktree.root }),
-            )
-          } else {
-            unrepaired.add(folder)
+          } else unrepaired.add(folder)
+          const one = yield* recorded(worktree, done)
+          if (failed === null) yield* Effect.logInfo('Repaired a worktree’s link to its repository').pipe(Effect.annotateLogs(fields))
+          // Said once, as the record is: a folder git can't repair fails again at each start, and that isn't news.
+          else if (one.news)
             yield* Effect.logWarning('Could not repair a worktree’s link to its repository', Cause.fail(failed)).pipe(
-              Effect.annotateLogs({ task: worktree.taskId, workspace: worktree.id, folder, copy, why }),
+              Effect.annotateLogs(fields),
             )
-          }
-          return yield* recorded(worktree, done)
+          return one
         })
 
       /**
