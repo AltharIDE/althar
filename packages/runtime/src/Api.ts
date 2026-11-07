@@ -1071,7 +1071,7 @@ export const handlers = Api.toLayer(
                 ? on
                   ? mcpSync.turnOn(io)
                   : mcpSync.turnOff(io, takeBack)
-                : Promise.resolve(on ? skillSync.turnSkillsOn(io) : skillSync.turnSkillsOff(io, takeBack)),
+                : mcpSync.serialized(io, () => (on ? skillSync.turnSkillsOn(io) : skillSync.turnSkillsOff(io, takeBack))),
             ),
           ).pipe(Effect.provideService(RuntimeConfig, config)),
         ),
@@ -1084,7 +1084,7 @@ export const handlers = Api.toLayer(
                 ? out
                   ? mcpSync.keepOut(io, agent, name)
                   : mcpSync.putBack(io, agent, name)
-                : Promise.resolve(out ? skillSync.keepSkillOut(io, agent, name) : skillSync.putSkillBack(io, agent, name)),
+                : mcpSync.serialized(io, () => (out ? skillSync.keepSkillOut(io, agent, name) : skillSync.putSkillBack(io, agent, name))),
             ),
           ).pipe(Effect.provideService(RuntimeConfig, config)),
         ),
@@ -1092,7 +1092,9 @@ export const handlers = Api.toLayer(
         once(
           commandId,
           api(
-            withSync((io) => (kind === 'server' ? mcpSync.pickWay(io, name, way) : Promise.resolve(skillSync.pickSkill(io, name, way)))),
+            withSync((io) =>
+              kind === 'server' ? mcpSync.pickWay(io, name, way) : mcpSync.serialized(io, () => skillSync.pickSkill(io, name, way)),
+            ),
           ).pipe(Effect.provideService(RuntimeConfig, config)),
         ),
       UndoToolSync: ({ commandId, id }) =>

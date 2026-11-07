@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 
 import type { AgentTools, SyncSettle, SyncView, ToolHere, ToolRole, ToolRow, ToolSource } from '@althar/contracts'
 import {
@@ -15,7 +15,7 @@ import {
 import { Effect, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { RuntimeConfig } from './Config'
+import { RuntimeConfig, type RuntimeOptions } from './Config'
 import * as mcp from './mcpSync'
 import * as skills from './skillSync'
 import { timestamp } from './records'
@@ -96,20 +96,43 @@ const FOLDERS: Readonly<Record<SyncedAgent, string>> = {
   opencode: '~/.config/opencode/skills',
 }
 
-/** Runs one of the person's agents' own commands, as sync writes through them. */
-const run: mcp.Run = (command, args) =>
-  new Promise((resolve) => {
-    execFile(command, [...args], { timeout: 60_000 }, (error, stdout, stderr) =>
-      resolve({ code: error === null ? 0 : typeof error.code === 'number' ? error.code : 1, output: `${stdout}${stderr}` }),
-    )
-  })
+/** Where the person's agents' commands are, beside the PATH Althar was started with, which an app opened from the Dock lacks. */
+const agentPath = (homeDir: string) =>
+  [
+    process.env['PATH'] ?? '',
+    join(homeDir, '.local', 'bin'),
+    join(homeDir, '.opencode', 'bin'),
+    join(homeDir, '.bun', 'bin'),
+    join(homeDir, '.npm-global', 'bin'),
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+  ]
+    .filter((one) => one !== '')
+    .join(delimiter)
 
-const ioOf = (configs: { readonly homeDir: string; readonly folder: string }, now: string): mcp.SyncIo & skills.SkillIo => ({
+const NAMES: Readonly<Record<string, string>> = { claude: 'Claude Code', codex: 'Codex' }
+
+/** Runs one of the person's agents' own commands, as sync writes through them; one that isn't on this computer says so. */
+const runIn =
+  (homeDir: string): mcp.Run =>
+  (command, args) =>
+    new Promise((resolve) => {
+      execFile(command, [...args], { timeout: 60_000, env: { ...process.env, PATH: agentPath(homeDir) } }, (error, stdout, stderr) => {
+        if (error !== null && (error as NodeJS.ErrnoException).code === 'ENOENT')
+          return resolve({
+            code: 127,
+            output: `Its \`${command}\` command isn’t on this computer, so ${NAMES[command] ?? command} wasn’t changed.`,
+          })
+        resolve({ code: error === null ? 0 : typeof error.code === 'number' ? error.code : 1, output: `${stdout}${stderr}` })
+      })
+    })
+
+const ioOf = (configs: NonNullable<RuntimeOptions['agentConfigs']>, now: string): mcp.SyncIo & skills.SkillIo => ({
   home: { homeDir: configs.homeDir, env: process.env },
   homeDir: configs.homeDir,
   env: process.env,
   folder: configs.folder,
-  run,
+  run: configs.run ?? runIn(configs.homeDir),
   now: () => now,
 })
 
@@ -146,12 +169,25 @@ const describe = (folder: string): string => {
   }
 }
 
+/**
+ * Brings the person's agents in step where a switch is on: as Settings reads
+ * them, and as a session starts, which is when an agent reads its settings.
+ * What can't be done is kept, and said in Settings.
+ */
+export const refresh = (io: mcp.SyncIo & skills.SkillIo) =>
+  Effect.promise(async () => {
+    if (mcp.readRecord(io).on) await mcp.reconcile(io)
+    if (skills.readSkillRecord(io).on) await mcp.serialized(io, () => skills.reconcileSkills(io))
+  })
+
 /** What Settings shows: the person's servers and skills, with the roles each gets here, and how sync stands. */
 export const agentTools = (projectId: string | null) =>
   Effect.gen(function* () {
     const io = yield* syncIo
     const empty: SyncView = { on: false, settle: [], since: [], targets: [], errors: [] }
     if (io === undefined) return { enabled: false, servers: [], skills: [], serverSync: empty, skillSync: empty } satisfies AgentTools
+    // While a switch is on, what the person changed in their agents since is brought in step as Settings reads them.
+    yield* refresh(io)
     const roles = yield* readRoles
     const { record, plan } = mcp.syncState(io)
     const agents = plan.agents
@@ -188,7 +224,7 @@ export const agentTools = (projectId: string | null) =>
           : plan.adds.filter((each) => each.agent === agent).map((each) => each.spec.name),
         out: [...record.keptOut[agent]],
       })),
-      errors: [],
+      errors: [...(record.errors ?? [])],
     }
     const skillRecord = skills.readSkillRecord(io)
     const skillPlan = skills.planSkills(io, skillRecord)
@@ -223,7 +259,7 @@ export const agentTools = (projectId: string | null) =>
           : skillPlan.links.filter((each) => each.agent === agent).map((each) => each.name),
         out: [...skillRecord.keptOut[agent]],
       })),
-      errors: [],
+      errors: [...(skillRecord.errors ?? [])],
     }
     return { enabled: true, servers, skills: skillRows, serverSync, skillSync } satisfies AgentTools
   })
@@ -274,6 +310,8 @@ export const serversFor = (role: ToolRole, projectId: string, http: boolean) =>
   Effect.gen(function* () {
     const config = yield* RuntimeConfig
     if (config.agentConfigs === undefined) return []
+    // A session starting is when its agent reads its settings: the person's agents are brought in step meanwhile, not waited on.
+    yield* Effect.forkDetach(refresh(ioOf(config.agentConfigs, yield* timestamp)))
     const roles = yield* readRoles
     const home = { homeDir: config.agentConfigs.homeDir, env: process.env }
     const seen = new Set<string>()

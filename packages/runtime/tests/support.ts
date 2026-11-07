@@ -332,6 +332,8 @@ export const runtime = (
     readonly onDevice?: RuntimeOptions['onDevice']
     /** The skills store and local catalog; no run has Althar-selected skills without it. */
     readonly skills?: RuntimeOptions['skills']
+    /** The person's agents' settings, in a home of the test's own: none is read without it. */
+    readonly agentConfigs?: RuntimeOptions['agentConfigs']
     /** The machine how many agents are at work at once comes from; a large one unless a test says, so no test waits on the Mac it runs on. */
     readonly busy?: BusyOptions
     /** The keychain, kept across runtimes given the same one; else each its own. */
@@ -370,6 +372,7 @@ export const runtime = (
     checksAppear: more.checksAppear ?? Duration.zero,
     ...(more.checksStuck === undefined ? {} : { checksStuck: more.checksStuck }),
     publishAgain: more.publishAgain ?? Duration.zero,
+    ...(more.agentConfigs === undefined ? {} : { agentConfigs: more.agentConfigs }),
     betweenAgents: more.betweenAgents ?? Duration.zero,
     ...(more.stalls === undefined ? {} : { stalls: more.stalls }),
     ...(more.stopGrace === undefined ? {} : { stopGrace: more.stopGrace }),

@@ -218,8 +218,40 @@ export const referenceOf = (value: string): string | undefined =>
 /** What a server runs or calls, in a line: `npx -y @github/github-mcp-server`, `https://mcp.linear.app/mcp`. */
 export const runsOf = (server: ServerSpec): string => server.url ?? [server.command ?? '', ...(server.args ?? [])].join(' ').trim()
 
-/** Whether two agents set a server up the same way: the same command and arguments, or the same address. */
-export const sameServer = (one: ServerSpec, other: ServerSpec): boolean =>
-  (one.url ?? '') === (other.url ?? '') &&
-  (one.command ?? '') === (other.command ?? '') &&
-  (one.args ?? []).join('\u0000') === (other.args ?? []).join('\u0000')
+/**
+ * A server's whole set-up, as one agent's way of writing it or another's
+ * would read: the same reference to a variable whichever way it is written
+ * (`${VAR}`, `{env:VAR}`, `$VAR`), a bearer token by its variable the same as
+ * an `Authorization` header naming it, and a remote server the same over
+ * HTTP or SSE, as OpenCode writes both alike. Whether it is off is said apart.
+ */
+const canonical = (server: ServerSpec): string => {
+  const value = (raw: string) => {
+    const bearer = /^Bearer\s+(.*)$/i.exec(raw)
+    const name = referenceOf(bearer?.[1] ?? raw)
+    return name === undefined ? raw : bearer === null ? `\${${name}}` : `Bearer \${${name}}`
+  }
+  const sorted = (values: Readonly<Record<string, string>> | undefined) =>
+    Object.entries(values ?? {})
+      .map(([key, raw]) => [key.toLowerCase() === 'authorization' ? 'authorization' : key, value(raw)] as const)
+      .sort(([one], [other]) => one.localeCompare(other))
+  const headers = sorted({
+    ...server.headers,
+    ...(server.tokenVariable === undefined ? {} : { Authorization: `Bearer \${${server.tokenVariable}}` }),
+  })
+  return JSON.stringify([
+    server.transport === 'stdio' ? 'stdio' : 'remote',
+    server.url ?? '',
+    server.command ?? '',
+    server.args ?? [],
+    sorted(server.env),
+    headers,
+  ])
+}
+
+/** Whether two agents set a server up the same way: the same command, arguments and environment, or address and headers. */
+export const sameServer = (one: ServerSpec, other: ServerSpec): boolean => canonical(one) === canonical(other)
+
+/** Whether a server is still exactly as Althar wrote it: set up the same, and not turned off since. */
+export const asWritten = (now: ServerSpec, written: ServerSpec): boolean =>
+  sameServer(now, written) && (now.off === true) === (written.off === true)

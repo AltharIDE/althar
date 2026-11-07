@@ -65,6 +65,8 @@ export interface SkillRecord {
   readonly keptOut: Readonly<Record<SyncedAgent, ReadonlyArray<string>>>
   /** For one name with two versions: whose is linked into the others, or both kept as they are. */
   readonly picks: Readonly<Record<string, SyncedAgent | 'apart'>>
+  /** What its last links couldn't do: said in Settings until they can. */
+  readonly errors?: ReadonlyArray<string>
 }
 
 const NONE: Readonly<Record<SyncedAgent, ReadonlyArray<string>>> = { claude: [], codex: [], opencode: [] }
@@ -224,6 +226,7 @@ export const reconcileSkills = (io: SkillIo): { readonly record: SkillRecord; re
       errors.push(error instanceof Error ? error.message : String(error))
     }
   }
+  record = { ...record, errors }
   writeSkillRecord(io, record)
   return { record, errors }
 }

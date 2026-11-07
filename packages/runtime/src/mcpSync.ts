@@ -6,6 +6,7 @@ import {
   type AgentServers,
   isReference,
   referenceOf,
+  asWritten,
   sameServer,
   type ServerHome,
   type ServerSpec,
@@ -87,6 +88,8 @@ export interface SyncRecord {
   readonly signedIn: ReadonlyArray<string>
   /** Whether `seen` was read once already, so a server not in it is one the person added since. */
   readonly looked?: boolean
+  /** What its last writes couldn't do, in each agent's own words: said in Settings until a write goes through. */
+  readonly errors?: ReadonlyArray<string>
 }
 
 const NONE: Readonly<Record<SyncedAgent, ReadonlyArray<string>>> = { claude: [], codex: [], opencode: [] }
@@ -189,9 +192,18 @@ export const planSync = (record: SyncRecord, agents: ReadonlyArray<AgentServers>
         continue
       }
       source = picked.spec
-      for (const one of having)
-        if (!sameServer(one.spec, picked.spec) && !record.keptOut[one.agent].includes(name))
-          replaces.push({ agent: one.agent, spec: { ...picked.spec, ...(one.spec.off === true ? { off: true } : {}) }, before: one.spec })
+      // Each other agent's way is replaced by the one picked, where it can go there as it is: a secret written out, or a way the
+      // agent doesn't take, stays under To settle, and its own way is left. One the person turned off there stays as they left it.
+      for (const one of having) {
+        if (sameServer(one.spec, picked.spec) || record.keptOut[one.agent].includes(name) || one.spec.off === true) continue
+        const cant = cantGo(picked.spec, one.agent)
+        if (cant !== undefined) {
+          settle.push({ kind: 'cant', server: name, agent: one.agent, why: cant })
+          continue
+        }
+        const { off: _, ...spec } = picked.spec
+        replaces.push({ agent: one.agent, spec, before: one.spec })
+      }
     }
     if (source === undefined) continue
     for (const agent of SYNCED_AGENTS) {
@@ -350,6 +362,24 @@ const seenNow = (agents: ReadonlyArray<AgentServers>, before: SyncRecord['seen']
     }),
   ) as SyncRecord['seen']
 
+/** A failure, in its own words. */
+const said = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+/** Sync's steps on one record, one at a time: a read of Settings that brings the agents in step, and a press, never at once. */
+const queues = new Map<string, Promise<unknown>>()
+export const serialized = <A>(io: { readonly folder: string }, step: () => Promise<A> | A): Promise<A> => {
+  const before = queues.get(io.folder) ?? Promise.resolve()
+  const next = before.then(step, step)
+  queues.set(
+    io.folder,
+    next.then(
+      () => undefined,
+      () => undefined,
+    ),
+  )
+  return next
+}
+
 const idOf = (io: SyncIo, server: string, agent: SyncedAgent) => `${io.now()}:${server}:${agent}`
 
 /**
@@ -358,7 +388,7 @@ const idOf = (io: SyncIo, server: string, agent: SyncedAgent) => `${io.now()}:${
  * to the others; and what the plan adds is written, each through its agent's
  * own command. A write that fails is said, and the rest goes on.
  */
-export const reconcile = async (io: SyncIo): Promise<{ readonly record: SyncRecord; readonly errors: ReadonlyArray<string> }> => {
+const reconcileNow = async (io: SyncIo): Promise<{ readonly record: SyncRecord; readonly errors: ReadonlyArray<string> }> => {
   let record = readRecord(io)
   const agents = read(io)
   if (!record.on) {
@@ -409,7 +439,7 @@ export const reconcile = async (io: SyncIo): Promise<{ readonly record: SyncReco
       record = { ...record, added: [...record.added, { agent, spec, at: io.now() }] }
       if (fresh.has(spec.name)) copied.set(spec.name, [...(copied.get(spec.name) ?? []), agent])
     } catch (error) {
-      errors.push(error instanceof Error ? error.message : String(error))
+      errors.push(said(error))
     }
   }
   // A server the person added to one agent, now copied to the others: said under Since, with Undo.
@@ -418,80 +448,108 @@ export const reconcile = async (io: SyncIo): Promise<{ readonly record: SyncReco
     if (from !== undefined)
       record = { ...record, since: [{ id: idOf(io, server, from), at: io.now(), server, kind: 'copied', from, to }, ...record.since] }
   }
-  record = { ...record, seen: seenNow(read(io), record.seen), since: record.since.slice(0, 20), looked: true }
+  record = { ...record, seen: seenNow(read(io), record.seen), since: record.since.slice(0, 20), looked: true, errors }
   writeRecord(io, record)
   return { record, errors }
 }
 
+/** Brings the agents in step, one step of sync at a time. */
+export const reconcile = (io: SyncIo) => serialized(io, () => reconcileNow(io))
+
 /** Turns the switch on, and brings the agents in step. */
-export const turnOn = async (io: SyncIo) => {
-  writeRecord(io, { ...readRecord(io), on: true })
-  return reconcile(io)
-}
+export const turnOn = (io: SyncIo) =>
+  serialized(io, () => {
+    writeRecord(io, { ...readRecord(io), on: true })
+    return reconcileNow(io)
+  })
 
 /**
  * Turns the switch off: what it added stays in each agent, the person's now,
  * or comes back out of each, where it is still as Althar wrote it. What the
  * person changed since stays as they left it.
  */
-export const turnOff = async (io: SyncIo, takeBack: boolean): Promise<{ readonly errors: ReadonlyArray<string> }> => {
-  const record = readRecord(io)
-  const errors: Array<string> = []
-  if (takeBack) {
-    const agents = read(io)
-    for (const each of record.added) {
-      const found = agents.find((agent) => agent.agent === each.agent)
-      const now = found?.servers.find((server) => server.name === each.spec.name)
-      if (found === undefined || now === undefined || !sameServer(now, each.spec)) continue
-      try {
-        await unwrite(io, each.agent, found.path, each.spec.name)
-      } catch (error) {
-        errors.push(error instanceof Error ? error.message : String(error))
+export const turnOff = (io: SyncIo, takeBack: boolean): Promise<{ readonly errors: ReadonlyArray<string> }> =>
+  serialized(io, async () => {
+    const record = readRecord(io)
+    const errors: Array<string> = []
+    // What it couldn't take back stays its own, to take back again; the rest is the person's now.
+    const kept: Array<Added> = []
+    if (takeBack) {
+      const agents = read(io)
+      for (const each of record.added) {
+        const found = agents.find((agent) => agent.agent === each.agent)
+        const now = found?.servers.find((server) => server.name === each.spec.name)
+        // Changed since, or gone: the person's now, and left as it is.
+        if (found === undefined || found.problem !== undefined || now === undefined || !asWritten(now, each.spec)) continue
+        try {
+          await unwrite(io, each.agent, found.path, each.spec.name)
+        } catch (error) {
+          errors.push(said(error))
+          kept.push(each)
+        }
       }
     }
-  }
-  writeRecord(io, { ...record, on: false, added: [], seen: seenNow(read(io), record.seen) })
-  return { errors }
-}
+    writeRecord(io, { ...record, on: false, added: kept, errors, seen: seenNow(read(io), record.seen) })
+    return { errors }
+  })
 
-/** Keeps a server out of one agent: taken back out, where Althar added it; left out of the plan, where it hasn't yet. */
-export const keepOut = async (io: SyncIo, agent: SyncedAgent, server: string) => {
+/**
+ * Keeps a server out of one agent: taken back out where Althar added it and
+ * it is still as Althar wrote it; left as it is where the person changed it
+ * since, which makes it theirs; left out of the plan where it isn't there.
+ */
+const keepOutNow = async (io: SyncIo, agent: SyncedAgent, server: string) => {
   const record = readRecord(io)
   const mine = record.added.find((each) => each.agent === agent && each.spec.name === server)
-  const path = agentServers(agent, io.home).path
-  if (mine !== undefined) await unwrite(io, agent, path, server)
+  const found = agentServers(agent, io.home)
+  const now = found.servers.find((each) => each.name === server)
+  const errors: Array<string> = []
+  let stillMine = false
+  if (mine !== undefined && now !== undefined && found.problem === undefined && asWritten(now, mine.spec))
+    try {
+      await unwrite(io, agent, found.path, server)
+    } catch (error) {
+      errors.push(said(error))
+      stillMine = true
+    }
   writeRecord(io, {
     ...record,
-    added: record.added.filter((each) => each !== mine),
+    added: stillMine ? record.added : record.added.filter((each) => each !== mine),
     keptOut: { ...record.keptOut, [agent]: [...new Set([...record.keptOut[agent], server])] },
+    errors,
     seen: seenNow(read(io), record.seen),
   })
 }
 
-/** Puts a server kept out of an agent back in the plan, and, while the switch is on, back in the agent. */
-export const putBack = async (io: SyncIo, agent: SyncedAgent, server: string) => {
+export const keepOut = (io: SyncIo, agent: SyncedAgent, server: string) => serialized(io, () => keepOutNow(io, agent, server))
+
+const putBackNow = (io: SyncIo, agent: SyncedAgent, server: string) => {
   const record = readRecord(io)
   writeRecord(io, { ...record, keptOut: { ...record.keptOut, [agent]: record.keptOut[agent].filter((name) => name !== server) } })
-  return reconcile(io)
+  return reconcileNow(io)
 }
+
+/** Puts a server kept out of an agent back in the plan, and, while the switch is on, back in the agent. */
+export const putBack = (io: SyncIo, agent: SyncedAgent, server: string) => serialized(io, () => putBackNow(io, agent, server))
 
 /** Picks whose way a server set up two ways runs everywhere, or leaves it out of syncing. */
-export const pickWay = async (io: SyncIo, server: string, way: SyncedAgent | 'apart') => {
-  const record = readRecord(io)
-  writeRecord(io, { ...record, picks: { ...record.picks, [server]: way } })
-  return reconcile(io)
-}
+export const pickWay = (io: SyncIo, server: string, way: SyncedAgent | 'apart') =>
+  serialized(io, () => {
+    const record = readRecord(io)
+    writeRecord(io, { ...record, picks: { ...record.picks, [server]: way } })
+    return reconcileNow(io)
+  })
 
 /** Undoes a line under Since: what it copied taken back out of each agent and kept out; what was taken out put back. */
-export const undoSince = async (io: SyncIo, id: string) => {
-  const record = readRecord(io)
-  const entry = record.since.find((each) => each.id === id)
-  if (entry === undefined || entry.undone === true) return
-  const marked = { ...record, since: record.since.map((each) => (each.id === id ? { ...each, undone: true } : each)) }
-  writeRecord(io, marked)
-  if (entry.kind === 'copied') for (const agent of entry.to) await keepOut(io, agent, entry.server)
-  else await putBack(io, entry.from, entry.server)
-}
+export const undoSince = (io: SyncIo, id: string) =>
+  serialized(io, async () => {
+    const record = readRecord(io)
+    const entry = record.since.find((each) => each.id === id)
+    if (entry === undefined || entry.undone === true) return
+    writeRecord(io, { ...record, since: record.since.map((each) => (each.id === id ? { ...each, undone: true } : each)) })
+    if (entry.kind === 'copied') for (const agent of entry.to) await keepOutNow(io, agent, entry.server)
+    else await putBackNow(io, entry.from, entry.server)
+  })
 
 /**
  * A server's sign-in in one agent, as the line the person runs in a terminal:

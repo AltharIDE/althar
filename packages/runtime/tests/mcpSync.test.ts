@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { agentServers } from '@althar/provider-adapters'
+
+import { fakeAgents, GITHUB_NPX, homeWith, stringify } from './agentHome'
 import { describe, expect, it } from 'vitest'
 
 import { keepOut, pickWay, putBack, reconcile, readRecord, syncState, type SyncIo, turnOff, turnOn, undoSince } from '../src/mcpSync'
@@ -13,104 +15,6 @@ import { keepOut, pickWay, putBack, reconcile, readRecord, syncState, type SyncI
  * Each agent's own command is a fake that writes its file as the agent
  * would, and records what it was asked.
  */
-
-const withoutTransport = (spec: Record<string, unknown>) => Object.fromEntries(Object.entries(spec).filter(([key]) => key !== 'transport'))
-
-/** A config as TOML, as far as these tests need: tables of strings, numbers, booleans and lists of strings, a table deep. */
-const stringify = (config: Record<string, unknown>): string => {
-  const value = (each: unknown): string =>
-    Array.isArray(each) ? `[${each.map(value).join(', ')}]` : typeof each === 'string' ? JSON.stringify(each) : String(each)
-  const lines: Array<string> = []
-  const table = (path: string, entries: Record<string, unknown>) => {
-    const plain = Object.entries(entries).filter(([, each]) => typeof each !== 'object' || Array.isArray(each))
-    if (path !== '') lines.push(`[${path}]`)
-    for (const [key, each] of plain) lines.push(`${key} = ${value(each)}`)
-    for (const [key, each] of Object.entries(entries))
-      if (typeof each === 'object' && each !== null && !Array.isArray(each))
-        table(path === '' ? key : `${path}.${key}`, each as Record<string, unknown>)
-  }
-  table('', config)
-  return `${lines.join('\n')}\n`
-}
-
-const GITHUB_NPX = { type: 'stdio', command: 'npx', args: ['-y', '@github/github-mcp-server'], env: { GITHUB_TOKEN: '${GITHUB_TOKEN}' } }
-
-const homeWith = (files: { claude?: unknown; codex?: Record<string, unknown>; opencode?: string }) => {
-  const home = mkdtempSync(join(tmpdir(), 'althar-sync-'))
-  if (files.claude !== undefined) writeFileSync(join(home, '.claude.json'), JSON.stringify(files.claude, null, 2))
-  if (files.codex !== undefined) {
-    mkdirSync(join(home, '.codex'), { recursive: true })
-    writeFileSync(join(home, '.codex', 'config.toml'), stringify(files.codex))
-  }
-  if (files.opencode !== undefined) {
-    mkdirSync(join(home, '.config', 'opencode'), { recursive: true })
-    writeFileSync(join(home, '.config', 'opencode', 'opencode.json'), files.opencode)
-  }
-  return home
-}
-
-/** Claude Code's and Codex's commands, as they write their own files; each call kept. */
-const fakeAgents = (home: string) => {
-  const calls: Array<string> = []
-  const claudeFile = join(home, '.claude.json')
-  const codexFile = join(home, '.codex', 'config.toml')
-  /** Codex's config as its file says it now, read back the way Althar reads it. */
-  const codexConfig = (): Record<string, unknown> => {
-    const found = agentServers('codex', { homeDir: home }).servers
-    return {
-      mcp_servers: Object.fromEntries(
-        found.map(({ name, tokenVariable, off, ...spec }) => [
-          name,
-          {
-            ...withoutTransport(spec),
-            ...(tokenVariable === undefined ? {} : { bearer_token_env_var: tokenVariable }),
-            ...(off === true ? { enabled: false } : {}),
-          },
-        ]),
-      ),
-    }
-  }
-  const run: SyncIo['run'] = async (command, args) => {
-    calls.push([command, ...args].join(' '))
-    if (command === 'claude') {
-      const config = existsSync(claudeFile) ? (JSON.parse(readFileSync(claudeFile, 'utf8')) as Record<string, any>) : {}
-      const servers = { ...config['mcpServers'] }
-      if (args[1] === 'add-json') servers[args[4]!] = JSON.parse(args[5]!)
-      else if (args[1] === 'remove') delete servers[args[4]!]
-      writeFileSync(claudeFile, JSON.stringify({ ...config, mcpServers: servers }, null, 2))
-      return { code: 0, output: '' }
-    }
-    const config = codexConfig()
-    const servers: Record<string, unknown> = { ...(config['mcp_servers'] as Record<string, unknown> | undefined) }
-    if (args[1] === 'add') {
-      const name = args[2]!
-      const rest = args.slice(3)
-      const url = rest.indexOf('--url')
-      if (url >= 0) {
-        const bearer = rest.indexOf('--bearer-token-env-var')
-        servers[name] = { url: rest[url + 1], ...(bearer >= 0 ? { bearer_token_env_var: rest[bearer + 1] } : {}) }
-      } else {
-        const dash = rest.indexOf('--')
-        const env = Object.fromEntries(
-          rest.slice(0, dash).flatMap((arg, at, all) => (arg === '--env' ? [all[at + 1]!.split('=') as [string, string]] : [])),
-        )
-        const [cmd, ...cmdArgs] = rest.slice(dash + 1)
-        servers[name] = { command: cmd, args: cmdArgs, ...(Object.keys(env).length === 0 ? {} : { env }) }
-      }
-    } else if (args[1] === 'remove') delete servers[args[2]!]
-    mkdirSync(join(home, '.codex'), { recursive: true })
-    writeFileSync(codexFile, stringify({ ...config, mcp_servers: servers }))
-    return { code: 0, output: '' }
-  }
-  let tick = 0
-  const io: SyncIo = {
-    home: { homeDir: home, env: {} },
-    folder: join(home, 'althar-profile'),
-    run,
-    now: () => `2026-11-07T10:00:${String(tick++).padStart(2, '0')}.000Z`,
-  }
-  return { io, calls }
-}
 
 const names = (home: string, agent: 'claude' | 'codex' | 'opencode') =>
   agentServers(agent, { homeDir: home })
@@ -261,5 +165,82 @@ describe('keeping the agents’ MCP servers the same', () => {
     expect(readFileSync(join(home, '.config', 'opencode', 'opencode.json'), 'utf8')).toBe('{ "mcp": { oops')
     expect(syncState(io).plan.settle).toContainEqual(expect.objectContaining({ kind: 'unreadable', agent: 'opencode' }))
     expect(names(home, 'codex')).toEqual(['a'])
+  })
+  it('leaves a server the person changed since, beyond its command: its environment, headers, token or off', async () => {
+    const home = homeWith({
+      claude: { mcpServers: { a: { command: 'a', env: { MODE: 'one' } }, b: { type: 'http', url: 'https://b.example/mcp' } } },
+    })
+    const { io } = fakeAgents(home)
+    await turnOn(io)
+    expect(names(home, 'codex')).toEqual(['a', 'b'])
+    // The person gives a its own environment in Codex, and turns b off there.
+    writeFileSync(
+      join(home, '.codex', 'config.toml'),
+      stringify({ mcp_servers: { a: { command: 'a', env: { MODE: 'two' } }, b: { url: 'https://b.example/mcp', enabled: false } } }),
+    )
+    await turnOff(io, true)
+    expect(names(home, 'codex')).toEqual(['a', 'b'])
+    // OpenCode's are still as Althar wrote them: they come out.
+    expect(names(home, 'opencode')).toEqual([])
+  })
+
+  it('tells servers apart by their whole set-up, not only their command, and waits on the person for one set up two ways', () => {
+    const home = homeWith({
+      claude: { mcpServers: { api: { type: 'http', url: 'https://api.example/mcp', headers: { Authorization: 'Bearer ${ONE}' } } } },
+      codex: { mcp_servers: { api: { url: 'https://api.example/mcp', bearer_token_env_var: 'TWO' } } },
+    })
+    const { io } = fakeAgents(home)
+    expect(syncState(io).plan.settle).toContainEqual(expect.objectContaining({ kind: 'differs', server: 'api' }))
+    // The same token, written each agent's way, is one set-up.
+    const same = homeWith({
+      claude: { mcpServers: { api: { type: 'http', url: 'https://api.example/mcp', headers: { Authorization: 'Bearer ${ONE}' } } } },
+      codex: { mcp_servers: { api: { url: 'https://api.example/mcp', bearer_token_env_var: 'ONE' } } },
+    })
+    expect(syncState(fakeAgents(same).io).plan.settle).toEqual([])
+  })
+
+  it('takes a server back out from its chip only while it is as Althar wrote it, and keeps it out either way', async () => {
+    const home = homeWith({ claude: { mcpServers: { a: { command: 'a' } } } })
+    const { io } = fakeAgents(home)
+    await turnOn(io)
+    // The person points a at another command in Codex: theirs now.
+    writeFileSync(join(home, '.codex', 'config.toml'), stringify({ mcp_servers: { a: { command: 'a-mine' } } }))
+    await keepOut(io, 'codex', 'a')
+    expect(agentServers('codex', { homeDir: home }).servers[0]?.command).toBe('a-mine')
+    expect(readRecord(io).added.some((each) => each.agent === 'codex')).toBe(false)
+    expect(readRecord(io).keptOut.codex).toEqual(['a'])
+    // OpenCode's is as written: its chip takes it out.
+    await keepOut(io, 'opencode', 'a')
+    expect(names(home, 'opencode')).toEqual([])
+  })
+
+  it('never copies a secret by a pick: the other agent keeps its own way, and the secret waits under To settle', async () => {
+    const home = homeWith({
+      claude: { mcpServers: { tool: { command: 'tool', env: { API_TOKEN: 'live_value' } } } },
+      codex: { mcp_servers: { tool: { command: 'tool-other' } } },
+    })
+    const { io } = fakeAgents(home)
+    await turnOn(io)
+    await pickWay(io, 'tool', 'claude')
+    expect(agentServers('codex', { homeDir: home }).servers[0]?.command).toBe('tool-other')
+    expect(readFileSync(join(home, '.codex', 'config.toml'), 'utf8')).not.toContain('live_value')
+    expect(syncState(io).plan.settle).toContainEqual({ kind: 'cant', server: 'tool', agent: 'codex', why: 'secret' })
+  })
+
+  it('keeps what an agent’s command couldn’t do, says it, and keeps what it couldn’t take back to take back again', async () => {
+    const home = homeWith({ claude: { mcpServers: { a: { command: 'a' } } } })
+    const working = fakeAgents(home)
+    await turnOn(working.io)
+    expect(names(home, 'codex')).toEqual(['a'])
+    const broken = fakeAgents(home, ['codex'])
+    const { errors } = await turnOff({ ...broken.io, now: working.io.now }, true)
+    expect(errors).toEqual(["Codex: codex: couldn't write its settings"])
+    expect(readRecord(working.io).errors).toEqual(errors)
+    expect(readRecord(working.io).added.map((each) => each.agent)).toEqual(['codex'])
+    expect(names(home, 'opencode')).toEqual([])
+    // Once Codex's command works, taking it back goes through.
+    await turnOff(working.io, true)
+    expect(names(home, 'codex')).toEqual([])
+    expect(readRecord(working.io).added).toEqual([])
   })
 })

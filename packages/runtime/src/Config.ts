@@ -98,7 +98,12 @@ export interface RuntimeOptions {
    * files it changed. Without it, none is read or written: a test's runtime
    * never touches the home it runs in.
    */
-  readonly agentConfigs?: { readonly homeDir: string; readonly folder: string }
+  readonly agentConfigs?: {
+    readonly homeDir: string
+    readonly folder: string
+    /** Runs one of the person's agents' own commands, as sync writes through them; the agents' own on this computer without it. */
+    readonly run?: (command: string, args: ReadonlyArray<string>) => Promise<{ readonly code: number; readonly output: string }>
+  }
   readonly appVersion: string
   /** What this device is called, when the profile is new. */
   readonly deviceName: string
