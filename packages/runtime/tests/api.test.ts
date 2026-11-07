@@ -304,6 +304,12 @@ describe('the API', () => {
           listed.projects.map((summary) => [summary.id, summary.tasks]),
           [[project.id, 1]],
         )
+        // While you were away, through the API as the window reads it: nothing yet, and cleared up to what it showed.
+        const away = yield* client.GetAway({ projectId: project.id })
+        assert.deepStrictEqual([away.acts, away.upTo, away.earlier], [[], 0, 0])
+        assert.deepStrictEqual((yield* client.GetAway({ projectId: project.id, all: true })).acts, [])
+        yield* client.ClearAway({ commandId: commandId(), projectId: project.id, upTo: away.upTo })
+        assert.isNotNull((yield* client.GetAway({ projectId: project.id })).looked)
         // The home has the project; left, it reads what the loop did from then.
         const firstLook = yield* client.GetHome({})
         assert.deepStrictEqual([firstLook.looked, firstLook.projects.map((summary) => summary.id)], [null, [project.id]])

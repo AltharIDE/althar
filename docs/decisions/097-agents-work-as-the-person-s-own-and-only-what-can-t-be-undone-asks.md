@@ -588,7 +588,9 @@ with its rules (`coordinator`, on without it), which agents may change with
 - Nothing wakes the coordinator: `Coordinator.say` drops news and Althar's
   own words (the merge line's, an answer to a question it asked) and refuses
   the person's (`CoordinatorOff`), so nothing starts its session; switching
-  it off stops one that runs. A task a lead starts still starts, through the
+  it off stops one that runs, from the window or through `change_settings`
+  alike (`applyRules`), apart from the change, so a coordinator turning itself
+  off ends its own call first. A task a lead starts still starts, through the
   plan's countdown as before.
 - The board's empty Up next offers New task, which puts the person in the
   composer, rather than "Talk to the coordinator".
@@ -608,6 +610,15 @@ that needs, and why it can't be now:
 | An issue changed at once | A change applied with no press of the person's: a lead's or the coordinator's at once, or Althar moving a task's issue along | Undo, through the same tracker, for a status move: back to the status it had | A comment on an issue: "Already sent" |
 | A review posted by the person's setting | It posts itself | None | "Reviews stay posted" |
 | Tasks a lead started | `start_task`, `propose_plan` and the rest from a lead | Stop, from the task: the row opens it | None; started in the same minute from one task, one row, "Started 2 tasks" |
+
+The board shows the newest 30, and under them "12 earlier", which shows the
+rest. × clears up to the newest act the window's read showed (its mark,
+`upTo`), never further, so an act done between the read and the press still
+shows; a mark never moves back, so an older window's press doesn't bring back
+what a newer one cleared. Taking an act back first claims it in one write
+(done or failed to under way), so two windows pressing at once take it back
+once; a claim with no revert's task after five minutes, as when Althar stopped
+in the middle, reads as failed and can be pressed again.
 
 Where this goes another way than #640's README: the list starts from the last
 act the person had seen when they last pressed ×, not from when they last

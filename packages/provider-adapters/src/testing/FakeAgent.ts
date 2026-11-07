@@ -1119,6 +1119,9 @@ const playRole = async (
         await commitIn(session.cwd, 'pushed.txt', 'Tidy up before pushing')
         return await call('push_to_pull_request', {})
       }
+      // Asked to say something on its pull request, it comments there: one of its acts outside its worktree (ADR-097).
+      if (available.has('reply_on_pull_request') && session.markers.has('[lead:comment]') && /\bcomment pls\b/i.test(text))
+        return await call('reply_on_pull_request', { body: 'Tried it on a slow network too.' })
       // Asked to tidy up, it commits and ends its turn: what goes up, and when, isn't its to say.
       if (session.markers.has('[lead:commit]') && /\btidy pls\b/i.test(text)) {
         commitIn(session.cwd, 'tidied.txt', 'Tidy up')
