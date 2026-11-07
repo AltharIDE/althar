@@ -96,7 +96,7 @@ const PICTURE_NAME = /\.(png|jpe?g|gif|webp)$/i
 const findPicture = (path: string, worktrees: ReadonlyArray<string>, where = 'the task’s worktree') =>
   Effect.gen(function* () {
     const [first] = worktrees
-    if (first === undefined) return yield* refuse(`Althar keeps a picture only from ${where}, and this has none.`)
+    if (first === undefined) return yield* refuse(`Althar keeps a screenshot only from ${where}, and this has none.`)
     const candidates = isAbsolute(path) ? [path] : worktrees.map((folder) => resolve(folder, path))
     const held = yield* Effect.promise(async () => {
       for (const one of candidates) if ((await stat(one).catch(() => null)) !== null) return one
