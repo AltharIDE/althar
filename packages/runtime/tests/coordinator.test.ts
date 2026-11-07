@@ -1343,7 +1343,7 @@ describe("the coordinator's tools", () => {
       assert.match(yield* callTool(access, 'project_overview', {}), /Tasks: 0 open/)
       assert.match(
         yield* callTool(access, 'project_overview', {}),
-        /Rules: Agents may do anything but these, which wait for the person: pushing to the default branch;/,
+        /Rules: Agents may do anything but what can't be undone, which waits for the person: losing work or history/,
       )
       assert.strictEqual(yield* callTool(access, 'list_tasks'), 'The project has no tasks yet.')
       assert.match(yield* callTool(access, 'draft_task', { title: 'Tidy the README', description: 'Short.' }), /^Drafted tidy-the-readme\./)

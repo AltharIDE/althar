@@ -1327,7 +1327,7 @@ describe('a project’s rules, as the coordinator is told them', () => {
     )
     assert.strictEqual(
       sayRules({ mode: 'allow', ask: RULES, never: [], allow: [], commands: [{ pattern: 'npm publish', decision: 'ask' }] }),
-      'Agents may do anything.',
+      "Agents may do anything but what can't be undone, which waits for the person: losing work or history (a force push, a push to the default branch, deleting another branch), publishing, a release or a merge, and posting for the person; and before running commands starting `npm publish`.",
     )
     assert.strictEqual(
       sayRules({ mode: 'rules', ask: ['force-push'], never: [], allow: [], commands: [{ pattern: 'npm publish', decision: 'ask' }] }),

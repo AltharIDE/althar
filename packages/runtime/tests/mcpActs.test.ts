@@ -87,6 +87,14 @@ describe('MCP calls', () => {
     assert.strictEqual(decide(call('mcp__github__add_issue_comment', { issue_number: 1, body: 'hi' }), never).verdict, 'deny')
   })
 
+  it('asks before publishing, a release, a merge or tearing down with everything allowed, and lets a deploy through', () => {
+    const run = (command: string) => decide({ ...call(command, { command }), kind: 'execute' }, everything).verdict
+    assert.strictEqual(run('npm publish'), 'ask')
+    assert.strictEqual(run('terraform destroy'), 'ask')
+    assert.strictEqual(run('fly deploy'), 'allow')
+    assert.strictEqual(irreversibleOf({ ...call('npm publish', { command: 'npm publish' }), kind: 'execute' }, everything)?.kind, 'publish')
+  })
+
   it('says on the card what can’t be undone and where the call goes', () => {
     assert.deepStrictEqual(
       irreversibleOf(call('mcp__github__add_issue_comment', { issue_number: 640, body: 'Not needed once #635 merges.' }), everything),

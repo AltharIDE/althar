@@ -159,9 +159,11 @@ export const sayRules = (rules: ProjectRuleSet): string => {
       ? `The coordinator judges permission requests within these rules. Always ask the person: ${asks.length === 0 ? 'none' : asks.join('; ')}.`
       : rules.mode === 'ask'
         ? "Agents may read anything and change a task's own files; everything else waits for the person."
-        : rules.mode === 'allow' || asks.length === 0
-          ? 'Agents may do anything.'
-          : `Agents may do anything but these, which wait for the person: ${asks.join('; ')}.`,
+        : rules.mode === 'allow'
+          ? `Agents may do anything but what can't be undone, which waits for the person: losing work or history (a force push, a push to the default branch, deleting another branch), publishing, a release or a merge, and posting for the person${named('ask').length === 0 ? '' : `; and before running ${named('ask').join('; ')}`}.`
+          : asks.length === 0
+            ? 'Agents may do anything.'
+            : `Agents may do anything but these, which wait for the person: ${asks.join('; ')}.`,
     ...(rules.mode === 'allow' || allowed.length === 0 ? [] : [`Allowed without asking: ${allowed.join('; ')}.`]),
     ...(never.length === 0 ? [] : [`Never allowed: ${never.join('; ')}.`]),
   ].join(' ')
