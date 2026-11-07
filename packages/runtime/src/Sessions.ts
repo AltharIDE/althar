@@ -393,6 +393,11 @@ interface Running {
   turnEndedAt: number | null
   /** Its last turn ended a step of its work, or made its task a change (`atBreak`): a break, where a lead may start afresh. */
   atBreak: boolean
+  /**
+   * Who leads it from its next turn, where the person or a tool changed that while it worked or waited (`changeLead`): taken up
+   * between turns, as what is said to it next is delivered, never in one.
+   */
+  nextLead: { readonly agentId: string; readonly model?: string; readonly effort?: string } | undefined
 }
 
 /** How often, at most, a thread's agent is looked at while a round waits for it to be done. */
@@ -730,6 +735,18 @@ export class Sessions extends Context.Service<
     setEffort(input: { readonly threadId: string; readonly effort: string }): Effect.Effect<void, NoSession | EffortUnchanged | Failure>
     /** Delivers what waits in the thread's queue now, if an agent is on it: after a usage limit resets, say. */
     wake(threadId: string): Effect.Effect<void>
+    /**
+     * Puts the thread's lead on another model, effort or agent from its next turn: never in the one it is in. Another agent
+     * takes over as `switchAgent` hands over, with the work so far, when the next thing said to the thread is delivered; the
+     * same agent's model and effort are set then. `later` where a session holds the thread and will change; `same` where it is on
+     * that already; `none` where no session holds it, so the next one starts as asked.
+     */
+    changeLead(input: {
+      readonly threadId: string
+      readonly agentId: string
+      readonly model?: string
+      readonly effort?: string
+    }): Effect.Effect<'later' | 'same' | 'none'>
     /** Hands the thread to another agent: a new session, briefed with the thread so far (ADR-005). */
     switchAgent(input: {
       readonly threadId: string
@@ -791,6 +808,8 @@ export class Sessions extends Context.Service<
         readonly stopping: boolean
         /** What it left running in the background. */
         readonly background: ReadonlyArray<ShownLeftRunning>
+        /** Who leads from its next turn, where `changeLead` changed that. */
+        readonly nextLead?: { readonly agentId: string; readonly model?: string; readonly effort?: string }
       }>
     >
     /**
@@ -1412,6 +1431,69 @@ export class Sessions extends Context.Service<
           return dueForLeadHandover(running.context, running.atBreak || idle)
         })
 
+      /** Whether anything waits in the thread's queue. */
+      const inputWaiting = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [waiting] = yield* sql<{
+            one: number
+          }>`SELECT 1 AS one FROM user_inputs WHERE thread_id = ${threadId} AND state = 'queued' LIMIT 1`
+          return waiting !== undefined
+        })
+
+      /** The same agent on another model or effort, set between turns as the composer sets them. One it won't take stays as it is, said. */
+      const settleLead = (running: Running, next: { readonly model?: string; readonly effort?: string }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const { threadId } = running.thread
+          const [now] = yield* sql<{ model: string | null; effort: string | null }>`
+            SELECT model, effort FROM provider_sessions WHERE id = ${running.sessionId}`
+          const refused = (what: string) =>
+            addItem({ projectId: running.thread.projectId, threadId, sessionId: running.sessionId }, 'notice', {
+              source: 'runtime',
+              severity: 'warning',
+              title: `${running.entry.definition.name} stays on ${what} as it is: it wouldn’t change.`,
+            })
+          if (next.model !== undefined && next.model !== now?.model)
+            yield* setModel({ threadId, model: next.model }).pipe(Effect.catch(() => refused('its model')))
+          if (next.effort !== undefined && next.effort !== now?.effort)
+            yield* setEffort({ threadId, effort: next.effort }).pipe(Effect.catch(() => refused('its effort')))
+        })
+
+      /**
+       * Another agent takes over a lead between turns, as it was changed: the same hand-over as the composer's, with what waits
+       * for the lead going to the new agent. One that can't start leaves the lead as it is, said.
+       */
+      const takeOver = (
+        previous: Running,
+        next: { readonly agentId: string; readonly model?: string; readonly effort?: string },
+      ): Effect.Effect<void, never, Store> =>
+        switchAgent({ threadId: previous.thread.threadId, ...next }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.andThen(
+              Effect.logWarning('Could not hand a lead to the agent it was changed to', cause),
+              Effect.suspend(() => {
+                if (threads.get(previous.thread.threadId) !== previous) return Effect.void
+                previous.handover = 'none'
+                return Effect.andThen(
+                  addItem(
+                    { projectId: previous.thread.projectId, threadId: previous.thread.threadId, sessionId: previous.sessionId },
+                    'notice',
+                    {
+                      source: 'runtime',
+                      severity: 'warning',
+                      title: `${previous.entry.definition.name} carries on: the agent it was changed to couldn’t start.`,
+                    },
+                  ),
+                  Queue.offer(previous.wake, undefined),
+                )
+              }),
+            ),
+          ),
+          Effect.catchCause((cause) => Effect.logWarning('Could not say a lead stayed as it was', cause)),
+          Effect.asVoid,
+        )
+
       /** Delivers the queued input as one turn, and records it to its end. */
       const deliver = (running: Running) =>
         Effect.gen(function* () {
@@ -1421,6 +1503,17 @@ export class Sessions extends Context.Service<
           // between turns, never in one: what waits goes to the fresh session (ADR-031, ADR-038).
           if (running.handover === 'under_way') return false
           yield* inputBatches.ready(thread.threadId)
+          // A lead changed meanwhile takes up what is said to it now, between turns: another agent takes over with it.
+          if (running.nextLead !== undefined && (yield* inputWaiting(thread.threadId))) {
+            const next = running.nextLead
+            running.nextLead = undefined
+            if (next.agentId !== running.entry.definition.id) {
+              running.handover = 'under_way'
+              yield* Effect.forkIn(run(takeOver(running, next)), sessionsScope)
+              return false
+            }
+            yield* settleLead(running, next)
+          }
           // A compaction the person asked for comes first: it may leave nothing to hand over.
           if (running.handover === 'none' && !(yield* compactQueued(thread.threadId)) && (yield* dueToHandOver(running))) {
             running.handover = 'under_way'
@@ -2619,6 +2712,7 @@ export class Sessions extends Context.Service<
             turnStartedAt: null,
             turnEndedAt: null,
             atBreak: false,
+            nextLead: undefined,
           }
           threads.set(thread.threadId, running)
           // Closed, it stops what it left running with all that started, before its agent ends their shells only (stopping.ts).
@@ -3353,7 +3447,7 @@ export class Sessions extends Context.Service<
             "- rerun_check, read_default_branch_checks, mark_ready, close_pull_request, reopen_pull_request, update_branch, reply_on_pull_request and edit_pull_request, to act on the project's pull requests on the code host, by their number or link. You do these without asking, since each can be undone in a step: run a failed check again when it looks like chance (a flaky test, a runner that went away; on the default branch too), read the default branch's checks to tell whether a failure is the change's or broken already, mark a draft that Althar opened ready, close one of Althar's own that is plainly dead and reopen it if that was wrong, reply on one Althar opened or one by the person or the repository's own people, and give one of those another title or description when it no longer says what the change does (on one a task follows, the title keeps the project's naming and the task's card follows it; rename_task, for a task, retitles its pull request too). update_branch merges the default branch into a pull request's branch when it is behind and that holds it up (a merge commit, never a rebase or a forced push; a conflict is named, not settled, and a branch the account can't push to is left for its author, whom only the person asks). Say what you did in a line. Closing on Bitbucket Cloud, where declining is final, and a reply to, edit of or close of an outside author's pull request wait for the person's word: say what you would do and why, and they decide. A host that can't do one (Bitbucket Cloud can't reopen; Bitbucket Data Center's builds are another service's) says so in its own words: pass that on, with the link.",
             "- attach_pull_request, when a task should follow an open pull request it didn't open: one opened by hand, or upstream after the task's own went to the fork. The task then hears its reviews, comments, checks and conflicts, its lead's pull request tools act on it, and its work goes to that pull request's branch, never a new one. Where its branch isn't based on that pull request's head, it starts from the head at once in a turn the person's message started, keeping the task's commits on top; otherwise ask them before you call it again with start_from_head. A task drafted to work on an open pull request, such as to answer its review, takes it as draft_task's pull_request, and starts on its head.",
             "- message_lead, to pass something to a task's lead. Leads have your tools too (ADR-097): a lead may draft, plan and start tasks from its own, which its card says it was started by, and move other tasks; read_task_diff shows any task's change as it stands, and show_pictures shows the person pictures from your copies.",
-            "- The rest of what the window's buttons on a task do, each at once with a line in your thread and the task's: skip_review (Skip the review), push_task (the Change card's Push, up to the head you read, never forced), open_task_pull_request (open its pull request, or a new one for commits after it merged), push_task_branch, resolve_conflicts (now, or whether it resolves them automatically), move_to_front, stop_following, change_lead (another model, effort or agent on its lead, or a step held for a usage limit handed on), try_again, compact_lead, set_part_of_issue, mark_ready and rename_task.",
+            "- The rest of what the window's buttons on a task do, each at once with a line in your thread and the task's: skip_review (Skip the review), push_task (the Change card's Push, up to the head you read, never forced), open_task_pull_request (open its pull request, or a new one for commits after it merged), push_task_branch, resolve_conflicts (now, or whether it resolves them automatically), move_to_front, stop_following, change_lead (another model, effort or agent on its lead from its next turn, or its reviewer; or a step held for a usage limit handed on), try_again, compact_lead, set_part_of_issue, mark_ready and rename_task.",
             "- read_settings and change_settings, for the project's settings and Althar's, everything the Settings screens show. A change that tightens, or changes nothing about what asks, goes at once with a line and Undo; one that loosens what asks goes only on the person's own message in this turn, and is a card for them otherwise.",
             // Release branches (ADR-093): made, and brought back, on the person's word, as a merge is.
             "- create_branch and open_pull_request, for release branches, only when the person asks, never on your own initiative, as for merging: create_branch makes a branch on the code host from a branch, a tag or a commit (release/0.8.0 from main, or from v0.7.0); open_pull_request opens a pull request from one branch into another, such as a release branch back into the default branch. To put a merged fix on another branch too, when they ask, draft a task toward that branch (toward) whose description names the fix's pull request and its merge commit, for its lead to cherry-pick with `git cherry-pick -x`: it has a pull request of its own, into that branch.",
@@ -3640,14 +3734,24 @@ export class Sessions extends Context.Service<
       const startLast = (threadId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [last] = yield* sql<{ agentId: string; model: string | null; effort: string | null }>`
-            SELECT agent_id, model, effort FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
+          const [last] = yield* sql<{ agentId: string; model: string | null; effort: string | null; startedAt: string }>`
+            SELECT agent_id, model, effort, started_at FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
           if (last === undefined) return false
+          // Its lead changed since that session began, with none running to change: the plan's lead is who starts (`changeLead`).
+          const [changed] = yield* sql<{ at: string | null; agentId: string | null; model: string | null; effort: string | null }>`
+            SELECT json_extract(p.parameters, '$.leadChanged') AS at, json_extract(s.value, '$.agentId') AS agent_id,
+              json_extract(s.value, '$.model') AS model, json_extract(s.value, '$.effort') AS effort
+            FROM threads t JOIN task_plans p ON p.task_id = t.task_id AND p.state IN ('proposed', 'accepted'),
+              json_each(p.parameters, '$.steps') s
+            WHERE t.id = ${threadId} AND t.kind = 'task' AND json_extract(s.value, '$.key') = 'implement'
+            ORDER BY p.proposed_at DESC LIMIT 1`
+          const moved = changed?.at != null && changed.agentId != null && changed.at > last.startedAt
+          const on = moved && changed.agentId != null ? { agentId: changed.agentId, model: changed.model, effort: changed.effort } : last
           yield* start({
             threadId,
-            agentId: last.agentId,
-            ...(last.model === null ? {} : { model: last.model }),
-            ...(last.effort === null ? {} : { effort: last.effort }),
+            agentId: on.agentId,
+            ...(on.model === null ? {} : { model: on.model }),
+            ...(on.effort === null ? {} : { effort: on.effort }),
           })
           return true
         })
@@ -3730,6 +3834,28 @@ export class Sessions extends Context.Service<
             const running = threads.get(threadId)
             return running === undefined ? Effect.void : Queue.offer(running.wake, undefined).pipe(Effect.asVoid)
           }),
+        changeLead: (input) =>
+          run(
+            Effect.gen(function* () {
+              const running = threads.get(input.threadId)
+              if (running === undefined || running.stopping) return 'none' as const
+              const sql = yield* SqlClient.SqlClient
+              const [now] = yield* sql<{ model: string | null; effort: string | null }>`
+                SELECT model, effort FROM provider_sessions WHERE id = ${running.sessionId}`
+              const same =
+                running.entry.definition.id === input.agentId &&
+                (input.model === undefined || input.model === now?.model) &&
+                (input.effort === undefined || input.effort === now?.effort)
+              running.nextLead = same
+                ? undefined
+                : {
+                    agentId: input.agentId,
+                    ...(input.model === undefined ? {} : { model: input.model }),
+                    ...(input.effort === undefined ? {} : { effort: input.effort }),
+                  }
+              return same ? ('same' as const) : ('later' as const)
+            }).pipe(Effect.orDie),
+          ),
         switchAgent: (input) => run(switchAgent(input)),
         interrupt: (threadId) =>
           Effect.suspend(() => {
@@ -3773,6 +3899,7 @@ export class Sessions extends Context.Service<
                   context: running.context,
                   stopping: running.stopping,
                   background: [...running.background.values()].map(shownOf),
+                  ...(running.nextLead === undefined ? {} : { nextLead: running.nextLead }),
                 })
           }),
         askPermission: (threadId, request) =>
