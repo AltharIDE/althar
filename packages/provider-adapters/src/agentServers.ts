@@ -65,13 +65,60 @@ const stringRecord = (value: unknown): Readonly<Record<string, string>> | undefi
   return Object.keys(kept).length === 0 ? undefined : kept
 }
 
+/** JSON with its comments taken out, read a character at a time: strings kept whole, line and block comments dropped. */
+const withoutComments = (text: string): string => {
+  let out = ''
+  let index = 0
+  while (index < text.length) {
+    const char = text[index]!
+    if (char === '"') {
+      let end = index + 1
+      while (end < text.length && text[end] !== '"') end += text[end] === '\\' ? 2 : 1
+      out += text.slice(index, end + 1)
+      index = end + 1
+    } else if (char === '/' && text[index + 1] === '/') {
+      const end = text.indexOf('\n', index)
+      index = end === -1 ? text.length : end
+    } else if (char === '/' && text[index + 1] === '*') {
+      const end = text.indexOf('*/', index + 2)
+      index = end === -1 ? text.length : end + 2
+    } else {
+      out += char
+      index += 1
+    }
+  }
+  return out
+}
+
+/** A comma before a closing bracket or brace, as `.jsonc` allows, taken out: read a character at a time. */
+const withoutTrailingCommas = (text: string): string => {
+  let out = ''
+  let inString = false
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]!
+    if (inString) {
+      out += char
+      if (char === '\\') {
+        out += text[index + 1] ?? ''
+        index += 1
+      } else if (char === '"') inString = false
+      continue
+    }
+    if (char === '"') inString = true
+    if (char === ',') {
+      let next = index + 1
+      while (next < text.length && /\s/.test(text[next]!)) next += 1
+      if (text[next] === '}' || text[next] === ']') continue
+    }
+    out += char
+  }
+  return out
+}
+
 /** JSON with comments and trailing commas, as OpenCode's `.jsonc` allows; undefined where it isn't JSON after all. */
 export const parseJsonc = (text: string): unknown => {
-  const stripped = text
-    .replace(/("(?:[^"\\]|\\.)*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (_, quoted: string | undefined) => quoted ?? '')
-    .replace(/,(\s*[}\]])/g, '$1')
   try {
-    return JSON.parse(stripped)
+    return JSON.parse(withoutTrailingCommas(withoutComments(text)))
   } catch {
     return undefined
   }

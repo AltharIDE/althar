@@ -15,13 +15,24 @@ export interface McpCall {
 
 const ALTHAR = /^althar$/i
 
-/** The name forms agents give an MCP tool: Claude Code's, then Codex's two. */
-const FORMS: ReadonlyArray<RegExp> = [/^mcp__([A-Za-z0-9_-]+?)__([A-Za-z0-9_.-]+)$/, /^mcp\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_.-]+)$/]
+const NAME = /^[A-Za-z0-9_-]+$/
+const TOOL = /^[A-Za-z0-9_.-]+$/
 
+/** The name forms agents give an MCP tool: Claude Code's `mcp__server__tool`, then Codex's `mcp.server.tool`; read without a pattern that backtracks. */
 const fromName = (name: string): McpCall | undefined => {
-  for (const form of FORMS) {
-    const match = form.exec(name.trim())
-    if (match !== null) return { server: match[1]!, tool: match[2]! }
+  const trimmed = name.trim()
+  if (trimmed.startsWith('mcp__')) {
+    const rest = trimmed.slice('mcp__'.length)
+    const at = rest.indexOf('__')
+    if (at <= 0) return undefined
+    const server = rest.slice(0, at)
+    const tool = rest.slice(at + 2)
+    return NAME.test(server) && TOOL.test(tool) ? { server, tool } : undefined
+  }
+  if (trimmed.startsWith('mcp.')) {
+    const [, server = '', ...tool] = trimmed.split('.')
+    const joined = tool.join('.')
+    return NAME.test(server) && joined !== '' && TOOL.test(joined) ? { server, tool: joined } : undefined
   }
   return undefined
 }
