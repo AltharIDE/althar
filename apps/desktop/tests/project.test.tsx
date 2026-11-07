@@ -643,6 +643,25 @@ describe('the Talk room', () => {
     expect(within(tidy).queryByText(/^(Low|Medium|High)$/)).toBeNull()
   })
 
+  it('names an OpenCode Go lead in people’s words before OpenCode lists its models', async () => {
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({
+          items: [
+            // The id as OpenCode stores it, while its models aren't reported yet.
+            items.card(
+              card({ phase: 'running', step: 'implement', plan: null, lead: 'opencode', leadModel: 'opencode-go/deepseek-v4.1-flash' }),
+            ),
+          ],
+        }),
+      ),
+    })
+    withServices(<Project room={Room.Talk} />, client)
+    const running = await screen.findByRole('article', { name: 'Add a retry' })
+    expect(await within(running).findByText('DeepSeek V4.1 Flash')).toBeTruthy()
+    expect(within(running).queryByText(/opencode-go/)).toBeNull()
+  })
+
   it('talks to the coordinator on the agent last used, or on another the person picks', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ session: { ...session, held: false } })) })
     withServices(<Project room={Room.Talk} />, client)
@@ -1028,6 +1047,26 @@ describe('what can go wrong', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Sign one in' }))
     expect(ways.agents).toHaveBeenCalledOnce()
     expect(screen.queryByRole('button', { name: /^Coordinator:/ })).toBeNull()
+  })
+
+  it('says nothing about agents until they are read, then asks for one when none is signed in', async () => {
+    // The agents' read stays open while the coordinator's thread is already read.
+    let answer: (value: typeof status) => void = () => undefined
+    const reading = new Promise<typeof status>((resolve) => (answer = resolve))
+    const { client } = fakeClient({
+      status: vi.fn(async () => reading),
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.says('Ready.')] })),
+    })
+    const ways = { signIn: vi.fn(), agents: vi.fn(), connections: vi.fn() }
+    withServices(<Project room={Room.Talk} ways={ways} />, client)
+    expect(await screen.findByText('Ready.')).toBeTruthy()
+    // No agent is known yet, so nothing is said about there being none.
+    expect(screen.queryByText(/No agent is signed in\./)).toBeNull()
+    // Every agent signed out: once they are known, it asks for one.
+    await act(async () => answer({ ...status, agents: status.agents.map((agent) => ({ ...agent, signIn: 'signed_out' as const })) }))
+    expect(await screen.findByText(/^No agent is signed in\./)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Sign one in' }))
+    expect(ways.agents).toHaveBeenCalledOnce()
   })
 
   it("says when the project can't be read, or the runtime didn't answer", async () => {
