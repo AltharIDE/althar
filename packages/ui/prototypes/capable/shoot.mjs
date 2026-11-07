@@ -55,25 +55,11 @@ const shots = [
   { id: '1b-2-parent', s: 'lineage', d: 'B', hash: FEW, height: 1000, go: (page) => to(page, 'ADR-097 is drafted', 'start') },
   { id: '1b-3-parent-end', s: 'lineage', d: 'B', hash: FEW, height: 900, go: (page) => to(page, 'woke the lead') },
 
-  // 2 · What asks: in the project (A, chosen) or in your Settings (B).
+  // 2 · What asks: in the project (A, chosen).
   { id: '2a-1-rules', s: 'rules', d: 'A', hash: RULES, height: 1300, go: () => undefined },
   { id: '2a-2-ask', s: 'rules', d: 'A', hash: MANY, height: 900, go: () => undefined },
-  { id: '2b-1-settings', s: 'rules', d: 'B', hash: '#/settings/what-asks', height: 820, go: () => undefined },
-  { id: '2b-2-rules', s: 'rules', d: 'B', hash: RULES, height: 980, go: () => undefined },
-  {
-    id: '2b-3-rules-differ',
-    s: 'rules',
-    d: 'B',
-    hash: RULES,
-    height: 760,
-    go: async (page) => {
-      await press(page, 'A kind works differently here')
-      await page.getByRole('menuitem', { name: 'Speaking for you' }).click()
-      await to(page, 'This project’s own', 'start')
-    },
-  },
 
-  // 3 · MCP servers and skills: the role table and one switch (chosen); what it writes, before it starts (A) or on its card (B).
+  // 3 · MCP servers and skills: the role table and one switch (chosen); what it writes, before it starts (A, chosen).
   { id: '3a-1-off', s: 'tools', d: 'A', hash: '#/settings/mcp', clip: { x: 324, y: 60, width: 916, height: 420 }, go: () => undefined },
   {
     id: '3a-2-dialog',
@@ -94,20 +80,19 @@ const shots = [
       await press(page, 'Turn on')
     },
   },
-  { id: '3b-1-off', s: 'tools', d: 'B', hash: '#/settings/mcp', clip: { x: 324, y: 60, width: 916, height: 560 }, go: () => undefined },
   {
-    id: '3b-2-week',
+    id: '3a-4-week',
     s: 'tools',
-    d: 'B',
+    d: 'A',
     q: '&week',
     hash: '#/settings/mcp',
     height: 1000,
     go: () => undefined,
   },
   {
-    id: '3b-3-week-menu',
+    id: '3a-5-week-menu',
     s: 'tools',
-    d: 'B',
+    d: 'A',
     q: '&week',
     hash: '#/settings/mcp',
     height: 1100,
@@ -118,9 +103,9 @@ const shots = [
     },
   },
   {
-    id: '3b-4-off',
+    id: '3a-6-week-off',
     s: 'tools',
-    d: 'B',
+    d: 'A',
     q: '&week',
     hash: '#/settings/mcp',
     clip: { x: 324, y: 60, width: 916, height: 300 },
@@ -273,7 +258,16 @@ const shots = [
   { id: '6-2-self-push', s: 'sketches', d: 'A', hash: '#/threads/th-codex-net', go: () => undefined },
   { id: '6-3-small', s: 'sketches', d: 'A', hash: '#/threads/th-typo', go: () => undefined },
   { id: '6-5-server-fails', s: 'sketches', d: 'A', hash: '#/threads/th-design', go: () => undefined },
-  { id: '6-6-batch', s: 'sketches', d: 'A', hash: '#/threads/th-adr', go: (page) => to(page, 'Starting 4 tasks') },
+  { id: '6-6-batch', s: 'sketches', d: 'A', hash: '#/threads/th-adr', go: (page) => to(page, 'Started 4 tasks') },
+
+  // 7 · Situations, one state each, where each happens.
+  { id: '7-1-away', s: 'situations', d: 'A', hash: BOARD, width: WIDE, height: 760, go: () => undefined },
+  { id: '7-2-no-coordinator', s: 'situations', d: 'A', q: '&off', hash: '#/projects/p1?room=talk', height: 700, go: () => undefined },
+  { id: '7-3-never', s: 'situations', d: 'A', hash: '#/threads/th-small', height: 700, go: unfold },
+  { id: '7-4-ask-waits', s: 'situations', d: 'A', hash: MANY, height: 1000, go: () => undefined },
+  { id: '7-5-child-stops', s: 'situations', d: 'A', hash: FEW, height: 900, go: (page) => to(page, 'stopped without a change') },
+  { id: '7-6-same-files', s: 'situations', d: 'A', hash: '#/threads/th-command', height: 760, go: (page) => page.keyboard.press('c') },
+  { id: '7-7-lighter', s: 'situations', d: 'A', hash: '#/threads/th-review', height: 700, go: () => undefined },
 ]
 
 const browser = await chromium.launch()

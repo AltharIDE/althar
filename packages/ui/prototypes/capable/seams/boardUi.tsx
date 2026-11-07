@@ -1,10 +1,11 @@
-// Scrappy: the kit as the board sees it here: a lead-started task says where it came from, and in B sits under its parent.
+// Scrappy: the kit as the board sees it here: a lead-started task says where it came from, and in B sits under its parent; in situations, what agents did while the person was away sits over the lanes.
 import { Children, type ComponentProps, isValidElement, type ReactElement } from 'react'
 
 import { BoardCard as RealBoardCard } from '../../../src/board/BoardCard/BoardCard'
-import { BoardColumn as RealBoardColumn } from '../../../src/board/Board/Board'
+import { Board as RealBoard, BoardColumn as RealBoardColumn } from '../../../src/board/Board/Board'
 import { BoardLane } from '../../../src/foundations/vocabulary'
 import { Lineage, lineageText } from '../directions/lineage/Lineage'
+import { WhileAway } from '../directions/situations/Situations'
 import { CHILD, PARENT } from '../data'
 import { useProto } from '../state'
 import s from '../directions/lineage/lineage.module.css'
@@ -51,4 +52,15 @@ export function BoardColumn(props: ComponentProps<typeof RealBoardColumn>) {
   if (props.lane !== BoardLane.Running) return <RealBoardColumn {...props} />
   if (p.surface === 'lineage' && p.direction === 'B') return <RealBoardColumn {...props}>{nested(props.children)}</RealBoardColumn>
   return <RealBoardColumn {...props} />
+}
+
+export function Board(props: ComponentProps<typeof RealBoard>) {
+  const p = useProto()
+  if (p.surface !== 'situations') return <RealBoard {...props} />
+  return (
+    <div className={s.withAway}>
+      <WhileAway />
+      <RealBoard {...props} />
+    </div>
+  )
 }

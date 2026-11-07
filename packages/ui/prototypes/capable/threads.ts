@@ -6,6 +6,8 @@ import type { AttentionRequest, ThreadItem, ThreadSnapshot } from './deps'
 
 /** In the sketches, the design review's Linear call fails: Claude Code isn't signed in to it. */
 const failing = () => proto.get().surface === 'sketches'
+/** Situations: each thread draws its one. */
+const situation = () => proto.get().surface === 'situations'
 
 export interface Own {
   readonly items: ThreadItem[]
@@ -79,11 +81,15 @@ export const threads: Record<string, () => Own> = {
     items: [
       mark('§reviewhead', 6),
       at(items.says('Reading the diff and the issue it fixes.'), 5),
+      ...(situation() ? [mark('§lighter', 4)] : []),
       read('apps/desktop/src/main/tray.ts', 5),
       at(
-        items.says(
-          'The fix reads right, but nothing tests the KDE path. Running it would show whether the icon lands; that needs your word, as ninemate is outside.',
-        ),
+        {
+          ...items.says(
+            'The fix reads right, but nothing tests the KDE path. Running it would show whether the icon lands; that needs your word, as ninemate is outside.',
+          ),
+          ...(situation() ? { model: 'claude-sonnet-5-5' } : {}),
+        } as ThreadItem,
         3,
       ),
     ],
@@ -103,14 +109,15 @@ export const threads: Record<string, () => Own> = {
           passed: 6,
           failed: 0,
         } as never),
-        2,
+        situation() ? 43 : 2,
       ),
       at(
         items.says(
           'Every check on #635 passed, so it can merge. dana’s #640 fixes the same pill another way; once this merges theirs isn’t needed, and they should hear it.',
         ),
-        1,
+        situation() ? 41 : 1,
       ),
+      ...(situation() ? [at(items.says('While those wait: the changelog line for 0.8.5 is in. Nothing else needs the merge.'), 38)] : []),
     ],
     attention: [
       call(
@@ -149,6 +156,17 @@ export const threads: Record<string, () => Own> = {
       ),
       mark('§child', 20),
       mark('§batch', 20),
+      ...(situation()
+        ? [
+            mark('§childfail', 9),
+            at(
+              items.says(
+                'Without it, ADR-097’s network section has nothing behind it on Windows. I’ve said so in the ADR, and kept the macOS and Linux parts as they are.',
+              ),
+              8,
+            ),
+          ]
+        : []),
       mark('§coordinator', 6),
       at(
         items.arrival({
@@ -183,6 +201,47 @@ export const threads: Record<string, () => Own> = {
         3,
       ),
       at(items.says('Fixed: “Strat” is “Start”. Pull request #643 is open and its checks pass.'), 1),
+    ],
+  }),
+  // Situations: the person's Never rule meets a lead resetting Althar's profile.
+  'th-small': () => ({
+    task: { request: 'A one-line fix took 40 minutes. Find where the time goes and cut it.' },
+    items: [
+      at(items.says('Timing a one-line task from a fresh start, so nothing cached hides the setup.'), 20),
+      mark('§never', 19),
+      at(
+        items.says(
+          'Started the app on a profile of its own instead (`ALTHAR_PROFILE=$(mktemp -d)`), so yours stays as it is. The plan’s countdown is 25 of the 40 minutes.',
+        ),
+        17,
+      ),
+    ],
+  }),
+  // Situations: another task changes the same file.
+  'th-command': () => ({
+    task: { request: 'A command’s card in the thread is hard to read. Make it read cleanly.' },
+    items: [
+      read('packages/ui/src/thread/Tool/Tool.tsx', 30),
+      at(
+        items.tool({
+          title: 'Edit apps/desktop/src/renderer/features/task/TaskView.tsx',
+          toolKind: 'edit',
+          locations: [{ path: 'apps/desktop/src/renderer/features/task/TaskView.tsx' }],
+        }),
+        28,
+      ),
+      at(items.says('#636 is open. One check fails on main too: handed.spec.ts times out on Windows.'), 10),
+      ...(situation()
+        ? [
+            mark('§samefiles', 9),
+            at(
+              items.says(
+                '#635 moves the pill in `TaskView.tsx`, three lines from mine. I’ll merge main once #635 is in, rather than both of us changing the same lines.',
+              ),
+              8,
+            ),
+          ]
+        : []),
     ],
   }),
   // The task the ADR's lead started.

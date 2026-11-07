@@ -2,8 +2,7 @@
 import { useState } from 'react'
 
 import { Brand } from '../../../../src/foundations/brands/brands'
-import { Icon, type IconName } from '../../../../src/foundations/Icon/Icon'
-import { BrandMark } from '../../../../src/foundations/Marks/Marks'
+import { Icon } from '../../../../src/foundations/Icon/Icon'
 import { ToolKind, ToolState } from '../../../../src/foundations/vocabulary'
 import { Button } from '../../../../src/primitives/Button/Button'
 import { LinkButton } from '../../../../src/primitives/LinkButton/LinkButton'
@@ -50,64 +49,6 @@ export function FastLane() {
           </Button>
         </div>
       )}
-    </div>
-  )
-}
-
-interface Done {
-  readonly id: string
-  readonly icon: IconName | Brand
-  readonly what: string
-  readonly task: string
-  readonly when: string
-  /** How to take it back, where it can be. */
-  readonly undo?: string
-}
-
-const DONE: ReadonlyArray<Done> = [
-  { id: 'merge', icon: 'pr', what: 'Merged #635 into main', task: 'Runs stay in the pill', when: '13:10', undo: 'Revert it' },
-  {
-    id: 'post',
-    icon: Brand.GitHub,
-    what: 'Posted a review on dana’s #612',
-    task: 'Design review of #612',
-    when: '12:52',
-    undo: 'Delete it',
-  },
-  { id: 'move', icon: Brand.Linear, what: 'Moved DEV-188 to In Review', task: 'Design review of #612', when: '12:52', undo: 'Undo' },
-  { id: 'start', icon: 'create', what: 'Started “Codex leads reach the network”', task: 'ADR: agents work as yours', when: '12:40' },
-  { id: 'set', icon: 'gear', what: 'Turned on worktrees for new tasks', task: 'The coordinator', when: '11:58', undo: 'Undo' },
-]
-const isBrand = (icon: Done['icon']): icon is Brand => (Object.values(Brand) as string[]).includes(icon)
-
-/** What agents did outside their worktrees since the person last looked, across the project, with Undo where it can be. */
-export function WhileAway() {
-  const [undone, setUndone] = useState<ReadonlyArray<string>>([])
-  return (
-    <div className={s.card}>
-      <p className={s.title}>
-        While you were away <span className={s.count}>since 11:40</span>
-      </p>
-      <ul className={s.done}>
-        {DONE.map((one) => (
-          <li key={one.id} data-undone={undone.includes(one.id) || undefined}>
-            <span className={s.glyph}>
-              {isBrand(one.icon) ? <BrandMark brand={one.icon} size={12} /> : <Icon name={one.icon} size={13} />}
-            </span>
-            <span className={s.doneWhat}>{one.what}</span>
-            <span className={s.doneTask}>{one.task}</span>
-            <span className={s.when}>{one.when}</span>
-            {one.undo !== undefined &&
-              (undone.includes(one.id) ? (
-                <span className={s.undone}>Undone</span>
-              ) : (
-                <LinkButton className={s.undo} onClick={() => setUndone((now) => [...now, one.id])}>
-                  {one.undo}
-                </LinkButton>
-              ))}
-          </li>
-        ))}
-      </ul>
     </div>
   )
 }

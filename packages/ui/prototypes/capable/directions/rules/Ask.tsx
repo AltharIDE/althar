@@ -1,5 +1,5 @@
 // Scrappy, surface 3: the ask that's left, when asking is rare and matters: what can't be undone, in one line, and the action on its button.
-import { useState } from 'react'
+import { type ReactNode, useState } from 'react'
 
 import { Brand } from '../../../../src/foundations/brands/brands'
 import { BrandMark } from '../../../../src/foundations/Marks/Marks'
@@ -78,7 +78,7 @@ const Through = ({ ask }: { ask: Irreversible }) =>
   )
 
 /** One ask: the action, what can't be undone in one line under it, the words it would post, and where the call goes. */
-export function IrreversibleAsk({ ask }: { ask: Irreversible }) {
+export function IrreversibleAsk({ ask, after }: { ask: Irreversible; after?: ReactNode }) {
   const [said, setSaid] = useState<'yes' | 'no' | null>(null)
   if (said !== null)
     return (
@@ -103,6 +103,7 @@ export function IrreversibleAsk({ ask }: { ask: Irreversible }) {
       <p className={s.from}>
         <Through ask={ask} />
       </p>
+      {after}
       {foot}
     </AskCard>
   )

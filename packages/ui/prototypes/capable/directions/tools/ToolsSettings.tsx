@@ -126,7 +126,7 @@ export function ToolsByRole({ kind }: { kind: 'servers' | 'skills' }) {
           ]}
         />
       </div>
-      {kind === 'servers' ? <KeepSame sync={agents} inline={p.direction === 'B'} /> : <KeepSkills sync={skills} />}
+      {kind === 'servers' ? <KeepSame sync={agents} /> : <KeepSkills sync={skills} />}
       <table className={s.table}>
         <thead>
           <tr>

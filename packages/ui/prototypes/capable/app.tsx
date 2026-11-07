@@ -115,7 +115,8 @@ proto.subscribe(() => {
     now.answered !== seen.answered ||
     now.childHeld !== seen.childHeld ||
     now.off !== seen.off ||
-    now.week !== seen.week
+    now.week !== seen.week ||
+    now.coordinatorOff !== seen.coordinatorOff
   )
     void cache.invalidateQueries()
   seen = now
@@ -155,7 +156,7 @@ const goDirection = (direction: Direction) => {
   remember()
 }
 
-/** Keys 1 to 6 pick a surface, A to C and T a direction, [ and ] step through them; never while typing, or inside a menu or dialog. */
+/** Keys 1 to 7 pick a surface, A to C and T a direction, [ and ] step through them; never while typing, or inside a menu or dialog. */
 const onKey = (event: KeyboardEvent) => {
   if (event.metaKey || event.ctrlKey || event.altKey) return
   const target = event.target instanceof Element ? event.target : null
@@ -164,7 +165,7 @@ const onKey = (event: KeyboardEvent) => {
   const ones = surfaceOf(p.surface).directions
   const at = ones.findIndex((one) => one.value === p.direction)
   const key = event.key.toLowerCase()
-  if (/^[1-6]$/.test(key)) {
+  if (/^[1-7]$/.test(key)) {
     event.preventDefault()
     goSurface(SURFACES[Number(key) - 1]!.value)
     return
@@ -222,7 +223,7 @@ function Switcher() {
       ))}
       <LinkButton onClick={proto.startOver}>Start over</LinkButton>
       <span className={s.grow} />
-      <span className={s.keys}>1–6 · A–C T · [ ]</span>
+      <span className={s.keys}>1–7 · A–C T · [ ]</span>
     </div>
   )
 }
@@ -231,7 +232,7 @@ function Switcher() {
 function App({ router }: { router: ReturnType<typeof makeRouter> }) {
   const p = useProto()
   return (
-    <Fragment key={`${p.surface}-${p.direction}-${p.week}`}>
+    <Fragment key={`${p.surface}-${p.direction}-${p.week}-${p.coordinatorOff}`}>
       <div className={p.bare ? s.bare : s.frame}>
         <RouterProvider router={router} />
       </div>
@@ -241,13 +242,13 @@ function App({ router }: { router: ReturnType<typeof makeRouter> }) {
 
 /** Opens the app on the surface and direction the URL says, or the first, at the surface's first place. */
 export const boot = () => {
-  // ?s=rules&d=B opens on a surface and direction (&week: a week after sync was turned on), once: taken off the address, so the router doesn't read it.
+  // ?s=rules&d=B opens on a surface and direction (&week: a week after sync was turned on; &off: the coordinator off), once: taken off the address, so the router doesn't read it.
   const params = new URLSearchParams(window.location.search)
   const kept = JSON.parse(window.sessionStorage.getItem('capable') ?? '{}') as { s?: string; d?: string }
   const surface = SURFACES.find((one) => one.value === (params.get('s') ?? kept.s))?.value ?? SURFACES[0]!.value
   const named = params.get('d') ?? kept.d ?? null
   const direction = fitting(surface, (named === 'Today' ? 'Today' : (named?.toUpperCase() ?? 'A')) as Direction)
-  proto.set({ surface, direction, bare: params.has('bare'), week: params.has('week') })
+  proto.set({ surface, direction, bare: params.has('bare'), week: params.has('week'), coordinatorOff: params.has('off') })
   window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`)
   remember()
   window.localStorage.removeItem('althar.tabs')

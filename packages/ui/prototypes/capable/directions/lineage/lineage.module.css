@@ -62,3 +62,15 @@
 .answered {
   margin: 4px 0;
 }
+
+/* Situations: while you were away, over the board's lanes. */
+.withAway {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+.withAway > :last-child {
+  flex: 1;
+  min-height: 0;
+}

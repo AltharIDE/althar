@@ -1,7 +1,7 @@
 // Scrappy: what the page holds: the surface and direction shown, and what the person did on it (calls answered, a child held).
 import { useSyncExternalStore } from 'react'
 
-export type Surface = 'lineage' | 'rules' | 'tools' | 'tune' | 'parts' | 'sketches'
+export type Surface = 'lineage' | 'rules' | 'tools' | 'tune' | 'parts' | 'sketches' | 'situations'
 export type Direction = 'A' | 'B' | 'C' | 'Today'
 
 export interface Place {
@@ -32,10 +32,9 @@ const MCP = '#/threads/th-design'
 const REVIEW = '#/threads/th-review'
 const TALK = '#/projects/p1?room=talk'
 const GENERAL = '#/projects/p1?room=settings&section=general'
-const ACCOUNT = '#/settings/what-asks'
 const MANY = '#/threads/th-runs'
 
-/** The surfaces in the strip's order, keys 1 to 6, each with its directions, keys A to C (and T for today). New task without the coordinator is set aside (6 Nov); it was the strip's first surface up to 7274e40. */
+/** The surfaces in the strip's order, keys 1 to 7, each with its directions, keys A to C (and T for today). New task without the coordinator is set aside (6 Nov); it was the strip's first surface up to 7274e40. */
 export const SURFACES: ReadonlyArray<SurfaceInfo> = [
   {
     value: 'lineage',
@@ -65,16 +64,10 @@ export const SURFACES: ReadonlyArray<SurfaceInfo> = [
     name: 'What asks',
     places: [
       { label: 'Project’s Rules', hash: RULES },
-      { label: 'Your Settings', hash: ACCOUNT },
       { label: 'An ask in a task', hash: ASK },
     ],
     directions: [
       { value: 'A', name: 'In the project', about: 'Chosen: Rules lead with the four kinds that still ask, then your own Never and Ask' },
-      {
-        value: 'B',
-        name: 'In your Settings',
-        about: 'The four kinds and your own commands live in Settings, the same in every project; a project keeps only its own',
-      },
       { value: 'Today', name: 'Today', about: 'Rules as built: a mode, Allow everything as a switch, six kinds' },
     ],
   },
@@ -92,12 +85,7 @@ export const SURFACES: ReadonlyArray<SurfaceInfo> = [
       {
         value: 'A',
         name: 'Before it starts',
-        about: 'One switch, as chosen: turning it on shows what it writes to each agent’s file and what it leaves alone, first',
-      },
-      {
-        value: 'B',
-        name: 'On the card',
-        about: 'One switch, as chosen: what it would write and what it leaves alone, on its card all along',
+        about: 'Chosen: one switch; turning it on shows what it writes to each agent’s file and what it leaves alone, first',
       },
       { value: 'Today', name: 'Today', about: 'Althar’s skills only; none of your MCP servers' },
     ],
@@ -153,7 +141,28 @@ export const SURFACES: ReadonlyArray<SurfaceInfo> = [
         value: 'A',
         name: 'Sketch',
         about:
-          'One state each, not yet choices: a review that runs or reads; an agent’s own push; a small change; while you were away; a server that fails; a lead that starts several',
+          'One state each, not yet choices: a review that runs or reads; an agent’s own push; a small change; a server that fails; a lead that starts several',
+      },
+    ],
+  },
+  {
+    value: 'situations',
+    name: 'Situations',
+    places: [
+      { label: 'Away', hash: BOARD, set: { coordinatorOff: false } },
+      { label: 'No coordinator', hash: TALK, set: { coordinatorOff: true } },
+      { label: 'Never rule', hash: '#/threads/th-small' },
+      { label: 'Ask waits', hash: MANY },
+      { label: 'Child stops', hash: PARENT },
+      { label: 'Same files', hash: '#/threads/th-command' },
+      { label: 'Lighter model', hash: REVIEW },
+    ],
+    directions: [
+      {
+        value: 'A',
+        name: 'Sketch',
+        about:
+          'One state each: while you were away, on the board; the coordinator off; a Never rule met; an ask that waits; a lead-started task that stops; two tasks on the same files; Auto on a lighter model',
       },
     ],
   },
@@ -174,6 +183,8 @@ export interface Proto {
   readonly off: ReadonlyArray<string>
   /** MCP: a week after sync was turned on. */
   readonly week: boolean
+  /** Situations: the project with its coordinator off. */
+  readonly coordinatorOff: boolean
 }
 
 let state: Proto = {
@@ -184,6 +195,7 @@ let state: Proto = {
   answered: {},
   off: [],
   week: false,
+  coordinatorOff: false,
 }
 const listeners = new Set<() => void>()
 
@@ -199,7 +211,7 @@ export const proto = {
     listeners.add(listener)
     return () => listeners.delete(listener)
   },
-  startOver: () => set({ childHeld: false, answered: {}, off: [], week: false }),
+  startOver: () => set({ childHeld: false, answered: {}, off: [], week: false, coordinatorOff: false }),
   toggle: (id: string) => set({ off: state.off.includes(id) ? state.off.filter((one) => one !== id) : [...state.off, id] }),
   answer: (id: string, how: 'allowed' | 'refused') => set({ answered: { ...state.answered, [id]: how } }),
 }

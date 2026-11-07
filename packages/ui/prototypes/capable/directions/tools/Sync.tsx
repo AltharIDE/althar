@@ -347,9 +347,8 @@ function Since({ sync }: { sync: Sync }) {
   )
 }
 
-/** The card over the table: the switch, and what it does, as each direction tells it. */
-export function KeepSame({ sync, inline }: { sync: Sync; inline: boolean }) {
-  const offAsked = inline && sync.asking === 'off'
+/** The card over the table: the switch, and what it writes, in a dialog before it starts (A, chosen 7 Nov). */
+export function KeepSame({ sync }: { sync: Sync }) {
   return (
     <div className={s.keep}>
       <div className={s.keepRow}>
@@ -357,36 +356,16 @@ export function KeepSame({ sync, inline }: { sync: Sync; inline: boolean }) {
           <span className={s.keepTitle}>{syncText.keep}</span>
           <span className={s.keepNote}>{sync.on ? syncText.later : syncText.what}</span>
         </span>
-        <Switch checked={sync.on && !offAsked} label={syncText.keep} onChange={sync.turn} />
+        <Switch checked={sync.on} label={syncText.keep} onChange={sync.turn} />
       </div>
-      {offAsked && (
-        <div className={s.offRow}>
-          <span className={s.settleWhat}>{syncText.offWhat(sync.total)}</span>
-          <Button size="small" variant="quiet" onClick={sync.cancel}>
-            Cancel
-          </Button>
-          <Button size="small" variant="quiet" onClick={() => sync.stop(true)}>
-            {syncText.takeBack}
-          </Button>
-          <Button size="small" onClick={() => sync.stop(false)}>
-            {syncText.keepThem}
-          </Button>
-        </div>
-      )}
-      {sync.on && !offAsked && (
+      {sync.on && (
         <>
           <Settle sync={sync} />
           <Since sync={sync} />
           <Files sync={sync} done />
         </>
       )}
-      {!sync.on && inline && (
-        <div className={s.body}>
-          <Files sync={sync} done={false} />
-          <Leaves />
-        </div>
-      )}
-      {!inline && sync.asking === 'on' && (
+      {sync.asking === 'on' && (
         <Dialog
           title={syncText.keep}
           description={`${syncText.what} ${syncText.later}`}
@@ -409,7 +388,7 @@ export function KeepSame({ sync, inline }: { sync: Sync; inline: boolean }) {
           </div>
         </Dialog>
       )}
-      {!inline && sync.asking === 'off' && (
+      {sync.asking === 'off' && (
         <Dialog
           title={syncText.offTitle}
           description={syncText.offWhat(sync.total)}

@@ -8,16 +8,17 @@ From the repository's root:
 cd packages/ui && ./node_modules/.bin/vp dev --config prototypes/capable/vite.config.mjs
 ```
 
-Then <http://localhost:5367/>. The strip under the window picks the surface (keys 1 to 6) and its direction (A to C, and T for today; `[` and `]` step through them). Its links go to where the surface shows, and Start over puts back what was answered. `?s=rules&d=B` opens on a surface and direction, `week` a week after sync was turned on, `bare` leaves the strip out, and `node shoot.mjs` takes every state into `test-results/capable`.
+Then <http://localhost:5367/>. The strip under the window picks the surface (keys 1 to 7) and its direction (A to C, and T for today; `[` and `]` step through them). Its links go to where the surface shows, and Start over puts back what was answered. `?s=lineage&d=B` opens on a surface and direction, `week` a week after sync was turned on, `off` the coordinator off, `bare` leaves the strip out, and `node shoot.mjs` takes every state into `test-results/capable`.
 
 What the person decided on 6 November, and what each surface draws from it. Then, looking at the page:
 
 - **New task without the coordinator: set aside.** The person starts tasks with the coordinator for now. Its code is gone from here; it is in the history up to 7274e40, and its notes are at the end.
-- **What asks: A**, the four kinds in Rules. Open: whether they live in the person's own Settings instead (2 · B).
-- **MCP servers and skills:** the role table, a card for each act in the thread, and **one switch** that keeps the person's agents the same. Open: how it says what it writes to their files and what it leaves alone (3 · A, B).
+- **What asks: A** (7 Nov), the four kinds in the project's Rules. B, in the person's own Settings, is gone from the page; its code is in the history at d2584e410.
+- **MCP servers and skills:** the role table, a card for each act in the thread, and **one switch** that keeps the person's agents the same. **A** (7 Nov): turning it on opens a dialog that says what it writes to each agent's file and what it leaves alone. B, all of it on the card, is gone from the page.
 - **Settings an agent changed: A**, a line each.
 - **A task's parts: C**, the parts' own icons just before the faces, what waits on the person first, each opening in place; the faces, Run and the menu never move. The rail beside the thread is out, as DESIGN.md rules out side panels.
 - **A lead-started task (1)** and **settings an agent changed (4)** were built in #663 (ADR-097), in direction A; where it went another way than recommended here (the countdown on a lead's start, loosening on the person's word), those sections say so.
+- **Situations (7)**: the seven states the decisions bring that weren't drawn, one each, where each happens. Nothing is left undrawn; what each needs from the runtime is in 7.
 - The directions not picked are gone from the code too; the history has them.
 
 The flow, as it stands:
@@ -55,18 +56,17 @@ What the runtime needs:
 
 ## 2 · What asks
 
-Seen in the project's Rules, in the person's own Settings (B), and in the Runs task, whose lead (woken by its checks passing, not by the person) wants to merge #635 with the person's GitHub MCP server and to comment on dana's #640. The ask card is A's in both directions: "Can't be undone", the action, what can't be taken back in one line, the words it would post, the server and tool; Not now / Merge #635. No "Unrestricted" anywhere (16 Oct note): nothing says what is allowed, only what still asks.
+Seen in the project's Rules and in the Runs task, whose lead (woken by its checks passing, not by the person) wants to merge #635 with the person's GitHub MCP server and to comment on dana's #640. The ask card: "Can't be undone", the action, what can't be taken back in one line, the words it would post, the server and tool; Not now / Merge #635. No "Unrestricted" anywhere (16 Oct note): nothing says what is allowed, only what still asks.
 
 | Direction | Your Settings | The project's Rules |
 | --- | --- | --- |
 | A · In the project (chosen) | Nothing | "What asks": Lost work and history, Publishing and merging, Speaking for you, Secrets, each with what it catches and a word to make it Never; then "Your own" Never and Ask me commands; then today's sandbox, last 14 days, finished and limits |
-| B · In your Settings | A section, What asks, after Agents: the four kinds, your own Never and Ask me for every project, and "Where a project differs", a line per project with Open | One line: "The same in every project: …", Change in Settings. Then "This project's own": the branches that ask as main does (`next`, `release/*`), its Never and Ask me commands, and a kind that works differently here (Asks you / Never / Goes ahead here), only once one is added; then the same sandbox and the rest |
 | Today | | A mode, Allow everything as a switch, six kinds |
 
-**On the person's question (should limits live in the account?): yes, B.** The four kinds are about the person, not the code: their name on GitHub, their secrets, history that can't be taken back. They read the same in every project, and in A each project repeats them, so a change to one is made five times or forgotten in one. What a project has of its own is narrower and stays there: which branches count as main, commands only that repository has (`fly deploy`, `db:reset`), and now and then a kind that works differently, such as merging going ahead in a scratch repository or posting being Never in a client's. Settings lists every project that differs, so nothing hides in one project's Rules.
+**Chosen (7 Nov): A.** I had recommended B (the four kinds are about the person, so they'd read the same in every project); the person picked A, so each project's Rules say what asks there, whole, in one place. A project that differs simply says so in its own Rules.
 
 What the runtime needs:
-- The rules shrink to the four kinds, each `ask` or `never`, plus Never and Ask commands. In B these are the person's, kept with Althar's own settings, and a project adds its protected branches, its own commands, and an exception per kind (`ask`, `never` or `allow`), which the project's Rules and Settings' list both read. `permissions` (the mode), `allowEverything` and the coordinator's judge go; the tally stays, for a kind agents keep working around.
+- The rules shrink to the four kinds, each `ask` or `never`, plus Never and Ask commands. Each project keeps its own, as Rules do today. `permissions` (the mode), `allowEverything` and the coordinator's judge go; the tally stays, for a kind agents keep working around.
 - An **MCP call classified** before it runs: which server, from which config, and whether it reads or acts. The MCP spec's tool annotations (`readOnlyHint`, `destructiveHint`, `openWorldHint`) are the first source; a table for the servers people use (GitHub, Linear) fills in where they say nothing. A merge, a publish or a post on someone else's thread is one of the four kinds.
 - The `AttentionRequest` gains what the card says: the kind, the action as a verb ("Merge #635"), what can't be taken back, the words it would post (read from the call's input), and the server and tool.
 - Asked-for on the person's word (ADR-081) reaches MCP calls: a merge the person asked for in this turn goes ahead without a card.
@@ -76,15 +76,14 @@ What the runtime needs:
 
 Settings gets **MCP servers** as a section of its own, before **Skills** (split on 7 Nov). Each is the role table (chosen), a row each, a column each for leads, reviewers and the coordinator; above, Every project or althar. In a thread, each MCP call says its server, and what acted on the outside world is a card: the server, what it did, what it said, Open. The "could see" line from #596 counts both: "Claude Code could see 6 skills and 7 MCP servers", opening by whose. Seen there and in a design review the person's own skill ran on dana's #612.
 
-Inside Althar nothing needs syncing: each role gets what's ticked, whichever agent's settings it was found in. Syncing is for the person's agents on their own: Claude Code, Codex and OpenCode each keep their own list, and here they disagree (github runs with npx in Claude Code and in Docker in Codex; linear, figma and sentry are only in Claude Code; context7 only in Codex; playwright only in OpenCode). The person chose **one switch**, "Keep your agents' servers the same". It writes into files that are theirs, so it has to say what it writes, to which file, and what it won't touch. Two ways to say it:
+Inside Althar nothing needs syncing: each role gets what's ticked, whichever agent's settings it was found in. Syncing is for the person's agents on their own: Claude Code, Codex and OpenCode each keep their own list, and here they disagree (github runs with npx in Claude Code and in Docker in Codex; linear, figma and sentry are only in Claude Code; context7 only in Codex; playwright only in OpenCode). The person chose **one switch**, "Keep your agents' servers the same". It writes into files that are theirs, so it has to say what it writes, to which file, and what it won't touch. Two ways to say it; **A was chosen** (7 Nov):
 
 | Direction | While it's off | Turning it on | Turning it off |
 | --- | --- | --- | --- |
-| A · Before it starts | The switch and one line: Althar writes each server into each agent's own settings | A dialog: what it adds to each agent, by file and server; github waiting until the person picks how it runs; what it leaves alone; that it keeps a copy of each file and can take back what it added. Turn on | A dialog: Leave them in, or Take them out |
-| B · On the card | All of A's dialog, on the card | It just turns on | The same choice, in the card |
+| A · Before it starts (chosen) | The switch and one line: Althar writes each server into each agent's own settings | A dialog: what it adds to each agent, by file and server; github waiting until the person picks how it runs; what it leaves alone; that it keeps a copy of each file and can take back what it added. Turn on | A dialog: Leave them in, or Take them out |
 | Today | Althar's skills only; none of the person's MCP servers | | |
 
-The same in both once it's on:
+Once it's on:
 - **To settle**, problems first: a file it couldn't read (OpenCode's, a week on), github's two ways (pick one, which changes the other agent's, or leave github out of syncing), and each sign-in, a button per agent.
 - **Since**, a week on: "You added notion to Claude Code. Copied to Codex", with Undo; "You took context7 out of Claude Code. It stays out there", with Put it back.
 - **Added**, a row per agent's file, each server a chip: pressing it takes it back out of that agent, and keeps it out. While it's off, the same chips leave a server out before it starts.
@@ -147,7 +146,7 @@ The coordinator, and leads too, tune the project's settings with Althar's own to
 
 A change that **loosens what asks** (here: let leads merge their own once checks pass and the review is clean) is a card that waits for the person, "Loosens what asks", with Keep asking and the action on its button. The prototype had it wait even when the person asked for it in words, since a rule outlasts the turn. **As built (#663, ADR-097) it goes on the person's own message in that turn** (`change_settings` names the words, Althar checks they're the person's, and the line quotes them), and is a card only in any other turn. The page's card comes in a turn that news woke, so it matches what was built. Once allowed, Rules says what goes ahead now under its kind, with who changed it, "on your word", and Undo.
 
-**Chosen: A** (a line each). One card for a turn's changes was the other direction, now off the strip; it may still earn its place when a turn changes three rows or more. Keep the note in Settings: it's where the person finds a change they didn't watch happen. With What asks in Settings (2 · B), letting leads merge their own in althar is one of althar's exceptions.
+**Chosen: A** (a line each). One card for a turn's changes was the other direction, now off the strip; it may still earn its place when a turn changes three rows or more. Keep the note in Settings: it's where the person finds a change they didn't watch happen. Letting leads merge their own in althar is a change to althar's Rules (2 · A).
 
 What the runtime needs:
 - **Settings tools** for leads and the coordinator, one per setting the window changes, writing through the same commands the window uses.
@@ -176,8 +175,8 @@ Sketches are single states, not choices between directions: things the decisions
 - **A push the lead made itself**, with `gh` as the person: Althar shows it once it sees it on GitHub, the commits and Compare, and that nothing held it.
 - **Where a lead-started task came from**, as its thread opens: "Started by the lead of ADR: agents work…, from your words there."
 - **A small change** ("The Run menu says Strat"): one card that says what it skipped (Sonnet 5.5, no plan, reviewed after it merges), each step with its time, and Merge, which still asks; Make it a full task.
-- **No first-time card** (7 Nov). The sketch put "Agents can do more now" in the coordinator's conversation, once after updating. It's gone: a new user has no "before" to be told about, someone who never opens the coordinator never sees it, and Settings is no place to send anyone who hasn't asked. What there is to learn shows where it happens, the same for everyone: the ask card says why it asks ("Can't be undone", and what stays), and each task's "could see 9 skills and 7 MCP servers" line says what loaded. A project the person had set to ask first stays so, unannounced. "While you were away" sits in the same conversation and has the same problem: it needs a home that isn't the coordinator's.
-- **While you were away**: what agents did outside their worktrees across the project (merged, posted, moved an issue, started a task, changed a setting), by task and time, with Revert it, Delete it or Undo where it can be undone.
+- **No first-time card** (7 Nov). The sketch put "Agents can do more now" in the coordinator's conversation, once after updating. It's gone: a new user has no "before" to be told about, someone who never opens the coordinator never sees it, and Settings is no place to send anyone who hasn't asked. What there is to learn shows where it happens, the same for everyone: the ask card says why it asks ("Can't be undone", and what stays), and each task's "could see 9 skills and 7 MCP servers" line says what loaded. A project the person had set to ask first stays so, unannounced. "While you were away" had the same problem, and now sits on the board (7).
+- **While you were away** moved to the board (7), so it's there with the coordinator or without.
 - **A server that fails**: the call where it ran ("Move DEV-188 to In Review", Linear), failed, and under it Althar's own line, the kit's `AltharLine` in its warning tone: "Claude Code isn't signed in to Linear, so DEV-188 wasn't moved. Sign in". The lead goes on and doesn't repeat it. Signing in turns the call to Moved. Two earlier versions, a warning card and a red line with a button, read as blocks apart from the thread.
 - **A lead that starts several**: "Started 4 tasks from your 'split it by ADR'", started at once, with no countdown: starting a task can be undone by stopping it, so nothing asks. Each is a row that opens it, with its model and where it stands (Running, Planning, After ADR-013 merges); Stop on hover, then Start again. The first version's Hold the rest and Change one didn't say what they'd hold or change. As built (#663) each would wait the plan's countdown instead, and a lead starts at most 3 in a turn.
 
@@ -193,15 +192,23 @@ The person keeps starting tasks with the coordinator for now (6 Nov). The three 
 
 **Outside Althar, in the person's own terminal, only partly.** Sync writes to each agent's own settings, which apply in every project. A project's own list lives in the repository (`.mcp.json`, `.codex/config.toml`, `opencode.json`, `.claude/skills`), which is the project's to change, not the person's. Claude Code alone keeps a per-project list outside the repository (its `local` scope). So sync stays global, and per-project choices are Althar's.
 
-## What else needs prototyping
+## 7 · Situations
 
-The sketches in 6 draw the first state of each of these: a small change, while you were away, a server that fails, a lead that starts several. Each needs directions once one matters. Leads (1) is still open.
+Seven states the decisions bring, one each, on the real screens; the strip's links go to each. Like 6, they are sketches, not choices. Nothing on the earlier list is left undrawn.
 
-Not drawn yet, most important first:
-1. **A Never rule an agent meets**: what the lead is told, and what the person sees afterwards.
-2. **An ask that waits while the person is away**: where it reaches them (the bar, a notification, a paired phone), and what a lead does meanwhile.
-3. **A lead-started task that fails or is stopped**: what its parent's lead hears, and what the parent's thread shows.
-4. **Working without the coordinator**: the project's Conversation room when it's off or never used, and where Up next lives then.
-5. **Two tasks changing the same files**: now that leads start tasks freely, who notices first, and what the person sees.
-6. **Auto routing when plan usage runs low**: a lead moved to a lighter model, and how the person sees it.
-7. **An undo that can't be done**: a merge already deployed, a post someone answered.
+- **While you were away, and an undo that can't be done** (Away). On the board, over the lanes, not in the coordinator's conversation: what agents did outside their worktrees since the person last looked (merged, posted, moved an issue, started tasks), newest first, by task and time, × to clear. Where it can be taken back, the way (Revert it, Undo). Where it can't, why, in its place: "dana replied" beside the review on #612, so there's no Delete; "Released in 0.8.4" beside #633, whose revert is still offered but undoes nothing already out.
+- **Working without the coordinator** (No coordinator). The project's Conversation, with it off: "The coordinator is off in althar. What you write here starts a task." and Turn it on. The composer reads "Describe a task" and starts one straight away. Up next, Needs you and While you were away are on the board, so nothing lives only in the conversation. The board's empty Up next still says "Talk to the coordinator"; with it off it would offer New task.
+- **A Never rule an agent meets** (Never rule). The command, declined, where it ran (`rm -rf ~/Library/Application Support/Althar`), and Althar's line: "Refused by your rule `rm -rf ~/Library`. The lead was told so. Rules". The lead's own words after say what it did instead (a profile of its own). Nothing asks and nothing waits: Never is the person's answer given ahead.
+- **An ask that waits while the person is away** (Ask waits). The ask card says how long it has waited and where else it reached them: "Waiting 40 min · sent to your iPhone at 13:20". The lead didn't stop: it said what it did meanwhile ("the changelog line is in. Nothing else needs the merge."). The tab's dot and the board's Needs you show it too, as today.
+- **A lead-started task that stops** (Child stops). In the parent's thread, Althar's line in its warning tone: "Codex leads reach the network in their shell stopped without a change: Codex's sandbox on Windows has no network switch. Its report". The parent's lead heard the report as news, and says what that means for its own work. One the person stopped reads the same, "stopped by you".
+- **Two tasks changing the same files** (Same files). Althar notices first, as it knows each open task's files: a line in both threads, "Runs show in the pill over the composer again changes `TaskView.tsx` too. Both leads were told." The lead says what it will do about it (merge main after #635). Nothing on the board: the person hears of it only where a lead can't settle it.
+- **Auto on a lighter model** (Lighter model). "Moved to Sonnet 5.5: your Claude plan is at 92% for the week, until Thursday. Keep Opus 5.5". Its words after the line are Sonnet's; Keep Opus 5.5 turns it back for this task, with Undo.
+
+What the runtime needs:
+- **A log of acts outside worktrees**, across the project, each with its task, time, how it's undone (`revert`, `undo` through the same server, or none), and why it can't be now: a reply under a post, a release that holds a merge. A "last looked" mark per person, for "since 11:40".
+- **The coordinator as a project switch.** Off: the project's composer starts a task with Auto (the StartTask command noted under Set aside), and the coordinator's news goes nowhere; a lead-started task still starts.
+- **A Never refusal as a thread item**: the rule that matched, and the same words given to the lead as the tool's result.
+- **An ask that doesn't hold the turn**: the lead goes on with what doesn't need the answer, the call kept until answered. When it reaches a paired device, after how long, and the time it was sent, on the request.
+- **A child's end reaching its parent**: settled without a change, failed, or stopped by the person, with its report, as news that wakes the parent's lead, and as a line in its thread.
+- **Overlapping files between open tasks**, from each task's changed files as `list_tasks` already gives them: a thread item in both, and news to both leads.
+- **Auto's moves as thread items**: from and to which model, why (plan usage and when it resets), and a per-task override that Auto keeps to. Plan usage comes from the usage endpoint (21 Oct note).

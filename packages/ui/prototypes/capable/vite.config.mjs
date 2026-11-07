@@ -20,6 +20,8 @@ const TASK = 'features/task/TaskView.tsx'
 const seams = [
   // The board's lanes and cards: a lead-started task's lineage.
   { importer: BOARD, id: '@althar/ui', to: 'seams/boardUi.tsx' },
+  // The project's screen: its Conversation with the coordinator off.
+  { importer: 'features/project/ProjectView.tsx', id: '@althar/ui', to: 'seams/projectUi.tsx' },
   // The task's thread: each direction's pieces where its data marks them.
   { importer: TASK, id: './TaskThread', to: 'seams/TaskThread.tsx' },
   // What still asks, in a task: each direction's card.
