@@ -11,14 +11,17 @@ import { items } from '../../tests/fixtures'
  * the pace a model writes, with the stalls a provider's stream has, after
  * which what came meanwhile arrives at once; the store's copy of the item
  * catches up every few hundred characters, and holds it all once the item
- * ends. Tool calls start, run a while and end. The turn loops.
+ * ends. Tool calls start, run a while and end; a lead hands in its report as
+ * a step's result. The turn loops.
  */
 
 export type Beat =
   | { readonly think: string }
-  | { readonly say: string }
+  /** What it says: its answer, or a word on the way, where its agent says which (Codex). */
+  | { readonly say: string; readonly answer?: boolean }
   | { readonly tool: string; readonly kind: string; readonly path?: string; readonly command?: string; readonly ms: number }
   | { readonly pause: number }
+  | { readonly report: string }
 
 export interface Played {
   readonly items: ReadonlyArray<ThreadItem>
@@ -83,11 +86,18 @@ export const usePlayed = (
         const show = (running = true) =>
           setPlayed({ items: thread, streaming, running, turnStarted, turnEnded: running ? null : new Date().toISOString() })
         show()
-        await sleep(900, stopped)
+        // A model takes a moment before its first word: the reply's place shows it thinking meanwhile.
+        await sleep(2000, stopped)
         for (const beat of beats) {
           if (gone) return
           if ('pause' in beat) {
             await sleep(beat.pause, stopped)
+            continue
+          }
+          if ('report' in beat) {
+            thread = [...thread, mine(items.step({ summary: beat.report, agentId }))]
+            show()
+            await sleep(300, stopped)
             continue
           }
           if ('tool' in beat) {
@@ -116,7 +126,15 @@ export const usePlayed = (
           }
           const kind = 'think' in beat ? ('agent_thought' as const) : ('agent_message' as const)
           const whole = 'think' in beat ? beat.think : beat.say
-          const first = mine(kind === 'agent_thought' ? items.thinks('', agentId) : items.says('', agentId))
+          const answer = 'say' in beat ? beat.answer : undefined
+          const said = items.says('', agentId)
+          const first = mine(
+            kind === 'agent_thought'
+              ? items.thinks('', agentId)
+              : answer === undefined
+                ? said
+                : ({ ...said, content: { text: '', pictures: [], files: [], answer } } as ThreadItem),
+          )
           let sent = 0
           let stored = 0
           let placed = false

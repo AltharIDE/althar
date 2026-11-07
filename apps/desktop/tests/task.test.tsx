@@ -247,7 +247,7 @@ describe('a task', () => {
     // The round is over: its work is one line, under what it said; Althar's news between rounds stands alone.
     expect(screen.queryByText('src/checkout.ts')).toBeNull()
     expect(screen.getByText('Codex took over from Claude Code.')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: /^Worked 0s/ }))
+    await userEvent.click(screen.getByRole('button', { name: /^Worked for 0s/ }))
     expect(screen.getByText('src/checkout.ts')).toBeTruthy()
     expect(screen.getByText('Write the test')).toBeTruthy()
     expect(screen.getByText('Context is filling up')).toBeTruthy()

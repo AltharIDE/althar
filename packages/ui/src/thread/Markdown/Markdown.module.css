@@ -163,3 +163,18 @@
   height: var(--dh);
   margin: auto;
 }
+
+/* a word as it streams in: dim, then bright (fresh.tsx) */
+.fresh {
+  animation: fresh var(--stream-in) var(--ease) both;
+}
+@keyframes fresh {
+  from {
+    opacity: 0.1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fresh {
+    animation: none;
+  }
+}

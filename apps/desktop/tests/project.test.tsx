@@ -784,6 +784,25 @@ describe('the Talk room', () => {
     expect(screen.queryByRole('button', { name: /Working for/ })).toBeNull()
   })
 
+  it('folds the coordinator’s work under how long it took as it starts to answer, its turn still running', async () => {
+    const said = items.says('Two tasks are running.')
+    const answer: ThreadItem = said.kind === 'agent_message' ? { ...said, content: { ...said.content, answer: true } } : said
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({
+          session: { ...session, turnRunning: true },
+          items: [items.you('What runs?'), items.says('I’ll check the board.'), items.tool({ title: 'Read checkout.ts' }), answer],
+        }),
+      ),
+    })
+    withServices(<Project room={Room.Talk} />, client)
+    expect(await screen.findByText('Two tasks are running.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Worked for / }).getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByRole('button', { name: /^Working for / })).toBeNull()
+    // What it said on the way folded with the rest of its work.
+    expect(screen.queryByText('I’ll check the board.')).toBeNull()
+  })
+
   it('lets go of Thinking once the coordinator’s turn ended with nothing said, as when it was interrupted before its first word', async () => {
     const asked = { ...items.you('And the docs?'), createdAt: new Date(Date.now() - 5000).toISOString() }
     const { client } = fakeClient({
@@ -812,9 +831,9 @@ describe('the Talk room', () => {
     withServices(<Project room={Room.Talk} />, client)
     const busy = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the coordinator' })
     expect(screen.getByText('Queued')).toBeTruthy()
-    // While it works, its work folds too, under how long it has worked so far and what it is doing now.
-    expect(screen.queryByText('checkout.ts')).toBeNull()
-    expect(screen.getByRole('button', { name: /Working for .*Reading checkout\.ts/ })).toBeTruthy()
+    // While it works, its work folds too, under how long it has worked so far, with one line for what it is doing now.
+    expect(screen.getByRole('button', { name: /^Working for / })).toBeTruthy()
+    expect(screen.getByText('Reading checkout.ts')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /Interrupt/ }))
     expect(client.interrupt).toHaveBeenCalledWith('thc')
     await userEvent.type(busy, 'Stop{Meta>}{Enter}{/Meta}')

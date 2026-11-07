@@ -43,7 +43,7 @@ const dark = declarations(readFileSync(join(styles, 'dark.css'), 'utf8'), ":root
 
 /** What isn't a colour: stacking, radii, type, air, motion. */
 const NOT_COLOUR =
-  /^--(z-|r-|r$|font|mono|sp$|measure|ease|fast|base|slow|slide|fold|enter$|exit$|move$|press$|scale-|prose|lede|frost-blur$)/
+  /^--(z-|r-|r$|font|mono|sp$|measure|ease|fast|base|slow|slide|fold|enter$|exit$|stream-in$|move$|press$|scale-|prose|lede|frost-blur$)/
 
 /**
  * The same in every theme, so dark.css leaves them alone: what is drawn on

@@ -43,6 +43,27 @@ describe('the thread recorder, at its edges', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('keeps whether a message is the agent’s answer, where it says, through every write of it', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const writer = recorder(where)
+      const events: ReadonlyArray<SessionEvent> = [
+        { _tag: 'AgentMessage', text: 'Checking the board.', messageId: 'a', answer: false },
+        { _tag: 'AgentMessage', text: 'Two tasks ', messageId: 'b', answer: true },
+        { _tag: 'AgentMessage', text: 'are running.', messageId: 'b', answer: true },
+        { _tag: 'AgentMessage', text: 'Said by Claude Code.', messageId: 'c' },
+      ]
+      for (const event of events) yield* writer.record(event)
+      yield* writer.flush
+      const said = (yield* items(where.threadId)).slice(where.before).map((item) => item.content)
+      assert.deepStrictEqual(said, [
+        { text: 'Checking the board.', answer: false },
+        { text: 'Two tasks are running.', answer: true },
+        { text: 'Said by Claude Code.' },
+      ])
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('keeps why a command failed from its own words, as OpenCode says it, where what came back says nothing', () =>
     Effect.gen(function* () {
       const where = yield* place
