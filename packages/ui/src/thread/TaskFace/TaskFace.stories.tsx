@@ -278,13 +278,18 @@ function scrolledUp(behind?: { sources?: (typeof PR_PILL)[]; processes?: typeof 
     ),
     play: async ({ canvasElement }) => {
       const c = within(canvasElement)
-      // Boxes exist only in a browser; jsdom draws none, so there is nothing to scroll and no pill.
+      // Needs layout, so these stories are in BROWSER_ONLY (tests/stories.ts): jsdom draws no boxes.
       const scroller = scrollerOf(canvasElement)
-      if (!scroller) return
-      scroller.scrollTo({ top: 0 })
+      await expect(scroller).toBeTruthy()
+      scroller!.scrollTo({ top: 0 })
       const jump = await c.findByRole('button', { name: /latest/i })
-      const row = canvasElement.querySelector('button[aria-expanded]')
-      if (row) await expect(jump.getBoundingClientRect().bottom).toBeLessThanOrEqual(row.getBoundingClientRect().top)
+      const row = c.queryAllByText(/Listening to|\d+ processes?/)[0]
+      if (behind) {
+        await expect(row).toBeTruthy()
+        await expect(jump.getBoundingClientRect().bottom).toBeLessThanOrEqual(row!.getBoundingClientRect().top)
+      } else {
+        await expect(row).toBeUndefined()
+      }
     },
   }
 }
