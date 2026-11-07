@@ -1376,6 +1376,15 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   onOpen: vi.fn(() => () => {}),
   onStoreFailed: vi.fn(() => () => {}),
   showBackup: vi.fn(async () => {}),
+  storage: {
+    places: vi.fn(async () => ({
+      profile: '/home/me/.local/share/althar',
+      logs: '/home/me/.local/share/althar/logs',
+      worktrees: '/home/me/Althar',
+    })),
+    size: vi.fn(async () => ({ state: 'done' as const, bytes: 3 * 1024 ** 3, approximate: false, unreadable: 0 })),
+    show: vi.fn(async () => {}),
+  },
   tryAgain: vi.fn(async () => {}),
   appIcon: vi.fn(async () => 'cobalt'),
   setAppIcon: vi.fn(async () => {}),

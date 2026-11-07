@@ -159,6 +159,24 @@ export interface WindowError {
   readonly source?: string
 }
 
+/** A place Althar keeps data, by id. */
+export type StoragePlace = 'profile' | 'logs' | 'worktrees'
+
+/** What measuring a place came to: bytes (approximate where the time was up), or that it isn't there, or couldn't be read. */
+export type StorageSize =
+  | { readonly state: 'done'; readonly bytes: number; readonly approximate: boolean; readonly unreadable: number }
+  | { readonly state: 'missing' }
+  | { readonly state: 'failed' }
+
+export interface StorageHost {
+  /** The path of each place. */
+  readonly places: () => Promise<Record<StoragePlace, string>>
+  /** Its size, as kept for the session, or measured again on a refresh. */
+  readonly size: (place: StoragePlace, refresh: boolean) => Promise<StorageSize>
+  /** Opens it in the system's file manager. */
+  readonly show: (place: StoragePlace) => Promise<void>
+}
+
 export interface Host {
   readonly onStartupStage?: (listener: (stage: StartupStage) => void) => () => void
   readonly startup?: (stage: string, duration?: number) => void
@@ -210,6 +228,8 @@ export interface Host {
   readonly onStoreFailed: (listener: (failure: StoreFailure) => void) => () => void
   /** Shows the copy from before that update in the system's file manager. */
   readonly showBackup: () => Promise<void>
+  /** Where Althar keeps its data and how big each place is (About › Storage); the main process measures, off the window's thread. */
+  readonly storage: StorageHost
   /** Starts the runtime again on a profile that was open elsewhere, once the person has closed that; the window reloads. */
   readonly tryAgain: () => Promise<void>
   /** Calls `listener` with the thread a notification the person clicked is about, until the returned function is called. */

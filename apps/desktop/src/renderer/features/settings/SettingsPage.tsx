@@ -40,6 +40,7 @@ import {
   SkillInstall,
   SkillList,
   SkillReview,
+  Storage,
   TaskFolders,
   UpdateReady,
   UsageData,
@@ -49,7 +50,7 @@ import altharFace from '../../../../resources/faces/althar-ai.svg'
 import type { AccentSource, Appearance } from '../../../main/appPreferences'
 import { SYSTEM_SOUND } from '../../../main/notify'
 import { notesOf } from '../../../main/updates'
-import { useServices } from '../../data/services'
+import { type StoragePlace, useServices } from '../../data/services'
 import { agentLineOf, brandOf, pinnedOf } from '../../shared/agents'
 import { systemAccentState } from '../../shared/accent'
 import { appIcons } from '../../shared/appIcons'
@@ -84,6 +85,7 @@ import { useNewProjectDefaults } from './useNewProjectDefaults'
 import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
 import { usePostTeamReviews } from './usePostTeamReviews'
 import { useSkills } from './useSkills'
+import { PLACES, useStorage } from './useStorage'
 import { useTaskFolders } from './useTaskFolders'
 
 /*
@@ -756,6 +758,7 @@ function AboutSection({ start }: { start: StartModel }) {
   const update = useUpdate()
   const { preferences, set, failed } = usePreferences()
   const { host } = useServices()
+  const storage = useStorage()
   const version = start.status?.appVersion
   return (
     <>
@@ -766,6 +769,18 @@ function AboutSection({ start }: { start: StartModel }) {
           <LinkButton onClick={() => host.reportProblem?.({ kind: 'asked', from: 'settings' })}>{text.report}</LinkButton>
         )}
       </div>
+      <Storage
+        places={PLACES.map((place) => ({
+          id: place,
+          ...text.storage[place],
+          path: storage.paths[place] ?? '',
+          figure: storage.figures[place],
+          ...(storage.problems[place] === undefined ? {} : { problem: storage.problems[place] }),
+        }))}
+        onShow={(id) => storage.show(id as StoragePlace)}
+        onMeasureAgain={storage.measureAgain}
+        text={{ show: text.storage.show }}
+      />
       <SettingList>
         <UsageData on={preferences.usageData} onChange={(on) => set('usageData', on)} doNotTrack={host.doNotTrack === true} />
         <CrashReports on={preferences.crashReports} onChange={(on) => set('crashReports', on)} doNotTrack={host.doNotTrack === true} />
