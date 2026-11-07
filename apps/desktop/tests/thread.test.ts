@@ -501,6 +501,35 @@ describe('tool calls', () => {
     expect(tool).toMatchObject({ state: ToolState.Declined, why: 'Althar’s rules: No writes' })
   })
 
+  it('keeps a call the person\u2019s own rule refused as the rule\u2019s words, for Althar\u2019s line under it', () => {
+    const refused = items.tool({
+      toolKind: 'execute',
+      declined: true,
+      command: 'rm -rf ~/Library',
+      declinedBy: 'rules',
+      declinedWhy: 'Refused by your rule `rm -rf ~/Library`.',
+    })
+    const [turn] = blocksOf(source([refused]), new Map(), at)
+    const tool = turn?.kind === 'turn' ? turn.parts.find((part) => part.kind === 'tool') : undefined
+    expect(tool).toMatchObject({ state: ToolState.Declined, refused: 'Refused by your rule `rm -rf ~/Library`.' })
+    expect(tool).not.toHaveProperty('why')
+  })
+
+  it('keeps which server was down under a call to it that failed, and nothing under one that went through', () => {
+    const partOf = (status: string) => {
+      const call = items.tool({
+        title: 'mcp__linear__save_issue',
+        toolKind: 'other',
+        status,
+        server: { name: 'linear', down: 'needs-auth', agentId: 'claude-code' },
+      })
+      const [turn] = blocksOf(source([call]), new Map(), at)
+      return turn?.kind === 'turn' ? turn.parts.find((part) => part.kind === 'tool') : undefined
+    }
+    expect(partOf('failed')).toMatchObject({ server: { name: 'linear', down: 'needs-auth', agentId: 'claude-code' } })
+    expect(partOf('completed')).not.toHaveProperty('server')
+  })
+
   it('makes a skill loaded a row naming it, and a read of its file a row saying so', () => {
     const partOf = (content: Parameters<typeof items.tool>[0]) => {
       const blocks = blocksOf({ items: [items.tool(content)], turnRunning: false, worktree: '/w' }, new Map(), at)

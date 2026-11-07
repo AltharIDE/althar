@@ -1,7 +1,8 @@
-import { Fragment, useState, type ReactNode } from 'react'
+import { createContext, Fragment, useContext, useState, type ReactNode } from 'react'
 
 import type { FieldAnswer, Unfurl } from '@althar/contracts'
 import {
+  AltharLine,
   Arrived,
   CodeBlock,
   FailedLogs,
@@ -77,6 +78,15 @@ import s from './ThreadBlocks.module.css'
 const LONG_COMMAND = 72
 
 export const text = {
+  /** Under a call the person's own rule refused: what the lead was told, and the way to the rules. */
+  refused: (words: string) => `${words} The lead was told so.`,
+  rules: 'Rules',
+  /** Under a call to a server that was down: what it was, and the way in. */
+  server: {
+    'needs-auth': (agent: string, server: string) => `${agent} isn’t signed in to ${server}, so this didn’t go through.`,
+    failed: (_agent: string, server: string) => `${server} didn’t start, so this didn’t go through.`,
+    signIn: 'Sign in',
+  },
   readSkill: (names: ReadonlyArray<string>) => `read skill ${names.join(', ')}`,
   shell: 'Shell',
   step: { implement: 'Implement', review: 'Review', settle: 'Settle', publish: 'Pull request' } satisfies Record<
@@ -167,6 +177,21 @@ function SetupView({ setup }: { setup: SetupContent }) {
  * or the file it works on). One from before Althar kept output, too long for
  * its row, opens to show it whole.
  */
+/** Where Althar's lines under a call lead: the project's rules, an agent's sign-in. The host that can open them provides it. */
+export interface ThreadWays {
+  readonly onRules?: () => void
+  readonly onSignIn?: (agentId: string) => void
+}
+export const ThreadWaysContext = createContext<ThreadWays>({})
+
+const AGENT_NAMES: Readonly<Record<string, string>> = { 'claude-code': 'Claude Code', codex: 'Codex', opencode: 'OpenCode' }
+
+/** A server's name as a person says it: the first letter capital, "linear-server" as "Linear". */
+const serverName = (name: string) => {
+  const word = name.replace(/[-_](server|mcp)$/i, '').replace(/^(mcp)[-_]/i, '')
+  return word.charAt(0).toUpperCase() + word.slice(1)
+}
+
 function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; threadId: string }) {
   const [open, setOpen] = useState(part.state === ToolState.Running && part.ran !== null)
   /* once opened, what it printed stays, so it doesn't vanish as the call folds */
@@ -193,7 +218,8 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
     ) : long ? (
       <></>
     ) : undefined
-  return (
+  const ways = useContext(ThreadWaysContext)
+  const tool = (
     <Tool
       kind={part.toolKind}
       verb={part.verb}
@@ -211,6 +237,26 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
     >
       {body}
     </Tool>
+  )
+  if (part.refused === undefined && part.server === undefined) return tool
+  const { server } = part
+  return (
+    <>
+      {tool}
+      {part.refused !== undefined && (
+        <AltharLine>
+          {text.refused(part.refused)} {ways.onRules && <LinkButton onClick={ways.onRules}>{text.rules}</LinkButton>}
+        </AltharLine>
+      )}
+      {server !== undefined && (
+        <AltharLine tone="warning">
+          {text.server[server.down](AGENT_NAMES[server.agentId ?? ''] ?? 'The agent', serverName(server.name))}{' '}
+          {server.down === 'needs-auth' && server.agentId !== undefined && ways.onSignIn && (
+            <LinkButton onClick={() => ways.onSignIn?.(server.agentId ?? '')}>{text.server.signIn}</LinkButton>
+          )}
+        </AltharLine>
+      )}
+    </>
   )
 }
 

@@ -69,6 +69,10 @@ export type Part =
       readonly skills?: { readonly names: ReadonlyArray<string>; readonly reported: boolean }
       /** For a refused call: who refused it and why, as the row says it; absent where the person refused it. */
       readonly why?: string
+      /** For a call the person's own Never rule refused: the words the lead was given, naming the rule; Althar's line under the call says them. */
+      readonly refused?: string
+      /** For a call to one of the person's MCP servers that failed because it was down: which, and how, under it as Althar's line. */
+      readonly server?: NonNullable<ToolContent['server']>
       /** The project's rule that let it through without asking (ADR-018), where one did. */
       readonly allowedBy?: AllowedBy
       /** For a command: its output so far, or how much it printed once it ended (handed.ts). */
@@ -284,6 +288,15 @@ export const declinedWords = (by?: 'rules' | 'coordinator' | 'person', why?: str
   return reason ? `${who}: ${reason}` : who
 }
 
+/** What the lead is told of a command the person's Never rule refused, which Althar says under the call (runtime Permissions.ts). */
+const REFUSED = 'Refused by your rule'
+
+type RefusableCall = { readonly declinedBy?: 'rules' | 'coordinator' | 'person'; readonly declinedWhy?: string }
+
+/** The words of a refusal by the person's own rule, where the call was one. */
+export const ruleRefusal = (call: RefusableCall): string | undefined =>
+  call.declinedBy === 'rules' && call.declinedWhy?.startsWith(REFUSED) === true ? call.declinedWhy : undefined
+
 /** A plan step's status, as the kit's. A step still in progress when its turn has ended waits for the next. */
 export const planStateOf = (status: string, turnRunning: boolean): PlanState =>
   status === 'completed' ? PlanState.Done : status === 'in_progress' && turnRunning ? PlanState.Running : PlanState.Queued
@@ -370,7 +383,8 @@ const partOf = (
       // A load is a row of its own, naming the skill; a command that printed one stays what it ran, and says so.
       const toolKind = skill !== undefined && ranKind !== ToolKind.Run ? ToolKind.Skill : ranKind
       const state = toolStateOf(item.content.status, turnRunning, item.content.declined)
-      const why = declinedWords(item.content.declinedBy, item.content.declinedWhy)
+      const refused = ruleRefusal(item.content)
+      const why = refused === undefined ? declinedWords(item.content.declinedBy, item.content.declinedWhy) : undefined
       return {
         kind: 'tool',
         id: item.id,
@@ -383,6 +397,8 @@ const partOf = (
         ...(item.content.label === undefined ? {} : { label: item.content.label }),
         ...(item.content.allowedBy === undefined ? {} : { allowedBy: item.content.allowedBy }),
         ...(state === ToolState.Declined && why !== undefined ? { why } : {}),
+        ...(state === ToolState.Declined && refused !== undefined ? { refused } : {}),
+        ...(state === ToolState.Failed && item.content.server !== undefined ? { server: item.content.server } : {}),
         ran: ranOf(item.content, state, outputs.get(item.id)),
         exit: item.content.exit,
         touches: [...item.content.locations.map((location) => location.path), ...item.content.files.map((file) => file.path)],

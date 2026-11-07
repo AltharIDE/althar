@@ -1430,6 +1430,14 @@ export const ToolCallItem = Schema.Struct({
     declinedWhy: Schema.optional(Schema.String),
     /** The agent asking the person something: its question stands in the thread in its place. */
     asks: Schema.optional(Schema.Boolean),
+    /**
+     * For a call to one of the person's MCP servers that failed because the server was down: which, and why, as its agent
+     * reported the server's status (`needs-auth` for one not signed in, `failed` for one that didn't start). Signing in turns
+     * the call to done.
+     */
+    server: Schema.optional(
+      Schema.Struct({ name: Schema.String, down: Schema.Literals(['needs-auth', 'failed']), agentId: Schema.optional(Schema.String) }),
+    ),
     /** Let through without asking by the project's allow rules, the first that did (ADR-018); absent otherwise. */
     allowedBy: Schema.optional(AllowedBy),
     /** The skills it loads, by the agent's own word (`reported`), or a read of their `SKILL.md`, where the agent has no such word. */
@@ -1521,6 +1529,22 @@ export const NoticeItem = Schema.Struct({
      * back, a line across the thread (ADR-056).
      */
     role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder', 'skills'])),
+    /**
+     * For what Althar says of another task, drawn as its own line with the task linked (`task`): a task this task's lead
+     * started that ended without reaching it, or another open task changing the same files.
+     */
+    situation: Schema.optional(
+      Schema.Union([
+        Schema.Struct({
+          kind: Schema.Literal('ended'),
+          /** Settled without a change, failed, or stopped by the person. */
+          how: Schema.Literals(['unchanged', 'failed', 'stopped']),
+          /** Why, from its report, in a line; absent where it said nothing. */
+          why: Schema.optional(Schema.String),
+        }),
+        Schema.Struct({ kind: Schema.Literal('overlap'), files: Schema.Array(Schema.String) }),
+      ]),
+    ),
     /** A task the line is about, which it links to: one this task's lead started (ADR-097). */
     task: Schema.optional(Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String })),
     /** For what a lead's agent could see: each skill, and whether it is the person's or the repository's. */
@@ -2675,6 +2699,13 @@ export const AttentionRequest = Schema.Struct({
   label: Schema.optional(Schema.String),
   /** For a permission: a kind or a command the project always asks about keeps it, so no "always allow" can answer it. */
   held: Schema.optional(Schema.Boolean),
+  /**
+   * For a call that waits while the person is away: where else it reached them, and when. The turn isn't held by it: the
+   * lead goes on with what doesn't need the answer, and the call is kept until answered.
+   */
+  reached: Schema.optional(Schema.Struct({ device: Schema.String, at: Schema.String })),
+  /** For a call set aside so its lead could go on: it is told when the person answers. */
+  setAside: Schema.optional(Schema.Boolean),
   /** For a step that needs the person: which, and why. */
   stuck: Schema.NullOr(StuckStep),
   /** For a Local task's checkout: what Althar asks before it takes it (ADR-091). */
