@@ -69,7 +69,7 @@ import { Tasks } from './Tasks'
 import { setToward } from './towards'
 import { addItem, transcript } from './threads'
 import { personsWords, quoted } from './TaskActions'
-import { POOL, ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
+import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
 import { describeModels, type Route, routeTo, usableModels } from './usableModels'
 
 /**
@@ -2046,7 +2046,7 @@ export class Coordinator extends Context.Service<
        */
       const readTasksTools: ReadonlyArray<Tool> = [listTasksTool, findTasksTool, readTaskTool, readThreadTool, readTaskDiffTool]
 
-      yield* toolServer.serve(POOL, [
+      const pool: ReadonlyArray<Tool> = [
         tool('project_overview', 'The project: its repositories, how many tasks it has, its rules, and its notes.', nothing, (access) =>
           overview(access),
         ),
@@ -2495,7 +2495,24 @@ export class Coordinator extends Context.Service<
           { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
           drop,
         ),
+      ]
+      /*
+       * A lead keeps its own of these, which act on its task's pull request and issue unless told another (Changes.ts,
+       * Issues.ts): one tool each, scoped by role, as ADR-097 has it.
+       */
+      const LEADS_OWN = new Set([
+        'read_issue',
+        'rerun_check',
+        'read_default_branch_checks',
+        'reply_on_pull_request',
+        'edit_pull_request',
+        'push_tag',
       ])
+      yield* toolServer.serve('coordinator', pool)
+      yield* toolServer.serve(
+        'lead',
+        pool.filter((one) => !LEADS_OWN.has(one.name)),
+      )
 
       yield* toolServer.serve('reviewer', [...readTasksTools, findIssuesTool])
       // A quick task's lead makes it a change when the person asks: offered only on a quick task not made one yet; refused,

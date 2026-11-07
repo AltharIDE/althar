@@ -137,9 +137,12 @@ describe('install_dependencies', () => {
         yield* callTool(bare.lead, 'install_dependencies', { repository: 'web' }),
         /^This task has no worktree of a repository called web\. Its repositories: /,
       )
-      // Only a task's lead has a worktree to set up.
-      assert.strictEqual(yield* callTool(bare.coordinator, 'install_dependencies', {}), 'Althar has no tool called install_dependencies.')
-      assert.strictEqual(yield* callTool({ ...bare.lead, taskId: null }, 'install_dependencies', {}), 'This tool is for a task’s lead.')
+      // The coordinator sets up its copies of the project's repositories (ADR-097); a lead with no task has nothing to set up.
+      assert.notInclude(yield* callTool(bare.coordinator, 'install_dependencies', {}), 'Althar has no tool called')
+      assert.strictEqual(
+        yield* callTool({ ...bare.lead, taskId: null }, 'install_dependencies', {}),
+        'This tool is for a task’s lead or the coordinator.',
+      )
     }).pipe(Effect.provide(runtime())),
   )
 })
@@ -197,7 +200,7 @@ describe('run_project and stop_project, for a lead', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('says how a run that ended at once ended, for the lead to fix; and is a lead’s only', () =>
+  it.live('says how a run that ended at once ended, for the lead to fix; and stops only its own task’s runs', () =>
     Effect.gen(function* () {
       const { lead } = yield* taskIn(repository())
       yield* callTool(lead, 'set_run_command', { command: `node -e "console.log('Error: Cannot find module vite'); process.exit(1)"` })
@@ -206,8 +209,11 @@ describe('run_project and stop_project, for a lead', () => {
         ended,
         /in your worktree ended at once, with exit code 1\. Its last lines, stdout and stderr:\n\nError: Cannot find module vite\n\nFix what stopped it/,
       )
-      assert.strictEqual(yield* callTool({ ...lead, taskId: null }, 'run_project', {}), 'This tool is for a task’s lead.')
-      assert.strictEqual(yield* callTool({ ...lead, taskId: null }, 'stop_project', {}), 'This tool is for a task’s lead.')
+      // One tool for both roles (ADR-097): with no task of its own, there is nothing of its to stop.
+      assert.strictEqual(
+        yield* callTool({ ...lead, taskId: null }, 'stop_project', {}),
+        'Nothing runs in your worktree, so there was nothing to stop.',
+      )
       const listed = yield* listTools(lead)
       for (const name of ['install_dependencies', 'run_project', 'stop_project', 'screenshot', 'rerun_check']) assert.include(listed, name)
     }).pipe(Effect.provide(runtime())),
