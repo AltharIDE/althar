@@ -290,6 +290,10 @@ describe('the client', () => {
           CancelAccountSignIn: () => Effect.die('unused'),
           // A refusal is an answer: it isn't tried again.
           CompactContext: () => Effect.die('unused'),
+          ClearView: () => Effect.die('unused'),
+          ShowEarlier: () => Effect.die('unused'),
+          UndoClearView: () => Effect.die('unused'),
+          ForgetConversation: () => Effect.die('unused'),
           Interrupt: ({ commandId }) => {
             commands.push(commandId)
             return refuse()

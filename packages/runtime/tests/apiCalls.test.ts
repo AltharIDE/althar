@@ -391,3 +391,60 @@ describe('what can’t be done, from the window', () => {
     ),
   )
 })
+
+describe('clearing the coordinator’s chat, from the window', () => {
+  it.live('clears the view, opens the earlier conversation, takes it back and forgets, as every window reads it', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, project, task } = yield* connected
+        const first = yield* client.GetCoordinator({ projectId: project.id })
+        const threadId = first.threadId
+        yield* client.Send({ commandId: commandId(), threadId, body: 'Where are we?', disposition: 'after_current' })
+        const talked = yield* until(
+          client.GetCoordinator({ projectId: project.id }),
+          (value) => value.session !== null && !value.session.turnRunning && value.items.some((item) => item.kind === 'agent_message'),
+        )
+        assert.isTrue(talked.view.clearable)
+
+        yield* client.ClearView({ commandId: commandId(), threadId })
+        const cleared = yield* client.GetCoordinator({ projectId: project.id })
+        // The task still at work stays in the view; the conversation does not.
+        assert.deepStrictEqual(
+          [cleared.items.map((item) => item.kind), cleared.view.cleared, cleared.view.clearable],
+          [['task'], true, false],
+        )
+        // Nothing is left to clear, and it says so in words.
+        assert.strictEqual(yield* refused(client.ClearView({ commandId: commandId(), threadId })), 'The view is already clear.')
+
+        yield* client.ShowEarlier({ commandId: commandId(), threadId, open: true })
+        const earlier = yield* client.GetCoordinator({ projectId: project.id })
+        assert.isTrue(earlier.view.earlierOpen)
+        assert.isTrue(earlier.items.some((item) => item.kind === 'user_message'))
+
+        yield* client.UndoClearView({ commandId: commandId(), threadId })
+        const restored = yield* client.GetCoordinator({ projectId: project.id })
+        assert.deepStrictEqual([restored.view.cleared, restored.view.earlierOpen], [false, false])
+        assert.strictEqual(restored.items.length, talked.items.length)
+
+        yield* client.ForgetConversation({ commandId: commandId(), threadId })
+        const forgotten = yield* client.GetCoordinator({ projectId: project.id })
+        assert.deepStrictEqual(
+          forgotten.items.map((item) => item.kind),
+          ['task', 'notice'],
+        )
+        assert.isFalse(forgotten.view.forgettable)
+        assert.isFalse(forgotten.session?.held ?? false)
+
+        // A task's thread is not the coordinator's: it is neither cleared nor forgotten.
+        assert.strictEqual(
+          yield* refused(client.ClearView({ commandId: commandId(), threadId: task.threadId })),
+          "That thing isn't there any more.",
+        )
+        assert.strictEqual(
+          yield* refused(client.ForgetConversation({ commandId: commandId(), threadId: task.threadId })),
+          "That thing isn't there any more.",
+        )
+      }),
+    ),
+  )
+})

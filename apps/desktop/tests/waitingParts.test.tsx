@@ -78,16 +78,16 @@ describe('what runs, and what waits', () => {
     id: 'proc_1',
     taskId: 't1',
     runnableId: null,
-    where: 'Clearing prototype',
-    name: 'Clearing prototype',
-    url: 'http://localhost:5363/',
+    where: 'Marketing site',
+    name: 'Marketing site',
+    url: 'http://localhost:5320/',
     startedAt: '2026-10-10T08:00:00.000Z',
   }
 
   it('lists a task’s running runs after what its lead left, and not one that ended', () => {
     const rows = pillOf([serving], [run, { ...run, id: 'proc_2', ended: { at: NOW, code: 1 } }], NOW)
     expect(rows.map((row) => row.id)).toEqual(['bg-1', 'run:proc_1'])
-    expect(rows[1]).toMatchObject({ name: 'Clearing prototype', url: 'localhost:5363', since: '1h 5m', output: false })
+    expect(rows[1]).toMatchObject({ name: 'Marketing site', url: 'localhost:5320', since: '1h 5m', output: false })
     expect(runIdOf('run:proc_1')).toBe('proc_1')
     expect(runIdOf('bg-1')).toBeNull()
   })

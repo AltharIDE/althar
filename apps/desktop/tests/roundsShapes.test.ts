@@ -71,7 +71,7 @@ describe('a task’s rounds', () => {
 
   it('reads streamed text the store holds already from the store, not from when it streamed', () => {
     const said = when(items.says('Done.'), 5)
-    const streaming = new Map([[said.id, { kind: 'agent_message' as const, agentId: 'claude-code', text: 'Do', at: at(1) }]])
+    const streaming = new Map([[said.id, { kind: 'agent_message' as const, agentId: 'claude-code', text: 'Do', sequence: 1, at: at(1) }]])
     const [round] = rounds(
       roundsOf(
         { items: [items.you('Go'), when(items.tool({}), 0), said], turnRunning: false, worktree: '/w/meridian' },

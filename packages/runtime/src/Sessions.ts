@@ -49,6 +49,7 @@ import { Agents, type AgentEntry, RuntimeConfig, SIGNED_OUT_GIT_CONFIG } from '.
 import { refusalOf, runSkills, type RunSkills } from './Skills'
 import { type CoordinatorFolder, coordinatorFolder } from './coordinatorFolder'
 import { coordinatorNews, type ModelNamer, modelNamer } from './coordinatorNews'
+import { coordinatorRow, forgetItems } from './chatView'
 import { CACHE_LIFE, dueForHandover, dueForLeadHandover, handoverRecord, notesSection, roomFor, shrinks } from './handover'
 import { notesOf } from './notes'
 import {
@@ -724,6 +725,15 @@ export class Sessions extends Context.Service<
      * agent's, and loads nothing here. Refused where no agent is on the thread.
      */
     compact(input: { readonly envelope: CommandEnvelope; readonly threadId: string }): Effect.Effect<void, NotFound | Failure>
+    /**
+     * Forgets the coordinator's conversation: its session ends (the turn it was
+     * on cut short), what waits in its queue is withdrawn, and its items are
+     * deleted, but for what is still open, so nothing of it can be read again
+     * (`transcript`, read_thread, a handover's brief). The next message starts
+     * a session afresh, briefed from the project's records. Refused for any
+     * thread but a project's coordinator.
+     */
+    forget(input: { readonly envelope: CommandEnvelope; readonly threadId: string }): Effect.Effect<void, NotFound | Failure>
     /** Takes back a message still waiting its turn, by its thread item: the agent never reads it. One the agent has stays. */
     takeBack(input: {
       readonly envelope: CommandEnvelope
@@ -1799,6 +1809,7 @@ export class Sessions extends Context.Service<
                     _tag: 'Streaming',
                     threadId: thread.threadId,
                     itemId: open.id,
+                    sequence: open.sequence,
                     kind: open.kind,
                     agentId: running.entry.definition.id,
                     text: open.text,
@@ -3832,6 +3843,19 @@ export class Sessions extends Context.Service<
               if (!threads.has(input.threadId)) return yield* new NotFound({ kind: 'agent on the thread', id: input.threadId })
               yield* send({ envelope: input.envelope, threadId: input.threadId, body: COMPACT, disposition: 'after_current', quiet: true })
             }),
+          ),
+        forget: (input) =>
+          run(
+            exclusive(
+              input.threadId,
+              Effect.gen(function* () {
+                // Only a project's coordinator forgets: a task's lead is stopped by Stop, not by this.
+                yield* coordinatorRow(input.threadId)
+                const running = threads.get(input.threadId)
+                if (running !== undefined) yield* stopRunning(running, { state: 'completed' })
+                yield* forgetItems({ envelope: input.envelope, threadId: input.threadId, ended: running !== undefined })
+              }),
+            ),
           ),
         takeBack: (input) => run(takeBack(input)),
         setModel: (input) => run(setModel(input)),

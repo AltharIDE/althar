@@ -122,15 +122,15 @@ export const Running: Story = {
 export const ARun: Story = {
   args: {
     processes: [
-      { id: 'run:proc_1', name: 'Clearing prototype', command: 'bun run dev', url: 'localhost:5363', since: '18h 37m', output: false },
+      { id: 'run:proc_1', name: 'Marketing site', command: 'bun run dev', url: 'localhost:5320', since: '18h 37m', output: false },
     ],
   },
   play: async ({ canvasElement, args }) => {
-    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Clearing prototype, localhost:5363' }))
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Marketing site, localhost:5320' }))
     const page = within(document.body)
     await expect(page.getByText('18h 37m')).toBeVisible()
     await expect(page.queryByRole('button', { name: /Show the output/ })).toBeNull()
-    await userEvent.click(page.getByRole('button', { name: 'Stop Clearing prototype' }))
+    await userEvent.click(page.getByRole('button', { name: 'Stop Marketing site' }))
     await expect(args.onStop).toHaveBeenCalledWith('run:proc_1')
   },
 }
@@ -139,14 +139,14 @@ export const ALeadProcessAndARun: Story = {
   args: {
     processes: [
       STORYBOOK,
-      { id: 'run:proc_1', name: 'Clearing prototype', command: 'bun run dev', url: 'localhost:5363', since: '18h 37m', output: false },
+      { id: 'run:proc_1', name: 'Marketing site', command: 'bun run dev', url: 'localhost:5320', since: '18h 37m', output: false },
     ],
   },
   play: async ({ canvasElement }) => {
     await userEvent.click(within(canvasElement).getByRole('button', { name: /2 running/ }))
     const page = within(document.body)
     await expect(page.getByRole('button', { name: 'Stop Storybook' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Stop Clearing prototype' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Stop Marketing site' })).toBeVisible()
   },
 }
 /** Several running, two pull requests, a failed exit, and waiting: still one chip, one popover. */
