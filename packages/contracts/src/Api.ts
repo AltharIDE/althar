@@ -3014,6 +3014,8 @@ export const ThreadSnapshot = Schema.Struct({
     review: Schema.optional(Schema.NullOr(ReviewBrief)),
   }),
   session: Schema.NullOr(SessionSummary),
+  /** Whether Try again can act now, from the runtime's retry rule. */
+  retryable: Schema.optional(Schema.Boolean),
   attention: Schema.Array(AttentionRequest),
   /** The newest items before the page's start, oldest first. */
   items: Schema.Array(ThreadItem),
@@ -3141,6 +3143,8 @@ export const CoordinatorSnapshot = Schema.Struct({
   usage: Schema.optional(Schema.Array(AccountUse)),
   project: Schema.Struct({ id: Schema.String, name: Schema.String }),
   session: Schema.NullOr(SessionSummary),
+  /** Whether Try again can act now, from the runtime's retry rule. */
+  retryable: Schema.optional(Schema.Boolean),
   /** The agent, model and effort it starts on: whatever you used last. Unavailable when that agent isn't signed in. */
   suggested: Schema.NullOr(
     Schema.Struct({

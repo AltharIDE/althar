@@ -68,6 +68,29 @@ describe('a task’s thread', () => {
     drawn.length = 0
   })
 
+  it('refreshes Try again from the runtime’s rule even when the failed round stays the same', async () => {
+    const failed = {
+      ...round('r1', ''),
+      result: null,
+      failed: {
+        kind: 'notice' as const,
+        id: 'failure1',
+        text: 'The connection to Claude was lost.',
+        failure: 'transient',
+        tone: 'error' as const,
+      },
+    }
+    const onTryAgain = vi.fn()
+    const props = { threadId: 'th1', rounds: [failed], versionOf: () => '', onTryAgain }
+    const show = shown({ ...props, retryable: false })
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+    show({ ...props, retryable: true })
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(onTryAgain).toHaveBeenCalledOnce()
+    show({ ...props, retryable: false })
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+  })
+
   it('draws a finished round again only when what it shows changed, and opens its files as the person now does', async () => {
     const before = vi.fn()
     const now = vi.fn()

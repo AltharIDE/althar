@@ -347,6 +347,8 @@ interface Running {
   readonly ended: Deferred.Deferred<void>
   /** The brief the session's first turn starts with, and what it asks for when no input is waiting. */
   brief: Brief | undefined
+  /** A failed first turn with no input still has its brief to try again. */
+  retryBrief?: Brief | undefined
   /** Takes back the session's Althar tools. */
   readonly revokeTools: Effect.Effect<void>
   /** What its permission requests are decided by: its thread, task and rules. */
@@ -419,7 +421,7 @@ const heardContext = (running: Running, event: SessionEvent) => {
 /** The account asked for, where one was. */
 const accountOf = (input: { readonly accountId?: string }) => (input.accountId === undefined ? {} : { accountId: input.accountId })
 
-type StopRequest = { readonly state: 'completed' } | { readonly state: 'superseded'; readonly by: string }
+type StopRequest = { readonly state: 'completed' | 'lost' } | { readonly state: 'superseded'; readonly by: string }
 
 /**
  * Why a session's brief is written: a start, another agent taking over, or
@@ -684,11 +686,13 @@ export class Sessions extends Context.Service<
      * Tries the thread's last turn again, as the person asked, where it
      * failed (ADR-060): what they said in it goes again, with what waits
      * since, to the agent on the thread, started again where it went. False,
-     * and nothing done, where its last turn didn't fail.
+     * and nothing done, where neither a failed turn nor an ended session can be retried.
      */
     tryAgain(
       threadId: string,
     ): Effect.Effect<boolean, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | PlanOnly | Failure>
+    /** Whether Try again can act now: the same rule the window uses for its error's action. */
+    retryable(threadId: string): Effect.Effect<boolean, SqlError.SqlError>
     /** Serializes preparation and acceptance in arrival order, holding delivery until the whole burst is ready. */
     accepting<A, E, R>(threadId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
     /** Accepts input into the thread's queue, and delivers it when the session can take it. */
@@ -1808,6 +1812,7 @@ export class Sessions extends Context.Service<
           // A brief the agent never read goes with the next turn: refused, or out of usage before it began.
           // A compaction left the brief where it was.
           if ((refused || held) && !compacting) running.brief = brief
+          running.retryBrief = state === 'failed' && !compacting ? brief : undefined
           if (refused) {
             // Tried again shortly, rather than straight away.
             yield* Effect.forkIn(Effect.delay(Queue.offer(running.wake, undefined), Duration.seconds(1)), running.scope)
@@ -2040,6 +2045,7 @@ export class Sessions extends Context.Service<
        */
       const supervise = (running: Running) => {
         let ended: string | undefined
+        let interrupted = false
         return Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const outcome = yield* Effect.raceFirst(
@@ -2078,6 +2084,11 @@ export class Sessions extends Context.Service<
               const open = yield* sql<{
                 id: string
               }>`SELECT id FROM turn_deliveries WHERE provider_session_id = ${running.sessionId} AND state IN ('pending', 'delivered')`
+              // The prompt's exit handler may have recorded its failure before supervision got here.
+              const [last] = yield* sql<{ state: string; errorClass: string | null }>`
+                SELECT state, error_class FROM turn_deliveries WHERE provider_session_id = ${running.sessionId}
+                ORDER BY requested_at DESC, rowid DESC LIMIT 1`
+              interrupted = open.length > 0 || (last?.state === 'failed' && last.errorClass === 'agent_exited')
               for (const turn of open) {
                 yield* Effect.logWarning('Turn ended').pipe(
                   Effect.annotateLogs({
@@ -2112,14 +2123,15 @@ export class Sessions extends Context.Service<
               )
             }),
           )
-          // An agent that goes on its own leaves a line in the thread, so the person knows why nothing is happening.
-          if (state === 'lost')
+          // An idle disconnect lost no work. Only an interrupted turn needs a warning and a way out.
+          if (state === 'lost' && interrupted)
             yield* addItem(
               { projectId: running.thread.projectId, threadId: running.thread.threadId, sessionId: running.sessionId },
               'notice',
               {
                 source: 'runtime',
-                severity: 'warning',
+                severity: 'error',
+                failure: 'agent_exited',
                 title: `${running.entry.definition.name} stopped on its own.`,
                 description: {
                   task: 'Start the lead again to carry on.',
@@ -2128,7 +2140,7 @@ export class Sessions extends Context.Service<
                 }[running.thread.role],
               },
             )
-          yield* (state === 'lost' ? Effect.logWarning : Effect.logInfo)('Agent stopped').pipe(
+          yield* (state === 'lost' && interrupted ? Effect.logWarning : Effect.logInfo)('Agent stopped').pipe(
             Effect.annotateLogs({
               agent: running.entry.definition.id,
               session: running.sessionId,
@@ -2138,7 +2150,7 @@ export class Sessions extends Context.Service<
             }),
           )
           // One that went on its own is reported (ADR-047), by its agent and how its process ended: never what it wrote.
-          if (state === 'lost')
+          if (state === 'lost' && interrupted)
             yield* failures.report(Cause.die(agentLost(running.entry.definition.id, exit)), 'agent', running.entry.definition.id)
         }).pipe(
           Effect.ensuring(
@@ -2650,30 +2662,36 @@ export class Sessions extends Context.Service<
           yield* Effect.forkIn(
             run(
               Stream.runForEach(agent.events, (event) =>
-                Effect.andThen(
-                  Effect.andThen(
+                Effect.suspend(() => {
+                  if (event._tag === 'AgentFailure' && event.connectionLost === true && !running.turnRunning) {
+                    running.stopping = true
+                    return Effect.asVoid(Deferred.succeed(running.stopRequest, { state: 'lost' }))
+                  }
+                  return Effect.andThen(
                     Effect.andThen(
                       Effect.andThen(
                         Effect.andThen(
-                          Effect.sync(() => heardContext(running, event)),
-                          heardPlan(running, event),
-                        ),
-                        heard.record(event),
-                      ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause))),
-                      Effect.andThen(heardWork(running, event), heardBackground(running, event)),
+                          Effect.andThen(
+                            Effect.sync(() => heardContext(running, event)),
+                            heardPlan(running, event),
+                          ),
+                          heard.record(event),
+                        ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause))),
+                        Effect.andThen(heardWork(running, event), heardBackground(running, event)),
+                      ),
+                      live.publish({ _tag: 'Agent', threadId: thread.threadId, event }),
                     ),
-                    live.publish({ _tag: 'Agent', threadId: thread.threadId, event }),
-                  ),
-                  // A coordinator that says between turns its context is filling up is handed over now, not at its next turn.
-                  Effect.suspend(() =>
-                    event._tag === 'ContextUsage' &&
-                    thread.role === 'coordinator' &&
-                    !running.turnRunning &&
-                    dueForHandover(running.context)
-                      ? Queue.offer(running.wake, undefined)
-                      : Effect.void,
-                  ),
-                ),
+                    // A coordinator that says between turns its context is filling up is handed over now, not at its next turn.
+                    Effect.suspend(() =>
+                      event._tag === 'ContextUsage' &&
+                      thread.role === 'coordinator' &&
+                      !running.turnRunning &&
+                      dueForHandover(running.context)
+                        ? Queue.offer(running.wake, undefined)
+                        : Effect.void,
+                    ),
+                  )
+                }),
               ),
             ),
             scope,
@@ -3623,7 +3641,7 @@ export class Sessions extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [last] = yield* sql<{ agentId: string; model: string | null; effort: string | null }>`
-            SELECT agent_id, model, effort FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at DESC LIMIT 1`
+            SELECT agent_id, model, effort FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
           if (last === undefined) return false
           yield* start({
             threadId,
@@ -3634,18 +3652,36 @@ export class Sessions extends Context.Service<
           return true
         })
 
-      const tryAgain = (threadId: string) =>
+      const retryOf = (threadId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [last] = yield* sql<{ id: string; state: string; projectId: ProjectId }>`
             SELECT d.id, d.state, t.project_id FROM turn_deliveries d JOIN threads t ON t.id = d.thread_id
             WHERE d.thread_id = ${threadId} ORDER BY d.requested_at DESC, d.rowid DESC LIMIT 1`
-          if (last?.state !== 'failed') return false
-          // What the person said in it, unless it waits already, as after a usage limit or a lost connection.
+          const [session] = yield* sql<{ id: string; state: string }>`
+            SELECT id, state FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
+          const running = threads.get(threadId)
+          const ready =
+            session !== undefined &&
+            session.state !== 'starting' &&
+            !running?.stopping &&
+            !running?.turnRunning &&
+            last?.state !== 'pending' &&
+            last?.state !== 'delivered'
+          return { last, retryable: ready && (last?.state === 'failed' || running === undefined) }
+        })
+
+      const tryAgain = (threadId: string) =>
+        Effect.gen(function* () {
+          const { last, retryable } = yield* retryOf(threadId)
+          if (!retryable) return false
+          // A lost idle session, including an error kept by an older version: start afresh from the thread's record.
+          if (last?.state !== 'failed') return yield* startLast(threadId)
+          const sql = yield* SqlClient.SqlClient
+          // Its input, including news, unless it waits already, as after a usage limit or a lost connection.
           const said = yield* sql<{ id: string }>`
             SELECT i.id FROM turn_delivery_inputs di JOIN user_inputs i ON i.id = di.user_input_id
-            JOIN actors a ON a.id = i.author_actor_id
-            WHERE di.delivery_id = ${last.id} AND a.kind = 'person' AND i.state <> 'queued'`
+            WHERE di.delivery_id = ${last.id} AND i.state NOT IN ('queued', 'withdrawn')`
           yield* sql.withTransaction(
             Effect.forEach(
               said,
@@ -3665,8 +3701,10 @@ export class Sessions extends Context.Service<
             ),
           )
           const running = threads.get(threadId)
-          if (running !== undefined && !running.stopping) yield* Queue.offer(running.wake, undefined)
-          else yield* startLast(threadId)
+          if (running !== undefined && !running.stopping) {
+            if (running.retryBrief !== undefined) running.brief = running.retryBrief
+            yield* Queue.offer(running.wake, undefined)
+          } else return yield* startLast(threadId)
           return true
         })
 
@@ -3674,6 +3712,7 @@ export class Sessions extends Context.Service<
         start: (input) => run(start(input)),
         startLast: (threadId) => run(startLast(threadId)),
         tryAgain: (threadId) => run(tryAgain(threadId)),
+        retryable: (threadId) => run(Effect.map(retryOf(threadId), (retry) => retry.retryable)),
         accepting: inputBatches.accepting,
         send: (input) => run(send(input)),
         compact: (input) =>
