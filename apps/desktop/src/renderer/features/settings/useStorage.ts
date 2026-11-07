@@ -9,7 +9,8 @@ import { type StoragePlace, useServices } from '../../data/services'
  * The paths come at once; each size comes as the main process finishes
  * measuring it (it keeps them for the session), and Measure again asks for
  * all anew. A measure that fails is a size that couldn't be measured, not an
- * error on the page.
+ * error on the page. The last figures are kept, so coming back to About shows
+ * them at once; a Show that fails says why at its row.
  */
 
 export const PLACES: ReadonlyArray<StoragePlace> = ['profile', 'logs', 'worktrees']
@@ -18,6 +19,8 @@ export interface StorageModel {
   /** Each place's path, once main says. */
   readonly paths: Partial<Record<StoragePlace, string>>
   readonly figures: Record<StoragePlace, StorageFigure>
+  /** Why a place couldn't be opened, by place. */
+  readonly problems: Partial<Record<StoragePlace, string>>
   readonly measureAgain: () => void
   readonly show: (place: StoragePlace) => void
 }
@@ -28,10 +31,23 @@ const measuringAll = (): Record<StoragePlace, StorageFigure> => ({
   worktrees: { state: 'measuring' },
 })
 
+// The figures last seen, by host, so About doesn't flash "measuring…" for what it showed a moment ago.
+const remembered = new WeakMap<object, Record<StoragePlace, StorageFigure>>()
+
 export const useStorage = (): StorageModel => {
   const { host } = useServices()
   const [paths, setPaths] = useState<Partial<Record<StoragePlace, string>>>({})
-  const [figures, setFigures] = useState(measuringAll)
+  const [figures, setFigures] = useState(() => remembered.get(host) ?? measuringAll())
+  const [problems, setProblems] = useState<Partial<Record<StoragePlace, string>>>({})
+  const keep = useCallback(
+    (place: StoragePlace, figure: StorageFigure) =>
+      setFigures((now) => {
+        const next = { ...now, [place]: figure }
+        remembered.set(host, next)
+        return next
+      }),
+    [host],
+  )
   // Each round of measuring, so an answer to an earlier one doesn't overwrite a newer.
   const round = useRef(0)
 
@@ -42,15 +58,16 @@ export const useStorage = (): StorageModel => {
   const measure = useCallback(
     (refresh: boolean) => {
       const mine = ++round.current
-      setFigures(measuringAll())
+      // Asked for anew, the old figures give way; asked as About opens, they stay until main answers (usually from its cache, at once).
+      if (refresh) setFigures(measuringAll())
       for (const place of PLACES) {
         host.storage.size(place, refresh).then(
-          (size) => mine === round.current && setFigures((now) => ({ ...now, [place]: size })),
-          () => mine === round.current && setFigures((now) => ({ ...now, [place]: { state: 'failed' } })),
+          (size) => mine === round.current && keep(place, size),
+          () => mine === round.current && keep(place, { state: 'failed' }),
         )
       }
     },
-    [host],
+    [host, keep],
   )
 
   useEffect(() => {
@@ -69,7 +86,19 @@ export const useStorage = (): StorageModel => {
   return {
     paths,
     figures,
+    problems,
     measureAgain: () => measure(true),
-    show: (place) => void host.storage.show(place).catch(() => {}),
+    show: (place) => {
+      setProblems(({ [place]: _gone, ...rest }) => rest)
+      host.storage.show(place).catch((error: unknown) =>
+        setProblems((now) => ({
+          ...now,
+          [place]: (error instanceof Error ? error.message : String(error)).replace(
+            /^Error invoking remote method '[^']*': (Error: )?/,
+            '',
+          ),
+        })),
+      )
+    },
   }
 }

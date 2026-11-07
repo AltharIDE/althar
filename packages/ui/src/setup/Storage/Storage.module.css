@@ -15,3 +15,10 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+.problem {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--danger);
+}

@@ -73,7 +73,7 @@ export const Measuring: Story = {
   },
 }
 
-/** The walk ran out of time: what it counted so far, said to be approximate. */
+/** The walk ran out of time: what it counted so far, said to be a lower bound. */
 export const Approximate: Story = {
   args: {
     places: places({
@@ -81,7 +81,7 @@ export const Approximate: Story = {
     }),
   },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText('about 41 GB')).toBeInTheDocument()
+    await expect(within(canvasElement).getByText('at least 41 GB')).toBeInTheDocument()
   },
 }
 
@@ -117,5 +117,17 @@ export const Sizes: Story = {
   render: () => <p>{[0, 900, 5 * 1024, 640 * MB, 2.3 * GB, 14 * GB].map(storageSize).join(' · ')}</p>,
   play: async ({ canvasElement }) => {
     await expect(within(canvasElement).getByText('0 B · 900 B · 5 KB · 640 MB · 2.3 GB · 14 GB')).toBeInTheDocument()
+  },
+}
+
+/** Show failed, as where no file manager opens: the row says why, and the path stays there to copy. */
+export const ShowFailed: Story = {
+  args: {
+    places: places().map((place) => (place.id === 'logs' ? { ...place, problem: 'No application is registered to open folders' } : place)),
+  },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('alert')).toHaveTextContent(
+      'Couldn’t open it: No application is registered to open folders',
+    )
   },
 }

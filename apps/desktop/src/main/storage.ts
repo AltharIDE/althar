@@ -1,5 +1,5 @@
 import type { Stats } from 'node:fs'
-import { lstat, readdir } from 'node:fs/promises'
+import { lstat, readdir, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 /*
@@ -10,7 +10,11 @@ import { join, resolve } from 'node:path'
  * as what it points to, so a worktree's links can't send it out of the folder
  * or round in a circle), counts a file with several hard links once, and
  * leaves out the folders it is told are another row's, so nothing is counted
- * twice. What it can't read is skipped, and counted.
+ * twice. What it can't read is skipped, and counted. The place itself may be
+ * a link (a folder moved to another disk, with a link left in its place): that
+ * one is followed, and what is under it is not. All the walks share a few reads
+ * in flight, so three of them at once don't queue behind each other's work the
+ * main process's other file reads (logs, preferences, pictures).
  */
 
 export interface Measured {
@@ -40,6 +44,23 @@ const PARALLEL = 8
 /** Entries read at once in a directory; the clock is looked at between batches. */
 const BATCH = 64
 
+/** Reads in flight across every walk: the thread pool is shared with the rest of the main process. */
+const IN_FLIGHT = 4
+let flying = 0
+const queue: Array<() => void> = []
+const io = async <T>(read: () => Promise<T>): Promise<T> => {
+  if (flying >= IN_FLIGHT) await new Promise<void>((go) => queue.push(go))
+  else flying++
+  try {
+    return await read()
+  } finally {
+    // Hands the slot straight on to the next in line, or frees it.
+    const next = queue.shift()
+    if (next === undefined) flying--
+    else next()
+  }
+}
+
 const onDisk = (stats: Stats) => (stats.blocks > 0 ? stats.blocks * 512 : stats.size)
 
 export const measure = async (root: string, options: MeasureOptions = {}): Promise<Size> => {
@@ -51,7 +72,8 @@ export const measure = async (root: string, options: MeasureOptions = {}): Promi
 
   let top: Stats
   try {
-    top = await lstat(root)
+    // stat, not lstat: where the place is itself a link, it is what it points to that is measured.
+    top = await stat(root)
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'ENOENT' || (error as NodeJS.ErrnoException).code === 'ENOTDIR'
       ? { state: 'missing' }
@@ -60,6 +82,8 @@ export const measure = async (root: string, options: MeasureOptions = {}): Promi
 
   let bytes = 0
   let unreadable = 0
+  // The place's own listing couldn't be read: there is no size to give, not a small one.
+  let unlisted = false
   let approximate = false
   // Files with more than one link, by device and inode: each counts once.
   const linked = new Set<string>()
@@ -111,8 +135,9 @@ export const measure = async (root: string, options: MeasureOptions = {}): Promi
       const look = async (folder: string) => {
         let names
         try {
-          names = await readdir(folder, { withFileTypes: true })
+          names = await io(() => (over ? Promise.resolve([]) : readdir(folder, { withFileTypes: true })))
         } catch {
+          if (folder === root) unlisted = true
           unreadable++
           return
         }
@@ -128,7 +153,7 @@ export const measure = async (root: string, options: MeasureOptions = {}): Promi
               let stats: Stats
               try {
                 // lstat: a symlink is itself, never what it points to.
-                stats = await lstat(path)
+                stats = await io(() => lstat(path))
               } catch {
                 unreadable++
                 return
@@ -143,6 +168,7 @@ export const measure = async (root: string, options: MeasureOptions = {}): Promi
       pump()
     })
   }
+  if (unlisted) return { state: 'failed' }
   return { state: 'done', bytes, approximate, unreadable }
 }
 

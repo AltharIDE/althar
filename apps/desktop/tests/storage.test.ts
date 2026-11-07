@@ -98,6 +98,26 @@ describe('measuring a folder', () => {
   })
 })
 
+describe('the place itself', () => {
+  it('follows a link at the place’s own path, and measures what it points to', async () => {
+    const real = await folder()
+    await file(join(real, 'big'), 500_000)
+    const at = await folder()
+    const place = join(at, 'Althar')
+    await symlink(real, place)
+    const size = done(await measure(place))
+    expect(size.bytes).toBeGreaterThanOrEqual(500_000)
+  })
+
+  it('fails, not a small size, where its own listing cannot be read', async () => {
+    if (process.platform === 'win32' || process.getuid?.() === 0) return
+    const root = await folder()
+    await mkdir(join(root, 'locked'))
+    await chmod(join(root, 'locked'), 0o000)
+    expect(await measure(join(root, 'locked'))).toEqual({ state: 'failed' })
+  })
+})
+
 describe('time running out during a walk', () => {
   it('stops inside a big directory and says the size is approximate', async () => {
     const root = await folder()

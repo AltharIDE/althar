@@ -34,6 +34,8 @@ export interface StoragePlaceRow {
   readonly note: string
   readonly path: string
   readonly figure: StorageFigure
+  /** Why it couldn't be opened, after a Show that failed. */
+  readonly problem?: string
 }
 
 export interface StorageText {
@@ -42,10 +44,12 @@ export interface StorageText {
   measuring: string
   /** The size, in bytes, as words: 2.3 GB. */
   size: (bytes: number) => string
-  /** The walk ran out of time: at least this much. */
+  /** The walk ran out of time, so the size is a lower bound: at least this much. */
   approximate: (size: string) => string
   /** Some entries couldn't be read and are left out of the size. */
   unreadable: (count: number) => string
+  /** Opening the place failed, with what the system said. */
+  couldntOpen: (why: string) => string
   missing: string
   failed: string
   /** Opens the place in the system's file manager: Show in Finder. */
@@ -74,7 +78,8 @@ export const storageText: StorageText = {
   note: 'Where Althar keeps its data on this computer.',
   measuring: 'measuring…',
   size: storageSize,
-  approximate: (size) => `about ${size}`,
+  approximate: (size) => `at least ${size}`,
+  couldntOpen: (why) => `Couldn’t open it: ${why}`,
   unreadable: (count) => (count === 1 ? '1 item couldn’t be read' : `${count} items couldn’t be read`),
   missing: 'not there yet',
   failed: 'couldn’t be measured',
@@ -108,7 +113,7 @@ export function Storage({ places, onShow, onMeasureAgain, text, headingLevel }: 
     >
       <SettingList>
         {places.map((place) => (
-          <SettingRow key={place.id} title={place.title} note={<Path place={place} />}>
+          <SettingRow key={place.id} title={place.title} note={<Path place={place} t={t} />}>
             {() => (
               <>
                 <Figure figure={place.figure} t={t} />
@@ -130,13 +135,18 @@ export function Storage({ places, onShow, onMeasureAgain, text, headingLevel }: 
   )
 }
 
-function Path({ place }: { place: StoragePlaceRow }) {
+function Path({ place, t }: { place: StoragePlaceRow; t: StorageText }) {
   return (
     <>
       {place.note}
       <span className={s.path} title={place.path}>
         {place.path}
       </span>
+      {place.problem !== undefined && (
+        <span className={s.problem} role="alert">
+          {t.couldntOpen(place.problem)}
+        </span>
+      )}
     </>
   )
 }
