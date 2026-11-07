@@ -121,10 +121,12 @@ export const readsOf = (place: {
     // Whether or not they are there: git reading one held from it fails rather than going without.
     ...GIT_CONFIG_FILES.map((file) => join(gitConfig, file)),
   ].map(real)
-  const denied = [place.home, place.projectFolder, ...(place.earlier ?? []), ...place.repositories, join(gitConfig, 'credentials')].map(
-    real,
-  )
-  return { allowed: [...new Set(allowed)], denied: [...new Set(denied)] }
+  const taskFolders = [place.projectFolder, ...(place.earlier ?? [])].map(real)
+  const denied = [place.home, ...taskFolders, ...place.repositories, join(gitConfig, 'credentials')].map(real)
+  // A place that holds task folders is not given back whole: a task root chosen in Settings may sit in a toolchain's folder (~/.bun), and
+  // the broader allowance would otherwise override the denial of the task folders in it.
+  const holdsTaskFolder = (path: string) => taskFolders.some((folder) => folder === path || folder.startsWith(path + sep))
+  return { allowed: [...new Set(allowed.filter((path) => !holdsTaskFolder(path)))], denied: [...new Set(denied)] }
 }
 
 /** What a copy's fetch brings from the person's repository: its branches, each remote's as last fetched, and its tags. */

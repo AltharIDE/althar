@@ -208,4 +208,22 @@ describe("the coordinator's copies", () => {
     )
     for (const folder of [home, before, now]) rmSync(folder, { recursive: true, force: true })
   })
+
+  it('does not give back a toolchain folder that holds the task folders, whether the root is in it now or was', () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), 'althar-home-')))
+    mkdirSync(join(home, '.bun'))
+    const projectFolder = join(home, '.bun', 'tasks', 'meridian')
+    const { allowed, denied } = readsOf({
+      home,
+      projectFolder,
+      earlier: [],
+      folder: join(projectFolder, '.coordinator'),
+      mirrors: join(projectFolder, '.coordinator-mirrors'),
+      objects: [],
+      repositories: [],
+    })
+    assert.isFalse(allowed.includes(join(home, '.bun')), 'the toolchain folder that holds the task folders is allowed whole')
+    assert.isTrue(denied.includes(projectFolder))
+    rmSync(home, { recursive: true, force: true })
+  })
 })
