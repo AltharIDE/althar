@@ -235,7 +235,13 @@ project again.
   task needs one.
 - **A role** is one of the roles its settings offer, suggested
   from the repository's name. Tasks and the coordinator are told it.
-- **A fork** is known from its clone's remotes, an `upstream` beside
+- **A fork** is known as its code host says, where one is connected: Althar
+  asks it whether `origin`'s repository is a fork and of what, keeps the
+  answer an hour, and finds that repository among the clone's remotes by its
+  address, whatever the remote is called (`upstream`, `base`, an owner's
+  name). Where no remote has it, the repository's settings offer to add it,
+  as `upstream`, or `parent` where that name is taken. Without a host's
+  answer, it is known from its clone's remotes, an `upstream` beside
   `origin` on the same host. Its binding says where tasks' work goes: on the
   fork, as before; pull requests on the repository it was forked from, from
   the fork's branch; or, where the host says the person can push there, both
