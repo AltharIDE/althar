@@ -29,7 +29,6 @@ export interface SmallChangeText {
   fullTask: string
   makeFullTask: string
   merge: string
-  review: string
   failed: string
 }
 
@@ -39,7 +38,6 @@ export const smallChangeText: SmallChangeText = {
   fullTask: 'Full task',
   makeFullTask: 'Make it a full task',
   merge: 'Merge',
-  review: 'Its review',
   failed: 'Checks failed',
 }
 

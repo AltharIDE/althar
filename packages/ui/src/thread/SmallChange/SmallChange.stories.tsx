@@ -74,7 +74,9 @@ export const Merging: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('button', { name: 'Merge' }))
-    await expect(c.getByText('Merged PR #641')).toBeInTheDocument()
+    // Merged, the step is done and Merge is gone; the review it started shows once there is one.
+    await expect(c.getByText('Merged')).toBeInTheDocument()
+    await expect(c.queryByRole('button', { name: 'Merge' })).toBeNull()
   },
 }
 
