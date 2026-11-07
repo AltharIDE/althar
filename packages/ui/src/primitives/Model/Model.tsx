@@ -53,6 +53,40 @@ export function Model({ model, short, strong, className }: ModelProps) {
 
 const escape = (id: string) => id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
+// en-GB says "A, B and C", with no comma before the and, as Althar's copy reads.
+const listOf = new Intl.ListFormat('en-GB', { type: 'conjunction' })
+
+export interface ModelListProps {
+  models: readonly ModelInfo[]
+  /** The short name, with the full one as its title. */
+  short?: boolean
+  /** Weighted, for where the model is who is speaking. */
+  strong?: boolean
+  /** On each model's name. */
+  className?: string
+}
+
+/**
+ * Models as a list in words — A and B, A, B and C — each once, by id, with
+ * its mark beside its own name. One list, so it wraps as text does and a
+ * mark never parts from the name it belongs to.
+ */
+export function ModelList({ models, short, strong, className }: ModelListProps) {
+  const once = models.filter((model, i) => models.findIndex((other) => other.id === model.id) === i)
+  if (once.length === 0) return null
+  const parts = listOf.formatToParts(once.map((model) => model.id))
+  let at = 0
+  return (
+    <span>
+      {parts.map((part, i) => {
+        if (part.type === 'literal') return part.value
+        const model = once[at++]
+        return model === undefined ? null : <Model key={i} model={model} short={short} strong={strong} className={className} />
+      })}
+    </span>
+  )
+}
+
 export interface WithModelsProps {
   /** The models the text may name, by id. */
   models: readonly ModelInfo[]

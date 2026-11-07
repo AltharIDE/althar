@@ -1,5 +1,5 @@
 import { Icon } from '../../foundations/Icon/Icon'
-import { Model, type ModelInfo } from '../Model/Model'
+import { ModelList, type ModelInfo } from '../Model/Model'
 import { CheckState, unreachable } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import { LiveDot } from '../LiveDot/LiveDot'
@@ -76,9 +76,7 @@ export function Checks({ checks, className, text }: ChecksProps) {
             <span className={s.name}>
               {c.name}
               <VisuallyHidden>, {t.state[c.state]}</VisuallyHidden>
-              {c.by?.map((m) => (
-                <Model key={m.id} model={m} short className={s.by} />
-              ))}
+              {c.by !== undefined && c.by.length > 0 && <ModelList models={c.by} short className={s.by} />}
               {c.added && (
                 <span className={s.added}>
                   <Icon name="plus" size={9} />

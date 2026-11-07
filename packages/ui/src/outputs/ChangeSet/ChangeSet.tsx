@@ -12,7 +12,7 @@ import { Delta, FileChanges, type ChangedFile } from '../../primitives/FileChang
 import { Caret, Disclosure, DisclosureTrigger, Fold } from '../../primitives/Fold/Fold'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
-import { Model, type ModelInfo } from '../../primitives/Model/Model'
+import { ModelList, type ModelInfo } from '../../primitives/Model/Model'
 import s from './ChangeSet.module.css'
 
 /*
@@ -358,13 +358,10 @@ function ReviewLine({ review, t }: { review: ChangeReview; t: ChangeSetText }) {
         ? [<Icon key="m" name="check" size={12} />, t.reviewed.passed, s.good]
         : [<LiveDot key="m" ping />, t.reviewed.running, s.running]
   return (
-    <p className={cx(s.line, tone)}>
+    <p className={cx(s.line, s.review, tone)}>
       <span className={s.mark}>{mark}</span>
-      <span className={s.said}>
-        {said}{' '}
-        {review.by.map((model) => (
-          <Model key={model.id} model={model} className={s.model} />
-        ))}
+      <span className={cx(s.said, s.reviewSaid)}>
+        {said} <ModelList models={review.by} className={s.model} />
       </span>
     </p>
   )
