@@ -1448,3 +1448,5 @@ CREATE TABLE setting_changes (
   ) STRICT;
 
 CREATE INDEX setting_changes_by_project ON setting_changes(project_id, state, created_at);
+
+CREATE INDEX setting_changes_by_item ON setting_changes(item_id) WHERE item_id IS NOT NULL;
