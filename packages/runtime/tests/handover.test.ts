@@ -439,7 +439,17 @@ describe('handing the coordinator to a fresh session', () => {
           "- old-work: Old work. Open, with nothing running.\n  Waiting on the person: its pull request https://github.test/meridian/api/pull/12 is open, with 2 commits on the branch they haven't pushed to it.",
         )
         assert.include(brief, '[person] Where are we? [context:85]')
-        assert.match(brief, /\n\nAnd now\?$/)
+        // The draft the test made outside a turn has no plan when the next turn ends, so the coordinator is told so: that news is
+        // the fresh session's first prompt, last in its brief, and "And now?" comes as the prompt after it.
+        assert.match(brief, /\n\nAlthar's news \(not the person's word\): tidy-the-readme is a draft that has no plan[^\n]*$/)
+        yield* until(prompts(threadId), (rows) =>
+          rows.some(
+            (row) =>
+              row.providerSessionId === fresh.id &&
+              row.prompt.includes('And now?') &&
+              row !== turns.find((one) => one.providerSessionId === fresh.id),
+          ),
+        )
       }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.seconds(5) }))),
   )
 
