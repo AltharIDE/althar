@@ -9,6 +9,7 @@ import {
   AttachedFile,
   AttentionRequest,
   AutomationCard,
+  Irreversible,
   type BoardSnapshot,
   type ChangeSummary,
   CheckLogShown,
@@ -43,6 +44,7 @@ import {
   TaskAskItem,
   QuestionField,
   type ThreadItem,
+  ModelMoveItem,
   type ThreadSnapshot,
   type ScreenshotsOnChange,
   type TaskFindings,
@@ -64,6 +66,7 @@ import { Coordinator } from './Coordinator'
 import { PullRequestScreenshots } from './PullRequestScreenshots'
 import type { PullRequestFacts } from './pullRequestStanding'
 import { baseOf, changedBetween, type ChangedFile, changedFiles, fileDiff, type FileDiff, unchangedFileDiff } from './diffs'
+import { changedWords, smallChangeOf, smallChangeSkips } from './smallChange'
 import { builtIn, descriptionsIn, evidenceOf, evidencePaths, keptViewsIn, shownOf, unverifiedIn } from './evidence'
 import { graphOf, type RunRows, type StepRow } from './graph'
 import { taskFindingsOf } from './taskFindings'
@@ -213,6 +216,25 @@ export const text = (value: unknown, key: string): string => {
 }
 
 /** A tool call's skills, as `threads.ts` keeps them. */
+/** What a call to one of the person's MCP servers did, as its item keeps it (ADR-097); nothing for any other call. */
+const mcpOf = (kept: unknown) => {
+  const server = text(kept, 'server')
+  const tool = text(kept, 'tool')
+  if (server === '' || tool === '') return {}
+  const words = text(kept, 'words')
+  const link = text(kept, 'link')
+  return {
+    mcp: {
+      server,
+      tool,
+      acts: field(kept, 'acts') === true,
+      did: text(kept, 'did') || tool,
+      ...(words === '' ? {} : { words }),
+      ...(link.startsWith('https://') ? { link } : {}),
+    },
+  }
+}
+
 const skillOf = (skill: unknown) => {
   const names = field(skill, 'names')
   return Array.isArray(names) && names.length > 0
@@ -410,6 +432,11 @@ const callOf = (request: {
     ...(command === null ? {} : { label: shortCommand(command) }),
     // A permission the rules keep for the person whatever they let through: no "always allow" can answer it.
     ...(request.kind === 'permission' && field(payload, 'held') === true ? { held: true } : {}),
+    // What a permission that can't be undone says on its card (ADR-097).
+    ...Option.match(
+      request.kind === 'permission' ? Schema.decodeUnknownOption(Irreversible)(field(payload, 'irreversible')) : Option.none(),
+      { onNone: () => ({}), onSome: (irreversible) => ({ irreversible }) },
+    ),
     ...reachedOf(payload),
     stuck: request.kind === 'stuck' ? stuckOf(payload) : null,
     // What Althar asks before a Local task takes a checkout (ADR-091).
@@ -490,6 +517,7 @@ const decodeAutomation = Schema.decodeUnknownOption(AutomationCard)
 const decodePushRequest = Schema.decodeUnknownOption(PushRequestItem.fields.content)
 const decodeTaskAsk = Schema.decodeUnknownOption(TaskAskItem.fields.content)
 const decodeSettingChange = Schema.decodeUnknownOption(SettingChangeCard)
+const decodeModelMove = Schema.decodeUnknownOption(ModelMoveItem.fields.content)
 /** The task a notice is about, which the thread links to: one its lead started (ADR-097). */
 const decodeNoticeTask = Schema.decodeUnknownOption(
   Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String }),
@@ -573,6 +601,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           ...(row.asks === 1 ? { asks: true } : {}),
           ...(allowedBy === undefined ? {} : { allowedBy }),
           ...skillOf(field(content, 'skill')),
+          ...mcpOf(field(content, 'mcp')),
           pictures: picturesOf(field(content, 'pictures')),
           files: filesOf(field(content, 'files')),
           output: outputOf(field(content, 'output')),
@@ -780,6 +809,12 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       return Option.match(decodeSettingChange(content), {
         onNone: () => undefined,
         onSome: (card): ThreadItem => ({ ...base, kind: 'setting', content: card }),
+      })
+    // Auto's line on moving the lead to a lighter model (modelMoves.ts), written whole, and kept current with the person's keep.
+    case 'model_move':
+      return Option.match(decodeModelMove(content), {
+        onNone: () => undefined,
+        onSome: (move): ThreadItem => ({ ...base, kind: 'model_move', content: move }),
       })
     case 'setup': {
       const ended = field(content, 'ended')
@@ -2824,6 +2859,117 @@ export class Queries extends Context.Service<
           return { items, earlier }
         })
 
+      /**
+       * A small change's card, read from the task as it stands (the fast lane,
+       * README section 6): its plan's start, the lead's report, the pull
+       * request's checks and merge, and the review its merge started. Nothing
+       * is stored for it, so it never goes stale; null where the thread isn't
+       * a task's, or the task is no small change.
+       */
+      const smallChangeOfThread = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{
+            id: string
+            title: string
+            slug: string
+            projectId: string
+            createdAt: string
+            startedAt: string | null
+          }>`
+            SELECT k.id, k.title, k.slug, k.project_id AS projectId, k.created_at AS createdAt,
+              (SELECT min(r.created_at) FROM runs r WHERE r.task_id = k.id) AS startedAt
+            FROM threads t JOIN tasks k ON k.id = t.task_id WHERE t.id = ${threadId} AND t.kind = 'task'`
+          if (task === undefined) return undefined
+          const [plan] = yield* sql<{ parameters: string; proposedAt: string }>`
+            SELECT parameters, proposed_at AS proposedAt FROM task_plans WHERE task_id = ${task.id}
+            ORDER BY proposed_at DESC, rowid DESC LIMIT 1`
+          const small = smallChangeOf(plan?.parameters ?? null)
+          if (small === undefined) return undefined
+          const [changeRow] = yield* sql<{ product: string; snapshot: string; listening: number }>`
+            SELECT product, snapshot, listening FROM external_links WHERE task_id = ${task.id} AND kind = 'change'
+            ORDER BY created_at DESC, rowid DESC LIMIT 1`
+          const change = changeRow === undefined ? null : changeOf(parse(changeRow.snapshot), changeRow.product, changeRow.listening === 1)
+          const [reviewed] = yield* sql<{ taskId: string; slug: string; title: string; threadId: string }>`
+            SELECT k.id AS taskId, k.slug, k.title, t.id AS threadId
+            FROM external_links x JOIN tasks k ON k.id = x.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+            WHERE x.kind = 'review' AND x.url = ${change?.url ?? ''}
+            ORDER BY k.created_at DESC, k.rowid DESC LIMIT 1`
+          const [reported] = yield* sql<{ at: string }>`
+            SELECT created_at AS at FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
+              AND json_extract(content, '$.step') = 'implement' ORDER BY sequence LIMIT 1`
+          const [checks] = yield* sql<{ at: string }>`
+            SELECT created_at AS at FROM thread_items WHERE thread_id = ${threadId} AND kind = 'arrival'
+              AND json_extract(content, '$.kind') = 'checks' AND coalesce(json_extract(content, '$.failed'), 0) = 0
+            ORDER BY sequence DESC LIMIT 1`
+          const [merged] = yield* sql<{ at: string }>`
+            SELECT created_at AS at FROM thread_items WHERE thread_id = ${threadId} AND kind = 'arrival'
+              AND json_extract(content, '$.kind') = 'merged' ORDER BY sequence DESC LIMIT 1`
+          // One file's line count where the lead left one: read from its worktree, or the pull request's numbers.
+          const files =
+            change !== null && change.changedFiles === 1
+              ? yield* Effect.gen(function* () {
+                  const [worktree] = yield* worktreesOf(task.id)
+                  if (worktree?.baseCommit === null || worktree?.baseCommit === undefined) return []
+                  return yield* changedFiles(worktree.path, worktree.baseCommit).pipe(Effect.orElseSucceed(() => []))
+                })
+              : []
+          const words = changedWords({
+            files,
+            additions: change?.additions ?? null,
+            deletions: change?.deletions ?? null,
+            changedFiles: change?.changedFiles ?? null,
+          })
+          const passed = change?.checks !== null && change?.checks !== undefined && change.checks.outcome === 'passed'
+          const failed = change?.checks !== null && change?.checks !== undefined && change.checks.outcome === 'failed'
+          const afterMerge = change !== null && change.state === 'merged'
+          const at = task.startedAt ?? plan?.proposedAt ?? task.createdAt
+          const reviewBefore = reviewed !== undefined && !afterMerge
+          const card: ThreadItem = {
+            id: `small-change:${task.id}`,
+            sequence: 0,
+            agentId: null,
+            createdAt: at,
+            kind: 'small_change',
+            content: {
+              taskId: task.id,
+              threadId,
+              slug: task.slug,
+              title: task.title,
+              lead: {
+                agentId: small.implement.agentId,
+                model: small.implement.model,
+                ...(small.implement.effort === undefined ? {} : { effort: small.implement.effort }),
+              },
+              skips: smallChangeSkips(reviewBefore ? null : small.review),
+              steps: [
+                { key: 'started', what: 'Started', at, done: true },
+                {
+                  key: 'changed',
+                  what: reported === undefined ? 'Changing the code' : `Changed ${words}`,
+                  at: reported?.at ?? null,
+                  done: reported !== undefined,
+                },
+                {
+                  key: 'checks',
+                  what: failed ? 'Checks failed' : passed ? 'Checks pass' : 'Checks',
+                  at: checks?.at ?? null,
+                  done: passed,
+                },
+                { key: 'merged', what: 'Merged', at: merged?.at ?? null, done: afterMerge },
+              ],
+              change,
+              ...(reviewed === undefined || !afterMerge
+                ? {}
+                : { review: { taskId: reviewed.taskId, slug: reviewed.slug, threadId: reviewed.threadId, title: reviewed.title } }),
+              ...(reviewBefore
+                ? { fullTask: { taskId: reviewed.taskId, slug: reviewed.slug, threadId: reviewed.threadId, title: reviewed.title } }
+                : {}),
+            },
+          }
+          return card
+        })
+
       /** A page of a thread's items, as screens show them; a task's starts at a round (`fromRound`). */
       const pageOf = (
         threadId: string,
@@ -2849,7 +2995,12 @@ export class Queries extends Context.Service<
           const shown = yield* Effect.forEach(items, (row) => (row.kind === 'task' ? cardOf(row) : Effect.succeed(itemOf(row))), {
             concurrency: AT_ONCE,
           })
-          return { items: shown.flatMap((item) => (item === undefined ? [] : [item])), earlier }
+          // A small change's card opens its thread, where the person meets it first: read from the task, so it is current.
+          const card = page.before === undefined ? yield* smallChangeOfThread(threadId) : undefined
+          return {
+            items: [...(card === undefined ? [] : [card]), ...shown.flatMap((item) => (item === undefined ? [] : [item]))],
+            earlier,
+          }
         })
 
       /**

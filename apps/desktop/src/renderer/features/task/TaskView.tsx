@@ -38,6 +38,7 @@ import {
   ThreadSkeleton,
   TitleBar,
   SettleWays,
+  TaskParts,
 } from '@althar/ui'
 
 import { isAnswered, isSettleable, takesDone } from '../../shared/calls'
@@ -64,6 +65,7 @@ import { ago, clock, running, useNow } from '../../shared/time'
 import { shortFolder } from '../../shared/folders'
 import { documentVersions, editorPath, wholePath } from '../../shared/handed'
 import { roundsOf } from '../../shared/rounds'
+import { kindsOf, type PartsActions, partsOf } from './parts'
 import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
 import { type Outgoing, outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
 import { pillOf, runIdOf } from '../../shared/running'
@@ -82,6 +84,8 @@ import { usePostTeamReviews } from '../settings/usePostTeamReviews'
 import { HeldLimit } from './LimitCall'
 import { StuckCall } from './StuckCall'
 import { TaskThread } from './TaskThread'
+import { SmallChangeOf } from './SmallChangeOf'
+import { ModelMoveOf } from './ModelMoveOf'
 import { latestReport, reviewsIn, useReviewOutcomes } from './reviewOutcomes'
 import { ConnectPanel } from '../connections/ConnectPanel'
 import { serviceOfProduct } from '../connections/ways'
@@ -375,8 +379,9 @@ export function TaskView({
             take: text.carriedTake,
           },
   })
+  const { client, host: servicesHost } = useServices()
   // Images and files to send with what the person says, and which agents take images.
-  const images = useAttachments(kept, useServices().host)
+  const images = useAttachments(kept, servicesHost)
   const models = useModels()
   // Whether the person has their team's reviews posted once drafted: what a review's reach says it posts.
   const postsTeamReviews = usePostTeamReviews()?.on === true
@@ -799,18 +804,29 @@ export function TaskView({
       {...(model.doing === doing.markDone ? { busy: 'done' as const } : model.doing === doing.keep ? { busy: 'keep' as const } : {})}
     />
   ) : null
-  // What it changed opens over the window; what else it can do is in its menu.
+  // Its parts, just before the faces: what it changed is in its worktree's, which opens the changes over the window (ADR-097).
+  const partsActions: PartsActions = {
+    seeChanges: () => changes.show(),
+    changesKey: text.diffKey,
+    ...(snapshot.task.worktree === null || editor === undefined
+      ? {}
+      : { openInEditor: { name: editor.name, open: () => editors.open(editor.id) } }),
+    ...(snapshot.task.phase === 'settled' && snapshot.task.worktree !== null
+      ? { removeFolder: () => void client.removeTaskFolder(snapshot.task.id, null) }
+      : {}),
+    merge: (change) => (change.head === null ? undefined : void model.accept([{ head: change.head, url: change.url }])),
+    postReview: (draftId) => void model.postReview(draftId),
+    stopLaunch: (id) => void model.stopLaunch(id),
+    openUrl: (url) => void window.open(url, '_blank'),
+    toOutputs: () => setFace('out'),
+    askLead: (words) => void model.send(words),
+    ...(snapshot.task.changes.length === 0 && snapshot.host?.connected === true ? { openChange: () => void model.openChange() } : {}),
+    ...(can('abandon') && snapshot.task.review == null ? { attach: (pullRequest: string) => void model.attach(pullRequest, false) } : {}),
+  }
+  const parts = <TaskParts parts={partsOf(snapshot, partsActions)} kinds={kindsOf(snapshot, partsActions)} />
+  // What else it can do is in its menu.
   const actions = (
     <>
-      {files.length > 0 && (
-        <ChromeButton
-          icon="file"
-          label={text.files(files.length)}
-          kbd={text.diffKey}
-          expanded={changes.open}
-          onClick={() => changes.show()}
-        />
-      )}
       {/* What it built runs with no agent, in its worktree (ADR-044); a review runs nothing of what it reads. */}
       {snapshot.task.worktree !== null && snapshot.task.review == null && (
         <Runs
@@ -1085,6 +1101,7 @@ export function TaskView({
                 onFace={setFace}
                 // Finished and the person's to settle: Done and Keep for later, inside where it stands.
                 {...(settle === null ? {} : { beside: settle })}
+                parts={parts}
                 actions={actions}
               />
             }
@@ -1283,6 +1300,18 @@ export function TaskView({
                           }}
                         />
                       )}
+                      // A small change's card: Merge as the header's, and Make it a full task (README section 6).
+                      smallChange={(card) => (
+                        <SmallChangeOf
+                          card={card}
+                          named={named}
+                          busy={model.pending}
+                          onMerge={(change) => void model.accept([change])}
+                          {...(onOpenTask === undefined ? {} : { onOpen: onOpenTask })}
+                        />
+                      )}
+                      // Auto's line on moving the lead to a lighter model, with Keep and Undo (README section 7).
+                      modelMove={(move, itemId) => <ModelMoveOf move={move} itemId={itemId} named={named} />}
                       // A push the lead asked for is pushed as the outputs push: up to the head it shows.
                       push={(request, at) => (
                         <PushRequestOf

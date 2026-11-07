@@ -81,6 +81,8 @@ export type Part =
       readonly exit: number | null
       /** Every file it names, as it names them: what it touched, wrote or pointed at. */
       readonly touches: ReadonlyArray<string>
+      /** A call to one of the person's MCP servers: which, and what it did; one that acted outside stands out as a card (ADR-097). */
+      readonly mcp?: ToolMcp
     } & HandedParts)
   | {
       readonly kind: 'plan'
@@ -112,6 +114,8 @@ export type ReviewDraftContent = Extract<ThreadItem, { kind: 'review_draft' }>['
 export type AutomationCardContent = Extract<ThreadItem, { kind: 'automation' }>['content']
 export type TaskAskContent = Extract<ThreadItem, { kind: 'task_ask' }>['content']
 export type SettingChangeContent = Extract<ThreadItem, { kind: 'setting' }>['content']
+export type SmallChangeContent = Extract<ThreadItem, { kind: 'small_change' }>['content']
+export type ModelMoveContent = Extract<ThreadItem, { kind: 'model_move' }>['content']
 
 export type Block =
   | {
@@ -183,12 +187,25 @@ export type Block =
   | { readonly kind: 'task_ask'; readonly id: string; readonly ask: TaskAskContent }
   /** An agent's change to a setting: a line with Undo, or a card the person presses first (ADR-097). */
   | { readonly kind: 'setting'; readonly id: string; readonly change: SettingChangeContent }
+  /** A small change's card: what its one-step path skipped, each step with its time, and Merge (README section 6). */
+  | { readonly kind: 'small_change'; readonly id: string; readonly card: SmallChangeContent }
+  /** Auto's line on moving the lead to a lighter model, with the way back (README section 7). */
+  | { readonly kind: 'model_move'; readonly id: string; readonly move: ModelMoveContent }
   /**
    * The agent's turn runs on what it was last asked, and it hasn't said
    * anything yet: where its reply will start, held for it, with how long it
    * has been once that is worth saying, and whether that is longer than usual.
    */
   | { readonly kind: 'waiting'; readonly id: string; readonly took: string | null; readonly slow: boolean }
+
+/** What a call to one of the person's MCP servers did, as its row and card say it. */
+export interface ToolMcp {
+  readonly server: string
+  readonly acts: boolean
+  readonly did: string
+  readonly words?: string
+  readonly link?: string
+}
 
 /** ACP's tool kinds, as the kit's. */
 /** The notice earlier versions left in a thread when Althar restarted under its lead. */
@@ -380,6 +397,34 @@ const partOf = (
           }
     }
     case 'tool_call': {
+      const { mcp } = item.content
+      if (mcp !== undefined) {
+        const state = toolStateOf(item.content.status, turnRunning, item.content.declined)
+        const why = declinedWords(item.content.declinedBy, item.content.declinedWhy)
+        const space = mcp.did.indexOf(' ')
+        return {
+          kind: 'tool',
+          id: item.id,
+          toolKind: mcp.acts ? ToolKind.Comment : ToolKind.Mcp,
+          verb: space > 0 ? mcp.did.slice(0, space) : mcp.did,
+          target: space > 0 ? mcp.did.slice(space + 1) : '',
+          state,
+          command: null,
+          ...(state === ToolState.Declined && why !== undefined ? { why } : {}),
+          ran: null,
+          exit: null,
+          touches: [],
+          pictures: item.content.pictures,
+          files: item.content.files,
+          mcp: {
+            server: mcp.server,
+            acts: mcp.acts,
+            did: mcp.did,
+            ...(mcp.words === undefined ? {} : { words: mcp.words }),
+            ...(mcp.link === undefined ? {} : { link: mcp.link }),
+          },
+        }
+      }
       const ranKind = toolKindOf(item.content.toolKind)
       const { skill } = item.content
       // A load is a row of its own, naming the skill; a command that printed one stays what it ran, and says so.
@@ -683,6 +728,12 @@ export const blocksOf = (
         continue
       case 'setting':
         blocks.push({ kind: 'setting', id: item.id, change: item.content })
+        continue
+      case 'small_change':
+        blocks.push({ kind: 'small_change', id: item.id, card: item.content })
+        continue
+      case 'model_move':
+        blocks.push({ kind: 'model_move', id: item.id, move: item.content })
         continue
       case 'notice':
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.

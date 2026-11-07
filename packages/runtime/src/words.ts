@@ -130,6 +130,9 @@ export const agentSaid = (error: unknown): string | undefined => {
     // An agent that couldn't start: the sentence Althar wrote when it failed, or nothing where there was none to say.
     case 'SessionFailed':
       return text(error, 'summary')
+    // What the fast lane couldn't do, as it was written for the person.
+    case 'FastLaneRefused':
+      return text(error, 'message')
     default:
       return undefined
   }
@@ -340,6 +343,7 @@ export const words = (
       case 'LaunchRefused':
       case 'AttachRefused':
       case 'ReviewRefused':
+      case 'FastLaneRefused':
       case 'ScreenshotsRefused':
         return text(error, 'message')
       case 'AutomationRefused':

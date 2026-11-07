@@ -47,6 +47,8 @@ test('keeps Allow always as a rule, lets the next through by it, and asks again 
     await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await openRules(page)
+    // Asking about more than what can't be undone, as the person may (ADR-097).
+    await page.getByRole('button', { name: 'Ask about more' }).click()
     await page.getByRole('button', { name: 'allowed', exact: true }).click()
     await page.getByRole('menuitemradio', { name: 'Ask me' }).click()
     const goAhead = page.getByRole('listitem', { name: 'Go ahead' })

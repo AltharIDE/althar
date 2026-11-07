@@ -116,6 +116,7 @@ import { stopProcesses, treeOfCommand } from './stopping'
 import { outputText } from './reading'
 import { ToolServer } from './ToolServer'
 import { agentSaid, lostWords, startedAfreshWords, summarize } from './words'
+import { serversFor } from './agentTools'
 
 /*
  * Agent sessions on a task's thread (docs/architecture/03). The runtime
@@ -961,7 +962,8 @@ export class Sessions extends Context.Service<
         ).pipe(Effect.provideContext(context), Effect.ignore),
       )
       const setups = yield* Setups
-      const skillsConfig = (yield* RuntimeConfig).skills
+      const runtimeConfig = yield* RuntimeConfig
+      const skillsConfig = runtimeConfig.skills
       const stopGrace = (yield* RuntimeConfig).stopGrace ?? Duration.seconds(10)
       // How long a task is under way after its last agent went or its lead's turn ended, before its card is read again (DEV-173).
       const betweenAgents = (yield* RuntimeConfig).betweenAgents ?? Duration.millis(BETWEEN_AGENTS_MS)
@@ -2497,6 +2499,11 @@ export class Sessions extends Context.Service<
                         ),
                     }),
               })
+              // The person's own servers ticked for this role, whichever of their agents' settings they were found in (ADR-097).
+              const persons = yield* serversFor(toolRoleOf(thread), thread.projectId, connection.info.mcp.http).pipe(
+                Effect.provideService(RuntimeConfig, runtimeConfig),
+                Effect.provideService(SqlClient.SqlClient, sessionsSql),
+              )
               const agent = yield* connection.newSession({
                 cwd: cwdOf(thread),
                 // The coordinator, a reviewer and a review's lead only read: in the agent's read-only mode where that still lets it call
@@ -2507,7 +2514,7 @@ export class Sessions extends Context.Service<
                 ...heldFor(definition, reads),
                 // The coordinator's every turn is a reply the person reads: a refusal never starts one of its own (ADR-019).
                 ...(thread.role === 'coordinator' ? { refusals: 'withNext' as const } : {}),
-                mcpServers: [tools.server],
+                mcpServers: [tools.server, ...persons],
                 ...(skills !== undefined && definition.skills?.via.kind === 'directory' ? { additionalDirectories: [skills.folder] } : {}),
                 ...(definition.sessionMeta === undefined
                   ? {}

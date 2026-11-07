@@ -33,7 +33,7 @@ import { type Round as RoundModel, type RoundBlock, type Said, type Shown, type 
 import type { Block, StepResult } from '../../shared/thread'
 import { RuleReceipt } from '../../shared/RuleReceipt'
 import { SaidIn } from '../../shared/code/CodeHost'
-import { PartView, ThreadBlocks } from '../../shared/ThreadBlocks'
+import { McpActs, PartView, ThreadBlocks } from '../../shared/ThreadBlocks'
 import { WayOut } from '../../shared/WayOut'
 import { PublishedReport, ReviewReport } from './Reports'
 import s from './TaskThread.module.css'
@@ -192,11 +192,14 @@ const RoundView = memo(function RoundView({
     !block.live
   )
     return (
-      <WorkLine who={model} took={work.took} summary={work.counts}>
-        {work.steps.map((step) => (
-          <StepView key={step.id} step={step} threadId={threadId} worktree={worktree} />
-        ))}
-      </WorkLine>
+      <>
+        <WorkLine who={model} took={work.took} summary={work.counts}>
+          {work.steps.map((step) => (
+            <StepView key={step.id} step={step} threadId={threadId} worktree={worktree} />
+          ))}
+        </WorkLine>
+        <McpActs parts={block.parts} />
+      </>
     )
   const report = block.report
   const shown = report === null ? null : shownBy(report)
@@ -256,6 +259,7 @@ const RoundView = memo(function RoundView({
           {trail.length === 0 ? undefined : trail}
         </WorkedFor>
       )}
+      <McpActs parts={block.parts} />
       <RuleReceipt parts={block.parts} {...(project === undefined ? {} : { project })} />
       {pictures(block.shown.before)}
       {answer !== null &&

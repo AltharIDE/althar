@@ -674,6 +674,8 @@ describe('the API', () => {
       Effect.gen(function* () {
         const { client, grant } = yield* connected()
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        // Asking about more than what can't be undone, as the person may: a deploy asks (ADR-097).
+        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, allowEverything: false })
         const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Deploy' })
         yield* client.SwitchAgent({ commandId: commandId(), threadId: task.threadId, agentId: 'codex', model: 'large' })
         yield* until(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
@@ -779,7 +781,7 @@ describe('the API', () => {
       Effect.gen(function* () {
         const { client, grant } = yield* connected()
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
-        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, permissions: 'ask' })
+        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, permissions: 'ask', allowEverything: false })
         const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Look' })
         yield* client.SwitchAgent({ commandId: commandId(), threadId: task.threadId, agentId: 'codex', model: 'large' })
         yield* until(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
@@ -1195,8 +1197,8 @@ describe('project rules, through the API', () => {
           projectId: project.id,
           revision: 1,
           permissions: 'rules',
-          allowEverything: false,
-          alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'],
+          allowEverything: true,
+          alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside', 'speak'],
           never: [],
           alwaysAllow: [],
           commands: [],

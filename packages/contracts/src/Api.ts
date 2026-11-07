@@ -402,6 +402,102 @@ export const NEW_PROJECT_DEFAULTS: NewProjectDefaults = { permissions: 'rules', 
 export const SealStyle = Schema.Literals(['ring', 'wax', 'colophon'])
 export type SealStyle = typeof SealStyle.Type
 
+/** The roles the person's MCP servers and skills load in (ADR-097): a task's lead, the reviewer, the coordinator. */
+export const ToolRole = Schema.Literals(['lead', 'reviewer', 'coordinator'])
+export type ToolRole = typeof ToolRole.Type
+
+/** The person's agents whose servers and skills Althar reads, and keeps the same where they ask it to. */
+export const SyncedAgent = Schema.Literals(['claude', 'codex', 'opencode'])
+export type SyncedAgent = typeof SyncedAgent.Type
+
+/** Where a server or a skill was found: one of the person's agents, a repository of the project, a plugin, or Althar's catalog. */
+export const ToolSource = Schema.Struct({
+  from: Schema.Literals(['claude', 'codex', 'opencode', 'repository', 'plugin', 'althar']),
+  /** The file or folder, as the person names it: ~/.claude.json, .mcp.json. */
+  where: Schema.String,
+})
+export type ToolSource = typeof ToolSource.Type
+
+/** How a server or a skill stands in each of the person's agents, for sync's marks beside its name. */
+export const ToolHere = Schema.Literals(['in', 'added', 'missing', 'out', 'differs', 'cant'])
+export type ToolHere = typeof ToolHere.Type
+
+/** One of the person's MCP servers or skills, a row of Settings' table: where it was found, which roles get it, and how it stands in each agent. */
+export const ToolRow = Schema.Struct({
+  name: Schema.String,
+  /** What a server runs or calls; what a skill is for. */
+  about: Schema.String,
+  sources: Schema.Array(ToolSource),
+  /** The roles that get it, here: for every project, or the project asked about. */
+  roles: Schema.Array(ToolRole),
+  here: Schema.Record(SyncedAgent, ToolHere),
+})
+export type ToolRow = typeof ToolRow.Type
+
+/** Something sync can't do alone, which the person settles: under To settle, problems first. */
+export const SyncSettle = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('unreadable'), agent: SyncedAgent, file: Schema.String, problem: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literal('differs'),
+    name: Schema.String,
+    ways: Schema.Array(Schema.Struct({ agent: SyncedAgent, runs: Schema.String })),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal('cant'),
+    name: Schema.String,
+    agent: SyncedAgent,
+    why: Schema.Literals(['sse', 'secret', 'headers', 'reference']),
+  }),
+  Schema.Struct({ kind: Schema.Literal('signIn'), name: Schema.String, agents: Schema.Array(SyncedAgent) }),
+])
+export type SyncSettle = typeof SyncSettle.Type
+
+/** One agent's file or folder that sync writes to, and what it added there or would. */
+export const SyncTarget = Schema.Struct({
+  agent: SyncedAgent,
+  /** As the person names it: ~/.codex/config.toml. */
+  where: Schema.String,
+  /** What it added there, while on; what turning it on would add, while off. */
+  adds: Schema.Array(Schema.String),
+  /** What is kept out of it. */
+  out: Schema.Array(Schema.String),
+})
+export type SyncTarget = typeof SyncTarget.Type
+
+/** A change sync saw or made since it was turned on: a line under Since, with its Undo or Put it back. */
+export const SyncSince = Schema.Struct({
+  id: Schema.String,
+  at: Schema.String,
+  name: Schema.String,
+  kind: Schema.Literals(['copied', 'tookOut']),
+  from: SyncedAgent,
+  to: Schema.Array(SyncedAgent),
+  undone: Schema.Boolean,
+})
+export type SyncSince = typeof SyncSince.Type
+
+/** How a sync switch stands: on or off, To settle, Since, and each agent's file. */
+export const SyncView = Schema.Struct({
+  on: Schema.Boolean,
+  settle: Schema.Array(SyncSettle),
+  since: Schema.Array(SyncSince),
+  targets: Schema.Array(SyncTarget),
+  /** What its last write couldn't do, in each agent's own words. */
+  errors: Schema.Array(Schema.String),
+})
+export type SyncView = typeof SyncView.Type
+
+/** The person's MCP servers and skills, as Settings shows them, and the two switches that keep their agents the same. */
+export const AgentTools = Schema.Struct({
+  /** False where this Althar reads no agent's settings (a test, a sandbox): the sections say so and nothing else. */
+  enabled: Schema.Boolean,
+  servers: Schema.Array(ToolRow),
+  skills: Schema.Array(ToolRow),
+  serverSync: SyncView,
+  skillSync: SyncView,
+})
+export type AgentTools = typeof AgentTools.Type
+
 /** The person's settings for the app as a whole. */
 export const AppSettings = Schema.Struct({
   plansAndReviews: PlansAndReviews,
@@ -686,7 +782,7 @@ export const FolderReading = Schema.Struct({
 export type FolderReading = typeof FolderReading.Type
 
 /** The kinds of request a project's rules can have ask the person, or refuse (ADR-013). */
-export const RuleKind = Schema.Literals(['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'])
+export const RuleKind = Schema.Literals(['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside', 'speak'])
 export type RuleKind = typeof RuleKind.Type
 
 /**
@@ -1442,6 +1538,22 @@ export const ToolCallItem = Schema.Struct({
     allowedBy: Schema.optional(AllowedBy),
     /** The skills it loads, by the agent's own word (`reported`), or a read of their `SKILL.md`, where the agent has no such word. */
     skill: Schema.optional(Schema.Struct({ names: Schema.Array(Schema.String), reported: Schema.Boolean })),
+    /**
+     * A call to one of the person's MCP servers (ADR-097): the server and its
+     * tool, whether it acts on the outside world or only reads, what it did in
+     * a few words, the words it posted, and where to see what it did, read
+     * from its result.
+     */
+    mcp: Schema.optional(
+      Schema.Struct({
+        server: Schema.String,
+        tool: Schema.String,
+        acts: Schema.Boolean,
+        did: Schema.String,
+        words: Schema.optional(Schema.String),
+        link: Schema.optional(Schema.String),
+      }),
+    ),
     ...handedFields,
     output: Schema.NullOr(CommandOutput),
     exit: Schema.NullOr(Schema.Number),
@@ -2454,8 +2566,84 @@ export const SettingItem = Schema.Struct({
   content: SettingChangeCard,
 })
 
+/** One step of a small change, as its card shows it: what happened, and when. */
+export const SmallChangeStep = Schema.Struct({
+  key: Schema.Literals(['started', 'changed', 'checks', 'merged', 'review']),
+  /** What happened, in a few words: "Changed 1 line in RunMenu.tsx", "Checks pass". */
+  what: Schema.String,
+  /** When it happened; null until it has. */
+  at: Schema.NullOr(Schema.String),
+  done: Schema.Boolean,
+})
+
+/**
+ * A small change's card in its thread: the one-step path a change of a few lines takes. It says what it skipped, each
+ * step with its time, and Merge, which still asks; Make it a full task takes the review before it merges instead of
+ * after. Althar posts it when the change starts and keeps it current.
+ */
+export const SmallChangeItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('small_change'),
+  content: Schema.Struct({
+    taskId: Schema.String,
+    /** The task's own thread, where its title opens it. */
+    threadId: Schema.String,
+    slug: Schema.String,
+    title: Schema.String,
+    /** Who leads it, and on which model and effort: the lighter one the small path picks. */
+    lead: Schema.Struct({
+      agentId: Schema.String,
+      model: Schema.NullOr(Schema.String),
+      effort: Schema.optional(Schema.NullOr(Schema.String)),
+    }),
+    /** What the path leaves out, in a short line each: "no plan", "reviewed after it merges". */
+    skips: Schema.Array(Schema.String),
+    steps: Schema.Array(SmallChangeStep),
+    /** Its pull request as last seen, where it has one: Merge acts on it, and the card says when it is merged. */
+    change: Schema.NullOr(ChangeSummary),
+    /** Where its review went once it merged, where one was started: the task that reads the merged change. */
+    review: Schema.optional(
+      Schema.NullOr(Schema.Struct({ taskId: Schema.String, slug: Schema.String, threadId: Schema.String, title: Schema.String })),
+    ),
+    /** The person made it a full task, reviewed before it merges: the card folds to the line saying what was made. */
+    fullTask: Schema.optional(
+      Schema.NullOr(Schema.Struct({ taskId: Schema.String, slug: Schema.String, threadId: Schema.String, title: Schema.String })),
+    ),
+  }),
+})
+
+/**
+ * Auto moving a task's lead to a lighter model, in its thread, because the plan is nearly out: from and to which model,
+ * the plan's usage and when it resets, and the way back for this task. Its words after the line are the new model's.
+ * Althar posts it and keeps it current.
+ */
+export const ModelMoveItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('model_move'),
+  content: Schema.Struct({
+    taskId: Schema.String,
+    /** The model it moved from, and the lighter one it moved to, as the agent's ids for them. */
+    from: Schema.Struct({ agentId: Schema.String, model: Schema.NullOr(Schema.String) }),
+    to: Schema.Struct({ agentId: Schema.String, model: Schema.NullOr(Schema.String) }),
+    /** Why: which window of the plan, the share of it used, and when it resets. */
+    why: Schema.Struct({
+      /** 0 to 100, used. */
+      percent: Schema.Number,
+      /** The plan's own name, as the line says it: Claude. */
+      plan: Schema.String,
+      /** The window as a thread says it: "the week". */
+      window: Schema.String,
+      resetsAt: Schema.NullOr(Schema.String),
+    }),
+    /** The person kept the heavier model for this task: the way back was pressed, and Undo puts the move again. */
+    kept: Schema.Boolean,
+  }),
+})
+
 export const ThreadItem = Schema.Union([
   SettingItem,
+  SmallChangeItem,
+  ModelMoveItem,
   UserMessageItem,
   AgentTextItem,
   ToolCallItem,
@@ -2695,6 +2883,35 @@ export const StuckStep = Schema.Struct({
 })
 export type StuckStep = typeof StuckStep.Type
 
+/**
+ * The kinds of what can't be undone, as a project's Rules list them
+ * (ADR-097): lost work and history, publishing and merging, speaking for
+ * the person, and secrets.
+ */
+export const IrreversibleKind = Schema.Literals(['history', 'publish', 'speak', 'secrets'])
+export type IrreversibleKind = typeof IrreversibleKind.Type
+
+/** Where a call that can't be undone goes: one of the person's MCP servers and its tool, or a command. */
+export const IrreversibleThrough = Schema.Union([
+  Schema.Struct({ server: Schema.String, tool: Schema.String }),
+  Schema.Struct({ command: Schema.String }),
+])
+
+/** What a permission that can't be undone says on its card: the kind, the action, what can't be taken back, what it would post. */
+export const Irreversible = Schema.Struct({
+  kind: IrreversibleKind,
+  /** The action, as its button says it: Merge #635. */
+  verb: Schema.String,
+  /** What it did, once allowed: Merged #635. */
+  done: Schema.String,
+  /** What can't be taken back, in one line. */
+  stays: Schema.String,
+  /** The words it would post, for one that speaks for the person. */
+  words: Schema.optional(Schema.String),
+  through: IrreversibleThrough,
+})
+export type Irreversible = typeof Irreversible.Type
+
 /** A call waiting on the person: a permission the rules keep for them, a step that needs them, or an agent's question. */
 export const AttentionRequest = Schema.Struct({
   id: Schema.String,
@@ -2708,6 +2925,8 @@ export const AttentionRequest = Schema.Struct({
   label: Schema.optional(Schema.String),
   /** For a permission: a kind or a command the project always asks about keeps it, so no "always allow" can answer it. */
   held: Schema.optional(Schema.Boolean),
+  /** For a permission the rules read as what can't be undone: what its card says (ADR-097). */
+  irreversible: Schema.optional(Irreversible),
   /**
    * For a call that waits while the person is away: where else it reached them, and when. The turn isn't held by it: the
    * lead goes on with what doesn't need the answer, and the call is kept until answered.
@@ -3972,6 +4191,37 @@ export const Api = RpcGroup.make(
   /** Switches one of an agent's models off, or on again: one switched off is never planned, and no picker offers it. */
   command('SetModelBlocked', { agentId: Schema.String, model: Schema.String, blocked: Schema.Boolean }, Schema.Void),
   call('GetSettings', {}, AppSettings),
+  /** The person's MCP servers and skills, which roles get each, for every project or one, and how sync stands (ADR-097). */
+  call('GetAgentTools', { projectId: Schema.NullOr(Schema.String) }, AgentTools),
+  /** Which roles get one of the person's servers or skills: for every project, or for one. */
+  command(
+    'SetToolRoles',
+    {
+      kind: Schema.Literals(['server', 'skill']),
+      name: Schema.String,
+      roles: Schema.Array(ToolRole),
+      projectId: Schema.NullOr(Schema.String),
+    },
+    Schema.Void,
+  ),
+  /** Turns a sync switch on, or off with what it added left in or taken back out. */
+  command('SetToolSync', { kind: Schema.Literals(['server', 'skill']), on: Schema.Boolean, takeBack: Schema.Boolean }, Schema.Void),
+  /** Keeps a server or a skill out of one agent (taken back out where sync added it), or puts it back. */
+  command(
+    'SetToolKeptOut',
+    { kind: Schema.Literals(['server', 'skill']), agent: SyncedAgent, name: Schema.String, out: Schema.Boolean },
+    Schema.Void,
+  ),
+  /** For one set up two ways: whose way it runs everywhere, or left out of syncing. */
+  command(
+    'PickToolWay',
+    { kind: Schema.Literals(['server', 'skill']), name: Schema.String, way: Schema.Literals(['claude', 'codex', 'opencode', 'apart']) },
+    Schema.Void,
+  ),
+  /** Undoes a line under Since. */
+  command('UndoToolSync', { id: Schema.String }, Schema.Void),
+  /** Starts a server's sign-in in one of the person's agents, through its own command. */
+  command('SignInToolServer', { agent: SyncedAgent, name: Schema.String }, Schema.Void),
   /** Turns Althar's co-authoring of commits and pull requests on or off; the agents' own credit lines go either way. */
   command('SetCoAuthor', { on: Schema.Boolean }, Schema.Void),
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
@@ -4002,6 +4252,15 @@ export const Api = RpcGroup.make(
   command('DeleteAutomation', { automationId: Schema.String }, Schema.Void),
   /** The person answers the coordinator's card asking to stop, hold, restart or settle a task: yes does it, as their own press would. */
   command('AnswerTaskAsk', { itemId: Schema.String, yes: Schema.Boolean }, Schema.Void),
+  /**
+   * Takes a small change out of the fast lane: its change is reviewed before it merges, by the reviewer its plan named,
+   * instead of after. The card folds to the line saying what was made.
+   */
+  command('MakeItAFullTask', { taskId: Schema.String }, Schema.Void),
+  /** Keeps the heavier model for this task, as the line Auto moved the lead with offers: Auto moves nothing more here. */
+  command('KeepTheModel', { itemId: Schema.String }, Schema.Void),
+  /** Puts the move Auto made again, after Keep: the task's lead may move back to the lighter model. */
+  command('UndoTheModelMove', { itemId: Schema.String }, Schema.Void),
   /** Puts back what the coordinator changed an automation from, as the card in its thread shows it. */
   command('UndoAutomationChange', { itemId: Schema.String }, Schema.Void),
   /** The person answers an agent's card asking to change a setting that loosens what asks: yes makes it, as their own change. */

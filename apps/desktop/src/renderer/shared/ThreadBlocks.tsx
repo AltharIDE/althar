@@ -26,6 +26,8 @@ import {
   WorkedFor,
   WorkNow,
   You,
+  McpAct,
+  McpServer,
 } from '@althar/ui'
 
 import { CommandOutput } from './CommandOutput'
@@ -37,6 +39,7 @@ import { fileAttachments } from './files'
 import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
 import { WayOut } from './WayOut'
+import { serverBrand } from './mcpServers'
 import { keyOf, pastedIn } from './pasted'
 import { RuleReceipt } from './RuleReceipt'
 import { SaidIn } from './code/CodeHost'
@@ -51,6 +54,8 @@ import type {
   ReviewDraftContent,
   Part,
   PushRequestContent,
+  ModelMoveContent,
+  SmallChangeContent,
   TaskAskContent,
   QuestionContent,
   RunContent,
@@ -177,6 +182,20 @@ function SetupView({ setup }: { setup: SetupContent }) {
  * or the file it works on). One from before Althar kept output, too long for
  * its row, opens to show it whole.
  */
+/**
+ * What a round's calls to the person's MCP servers did outside, each a card
+ * under its work (ADR-097): what acted on the world stands out of what only
+ * read, which stays folded in the work.
+ */
+export function McpActs({ parts }: { parts: ReadonlyArray<Part> }) {
+  const acts = parts.flatMap((part) =>
+    part.kind === 'tool' && part.mcp?.acts === true && part.state === ToolState.Done ? [{ id: part.id, mcp: part.mcp }] : [],
+  )
+  return acts.map(({ id, mcp }) => (
+    <McpAct key={id} server={mcp.server} brand={serverBrand(mcp.server)} did={mcp.did} words={mcp.words} link={mcp.link} />
+  ))
+}
+
 /** Where Althar's lines under a call lead: the project's rules, an agent's sign-in. The host that can open them provides it. */
 export interface ThreadWays {
   readonly onRules?: () => void
@@ -226,6 +245,7 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
       target={part.target}
       state={part.state}
       {...(part.toolKind === ToolKind.Run && part.skills !== undefined ? { meta: text.readSkill(part.skills.names) } : {})}
+      {...(part.mcp === undefined ? {} : { meta: <McpServer name={part.mcp.server} brand={serverBrand(part.mcp.server)} /> })}
       {...(part.why === undefined ? {} : { why: part.why })}
       {...(part.command === null ? {} : { copy: part.command })}
       {...(part.state === ToolState.Failed && part.exit !== null ? { exit: part.exit } : {})}
@@ -477,6 +497,8 @@ export function ThreadBlocks({
   review,
   automation,
   taskAsk,
+  smallChange,
+  modelMove,
   queued,
   retryable,
   onTryAgain,
@@ -520,6 +542,10 @@ export function ThreadBlocks({
   automation?: (automation: AutomationCardContent, itemId: string) => ReactNode
   /** Draws the coordinator's card asking to stop, hold, restart or settle a task, by its item, which answering it names. */
   taskAsk?: (ask: TaskAskContent, itemId: string) => ReactNode
+  /** Draws a small change's card, by its item, which Merge and Make it a full task name. */
+  smallChange?: (card: SmallChangeContent, itemId: string) => ReactNode
+  /** Draws Auto's line on moving the lead to a lighter model, by its item, which Keep and Undo name. */
+  modelMove?: (move: ModelMoveContent, itemId: string) => ReactNode
   /** What a message still waiting says: who reads it next. */
   queued?: string
   /** The runtime's retry eligibility, refreshed with the thread's head. */
@@ -612,6 +638,10 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{automation?.(block.automation, block.id)}</Fragment>
       case 'task_ask':
         return <Fragment key={block.id}>{taskAsk?.(block.ask, block.id)}</Fragment>
+      case 'small_change':
+        return <Fragment key={block.id}>{smallChange?.(block.card, block.id)}</Fragment>
+      case 'model_move':
+        return <Fragment key={block.id}>{modelMove?.(block.move, block.id)}</Fragment>
       case 'setting':
         return <SettingChangeOf key={block.id} change={block.change} itemId={block.id} />
       case 'waiting':
