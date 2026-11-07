@@ -9,7 +9,7 @@ import type { CommentFact, ComposerComment } from '../composer/Comments/Comments
 
 const svg = (width: number, height: number, body: string) =>
   `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${body}</svg>`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">${body}</svg>`,
   )}`
 
 const rows = (width: number, top: number, n: number) =>
