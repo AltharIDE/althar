@@ -83,3 +83,12 @@ export const askedOf = (permission: string, mediaTypes: ReadonlyArray<string> = 
  * anywhere else, and is only refused.
  */
 export const downloadOffered = (address: string): string | null => (refusalOf(address) === null ? address : null)
+
+/**
+ * A file link pressed on a web page never becomes a navigation: Chromium
+ * blocks it in the page and only says so in its console. That saying is
+ * read, so the line under the bar says it too. A page can write the same
+ * words to its console; all that does is show the same line.
+ */
+export const blockedFile = (level: string, message: string): boolean =>
+  level === 'error' && message.startsWith('Not allowed to load local resource: file:')

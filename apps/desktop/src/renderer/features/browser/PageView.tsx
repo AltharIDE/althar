@@ -137,17 +137,27 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
   const [writing, setWriting] = useState<Writing | null>(null)
   const covered = useCovered(panel, () => document.getElementById('root'))
   const [still, setStill] = useState<string | null>(null)
+  // Whether the page should be aside now: a picture that finishes drawing after what was over it went must not hide it again.
+  const aside = useRef(false)
+  aside.current = covered || writing !== null
   // While something of the window's is over it, or a comment is written on it, a picture shows in its place; the page steps aside once it is drawn.
   useEffect(() => {
     if (browser === undefined) return
     let live = true
-    if (writing !== null) setStill(writing.pointed.still)
-    else if (covered)
-      void browser.still(owner).then((picture) => {
-        if (!live) return
-        if (picture === null) void browser.cover(owner, true)
-        setStill(picture)
-      })
+    if (writing !== null) {
+      // With no picture of the page, the comment is written over the panel's own ground: the page steps aside at once.
+      if (writing.pointed.still === '') void browser.cover(owner, true)
+      setStill(writing.pointed.still === '' ? null : writing.pointed.still)
+    } else if (covered)
+      void browser
+        .still(owner)
+        .catch(() => null)
+        .then((picture) => {
+          if (!live) return
+          // With no picture to show, the page steps aside all the same: what is over it must show.
+          if (picture === null) void browser.cover(owner, true)
+          setStill(picture)
+        })
     else {
       void browser.cover(owner, false)
       // The picture goes once the page is back over it, so nothing between blinks.
@@ -213,7 +223,8 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
     const { pointed, comment, n } = writing
     setWriting(null)
     const on = { kind: 'page' as const, picked: pointed.picked, address: pointed.address, viewport: pointed.viewport }
-    const crop = pointed.crop === null ? null : await cropOf(pointed.crop, n)
+    // A crop that can't be read goes without; the comment never does.
+    const crop = pointed.crop === null ? null : await cropOf(pointed.crop, n).catch(() => null)
     if (comment === null) gather(draft, { id: crypto.randomUUID(), note, on, crop })
     else rewrite(draft, comment.id, note, pointed.crop === null ? undefined : { on, crop })
   }
@@ -287,7 +298,9 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
         placeRef={setPlace}
         page={device}
         still={still}
-        onStill={() => void browser.cover(owner, true)}
+        onStill={() => {
+          if (aside.current) void browser.cover(owner, true)
+        }}
         {...(empty ? { empty: <PageEmpty>{text.empty}</PageEmpty> } : {})}
       >
         {writing !== null && (

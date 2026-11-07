@@ -21,14 +21,19 @@ interface Place {
 const meets = (a: DOMRect, b: Place) =>
   a.width > 0 && a.height > 0 && a.left < b.x + b.width && a.right > b.x && a.top < b.y + b.height && a.bottom > b.y
 
+/*
+ * What draws over the window: a popover's, menu's or tooltip's content, a
+ * dialog, and a dialog's scrim. Not the containers portals leave in the
+ * body, which can span the window and draw nothing.
+ */
+const OVER = '[data-radix-popper-content-wrapper], [role="dialog"], [role="alertdialog"], [data-state="open"]'
+
 /** Whether any of what opens over the window, past its root, is over the place now. */
 export const coveredNow = (root: Element | null, place: Place): boolean => {
   for (const child of document.body.children) {
-    if (child === root || child.contains(root) || !(child instanceof HTMLElement)) continue
-    if (child.localName === 'script' || child.localName === 'style' || child.hidden) continue
-    // A dialog's scrim covers the window whole; anything else, by what it draws.
-    for (const drawn of [child, ...child.querySelectorAll<HTMLElement>('[data-radix-popper-content-wrapper] > *, [role="dialog"]')])
-      if (meets(drawn.getBoundingClientRect(), place)) return true
+    if (child === root || child.contains(root) || !(child instanceof HTMLElement) || child.hidden) continue
+    const drawn = [...(child.matches(OVER) ? [child] : []), ...child.querySelectorAll(OVER)]
+    if (drawn.some((one) => meets(one.getBoundingClientRect(), place))) return true
   }
   return false
 }

@@ -465,7 +465,7 @@ export function ProjectView({
         onSubmit={(body) => send(body, false)}
         onSendNow={(body) => send(body, true)}
         {...images.props(receiver)}
-        comments={comments.map(composerComment)}
+        comments={comments.map((comment, index) => composerComment(comment, index + 1))}
         onOpenComment={(id) => {
           if (about === null) return
           // Pressed, a comment opens again on its page beside the conversation.

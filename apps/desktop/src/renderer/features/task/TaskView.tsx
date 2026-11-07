@@ -936,7 +936,7 @@ export function TaskView({
         onSubmit={(body) => submit(body, false)}
         onSendNow={(body) => submit(body, true)}
         {...images.props(receiver)}
-        comments={comments.map(composerComment)}
+        comments={comments.map((comment, index) => composerComment(comment, index + 1))}
         onOpenComment={(id) => {
           if (taskId === undefined) return
           // Pressed, a comment opens again on its page beside the conversation.

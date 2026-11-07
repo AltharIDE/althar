@@ -14,7 +14,7 @@ import {
 import { signInOf, typedAddress } from './addresses'
 import { type CookieKeep, clearsAt, type Moment, type Owner, ownerOf, ownerOfFolder, partitionOf } from './cookies'
 import { deviceOf, mobileAgent, placed, type Rect, type Viewport } from './devices'
-import { allowed, askedOf, downloadOffered, navigation, popUp, type Verdict } from './guards'
+import { allowed, askedOf, blockedFile, downloadOffered, navigation, popUp, type Verdict } from './guards'
 import type { PageKey, PageLine, PageMove, PagePin, PageState, Pointed } from './page'
 import { cropOf, type Picked, pickedOf, scaled } from './picked'
 
@@ -393,6 +393,9 @@ export const startPages = (options: PagesOptions) => {
       void pin(page).catch(() => undefined)
     })
     contents.on('render-process-gone', () => said(page, { kind: 'gone' }))
+    contents.on('console-message', (event) => {
+      if (event.frame?.parent == null && blockedFile(event.level, event.message)) said(page, { kind: 'refused', refusal: 'file' })
+    })
     contents.on('before-input-event', (event, input) => keys(page, event, input))
     contents.on('select-bluetooth-device', (event, _devices, choose) => {
       event.preventDefault()
@@ -460,9 +463,10 @@ export const startPages = (options: PagesOptions) => {
 
   const pictureOf = async (page: Page, picked: Picked): Promise<Pointed> => {
     const crop = cropOf(picked.rect, picked.page)
+    // A picture the compositor can't give leaves the comment without its crop, never without the comment.
     const [still, cropped] = await Promise.all([
-      page.contents.capturePage(),
-      crop === null ? Promise.resolve(null) : page.contents.capturePage(scaled(crop, page.scale)),
+      page.contents.capturePage().catch(() => null),
+      crop === null ? Promise.resolve(null) : page.contents.capturePage(scaled(crop, page.scale)).catch(() => null),
     ])
     const shown = cropped === null || cropped.isEmpty() ? null : smaller(cropped)
     const at = scaled(picked.rect, page.scale)
@@ -471,7 +475,7 @@ export const startPages = (options: PagesOptions) => {
       picked,
       crop: shown === null ? null : dataUrl(shown, 'png'),
       cropSize: shown === null ? null : shown.getSize(),
-      still: dataUrl(still, 'jpeg'),
+      still: still === null || still.isEmpty() ? '' : dataUrl(still, 'jpeg'),
       scale: page.scale,
       at: { x: at.x / zoom, y: at.y / zoom, width: at.width / zoom, height: at.height / zoom },
       address: page.contents.getURL(),
@@ -598,8 +602,9 @@ export const startPages = (options: PagesOptions) => {
     still: async (ownerId: string): Promise<string | null> => {
       const page = live(ownerId)
       if (page === null || page.panel === null) return null
-      const picture = await page.contents.capturePage()
-      return picture.isEmpty() ? null : dataUrl(picture, 'jpeg')
+      // The compositor can have nothing to give (a view just laid out, a window drawn clear): the window then hides the page with no picture.
+      const picture = await page.contents.capturePage().catch(() => null)
+      return picture === null || picture.isEmpty() ? null : dataUrl(picture, 'jpeg')
     },
     /** Hides the view while something of the window's is over it, and shows it again after. */
     cover: (ownerId: string, covered: boolean) => {

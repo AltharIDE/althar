@@ -5,7 +5,7 @@ import { DEFAULT_PREFERENCES, holds } from '../src/main/appPreferences'
 import { isLocalHost, refusalOf, shownAddress, signInOf, typedAddress } from '../src/main/browser/addresses'
 import { clearsAt, COOKIE_KEEPS, isCookieKeep, type Moment, ownerOf, ownerOfFolder, partitionOf } from '../src/main/browser/cookies'
 import { browserAgent, DEVICES, deviceOf, isViewport, mobileAgent, placed, WELL } from '../src/main/browser/devices'
-import { allowed, askedOf, downloadOffered, navigation, popUp } from '../src/main/browser/guards'
+import { allowed, askedOf, blockedFile, downloadOffered, navigation, popUp } from '../src/main/browser/guards'
 import { pinsOf, rectOf } from '../src/main/browser/ipc'
 import { cropOf, pickedOf, scaled } from '../src/main/browser/picked'
 
@@ -160,6 +160,12 @@ describe('what a page may ask for', () => {
     expect(askedOf('midiSysex')).toBe('MIDI devices')
     expect(askedOf('display-capture')).toBe('screen')
     expect(askedOf('fullscreen')).toBeNull()
+  })
+
+  it('hears a file link Chromium blocked in the page, which never became a navigation', () => {
+    expect(blockedFile('error', 'Not allowed to load local resource: file:///etc/hosts')).toBe(true)
+    expect(blockedFile('warning', 'Not allowed to load local resource: file:///etc/hosts')).toBe(false)
+    expect(blockedFile('error', 'Uncaught TypeError: x is undefined')).toBe(false)
   })
 
   it('keeps no download, and offers the person’s browser one with a web address', () => {

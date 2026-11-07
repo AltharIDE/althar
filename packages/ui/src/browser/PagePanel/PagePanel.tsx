@@ -1,4 +1,5 @@
 import { type ReactNode, type Ref, useEffect, useState } from 'react'
+import { flushSync } from 'react-dom'
 
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
@@ -213,10 +214,13 @@ export function PagePanel<V extends string>({
           // Its own Escape: it puts the address back and leaves, without closing the panel.
           data-own-escape=""
           onFocus={(event) => {
-            setEditing(true)
-            setTyped(full)
+            // The full address, selected, before anything typed lands: typed at once, it replaces the address rather than joining it.
             const input = event.currentTarget
-            requestAnimationFrame(() => input.select())
+            flushSync(() => {
+              setEditing(true)
+              setTyped(full)
+            })
+            input.select()
           }}
           onBlur={() => setEditing(false)}
           onKeyDown={(event) => {
