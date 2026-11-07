@@ -280,6 +280,22 @@ test('a task’s run opens beside its thread, isolated; a comment pointed on it 
     await expect(panel.getByText('GitHub’s sign-in opened in your browser.')).toBeVisible()
     expect(await openedOutside(electronApp)).toEqual(['https://github.com/login'])
 
+    // Open as a tab: the page takes a tab of its own after the projects', where it was, and Back beside the task returns it.
+    await panel.getByRole('button', { name: 'Open as a tab' }).click()
+    // Named by its page's title, which the camera's answer above set.
+    const tab = page.getByRole('list', { name: 'Pages' }).getByRole('button', { name: 'camera: NotAllowedError', exact: true })
+    await expect(tab).toHaveAttribute('aria-current', 'page')
+    const tabbed = page.getByRole('complementary', { name: 'Page' })
+    await expect(tabbed.getByRole('textbox', { name: 'Address' })).toHaveValue(address)
+    await expect.poll(async () => (await drawn(electronApp))[0]?.bounds.width ?? 0).toBeGreaterThan(1200)
+    expect(await inPage(electronApp, 'location.href')).toBe(`http://${address}/`)
+    await still(page)
+    await shoot(page, electronApp, 'test-results/browser-tab.png')
+    await tabbed.getByRole('button', { name: 'Back beside the task' }).click()
+    await expect(page.getByRole('list', { name: 'Pages' })).toHaveCount(0)
+    await expect(panel.getByRole('textbox', { name: 'Address' })).toHaveValue(address)
+    await expect.poll(async () => (await drawn(electronApp))[0]?.bounds.width ?? 9999).toBeLessThan(800)
+
     // The session's facts, over the page: the page steps aside for a picture of it while they show.
     await panel.getByRole('button', { name: 'Its own session' }).click()
     await expect(page.getByText('Cookies kept until the task is done.')).toBeVisible()
@@ -296,6 +312,51 @@ test('a task’s run opens beside its thread, isolated; a comment pointed on it 
     await expect(page.getByRole('radio', { name: 'Beside the conversation' })).toBeChecked()
     await still(page)
     await page.screenshot({ path: 'test-results/browser-settings.png', animations: 'disabled', scale: 'css' })
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('from the coordinator, the project’s run opens beside its conversation, the board stepping aside', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const repo = repository(home)
+  writeFileSync(join(repo, 'package.json'), JSON.stringify({ name: 'meridian', private: true, scripts: { dev: 'node serve.js' } }, null, 2))
+  writeFileSync(join(repo, 'serve.js'), SERVER)
+  writeFileSync(join(repo, 'page.html'), PAGE)
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 'Test',
+    GIT_AUTHOR_EMAIL: 't@althar.test',
+    GIT_COMMITTER_NAME: 'Test',
+    GIT_COMMITTER_EMAIL: 't@althar.test',
+  }
+  execFileSync('git', ['add', '.'], { cwd: repo, env })
+  execFileSync('git', ['commit', '-q', '-m', 'Serve'], { cwd: repo, env })
+  const { electronApp, page } = await launch(home)
+  try {
+    await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1440, 900))
+    await openFirstProject(electronApp, page, repo)
+    // The board is beside the conversation as the project opens, on its Home view.
+    await expect(page.getByRole('radio', { name: 'Home', checked: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Run', exact: true }).click()
+    await page.getByRole('dialog', { name: 'What it runs' }).getByRole('button', { name: 'Run npm run dev' }).click()
+    await page.keyboard.press('Escape')
+    const open = page.getByRole('article', { name: 'Run of main' }).getByRole('button', { name: /^Open localhost:\d+$/ })
+    await expect(open).toBeVisible()
+    const address = (await open.getAttribute('aria-label'))?.replace('Open ', '') ?? ''
+    await open.click()
+    // The project goes to its conversation, and the page opens beside it, in the project's own session.
+    const panel = page.getByRole('complementary', { name: 'Page' })
+    await expect(panel.getByRole('textbox', { name: 'Address' })).toHaveValue(address)
+    await expect(page.getByRole('radio', { name: 'Conversation', checked: true })).toBeVisible()
+    await expect.poll(() => inPage<string>(electronApp, 'document.title')).toBe('Refunds')
+    await panel.getByRole('button', { name: 'Its own session' }).click()
+    await expect(page.getByText('The project’s own session')).toBeVisible()
+    await expect(page.getByText('Cookies kept until the project is removed.')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect.poll(async () => (await drawn(electronApp)).length).toBe(1)
+    await still(page)
+    await shoot(page, electronApp, 'test-results/browser-coordinator.png')
   } finally {
     await electronApp.close()
   }

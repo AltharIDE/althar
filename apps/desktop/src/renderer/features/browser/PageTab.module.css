@@ -1,7 +1,6 @@
 /* A page in a tab of its own: the page under the window's bar, its comments at its foot. */
 .tab {
-  position: absolute;
-  inset: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background: var(--paper);
