@@ -220,6 +220,8 @@ export const words = (
         return 'There is no failed turn or lost connection to try again.'
       case 'NoSession':
         return 'The task isn’t running.'
+      case 'NothingToClear':
+        return 'The view is already clear.'
       case 'InstallFailed':
         return text(error, 'summary')
       case 'SessionFailed': {
@@ -571,6 +573,7 @@ export const expected = new Set([
   'SessionRunning',
   'NoSession',
   'RetryRefused',
+  'NothingToClear',
   'AttentionClosed',
   'AlwaysNotOffered',
   'QuestionUnanswered',

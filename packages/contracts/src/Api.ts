@@ -3177,6 +3177,27 @@ export const BoardSnapshot = Schema.Struct({
 export type BoardSnapshot = typeof BoardSnapshot.Type
 
 /**
+ * How the coordinator's thread is read: the person can clear its view, which
+ * starts the thread where they cleared it and leaves the conversation to the
+ * coordinator and to Show earlier, or forget the conversation altogether.
+ */
+export const ConversationView = Schema.Struct({
+  /** The view was cleared: the thread starts at the clear, with what is still open carried in. */
+  cleared: Schema.Boolean,
+  /** The conversation before the clear is read in the thread's place. */
+  earlierOpen: Schema.Boolean,
+  /** The sequence where the cleared view begins; null while the view is whole. An item before it belongs to the earlier conversation. */
+  from: Schema.NullOr(Schema.Int),
+  /** There is something in the view to clear. */
+  clearable: Schema.Boolean,
+  /** There is a conversation to forget: its messages, or the session that holds it. */
+  forgettable: Schema.Boolean,
+  /** Moves on whenever the view is cleared, opened on the earlier conversation or restored, or the conversation is forgotten: pages read before it are of another thread. */
+  version: Schema.Int,
+})
+export type ConversationView = typeof ConversationView.Type
+
+/**
  * A project's coordinator thread: the agent working on it, if one is, the one
  * it would start on, and a page of its items. The coordinator starts when you
  * first say something to it.
@@ -3202,6 +3223,7 @@ export const CoordinatorSnapshot = Schema.Struct({
   ),
   items: Schema.Array(ThreadItem),
   earlier: Schema.Boolean,
+  view: ConversationView,
   /** Where the project's repository is hosted, when its remote says, and whether Althar is connected to it there. */
   host: Schema.NullOr(Schema.Struct({ product: Product, name: Schema.String, webUrl: Schema.String, connected: Schema.Boolean })),
   /** What the project runs, in its order, the first its default (ADR-044), as run in the default branch's copy; empty where nothing says how. */
@@ -3236,6 +3258,8 @@ export const WatchEvent = Schema.Union([
     _tag: Schema.Literal('Streaming'),
     threadId: Schema.String,
     itemId: Schema.String,
+    /** Where the thread places the item, so a window with a cleared view can tell whether it is in it. */
+    sequence: Schema.Int,
     /** What it is and who is saying it, so a client can show it before it has read the item. */
     kind: Schema.Literals(['agent_message', 'agent_thought']),
     agentId: Schema.String,
@@ -4054,6 +4078,22 @@ export const Api = RpcGroup.make(
    * what was said before; it never waits for a place among the agents at work.
    */
   command('CompactContext', { threadId: Schema.String }, Schema.Void),
+  /**
+   * Clears the view of a project's coordinator thread: it starts here, with
+   * what is still open carried in. Nothing is forgotten: the coordinator keeps
+   * the conversation, and the earlier part stays a press away.
+   */
+  command('ClearView', { threadId: Schema.String }, Schema.Void),
+  /** Opens the conversation before a cleared view in the thread's place, or puts it away again. */
+  command('ShowEarlier', { threadId: Schema.String, open: Schema.Boolean }, Schema.Void),
+  /** Takes back a cleared view: the whole thread shows again. */
+  command('UndoClearView', { threadId: Schema.String }, Schema.Void),
+  /**
+   * Ends the coordinator's session and deletes its conversation, so nothing of
+   * it can be read again; what is still open, and the project's notes, tasks
+   * and errands, stay. Its next session starts from those. It can't be undone.
+   */
+  command('ForgetConversation', { threadId: Schema.String }, Schema.Void),
   command('StopSession', { threadId: Schema.String }, Schema.Void),
   /** Stops a task: every agent on it stops, and the step it was on waits until the person resumes it. */
   command('StopTask', { taskId: Schema.String }, Schema.Void),

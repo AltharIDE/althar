@@ -360,6 +360,8 @@ describe('the API', () => {
         assert.isAbove(change?._tag === 'Changed' ? change.cursor : 0, listed.cursor)
         const [live] = (yield* Fiber.join(streamed)) as ReadonlyArray<WatchEvent>
         assert.strictEqual(live?._tag === 'Streaming' ? live.threadId : undefined, task.threadId)
+        // It says where the thread places the item, which a window with a cleared view reads against the mark.
+        assert.isAbove(live?._tag === 'Streaming' ? live.sequence : 0, 0)
 
         // A page of the newest, reaching back to the start of its round, what the person said; then the one before it, and one item by id.
         const newest = yield* client.GetThread({ threadId: task.threadId, limit: 1 })
