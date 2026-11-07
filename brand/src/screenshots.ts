@@ -25,6 +25,13 @@ export const FRAME_WALLPAPER = 'wallpaper/aurora-dark-display.jpg'
 
 export const SCREENSHOTS: readonly Screenshot[] = [
   {
+    file: 'project-home',
+    story: 'screens-projecthome--busy',
+    width: 1440,
+    height: 900,
+    shows: "A project's home: the coordinator's conversation, with its plan, beside the board",
+  },
+  {
     file: 'home',
     story: 'screens-home--busy',
     width: 1440,
@@ -42,7 +49,7 @@ export const SCREENSHOTS: readonly Screenshot[] = [
   {
     file: 'project-rules',
     bar: true,
-    story: 'screens-projectrules--default',
+    story: 'screens-projectrules--at-rest',
     width: 1440,
     height: 900,
     shows: 'Project rules: when agents need a yes',
@@ -50,10 +57,10 @@ export const SCREENSHOTS: readonly Screenshot[] = [
   {
     file: 'first-run',
     bar: true,
-    story: 'screens-start--found',
+    story: 'screens-welcome--agents',
     width: 1440,
     height: 900,
-    shows: 'First run: the agents on this Mac, and a first project',
+    shows: 'First run: the agents on this computer, and which are signed in',
   },
   {
     file: 'plan',
