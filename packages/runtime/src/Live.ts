@@ -66,6 +66,8 @@ export type LiveEvent =
       readonly threadId: string
       readonly attentionId: string
       readonly outcome: 'answered' | 'withdrawn'
+      /** For a request its agent went on without: what it was, and the person's answer, for its lead to be told. */
+      readonly setAside?: { readonly title: string; readonly decision: 'allow' | 'reject' }
     }
 
 export class Live extends Context.Service<

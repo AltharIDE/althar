@@ -1672,7 +1672,7 @@ export class Sessions extends Context.Service<
             deliveryId: turnId,
             folders: foldersOf(thread),
             sandboxed: running.requestContext.sandbox !== undefined,
-            ...(thread.role === 'task' ? { lead: running.entry.definition.name } : {}),
+            ...(thread.role === 'task' ? { lead: running.entry.definition.name, leadId: running.entry.definition.id } : {}),
           })
           // What it was saying between turns ends here: what follows belongs after this turn's input.
           yield* running.settleBetween
@@ -2637,7 +2637,7 @@ export class Sessions extends Context.Service<
             sessionId,
             folders: foldersOf(thread),
             sandboxed: requestContext.sandbox !== undefined,
-            ...(thread.role === 'task' ? { lead: definition.name } : {}),
+            ...(thread.role === 'task' ? { lead: definition.name, leadId: definition.id } : {}),
           })
           const heard = yield* betweenTurns(between, scope)
           running.settleBetween = heard.close

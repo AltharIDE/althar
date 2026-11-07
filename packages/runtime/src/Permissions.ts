@@ -165,6 +165,22 @@ export const actionDigest = (request: PermissionRequest) =>
     )
     .digest('hex')
 
+/**
+ * What the person's own Never rule refused says, in the words the lead is given as the tool's result and the thread shows
+ * under the call: "Refused by your rule `rm -rf ~/Library`." Nothing asked and nothing waited: Never is the person's answer
+ * given ahead. Any other refusal keeps the words it was given.
+ */
+export const refusedWords = (reason: string): string => {
+  const named = /^The project's rules never allow (`[^`]+`)\.$/.exec(reason)
+  if (named !== null) return `Refused by your rule ${named[1]}.`
+  const kind = /^The project's rules never allow ([^`]+)\.$/.exec(reason)
+  return kind === null ? reason : `Refused by your rule against ${kind[1]}.`
+}
+
+/** What the lead is told of a call it was made to go on without: the person is away, and it is kept (docs/decisions/097). */
+export const setAsideWords =
+  'The person is away, so this isn\u2019t answered yet. Go on with what doesn\u2019t need it; Althar tells you when they answer, and the call is theirs to allow until then.'
+
 /** Moves a session along its lifecycle; a move the lifecycle doesn't allow is a bug. */
 export const moveSession = (sessionId: string, to: ProviderSessionState, set: Readonly<Record<string, unknown>> = {}) =>
   Effect.gen(function* () {
@@ -187,7 +203,7 @@ export const releaseSession = (sessionId: string, options: { readonly questions:
     // Without its questions, where they no longer wait on this session: they wait on the thread.
     const [open] = yield* sql<{ count: number }>`
       SELECT count(*) AS count FROM attention_requests a LEFT JOIN permission_requests r ON r.id = a.permission_request_id
-      WHERE a.state = 'open' AND (r.provider_session_id = ${sessionId}
+      WHERE a.state = 'open' AND coalesce(json_extract(a.payload, '$.setAside'), 0) != 1 AND (r.provider_session_id = ${sessionId}
         OR (${options.questions ? 1 : 0} = 1 AND a.kind = 'question' AND json_extract(a.payload, '$.sessionId') = ${sessionId}))`
     if ((open?.count ?? 0) === 0) yield* moveSession(sessionId, 'active')
   })
@@ -215,6 +231,17 @@ export class Permissions extends Context.Service<
      * change to the rules applies from the lead's next session.
      */
     upFront(projectId: ProjectId, taskId: string | null, rules: RuleContext): Effect.Effect<Reach, SqlError.SqlError | Schema.SchemaError>
+    /**
+     * Notes that a request waiting on the person reached a paired device, and when, so its card says where else it
+     * reached them. The turn isn't held by it.
+     */
+    reached(attentionId: string, device: string, at: string): Effect.Effect<void, NotFound>
+    /**
+     * Lets the agent go on without the answer, for a request that waits while the person is away: its call is refused
+     * with a word saying so, and it stays open for the person. When they allow it, the call goes through once the agent
+     * makes it again, and `AttentionClosed` says the lead is to be told. False where it isn't waiting.
+     */
+    setAside(attentionId: string): Effect.Effect<boolean>
     /** Withdraws every request a session is still waiting on, as when its agent has gone. */
     withdrawAll(sessionId: string): Effect.Effect<void>
     /** Decides again every request of a project still waiting on the person, by its rules as they now are: what they no longer keep for the person is answered. */
@@ -240,6 +267,10 @@ export class Permissions extends Context.Service<
       const live = yield* Live
       const judge = yield* PermissionJudge
       const waiting = new Map<string, Waiting>()
+      /** Requests whose agent went on without an answer: still open for the person. */
+      const aside = new Set<string>()
+      /** What the person allowed after its agent went on without it, by task and action, until the agent makes the call again. */
+      const granted = new Set<string>()
       const deciding = new Map<Fiber.Fiber<PermissionDecision>, string>()
       const run = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
 
@@ -403,7 +434,8 @@ export class Permissions extends Context.Service<
         readonly decision: PermissionDecision
         readonly cited?: { readonly rules: ReadonlyArray<AllowRule>; readonly policyId: string }
       } => {
-        if (verdict.verdict === 'deny') return { decision: { decision: 'reject', reason: verdict.reason, decidedBy: 'rules' } }
+        if (verdict.verdict === 'deny')
+          return { decision: { decision: 'reject', reason: refusedWords(verdict.reason), decidedBy: 'rules' } }
         const [first] = verdict.rules ?? []
         return first === undefined || verdict.rules === undefined
           ? { decision: { decision: 'allow', reason: 'Allowed by the project rules.' } }
@@ -639,6 +671,14 @@ export class Permissions extends Context.Service<
             // The rules first, the allow rules among them: the coordinator judges only what none of them answers.
             const ruled = yield* byRules(requestContext.projectId, requestContext.taskId, rules, request, inside)
             const kind = tallyKindOf(request, ruled.context)
+            // A call its lead went on without, and the person has since allowed: it goes through once, short of what is never allowed.
+            if (ruled.verdict.verdict !== 'deny' && granted.delete(`${requestContext.taskId ?? ''}\u0000${digest}`)) {
+              const decision: PermissionDecision = { decision: 'allow', reason: 'Allowed by the person while you went on without it.' }
+              yield* sql.withTransaction(
+                recordDecision({ context: requestContext, request, requestId, digest, decision, actorId: instance.personId, kind }),
+              )
+              return decision
+            }
             let ruleContext = ruled.context
             let policyId = ruled.policyId
             let verdict: Exclude<Verdict, { readonly verdict: 'judge' }>
@@ -786,6 +826,42 @@ export class Permissions extends Context.Service<
           } satisfies Reach
         })
 
+      // A request set aside by an earlier run has no one left to answer for: its agent's process is gone with that run.
+      yield* run(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const left = yield* sql<{ id: string; projectId: ProjectId; requestId: string | null }>`
+            SELECT id, project_id, permission_request_id FROM attention_requests
+            WHERE kind = 'permission' AND state = 'open' AND json_extract(payload, '$.setAside') = 1`
+          for (const row of left) {
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                const revision = yield* change('attention_requests', row.id, { state: 'withdrawn' })
+                yield* fact({
+                  projectId: row.projectId,
+                  aggregateType: 'attention_request',
+                  aggregateId: row.id,
+                  revision,
+                  type: 'attention_request.withdrawn',
+                  actorId: instance.systemId,
+                })
+                if (row.requestId !== null) {
+                  const requestRevision = yield* change('permission_requests', row.requestId, { state: 'cancelled' })
+                  yield* fact({
+                    projectId: row.projectId,
+                    aggregateType: 'permission_request',
+                    aggregateId: row.requestId,
+                    revision: requestRevision,
+                    type: 'permission_request.cancelled',
+                    actorId: instance.systemId,
+                  })
+                }
+              }),
+            )
+          }
+        }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not close the requests an earlier run set aside', cause))),
+      )
+
       return Permissions.of({
         upFront: (projectId, taskId, rules) => run(upFront(projectId, taskId, rules)),
         decide: (requestContext, request) =>
@@ -877,8 +953,16 @@ export class Permissions extends Context.Service<
                 }),
               })
               waiting.delete(attentionId)
+              const wasAside = aside.delete(attentionId)
+              if (wasAside && decision === 'allow') granted.add(`${waiter.context.taskId ?? ''}\u0000${waiter.digest}`)
               yield* Deferred.succeed(waiter.deferred, answered)
-              yield* live.publish({ _tag: 'AttentionClosed', threadId: waiter.context.threadId, attentionId, outcome: 'answered' })
+              yield* live.publish({
+                _tag: 'AttentionClosed',
+                threadId: waiter.context.threadId,
+                attentionId,
+                outcome: 'answered',
+                ...(wasAside ? { setAside: { title: waiter.request.title, decision } } : {}),
+              })
               // A rule kept answers every other request it now covers, or refuses.
               if (keep !== undefined) yield* reconsider(waiter.context.projectId)
             }).pipe(
@@ -889,6 +973,80 @@ export class Permissions extends Context.Service<
                 RowNotFound: Effect.die,
                 RevisionConflict: Effect.die,
               }),
+            ),
+          ),
+
+        reached: (attentionId, device, at) =>
+          run(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              const [row] = yield* sql<{ projectId: ProjectId; payload: string; state: string }>`
+                SELECT project_id, payload, state FROM attention_requests WHERE id = ${attentionId}`
+              if (row === undefined) return yield* new NotFound({ kind: 'attention_request', id: attentionId })
+              // Only the first device it reached is kept, and only while it waits.
+              const kept = JSON.parse(row.payload) as Record<string, unknown>
+              if (row.state !== 'open' || kept['reached'] !== undefined) return
+              yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  const revision = yield* change('attention_requests', attentionId, {
+                    payload: JSON.stringify({ ...kept, reached: { device, at } }),
+                  })
+                  yield* fact({
+                    projectId: row.projectId,
+                    aggregateType: 'attention_request',
+                    aggregateId: attentionId,
+                    revision,
+                    type: 'attention_request.reached',
+                    payload: { device, at },
+                    actorId: instance.systemId,
+                  })
+                }),
+              )
+              const waiter = waiting.get(attentionId)
+              if (waiter !== undefined)
+                yield* live.publish({
+                  _tag: 'AttentionNeeded',
+                  threadId: waiter.context.threadId,
+                  attentionId,
+                  title: waiter.request.title,
+                  reason: '',
+                })
+            }).pipe(
+              Effect.catchTags({ SqlError: Effect.die, SchemaError: Effect.die, RowNotFound: Effect.die, RevisionConflict: Effect.die }),
+            ),
+          ),
+
+        setAside: (attentionId) =>
+          run(
+            Effect.gen(function* () {
+              const waiter = waiting.get(attentionId)
+              if (waiter === undefined || aside.has(attentionId)) return false
+              const sql = yield* SqlClient.SqlClient
+              const [row] = yield* sql<{ payload: string; state: string }>`
+                SELECT payload, state FROM attention_requests WHERE id = ${attentionId}`
+              if (row === undefined || row.state !== 'open') return false
+              yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  const revision = yield* change('attention_requests', attentionId, {
+                    payload: JSON.stringify({ ...(JSON.parse(row.payload) as Record<string, unknown>), setAside: true }),
+                  })
+                  yield* fact({
+                    projectId: waiter.context.projectId,
+                    aggregateType: 'attention_request',
+                    aggregateId: attentionId,
+                    revision,
+                    type: 'attention_request.set_aside',
+                    actorId: instance.systemId,
+                  })
+                  // The session goes back to work: the request no longer holds its turn.
+                }),
+              )
+              aside.add(attentionId)
+              yield* Deferred.succeed(waiter.deferred, { decision: 'reject', reason: setAsideWords })
+              yield* release(waiter.context.sessionId)
+              return true
+            }).pipe(
+              Effect.catchTags({ SqlError: Effect.die, SchemaError: Effect.die, RowNotFound: Effect.die, RevisionConflict: Effect.die }),
             ),
           ),
 
@@ -935,7 +1093,8 @@ export class Permissions extends Context.Service<
                 { discard: true },
               ),
               Effect.forEach(
-                [...waiting].filter(([, waiter]) => waiter.context.sessionId === sessionId),
+                // What was set aside belongs to the person now, not to the session: its end leaves it open to answer.
+                [...waiting].filter(([attentionId, waiter]) => waiter.context.sessionId === sessionId && !aside.has(attentionId)),
                 // Withdrawn here, before the session's end is recorded; the waiting decision then ends too.
                 ([attentionId, waiter]) =>
                   Effect.andThen(Effect.ignore(withdraw(attentionId, waiter)), Deferred.interrupt(waiter.deferred)),

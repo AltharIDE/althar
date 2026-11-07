@@ -9,6 +9,7 @@ import {
   type Handed,
   type QuestionField,
   type SeenSkill,
+  serverOfCall,
   type SessionEvent,
 } from '@althar/provider-adapters'
 import { Cause, Clock, Duration, Effect, Exit, Fiber, Scope, Semaphore } from 'effect'
@@ -54,6 +55,8 @@ export interface ItemPlace {
   readonly sandboxed?: boolean
   /** A task's lead, by its agent's name: the thread says which skills it could see. */
   readonly lead?: string
+  /** The same agent's id, so a line about it can lead to its sign-in. */
+  readonly leadId?: string
 }
 
 /** Adds an item at the end of the thread. */
@@ -279,6 +282,10 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   let plan: string | undefined
   /** Commands' output as it comes, by tool call, until each ends. */
   const outputs = new Map<string, Output>()
+  /** The person's MCP servers the agent said are down in this session, and how: a call to one that fails says so under it. */
+  const down = new Map<string, 'needs-auth' | 'failed'>()
+  /** Which of the person's servers each call went to, from the event that named it: an update that only says it failed doesn't. */
+  const servers = new Map<string, string>()
   /** Commands that ended, whose output is kept. */
   const finished = new Set<string>()
   const folders = place.folders ?? []
@@ -476,6 +483,7 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
           const marked = {
             ...(cut.length === 0 ? content : { ...content, cut }),
             ...(event.skill === undefined ? {} : { skill: { names: [event.skill], reported: true } }),
+            ...serverDown(event),
           }
           // Only what it read of the skills its agent listed: an agent that says what it loads has said so.
           const read = (stored: Readonly<Record<string, unknown>>) =>
@@ -504,6 +512,10 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
       case 'SkillsSeen':
         return place.lead === undefined ? Effect.void : Effect.andThen(flush, sawSkills({ ...place, lead: place.lead }, event.skills))
       case 'Notice':
+        if (event.server !== undefined) {
+          if (event.server.status === 'needs-auth' || event.server.status === 'failed') down.set(event.server.name, event.server.status)
+          else down.delete(event.server.name)
+        }
         return notice({ source: 'agent', severity: event.severity, title: event.title, description: event.description })
       case 'AgentFailure':
         return notice({ source: 'agent', severity: event.severity, title: event.classified.message, failure: event.classified.failure })
@@ -517,6 +529,16 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
       default:
         return Effect.void
     }
+  }
+
+  /** A call to a server that was down, once it failed: which, and how, for the thread to say under it. */
+  const serverDown = (event: Extract<SessionEvent, { _tag: 'ToolCall' | 'ToolCallUpdate' }>) => {
+    if (event.server !== undefined) servers.set(event.toolCallId, event.server)
+    const name = event.server ?? servers.get(event.toolCallId) ?? serverOfCall(event.title ?? '')
+    const how = name === undefined ? undefined : down.get(name)
+    return name === undefined || how === undefined || event.status !== 'failed'
+      ? {}
+      : { server: { name, down: how, ...(place.leadId === undefined ? {} : { agentId: place.leadId }) } }
   }
 
   /** The message being gathered, as far as it has come: what a watching client shows while it streams. */
