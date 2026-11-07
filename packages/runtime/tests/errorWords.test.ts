@@ -203,9 +203,78 @@ describe('why an agent couldn’t start or be reached (DEV-196)', () => {
       summarize(Cause.fail(new AgentStartFailed({ command: 'claude', reason: 'spawn claude ENOENT' }))),
       `claude isn't installed, or isn't on ${thisDevice()}'s PATH.`,
     )
+    // An agent that started and then couldn't run its own CLI: the adapter's spawn of it, as claude-agent-acp's is.
     assert.strictEqual(
-      agentSaid(exited('sh: 1: opencode: command not found')),
+      agentSaid(
+        exited('Error: spawn /usr/local/bin/claude ENOENT\n    at ChildProcess._handle.onexit (node:internal/child_process:286:19)'),
+      ),
       `The agent isn't installed, or isn't on ${thisDevice()}'s PATH.`,
+    )
+  })
+
+  it('takes no class from what an agent that started wrote further up, or of an MCP server, a hook or a tool', () => {
+    // An MCP server refused at start-up, far above why the agent stopped.
+    assert.strictEqual(
+      agentSaid(
+        exited(
+          [
+            'MCP client for `linear` failed to start: HTTP error: 401 Unauthorized',
+            'Loaded 12 skills',
+            'Resuming session 0198…',
+            'Indexing workspace',
+            'Error: Cannot find module "./auth"',
+          ].join('\n'),
+        ),
+      ),
+      'The agent stopped: Error: Cannot find module "./auth".',
+    )
+    // The same, just above the last line: still the MCP server's, not the agent's sign-in.
+    assert.strictEqual(
+      agentSaid(exited('MCP server "github" failed: 401 Unauthorized\nError: config.toml is not valid TOML')),
+      'The agent stopped: Error: config.toml is not valid TOML.',
+    )
+    // A hook's shell, which can't find its own command: the agent is there.
+    assert.strictEqual(
+      agentSaid(exited('PreToolUse hook: sh: 1: prettier: command not found\nError: session/prompt was cancelled')),
+      'The agent stopped: Error: session/prompt was cancelled.',
+    )
+    assert.strictEqual(agentSaid(exited('sh: 1: prettier: command not found')), 'The agent stopped: sh: 1: prettier: command not found.')
+    // A tool's request that timed out, retried, before the agent stopped for another reason.
+    assert.strictEqual(
+      agentSaid(
+        exited('fetch https://registry.npmjs.org/foo failed: ETIMEDOUT, retrying\nLoaded 3 tools\nIndexing\nfatal: not a git repository'),
+      ),
+      'The agent stopped: fatal: not a git repository.',
+    )
+    // A bare 401 isn't a sign-in: only a status the agent's own request got.
+    assert.strictEqual(agentSaid(exited('Error: expected 401 rows, read 400')), 'The agent stopped: Error: expected 401 rows, read 400.')
+  })
+
+  it('takes out a credential the agent’s own line carried', () => {
+    assert.strictEqual(
+      agentSaid(
+        exited(
+          'Error: request to https://generativelanguage.googleapis.com/v1beta/models?key=AIzaSyA1b2C3d4E5f6G7h8I9j0KlMnOpQrStUvW failed',
+        ),
+      ),
+      'The agent stopped: Error: request to https://generativelanguage.googleapis.com/v1beta/models?key=[REDACTED] failed.',
+    )
+    assert.strictEqual(
+      agentSaid(
+        refused('unknown', 'Error: upstream refused the request with Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc'),
+      ),
+      'Error: upstream refused the request with Authorization: [REDACTED] [REDACTED].',
+    )
+    // A key in a URL's query that isn't shaped as Google's: its name says it.
+    assert.strictEqual(
+      agentSaid(exited('Error: GET https://api.example.com/v1/models?api_key=c0ffee-1234-beef&limit=5 failed: 403')),
+      'The agent stopped: Error: GET https://api.example.com/v1/models?api_key=[REDACTED]&limit=5 failed: 403.',
+    )
+    assert.strictEqual(
+      summarize(
+        Cause.fail(new AgentStartFailed({ command: 'codex', reason: 'invalid environment: OPENAI_API_KEY=sk-proj-abcdef123456 refused' })),
+      ),
+      "codex wouldn't start: invalid environment: OPENAI_API_KEY=[REDACTED] refused.",
     )
   })
 
@@ -242,10 +311,18 @@ describe('why an agent couldn’t start or be reached (DEV-196)', () => {
     )
   })
 
-  it('says a refusal’s first error line alone, where it gave several', () => {
+  it('says a refusal’s first error line alone, where it gave several, with the line under it that says what to fix', () => {
     assert.strictEqual(
       agentSaid(refused('unknown', 'Loading MCP servers…\nError: invalid config at ~/.codex/config.toml\n  line 4: unknown key "modle"')),
-      'Error: invalid config at ~/.codex/config.toml.',
+      'Error: invalid config at ~/.codex/config.toml: line 4: unknown key "modle".',
+    )
+    assert.strictEqual(
+      agentSaid(refused('unknown', 'Error: could not parse settings.json:\nUnexpected token } in JSON at position 212\nat JSON.parse')),
+      'Error: could not parse settings.json: Unexpected token } in JSON at position 212.',
+    )
+    assert.strictEqual(
+      agentSaid(exited('Error: invalid config at ~/.codex/config.toml\nline 4: unknown key "modle"')),
+      'The agent stopped: Error: invalid config at ~/.codex/config.toml: line 4: unknown key "modle".',
     )
     assert.strictEqual(
       agentSaid(refused('transient', 'stream disconnected before completion\nerror: 502 Bad Gateway\n<html>…</html>')),

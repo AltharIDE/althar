@@ -29,6 +29,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
 import { Agents, RuntimeConfig } from './Config'
+import type { NotFound } from './errors'
 import { Live } from './Live'
 import { timestamp } from './records'
 import { SignIns } from './SignIns'
@@ -160,8 +161,11 @@ export class PlanUsage extends Context.Service<
     readonly now: (refresh?: boolean) => Effect.Effect<PlanUsageView, Failure>
     /** The windows Claude Code's adapter reported on a session of the account, from one event. */
     readonly heard: (accountId: string, agentId: string, windows: ReadonlyArray<UsageWindow>) => Effect.Effect<void, never>
-    /** Puts aside the warning that the account's sign-in ends at `endsAt`, for good: only another sign-in raises one again. */
-    readonly dismiss: (accountId: string, endsAt: string) => Effect.Effect<void, Failure>
+    /**
+     * Puts aside the warning that the account's sign-in ends at `endsAt`, for good: only another sign-in raises one again. Only
+     * for an account there is: what is kept goes with the account when it is removed (`Accounts.remove`).
+     */
+    readonly dismiss: (accountId: string, endsAt: string) => Effect.Effect<void, NotFound | Failure>
     /** Tells the view again at once, as an account signed in again: a warning its old sign-in raised goes from the window's bar with it. */
     readonly retell: Effect.Effect<void>
     /**
@@ -676,6 +680,7 @@ export class PlanUsage extends Context.Service<
           retell: told,
           dismiss: (accountId, endsAt) =>
             Effect.gen(function* () {
+              yield* accounts.get(accountId)
               const value = JSON.stringify({ endsAt, dismissed: true } satisfies Warned)
               yield* sql`INSERT INTO settings ${sql.insert({ key: warnedKey(accountId), value, updatedAt: yield* timestamp })}
                 ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`

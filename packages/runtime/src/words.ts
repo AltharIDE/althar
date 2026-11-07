@@ -2,10 +2,11 @@ import { basename } from 'node:path'
 
 import { MESSAGE_FILES } from '@althar/contracts'
 import { products } from '@althar/connectors'
-import { firstErrorLine, startFailureOf } from '@althar/provider-adapters'
+import { closingErrorLine, closingFailureOf, firstErrorLine, type StartFailure, startFailureOf } from '@althar/provider-adapters'
 import { Cause, Option } from 'effect'
 
 import { thisDevice } from './device'
+import { redact } from './diagnostics'
 import type { AccountRefused } from './Accounts'
 import type { CantMerge, DocumentRefused, FileRefused, ImageRefused, NoChangeToOpen, ProjectRefused, TaskRefused } from './errors'
 import { NOTE_LENGTH, type NoteRefused, NOTES_KEPT } from './notes'
@@ -103,8 +104,8 @@ export const signInWords = (words: string | null | undefined): boolean => words 
  * ended, or the network in the way (DEV-196). Undefined for anything else,
  * which the agent's own first error line says.
  */
-const classed = (said: string, command: string, authRequired = false): string | undefined => {
-  switch (startFailureOf(said, authRequired)) {
+const classWords = (failure: StartFailure | undefined, command: string): string | undefined => {
+  switch (failure) {
     case 'not_installed':
       return `${command === '' ? 'The agent' : command} isn't installed, or isn't on ${thisDevice()}'s PATH.`
     case 'signed_out':
@@ -118,6 +119,16 @@ const classed = (said: string, command: string, authRequired = false): string | 
   }
 }
 
+/** The class of one answer an agent gave, such as a spawn's error or a refused request, in words. */
+const classed = (said: string, command: string, authRequired = false): string | undefined =>
+  classWords(startFailureOf(said, authRequired), command)
+
+/**
+ * A line of an agent's own, as the window and the step's call show it and the
+ * record keeps it: a credential it carried taken out, as far as `redact` knows one.
+ */
+const own = (line: string): string => redact(line)
+
 /** What an agent's own error says, when the runtime can put it in words. */
 export const agentSaid = (error: unknown): string | undefined => {
   switch (tagOf(error)) {
@@ -129,15 +140,17 @@ export const agentSaid = (error: unknown): string | undefined => {
       // The person's own command, where the sandbox cannot reach the device: say what to put right, never "isn't installed".
       if (command === 'flatpak-spawn' || /flatpak|org\.freedesktop\.Flatpak/i.test(reason)) return hostDenied
       if (/ENOENT/.test(reason)) return `${command} isn't installed, or isn't on ${thisDevice()}'s PATH.`
-      return classed(reason, command) ?? sentence(`${command} wouldn't start: ${firstErrorLine(reason)}`)
+      return classed(reason, command) ?? sentence(`${command} wouldn't start: ${own(firstErrorLine(reason))}`)
     }
     case 'AgentExited': {
       const stderr = text(error, 'stderr')
       // A bridge that started and then could not take the command out to the device says so; keep its sentence, not "the agent stopped".
       if (/flatpak-spawn|org\.freedesktop\.Flatpak/i.test(lastLine(stderr))) return hostDenied
       if (olderOpenCode.test(stderr)) return olderOpenCodeWords
-      const said = firstErrorLine(stderr)
-      return classed(stderr, '') ?? (said === '' ? 'The agent stopped.' : sentence(`The agent stopped: ${said}`))
+      // Its class from its last lines alone, and the line said from them: what it wrote further up, an MCP server's 401 or a
+      // hook's "command not found", is no reason it stopped.
+      const said = own(closingErrorLine(stderr))
+      return classWords(closingFailureOf(stderr), '') ?? (said === '' ? 'The agent stopped.' : sentence(`The agent stopped: ${said}`))
     }
     case 'AgentRequestFailed':
       switch (fieldOf(error, 'failure')) {
@@ -145,7 +158,7 @@ export const agentSaid = (error: unknown): string | undefined => {
           return classed(text(error, 'message'), '', true) ?? signedOutWords
         // A connection that failed, said as what to look at; a server's own trouble stays in its words.
         case 'transient':
-          return classed(text(error, 'message'), '') ?? sentence(firstErrorLine(text(error, 'message')))
+          return classed(text(error, 'message'), '') ?? sentence(own(firstErrorLine(text(error, 'message'))))
         case 'usage_limit': {
           const until = text(error, 'resetsAt')
           return until === '' ? "The agent's usage limit is reached." : `The agent's usage limit is reached until ${until}.`
@@ -155,7 +168,7 @@ export const agentSaid = (error: unknown): string | undefined => {
         case 'session_lost':
           return lostWords('The agent')
         default:
-          return classed(text(error, 'message'), '') ?? sentence(firstErrorLine(text(error, 'message')))
+          return classed(text(error, 'message'), '') ?? sentence(own(firstErrorLine(text(error, 'message'))))
       }
     case 'OptionUnavailable':
       return `The agent doesn't offer ${text(error, 'value')}.`

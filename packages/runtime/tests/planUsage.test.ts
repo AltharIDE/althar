@@ -1,3 +1,7 @@
+import { mkdirSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { assert, describe, it } from '@effect/vitest'
 import type { PlanUsage as PlanUsageView } from '@althar/contracts'
 import { Ids, newId } from '@althar/domain'
@@ -1110,5 +1114,25 @@ describe('a sign-in that ends soon (DEV-196)', () => {
       yield* TestClock.adjust(Duration.minutes(2))
       assert.strictEqual((yield* usage.now(true)).endings?.[0]?.endsAt, at(31 + 24 * 5))
     }).pipe(Effect.scoped, Effect.provide(Layer.fresh(withUsage({})))),
+  )
+
+  it.effect('is put aside only for an account there is, and what was kept of it goes with the account', () =>
+    Effect.gen(function* () {
+      const usage = yield* PlanUsage
+      const accounts = yield* Accounts
+      const sql = yield* SqlClient.SqlClient
+      const kept = (accountId: string) => sql<{ key: string }>`SELECT key FROM settings WHERE key = ${`sign_in_ending:${accountId}`}`
+      const refused = yield* Effect.flip(usage.dismiss('acc_nobody', at(30)))
+      assert.strictEqual(refused._tag, 'NotFound')
+      assert.lengthOf(yield* kept('acc_nobody'), 0)
+      // An account another tool's folder holds, so removing it signs nothing out.
+      const home = join(mkdtempSync(join(tmpdir(), 'althar-home-')), 'claude-work')
+      mkdirSync(home)
+      const work = yield* accounts.add({ agentId: 'claude-code', name: 'work', folder: home })
+      yield* usage.dismiss(work.id, at(30))
+      assert.lengthOf(yield* kept(work.id), 1)
+      yield* accounts.remove(work.id)
+      assert.lengthOf(yield* kept(work.id), 0)
+    }).pipe(Effect.provide(Layer.fresh(withUsage({})))),
   )
 })

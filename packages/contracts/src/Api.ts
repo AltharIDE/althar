@@ -120,6 +120,8 @@ export const AccountStatus = Schema.Struct({
   adoptedFrom: Schema.NullOr(Schema.String),
   /** When its sign-in ends, where its agent's status says (Claude Code's claude.ai sign-in); not given where it doesn't. */
   endsAt: Schema.optional(Schema.String),
+  /** Its sign-in ends within the days the runtime warns in, or has ended: given with `endsAt`, so the row and the warning agree. */
+  endsSoon: Schema.optional(Schema.Boolean),
   /**
    * For an agent that reaches several providers with sign-ins of their own (OpenCode): each one it lists as signed in, and, where
    * a turn on it was refused since, when; how it is paid for where that is known (OpenCode Go a plan, Zen per use). Not given
