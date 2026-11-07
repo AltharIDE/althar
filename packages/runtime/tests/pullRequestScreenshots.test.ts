@@ -106,6 +106,30 @@ const commentSaying = (github: FakeService, words: string) =>
 const comments = (github: FakeService) => github.commentsOn(1).filter((comment) => comment.body.includes(SCREENSHOTS_MARK))
 
 describe('a task’s screenshots on its pull request', () => {
+  it.live('accepts host timestamps without milliseconds and clears a previous failure on retry', () => {
+    const { working, bare } = hosted()
+    const fake = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    fake.addRepository(['meridian', 'api'])
+    const github = {
+      ...fake,
+      reply: (...args: Parameters<typeof fake.reply>) =>
+        fake.reply(...args).pipe(Effect.map((comment) => ({ ...comment, at: comment.at.replace(/\.\d{3}Z$/, 'Z') }))),
+      editComment: (...args: Parameters<NonNullable<typeof fake.editComment>>) =>
+        fake.editComment!(...args).pipe(Effect.map((comment) => ({ ...comment, at: comment.at.replace(/\.\d{3}Z$/, 'Z') }))),
+    }
+    return Effect.gen(function* () {
+      const { taskId, threadId, url } = yield* opened(github, working)
+      const screenshots = yield* PullRequestScreenshots
+      yield* screenshots.post({ taskId, url, leftOut: [] })
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE pull_request_pictures SET failed = 'old failure'`
+      yield* screenshots.post({ taskId, url })
+      assert.isNull((yield* standing(threadId))?.failed)
+      assert.lengthOf(comments(github), 1)
+      assert.lengthOf(github.uploads, 1)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('go up by the person’s hand in one comment, written anew as they change, each picture uploaded once', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
