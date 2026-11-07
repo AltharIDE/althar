@@ -5,7 +5,7 @@ import { type CommandEnvelope, type ProjectId, type WorksIn } from '@althar/doma
 import type { Commands, Ledger } from '@althar/persistence-sqlite'
 import { AUTOMATION_DEFAULTS, type AutomationDefinition, knownModelName, Schedule, scheduleInLine } from '@althar/contracts'
 import { Priority, StatusCategory } from '@althar/connectors'
-import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema } from 'effect'
+import { Clock, Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { thisDevice } from './device'
@@ -27,7 +27,7 @@ import { Instance } from './Instance'
 import { IssueDrafts, refusedDraft } from './IssueDrafts'
 import { AskedFields, fieldSchema, wantedFields } from './issueFields'
 import { findWords, foundLine, Issues, keysOf, READ_ISSUE, READ_ISSUE_INPUT, stoppedAt } from './Issues'
-import { answeredIn, quickIn } from './kinds'
+import { quickIn } from './kinds'
 import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
 import { Installs } from './Installs'
@@ -69,8 +69,17 @@ import { Tasks } from './Tasks'
 import { setToward } from './towards'
 import { addItem, transcript } from './threads'
 import { personsWords, quoted } from './TaskActions'
-import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
+import { POOL, ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
 import { describeModels, type Route, routeTo, usableModels } from './usableModels'
+
+/**
+ * How many tasks a lead may start (ADR-097): in one turn, and from its task in all. Beyond them it says what else it would
+ * start in its report, for the person or the coordinator.
+ */
+export const LEAD_STARTS = { turn: 3, all: 10 } as const
+
+/** What a task's lead is told of starting tasks, in each tool that starts one. */
+const LEAD_STARTING = ` From a task's lead: for work the person asked for that your task shouldn't do itself, such as turning a prototype into the real build, or a review's findings into a fix, never for work your brief covers. It records your task as where it came from: its card says it was started by your task, and your thread has a line linking to it. You may start ${LEAD_STARTS.turn} in a turn and ${LEAD_STARTS.all} from your task in all.`
 
 /*
  * The project's coordinator (docs/architecture/04; docs/plans/mvp.md, "The
@@ -255,7 +264,6 @@ const MadeChange = Schema.Struct({
   output: Schema.Literals(['draft', 'ready']),
 })
 /* A task that isn't a change, moved on by its lead as the person said: done, kept for later, or discarded. */
-const Settling = Schema.Struct({ how: Schema.Literals(['done', 'keep', 'discard']) })
 const Sought = Schema.Struct({ text: Schema.String })
 /* Pull requests to find: open unless said, narrowed by author, words in the title, a review asked of the person, or drafts. */
 const SoughtPullRequests = Schema.Struct({
@@ -406,6 +414,67 @@ export class Coordinator extends Context.Service<
           return task === undefined
             ? yield* new ToolRefused({ message: `This project has no task ${reference}. list_tasks shows them.` })
             : task
+        })
+
+      /* ---- Leads starting tasks (ADR-097): the task a lead calls from is what it starts records as its parent ---- */
+
+      /** The task a lead works on, where a lead calls; null for the coordinator. */
+      const parentOf = (access: ToolAccess) => (access.role === 'lead' ? access.taskId : null)
+
+      /**
+       * A lead may start only so many tasks: in one turn, and from its task in all, so a lead gone wrong can't fill the
+       * board. Within them, each goes through the plan's countdown, so the person can hold it.
+       */
+      const fanOut = (access: ToolAccess) =>
+        Effect.gen(function* () {
+          const parent = parentOf(access)
+          if (parent === null) return
+          const sql = yield* SqlClient.SqlClient
+          const [all] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM tasks WHERE parent_task_id = ${parent}`
+          if ((all?.n ?? 0) >= LEAD_STARTS.all)
+            return yield* new ToolRefused({
+              message: `This task has started ${all?.n} tasks, as many as a lead may. Say in your report what else you would start, and the person or the coordinator starts it.`,
+            })
+          const [turn] = yield* sql<{ n: number }>`
+            SELECT count(*) AS n FROM tasks WHERE parent_task_id = ${parent}
+              AND created_at >= coalesce((SELECT requested_at FROM turn_deliveries WHERE id = ${access.turnId ?? ''}), '9999')`
+          if ((turn?.n ?? 0) >= LEAD_STARTS.turn)
+            return yield* new ToolRefused({
+              message: `You started ${turn?.n} tasks in this turn, as many as a lead may in one. Tell the person what else you would start; they can ask you again.`,
+            })
+        })
+
+      /**
+       * A task a lead started: it records the lead's task as its parent, its card says "started by" it, and the lead's
+       * thread has a line linking to it. Once: a second call for the same task, unsure the first worked, says nothing again.
+       */
+      const adopt = (access: ToolAccess, child: { readonly taskId: string; readonly slug: string; readonly title: string }) =>
+        Effect.gen(function* () {
+          const parent = parentOf(access)
+          if (parent === null || parent === child.taskId) return
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ parentTaskId: string | null; threadId: string }>`
+            SELECT k.parent_task_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+            WHERE k.id = ${child.taskId}`
+          if (row === undefined || row.parentTaskId !== null) return
+          yield* sql`UPDATE tasks SET parent_task_id = ${parent} WHERE id = ${child.taskId} AND parent_task_id IS NULL`
+          yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: `Started “${child.title}”`,
+            description: null,
+            task: { taskId: child.taskId, slug: child.slug, title: child.title, threadId: row.threadId },
+          })
+          yield* touchCard(child.taskId)
+        })
+
+      /** The title of the task a lead works on, which what it passes on is signed with. */
+      const ownTitle = (access: ToolAccess) =>
+        Effect.gen(function* () {
+          if (access.role !== 'lead' || access.taskId === null) return undefined
+          const sql = yield* SqlClient.SqlClient
+          const [own] = yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${access.taskId}`
+          return own?.title
         })
 
       const agentOf = (agentId: string) =>
@@ -809,6 +878,7 @@ export class Coordinator extends Context.Service<
           // Called again, it makes no task and tells nobody of one.
           const [again] = yield* sql<{ one: number }>`
             SELECT 1 AS one FROM command_receipts WHERE actor_id = ${instance.coordinatorId} AND command_id = ${commandId}`
+          if (again === undefined) yield* fanOut(access)
           const created = yield* projects
             .createTask({
               envelope: yield* envelope('task.create', { title: title.trim().toLowerCase() }, commandId, instance.coordinatorId),
@@ -850,6 +920,7 @@ export class Coordinator extends Context.Service<
             yield* issues.attach({ projectId: access.projectId as ProjectId, taskId: created.taskId, issue: from })
             if (partOf === true) yield* issues.setPart(created.taskId, true)
           }
+          yield* adopt(access, { taskId: created.taskId, slug: created.slug, title: title.trim() })
           // The leads already at work on tasks from this message hear of this one: their opening briefs were written before it was made.
           if (again === undefined && request !== undefined) {
             const task = yield* taskOf(access, created.taskId)
@@ -932,6 +1003,8 @@ export class Coordinator extends Context.Service<
           // Called again, unsure the first worked, it doesn't start the same task twice.
           if ((yield* taskOf(access, created.taskId)).state !== 'draft') return `${created.slug} has started already.`
           const worksIn = yield* worksInFor(access.projectId, drafted.works_in)
+          // A lead's starts after the countdown, as any plan, so the person can hold it; the coordinator's at once.
+          const byLead = parentOf(access) !== null
           const planId = yield* plans.propose({
             projectId: access.projectId as ProjectId,
             taskId: created.taskId,
@@ -939,12 +1012,14 @@ export class Coordinator extends Context.Service<
             reason: pick.reason ?? null,
             actorId: instance.coordinatorId,
             end: null,
-            held: true,
+            ...(byLead ? {} : { held: true }),
             // It said nothing goes outside the project when it is done: nor does it once its lead writes and it has a branch.
             here: true,
             worksIn,
             ...(drafted.works_in_why === undefined ? {} : { worksInWhy: drafted.works_in_why }),
           })
+          if (byLead)
+            return `Planned ${created.slug}, started from this task: its lead starts in 25 seconds unless the person holds it, with no review, and nothing goes outside the project when it is done. The person sees it as a card, started by this task; say in a sentence what it does.`
           const started = yield* plans.start(planId, instance.coordinatorId)
           if (started === 'waiting' && worksIn === 'checkout') {
             const taken = yield* localTakenFor(created.taskId)
@@ -983,6 +1058,7 @@ export class Coordinator extends Context.Service<
           // once that one is over, a new review starts.
           const [turn] = yield* sql<{ id: string }>`
             SELECT id FROM turn_deliveries WHERE provider_session_id = ${access.sessionId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`
+          yield* fanOut(access)
           const commandId = `cmd_${createHash('sha256')
             .update(`${access.sessionId}\u0000${turn?.id ?? ''}\u0000review\u0000${pullRequest.toLowerCase()}`)
             .digest('hex')
@@ -1011,6 +1087,7 @@ export class Coordinator extends Context.Service<
             : 'Nothing is posted until the person posts it from its card.'
           if (!started.leading)
             return `Made ${started.slug} to review ${started.author}'s ${started.name}, "${started.title}", but Althar couldn't make a copy of its code to read: its thread says so. Tell the person.`
+          yield* adopt(access, { taskId: started.taskId, slug: started.slug, title: started.title })
           yield* plans.propose({
             projectId: access.projectId as ProjectId,
             taskId: started.taskId,
@@ -1094,11 +1171,13 @@ export class Coordinator extends Context.Service<
             FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${taskId ?? ''}`
           if (task === undefined) return 'Only the lead of one of the project’s tasks makes its task a change.'
           if (task.quick === 1) return task
-          if (task.reviews === 1) return 'This task reviews someone else’s pull request: it has no work of its own to make a change of.'
+          if (task.reviews === 1)
+            return 'This task reviews someone else’s pull request: it has no work of its own to make a change of. Where the person wants what it found fixed, start that as a task of its own: draft_task, then propose_plan.'
           if (task.made === 1)
             return 'This task is a change already: it was made one as the person asked. Commit your work and call finish_step when it’s ready; its review and its pull request follow.'
-          if (task.changes === 1) return 'This task has a pull request already, so it is a change: there is nothing to make.'
-          return 'This task was planned as a change from its start: its plan already says who reviews it and how it ends. Carry on, and call finish_step when it’s done.'
+          if (task.changes === 1)
+            return 'This task has a pull request already, so it is a change: there is nothing to make. Where the person wants another change made from it, such as the real build of a prototype, start it as a task of its own: draft_task, then propose_plan.'
+          return 'This task was planned as a change from its start: its plan already says who reviews it and how it ends. Carry on, and call finish_step when it’s done. Where the person wants another change made from it, start it as a task of its own: draft_task, then propose_plan.'
         })
 
       /** Why a task's lead may not make it a change, or null where it may. */
@@ -1190,73 +1269,6 @@ export class Coordinator extends Context.Service<
             : `The task is a change now, called “${title}”, but Althar couldn't open a round of work for it: tell the person, who can write to you to carry on.`
         })
 
-      /*
-       * A task that isn't a change, moved on by its lead as the person said in their own words (the person's decision of 19
-       * October): Done settles it and stops what it left running, Keep for later takes it out of Needs you as it is, and
-       * discarding abandons it once the lead's turn ends, as its agents stop then. A change waits on the person in its own way,
-       * and a review settles as its draft is posted, so neither is the lead's to settle.
-       */
-      const settleTask = (access: ToolAccess, input: unknown) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const tasks = yield* Tasks
-          const { how } = yield* read(Settling, input)
-          const [task] = yield* sql<{
-            id: string
-            threadId: string
-            state: string
-            keptAt: string | null
-            quick: number
-            reviews: number
-            answered: number
-          }>`
-            SELECT k.id, t.id AS thread_id, k.state, k.kept_at, ${sql.unsafe(quickIn('k'))} AS quick,
-              EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review') AS reviews,
-              ${sql.unsafe(answeredIn('k'))} AS answered
-            FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${access.taskId ?? ''}`
-          if (task === undefined)
-            return yield* new ToolRefused({ message: 'Only the lead of one of the project’s tasks settles its task.' })
-          if (task.quick !== 1 && task.reviews !== 1)
-            return yield* new ToolRefused({
-              message:
-                'This task is a change: the person accepts it from its card, or abandons it from its menu. Carry on with what they asked.',
-            })
-          if (task.state === 'abandoned') return 'It is discarded already.'
-          const said = (type: string) => envelope(type, { taskId: task.id }, undefined, instance.systemId)
-          switch (how) {
-            case 'done':
-              // A review posted and answered since is finished as a quick task is; one with a draft settles as it is posted.
-              if (task.reviews === 1 && (task.answered !== 1 || task.state !== 'open'))
-                return yield* new ToolRefused({
-                  message:
-                    'A review settles once its draft is posted: the person posts it, or discards it, on its draft. If they asked to set it aside, keep it for later instead.',
-                })
-              if (task.state === 'done') return 'It is done already: it is in Settled.'
-              // What it left running, such as a page, stops after, in the background, and this lead once its turn ends.
-              return (yield* tasks.markDone({ envelope: yield* said('task.mark_done'), taskId: task.id }))
-                ? 'Marked it done: it is in Settled, and what it left running, such as a page, stops. Say so in a sentence; writing to you again picks it up.'
-                : 'Althar couldn’t mark it done: something on it waits on the person first. Tell them.'
-            case 'keep':
-              if (task.state === 'done') return 'It is done already: it is in Settled, so there is nothing to keep.'
-              if (task.keptAt !== null) return 'It is kept for later already.'
-              return (yield* tasks.keep({ envelope: yield* said('task.keep'), taskId: task.id }))
-                ? 'Kept it for later: it is out of Needs you as it is, with what it left running still up, under Kept for later beside Settled. Say so in a sentence; writing to you again brings it back.'
-                : 'Althar couldn’t keep it for later. Tell the person.'
-            case 'discard': {
-              if (task.state === 'done') return 'It is done already: it is in Settled, so there is nothing to discard.'
-              const discard = said('task.abandon')
-              // Its agents stop as it is abandoned, this lead too: once its turn ends, so its word on it reaches the person.
-              yield* Effect.forkDetach(
-                Effect.gen(function* () {
-                  yield* sessions.untilIdle(task.threadId, Duration.minutes(2))
-                  yield* tasks.abandon({ envelope: yield* discard, taskId: task.id })
-                }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not discard a task its lead was told to', cause))),
-              )
-              return 'It is discarded as your turn ends: it moves to Settled, its agents stop, and its work stays on this Mac. End your turn with a sentence saying so.'
-            }
-          }
-        })
-
       /** The models the coordinator can give work to in the project, as it reads them. */
       const listModels = (access: ToolAccess) =>
         Effect.zipWith(usableModels(access.projectId), Clock.currentTimeMillis, (usable, now) => describeModels(usable, now))
@@ -1344,6 +1356,16 @@ export class Coordinator extends Context.Service<
           const task = yield* taskOf(access, proposed.task)
           if (task.state !== 'draft')
             return yield* new ToolRefused({ message: `${task.slug} has started already; message its lead instead.` })
+          // A lead plans the tasks it drafted; the coordinator any.
+          const parent = parentOf(access)
+          if (parent !== null) {
+            const sql = yield* SqlClient.SqlClient
+            const [row] = yield* sql<{ parentTaskId: string | null }>`SELECT parent_task_id FROM tasks WHERE id = ${task.id}`
+            if (row?.parentTaskId !== parent)
+              return yield* new ToolRefused({
+                message: `${task.slug} isn't a task you drafted: the coordinator or the person plans it. Tell the person, or message its lead.`,
+              })
+          }
           const steps: Array<PlanStep> = [{ key: 'implement', ...(yield* stepOf(access.projectId, proposed.lead)), skipped: false }]
           if (proposed.review !== null && proposed.review !== undefined)
             steps.push({ key: 'review', ...(yield* stepOf(access.projectId, proposed.review)), skipped: false })
@@ -1384,12 +1406,16 @@ export class Coordinator extends Context.Service<
         Effect.gen(function* () {
           const { task: reference, message: body, now } = yield* read(Passed, input)
           const task = yield* taskOf(access, reference)
+          if (task.id === access.taskId)
+            return yield* new ToolRefused({ message: `${task.slug} is your own task: there is nobody else to pass this to.` })
+          // From a lead, signed with its task's title, so the other lead knows who asks.
+          const from = yield* ownTitle(access)
           const lead = yield* sessions.running(task.threadId)
           // Its thread says it once the lead has it: a lead mid-turn reads it only once that turn ends (Sessions.ts).
           yield* sessions.send({
             envelope: yield* envelope('thread.send', { threadId: task.threadId, body }, undefined, instance.coordinatorId),
             threadId: task.threadId,
-            body: passedOn(body),
+            body: passedOn(body, from),
             disposition: now === true ? 'interrupt_and_continue' : 'after_current',
             quiet: true,
           })
@@ -1800,7 +1826,7 @@ export class Coordinator extends Context.Service<
       }
       const draftIssueTool = tool(
         'draft_issue',
-        "Drafts an issue on one of the person's connected trackers, for something to track rather than do now: a bug found, follow-up work, an idea. As a card the person files, changes or discards, unless file_now: where the project's notes say issues are filed at once, or the person just said to. Give it a title and a description in Markdown with what whoever picks it up needs, and any of its tracker's fields: its project, milestone, cycle, parent, assignee, status, estimate, type, components or due date, each set as it is filed. Without tracker and container, it goes where the project's issues come from, or its repository's issues; when that isn't clear, Althar says what to name. Althar reads each name against the tracker and says what it left off and why.",
+        "Drafts an issue on one of the person's connected trackers, for something to track rather than do now: a bug found, follow-up work, an idea. As a card the person files, changes or discards, unless file_now: where the project's notes say issues are filed at once, or the person just said to. Give it a title and a description in Markdown with what whoever picks it up needs, and any of its tracker's fields: its project, milestone, cycle, parent, assignee, status, estimate, type, components or due date, each set as it is filed. Without tracker and container, it goes where the project's issues come from, or its repository's issues; when that isn't clear, Althar says what to name. Althar reads each name against the tracker and says what it left off and why. A task's lead drafts one only where the person asks; before drafting one for something the person asked for that is outside your brief, check find_tasks: when a task covers it, say so in your report instead of drafting.",
         {
           type: 'object',
           properties: {
@@ -1836,13 +1862,13 @@ export class Coordinator extends Context.Service<
 
       const listTasksTool = tool(
         'list_tasks',
-        "The project's tasks, newest first: what each is, where it stands, who leads it, the branch it works toward where that isn't the default, and, after a dash, how its pull request stands as Althar last saw it: draft or ready for review, checks, commits not pushed yet, merged or closed. A merged pull request is finished: don't suggest merging it. A closed one is as last seen only, since Althar stops watching it and it may have been reopened: say so rather than calling the task finished.",
+        "The project's tasks, newest first: what each is, where it stands, who leads it, the branch it works toward where that isn't the default, and, after a dash, how its pull request stands as Althar last saw it: draft or ready for review, checks, commits not pushed yet, merged or closed. A merged pull request is finished: don't suggest merging it. A closed one is as last seen only, since Althar stops watching it and it may have been reopened: say so rather than calling the task finished. To a task's lead and its reviewer, under each: whether it is yours, where it works (Local, in the person's checkout, or a worktree of its own), its branch, and for an open one the files it changes now, what isn't committed included. Before changing code another open task changes, or where your brief names another task, read it with read_task, read_task_diff and read_thread. It only reads.",
         nothing,
         (access) => list(access),
       )
       const findTasksTool = tool(
         'find_tasks',
-        "Finds the project's tasks by what they were about: words from a title, what the person asked, what a lead reported or built, a pull request's number (#143), an issue's key, a branch, or a file's name. Each word finds the words it begins, and a task must hold them all. Best first: each with where it stands, its pull request and its id, and the words that matched. For a task asked about by what it did rather than its name.",
+        "Finds the project's tasks by what they were about: words from a title, what the person asked, what a lead reported or built, a pull request's number (#143), an issue's key, a branch, or a file's name. Each word finds the words it begins, and a task must hold them all. Best first: each with where it stands, its pull request and its id, and the words that matched; to a task's lead and its reviewer, as list_tasks says, whether it is yours, where it works, its branch and the files it changes. For a task asked about by what it did rather than its name. It only reads.",
         {
           type: 'object',
           properties: { text: { type: 'string', description: 'What to look for, in a few words.' } },
@@ -1853,89 +1879,56 @@ export class Coordinator extends Context.Service<
 
       const readTaskTool = tool(
         'read_task',
-        "A task: what it is, what it built as its lead last said it (and what it couldn't show working), its branch and the branch it works toward, what each of its steps reported, and its pull request: link, checks (passing, failing with names, pending), commits not pushed yet, when it was merged or closed, and what isn't known or may be out of date.",
+        "A task, another or a lead's own: what it is and whether it is yours; its brief (its title and description, what it was asked) and plan; what it built as its lead last said it (and what it couldn't show working); its branch and the branch it works toward, and its folder; what each of its steps reported; its pull request: link, checks (passing, failing with names, pending), commits not pushed yet, when it was merged or closed, and what isn't known or may be out of date; and what its review found. It only reads.",
         named,
         readTask,
       )
       const readThreadTool = tool(
         'read_thread',
-        "A thread as text, oldest first: a task's, with what the person, its lead and Althar said; or, without a task, your own conversation with the person. It reads the latest part; to read further back, pass before as it says.",
+        "A thread as text, oldest first: a task's, with what the person, its lead and Althar said, the person's messages included; or, without a task, your own (the coordinator's is its conversation with the person). It reads the latest part; to read further back, pass before as it says. It only reads.",
         {
           type: 'object',
           properties: {
-            task: { type: 'string', description: "The task's slug, as list_tasks shows it. Leave it out for your own conversation." },
+            task: { type: 'string', description: "The task's slug, as list_tasks shows it. Leave it out for your own thread." },
             before: { type: 'integer', description: 'To read further back: the number an earlier read_thread gave.' },
           },
         },
         readThread,
       )
+      const readTaskDiffTool = tool(
+        'read_task_diff',
+        "A task's change against where its branch started: the files it changed, then their diff, as it stands now in its worktree (or in the person's checkout, for a task that works Local), what isn't committed yet included. Althar reads it for you without touching that folder: nothing there is written or locked, so its lead isn't disturbed. Give paths, as the list names them, to read only some files; a long diff comes a page at a time (page). A lead reads it before changing code another open task changes, so its work doesn't conflict; the coordinator, to see what a task has made before it passes something on or answers the person. It only reads.",
+        {
+          type: 'object',
+          properties: {
+            task: { type: 'string', description: "The task's slug, as list_tasks shows it." },
+            paths: { type: 'array', items: { type: 'string' }, description: 'Only these files, as its list of files names them.' },
+            page: { type: 'integer', description: 'Which page of a long diff, from 1.' },
+          },
+          required: ['task'],
+        },
+        readTaskDiff,
+      )
 
       /*
-       * A task's lead and its reviewer see the project's other tasks, read-only: what each is and where it stands, its brief,
-       * report and thread, and its change as it stands, uncommitted work included (docs/architecture/04, "What a lead sees of
-       * other tasks"). The same tools as the coordinator's, saying more of each task's work; nothing among them messages another
-       * lead, changes another task, or writes in another folder. Leads still talk to each other only through the coordinator. A
-       * review of someone else's pull request isn't given them (they aren't `inReview`): its lead reads what the pull request
-       * says, untrusted, and reaches the web, so it reads none of the person's work in progress.
+       * Leads and the coordinator share one tool set (ADR-097, the person's decision of 6 November): each tool is defined
+       * once and served to both, and reads `access.role` only where the two differ. A lead's tools on its own task and
+       * folder (finish_step, make_it_a_change, its pull request's) are its alone; the coordinator doesn't change code, its
+       * agent's edit tools denied, for tidiness rather than safety. What a lead starts records its task as the parent, goes
+       * through the plan's countdown, and is capped (LEAD_STARTS). A task's reviewer reads the project's tasks, and only
+       * reads; a review of someone else's pull request isn't given them (they aren't `inReview`): its lead reads what the
+       * pull request says, untrusted, and reaches the web, so it reads none of the person's work in progress.
        */
-      const readOnly = ' Read-only: nothing here reaches another task’s lead or changes its work.'
-      const otherTasksTools: ReadonlyArray<Tool> = [
-        {
-          ...listTasksTool,
-          description: `${listTasksTool.description} Under each: whether it is yours, where it works (Local, in the person's checkout, or a worktree of its own), its branch, and for an open one the files it changes now, what isn't committed included. Before changing code another open task changes, or where your brief names another task, read it with read_task, read_task_diff and read_thread.${readOnly}`,
-        },
-        {
-          ...findTasksTool,
-          description: `${findTasksTool.description} Under each, as list_tasks says: whether it is yours, where it works, its branch and the files it changes.${readOnly}`,
-        },
-        {
-          ...readTaskTool,
-          description: `Another task of this project, or your own: whether it is yours, where it stands and its plan; its brief (its title and description, what it was asked); what it built and couldn't show working, as its lead last said it; its branch and folder; what each of its steps reported; its pull request; and what its review found.${readOnly}`,
-        },
-        {
-          ...readThreadTool,
-          description: `A task's thread as text, oldest first: what the person, its lead and Althar said, the person's messages included; without a task, your own. It reads the latest part; to read further back, pass before as it says.${readOnly}`,
-          input: {
-            type: 'object',
-            properties: {
-              task: { type: 'string', description: "The task's slug, as list_tasks shows it. Leave it out for your own thread." },
-              before: { type: 'integer', description: 'To read further back: the number an earlier read_thread gave.' },
-            },
-          },
-        },
-        tool(
-          'read_task_diff',
-          `Another task's change against where its branch started: the files it changed, then their diff, as it stands now in its worktree (or in the person's checkout, for a task that works Local), what isn't committed yet included. Althar reads it for you without touching that folder: nothing there is written or locked, so its lead isn't disturbed. Give paths, as the list names them, to read only some files; a long diff comes a page at a time (page). Read it before changing code another open task changes, so your work doesn't conflict with its.${readOnly}`,
-          {
-            type: 'object',
-            properties: {
-              task: { type: 'string', description: "The task's slug, as list_tasks shows it." },
-              paths: { type: 'array', items: { type: 'string' }, description: 'Only these files, as its list of files names them.' },
-              page: { type: 'integer', description: 'Which page of a long diff, from 1.' },
-            },
-            required: ['task'],
-          },
-          readTaskDiff,
-        ),
-      ]
+      const readTasksTools: ReadonlyArray<Tool> = [listTasksTool, findTasksTool, readTaskTool, readThreadTool, readTaskDiffTool]
 
-      // A lead checks the project's tasks before it drafts: work the person asked for may be another task's already.
-      const leadDraftIssueTool: Tool = {
-        ...draftIssueTool,
-        description: `${draftIssueTool.description} Before drafting an issue for something the person asked for that is outside your brief, check find_tasks: when a task covers it, say so in your report instead of drafting.`,
-      }
-
-      yield* toolServer.serve('coordinator', [
+      yield* toolServer.serve(POOL, [
         tool('project_overview', 'The project: its repositories, how many tasks it has, its rules, and its notes.', nothing, (access) =>
           overview(access),
         ),
-        listTasksTool,
-        findTasksTool,
-        readTaskTool,
-        readThreadTool,
+        ...readTasksTools,
         tool(
           'draft_task',
-          `Drafts a task for a change: its title, saying what should change in a few words (at most ${TITLE_LENGTH} characters), and a description with what the lead needs: the context, where to look, constraints, and what done looks like. When it comes from an issue, pass the issue's link or key as issue, and part_of where it does only part of it. When it works on an open pull request, such as to answer its review, pass it as pull_request: the task starts on its head and follows it, and its work goes there, with no new pull request. Then propose its plan.`,
+          `Drafts a task for a change: its title, saying what should change in a few words (at most ${TITLE_LENGTH} characters), and a description with what the lead needs: the context, where to look, constraints, and what done looks like. When it comes from an issue, pass the issue's link or key as issue, and part_of where it does only part of it. When it works on an open pull request, such as to answer its review, pass it as pull_request: the task starts on its head and follows it, and its work goes there, with no new pull request. Then propose its plan.${LEAD_STARTING}`,
           {
             type: 'object',
             properties: {
@@ -2114,7 +2107,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'propose_plan',
-          "Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. A change of a few lines is planned small: no review, and its lead at low effort (minimal where that is the lowest it lists), so it starts at once in a place kept for small tasks, however many long ones are at work. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. It starts on its own after 25 seconds unless the person holds or changes it. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it.",
+          "Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. A change of a few lines is planned small: no review, and its lead at low effort (minimal where that is the lowest it lists), so it starts at once in a place kept for small tasks, however many long ones are at work. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. It starts on its own after 25 seconds unless the person holds or changes it. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it. A task's lead plans only the tasks it drafted.",
           {
             type: 'object',
             properties: {
@@ -2154,7 +2147,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'start_task',
-          `Starts something small at once, without a plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead you pick, as list_models writes it, and an effort it lists where it matters; no review, nothing published, and no wait. Give it a title (at most ${TITLE_LENGTH} characters) and what the lead needs to know. It starts with no branch; if its lead changes the repository, Althar puts that on a branch of its own, which stays on ${thisDevice()}. Should the person want what it made as a real change, reviewed and in a pull request, they ask its lead, which makes it one; pass that on with message_lead. A change worth reviewing, or that should end in a pull request from the start, is draft_task and propose_plan instead; to try what a task has built, ask its lead with message_lead.`,
+          `Starts something small at once, without a plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead you pick, as list_models writes it, and an effort it lists where it matters; no review, nothing published, and no wait. Give it a title (at most ${TITLE_LENGTH} characters) and what the lead needs to know. It starts with no branch; if its lead changes the repository, Althar puts that on a branch of its own, which stays on ${thisDevice()}. Should the person want what it made as a real change, reviewed and in a pull request, they ask its lead, which makes it one; pass that on with message_lead. A change worth reviewing, or that should end in a pull request from the start, is draft_task and propose_plan instead; to try what a task has built, ask its lead with message_lead. One a task's lead starts goes through the countdown, as a plan does, so the person can hold it.${LEAD_STARTING}`,
           {
             type: 'object',
             properties: {
@@ -2192,7 +2185,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'review_pull_request',
-          "Plans a review of a pull request, when the person asks for one or pastes a pull request's link and asks: by its link, or its number in the project's repository (#123). Its lead, the model you pick as list_models writes it (a strong one), with why in a sentence, reads a read-only copy of the pull request's code, runs nothing of it, and drafts a review the person posts from its card. Only a model whose agent can be held to reading only leads one: not Codex. Nothing reaches the code host until they post it. It starts on its own after 25 seconds unless the person holds or changes it. Don't review it yourself. Asked to review someone's pull requests without numbers, find them with find_pull_requests first, then plan one review each.",
+          "Plans a review of a pull request, when the person asks for one or pastes a pull request's link and asks: by its link, or its number in the project's repository (#123). Its lead, the model you pick as list_models writes it (a strong one), with why in a sentence, reads a read-only copy of the pull request's code, runs nothing of it, and drafts a review the person posts from its card. Only a model whose agent can be held to reading only leads one: not Codex. Nothing reaches the code host until they post it. It starts on its own after 25 seconds unless the person holds or changes it. Don't review it yourself. Asked to review someone's pull requests without numbers, find them with find_pull_requests first, then plan one review each. One a task's lead plans is started by its task, and counts among those it may start.",
           {
             type: 'object',
             properties: {
@@ -2316,7 +2309,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'message_lead',
-          "Passes a message to a task's lead, starting it if it stopped: after its current turn, or at once with now. It waits for an agent place and available usage.",
+          "Passes a message to a task's lead, starting it if it stopped: after its current turn, or at once with now. It waits for an agent place and available usage. From a task's lead, it is signed with your task's title, and its thread says it came from you: for what another task should know or change, such as a task you started.",
           {
             type: 'object',
             properties: { task: { type: 'string' }, message: { type: 'string' }, now: { type: 'boolean' } },
@@ -2339,16 +2332,13 @@ export class Coordinator extends Context.Service<
         ),
       ])
 
-      // A quick task's lead makes it a change when the person asks: the one lead tool that plans, as the coordinator's do. Offered
-      // only on a quick task not made one yet; refused, with why, on any other.
-      yield* toolServer.serve('reviewer', otherTasksTools)
+      yield* toolServer.serve('reviewer', [...readTasksTools, findIssuesTool])
+      // A quick task's lead makes it a change when the person asks: offered only on a quick task not made one yet; refused,
+      // with why, on any other. Any other kind becomes a change as a task of its own: draft_task and propose_plan.
       yield* toolServer.serve('lead', [
-        ...otherTasksTools,
-        findIssuesTool,
-        leadDraftIssueTool,
         tool(
           'make_it_a_change',
-          `Makes this quick task a real change, with a review and a pull request: call it only when the person asks to turn what you made into a real thing (to keep it, review it, or open a pull request), never on your own. Give the task a title for what the change does now (at most ${TITLE_LENGTH} characters); the model that reviews it, which only reads (pick a strong one, from another maker than yours where there is one), or null only where the person said it needs no review; and whether its pull request opens as a draft or ready for review (a draft, unless the person said ready). Its work goes on a branch of its own if it has none; then commit what belongs in the change, and call finish_step: the review comes next, then the pull request.`,
+          `Makes this quick task a real change, with a review and a pull request: call it only when the person asks to turn what you made into a real thing (to keep it, review it, or open a pull request), never on your own. Give the task a title for what the change does now (at most ${TITLE_LENGTH} characters); the model that reviews it, which only reads (pick a strong one, from another maker than yours where there is one), or null only where the person said it needs no review; and whether its pull request opens as a draft or ready for review (a draft, unless the person said ready). Its work goes on a branch of its own if it has none; then commit what belongs in the change, and call finish_step: the review comes next, then the pull request. Any other task, such as a prototype that should become the real build, or a review whose findings need a fix, starts the change as a task of its own: draft_task, then propose_plan.`,
           {
             type: 'object',
             properties: {
@@ -2368,22 +2358,7 @@ export class Coordinator extends Context.Service<
           },
           makeChange,
         ),
-        {
-          ...tool(
-            'settle_task',
-            'Moves this task on as the person tells you, only when they do, never on your own: done (it is settled, and what it left running, such as a page, stops), keep (kept for later: out of their Needs you as it is, with its page still up), or discard (abandoned as your turn ends; its work stays on this computer). For a task that isn’t a change: a quick task, or a review, which only keeps or discards while a draft waits (it settles as its draft is posted), and is done once its review was posted. Writing to you again later picks it up.',
-            {
-              type: 'object',
-              properties: { how: { type: 'string', enum: ['done', 'keep', 'discard'] } },
-              required: ['how'],
-            },
-            settleTask,
-          ),
-          // A review's lead keeps or discards its review as the person says, as any task's that isn't a change.
-          inReview: true,
-        },
       ])
-      yield* toolServer.serve('reviewer', [findIssuesTool])
       yield* toolServer.guard('lead', (tool, access) =>
         tool.name !== 'make_it_a_change'
           ? Effect.succeed(null)

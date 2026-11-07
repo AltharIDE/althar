@@ -96,8 +96,10 @@ describe('a lead reading another task', () => {
 
       const lead = leadOf(projectId, mine)
       assert.includeMembers(yield* listTools(lead), ['list_tasks', 'find_tasks', 'read_task', 'read_thread', 'read_task_diff'])
-      // Read-only: nothing that messages another lead or changes another task.
-      assert.notIncludeMembers(yield* listTools(lead), ['message_lead', 'draft_task', 'rename_task'])
+      // One tool set with the coordinator (ADR-097): it messages other leads and moves tasks too.
+      assert.includeMembers(yield* listTools(lead), ['message_lead', 'draft_task', 'rename_task'])
+      // A task's reviewer only reads.
+      assert.notIncludeMembers(yield* listTools({ ...lead, role: 'reviewer' }), ['message_lead', 'draft_task', 'rename_task'])
 
       const listed = yield* callTool(lead, 'list_tasks')
       assert.match(listed, new RegExp(`- ${mine.slug}: Retry the checkout [^\\n]*\\n {2}Yours: the task you are on; works in a worktree;`))

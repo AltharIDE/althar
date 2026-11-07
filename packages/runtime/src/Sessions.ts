@@ -627,11 +627,19 @@ export const sentWithWords = (sent: {
 
 const PASSED_ON = 'The coordinator passes this on:\n\n'
 
-/** What the coordinator passes on to a task's lead, as the lead is told it. */
-export const passedOn = (body: string) => `${PASSED_ON}${body}`
+/**
+ * What the coordinator, or another task's lead (`from`, that task's title), passes on to a task's lead, as the lead is told
+ * it: leads and the coordinator share one tool set, message_lead among them (ADR-097).
+ */
+export const passedOn = (body: string, from?: string) =>
+  from === undefined ? `${PASSED_ON}${body}` : `The lead of “${from}” passes this on:\n\n${body}`
 
-/** What the coordinator passed on, in its own words, from what the lead was told. */
-const passedOnOf = (told: string) => (told.startsWith(PASSED_ON) ? told.slice(PASSED_ON.length) : told)
+/** Who passed a message on, and in their own words, from what the lead was told; undefined for anything else. */
+const passedOnOf = (told: string) => {
+  if (told.startsWith(PASSED_ON)) return { from: 'the coordinator', words: told.slice(PASSED_ON.length) }
+  const lead = /^The lead of “([^\n]+)” passes this on:\n\n/.exec(told)
+  return lead === null ? undefined : { from: `the lead of “${lead[1]}”`, words: told.slice(lead[0].length) }
+}
 
 /** Why a turn ended in failure, as a class for the record. */
 export const errorClassOf = (
@@ -1361,15 +1369,16 @@ export class Sessions extends Context.Service<
           const itemsOf = (input: { readonly id: string }) => shown.filter((item) => item.userInputId === input.id).map((item) => item.id)
           for (const [index, input] of fresh.entries()) {
             // What the coordinator passed on, by the words it is passed on with: Althar writes the input for it, as for every quiet one.
-            if (input.body.startsWith(PASSED_ON))
+            const relayed = passedOnOf(input.body)
+            if (relayed !== undefined)
               yield* addItem(
                 { projectId: thread.projectId, threadId: thread.threadId, sessionId: running.sessionId, deliveryId },
                 'notice',
                 {
                   source: 'runtime',
                   severity: 'info',
-                  title: 'From the coordinator:',
-                  description: passedOnOf(input.body),
+                  title: `From ${relayed.from}:`,
+                  description: relayed.words,
                   role: 'relayed',
                 },
               )

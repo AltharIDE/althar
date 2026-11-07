@@ -2019,6 +2019,10 @@ export class Queries extends Context.Service<
             runPlan: string | null
             local: number
             toward: string | null
+            parentId: string | null
+            parentSlug: string | null
+            parentTitle: string | null
+            parentThread: string | null
           }>`
             SELECT k.project_id, t.id AS thread_id, k.title, k.slug, k.state, k.settled_at, k.kept_at, ${sql.unsafe(SHOWN_BRANCH)},
               p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at, p.proposed_at,
@@ -2047,6 +2051,11 @@ export class Queries extends Context.Service<
               (SELECT tw.toward FROM workspaces tw JOIN repository_bindings tb ON tb.id = tw.binding_id
                 WHERE tw.task_id = k.id AND tw.device_id = ${instance.deviceId} AND tw.toward IS NOT NULL
                 ORDER BY tb.created_at, tb.rowid LIMIT 1) AS toward,
+              -- The task a lead started it from, where one did (ADR-097): its card says "started by" it.
+              k.parent_task_id AS parent_id,
+              (SELECT pk.slug FROM tasks pk WHERE pk.id = k.parent_task_id) AS parent_slug,
+              (SELECT pk.title FROM tasks pk WHERE pk.id = k.parent_task_id) AS parent_title,
+              (SELECT pt.id FROM threads pt WHERE pt.task_id = k.parent_task_id AND pt.kind = 'task') AS parent_thread,
               (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') + ${sql.unsafe(issueCardsWaiting('k'))} AS waiting,
               (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' LIMIT 1) AS review,
               (SELECT agent_id FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead,
@@ -2269,6 +2278,10 @@ export class Queries extends Context.Service<
             // Its folder being set up before its lead's first turn: the install its lockfile names, or the setup kept for it.
             ...(settingUp ? { settingUp: task.settingUp === 1 ? ('kept' as const) : ('install' as const) } : {}),
             kind,
+            // Started by another task's lead: that task, which the card names.
+            ...(task.parentId === null || task.parentSlug === null || task.parentTitle === null || task.parentThread === null
+              ? {}
+              : { startedBy: { taskId: task.parentId, slug: task.parentSlug, title: task.parentTitle, threadId: task.parentThread } }),
             // What a plain task handed back, small on its card while it waits for the person.
             handed: kind === 'plain' ? yield* handedFor(task.threadId, latest?.content ?? null, task.runAt) : null,
             reviewing,

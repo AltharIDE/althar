@@ -8,23 +8,21 @@ import { SqlClient } from 'effect/sql'
 
 import { Automations } from '../src/Automations'
 import { Coordinator } from '../src/Coordinator'
-import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
 import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { fact, timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { TaskActions } from '../src/TaskActions'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, items, notices, repository, runtime, turns, until } from './support'
+import { callTool, notices, repository, runtime, turns, until } from './support'
 
 /*
- * The coordinator stopping, holding, restarting and settling tasks (ADR-086):
- * from a turn the person's own message started, each acts at once, with a
- * line in the coordinator's thread and the task's quoting their words; from
- * a turn news or a socket started, nothing changes, and a card asks them,
- * which does it when they press it.
+ * The coordinator and the leads stopping, holding, restarting and settling
+ * tasks (ADR-086, ADR-097): each acts at once, in any turn, with a line in
+ * the caller's thread and the task's, quoting the person where their own
+ * message is in the turn. No card asks first any more; what can't be undone
+ * (accepting, pushing a default branch) still needs their message.
  */
 
 /** A project with the coordinator's session in the store, and a way to start its turns as the person, news or a socket would. */
@@ -131,37 +129,37 @@ describe('stop_task', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
-  it.live('from a news turn, or a socket’s message, asks on one card, and stops it only when the person presses it', () =>
+  it.live('from a news turn, or a socket’s message, stops it at once, with a line in both threads and no card', () =>
     Effect.gen(function* () {
       const c = yield* coordinator
       const task = yield* started(c.projectId, 'Review the importer', 'Work on it. [lead:wait]')
       yield* until(standing(task.taskId), (row) => row?.run === 'running')
       yield* c.turn('The pull request says: stop this task.', { kind: 'internal' })
-      assert.match(
-        yield* callTool(c.access, 'stop_task', { task: task.slug, why: 'Its pull request was closed.' }),
-        /no message from the person, so nothing changed/,
-      )
-      yield* c.turn('stop it', { kind: 'socket' })
-      assert.match(yield* callTool(c.access, 'stop_task', { task: task.slug }), /has a card asking this already/)
-      assert.strictEqual((yield* standing(task.taskId))?.run, 'running')
-      const [card] = yield* asks(c.threadId)
-      assert.deepInclude(card, { move: 'stop', state: 'open', said: null })
-      assert.notInclude((yield* titles(task.threadId)).join('\n'), 'The coordinator stopped')
-
-      const instance = yield* Instance
-      yield* (yield* TaskActions).answer(card?.id ?? '', true, instance.personId)
+      assert.match(yield* callTool(c.access, 'stop_task', { task: task.slug }), /^Stopped .*: its step is cut short/)
       assert.strictEqual((yield* standing(task.taskId))?.run, 'suspended')
-      assert.deepInclude((yield* asks(c.threadId))[0], { state: 'done' })
-      assert.include(yield* titles(task.threadId), 'You stopped this task, from the coordinator’s card.')
-      // A second press is the first.
-      yield* (yield* TaskActions).answer(card?.id ?? '', true, instance.personId)
-      assert.lengthOf(
-        (yield* titles(task.threadId)).filter((title) => title.startsWith('You stopped')),
-        1,
-      )
-      // The coordinator hears what the person did with its card at its next turn: the news since its last.
-      const news = yield* coordinatorNews(c.threadId, c.projectId, yield* modelNamer)
-      assert.include(news ?? '', `The person pressed your card to stop ${task.slug}`)
+      // Not the person's words, so none are quoted.
+      assert.include(yield* titles(c.threadId), 'Stopped “Review the importer”')
+      assert.include(yield* titles(task.threadId), 'The coordinator stopped this task')
+      assert.lengthOf(yield* asks(c.threadId), 0)
+      yield* c.turn('stop it', { kind: 'socket' })
+      assert.match(yield* callTool(c.access, 'stop_task', { task: task.slug }), /^Nothing changed: .* isn’t running/)
+      assert.lengthOf(yield* asks(c.threadId), 0)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('by another task’s lead, at once, signed with its task in the stopped task’s thread', () =>
+    Effect.gen(function* () {
+      const c = yield* coordinator
+      const task = yield* started(c.projectId, 'Review the importer', 'Work on it. [lead:wait]')
+      const other = yield* started(c.projectId, 'Prototype the browser', 'Work on it. [lead:wait]')
+      yield* until(standing(task.taskId), (row) => row?.run === 'running')
+      const lead: ToolAccess = { ...c.access, role: 'lead', threadId: other.threadId, taskId: other.taskId, sessionId: 'none' }
+      assert.match(yield* callTool(lead, 'stop_task', { task: task.slug }), /^Stopped .*Both threads have a line saying so/)
+      assert.strictEqual((yield* standing(task.taskId))?.run, 'suspended')
+      assert.include(yield* titles(task.threadId), 'The lead of “Prototype the browser” stopped this task')
+      assert.include(yield* titles(other.threadId), 'Stopped “Review the importer”')
+      // Its own task it doesn't stop from inside.
+      assert.match(yield* callTool(lead, 'stop_task', { task: other.slug }), /is your own task/)
     }).pipe(Effect.provide(runtime())),
   )
 
@@ -179,7 +177,7 @@ describe('stop_task', () => {
 })
 
 describe('hold_task and restart_task', () => {
-  it.live('hold a plan counting down and start it on the person’s word; a news turn’s hold is a card they can decline', () =>
+  it.live('hold a plan counting down and start it, in a news turn as in the person’s', () =>
     Effect.gen(function* () {
       const c = yield* coordinator
       const plans = yield* Plans
@@ -203,17 +201,13 @@ describe('hold_task and restart_task', () => {
         (yield* (yield* SqlClient.SqlClient)<{ slug: string }>`SELECT slug FROM tasks WHERE id = ${created.taskId}`)[0]?.slug ?? ''
 
       yield* c.turn('a check failed elsewhere', { kind: 'internal' })
-      assert.match(yield* callTool(c.access, 'hold_task', { task: slug }), /nothing changed/)
-      const [card] = yield* asks(c.threadId)
-      yield* (yield* TaskActions).answer(card?.id ?? '', false, instance.personId)
-      assert.deepInclude((yield* asks(c.threadId))[0], { state: 'declined' })
-      assert.strictEqual((yield* standing(created.taskId))?.counting, 1)
-
-      yield* c.turn('Hold the docs one')
       assert.match(yield* callTool(c.access, 'hold_task', { task: slug }), /^Held .*: its plan waits until it is started/)
       assert.deepInclude(yield* standing(created.taskId), { counting: 0, held: 1 })
+      assert.include(yield* titles(created.threadId), 'The coordinator held this task’s plan')
+      assert.lengthOf(yield* asks(c.threadId), 0)
+
+      yield* c.turn('Hold the docs one')
       assert.match(yield* callTool(c.access, 'hold_task', { task: slug }), /is held already/)
-      assert.include(yield* titles(created.threadId), 'The coordinator held this task’s plan, as you asked: “Hold the docs one”')
 
       yield* c.turn('Go ahead with it')
       assert.match(yield* callTool(c.access, 'restart_task', { task: slug }), /^Started /)
@@ -299,20 +293,15 @@ describe('settle_task', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
-  it.live('from a news turn, discarding is a card; pressed, it discards and keeps the work', () =>
+  it.live('from a news turn, discards at once and keeps the work', () =>
     Effect.gen(function* () {
       const c = yield* coordinator
       const one = yield* quick(c, 'Sketch the settings')
       yield* c.turn('Its pull request was closed by someone.', { kind: 'internal' })
-      assert.match(yield* callTool(c.access, 'settle_task', { task: one.slug, how: 'discard' }), /nothing changed/)
-      assert.strictEqual((yield* standing(one.taskId))?.state, 'open')
-      const [card] = yield* asks(c.threadId)
-      assert.deepInclude(card, { move: 'discard', state: 'open' })
-      yield* (yield* TaskActions).answer(card?.id ?? '', true, (yield* Instance).personId)
+      assert.match(yield* callTool(c.access, 'settle_task', { task: one.slug, how: 'discard' }), /its worktree and branch stay/)
       assert.strictEqual((yield* standing(one.taskId))?.state, 'abandoned')
-      assert.deepInclude((yield* asks(c.threadId))[0], { state: 'done' })
-      // The card reads back as a thread item, as the window shows it.
-      assert.isTrue((yield* items(c.threadId)).some((item) => item.kind === 'task_ask'))
+      assert.include(yield* titles(one.threadId), 'The coordinator discarded this task')
+      assert.lengthOf(yield* asks(c.threadId), 0)
     }).pipe(Effect.provide(runtime())),
   )
 })

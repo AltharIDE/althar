@@ -1517,6 +1517,8 @@ export const NoticeItem = Schema.Struct({
      * back, a line across the thread (ADR-056).
      */
     role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder', 'skills'])),
+    /** A task the line is about, which it links to: one this task's lead started (ADR-097). */
+    task: Schema.optional(Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String })),
     /** For what a lead's agent could see: each skill, and whether it is the person's or the repository's. */
     skills: Schema.optional(
       Schema.Array(Schema.Struct({ name: Schema.String, path: Schema.String, from: Schema.Literals(['person', 'repository']) })),
@@ -1883,6 +1885,8 @@ export const TaskCard = Schema.Struct({
   settingUp: Schema.optional(Schema.Literals(['install', 'kept'])),
   /** What it makes, read from what it has now: its card's word, and what the card shows. */
   kind: TaskKind,
+  /** The task whose lead started it (ADR-097: leads start tasks), which its card names; absent for one the person or the coordinator started. */
+  startedBy: Schema.optional(Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String })),
   /** A plain task's pictures and files, while it has some; null or absent otherwise. */
   handed: Schema.optional(Schema.NullOr(Handed)),
   /** The pull request a review task reads, and how its review stands; null or absent for any other task. */
