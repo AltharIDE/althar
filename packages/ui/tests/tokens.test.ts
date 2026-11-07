@@ -282,7 +282,6 @@ const PAIRS: ReadonlyArray<readonly [ink: string, on: ReadonlyArray<string>, at:
   ['--live', ['--n-1', '--live-dim'], TEXT],
   ['--danger', ['--n-1'], TEXT],
   ['--danger', ['--n-1', '--danger-dim'], TEXT],
-  ['--ok', ['--n-1'], TEXT],
   ['--add-ink', ['--add-line'], TEXT],
   ['--add-ink', ['--add-word'], TEXT],
   ['--del-ink', ['--del-line'], TEXT],
@@ -306,15 +305,32 @@ const PAIRS: ReadonlyArray<readonly [ink: string, on: ReadonlyArray<string>, at:
   ['--del-sign', ['--del-gutter'], MARK],
   ['--linear', ['--n-1'], MARK],
   ['--knob-off', ['--n-1', '--line-2'], MARK],
+  // DEV-152: green as words, a field's edge against the page (1.4.11), and the faint ink of project settings' notes
+  ['--ok-ink', ['--n-1'], TEXT],
+  ['--ok-ink', ['--n-2'], TEXT],
+  ['--field-edge', ['--n-2'], MARK], // light only: dark keeps its hairline
+  ['--field-edge', ['--n-1'], MARK],
+  ['--t-3', ['--signal-paper'], TEXT],
+  ['--signal-ink', ['--signal-dim'], TEXT], // a status chip on the page
 ]
 
-describe('the dark theme, read', () => {
-  it.each(PAIRS.map(([ink, on, at]) => ({ ink, on: on.join(' under '), at, surfaces: on })))(
-    '$ink on $on reaches $at:1',
-    ({ ink, surfaces, at }) => {
-      expect(contrast(ink, surfaces, 'dark')).toBeGreaterThanOrEqual(at)
-    },
-  )
+/** Light pairs outside DEV-152's table that still fall short: not asserted for light until they are fixed. */
+const LIGHT_ONLY = new Set(['--field-edge'])
+const LIGHT_OPEN = new Set(['--kbd-ink', '--danger-dim', '--knob-off'])
+
+describe.each(['dark', 'light'] as const)('the %s theme, read', (theme) => {
+  it.each(
+    PAIRS.filter(([ink, on]) => (theme === 'dark' ? !LIGHT_ONLY.has(ink) : ![ink, ...on].some((name) => LIGHT_OPEN.has(name)))).map(
+      ([ink, on, at]) => ({
+        ink,
+        on: on.join(' under '),
+        at,
+        surfaces: on,
+      }),
+    ),
+  )('$ink on $on reaches $at:1', ({ ink, surfaces, at }) => {
+    expect(contrast(ink, surfaces, theme)).toBeGreaterThanOrEqual(at)
+  })
 
   it('resolves colours as a browser does', () => {
     // the parts of the resolver the pairs lean on, against values a browser gives

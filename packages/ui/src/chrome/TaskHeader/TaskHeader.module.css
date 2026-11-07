@@ -22,7 +22,7 @@
 }
 .chip[data-status='you'] {
   background: var(--signal-dim);
-  color: var(--signal);
+  color: var(--signal-ink);
 }
 .chip[data-status='running'] {
   background: var(--live-dim);

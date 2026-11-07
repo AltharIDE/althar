@@ -166,7 +166,7 @@
   white-space: nowrap;
 }
 .good .mark {
-  color: var(--ok);
+  color: var(--ok-ink);
 }
 .bad,
 .bad .mark {
