@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { cp, lstat, realpath } from 'node:fs/promises'
 import { basename, isAbsolute, join, normalize, sep } from 'node:path'
 
@@ -614,8 +615,13 @@ export class Setups extends Context.Service<
         })
 
       /** How a setup the lead asked for went, in words for it, with the end of what it printed either way. */
-      const saidOf = (name: string, several: boolean, ran: { readonly setUp: SetUp; readonly printed: string } | undefined) => {
-        const where = several ? `${name}'s worktree` : 'the worktree'
+      const saidOf = (
+        name: string,
+        several: boolean,
+        ran: { readonly setUp: SetUp; readonly printed: string } | undefined,
+        folder = 'worktree',
+      ) => {
+        const where = several ? `${name}'s ${folder}` : `the ${folder}`
         if (ran === undefined || ran.setUp.command === null)
           return `${several ? name : 'The repository'} has no setup recorded, and nothing Althar can tell to install: there is no lockfile or manifest it knows. If it needs one, get the folder ready yourself and record what worked with record_setup.`
         const { setUp, printed } = ran
@@ -641,8 +647,14 @@ export class Setups extends Context.Service<
               const copies = yield* provide(copiesOf(access, named))
               if (copies.length === 0)
                 return yield* new ToolRefused({ message: 'The project has no repository on this computer to set up.' })
+              // Made as its turn starts: outside one, there is nothing to set up yet.
+              const missing = copies.filter((one) => !existsSync(one.worktree))
+              if (missing.length > 0)
+                return yield* new ToolRefused({
+                  message: `Your copy of ${missing.map((one) => one.name).join(' and ')} isn't on this computer: your copies are made as each of your turns starts.`,
+                })
               const ran = yield* Effect.forEach(copies, (one) => locked(`copy:${one.worktree}`, provide(setUp(one, false))))
-              return copies.map((one, at) => saidOf(one.name, copies.length > 1, ran[at])).join('\n\n')
+              return copies.map((one, at) => saidOf(one.name, copies.length > 1, ran[at], 'copy')).join('\n\n')
             }
             if (taskId === null) return yield* new ToolRefused({ message: 'This tool is for a task’s lead or the coordinator.' })
             const again = yield* provide(againOf(taskId, named))

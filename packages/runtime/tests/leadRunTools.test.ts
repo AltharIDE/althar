@@ -1,12 +1,14 @@
 import { execFileSync } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import type { Screenshot, Shot } from '../src/Config'
+import { RuntimeConfig, type Screenshot, type Shot } from '../src/Config'
+import { coordinatorFolderAt } from '../src/coordinatorFolder'
+import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { Launches } from '../src/Launches'
 import { Projects } from '../src/Projects'
@@ -142,6 +144,45 @@ describe('install_dependencies', () => {
       assert.strictEqual(
         yield* callTool({ ...bare.lead, taskId: null }, 'install_dependencies', {}),
         'This tool is for a task’s lead or the coordinator.',
+      )
+    }).pipe(Effect.provide(runtime())),
+  )
+})
+
+describe('install_dependencies, for the coordinator', () => {
+  it.live('sets up its copies as a worktree is, keeps nothing of it, and says so where a copy isn’t there yet', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const SETUP = `node -e "require('fs').writeFileSync('installed.txt','yes');console.log('added 3 packages')"`
+      const { project } = yield* taskIn(repository(), SETUP)
+      const threadId = yield* (yield* Coordinator).thread(project.projectId)
+      const coordinator: ToolAccess = { role: 'coordinator', projectId: project.projectId, threadId, sessionId: 'none', taskId: null }
+      const [binding] = yield* sql<{ slug: string; name: string; recorded: string | null }>`
+        SELECT b.slug, b.display_name AS name, b.recorded_setup AS recorded
+        FROM repository_bindings b WHERE b.project_id = ${project.projectId}`
+      const [{ slug } = { slug: '' }] = yield* sql<{ slug: string }>`SELECT slug FROM projects WHERE id = ${project.projectId}`
+      const copy = join(coordinatorFolderAt((yield* RuntimeConfig).worktreeRoot, slug), binding?.slug ?? '')
+
+      // Its copies are made as its turn starts: outside one, there is nothing to set up.
+      assert.strictEqual(
+        yield* callTool(coordinator, 'install_dependencies', {}),
+        `Your copy of ${binding?.name} isn't on this computer: your copies are made as each of your turns starts.`,
+      )
+      mkdirSync(copy, { recursive: true })
+      assert.strictEqual(
+        yield* callTool(coordinator, 'install_dependencies', { repository: binding?.name ?? '' }),
+        `Althar ran \`${SETUP}\` in the copy, outside your sandbox, and it went through. The end of what it printed:\n\`\`\`\nadded 3 packages\n\`\`\``,
+      )
+      assert.strictEqual(readFileSync(join(copy, 'installed.txt'), 'utf8'), 'yes')
+      // Shown in its thread; nothing kept of it, as the copy is made again next turn.
+      assert.lengthOf(yield* setupItems(threadId), 1)
+      const [after] = yield* sql<{
+        recorded: string | null
+      }>`SELECT recorded_setup AS recorded FROM repository_bindings WHERE project_id = ${project.projectId}`
+      assert.strictEqual(after?.recorded, binding?.recorded)
+      assert.match(
+        yield* callTool(coordinator, 'install_dependencies', { repository: 'web' }),
+        /^The project has no repository called web\. Its repositories: /,
       )
     }).pipe(Effect.provide(runtime())),
   )
