@@ -194,6 +194,11 @@ describe('a project’s settings', () => {
         setup: { copy: ['.env'], commands: ['bun install --frozen-lockfile', 'bunx playwright install chromium'] },
       }),
     )
+    // Clearing hands it back: the call is made and the lines say nothing is kept.
+    await userEvent.click(screen.getByRole('button', { name: 'Clear, so an agent sets it again' }))
+    await waitFor(() =>
+      expect(client.setRepository).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: repositories[0]?.id, setup: null }),
+    )
     // A repository no lead has set up yet says who fills it in.
     await userEvent.click(screen.getByRole('tab', { name: 'meridian-web' }))
     expect(screen.getByRole('textbox', { name: 'meridian-web: commands' })).toHaveProperty(

@@ -23,7 +23,7 @@ export const repositorySetupsText = {
   copy: 'Copied from your checkout',
   unrecorded: 'None yet: the first task’s agent sets it.',
   byAgent: 'Set by an agent.',
-  byPerson: 'Edited by you. An agent asks before replacing it.',
+  byPerson: 'Edited by you. Agents are told to ask you before replacing it.',
   newTasks: 'New tasks use this; worktrees already made keep what they have.',
   clear: 'Clear, so an agent sets it again',
   nothing: 'Needs nothing.',
@@ -259,10 +259,10 @@ export function RepositorySetups({ repositories, onChange, onClear, error }: Rep
         <div className={s.foot}>
           <span className={s.note}>
             {who === null ? '' : `${who} `}
-            {repositorySetupsText.newTasks}
+            {setup !== null && repositorySetupsText.newTasks}
           </span>
           {setup !== null && (
-            <Button size="small" onClick={() => onClear(repository.id)}>
+            <Button size="small" variant="danger" onClick={() => onClear(repository.id)}>
               {repositorySetupsText.clear}
             </Button>
           )}

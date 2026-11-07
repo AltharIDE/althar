@@ -143,7 +143,7 @@ export const None: Story = {
       'placeholder',
       'None yet: the first task’s agent sets it.',
     )
-    await expect(canvas.getByText(SAID)).toBeInTheDocument()
+    await expect(canvas.queryByText(SAID)).toBeNull()
     await expect(canvas.queryByRole('button', { name: /Clear/ })).toBeNull()
   },
 }
@@ -161,7 +161,7 @@ export const AgentSet: Story = {
 export const PersonEdited: Story = {
   args: { repositories: [{ ...ALTHAR, setup: { by: 'person', copy: ['.env'], commands: ['make deps'] } }] },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText(/Edited by you\. An agent asks before replacing it\./)).toBeInTheDocument()
+    await expect(within(canvasElement).getByText(/Edited by you\. Agents are told to ask you before replacing it\./)).toBeInTheDocument()
   },
 }
 

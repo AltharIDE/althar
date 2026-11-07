@@ -554,15 +554,8 @@ export class Setups extends Context.Service<
           return found
         })
 
-      /** Keeps a repository's setup, replacing what was recorded; the project changes with it, so its settings read it again. */
-      const record = (
-        projectId: ProjectId,
-        bindingId: string,
-        name: string,
-        recorded: Recorded | null,
-        actorId: ActorId,
-        personAgreed = true,
-      ) =>
+      /** Keeps a repository's setup, replacing what was recorded (the person's own edit only where `personAgreed`); the project changes with it, so its settings read it again. */
+      const record = (projectId: ProjectId, bindingId: string, name: string, recorded: Recorded, actorId: ActorId, personAgreed: boolean) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           return yield* sql.withTransaction(
@@ -570,7 +563,7 @@ export class Setups extends Context.Service<
               // One statement decides and writes, so an edit the person saved meanwhile is never replaced without their agreement.
               const written = yield* sql<{
                 id: string
-              }>`UPDATE repository_bindings SET recorded_setup = ${recorded === null ? null : JSON.stringify(recorded)}
+              }>`UPDATE repository_bindings SET recorded_setup = ${JSON.stringify(recorded)}
                 WHERE id = ${bindingId}
                   AND (${personAgreed ? 1 : 0} = 1 OR recorded_setup IS NULL OR json_extract(recorded_setup, '$.taskId') IS NOT NULL)
                 RETURNING id`
@@ -582,8 +575,8 @@ export class Setups extends Context.Service<
                 aggregateType: 'project',
                 aggregateId: projectId,
                 revision,
-                type: recorded === null ? 'project.setup_cleared' : 'project.setup_recorded',
-                payload: { repository: name, ...(recorded === null ? {} : { copy: recorded.copy, commands: recorded.commands }) },
+                type: 'project.setup_recorded',
+                payload: { repository: name, copy: recorded.copy, commands: recorded.commands },
                 actorId,
               })
               return true
