@@ -204,24 +204,29 @@ function Field({ words, onWords }: { words: string; onWords: (words: string) => 
   )
 }
 
-function Foot({
-  hostConnected,
-  hostName,
-  task,
-  onConnect,
-}: {
-  hostConnected: boolean
-  hostName: string
-  task: Task | null
-  onConnect: () => void
-}) {
+/** The host that isn't connected: named, with the one press that connects it. */
+function HostGap({ hostName, onConnect }: { hostName: string; onConnect: () => void }) {
+  return (
+    <div className={css.host}>
+      <span className={css.hostMark}>
+        <BrandMark brand={Brand.GitLab} size={16} />
+      </span>
+      <span className={css.hostWords}>
+        <span className={css.hostName} title={hostName}>
+          {hostName}
+        </span>
+        <span className={css.hostWhat}>Merge requests need a connection</span>
+      </span>
+      <Button size="small" onClick={onConnect}>
+        Connect GitLab
+      </Button>
+    </div>
+  )
+}
+
+function Foot({ task }: { task: Task | null }) {
   return (
     <div className={cx(s.note, css.foot)}>
-      {!hostConnected && (
-        <span className={css.footLine}>
-          {hostName} isn’t connected, so its merge requests aren’t here. <LinkButton onClick={onConnect}>Connect GitLab…</LinkButton>
-        </span>
-      )}
       <span className={css.footLine}>
         {task === null
           ? 'A branch picked here is also where new tasks work toward.'
@@ -353,6 +358,7 @@ function Flat({
   return (
     <div className={s.picker}>
       <Field words={words} onWords={setWords} />
+      {!hostConnected && <HostGap hostName={hostName} onConnect={onConnect} />}
       <div className={s.results}>
         <Row
           checked={task === null && changed.length === 0}
@@ -431,7 +437,7 @@ function Flat({
         )}
         {rows.length === 0 && pulls.length === 0 && shownTasks.length === 0 && <p className={s.quiet}>Nothing matches “{words}”.</p>}
       </div>
-      <Foot hostConnected={hostConnected} hostName={hostName} task={task} onConnect={onConnect} />
+      <Foot task={task} />
     </div>
   )
 }
@@ -470,6 +476,7 @@ function Grouped({
         <span className={css.summaryQuiet}>One repository can move while the rest stay on their defaults.</span>
       </div>
       <Field words={words} onWords={setWords} />
+      {!hostConnected && <HostGap hostName={hostName} onConnect={onConnect} />}
       <div className={s.results}>
         {shownTasks.length > 0 && (
           <Group label="Tasks">
@@ -563,7 +570,7 @@ function Grouped({
         }) &&
           shownTasks.length === 0 && <p className={s.quiet}>Nothing matches “{words}”.</p>}
       </div>
-      <Foot hostConnected={hostConnected} hostName={hostName} task={task} onConnect={onConnect} />
+      <Foot task={task} />
     </div>
   )
 }
@@ -606,6 +613,7 @@ function Board({
         </div>
       </div>
       <Field words={words} onWords={setWords} />
+      {!hostConnected && <HostGap hostName={hostName} onConnect={onConnect} />}
       <LinkButton className={css.reset} onClick={onReset}>
         All on defaults
       </LinkButton>
@@ -727,7 +735,7 @@ function Board({
           </p>
         </div>
       </div>
-      <Foot hostConnected={hostConnected} hostName={hostName} task={task} onConnect={onConnect} />
+      <Foot task={task} />
     </div>
   )
 }

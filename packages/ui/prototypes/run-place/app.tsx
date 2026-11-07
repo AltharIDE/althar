@@ -36,7 +36,7 @@ import { labelOf, type Picks, placeOf, RunPlacePrototype } from './picker'
 
 /* ——— The URL says what the page shows, so a screenshot can open it again. ——— */
 
-const directionOf = (word: string | null): Direction => (word === 'B' || word === 'C' ? word : 'A')
+const directionOf = (word: string | null): Direction => (word === 'A' || word === 'C' ? word : 'B')
 const defaultsOf = (word: string | null): Defaults => (word === 'same' || word === 'single' ? word : 'mixed')
 
 const picksOf = (word: string | null): Picks => {
@@ -219,6 +219,7 @@ function App() {
             <div className={css.tag}>
               <span className={css.tagLetter}>{state.direction}</span>
               <span>{DIRECTION_NAMES[state.direction]}</span>
+              {state.direction === 'B' && <span className={css.tagChosen}>Chosen</span>}
             </div>
             <p className={css.blurb}>
               {single ? 'One repository: nothing to tell apart, so the picker stays as it is today.' : DIRECTION_BLURBS[state.direction]}

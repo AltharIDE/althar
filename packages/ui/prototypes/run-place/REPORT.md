@@ -1,6 +1,6 @@
 # Run’s place in a multi-repo project
 
-Live page: **[http://localhost:5358/](http://localhost:5358/)**. The bar at the bottom switches direction (A, B, C or keys 1–3), project (mixed defaults, shared main, one repository, or keys 4–6) and host (h). Open the picker from the chip beside **Run**.
+Live page: **[http://localhost:5358/](http://localhost:5358/)**. It opens on **B**, the direction chosen on 7 Nov; the bar at the bottom still switches direction (A, B, C or keys 1–3), project (mixed defaults, shared main, one repository, or keys 4–6) and host (h). Open the picker from the chip beside **Run**.
 
 The project is `fnt`: five repositories on a self-hosted GitLab at `gitlab.fnt.example`. Three are on `main`, one on `develop`, one on `master`; the shared-main project puts all five on `main`. The page is the real `ProjectHeader`, the real `Popover`, `Button`, `Icon` and `LinkButton`, and the real picker’s own row styles (`RunPlace.module.css`). Only the shape of the answer is on trial. The data is local; nothing runs.
 
@@ -22,22 +22,24 @@ A wider, two-column picker. On the left, repositories expand in place to their d
 
 - **What will run where, before picking:** branch rows name their runnable and command; C’s right column and the page’s “Where each run starts” panel make it explicit.
 - **Defaults that differ and defaults that agree:** the Mixed-defaults and Shared-main projects (keys 4 and 5).
-- **A host that is not connected:** the footer says `gitlab.fnt.example isn’t connected, so its merge requests aren’t here.` with **Connect GitLab…**, which opens the token dialog. Turning the host on in the switcher (or connecting it) shows each repository’s pull requests with its name.
+- **A host that is not connected:** a band of its own above the places, not a footer line. It has the GitLab mark, `gitlab.fnt.example` in mono, “Merge requests need a connection”, and a real **Connect GitLab** button that opens the token dialog. The band is a grid: the host name truncates with an ellipsis and the button keeps its size, so nothing overflows the popover. Turning the host on in the switcher (or connecting it) removes the band and shows each repository’s pull requests with its name.
 - **Plain footer:** the old “A number, as #12, runs one still.” is gone. The only other line is `A branch picked here is also where new tasks work toward.`
 - **One repository:** all three directions fall back to today’s picker — one `main`, tasks, branches, no repository names, no summary.
 
 ## Pictures
 
-1. **A1 — A, mixed defaults, host off.** `engine` is on `fix/redirects`; the top row lists all five repositories and their defaults, with `engine` in violet, and the chip says `engine: fix/redirects · 4 on defaults`. The footer names the host.
-2. **B1 — B, the same pick.** One section per repository; `engine`’s section shows its default, branches and the picked `fix/redirects`, while `frontend` starts on `main`.
-3. **C1 — C, the same pick.** The board: repositories left, and right, `engine fix/redirects bun run dev localhost:4100` beside `frontend main`, `api develop`, `docs master`, `shared main`.
-4. **A2 — shared main, GitLab connected.** All five defaults agree; pull requests appear under A’s flat list, each naming its repository. The chip says `frontend: !18 · 4 on defaults`.
-5. **S1 — one repository.** The picker is today’s: `main`, tasks, branches; no repository names or grouping.
-6. **H1 — the way to connect.** **Connect GitLab…** opens a dialog for `gitlab.fnt.example`, with the host and a token field — the DEV-212 direction, in place.
+1. **B0 — B, mixed defaults, nothing picked.** The page opens here, with the “Chosen” mark beside B. Each repository has its own section and names its default branch, and the host band sits above the places.
+2. **B1 — B, the same pick.** `engine` is on `fix/redirects`; its section marks the branch, the other four stay on their defaults, and the chip says `engine: fix/redirects · 4 on defaults`.
+3. **A1 — A, the same pick.** The top row is “Default branches”; every repository is named with its branch, and `engine` stands out in violet.
+4. **C1 — C, the same pick.** The board: repositories left, and right, `engine fix/redirects bun run dev localhost:4100` beside `frontend main`, `api develop`, `docs master`, `shared main`.
+5. **H0 — the host band.** The GitLab mark, `gitlab.fnt.example`, “Merge requests need a connection”, and **Connect GitLab**, on a tinted strip that does not wrap or overflow.
+6. **A2 — shared main, GitLab connected.** All five defaults agree, the band is gone, and pull requests appear each naming its repository. The chip says `frontend: !18 · 4 on defaults`.
+7. **S1 — one repository.** The picker is today’s: `main`, tasks, branches; no repository names or grouping, and the same host band.
+8. **H1 — the way to connect.** **Connect GitLab** opens a dialog for `gitlab.fnt.example`, with the host and a token field — the DEV-212 direction, in place.
 
-## What I recommend
+## What we chose
 
-**B**, with A’s default-branch line kept as the first thing in the list and C’s “Where each run starts” kept as a short footer in multi-repo projects.
+**B** (7 Nov), with A’s default-branch line kept as the first thing in the list and C’s “Where each run starts” kept as a short footer in multi-repo projects.
 
 B answers the question at the level the data already lives: one repository, one default (or work-toward) branch, one pick. It makes a cross-repository mix legible without a new screen, and it leaves single-repository projects exactly as they are. A alone labels the flat list but still asks the person to spot that two `fix/redirects` rows are in different repositories. C is the best overview but too heavy as the picker itself; its right column belongs in the Run list, where someone is about to press Run.
 

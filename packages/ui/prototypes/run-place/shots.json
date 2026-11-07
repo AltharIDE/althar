@@ -1,13 +1,18 @@
 [
   {
-    "id": "A1",
-    "page": "?d=A&s=mixed&host=off&open=1&pick=engine=fix/redirects",
-    "caption": "A, mixed defaults, host off: the top row is “Default branches”, every repository is named with its branch, and engine’s fix/redirects stands out. The chip says where the pick leaves the rest."
+    "id": "B0",
+    "page": "?d=B&s=mixed&host=off&open=1",
+    "caption": "B, nothing picked yet. The page opens here: one section per repository, each naming its own default branch. Above the list, gitlab.fnt.example has a band of its own with Connect GitLab, so it isn’t a line of footer text."
   },
   {
     "id": "B1",
     "page": "?d=B&s=mixed&host=off&open=1&pick=engine=fix/redirects",
-    "caption": "B, the same pick: one section per repository. Engine shows its default, branches and the picked fix/redirects; frontend stays on main. The summary and the chip say “engine: fix/redirects · 4 on defaults”."
+    "caption": "B with engine on fix/redirects: engine’s section marks the branch, the other four stay on their defaults, and the chip and summary read “engine: fix/redirects · 4 on defaults”."
+  },
+  {
+    "id": "A1",
+    "page": "?d=A&s=mixed&host=off&open=1&pick=engine=fix/redirects",
+    "caption": "A, the same pick: the top row is “Default branches”, every repository is named with its branch, and engine’s fix/redirects stands out. The host band is the same band here."
   },
   {
     "id": "C1",
@@ -15,19 +20,25 @@
     "caption": "C, the same pick: the run board. Repositories expand in place on the left, and “Where each run starts” on the right says engine runs fix/redirects on localhost:4100 while the other four keep their defaults."
   },
   {
+    "id": "H0",
+    "page": "?d=B&s=mixed&host=off&open=1",
+    "clip": { "x": 624, "y": 140, "width": 534, "height": 78 },
+    "caption": "The host band on its own: the GitLab mark, gitlab.fnt.example in mono, “Merge requests need a connection”, and a real Connect GitLab button. The host name truncates rather than pushing the button out."
+  },
+  {
     "id": "A2",
     "page": "?d=A&s=same&host=on&open=1&pick=frontend=!18",
-    "caption": "Shared main with GitLab connected: all five defaults agree, and pull requests appear with the repository they belong to. frontend’s !18 is picked; the other four stay on main."
+    "caption": "Shared main with GitLab connected: all five defaults agree, the band is gone, and pull requests appear with the repository they belong to. frontend’s !18 is picked; the other four stay on main."
   },
   {
     "id": "S1",
     "page": "?d=B&s=single&host=off&open=1",
-    "caption": "One repository: the picker falls back to today’s shape — main, tasks, branches — with no repository names, grouping or summary to carry."
+    "caption": "One repository: the picker falls back to today’s shape — main, tasks, branches — with no repository names or grouping; only the host band is added."
   },
   {
     "id": "H1",
-    "page": "?d=A&s=mixed&host=off&open=1&pick=engine=fix/redirects",
-    "click": ["text=Connect GitLab…"],
-    "caption": "The way to connect from the footer: Connect GitLab… opens a dialog for gitlab.fnt.example, its host and a token. Connecting turns the host on and fills the pull requests in."
+    "page": "?d=B&s=mixed&host=off&open=1",
+    "click": ["text=Connect GitLab"],
+    "caption": "Connect GitLab in the band opens the token dialog for gitlab.fnt.example. Connecting turns the host on and fills the pull requests in."
   }
 ]

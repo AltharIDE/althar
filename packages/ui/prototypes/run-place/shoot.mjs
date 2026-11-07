@@ -24,7 +24,7 @@ for (const shot of shots.filter((one) => only.length === 0 || only.includes(one.
     await page.locator(click).first().click()
     await page.waitForTimeout(600)
   }
-  await page.screenshot({ path: resolve(out, `${shot.id}.png`) })
+  await page.screenshot({ path: resolve(out, `${shot.id}.png`), ...(shot.clip ? { clip: shot.clip } : {}) })
   process.stdout.write(`${shot.id}  ${errors.length === 0 ? 'ok' : errors.join(' | ')}\n`)
   await page.close()
 }

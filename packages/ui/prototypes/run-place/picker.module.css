@@ -74,7 +74,55 @@
   font-weight: 500;
 }
 
-/* ——— The footer: what a pick does, and the host when it isn't connected. ——— */
+/* ——— A host that isn't connected: a band of its own, pinned above the places. ——— */
+.host {
+  display: grid;
+  flex: none;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--signal-line);
+  border-radius: 8px;
+  background: var(--signal-paper);
+}
+
+.hostMark {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+.hostWords {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.hostName {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--t-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hostWhat {
+  overflow: hidden;
+  font-size: 11.5px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ——— The footer: what a pick does. ——— */
 .foot {
   display: grid;
   gap: 3px;

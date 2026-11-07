@@ -57,6 +57,15 @@
   color: var(--t-2);
 }
 
+.tagChosen {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--signal-dim);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--signal);
+}
+
 .blurb {
   margin: 12px 0 0;
   font-size: 13.5px;
