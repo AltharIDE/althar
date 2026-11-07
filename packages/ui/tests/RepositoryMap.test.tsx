@@ -106,6 +106,42 @@ describe('a fork’s branches', () => {
   })
 })
 
+describe('the repository a fork forks, among its clone’s remotes', () => {
+  const forkWith = (remote: string | null | undefined) =>
+    MAP_HALYARD.map((one) =>
+      one.fork === undefined ? one : { ...one, fork: { ...one.fork, ...(remote === undefined ? {} : { remote }) } },
+    )
+  const NO_REMOTE = 'Your clone has no remote for halyard/api, so tasks start from your fork.'
+
+  it('names the remote its clone has it as, where that isn’t upstream', () => {
+    map({ repositories: forkWith('base') })
+    expect(screen.getByText('The repository it forks, as base')).toBeTruthy()
+    expect(screen.queryByText(NO_REMOTE)).toBeNull()
+  })
+
+  it('says only what it is, as upstream or unsaid', () => {
+    for (const remote of ['upstream', undefined]) {
+      const { unmount } = map({ repositories: forkWith(remote) })
+      expect(screen.getByText('The repository it forks')).toBeTruthy()
+      unmount()
+    }
+  })
+
+  it('offers to add it where none of the remotes is it, with the button beside what it says', () => {
+    const onAddRemote = vi.fn()
+    map({ repositories: forkWith(null), onAddRemote })
+    expect(screen.getByText(NO_REMOTE)).toBeTruthy()
+    act(() => screen.getByRole('button', { name: 'Add it as a remote' }).click())
+    expect(onAddRemote).toHaveBeenCalledWith('halyard')
+  })
+
+  it('says so without a button where there is no way to add it here', () => {
+    map({ repositories: forkWith(null) })
+    expect(screen.getByText(NO_REMOTE)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Add it as a remote' })).toBeNull()
+  })
+})
+
 describe('its wires', () => {
   it('draws a wire for a repository added after the map was drawn as new, to draw itself in', () => {
     const { again } = map({ repositories: MAP_MERIDIAN.slice(0, 2) })
