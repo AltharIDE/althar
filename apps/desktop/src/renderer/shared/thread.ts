@@ -334,6 +334,8 @@ export interface Streamed {
   readonly kind: 'agent_message' | 'agent_thought'
   readonly agentId: string
   readonly text: string
+  /** Where the thread places the item it will be. */
+  readonly sequence: number
   /** When it was first heard. */
   readonly at: string
 }

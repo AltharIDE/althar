@@ -3218,6 +3218,8 @@ export const WatchEvent = Schema.Union([
     _tag: Schema.Literal('Streaming'),
     threadId: Schema.String,
     itemId: Schema.String,
+    /** Where the thread places the item, so a window with a cleared view can tell whether it is in it. */
+    sequence: Schema.Int,
     /** What it is and who is saying it, so a client can show it before it has read the item. */
     kind: Schema.Literals(['agent_message', 'agent_thought']),
     agentId: Schema.String,

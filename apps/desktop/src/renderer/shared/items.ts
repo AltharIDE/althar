@@ -61,14 +61,15 @@ export const unsent = (items: ReadonlyArray<ThreadItem>, id: string, text: strin
 }
 
 /**
- * Whether a coordinator's item belongs in the thread the window shows, by the view's mark: a whole view takes every item; a
- * cleared one those from the mark on, and, with the earlier conversation open, those before it. An item the window holds
- * already (a card carried in from before the mark) is always in it, to be kept up to date.
+ * Whether a place in the coordinator's thread is in the view the window shows, by its mark: a whole view takes every place; a
+ * cleared one those from the mark on, and, with the earlier conversation open, those before it.
  */
+export const placedInView = (view: ConversationView, sequence: number): boolean =>
+  view.from === null || (view.earlierOpen ? sequence < view.from : sequence >= view.from)
+
+/** Whether an item belongs in that view. An item the window holds already (a card carried in from before the mark) always does, to be kept up to date. */
 export const inView = (view: ConversationView, held: ReadonlyArray<ThreadItem>, item: ThreadItem): boolean =>
-  view.from === null ||
-  (view.earlierOpen ? item.sequence < view.from : item.sequence >= view.from) ||
-  held.some((one) => one.id === item.id)
+  placedInView(view, item.sequence) || held.some((one) => one.id === item.id)
 
 /** Items by id, oldest first: what arrives replaces what was there, and the store's copy of a message, the window's. */
 export const mergeItems = (current: ReadonlyArray<ThreadItem>, incoming: ReadonlyArray<ThreadItem>): ReadonlyArray<ThreadItem> => {

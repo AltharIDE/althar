@@ -151,7 +151,7 @@ export const useProject = (projectId: string): ProjectModel => {
   // What the coordinator's commands have printed so far, while they run.
   const outputs = useOutputs(threadId, coordinator?.items ?? NO_ITEMS, coordinator?.session?.turnRunning ?? false)
   // What it is still saying, while the window hears it.
-  const streaming = useStreamed(threadId, coordinator?.items ?? NO_ITEMS)
+  const streaming = useStreamed(threadId, coordinator?.items ?? NO_ITEMS, coordinator?.view)
 
   /** Changes the coordinator's thread as the window keeps it; nothing before it is first read. */
   const setCoordinator = useCallback(

@@ -11,7 +11,7 @@ import { useBoard } from '../src/renderer/features/board/useBoard'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
-import { changed, coordinatorSnapshot, fakeClient, items } from './fixtures'
+import { changed, coordinatorSnapshot, fakeClient, items, streamed } from './fixtures'
 import { servicesFor, useSettingsOf, withServices } from './render'
 
 /*
@@ -379,5 +379,63 @@ describe('what the window hears of a thread whose view is cleared', () => {
       await Promise.resolve()
     })
     expect(result.current.coordinator?.items).toEqual([])
+  })
+})
+
+describe('what the thread shows of words still being written, by its view', () => {
+  /** A thread of one item after the mark, with the view as given. */
+  const read = (view: Partial<ConversationView>, held: ReadonlyArray<ThreadItem> = [at(items.you('After'), 101)]) =>
+    talk({ cleared: true, from: 100, clearable: false, ...view }, { items: held })
+
+  it('does not show words of an item before the mark, and shows those after it', async () => {
+    const { client, emit } = fakeClient({ getCoordinator: vi.fn(async () => read({})) })
+    withServices(<Project />, client)
+    expect(await screen.findByText('After')).toBeTruthy()
+    // The thread shows the words heard last, so the one the view leaves out comes after.
+    act(() => emit(streamed('new', 'Said after the clear', 'thc', 'agent_message', 'claude-code', 101)))
+    act(() => emit(streamed('old', 'Said before the clear', 'thc', 'agent_message', 'claude-code', 4)))
+    expect(await screen.findByText(/Said after the clear/)).toBeTruthy()
+    expect(screen.queryByText(/Said before the clear/)).toBeNull()
+  })
+
+  it('takes the words away as the view is cleared mid-answer, and not again as the agent goes on', async () => {
+    let now = talk({}, { items: [at(items.you('Why?'), 3)] })
+    const { client, emit } = fakeClient({ getCoordinator: vi.fn(async () => now) })
+    withServices(<Project />, client)
+    expect(await screen.findByText('Why?')).toBeTruthy()
+    act(() => emit(streamed('live', 'Half of an answer', 'thc', 'agent_message', 'claude-code', 4)))
+    expect(await screen.findByText('Half of an answer')).toBeTruthy()
+    // Cleared in another window while the agent is answering.
+    now = read({ version: 2 }, [])
+    act(() => emit(changed('thread', 'thc', 'thc', 'p1')))
+    await waitFor(() => expect(screen.queryByText('Half of an answer')).toBeNull())
+    act(() => emit(streamed('live', 'Half of an answer, and the rest', 'thc', 'agent_message', 'claude-code', 4)))
+    act(() => emit(streamed('after', 'And a new one', 'thc', 'agent_message', 'claude-code', 101)))
+    expect(await screen.findByText('And a new one')).toBeTruthy()
+    expect(screen.queryByText(/Half of an answer/)).toBeNull()
+  })
+
+  it('shows only the earlier conversation’s words while it is open', async () => {
+    const { client, emit } = fakeClient({
+      getCoordinator: vi.fn(async () => read({ earlierOpen: true, version: 2 }, [at(items.you('Then'), 4)])),
+    })
+    withServices(<Project />, client)
+    expect(await screen.findByText('Then')).toBeTruthy()
+    act(() => emit(streamed('early', 'Said then', 'thc', 'agent_message', 'claude-code', 5)))
+    act(() => emit(streamed('late', 'Said now', 'thc', 'agent_message', 'claude-code', 101)))
+    expect(await screen.findByText(/Said then/)).toBeTruthy()
+    expect(screen.queryByText(/Said now/)).toBeNull()
+  })
+
+  it('takes the words away as the conversation is wiped', async () => {
+    let now = talk({}, { items: [at(items.you('Why?'), 3)] })
+    const { client, emit } = fakeClient({ getCoordinator: vi.fn(async () => now) })
+    withServices(<Project />, client)
+    expect(await screen.findByText('Why?')).toBeTruthy()
+    act(() => emit(streamed('live', 'Half of an answer', 'thc', 'agent_message', 'claude-code', 4)))
+    expect(await screen.findByText('Half of an answer')).toBeTruthy()
+    now = talk({ clearable: false, forgettable: false, version: 2 }, { items: [] })
+    act(() => emit(changed('thread', 'thc', 'thc', 'p1')))
+    await waitFor(() => expect(screen.queryByText('Half of an answer')).toBeNull())
   })
 })

@@ -1709,6 +1709,7 @@ export class Sessions extends Context.Service<
                     _tag: 'Streaming',
                     threadId: thread.threadId,
                     itemId: open.id,
+                    sequence: open.sequence,
                     kind: open.kind,
                     agentId: running.entry.definition.id,
                     text: open.text,

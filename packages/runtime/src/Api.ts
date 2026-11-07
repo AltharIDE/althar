@@ -662,6 +662,7 @@ export const handlers = Api.toLayer(
                   _tag: 'Streaming',
                   threadId: event.threadId,
                   itemId: event.itemId,
+                  sequence: event.sequence,
                   kind: event.kind,
                   agentId: event.agentId,
                   text: event.text,

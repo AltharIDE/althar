@@ -19,6 +19,8 @@ export type LiveEvent =
       readonly _tag: 'Streaming'
       readonly threadId: string
       readonly itemId: string
+      /** Where the thread places it. */
+      readonly sequence: number
       readonly kind: 'agent_message' | 'agent_thought'
       readonly agentId: string
       readonly text: string

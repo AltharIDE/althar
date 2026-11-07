@@ -1436,10 +1436,12 @@ export const streamed = (
   threadId = 'th1',
   kind: 'agent_message' | 'agent_thought' = 'agent_message',
   agentId = 'claude-code',
+  sequence = 1,
 ): WatchEvent => ({
   _tag: 'Streaming',
   threadId,
   itemId,
+  sequence,
   kind,
   agentId,
   text,
