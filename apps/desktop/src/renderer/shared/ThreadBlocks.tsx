@@ -11,7 +11,6 @@ import {
   LinkButton,
   Markdown,
   Plan,
-  Prose,
   Question,
   type QuestionAnswer,
   Reasoning,
@@ -62,16 +61,17 @@ import s from './ThreadBlocks.module.css'
  * coordinator's thread. A turn's work folds under how long it worked, or is
  * working, with its last message open under it; a step's result stands open
  * under the work that led to it. Before the agent says anything, its turn
- * stands under its name, thinking, where its words will take its place. A
- * task's card is the host's to draw, since what it can do with one is the
- * host's.
+ * stands under its name, thinking, where its words will take its place.
+ * While it works, what it thinks streams under its line, and folds to a
+ * line of its own as it moves on; once it answers, that folds away into the
+ * work. What it is still writing streams in at an even pace. A task's card
+ * is the host's to draw, since what it can do with one is the host's.
  */
 
 /** How long a command can be before its row, at the thread's width, clips it. */
 const LONG_COMMAND = 72
 
 export const text = {
-  thought: 'Thought',
   readSkill: (names: ReadonlyArray<string>) => `read skill ${names.join(', ')}`,
   shell: 'Shell',
   step: { implement: 'Implement', review: 'Review', settle: 'Settle', publish: 'Pull request' } satisfies Record<
@@ -209,21 +209,21 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
   )
 }
 
-/** A part of a turn as the thread draws it: what it said, a thought, a tool call, its plan, a notice. */
-export function PartView({ part, threadId }: { part: Part; threadId: string }) {
+/** A part of a turn as the thread draws it: what it said, a thought, a tool call, its plan, a notice. Quiet, a thought stays folded as it streams. */
+export function PartView({ part, threadId, quiet = false }: { part: Part; threadId: string; quiet?: boolean }) {
   switch (part.kind) {
     case 'message':
       // Its names are read as they were when it was said.
       return (
         <SaidIn.Provider value={part.id}>
-          <Markdown source={part.text} />
+          <Markdown source={part.text} streaming={part.live === true} />
         </SaidIn.Provider>
       )
     case 'thought':
       return (
-        <Reasoning took="" text={{ thought: () => text.thought }}>
-          <Prose dim>{part.text}</Prose>
-        </Reasoning>
+        <SaidIn.Provider value={part.id}>
+          <Reasoning source={part.text} live={part.live === true} quiet={quiet} {...(part.took == null ? {} : { took: part.took })} />
+        </SaidIn.Provider>
       )
     case 'tool':
       return <ToolView part={part} threadId={threadId} />
@@ -240,6 +240,14 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
       return <Gallery shots={shotsOf(part.id, part.pictures)} />
   }
 }
+
+/**
+ * What a running turn is thinking, under its line: its latest thought, live
+ * or folded once it moved on, until it starts to answer. Undefined where
+ * there is none to show.
+ */
+export const thinkingOf = (work: ReadonlyArray<Part>, live: boolean, answering: boolean): Extract<Part, { kind: 'thought' }> | undefined =>
+  !live || answering ? undefined : work.findLast((part): part is Extract<Part, { kind: 'thought' }> => part.kind === 'thought')
 
 /** What the person said, each link that unfurled read as its key where they pasted it; its card, under the words, says the rest. */
 function Said({ text, links }: { text: string; links: ReadonlyArray<Unfurl> }) {
@@ -567,6 +575,8 @@ export function ThreadBlocks({
       case 'turn': {
         // What Copy takes: what it said, open under its work.
         const said = block.said.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part.text] : [])).join('\n\n')
+        // Its latest thought under its line while it works, until it starts its answer.
+        const thinking = thinkingOf(block.work, block.live, block.parts.at(-1)?.kind === 'message')
         return (
           <Turn
             key={block.id}
@@ -575,7 +585,12 @@ export function ThreadBlocks({
             {...(said === '' || block.live ? {} : { copy: said })}
           >
             {block.work.length > 0 && (
-              <WorkedFor took={block.took} live={block.live} {...(block.doing === null ? {} : { summary: block.doing })}>
+              <WorkedFor
+                took={block.took}
+                live={block.live}
+                {...(block.doing === null ? {} : { summary: block.doing })}
+                {...(thinking === undefined ? {} : { thinking: <PartView key={thinking.id} part={thinking} threadId={threadId} /> })}
+              >
                 {block.work.map((part) => (
                   <PartView key={part.id} part={part} threadId={threadId} />
                 ))}

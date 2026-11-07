@@ -82,6 +82,21 @@ export function Fold({ className, bleed = true, eager = false, children }: FoldP
   )
 }
 
+/**
+ * What shows while `open`, opening and folding away as a Fold does, with no
+ * trigger of its own: as it folds, what it last showed stays until it is
+ * gone, so it never empties first.
+ */
+export function Unfold({ open, children, className }: { open: boolean; children?: ReactNode; className?: string }) {
+  const [kept, setKept] = useState(children)
+  if (open && children !== kept) setKept(children)
+  return (
+    <div className={cx(s.fold, className)} data-state={open ? 'open' : 'closed'} inert={!open}>
+      <div className={s.inner}>{open ? children : kept}</div>
+    </div>
+  )
+}
+
 /** The fold's look, for panels another primitive owns (an Accordion item). They carry data-state like a Fold. */
 export const foldClass = { fold: s.fold, inner: s.inner, bleed: s.bleed }
 

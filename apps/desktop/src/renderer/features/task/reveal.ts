@@ -4,7 +4,9 @@
  * a round, a step's report), found by the item's id (`data-item`) once the
  * conversation shows, reading earlier pages of the thread where the item is
  * further back than those read. Brought into the middle of the view and
- * given focus, so a screen reader goes there too.
+ * given focus, so a screen reader goes there too. A review folds to a line,
+ * with the lead's round settling it where a later one handed over since: it
+ * stands for that round's report too, and opens as it is brought into view.
  */
 
 /** How many earlier pages it reads, at most, looking for an item: a hundred items each. */
@@ -14,7 +16,8 @@ const FRAMES = 4
 
 const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
 
-const blockOf = (root: ParentNode, itemId: string) => root.querySelector<HTMLElement>(`[data-item="${CSS.escape(itemId)}"]`)
+const blockOf = (root: ParentNode, itemId: string) =>
+  root.querySelector<HTMLElement>(`[data-item="${CSS.escape(itemId)}"], [data-items~="${CSS.escape(itemId)}"]`)
 
 /** The block for an item, once it shows: waiting a few frames for it, as the conversation draws what it read. */
 const found = async (root: ParentNode, itemId: string): Promise<HTMLElement | null> => {
@@ -35,6 +38,8 @@ export async function reveal(itemId: string, earlier: () => Promise<boolean>, ro
     const block = await found(root, itemId)
     if (block !== null) {
       const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      // A review's line, folded: opened, to what it holds.
+      if (block.matches('[data-review][data-state="closed"]')) block.querySelector<HTMLElement>('button[aria-expanded="false"]')?.click()
       block.scrollIntoView({ block: 'center', behavior: still ? 'auto' : 'smooth' })
       if (!block.hasAttribute('tabindex')) block.setAttribute('tabindex', '-1')
       block.focus({ preventScroll: true })

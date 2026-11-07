@@ -19,6 +19,10 @@ import { took } from './time'
  * follows, since the step's summary is what the person reads. While it runs,
  * the fold says how long it has worked so far and what it is doing now.
  * Before it has said anything, where its reply will start is held for it.
+ *
+ * A thought says how long it took (until whatever came next), and the
+ * message or thought the running turn is on now is live: still being
+ * written, so it streams in view (ThreadBlocks, TaskThread).
  */
 
 /** What a message or a tool call handed back beside its words (handed.ts). */
@@ -28,8 +32,22 @@ interface HandedParts {
 }
 
 export type Part =
-  | ({ readonly kind: 'message'; readonly id: string; readonly text: string } & HandedParts)
-  | { readonly kind: 'thought'; readonly id: string; readonly text: string }
+  | ({
+      readonly kind: 'message'
+      readonly id: string
+      readonly text: string
+      /** Still being written: the running turn's last part. */
+      readonly live?: boolean
+    } & HandedParts)
+  | {
+      readonly kind: 'thought'
+      readonly id: string
+      readonly text: string
+      /** How long it thought, until what came next, once that is a second or more; null while it thinks, or where it isn't known. */
+      readonly took?: string | null
+      /** It is thinking now: the running turn's last part. */
+      readonly live?: boolean
+    }
   | ({
       readonly kind: 'tool'
       readonly id: string
@@ -436,14 +454,34 @@ const splitOf = (parts: ReadonlyArray<Part>, beforeStep: boolean) => {
   }
 }
 
-/** What a running turn is doing, from the last thing it did. */
+/**
+ * A turn's parts, each thought with how long it took, until the next part
+ * or, for its last, until the turn ended; and the part a running turn is on
+ * now, live.
+ */
+const timed = (
+  parts: ReadonlyArray<Part>,
+  atOf: ReadonlyMap<string, string>,
+  running: boolean,
+  ended: string | undefined,
+): ReadonlyArray<Part> =>
+  parts.map((part, index) => {
+    const last = index === parts.length - 1
+    const live = running && last
+    if (part.kind === 'message') return live ? { ...part, live } : part
+    if (part.kind !== 'thought') return part
+    const from = atOf.get(part.id)
+    const to = last ? (running ? undefined : ended) : atOf.get(parts[index + 1]?.id ?? '')
+    const thought = from === undefined || to === undefined || Date.parse(to) - Date.parse(from) < 1000 ? null : took(from, to)
+    return { ...part, took: thought, ...(live ? { live } : {}) }
+  })
+
+/** What a running turn is doing, from the last thing it did. A thought shows itself, under the line (the turn's `thinking`). */
 const doingOf = (work: ReadonlyArray<Part>): string | null => {
   const last = work.at(-1)
   switch (last?.kind) {
     case 'tool':
       return `${last.verb} ${last.target}`
-    case 'thought':
-      return text.thinking
     case 'plan':
       return text.planning
     default:
@@ -475,7 +513,10 @@ export const blocksOf = (
   let restartedAt = -1
   /** When each turn began and last grew, by its id. */
   const spans = new Map<string, { from: string; to: string }>()
+  /** When each part was first heard, by its id: how long a thought took is read from them. */
+  const atOf = new Map<string, string>()
   const add = (agentId: string | null, at: string, part: Part, model: string | null = null) => {
+    atOf.set(part.id, at)
     const last = blocks.at(-1)
     if (last?.kind === 'turn' && last.agentId === agentId) {
       blocks[blocks.length - 1] = { ...last, parts: [...last.parts, part] }
@@ -634,13 +675,25 @@ export const blocksOf = (
   })
   // Each turn folds its work; the one still running says what it is doing now.
   const live = runningTurn === -1 ? -1 : merged.findLastIndex((block) => block.kind === 'turn')
+  // The last turn, over, ran until the runtime says it ended, where that is after its last part and nothing came since but its
+  // step's result: a turn stopped while it thought thought until then. Others ran until their last part.
+  const lastOver = merged.findLastIndex((block) => block.kind === 'turn')
+  const endOf = (index: number, span: { from: string; to: string }) => {
+    const ended = source.turnEnded
+    if (index !== lastOver || index === live || ended == null || Date.parse(ended) <= Date.parse(span.to)) return span.to
+    const since = merged.slice(index + 1).every((block) => block.kind === 'step')
+    return since && (askedWhen == null || Date.parse(askedWhen) <= Date.parse(span.to)) ? ended : span.to
+  }
   const drawn = merged.map((block, index): Block => {
     if (block.kind !== 'turn') return block
-    const span = spans.get(block.id)
+    const known = spans.get(block.id)
+    const span = known === undefined ? undefined : { ...known, to: endOf(index, known) }
     const running = index === live
-    const { work, said } = splitOf(block.parts, !running && merged[index + 1]?.kind === 'step')
+    const parts = timed(block.parts, atOf, running, span?.to)
+    const { work, said } = splitOf(parts, !running && merged[index + 1]?.kind === 'step')
     return {
       ...block,
+      parts,
       work,
       said,
       live: running,

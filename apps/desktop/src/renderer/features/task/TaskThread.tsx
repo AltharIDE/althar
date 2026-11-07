@@ -7,6 +7,7 @@ import {
   type GalleryShot,
   Markdown,
   Relayed,
+  ReviewLine,
   Round,
   shotName,
   SkillsSeen,
@@ -16,6 +17,7 @@ import {
   WorkNote,
   WorkSaid,
   WorkShots,
+  Verdict,
   type ModelInfo,
 } from '@althar/ui'
 
@@ -43,6 +45,14 @@ import s from './TaskThread.module.css'
  * round, and what a step reported, carry their item's id (`data-item`), so
  * the Graph face can take the person to them.
  *
+ * While the lead works, what it thinks streams under its round's line, and
+ * folds to a line of its own as it moves on; settling a review, it works
+ * quietly. A review is one line ("Review · GPT-5.2 · 3 findings · 2 fixed,
+ * 1 declined"), opening to what it found and said, and to the lead settling
+ * it where a later round handed the work over since (rounds.ts): the lead's
+ * latest handoff stands open, so reviews never bury it. A review running
+ * is a line too, with nothing of its thinking.
+ *
  * A round, and what the person said, redraws only when what it shows
  * changed: typing, the lead's words streaming in and the ticking clock
  * redraw the round they are in, not the whole history before it.
@@ -54,10 +64,26 @@ export interface TaskThreadProps extends Shared {
   readonly rounds: ReadonlyArray<RoundBlock>
   /** What each document was last changed by, so one handed back is read again after an edit (documentVersions). */
   readonly versionOf: (whole: string) => string
+  /** What became of a review's findings, in words ("2 fixed, 1 declined"), by its report; undefined while none is settled. */
+  readonly settledOf?: (review: string) => string | undefined
+  /** A review running now, by who and for how long: a line at the thread's end. */
+  readonly reviewing?: { readonly model: ModelInfo; readonly took: string } | null
+  /** The lead's round running now settles a review: it works quietly, its thinking folded. */
+  readonly settling?: boolean
 }
 
-/** One step of a round's work, in its sheet. */
-function StepView({ step, threadId, worktree }: { step: WorkStep; threadId: string; worktree: string | null }) {
+/** One step of a round's work, in its sheet. Quiet, its thoughts stay folded as they stream, until asked. */
+function StepView({
+  step,
+  threadId,
+  worktree,
+  quiet = false,
+}: {
+  step: WorkStep
+  threadId: string
+  worktree: string | null
+  quiet?: boolean
+}) {
   switch (step.kind) {
     case 'message':
       return <WorkSaid source={step.text} />
@@ -72,7 +98,7 @@ function StepView({ step, threadId, worktree }: { step: WorkStep; threadId: stri
         </>
       )
     default:
-      return <PartView part={step} threadId={threadId} />
+      return <PartView part={step} threadId={threadId} quiet={quiet} />
   }
 }
 
@@ -114,6 +140,8 @@ interface RoundProps {
   readonly threadId: string
   readonly worktree: string | null
   readonly project: string | undefined
+  /** Its thinking stays folded even while it works: the lead settling a review. */
+  readonly quiet: boolean
   readonly openFile: ((path: string) => void) | undefined
   /** The ways out of the error it ended with, where it is the thread's last: Try again, and the agent to sign in again. */
   readonly out: { readonly again: boolean; readonly compact: boolean; readonly signIn: string | null } | null
@@ -131,6 +159,7 @@ const RoundView = memo(function RoundView({
   threadId,
   worktree,
   project,
+  quiet,
   openFile,
   out,
   onTryAgain,
@@ -144,7 +173,7 @@ const RoundView = memo(function RoundView({
   const said = (one: Said, children?: ReactNode) => (
     <Fragment key={one.id}>
       <SaidIn.Provider value={one.id}>
-        <Markdown source={one.text} />
+        <Markdown source={one.text} streaming={one.live === true} />
       </SaidIn.Provider>
       <Gallery shots={one.handed.pictures.map((picture) => ({ ...picture, caption: picture.label ?? picture.name }))} />
       {children}
@@ -157,6 +186,9 @@ const RoundView = memo(function RoundView({
     sets.map((shown) => <Gallery key={shown.id} data-item={shown.id} shots={shotsOf(shown.id, shown.pictures)} />)
 
   const work = block.work
+  // While it works, its latest thought under its line: streaming as it thinks, folded once it moves on. Settling, none.
+  const thought = work?.live === true && !quiet ? work.steps.findLast((step) => step.kind === 'thought') : undefined
+  const thinking = thought === undefined ? {} : { thinking: <StepView step={thought} threadId={threadId} worktree={worktree} /> }
   // A round that said nothing is its line alone, with who worked.
   if (
     block.ack === null &&
@@ -196,10 +228,11 @@ const RoundView = memo(function RoundView({
           took={work.took}
           live={work.live}
           {...(work.live ? (work.now === null ? {} : { summary: work.now }) : { summary: work.counts })}
+          {...thinking}
         >
           {work.steps.length === 0
             ? undefined
-            : work.steps.map((step) => <StepView key={step.id} step={step} threadId={threadId} worktree={worktree} />)}
+            : work.steps.map((step) => <StepView key={step.id} step={step} threadId={threadId} worktree={worktree} quiet={quiet} />)}
         </WorkLine>
       )}
       <RuleReceipt parts={block.parts} {...(project === undefined ? {} : { project })} />
@@ -246,7 +279,7 @@ const YouView = memo(
   (before, after) => before.threadId === after.threadId && same(before.block, after.block),
 )
 
-export function TaskThread({ rounds, versionOf, ...shared }: TaskThreadProps) {
+export function TaskThread({ rounds, versionOf, settledOf, reviewing = null, settling = false, ...shared }: TaskThreadProps) {
   const { threadId, worktree = null, openFile, session, project, onTryAgain, onCompact, onSignIn } = shared
   const named = useModelNames()
   // A round on the model its own turn ran, as the runtime recorded it; an older one without, on the thread's current
@@ -298,6 +331,7 @@ export function TaskThread({ rounds, versionOf, ...shared }: TaskThreadProps) {
         threadId={threadId}
         worktree={worktree}
         project={project}
+        quiet={settling && block.live}
         openFile={openFile === undefined ? undefined : open}
         out={outOf(block)}
         onTryAgain={tryAgain}
@@ -307,7 +341,7 @@ export function TaskThread({ rounds, versionOf, ...shared }: TaskThreadProps) {
     )
   }
 
-  return rounds.map((block) => {
+  const drawn = rounds.map((block) => {
     switch (block.kind) {
       case 'round':
         return round(block)
@@ -333,18 +367,24 @@ export function TaskThread({ rounds, versionOf, ...shared }: TaskThreadProps) {
         )
       case 'skills':
         return <SkillsSeen key={block.id} title={block.title} skills={block.skills} data-item={block.id} />
-      case 'verdict':
+      case 'verdict': {
+        // One line: who reviewed, what it found, what became of it; opened, its findings and words, and the lead settling them.
+        const settled = settledOf?.(block.id)
         return (
-          <Round
+          <ReviewLine
             key={block.id}
-            model={block.model === null ? named(block.result.agentId) : named(block.result.agentId, block.model)}
-            at={block.at}
-            part="Review"
             data-item={block.id}
+            {...(block.settle?.report == null ? {} : { 'data-items': block.settle.report.id })}
+            model={block.model === null ? named(block.result.agentId) : named(block.result.agentId, block.model)}
+            verdict={block.result.verdict === 'pass' ? Verdict.Pass : Verdict.Changes}
+            findings={block.result.findings.length}
+            {...(settled === undefined ? {} : { settled })}
           >
-            <ReviewReport id={block.id} result={block.result} />
-          </Round>
+            <ReviewReport id={block.id} result={block.result} said={false} />
+            {block.settle !== null && round(block.settle)}
+          </ReviewLine>
         )
+      }
       case 'published':
         // Althar's own words for it, and the pull request under them, as every thread shows one.
         return (
@@ -358,4 +398,5 @@ export function TaskThread({ rounds, versionOf, ...shared }: TaskThreadProps) {
         return <ThreadBlocks key={block.id} {...shared} blocks={[block as Block]} />
     }
   })
+  return reviewing === null ? drawn : [...drawn, <ReviewLine key="reviewing" model={reviewing.model} live took={reviewing.took} />]
 }
