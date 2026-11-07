@@ -21,6 +21,9 @@ import { launch, openFirstProject, planTask, say, still } from './support'
 
 const ANSWER = 'Looked into it: the payment call has no retry'
 
+/** Asks the coordinator, whose fake answers after a second. */
+const ask = (page: Page, words: string) => say(page, `${words} [answers-after:1s]`)
+
 const opened = async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const projects = join(home, 'Projects')
@@ -30,15 +33,17 @@ const opened = async () => {
   return launched
 }
 
-/** The conversation, with two exchanges in it, a planned task, and a context a third full. */
-const talked = async (page: Page) => {
+/** The conversation, with two exchanges in it and a planned task; and, asked to, a context a third full, which the ring shows. */
+const talked = async (page: Page, { ring = false }: { readonly ring?: boolean } = {}) => {
   const conversation = page.getByRole('region', { name: 'Conversation' })
-  await say(page, 'Why is checkout slow?')
+  await ask(page, 'Why is checkout slow?')
   await expect(conversation.getByText(ANSWER)).toHaveCount(1)
   await planTask(page, 'Add a retry to checkout')
   await expect(conversation.getByText('Add a retry to checkout', { exact: true })).toBeVisible()
-  await say(page, 'And refunds? [context:33]')
+  await ask(page, 'And refunds?')
   await expect(conversation.getByText(ANSWER)).toHaveCount(2)
+  // The fake says how full its context is only where it doesn't answer slowly.
+  if (ring) await say(page, 'Thanks. [context:33]')
   await expect(page.getByRole('button', { name: 'Interrupt the coordinator' })).toHaveCount(0)
   return conversation
 }
@@ -62,21 +67,21 @@ test('clears the view from the bar and /clear, reads the earlier conversation, a
     await dialog.getByRole('button', { name: 'Clear the view' }).click()
 
     // The conversation goes from the view; the task at work stays, under the line that says where it was cleared.
-    await expect(page.getByText('Cleared', { exact: true })).toBeVisible()
+    await expect(page.getByText(/^Cleared/)).toBeVisible()
     await expect(conversation.getByText(ANSWER)).toHaveCount(0)
     await expect(conversation.getByText('Add a retry to checkout', { exact: true })).toBeVisible()
     await expect(bar.getByRole('button', { name: 'Clear', exact: true })).toBeFocused()
     await shoot(page, 'cleared', conversation)
 
     // Nothing was said by the coordinator on its own; its next word answers what it is asked, and shows from the clear.
-    await say(page, 'Where were we?')
+    await ask(page, 'Where were we?')
     await expect(conversation.getByText(ANSWER)).toHaveCount(1)
     await expect(conversation.getByRole('article', { name: /^You/ })).toHaveCount(1)
 
     // The earlier conversation is read in the thread's place.
     await page.getByRole('button', { name: 'Show earlier' }).click()
     await expect(page.getByText('Earlier conversation')).toBeVisible()
-    await expect(conversation.getByRole('article', { name: /^You/ })).toHaveCount(2)
+    await expect(conversation.getByRole('article', { name: /^You/ })).toHaveCount(3)
     await expect(conversation.getByText('Why is checkout slow?')).toBeVisible()
     await shoot(page, 'earlier', conversation)
     await page.getByRole('button', { name: 'Back to now' }).click()
@@ -84,26 +89,26 @@ test('clears the view from the bar and /clear, reads the earlier conversation, a
 
     // It is the thread's: a reload of the window reads the same.
     await page.reload()
-    await expect(page.getByText('Cleared', { exact: true })).toBeVisible()
+    await expect(page.getByText(/^Cleared/)).toBeVisible()
     await expect(conversation.getByRole('article', { name: /^You/ })).toHaveCount(1)
 
     // Undo brings the whole thread back.
     await page.getByRole('button', { name: 'Undo' }).click()
-    await expect(page.getByText('Cleared', { exact: true })).toHaveCount(0)
-    await expect(conversation.getByRole('article', { name: /^You/ })).toHaveCount(3)
+    await expect(page.getByText(/^Cleared/)).toHaveCount(0)
+    await expect(conversation.getByRole('article', { name: /^You/ })).toHaveCount(4)
 
     // /clear asks the same question, on the same kind, and is not said to the coordinator.
     await say(page, '/clear')
     await expect(dialog.getByRole('radio', { name: /Clear only the view/ })).toBeChecked()
     await page.keyboard.press('Escape')
     await expect(dialog).toHaveCount(0)
-    await expect(conversation.getByRole('article', { name: /^You/ })).toHaveCount(3)
+    await expect(conversation.getByRole('article', { name: /^You/ })).toHaveCount(4)
     await expect(page.getByRole('textbox', { name: /^Tell .* something/ })).toBeFocused()
 
     // Cleared again, the view is clear: the question says so and has forgetting ready.
     await bar.getByRole('button', { name: 'Clear', exact: true }).click()
     await dialog.getByRole('button', { name: 'Clear the view' }).click()
-    await expect(page.getByText('Cleared', { exact: true })).toBeVisible()
+    await expect(page.getByText(/^Cleared/)).toBeVisible()
     await bar.getByRole('button', { name: 'Clear', exact: true }).click()
     await expect(dialog.getByRole('radio', { name: /Clear only the view\s*The view is already clear\./ })).toBeDisabled()
     await expect(dialog.getByRole('radio', { name: /Forget the conversation too/ })).toBeChecked()
@@ -116,7 +121,7 @@ test('clears the view from the bar and /clear, reads the earlier conversation, a
 test('forgets the conversation from the context ring, and the next message starts afresh from the project’s records', async () => {
   const { electronApp, page } = await opened()
   try {
-    const conversation = await talked(page)
+    const conversation = await talked(page, { ring: true })
 
     const ring = page.getByRole('button', { name: /^Context \d+% used$/ })
     await ring.hover()
@@ -151,7 +156,7 @@ test('forgets the conversation from the context ring, and the next message start
     await expect(page.getByRole('button', { name: 'Undo' })).toHaveCount(0)
 
     // The next message is answered by a session of its own: the coordinator says nothing before it.
-    await say(page, 'Where were we?')
+    await ask(page, 'Where were we?')
     await expect(conversation.getByText(ANSWER)).toHaveCount(1)
     await expect(conversation.getByRole('article', { name: /^You/ })).toHaveCount(1)
     await expect(page.getByText('Fresh session', { exact: true })).toBeVisible()
