@@ -9,6 +9,7 @@ import {
   type Handed,
   type QuestionField,
   type SeenSkill,
+  serverOfCall,
   type SessionEvent,
 } from '@althar/provider-adapters'
 import { Cause, Clock, Duration, Effect, Exit, Fiber, Scope, Semaphore } from 'effect'
@@ -283,6 +284,8 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   const outputs = new Map<string, Output>()
   /** The person's MCP servers the agent said are down in this session, and how: a call to one that fails says so under it. */
   const down = new Map<string, 'needs-auth' | 'failed'>()
+  /** Which of the person's servers each call went to, from the event that named it: an update that only says it failed doesn't. */
+  const servers = new Map<string, string>()
   /** Commands that ended, whose output is kept. */
   const finished = new Set<string>()
   const folders = place.folders ?? []
@@ -530,10 +533,12 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
 
   /** A call to a server that was down, once it failed: which, and how, for the thread to say under it. */
   const serverDown = (event: Extract<SessionEvent, { _tag: 'ToolCall' | 'ToolCallUpdate' }>) => {
-    const how = event.server === undefined ? undefined : down.get(event.server)
-    return event.server === undefined || how === undefined || event.status !== 'failed'
+    if (event.server !== undefined) servers.set(event.toolCallId, event.server)
+    const name = event.server ?? servers.get(event.toolCallId) ?? serverOfCall(event.title ?? '')
+    const how = name === undefined ? undefined : down.get(name)
+    return name === undefined || how === undefined || event.status !== 'failed'
       ? {}
-      : { server: { name: event.server, down: how, ...(place.leadId === undefined ? {} : { agentId: place.leadId }) } }
+      : { server: { name, down: how, ...(place.leadId === undefined ? {} : { agentId: place.leadId }) } }
   }
 
   /** The message being gathered, as far as it has come: what a watching client shows while it streams. */

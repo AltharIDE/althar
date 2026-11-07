@@ -203,6 +203,26 @@ describe('An ask that waits while the person is away', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('stays open to answer when its session ends, and the allowed call still goes through once', () =>
+    Effect.gen(function* () {
+      const permissions = yield* Permissions
+      const queries = yield* Queries
+      const met = yield* lead
+      const asked = yield* Effect.forkChild(met.ask('git status'))
+      const call = yield* waiting(met.created.threadId)
+      yield* permissions.setAside(call.id)
+      yield* Fiber.join(asked)
+      // The lead's session closes, as when it ends its turn, crashes or is stopped.
+      yield* permissions.withdrawAll(met.sessionId)
+      const kept = yield* waiting(met.created.threadId)
+      assert.strictEqual(kept.id, call.id)
+      assert.isTrue(kept.setAside)
+      yield* answer(call.id, 'allow')
+      assert.deepStrictEqual((yield* queries.thread(met.created.threadId)).attention, [])
+      assert.strictEqual((yield* met.ask('git status')).decision, 'allow')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('lets the lead go on once a request that reached a device has waited long enough, and not before', () =>
     Effect.gen(function* () {
       const permissions = yield* Permissions

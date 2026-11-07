@@ -826,6 +826,42 @@ export class Permissions extends Context.Service<
           } satisfies Reach
         })
 
+      // A request set aside by an earlier run has no one left to answer for: its agent's process is gone with that run.
+      yield* run(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const left = yield* sql<{ id: string; projectId: ProjectId; requestId: string | null }>`
+            SELECT id, project_id, permission_request_id FROM attention_requests
+            WHERE kind = 'permission' AND state = 'open' AND json_extract(payload, '$.setAside') = 1`
+          for (const row of left) {
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                const revision = yield* change('attention_requests', row.id, { state: 'withdrawn' })
+                yield* fact({
+                  projectId: row.projectId,
+                  aggregateType: 'attention_request',
+                  aggregateId: row.id,
+                  revision,
+                  type: 'attention_request.withdrawn',
+                  actorId: instance.systemId,
+                })
+                if (row.requestId !== null) {
+                  const requestRevision = yield* change('permission_requests', row.requestId, { state: 'cancelled' })
+                  yield* fact({
+                    projectId: row.projectId,
+                    aggregateType: 'permission_request',
+                    aggregateId: row.requestId,
+                    revision: requestRevision,
+                    type: 'permission_request.cancelled',
+                    actorId: instance.systemId,
+                  })
+                }
+              }),
+            )
+          }
+        }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not close the requests an earlier run set aside', cause))),
+      )
+
       return Permissions.of({
         upFront: (projectId, taskId, rules) => run(upFront(projectId, taskId, rules)),
         decide: (requestContext, request) =>
@@ -1057,7 +1093,8 @@ export class Permissions extends Context.Service<
                 { discard: true },
               ),
               Effect.forEach(
-                [...waiting].filter(([, waiter]) => waiter.context.sessionId === sessionId),
+                // What was set aside belongs to the person now, not to the session: its end leaves it open to answer.
+                [...waiting].filter(([attentionId, waiter]) => waiter.context.sessionId === sessionId && !aside.has(attentionId)),
                 // Withdrawn here, before the session's end is recorded; the waiting decision then ends too.
                 ([attentionId, waiter]) =>
                   Effect.andThen(Effect.ignore(withdraw(attentionId, waiter)), Deferred.interrupt(waiter.deferred)),

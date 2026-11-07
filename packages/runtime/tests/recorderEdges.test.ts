@@ -101,7 +101,11 @@ describe('the thread recorder, at its edges', () => {
           server: { name: 'linear', status: 'needs-auth' },
         },
         { _tag: 'ToolCall', toolCallId: 'c1', title: 'mcp__linear__save_issue', kind: 'other', status: 'in_progress', server: 'linear' },
-        { _tag: 'ToolCallUpdate', toolCallId: 'c1', status: 'failed', server: 'linear' },
+        // What the agent sends when a call fails is its id and status alone: the server is the one the call was made to.
+        { _tag: 'ToolCallUpdate', toolCallId: 'c1', status: 'failed' },
+        // Named by its _meta rather than its title, and failed by a status alone.
+        { _tag: 'ToolCall', toolCallId: 'c3', title: 'Move DEV-188 to In Review', kind: 'other', status: 'in_progress', server: 'linear' },
+        { _tag: 'ToolCallUpdate', toolCallId: 'c3', status: 'failed' },
         // A call to a server that is up says nothing, though it fails.
         { _tag: 'ToolCall', toolCallId: 'c2', title: 'mcp__github__get_pr', kind: 'other', status: 'failed', server: 'github' },
       ]
@@ -112,6 +116,7 @@ describe('the thread recorder, at its edges', () => {
         .flatMap((item) => (item.kind === 'tool_call' ? [[item.content.title, item.content.server ?? null]] : []))
       assert.deepStrictEqual(calls, [
         ['mcp__linear__save_issue', { name: 'linear', down: 'needs-auth', agentId: 'claude-code' }],
+        ['Move DEV-188 to In Review', { name: 'linear', down: 'needs-auth', agentId: 'claude-code' }],
         ['mcp__github__get_pr', null],
       ])
     }).pipe(Effect.provide(runtime())),

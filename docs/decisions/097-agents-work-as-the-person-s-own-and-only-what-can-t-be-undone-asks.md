@@ -587,6 +587,10 @@ these changes to its sketches:
   what is never allowed. The kept call is the person's to answer, not a
   suspended one: an agent's permission request cannot outlive its turn, so the
   lead repeats it.
+  The request belongs to the person, not the session: it stays open when the
+  lead's session ends, and is answered all the same. It does not survive
+  Althar restarting, whose agent processes end with it; those are withdrawn
+  when it starts.
 - **A task a lead started that stops reaching its parent.** Settled without a
   change, failed, or stopped by the person (stopped by anyone else says
   nothing): once, a line in the parent's thread in its warning tone, "<child>
@@ -600,7 +604,8 @@ these changes to its sketches:
 - **A server that fails mid-task.** claude-agent-acp reports a server that
   failed to start or needs signing in in a notice's `_meta.claudeCode`
   (`kind: "mcpServerStatus"`); a call to that server that then fails keeps
-  which server and how (`server` on the tool call), and the thread says so
+  which server and how (`server` on the tool call; the server is remembered from the
+  event that named the call, since the update that fails carries only its status), and the thread says so
   under the call: "Claude Code isn't signed in to Linear, so this didn't go
   through. Sign in". *Different from the prototype:* the call isn't turned to
   done by signing in (the lead goes on, and Althar can't repeat its call), and
