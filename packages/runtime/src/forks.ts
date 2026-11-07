@@ -87,11 +87,17 @@ export const tellOf = (
 /** Forgets every host's answer: for tests, which start each runtime afresh. */
 export const forgetTold = () => told.clear()
 
-/** An address for a repository on the same host, written as `like` is (SSH or HTTPS, with `.git` or not): `like`'s path swapped. */
+/**
+ * An address for a repository on the same host, written as `like` is (SSH or HTTPS, with `.git` or not): `like`'s repository
+ * swapped for `path`, as many of its last segments as `path` has, so what the server puts in front stays (Bitbucket Data
+ * Center's `scm/`, a server's own path).
+ */
 export const addressLike = (like: string, path: ReadonlyArray<string>, own: ReadonlyArray<string>) => {
   const written = own.join('/')
   const at = like.toLowerCase().lastIndexOf(written.toLowerCase())
-  return at < 0 ? null : `${like.slice(0, at)}${path.join('/')}${like.slice(at + written.length)}`
+  if (at < 0) return null
+  const kept = own.slice(0, Math.max(0, own.length - path.length))
+  return `${like.slice(0, at)}${[...kept, ...path].join('/')}${like.slice(at + written.length)}`
 }
 
 /**

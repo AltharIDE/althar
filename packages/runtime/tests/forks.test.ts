@@ -110,5 +110,14 @@ describe('telling a fork', () => {
       'git@gitlab.com:meridian/group/api.git',
     )
     assert.strictEqual(addressLike('ssh://git@host:7999/dana/api.git', ['PRJ', 'api'], ['dana', 'api']), 'ssh://git@host:7999/PRJ/api.git')
+    // What the server puts in front of the repository stays.
+    assert.strictEqual(
+      addressLike('https://git.example.com/scm/~dana/api.git', ['PRJ', 'api'], ['scm', '~dana', 'api']),
+      'https://git.example.com/scm/PRJ/api.git',
+    )
+    assert.strictEqual(
+      addressLike('https://example.com/gitlab/dana/api.git', ['meridian', 'api'], ['gitlab', 'dana', 'api']),
+      'https://example.com/gitlab/meridian/api.git',
+    )
   })
 })
