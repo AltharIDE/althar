@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { AgentModels, AgentStatus } from '@althar/contracts'
 
 import { useModels, useSetDefaultEffort } from '../src/renderer/data/models'
+import { useModelNames } from '../src/renderer/shared/modelNames'
 import {
   catalogOf,
   defaultEffortOf,
@@ -112,6 +113,11 @@ describe('the models every agent offers', () => {
     const alone = catalogOf([...models, offered], [...signedIn, opencode], { apart: false })
     expect(alone.models.find((info) => info.id === 'opencode:other/big-pickle')).toMatchObject({ name: 'Big Pickle', via: 'via OpenCode' })
     expect(alone.models.find((info) => info.id === 'opencode:other/big-pickle')?.route).toBeUndefined()
+    // A provider that names the agent keeps its route on hover, even where the name is only shown on a line.
+    expect(alone.models.find((info) => info.id === 'opencode:opencode-go/deepseek-v4.1-flash')).toMatchObject({
+      name: 'DeepSeek V4.1 Flash',
+      via: 'via OpenCode Go',
+    })
     expect([named('opencode:openai/gpt-6-sol')?.name, named('opencode:gemini-3-pro')?.name, named('opencode:v2')?.name]).toEqual([
       'GPT-6 Sol',
       'Gemini 3 Pro',
@@ -228,9 +234,44 @@ describe('the models every agent offers', () => {
       name: 'DeepSeek V4.1 Flash',
       short: 'DeepSeek V4.1 Flash',
       mark: Brand.DeepSeek,
+      via: 'via OpenCode Go',
     })
     // Nothing names it at all: still readable, without the provider.
     expect(infoOf(probing, { agentId: 'opencode', model: 'acme/new-model' })).toMatchObject({ name: 'New Model' })
+    // Go and Zen are different routes: a Go id the list lacks never borrows Zen's entry.
+    const zenOnly = catalogOf(
+      [...models, { ...offered, models: [plain('opencode-zen/deepseek-v4.1-flash', 'opencode-zen/DeepSeek Zen')] }],
+      agents,
+    )
+    expect(infoOf(zenOnly, { agentId: 'opencode', model: 'opencode-go/deepseek-v4.1-flash' })).toMatchObject({
+      id: 'opencode:opencode-go/deepseek-v4.1-flash',
+      name: 'DeepSeek V4.1 Flash',
+      via: 'via OpenCode Go',
+    })
+    // Both routes listed: each keeps its own, and an exact id wins over an earlier bare match.
+    const bothRoutes = catalogOf(
+      [
+        ...models,
+        {
+          ...offered,
+          models: [
+            plain('opencode-zen/deepseek-v4.1-flash', 'opencode-zen/DeepSeek Zen'),
+            plain('opencode-go/deepseek-v4.1-flash', 'opencode-go/DeepSeek Go'),
+          ],
+        },
+      ],
+      agents,
+      { apart: false },
+    )
+    expect(infoOf(bothRoutes, { agentId: 'opencode', model: 'opencode-go/deepseek-v4.1-flash' })).toMatchObject({
+      name: 'DeepSeek Go',
+      via: 'via OpenCode Go',
+    })
+    expect(infoOf(bothRoutes, { agentId: 'opencode', model: 'opencode-zen/deepseek-v4.1-flash' })).toMatchObject({
+      name: 'DeepSeek Zen',
+      via: 'via OpenCode Zen',
+    })
+    expect(modelName(bothRoutes, 'opencode', 'opencode-go/deepseek-v4.1-flash')).toBe('DeepSeek Go')
   })
 
   it('carry the person’s default effort for each model, or else the one it starts at', () => {
@@ -403,5 +444,51 @@ describe('reading the models', () => {
     withServices(<Known />, client)
     await waitFor(() => expect(client.getModels).toHaveBeenCalled())
     expect(screen.getByRole('status').textContent).toBe('none yet')
+  })
+})
+
+function NamedOn({ agentId, model, account }: { agentId: string; model: string; account?: string }) {
+  const named = useModelNames()
+  const info = named(agentId, model, account ?? null)
+  return <output>{`${info.name}|${info.via ?? ''}`}</output>
+}
+
+describe('naming a model on a screen', () => {
+  it('keeps its route on hover before and after the agent lists it, and under an account', async () => {
+    let answer: (value: ReadonlyArray<AgentModels>) => void = () => undefined
+    const reading = new Promise<ReadonlyArray<AgentModels>>((resolve) => (answer = resolve))
+    const { client } = fakeClient({ getModels: vi.fn(async () => reading) })
+    withServices(
+      <>
+        <NamedOn agentId="opencode" model="opencode-go/deepseek-v4.1-flash" />
+        <NamedOn agentId="opencode" model="opencode-go/deepseek-v4.1-flash" account="work" />
+      </>,
+      client,
+    )
+    const [shown, withAccount] = screen.getAllByRole('status')
+    // Before OpenCode has reported its models: the id in people's words, the route on hover.
+    await waitFor(() => expect(shown?.textContent).toBe('DeepSeek V4.1 Flash|via OpenCode Go'))
+    expect(withAccount?.textContent).toBe('DeepSeek V4.1 Flash|via OpenCode Go · work')
+    // Once it lists the model, the name stays and the route stays on hover.
+    await act(async () =>
+      answer([
+        ...models,
+        {
+          ...models[2]!,
+          models: [
+            {
+              id: 'opencode-go/deepseek-v4.1-flash',
+              name: 'opencode-go/DeepSeek V4.1 Flash',
+              description: null,
+              efforts: [],
+              effort: null,
+            },
+          ],
+        },
+      ]),
+    )
+    await waitFor(() => expect(client.getModels).toHaveBeenCalled())
+    await waitFor(() => expect(shown?.textContent).toBe('DeepSeek V4.1 Flash|via OpenCode Go'))
+    expect(withAccount?.textContent).toBe('DeepSeek V4.1 Flash|via OpenCode Go · work')
   })
 })
