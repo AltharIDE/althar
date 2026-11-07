@@ -4,7 +4,7 @@ import { fn } from 'storybook/test'
 
 import { Board, BoardColumn, BoardList, type BoardFolds } from '../../board/Board/Board'
 import { BoardCard, type BoardCardProps } from '../../board/BoardCard/BoardCard'
-import { BranchChip, Fact, PullChip } from '../../board/BoardCard/Chips'
+import { BranchChip, Fact, FactLine, PullChip } from '../../board/BoardCard/Chips'
 import { NextRow } from '../../board/NextRow/NextRow'
 import { ProjectHeader, type ProjectPart } from '../../chrome/ProjectHeader/ProjectHeader'
 import { ProjectTabs } from '../../chrome/ProjectTabs/ProjectTabs'
@@ -54,6 +54,7 @@ const RUNNING: Card[] = [
     title: 'Repair token refresh on privilege change',
     track: trackOf(['Implement', 'Review', 'Security review'], 1),
     object: <BranchChip name="meridian/repair-token-refresh" add={126} del={31} />,
+    foot: <Fact>{OPUS.short} leads</Fact>,
   },
   {
     status: TaskStatus.Running,
@@ -63,6 +64,7 @@ const RUNNING: Card[] = [
     title: 'Sign webhook v2 payloads with rotating keys',
     track: trackOf(['Implement', 'Review'], 0),
     object: <BranchChip name="meridian/sign-webhook-v2-payloads" add={212} del={18} />,
+    foot: <Fact>{SONNET.short} leads</Fact>,
   },
   {
     status: TaskStatus.Running,
@@ -72,7 +74,12 @@ const RUNNING: Card[] = [
     title: 'Return 409 when a refund idempotency key is reused',
     track: trackOf(['Follow-up', 'Review'], 0),
     object: <PullChip host={GITHUB} repo="meridian-api" number={1191} add={48} del={9} />,
-    foot: <Fact>6 of 8 checks passed</Fact>,
+    foot: (
+      <FactLine>
+        <Fact>{CODEX.short} leads</Fact>
+        <Fact>6 of 8 checks passed</Fact>
+      </FactLine>
+    ),
   },
 ]
 
