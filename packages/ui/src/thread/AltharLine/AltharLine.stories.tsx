@@ -65,3 +65,13 @@ export const AllStates: Story = {
     />
   ),
 }
+
+/** A task's folder whose link to its repository git couldn't repair: what git said, the folder left as it was (ADR-101). */
+export const FolderNotRepaired: Story = {
+  args: {
+    tone: 'warning',
+    children:
+      'Althar couldn’t repair this task’s folder link to the repository: git worktree: unable to locate repository; .git file does not reference a repository: ~/.local/share/althar/worktrees/orchy/fix-login/orchy/.git.',
+  },
+}
+export const FolderNotRepairedDark: Story = { ...FolderNotRepaired, globals: { theme: 'dark' } }

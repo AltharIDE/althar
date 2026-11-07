@@ -2643,7 +2643,7 @@ describe('words', () => {
     assert.strictEqual(said({ _tag: 'AttentionClosed' }), 'That call is closed.')
     assert.strictEqual(
       said(new GitFailed({ args: ['worktree', 'add'], cwd: '/r', stderr: 'fatal: a branch named x already exists\n' })),
-      "git worktree didn't work: fatal: a branch named x already exists.",
+      "git worktree didn't work: a branch named x already exists.",
     )
     assert.strictEqual(said(new GitFailed({ args: ['fetch'], cwd: '/r', stderr: '' })), "git fetch didn't work.")
     assert.strictEqual(said({ _tag: 'CommandIdReused' }), 'Something went wrong. Try again.')

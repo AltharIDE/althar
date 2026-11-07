@@ -1,6 +1,6 @@
 import { Logger } from 'effect'
 
-import type { AgentStderr } from '@althar/runtime'
+import { type AgentStderr, gitFields } from '@althar/runtime'
 
 import { type LogFile, openLogFile } from '../logs/logFile'
 
@@ -15,9 +15,21 @@ import { type LogFile, openLogFile } from '../logs/logFile'
 /** The runtime's log line: level, message, cause and annotations, as logfmt, without the time or the fiber. */
 const line = Logger.map(Logger.formatLogFmt, (formatted) => formatted.replace(/^timestamp=\S+ /, '').replace(/ fiber=#\d+/, ''))
 
+/**
+ * What a line adds for a git failure, besides its stack: the command's
+ * arguments, where it ran and all git said, redacted (`gitFields`).
+ */
+const gitPart = (cause: Parameters<typeof gitFields>[0]) =>
+  Object.entries(gitFields(cause))
+    .map(([key, value]) => ` ${key}=${JSON.stringify(value)}`)
+    .join('')
+
+/** A log line as the runtime writes it: logfmt, with what git said where its cause is a git failure. */
+export const logLine = (options: Parameters<typeof line.log>[0]) => `${line.log(options)}${gitPart(options.cause)}`
+
 /** Writes each of the runtime's log lines to stdout, for the main process to keep. */
 export const stdoutLogger = Logger.make((options) => {
-  process.stdout.write(`${line.log(options)}\n`)
+  process.stdout.write(`${logLine(options)}\n`)
 })
 
 /** The most agents' processes whose half-written line is held at once; the oldest is written out to make room. */

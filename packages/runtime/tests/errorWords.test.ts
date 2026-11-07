@@ -71,10 +71,7 @@ describe('the words for what went wrong', () => {
   })
 
   it('says a git command it can’t name as git, with what git said', () => {
-    assert.strictEqual(
-      said({ _tag: 'GitFailed', stderr: 'fatal: not a git repository\n' }),
-      "git  didn't work: fatal: not a git repository.",
-    )
+    assert.strictEqual(said({ _tag: 'GitFailed', stderr: 'fatal: not a git repository\n' }), "git  didn't work: not a git repository.")
   })
 
   it('says a branch that moved since the person looked, so nothing was pushed', () => {
@@ -149,7 +146,7 @@ describe('the words for what went wrong, for the refusals the API’s tests don�
     const failed = (ended: object) => words({ _tag: 'GitFailed', args: ['fetch'], stderr: 'fatal: no\n', ...ended }, name)
     assert.deepStrictEqual(failed({ code: 128 }), {
       reason: 'GitFailed',
-      message: "git fetch didn't work: fatal: no.",
+      message: "git fetch didn't work: no.",
       detail: 'fatal: no\nExit code 128.',
     })
     assert.strictEqual(failed({ signal: 'SIGKILL' }).detail, 'fatal: no\nStopped by SIGKILL.')

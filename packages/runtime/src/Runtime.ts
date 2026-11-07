@@ -49,6 +49,7 @@ import { SignIns } from './SignIns'
 import { Errands } from './Errands'
 import { MergeLine } from './MergeLine'
 import { ToolServer } from './ToolServer'
+import { WorktreeRepair } from './WorktreeRepair'
 
 export interface RuntimeLayerOptions extends RuntimeOptions {
   /** The profile's database file, or `:memory:` for tests. */
@@ -144,7 +145,8 @@ export const layer = (options: RuntimeLayerOptions) => {
   const shown = PullRequestScreenshots.layer.pipe(Layer.provideMerge(linked))
   // Runs drive a task's steps; plans start runs when their time comes; the person steers a task's course; the coordinator plans tasks and passes messages on.
   // Finished tasks' folders go after their wait, or when the person cleans up, and come back when needed (ADR-056).
-  const work = Layer.mergeAll(Tasks.layer, FolderCleanup.layer).pipe(
+  // Worktrees whose link to their repository broke are repaired as Althar starts, or as git fails in one (ADR-101).
+  const work = Layer.mergeAll(Tasks.layer, FolderCleanup.layer, WorktreeRepair.layer).pipe(
     Layer.provideMerge(Plans.layer.pipe(Layer.provideMerge(startupLayer('runs', Runs.layer).pipe(Layer.provideMerge(shown))))),
   )
   // Signing accounts in inside Althar, with each agent's own login (ADR-012).

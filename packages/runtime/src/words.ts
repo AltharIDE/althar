@@ -5,6 +5,7 @@ import { products } from '@althar/connectors'
 import { Cause, Option } from 'effect'
 
 import { thisDevice } from './device'
+import { type GitFailure, gitLine, gitSummary, redacted, subcommandOf } from './gitSaid'
 import type { AccountRefused } from './Accounts'
 import type { CantMerge, DocumentRefused, FileRefused, ImageRefused, NoChangeToOpen, ProjectRefused, TaskRefused } from './errors'
 import { NOTE_LENGTH, type NoteRefused, NOTES_KEPT } from './notes'
@@ -39,15 +40,6 @@ const text = (error: unknown, key: string): string => {
 }
 
 /** The last line of an agent's error output, which usually says why. */
-/** What git said without the advice it ends a remote it couldn't read with, whose last line says nothing alone. */
-const saidByGit = (stderr: string): string =>
-  lastLine(
-    stderr.replace(
-      /(fatal: )?Could not read from remote repository\.\s*(Please make sure you have the correct access rights\s*and the repository exists\.\s*)?/i,
-      '',
-    ),
-  )
-
 const lastLine = (output: string): string =>
   output
     .split('\n')
@@ -135,10 +127,14 @@ export const agentSaid = (error: unknown): string | undefined => {
   }
 }
 
+/** A git failure, summed up: the subcommand and git's most telling line, `git rev-parse: gitfile does not point to a valid repository: ~/….` */
+const gitFailed = (error: unknown): string | undefined =>
+  tagOf(error) === 'GitFailed' ? sentence(gitSummary(error as GitFailure)) : undefined
+
 /** A cause, summed up for a person: what the agent said, what the host said no to, or the first line of what went wrong. */
 export const summarize = (cause: Cause.Cause<unknown>): string => {
   const error = Cause.findErrorOption(cause)
-  const said = Option.isSome(error) ? (agentSaid(error.value) ?? hostFailed(error.value)) : undefined
+  const said = Option.isSome(error) ? (agentSaid(error.value) ?? hostFailed(error.value) ?? gitFailed(error.value)) : undefined
   if (said !== undefined) return said
   const first = lastLine(Cause.pretty(cause).split('\n')[0] ?? '').replace(/^\w*Error: /, '')
   return first === '' ? '' : sentence(first)
@@ -257,11 +253,11 @@ export const words = (
         return 'The agent already has that message.'
       case 'GitFailed': {
         const args = fieldOf(error, 'args')
-        const command = `git ${Array.isArray(args) ? String(args.find((arg) => !String(arg).startsWith('-') && !String(arg).includes('=')) ?? '') : ''}`
-        const said = saidByGit(text(error, 'stderr'))
+        const command = `git ${Array.isArray(args) ? subcommandOf(args.map(String)) : ''}`
+        const said = gitLine(text(error, 'stderr'))
         if (said !== '') return sentence(`${command} didn't work: ${said}`)
         const reason = text(error, 'reason')
-        if (reason !== '') return sentence(`${command} couldn't complete: ${reason}`)
+        if (reason !== '') return sentence(`${command} couldn't complete: ${redacted(reason)}`)
         // git said nothing: what Althar knows of how it ended.
         if (fieldOf(error, 'timedOut') === true) {
           const timeout = fieldOf(error, 'timeout')
@@ -277,7 +273,9 @@ export const words = (
       case 'DatabaseInUse':
         return 'Another copy of Althar is using this profile.'
       case 'PushRefused': {
-        const remote = text(error, 'remote')
+        // Every field shown is redacted here, for a refusal kept before Althar hid secrets in what git said.
+        const remote = redacted(text(error, 'remote'))
+        const said = redacted(text(error, 'said'))
         const why = text(error, 'why')
         if (why === 'behind')
           return `${remote} has commits that aren’t here yet, so it didn’t take the push. Bring them in, then push again.`
@@ -288,7 +286,7 @@ export const words = (
         if (why === 'protected') {
           const needs = fieldOf(error, 'needs')
           if (Array.isArray(needs)) {
-            const held = text(error, 'said')
+            const held = said
             const many = held.includes(',')
             const named = needs
               .map((setting) => repositorySwitches[setting as keyof typeof repositorySwitches])
@@ -304,10 +302,10 @@ export const words = (
         if (why === 'unplaced')
           return `The host doesn’t say where ${remote}’s branch is, and this project’s remotes don’t settle it, so nothing was pushed.`
         if (why === 'no_push_address')
-          return `This clone’s push address for ${remote} is ‘${text(error, 'said')}’, which isn’t a repository, so nothing was pushed. Set another with git remote set-url --push.`
-        if (why === 'refused') return sentence(`${remote} refused the push${text(error, 'said') === '' ? '' : `: ${text(error, 'said')}`}`)
+          return `This clone’s push address for ${remote} is ‘${said}’, which isn’t a repository, so nothing was pushed. Set another with git remote set-url --push.`
+        if (why === 'refused') return sentence(`${remote} refused the push${said === '' ? '' : `: ${said}`}`)
         // Where the person's own git pushed, the host by name: GitLab, not origin/a-long-branch-name.
-        const host = text(error, 'host')
+        const host = redacted(text(error, 'host'))
         const where = host === '' ? remote : host
         if (why === 'forbidden')
           return `Your account can’t push to this repository on ${where}, so nothing was pushed. Push to a fork of it, or ask its owners for access.`
@@ -394,8 +392,14 @@ export const words = (
   // A merge that conflicts says in which files, for the window to have the lead settle them, or say it is.
   if (reason === 'CantMerge') return { reason, message, why: text(error, 'why'), detail: text(error, 'detail') }
   // A push refused says why, for the window to offer what puts it right: bringing the remote's commits in.
+  // Its Details are redacted as they were kept, and again here, for one kept before Althar hid secrets in them.
   if (reason === 'PushRefused')
-    return { reason, message, why: text(error, 'why'), ...(text(error, 'detail') === '' ? {} : { detail: text(error, 'detail') }) }
+    return {
+      reason,
+      message,
+      why: text(error, 'why'),
+      ...(text(error, 'detail') === '' ? {} : { detail: redacted(text(error, 'detail')) }),
+    }
   // A git failure that said anything keeps it all, and how it ended, for a quiet Details under its line.
   if (reason === 'GitFailed') {
     const code = fieldOf(error, 'code')
