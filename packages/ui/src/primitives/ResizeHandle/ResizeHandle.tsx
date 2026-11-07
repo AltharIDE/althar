@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type PointerEvent, useEffect, useRef } from 'react'
+import { type KeyboardEvent, type PointerEvent, useEffect, useLayoutEffect, useRef } from 'react'
 
 import { cx } from '../../lib/cx'
 import s from './ResizeHandle.module.css'
@@ -10,8 +10,9 @@ import s from './ResizeHandle.module.css'
  * its narrowest and widest, and a double click puts it back. The width is
  * the consumer's: `onChange` follows the drag, and `onCommit` says where it
  * ended (the pointer let go, a key moved it), so it is kept once a move.
- * While the pointer drags it, the page says so (`data-resizing` on its root),
- * so what is costly to lay out at each width, as a long thread, can wait.
+ * `onResizing` says when the pointer starts dragging it and when it stops,
+ * so the consumer can mark the column it resizes (as `data-resizing`) and
+ * what is costly to lay out at each width in it, as a long thread, can wait.
  */
 
 export interface ResizeHandleProps {
@@ -28,13 +29,15 @@ export interface ResizeHandleProps {
   label: string
   /** Which edge of its column it is on: the end widens the column to the right. */
   edge?: 'start' | 'end'
+  /**
+   * The pointer started dragging it (true), and stopped: let go, cancelled, lost, or the handle gone mid-drag (false).
+   * A key moving it says nothing: there is no drag to wait for.
+   */
+  onResizing?: (resizing: boolean) => void
   /** How far an arrow key moves it, in px. */
   step?: number
   className?: string
 }
-
-/** The page's root, marked while a handle is dragged; one at a time, as there is one pointer. */
-const resizing = (on: boolean) => document.documentElement.toggleAttribute('data-resizing', on)
 
 const clamp = (width: number, min: number, max: number) => Math.round(Math.min(Math.max(width, min), Math.max(min, max)))
 
@@ -45,6 +48,7 @@ export function ResizeHandle({
   onChange,
   onCommit,
   onReset,
+  onResizing,
   label,
   edge = 'end',
   step = 16,
@@ -52,10 +56,16 @@ export function ResizeHandle({
 }: ResizeHandleProps) {
   const drag = useRef<{ readonly x: number; readonly width: number; at: number } | null>(null)
   const sign = edge === 'end' ? 1 : -1
-  // Gone mid-drag, the page isn't left marked.
+  // The consumer's latest, so the drag ending says so to whom it would now, the handle gone mid-drag included.
+  const said = useRef(onResizing)
+  useLayoutEffect(() => {
+    said.current = onResizing
+  })
+  const resizing = (on: boolean) => said.current?.(on)
+  // Gone mid-drag, what it marked isn't left marked.
   useEffect(
     () => () => {
-      if (drag.current !== null) resizing(false)
+      if (drag.current !== null) said.current?.(false)
     },
     [],
   )

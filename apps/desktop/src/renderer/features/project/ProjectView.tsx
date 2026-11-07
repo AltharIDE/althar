@@ -1,7 +1,7 @@
 import { EarlierTurns } from '../../shared/EarlierTurns'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { type ReactNode, useCallback, useEffect, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 
 import type { ThreadItem } from '@althar/contracts'
 
@@ -123,7 +123,14 @@ export const text = {
  */
 const WIDTH = { key: 'althar.both', start: 560, min: 340, board: 480, lane: 240 } as const
 
+/*
+ * The width last kept in this window where storage wouldn't take it: the column goes with a switch of room, and back
+ * it is as the person left it all the same. Null where storage holds it.
+ */
+let held: number | null = null
+
 const storedWidth = (): number => {
+  if (held !== null) return held
   try {
     const kept = Number(window.localStorage.getItem(WIDTH.key))
     return Number.isFinite(kept) && kept >= WIDTH.min ? kept : WIDTH.start
@@ -146,8 +153,10 @@ const useBothWidth = () => {
     setWidth(next)
     try {
       window.localStorage.setItem(WIDTH.key, String(next))
+      held = null
     } catch {
-      // Not kept; it still holds for this window.
+      // Not kept across launches; it still holds for this window.
+      held = next
     }
   }
   return { width: Math.min(width, max), min: WIDTH.min, max, room, set: setWidth, keep, reset: () => keep(WIDTH.start) }
@@ -157,7 +166,10 @@ const useBothWidth = () => {
  * The conversation's column, and beside the board its divider and what opens over the board against it. The width is
  * its own: a drag draws this again and nothing else, the thread and the board given as made (`children`, `over`), so a
  * long thread and a full board stay as they are while it moves. It is set as the column's `width`, not a custom
- * property, which every element of the thread would inherit and have its style worked out again for each move.
+ * property, which every element of the thread would inherit and have its style worked out again for each move. While
+ * its divider is dragged, the column is marked `data-resizing`, so the thread in it lays out only the turns on screen.
+ * What opens over the board (`over`) is drawn again on each move, as it is placed by the width and as wide as the room
+ * it leaves: with a file open on it, that file's panel is drawn again too.
  */
 function TalkColumn({
   beside,
@@ -166,13 +178,14 @@ function TalkColumn({
 }: {
   beside: boolean
   children: ReactNode
-  /** What opens over the board, against the conversation: by the conversation's width and the window's. */
+  /** What opens over the board, against the conversation: by the conversation's width and the window's (`room`). */
   over: (width: number, room: number) => ReactNode
 }) {
   const both = useBothWidth()
+  const column = useRef<HTMLDivElement>(null)
   return (
     <>
-      <div className={s.talk} style={beside ? { width: both.width } : undefined}>
+      <div ref={column} className={s.talk} style={beside ? { width: both.width } : undefined}>
         {children}
         {beside && (
           <ResizeHandle
@@ -182,6 +195,7 @@ function TalkColumn({
             onChange={both.set}
             onCommit={both.keep}
             onReset={both.reset}
+            onResizing={(on) => column.current?.toggleAttribute('data-resizing', on)}
             label={text.width}
           />
         )}
@@ -670,8 +684,8 @@ export function ProjectView({
                  * Beside the board, a file the coordinator names opens over the board, against the conversation, dragged by its far
                  * edge; where it would leave less of the board than a lane, as in a small window, it covers the board to the window's edge.
                  */
-                over={(width, window) =>
-                  shown.workbench(null, { room: window - width, keep: WIDTH.lane, className: s.over, style: { left: width } })
+                over={(width, windowWidth) =>
+                  shown.workbench(null, { room: windowWidth - width, keep: WIDTH.lane, className: s.over, style: { left: width } })
                 }
               >
                 {coordinator === null ? (

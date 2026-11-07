@@ -12,8 +12,9 @@ const known = (...isos: ReadonlyArray<string>) => isos.every((iso) => !Number.is
 /**
  * A day and its month (12 Oct), as the date's `toLocaleDateString` says it, from one formatter made once: making one
  * for each date, as that does, takes a fifth of a millisecond, and a project's thread and board say a hundred at once.
- * It keeps the time zone it found when made: where the system's changes while the app runs, a date near midnight can
- * say the day before or after until the app is reloaded, where `toLocaleDateString` would follow the change.
+ * It keeps the time zone and the language it found when made: where the system's time zone changes while the app runs,
+ * a date near midnight can say the day before or after, and where its language changes, the month keeps the old one's
+ * name, until the app is reloaded, where `toLocaleDateString` would follow either change.
  */
 let dayMonth: Intl.DateTimeFormat | undefined
 const dayAndMonth = (at: Date) => (dayMonth ??= new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' })).format(at)
