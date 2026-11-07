@@ -777,7 +777,7 @@ describe('the API', () => {
       Effect.gen(function* () {
         const { client, grant } = yield* connected()
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
-        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, permissions: 'ask' })
+        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, permissions: 'ask', allowEverything: false })
         const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Look' })
         yield* client.SwitchAgent({ commandId: commandId(), threadId: task.threadId, agentId: 'codex', model: 'large' })
         yield* until(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)

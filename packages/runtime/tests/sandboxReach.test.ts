@@ -275,12 +275,12 @@ const leading = (rules: Parameters<Policies['Service']['set']>[1]) =>
 
 describe('a lead’s session', () => {
   it.live('starts a new lead with native web tools off when the project switch is off', () =>
-    leading({ permissions: 'rules', leadsReachWeb: false }).pipe(Effect.provide(runtime())),
+    leading({ permissions: 'rules', allowEverything: false, leadsReachWeb: false }).pipe(Effect.provide(runtime())),
   )
 
   it.live('runs the project’s known commands outside its sandbox, and reaches its code host, registry and tracker without asking', () =>
     Effect.gen(function* () {
-      const sandbox = yield* leading({ permissions: 'rules' })
+      const sandbox = yield* leading({ permissions: 'rules', allowEverything: false })
       // Not `bun run dev` or `bun install`, which Claude Code would run in the sandbox anyway.
       assert.deepStrictEqual(sandbox?.commands, ['bunx playwright', 'bunx electron', 'bunx vitest', 'node scripts/e2e.ts', 'ps', 'env -i'])
       // GitHub's release downloads too, where Electron's build comes from: a host, not a release script.

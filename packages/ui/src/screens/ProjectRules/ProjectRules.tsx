@@ -6,6 +6,7 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { Menu, MenuCheckboxItem, MenuGroup, MenuRadioGroup, MenuRadioItem, MenuSeparator } from '../../primitives/Menu/Menu'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Popover } from '../../primitives/Popover/Popover'
 import {
   AddCommand,
@@ -100,6 +101,64 @@ export interface KindTally {
   allowed: number
   refused: number
   workedAround: number
+}
+
+/**
+ * The kinds of what can't be undone, as What asks lists them (ADR-097): each
+ * asks the person or is never allowed. Secrets are never allowed, whatever
+ * the project says.
+ */
+export type AskKind = 'history' | 'publish' | 'speak'
+
+/** Where a kind of what can't be undone sits. */
+export type AskPlace = 'asks' | 'never'
+
+/** What What asks needs: where each kind sits, and the way to be asked about more. */
+export interface WhatAsksModel {
+  places: Readonly<Record<AskKind, AskPlace>>
+  onChange: (kind: AskKind, place: AskPlace) => void
+  /** Asks about more than what can't be undone: the project's sentences, from Never to the rest. */
+  onAskMore: () => void
+}
+
+/** What What asks says. */
+export interface WhatAsksText {
+  title: string
+  lede: string
+  kinds: Record<AskKind | 'secrets', { name: string; catches: readonly string[] }>
+  /** Where each kind can sit, as its word and its menu say. */
+  place: Record<AskPlace, ChoiceWords>
+  /** What secrets are: refused, whatever the project says. */
+  secrets: string
+  yours: string
+  askMore: string
+}
+
+export const whatAsksText: WhatAsksText = {
+  title: 'What asks',
+  lede: 'Agents go ahead with everything else, in every task.',
+  kinds: {
+    history: {
+      name: 'Lost work and history',
+      catches: [
+        'git push --force',
+        'a push to main',
+        'deleting another branch',
+        'discarding changes in another checkout',
+        'deleting outside the task',
+      ],
+    },
+    publish: { name: 'Publishing and merging', catches: ['a merge', 'npm publish', 'a release or its tag', 'terraform destroy'] },
+    speak: { name: 'Speaking for you', catches: ['a post on someone else’s pull request or issue', 'a message through an MCP server'] },
+    secrets: { name: 'Secrets', catches: ['~/.ssh', 'token files', 'the keychain'] },
+  },
+  place: {
+    asks: { title: 'Asks you', note: 'Every time' },
+    never: { title: 'Never', note: 'Refused outright' },
+  },
+  secrets: 'Never',
+  yours: 'Your own',
+  askMore: 'Ask about more',
 }
 
 /** A value of a setting, as its menu offers it and as the sentence says it. */
@@ -264,6 +323,12 @@ export const projectRulesText: ProjectRulesText = {
       does: 'write outside the task',
       doing: 'writing outside the task',
       catches: ['cp .env ~/backup', 'git status > ~/.zshrc'],
+    },
+    [RuleKind.Speak]: {
+      name: 'Posting for you',
+      does: 'post for you',
+      doing: 'posting for you',
+      catches: ['a comment on someone else’s pull request', 'a message through an MCP server'],
     },
   },
   catches: 'Catches',
@@ -435,6 +500,7 @@ const KINDS = [
   RuleKind.DeleteBranch,
   RuleKind.Deploy,
   RuleKind.Outside,
+  RuleKind.Speak,
 ] as const
 /** Whether what a tally counts is one of the kinds, which say their own name. */
 const isRuleKind = (kind: TallyKind): kind is RuleKind => (KINDS as readonly string[]).includes(kind)
@@ -502,7 +568,15 @@ export type ProjectRulesProps = RootProps<
      * can be dropped. Without it, the sentence isn't said.
      */
     tally?: readonly KindTally[]
+    /**
+     * What asks (ADR-097), while everything else is allowed: the kinds of
+     * what can't be undone, each asking or never allowed, then the person's
+     * own Never and Ask me commands, in place of the sentences from Always to
+     * the rest. Without it, those sentences.
+     */
+    whatAsks?: WhatAsksModel
     text?: Partial<ProjectRulesText>
+    asksText?: Partial<WhatAsksText>
   }
 >
 
@@ -583,6 +657,84 @@ const nameShown = (rule: Omit<NamingRuleProps, 'text'>) => {
   return patterns.length <= 1 ? (patterns[0] ?? rule.fallback) : null
 }
 
+/** Each kind of what can't be undone, with what it catches, and the word that moves it between asking and Never. */
+function WhatAsks({
+  model,
+  w,
+  headingLevel,
+  titled,
+  project,
+  t,
+  children,
+}: {
+  model: WhatAsksModel
+  w: WhatAsksText
+  headingLevel: HeadingLevel
+  titled: boolean
+  project: string
+  t: ProjectRulesText
+  children: ReactNode
+}) {
+  const sub: HeadingLevel = headingLevel >= 6 ? 6 : ((headingLevel + 1) as HeadingLevel)
+  const catches = (each: readonly string[]) =>
+    each.map((one, index) => (
+      <Fragment key={one}>
+        {index > 0 && ', '}
+        {/^(git |npm |terraform |~)/.test(one) ? <code>{one}</code> : one}
+      </Fragment>
+    ))
+  return (
+    <section className={s.whatAsks}>
+      {titled && (
+        <div className={s.headText}>
+          <Heading level={headingLevel} className={s.title}>
+            {t.title}
+          </Heading>
+          <p className={s.lede}>{t.lede(project)}</p>
+        </div>
+      )}
+      <Heading level={sub} className={s.asksTitle}>
+        {w.title}
+      </Heading>
+      <p className={s.asksLede}>{w.lede}</p>
+      <ul className={s.kinds}>
+        {ASK_KINDS.map((kind) => (
+          <li key={kind} className={s.kind}>
+            <span className={s.kindText}>
+              <span className={s.kindName}>{w.kinds[kind].name}</span>
+              <span className={s.catches}>{catches(w.kinds[kind].catches)}</span>
+            </span>
+            <ChoiceWord
+              word={w.place[model.places[kind]].title}
+              label={w.kinds[kind].name}
+              value={model.places[kind]}
+              onChange={(place) => model.onChange(kind, place)}
+              options={ASK_PLACES.map((place) => ({ value: place, title: w.place[place].title, note: w.place[place].note }))}
+            />
+          </li>
+        ))}
+        <li className={s.kind}>
+          <span className={s.kindText}>
+            <span className={s.kindName}>{w.kinds.secrets.name}</span>
+            <span className={s.catches}>{catches(w.kinds.secrets.catches)}</span>
+          </span>
+          <span className={s.fixedWord}>{w.secrets}</span>
+        </li>
+      </ul>
+      <Heading level={sub} className={s.asksTitle}>
+        {w.yours}
+      </Heading>
+      {children}
+      <p className={s.askMore}>
+        <LinkButton onClick={model.onAskMore}>{w.askMore}</LinkButton>
+      </p>
+    </section>
+  )
+}
+
+const ASK_KINDS: readonly AskKind[] = ['history', 'publish', 'speak']
+const ASK_PLACES: readonly AskPlace[] = ['asks', 'never']
+
 /** A project's rules as a few sentences, each changed in place. */
 export function ProjectRules({
   project,
@@ -611,11 +763,14 @@ export function ProjectRules({
   onAllowedChange,
   sandbox,
   tally,
+  whatAsks,
   text,
+  asksText,
   className,
   ...rest
 }: ProjectRulesProps) {
   const t = { ...projectRulesText, ...text }
+  const w = { ...whatAsksText, ...asksText }
   const sub: HeadingLevel = headingLevel >= 6 ? 6 : ((headingLevel + 1) as HeadingLevel)
   const modeWords = t.rest.mode[mode]
 
@@ -838,127 +993,164 @@ export function ProjectRules({
 
   return (
     <div className={cx(s.rules, className)} {...rest}>
-      <header className={cx(s.head, !titled && s.keyOnly)}>
-        {titled && (
-          <div className={s.headText}>
-            <Heading level={headingLevel} className={s.title}>
-              {t.title}
-            </Heading>
-            <p className={s.lede}>{t.lede(project)}</p>
-          </div>
-        )}
-        <CharterKey text={t.key} className={s.key} />
-      </header>
+      {whatAsks !== undefined ? (
+        <WhatAsks model={whatAsks} w={w} headingLevel={headingLevel} titled={titled} project={project} t={t}>
+          <Charter className={s.yours}>
+            <Clause label={t.label.never} headingLevel={sub} ref={clauseRef(RulePlace.Never)} below={hint(RulePlace.Never)}>
+              {neverCommands.length > 0 ? (
+                <>
+                  {t.never.runs(t.agents)}
+                  {join(neverCommands, t.or, ending(RulePlace.Never))}
+                </>
+              ) : (
+                <>
+                  {t.never.none}
+                  {adding(RulePlace.Never)}
+                </>
+              )}
+            </Clause>
+            <Clause label={t.label.ask} headingLevel={sub} ref={clauseRef(RulePlace.Ask)} below={hint(RulePlace.Ask)}>
+              {askCommands.length > 0 ? (
+                <>
+                  {t.ask.running(neverCommands.length > 0 ? t.they : t.agents)}
+                  {join(askCommands, t.or, ending(RulePlace.Ask))}
+                </>
+              ) : (
+                <>
+                  {t.ask.none}
+                  {adding(RulePlace.Ask)}
+                </>
+              )}
+            </Clause>
+          </Charter>
+        </WhatAsks>
+      ) : (
+        <>
+          <header className={cx(s.head, !titled && s.keyOnly)}>
+            {titled && (
+              <div className={s.headText}>
+                <Heading level={headingLevel} className={s.title}>
+                  {t.title}
+                </Heading>
+                <p className={s.lede}>{t.lede(project)}</p>
+              </div>
+            )}
+            <CharterKey text={t.key} className={s.key} />
+          </header>
 
-      <ControlSheet className={s.allowAll}>
-        <SettingList>
-          <SettingSwitch title={t.allowAll.title} note={t.allowAll.note(project)} checked={allowAll} onChange={onAllowAllChange} />
-        </SettingList>
-      </ControlSheet>
+          <ControlSheet className={s.allowAll}>
+            <SettingList>
+              <SettingSwitch title={t.allowAll.title} note={t.allowAll.note(project)} checked={allowAll} onChange={onAllowAllChange} />
+            </SettingList>
+          </ControlSheet>
+
+          <Charter>
+            <Clause label={t.label.always} headingLevel={sub} fixed>
+              {t.fixed}
+            </Clause>
+
+            <Clause label={t.label.never} headingLevel={sub} ref={clauseRef(RulePlace.Never)} below={hint(RulePlace.Never)}>
+              {neverKinds.length > 0 && neverCommands.length > 0 ? (
+                <>
+                  {t.never.does(t.agents)}
+                  {join(neverKinds, t.or)}
+                  {t.never.andRuns}
+                  {join(neverCommands, t.or, ending(RulePlace.Never))}
+                </>
+              ) : neverKinds.length > 0 ? (
+                <>
+                  {t.never.does(t.agents)}
+                  {join(neverKinds, t.or, ending(RulePlace.Never))}
+                </>
+              ) : neverCommands.length > 0 ? (
+                <>
+                  {t.never.runs(t.agents)}
+                  {join(neverCommands, t.or, ending(RulePlace.Never))}
+                </>
+              ) : (
+                <>
+                  {t.never.none}
+                  {adding(RulePlace.Never)}
+                </>
+              )}
+            </Clause>
+
+            <Clause
+              label={t.label.ask}
+              headingLevel={sub}
+              ref={clauseRef(RulePlace.Ask)}
+              below={hint(RulePlace.Ask)}
+              {...(allowAll ? { off: t.off } : {})}
+            >
+              {askKinds.length > 0 && askCommands.length > 0 ? (
+                <>
+                  {t.ask.before(neverNames ? t.they : t.agents)}
+                  {join(askKinds, t.or)}
+                  {t.ask.andRunning}
+                  {join(askCommands, t.or, ending(RulePlace.Ask))}
+                </>
+              ) : askKinds.length > 0 ? (
+                <>
+                  {t.ask.before(neverNames ? t.they : t.agents)}
+                  {join(askKinds, t.or, ending(RulePlace.Ask))}
+                </>
+              ) : askCommands.length > 0 ? (
+                <>
+                  {t.ask.running(neverNames ? t.they : t.agents)}
+                  {join(askCommands, t.or, ending(RulePlace.Ask))}
+                </>
+              ) : (
+                <>
+                  {t.ask.none}
+                  {adding(RulePlace.Ask)}
+                </>
+              )}
+            </Clause>
+
+            <Clause
+              label={t.label.allow}
+              headingLevel={sub}
+              ref={clauseRef(RulePlace.Allow)}
+              below={hint(RulePlace.Allow)}
+              {...(allowAll ? { off: t.off } : {})}
+            >
+              {goAhead.length > 0 ? (
+                <>
+                  {t.allow.with(neverNames || askNames ? t.they : t.agents)}
+                  {join(goAhead, t.and, ending(RulePlace.Allow))}
+                </>
+              ) : (
+                <>
+                  {t.allow.none}
+                  {adding(RulePlace.Allow)}
+                </>
+              )}
+            </Clause>
+
+            <Clause label={t.label.rest} headingLevel={sub} {...(allowAll ? { off: t.off } : {})}>
+              {restKinds.length > 0 ? (
+                <>
+                  {t.rest.like}
+                  {join(restKinds, t.and)}
+                </>
+              ) : (
+                t.rest.alone
+              )}
+              {t.rest.colon}
+              <ChoiceWord
+                word={modeWords.word}
+                label={t.rest.label}
+                value={mode}
+                onChange={onModeChange}
+                options={MODES.map((value) => ({ value, title: t.rest.mode[value].title, note: t.rest.mode[value].note }))}
+              />
+              . {modeWords.after}
+            </Clause>
+          </Charter>
+        </>
+      )}
 
       <Charter>
-        <Clause label={t.label.always} headingLevel={sub} fixed>
-          {t.fixed}
-        </Clause>
-
-        <Clause label={t.label.never} headingLevel={sub} ref={clauseRef(RulePlace.Never)} below={hint(RulePlace.Never)}>
-          {neverKinds.length > 0 && neverCommands.length > 0 ? (
-            <>
-              {t.never.does(t.agents)}
-              {join(neverKinds, t.or)}
-              {t.never.andRuns}
-              {join(neverCommands, t.or, ending(RulePlace.Never))}
-            </>
-          ) : neverKinds.length > 0 ? (
-            <>
-              {t.never.does(t.agents)}
-              {join(neverKinds, t.or, ending(RulePlace.Never))}
-            </>
-          ) : neverCommands.length > 0 ? (
-            <>
-              {t.never.runs(t.agents)}
-              {join(neverCommands, t.or, ending(RulePlace.Never))}
-            </>
-          ) : (
-            <>
-              {t.never.none}
-              {adding(RulePlace.Never)}
-            </>
-          )}
-        </Clause>
-
-        <Clause
-          label={t.label.ask}
-          headingLevel={sub}
-          ref={clauseRef(RulePlace.Ask)}
-          below={hint(RulePlace.Ask)}
-          {...(allowAll ? { off: t.off } : {})}
-        >
-          {askKinds.length > 0 && askCommands.length > 0 ? (
-            <>
-              {t.ask.before(neverNames ? t.they : t.agents)}
-              {join(askKinds, t.or)}
-              {t.ask.andRunning}
-              {join(askCommands, t.or, ending(RulePlace.Ask))}
-            </>
-          ) : askKinds.length > 0 ? (
-            <>
-              {t.ask.before(neverNames ? t.they : t.agents)}
-              {join(askKinds, t.or, ending(RulePlace.Ask))}
-            </>
-          ) : askCommands.length > 0 ? (
-            <>
-              {t.ask.running(neverNames ? t.they : t.agents)}
-              {join(askCommands, t.or, ending(RulePlace.Ask))}
-            </>
-          ) : (
-            <>
-              {t.ask.none}
-              {adding(RulePlace.Ask)}
-            </>
-          )}
-        </Clause>
-
-        <Clause
-          label={t.label.allow}
-          headingLevel={sub}
-          ref={clauseRef(RulePlace.Allow)}
-          below={hint(RulePlace.Allow)}
-          {...(allowAll ? { off: t.off } : {})}
-        >
-          {goAhead.length > 0 ? (
-            <>
-              {t.allow.with(neverNames || askNames ? t.they : t.agents)}
-              {join(goAhead, t.and, ending(RulePlace.Allow))}
-            </>
-          ) : (
-            <>
-              {t.allow.none}
-              {adding(RulePlace.Allow)}
-            </>
-          )}
-        </Clause>
-
-        <Clause label={t.label.rest} headingLevel={sub} {...(allowAll ? { off: t.off } : {})}>
-          {restKinds.length > 0 ? (
-            <>
-              {t.rest.like}
-              {join(restKinds, t.and)}
-            </>
-          ) : (
-            t.rest.alone
-          )}
-          {t.rest.colon}
-          <ChoiceWord
-            word={modeWords.word}
-            label={t.rest.label}
-            value={mode}
-            onChange={onModeChange}
-            options={MODES.map((value) => ({ value, title: t.rest.mode[value].title, note: t.rest.mode[value].note }))}
-          />
-          . {modeWords.after}
-        </Clause>
-
         {sandbox !== undefined && (
           <Clause
             label={t.label.sandbox}

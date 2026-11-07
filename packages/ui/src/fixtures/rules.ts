@@ -16,6 +16,7 @@ export const MERIDIAN_KINDS: Readonly<Record<RuleKind, RulePlace>> = {
   [RuleKind.DeleteBranch]: RulePlace.Ask,
   [RuleKind.Deploy]: RulePlace.Ask,
   [RuleKind.Outside]: RulePlace.Rest,
+  [RuleKind.Speak]: RulePlace.Ask,
 }
 
 const command = (place: RuleCommand['place'], pattern: string, match = CommandMatch.Prefix): RuleCommand => ({

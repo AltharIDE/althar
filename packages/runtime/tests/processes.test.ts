@@ -133,7 +133,7 @@ describe('agents as processes', () => {
       const instance = yield* Instance
       const queries = yield* Queries
       const { project } = yield* task()
-      yield* policies.set(project.projectId, { permissions: 'rules' }, instance.personId)
+      yield* policies.set(project.projectId, { permissions: 'rules', allowEverything: false }, instance.personId)
       // Its own temp folder is in the system's, so `$TMPDIR/..` is the system's temp folder, anything's to write to.
       const command = `rm -f $TMPDIR/../althar-temp-probe-${crypto.randomUUID()}.log`
       const asks = (agentId: string) =>
