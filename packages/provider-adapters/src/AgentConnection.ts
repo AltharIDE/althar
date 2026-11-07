@@ -1022,9 +1022,9 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         /** Explain pending refusals before ending the turn. ACP's permission response has no portable reason field. */
         const stopped = (turn: Turn, response: acp.PromptResponse) =>
           Effect.gen(function* () {
-            // A turn that ended on a refusal without a word to the person is never left so: the agent is asked once more,
+            // A turn the agent cut short (stop reason cancelled, though the person did not) after a refusal, with no word to the person, is never left so: the agent is asked once more,
             // where refusals go with the next prompt too, and where it still says nothing the thread says what happened.
-            const silent = !turn.cancelled && turn.refused && !turn.spoke
+            const silent = !turn.cancelled && response.stopReason === 'cancelled' && turn.refused && !turn.spoke
             const again =
               turn.cancelled || turn.resumes >= MAX_RESUMES
                 ? undefined

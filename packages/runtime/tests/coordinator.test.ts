@@ -1355,12 +1355,12 @@ describe("the coordinator's tools", () => {
       assert.include(refused, "Althar couldn't read that")
       assert.include(refused, 'lead and review are objects, not strings')
       assert.include(refused, '"lead": { "model"')
-      assert.lengthOf(yield* sql`SELECT id FROM task_plans WHERE state = 'proposed'`, 0)
+      assert.lengthOf(yield* sql`SELECT id FROM task_plans`, 0)
       // A call repeated for want of knowing whether it went through (the socket closed) leaves one plan, not two.
       const plan = { task: 'shape-it', lead: { agent: 'codex', model: 'large' } }
       yield* callTool(access, 'propose_plan', plan)
       yield* callTool(access, 'propose_plan', plan)
-      assert.lengthOf(yield* sql`SELECT id FROM task_plans WHERE state = 'proposed'`, 1)
+      assert.lengthOf(yield* sql`SELECT id FROM task_plans WHERE state IN ('proposed', 'accepted')`, 1)
     }).pipe(Effect.provide(withQueries())),
   )
 
