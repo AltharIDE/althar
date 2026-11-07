@@ -22,7 +22,7 @@ import { useServices } from '../../data/services'
  */
 
 /** A rule the settings switch in place. */
-export type RuleSwitch = 'resolveConflicts' | 'pushCommits' | 'postScreenshots' | 'moveIssues' | 'repositoryFiles'
+export type RuleSwitch = 'coordinator' | 'resolveConflicts' | 'pushCommits' | 'postScreenshots' | 'moveIssues' | 'repositoryFiles'
 /** A rule set from General: one of its switches, or where new tasks start (ADR-091). */
 export type GeneralRule = RuleSwitch | 'worksIn'
 
@@ -60,6 +60,8 @@ export interface ProjectSettingsModel {
   readonly looked: 'asked' | { readonly failed: string } | null
   /** Moves a task's issue along with it: to In Progress as it starts, In Review and Done with its pull request. */
   readonly setMoveIssues: (on: boolean) => void
+  /** Whether the project has a coordinator (ADR-097): off, what the person writes in its conversation starts a task. */
+  readonly setCoordinator: (on: boolean) => void
   /** Allows or holds back skill or OpenSpec files in a task's commits, or pushing them: each a new revision of its rules. */
   readonly setRepositoryFile: (file: RepositoryFile, on: boolean) => void
   /** Where new tasks start: Local, in the person's checkout, or a worktree of their own (ADR-091). */
@@ -158,6 +160,7 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
   const setPushCommits = useCallback((on: boolean) => setRule('pushCommits', on), [setRule])
   const setPostScreenshots = useCallback((on: boolean) => setRule('postScreenshots', on), [setRule])
   const setMoveIssues = useCallback((on: boolean) => setRule('moveIssues', on), [setRule])
+  const setCoordinator = useCallback((on: boolean) => setRule('coordinator', on), [setRule])
   // The three are one rule: each switch sends all three, the one switched as now chosen, the others as last shown.
   const setRepositoryFile = useCallback(
     (file: RepositoryFile, on: boolean) => {
@@ -248,6 +251,7 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     lookForConflicts,
     looked,
     setMoveIssues,
+    setCoordinator,
     setRepositoryFile,
     setWorksIn,
     ruleFailed,

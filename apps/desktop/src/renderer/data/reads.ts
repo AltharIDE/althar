@@ -19,6 +19,7 @@ export const keys = {
   status: ['status'] as const,
   home: ['home'] as const,
   board: (projectId: string) => ['board', projectId] as const,
+  away: (projectId: string) => ['away', projectId] as const,
   coordinator: (projectId: string) => ['coordinator', projectId] as const,
   thread: (threadId: string) => ['thread', threadId] as const,
   /** A task's head alone, as the board stood at `version` (`headVersion`): what the dock shows of a ready task. */
@@ -111,6 +112,7 @@ export const reads = (client: Client) => ({
       queryFn: () => client.getHome(homeSince(client).since),
     }),
   board: (projectId: string) => queryOptions({ queryKey: keys.board(projectId), queryFn: () => client.getBoard(projectId) }),
+  away: (projectId: string) => queryOptions({ queryKey: keys.away(projectId), queryFn: () => client.getAway(projectId) }),
   coordinator: (projectId: string) =>
     queryOptions({
       queryKey: keys.coordinator(projectId),

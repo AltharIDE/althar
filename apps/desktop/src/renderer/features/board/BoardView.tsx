@@ -85,6 +85,9 @@ export const text = {
     title: 'Nothing queued',
     how: 'Tell the coordinator what you want done. The tasks it plans line up here.',
     talk: 'Talk to the coordinator',
+    /** With the project's coordinator off (ADR-097): tasks start from the composer, and wait here for a free agent. */
+    own: 'Tasks you start wait here for a free agent.',
+    newTask: 'New task',
   },
   step: { implement: 'Implement', review: 'Review' } satisfies Record<PlanStep['key'], string>,
   /** A round of work after its plan, in place of Implement, as the person asked its lead for more. */
@@ -701,6 +704,7 @@ export function BoardView({
   folds,
   onFoldsChange,
   onTalk,
+  coordinatorOff = false,
   team,
 }: {
   lanes: Lanes
@@ -722,6 +726,8 @@ export function BoardView({
   onFoldsChange?: (folds: BoardFolds) => void
   /** Puts the person in the coordinator's composer, from Up next while the board has nothing on it; without it, Up next says how work gets here and offers nothing to press. */
   onTalk?: () => void
+  /** The project's coordinator is off (ADR-097): Up next, empty, offers New task, which `onTalk` puts the person in the composer for. */
+  coordinatorOff?: boolean
   /**
    * Starting a plan up next and changing who does it, from its row: a plan held or on its countdown says Start where its line
    * was as the person points at it, and its row and a started one's whose first step waits have a menu to change the team.
@@ -844,9 +850,15 @@ export function BoardView({
               empty: (
                 <BoardEmpty
                   title={text.upNextEmpty.title}
-                  {...(onTalk === undefined ? {} : { action: <LinkButton onClick={onTalk}>{text.upNextEmpty.talk}</LinkButton> })}
+                  {...(onTalk === undefined
+                    ? {}
+                    : {
+                        action: (
+                          <LinkButton onClick={onTalk}>{coordinatorOff ? text.upNextEmpty.newTask : text.upNextEmpty.talk}</LinkButton>
+                        ),
+                      })}
                 >
-                  {text.upNextEmpty.how}
+                  {coordinatorOff ? text.upNextEmpty.own : text.upNextEmpty.how}
                 </BoardEmpty>
               ),
             }

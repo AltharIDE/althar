@@ -164,6 +164,8 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
           .map((query) => ({ key: query.queryKey, offScreen: false })),
       ]
     : []),
+  // What agents did outside their worktrees (ADR-097), over its board's lanes, only while it shows.
+  ...(event.projectId !== null && event.aggregateType === 'outside_act' ? [{ key: keys.away(event.projectId), offScreen: false }] : []),
   // Finished tasks' folders, which go and come back with their worktrees and with tasks settling, only while they show (ADR-056).
   ...(event.aggregateType === 'workspace' || event.aggregateType === 'task' ? [{ key: keys.folders, offScreen: false }] : []),
 ]
