@@ -1,3 +1,4 @@
+import { ProjectInk } from '@althar/contracts'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 
@@ -182,12 +183,12 @@ describe('settings, for the coordinator and leads', () => {
           assert.include(tools.lead, name, `${change}: a lead has no ${name}`)
         } else assert.match(how, /^(person|window): \S/, `${change}: say how it is made, or why no agent makes it`)
       }
-      // The project's colour, which the screen had and the tools didn't, goes as the screen's does.
-      assert.match(
-        yield* callTool(coordinator, 'change_settings', { section: 'project/general', change: { ink: 'moss' } }),
-        /^Changed General/,
-      )
-      assert.include(yield* callTool(coordinator, 'read_settings', { section: 'project/general' }), '- ink (Colour): "moss"')
+      // The project's colour, which the screen had and the tools didn't, goes as the screen's does: to one it hasn't, as
+      // a new project's is picked at random.
+      const before = yield* callTool(coordinator, 'read_settings', { section: 'project/general' })
+      const ink = ProjectInk.literals.find((one) => !before.includes(`- ink (Colour): "${one}"`)) ?? 'moss'
+      assert.match(yield* callTool(coordinator, 'change_settings', { section: 'project/general', change: { ink } }), /^Changed General/)
+      assert.include(yield* callTool(coordinator, 'read_settings', { section: 'project/general' }), `- ink (Colour): "${ink}"`)
     }).pipe(Effect.provide(withQueries())),
   )
 
