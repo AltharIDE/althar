@@ -190,7 +190,7 @@ export function ChangeTrack({
             </div>
           )}
         </div>
-        {acting && <div className={s.actions}>{actions}</div>}
+        {acting && <div className={cx(s.actions, t.acts)}>{actions}</div>}
         {error && (
           <p className={s.error} role="alert">
             {error}

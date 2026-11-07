@@ -104,11 +104,29 @@
   background: var(--t-4);
 }
 
-/* its files: of every repository, or of one */
+/* narrow, a press with its menu as wide as the card, as one button is; wide, at its own width */
+.acts > [role='group'] {
+  flex: 1 1 0;
+}
+.acts > [role='group'] > :first-child {
+  flex: 1;
+  justify-content: center;
+}
+@container (min-width: 520px) {
+  .acts > [role='group'] {
+    flex: none;
+  }
+}
+
+/* its files: of every repository, or of one; long names keep their width, and the choice scrolls */
 .tabs {
   align-self: flex-start;
   max-width: 100%;
   overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabs > [role='radio'] {
+  flex: none;
 }
 .repositories {
   display: flex;

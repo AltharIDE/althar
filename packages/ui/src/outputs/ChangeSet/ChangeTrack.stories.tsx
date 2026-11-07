@@ -126,7 +126,7 @@ export const FourRepositories: Story = {
   args: {
     stops: TRACK_FOUR,
     actions: split(
-      'Mark both ready for review',
+      'Mark 2 drafts ready for review',
       false,
       ['Mark meridian-web ready for review', 'Mark meridian-docs ready for review'],
       ready,

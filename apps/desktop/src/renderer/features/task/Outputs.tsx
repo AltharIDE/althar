@@ -41,7 +41,9 @@ import { ScreenshotsOnPullRequest, screenshotsTarget } from './ScreenshotsOnPull
  * now, and what its lead couldn't check before what it did. What it changed,
  * for deciding on it: its pull requests, merged on their host when it is
  * accepted, up to the heads shown, and its repositories whose work ended on
- * its branch, which merge here. Each card says where it stands and holds the
+ * its branch, which merge here. Pull requests in several repositories are one
+ * track, in the order they merge, each with where it stands and its checks:
+ * accepting merges each once the one before has landed. Each card says where it stands and holds the
  * one thing to press now: accept it, push what the lead committed since,
  * mark a draft ready, open its draft pull request, or connect the host that
  * opens one. Asking for changes is a word to the lead in the conversation. A
