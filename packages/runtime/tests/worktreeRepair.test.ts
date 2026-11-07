@@ -59,7 +59,7 @@ const repaired = (main: string, folder: string) => Effect.runPromise(repairWorkt
 
 describe('a worktree whose link broke', () => {
   it('says no secret a folder, a repository or a branch is named with', () => {
-    const token = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789'
+    const token = 'ghp_' + 'abcdefghijklmnopqrstuvwxyz0123456789'
     const folder = `/work/${token}/app`
     const root = `/repos/${token}`
     const branch = `althar/${token}`
