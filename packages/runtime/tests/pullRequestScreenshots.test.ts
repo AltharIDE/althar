@@ -110,13 +110,14 @@ describe('a task’s screenshots on its pull request', () => {
     const { working, bare } = hosted()
     const fake = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
     fake.addRepository(['meridian', 'api'])
-    const github = {
-      ...fake,
+    const reply = fake.reply
+    const editComment = fake.editComment!
+    const github = Object.assign(fake, {
       reply: (...args: Parameters<typeof fake.reply>) =>
-        fake.reply(...args).pipe(Effect.map((comment) => ({ ...comment, at: comment.at.replace(/\.\d{3}Z$/, 'Z') }))),
+        reply(...args).pipe(Effect.map((comment) => ({ ...comment, at: comment.at.replace(/\.\d{3}Z$/, 'Z') }))),
       editComment: (...args: Parameters<NonNullable<typeof fake.editComment>>) =>
-        fake.editComment!(...args).pipe(Effect.map((comment) => ({ ...comment, at: comment.at.replace(/\.\d{3}Z$/, 'Z') }))),
-    }
+        editComment(...args).pipe(Effect.map((comment) => ({ ...comment, at: comment.at.replace(/\.\d{3}Z$/, 'Z') }))),
+    })
     return Effect.gen(function* () {
       const { taskId, threadId, url } = yield* opened(github, working)
       const screenshots = yield* PullRequestScreenshots
