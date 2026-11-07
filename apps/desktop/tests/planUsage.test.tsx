@@ -9,7 +9,7 @@ import { PlanGauge } from '@althar/ui'
 
 import type { Host } from '../src/renderer/data/services'
 import { TabsFrame } from '../src/renderer/features/tabs/TabsFrame'
-import { limitWords, planOf, roomOf, windowName } from '../src/renderer/features/usage/plan'
+import { limitWords, planOf, remember, roomOf, windowName, type WindowMemory } from '../src/renderer/features/usage/plan'
 import { waitsWords } from '../src/renderer/shared/agents'
 import { ModelChoice } from '../src/renderer/shared/ModelChoice'
 import { clock } from '../src/renderer/shared/time'
@@ -369,6 +369,26 @@ describe('what the window says of a plan', () => {
     const after = new Date('2026-10-15T15:01:00.000Z')
     expect(windows(after)?.[0]).toMatchObject({ resets: `reset at ${clock(RESET, after)} · not read since`, unread: true })
     expect(windows(after)?.[1]).not.toHaveProperty('unread')
+  })
+
+  it('keeps showing each reset window as not read since once the runtime sends none, until it is read again', () => {
+    const memory: WindowMemory = new Map()
+    const read = planUsage([claudeBoth])
+    remember(memory, read)
+    // The runtime's own clock has passed them all: no windows, and said so.
+    const after = new Date('2026-10-20T00:00:00.000Z')
+    const sent = planUsage([{ ...claudeBoth, windows: [], resetSince: true }])
+    remember(memory, sent)
+    const [agent] = planOf(sent, after, memory).agents
+    expect(agent).toMatchObject({ unread: 'Not read since reset' })
+    expect(agent?.accounts[0]?.windows.map((window) => [window.label, window.unread, window.resets])).toEqual(
+      claudeBoth.windows.map((window) => [windowName(window), true, `reset at ${clock(window.resetsAt ?? '', after)} · not read since`]),
+    )
+    // Even where the window's own clock hasn't passed its reset yet, the runtime has said it has.
+    const early = planOf(sent, NOW, memory).agents[0]?.accounts[0]?.windows
+    expect(early?.every((window) => window.unread === true && window.resets?.startsWith('reset at'))).toBe(true)
+    // Nothing remembered (a restart): no windows to show, as before.
+    expect(planOf(sent, after).agents[0]?.accounts[0]?.windows).toEqual([])
   })
 
   it('leaves out a window whose reset has passed, as unknown, and a model’s room with it', () => {
