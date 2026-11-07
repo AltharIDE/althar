@@ -1399,7 +1399,7 @@ export class Changes extends Context.Service<
           const forked = yield* host.repository(found.path)
           // What the host says of it now, whether it is a fork and of what, is kept, and goes for where its work goes from now.
           const origin = named.find((remote) => remote.name === 'origin')
-          if (origin !== undefined) tellOf(origin.url, forked, yield* Clock.currentTimeMillis)
+          if (origin !== undefined) tellOf(origin.url, forked, yield* Clock.currentTimeMillis, host.product)
           const fork = forkOf(named)
           const upstream =
             fork !== null && (task.changeTarget === 'upstream' || task.changeTarget === 'upstream_branch')

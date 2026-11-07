@@ -444,7 +444,7 @@ export const handlers = Api.toLayer(
           Effect.timeout(PUSHABLE_WAIT),
           Effect.orElseSucceed(() => null),
         )
-        return read !== null && tellOf(origin.url, read, now)
+        return read !== null && tellOf(origin.url, read, now, found.host.product)
       })
 
     /**

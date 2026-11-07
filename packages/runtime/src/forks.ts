@@ -1,4 +1,4 @@
-import { parseRemote } from '@althar/connectors'
+import { parseRemote, type Product } from '@althar/connectors'
 
 /*
  * A fork, as its host says, else as its clone's remotes say (DEV-171). Its
@@ -44,11 +44,21 @@ const endsIn = (remote: ReadonlyArray<string>, host: ReadonlyArray<string>) =>
   remote.length >= host.length && samePath(remote.slice(remote.length - host.length), host)
 
 /**
- * Whether a remote's path is a host's path for a repository, with what the server puts in front of a repository's path there,
- * as `origin`'s address has it: exactly that, so `archive/group/repo` is never `group/repo`. Bitbucket Data Center's HTTPS
- * addresses have `scm/` there and its SSH ones don't, so either way.
+ * Where a host's paths for repositories sit in its addresses, as its answer for `origin` told: what the server puts in front of
+ * them in `origin`'s address (`context`: nothing on GitHub, a server's own path where it is under one), and whether the host is
+ * Bitbucket Data Center (`scm`), whose HTTPS addresses have `scm/` in front of what its SSH ones have.
  */
-const pathIs = (remote: ReadonlyArray<string>, host: ReadonlyArray<string>, context: ReadonlyArray<string>) => {
+export type Place = { readonly context: ReadonlyArray<string>; readonly scm: boolean }
+
+const NOWHERE: Place = { context: [], scm: false }
+
+/**
+ * Whether a remote's path is a host's path for a repository, with exactly what the server puts in front of a repository's
+ * path there, so `archive/group/repo` is never `group/repo`; on Bitbucket Data Center, with its `scm/` or without, as its
+ * HTTPS and SSH addresses differ, and on no other host, where `scm/group/repo` is a repository of its own.
+ */
+const pathIs = (remote: ReadonlyArray<string>, host: ReadonlyArray<string>, { context, scm }: Place) => {
+  if (!scm) return samePath(remote, [...context, ...host])
   const bare = context.at(-1)?.toLowerCase() === 'scm' ? context.slice(0, -1) : context
   return [bare, [...bare, 'scm']].some((before) => samePath(remote, [...before, ...host]))
 }
@@ -68,7 +78,7 @@ const told = new Map<string, Told>()
  * asked by, `origin`'s, which the host's own path for it leaves out: [] on GitHub, `scm` on Bitbucket Data Center over HTTPS, a
  * server's own path where it is under one.
  */
-type Told = { readonly at: number; readonly parent: Parent; readonly context: ReadonlyArray<string> }
+type Told = { readonly at: number; readonly parent: Parent } & Place
 
 /** How long a host's answer stands before it is asked again: a fork's parent hardly ever changes. */
 export const PARENT_KEPT = 60 * 60_000
@@ -80,12 +90,12 @@ export const toldOf = (url: string) => {
 }
 
 /**
- * Keeps what a host said of the repository at an address: the one it was forked from, or that it is no fork; `context`, what
- * the server puts in front of a repository's path in that address.
+ * Keeps what a host said of the repository at an address: the one it was forked from, or that it is no fork; `place`, where
+ * its paths sit in that address.
  */
-export const tell = (url: string, parent: Parent, at: number, context: ReadonlyArray<string> = []) => {
+export const tell = (url: string, parent: Parent, at: number, place: Place = NOWHERE) => {
   const ref = parseRemote(url)
-  if (ref !== null) told.set(keyOf(ref), { at, parent, context })
+  if (ref !== null) told.set(keyOf(ref), { at, parent, ...place })
 }
 
 /**
@@ -96,11 +106,13 @@ export const tellOf = (
   url: string,
   repository: { readonly path: ReadonlyArray<string>; readonly parent?: Parent | undefined },
   at: number,
+  product?: Product,
 ) => {
   const ref = parseRemote(url)
   if (repository.parent === undefined || ref === null || !endsIn(ref.path, repository.path)) return false
   const was = told.get(keyOf(ref))?.parent
-  told.set(keyOf(ref), { at, parent: repository.parent, context: ref.path.slice(0, ref.path.length - repository.path.length) })
+  const context = ref.path.slice(0, ref.path.length - repository.path.length)
+  told.set(keyOf(ref), { at, parent: repository.parent, context, scm: product === 'bitbucket_dc' })
   return was === undefined ? true : (was?.path.join('/') ?? null) !== (repository.parent?.path.join('/') ?? null)
 }
 
@@ -125,22 +137,23 @@ export const addressLike = (like: string, path: ReadonlyArray<string>, own: Read
  * undefined where no host said. A host's parent is found among the remotes by
  * address, `upstream` first where several have it. A host saying it is no
  * fork leaves the remotes' names to say, so a clone with an `upstream` is
- * read as it always was. `context` is what the server puts in front of a
- * repository's path, as the host's answer told it, else nothing.
+ * read as it always was. `place` is where the host's paths sit in its
+ * addresses, as its answer told it, else as on GitHub.
  */
-export const forkOf = (remotes: ReadonlyArray<Remote>, said?: Parent, context?: ReadonlyArray<string>): Fork | null => {
+export const forkOf = (remotes: ReadonlyArray<Remote>, said?: Parent, place?: Place): Fork | null => {
   const origin = remotes.find((remote) => remote.name === 'origin')
   if (origin === undefined) return null
   const own = parseRemote(origin.url)
   if (own === null) return null
   const kept = told.get(keyOf(own))
   const parent = said === undefined ? kept?.parent : said
-  const before = context ?? (said === undefined ? kept?.context : undefined) ?? []
+  const where = place ?? (said === undefined ? kept : undefined) ?? NOWHERE
+  const before = where.context
   if (parent != null && !samePath(parent.path, own.path.slice(before.length))) {
     const having = remotes.filter((remote) => {
       if (remote.name === 'origin') return false
       const ref = parseRemote(remote.url)
-      return ref !== null && ref.host === own.host && pathIs(ref.path, parent.path, before)
+      return ref !== null && ref.host === own.host && pathIs(ref.path, parent.path, where)
     })
     const there = having.find((remote) => remote.name === 'upstream') ?? having[0]
     return {
