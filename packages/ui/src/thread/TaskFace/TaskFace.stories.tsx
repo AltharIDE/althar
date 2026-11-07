@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import { Behind } from '../../composer/Behind/Behind'
@@ -218,3 +218,85 @@ export const LastMessageClearsTheEdge: Story = {
     await expect(alert.getBoundingClientRect().bottom).toBeLessThanOrEqual(keep.getBoundingClientRect().top)
   },
 }
+
+const LONG = (
+  <>
+    {THREAD}
+    {Array.from({ length: 6 }, (_, i) => (
+      <Turn key={i} model={OPUS} at={`12:${10 + i}`}>
+        <Prose>Checked another batch of refunds against the keys: nothing to change, the dry run still matches the ledger.</Prose>
+      </Turn>
+    ))}
+  </>
+)
+const PR_PILL = { id: 'pr', mark: Brand.GitHub, label: 'PR #317', what: 'review comments and checks' }
+const TWO_PROCESSES = [
+  { id: 'site', name: 'Site dev server', command: 'bun run dev', url: 'localhost:5173', since: '41m' },
+  { id: 'sb', name: 'Storybook', command: 'bun run storybook', url: 'localhost:6116', since: '22m' },
+]
+
+/* The thread's scroller: the one inside the face that has more to scroll than it shows. */
+const scrollerOf = (root: HTMLElement | null) =>
+  Array.from(root?.querySelectorAll<HTMLElement>('[data-floats-host] *') ?? []).find(
+    (el) => getComputedStyle(el).overflowY === 'auto' && el.scrollHeight > el.clientHeight,
+  )
+
+/* Scrolls the thread inside it to the top once it has a size, as a reader scrolling up would. */
+function ReadingUp({ children }: { children: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    // after the thread has settled at its end, so the following doesn't take the reader back down
+    const timer = setTimeout(() => scrollerOf(box.current)?.scrollTo({ top: 0 }), 400)
+    return () => clearTimeout(timer)
+  }, [])
+  return (
+    <div ref={box} style={{ height: 520, width: 640 }}>
+      {children}
+    </div>
+  )
+}
+
+/* The thread scrolled up to read, so the Latest pill shows, over a composer with the given pills on its edge. */
+function scrolledUp(behind?: { sources?: (typeof PR_PILL)[]; processes?: typeof TWO_PROCESSES }): Story {
+  return {
+    render: () => (
+      <ReadingUp>
+        <TaskFace
+          composer={
+            <Composer
+              value=""
+              onChange={() => {}}
+              onSubmit={() => {}}
+              placeholder="Tell the lead"
+              above={behind ? <Behind {...behind} /> : undefined}
+            />
+          }
+        >
+          <Thread label="Task 432">{LONG}</Thread>
+        </TaskFace>
+      </ReadingUp>
+    ),
+    play: async ({ canvasElement }) => {
+      const c = within(canvasElement)
+      // Boxes exist only in a browser; jsdom draws none, so there is nothing to scroll and no pill.
+      const scroller = scrollerOf(canvasElement)
+      if (!scroller) return
+      scroller.scrollTo({ top: 0 })
+      const jump = await c.findByRole('button', { name: /latest/i })
+      const row = canvasElement.querySelector('button[aria-expanded]')
+      if (row) await expect(jump.getBoundingClientRect().bottom).toBeLessThanOrEqual(row.getBoundingClientRect().top)
+    },
+  }
+}
+
+/** Scrolled up with nothing on the composer's edge: the pill keeps its place just above the composer. */
+export const ScrolledUp: Story = scrolledUp()
+export const ScrolledUpDark: Story = { ...ScrolledUp, globals: { theme: 'dark' } }
+
+/** One pill on the composer's edge ("Listening to PR #317"): the Latest pill rests above it, not on it. */
+export const ScrolledUpWithOnePill: Story = scrolledUp({ sources: [PR_PILL] })
+export const ScrolledUpWithOnePillDark: Story = { ...ScrolledUpWithOnePill, globals: { theme: 'dark' } }
+
+/** Two pills ("Listening to PR #317", "Running 2 processes"): the Latest pill clears both. */
+export const ScrolledUpWithTwoPills: Story = scrolledUp({ sources: [PR_PILL], processes: TWO_PROCESSES })
+export const ScrolledUpWithTwoPillsDark: Story = { ...ScrolledUpWithTwoPills, globals: { theme: 'dark' } }
