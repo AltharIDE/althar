@@ -423,7 +423,8 @@ describe('A step a restart stopped', () => {
       ).pipe(Layer.provide(fakeAgents()))
       yield* Effect.gen(function* () {
         const [call] = yield* until(callsOf(task.taskId), (rows) => rows.length === 1)
-        assert.deepStrictEqual(call, { kind: 'stuck', state: 'open', why: 'failed_to_start' })
+        // An agent that isn't there stops for that: installing it is the way on.
+        assert.deepStrictEqual(call, { kind: 'stuck', state: 'open', why: 'not_installed' })
         const [attempt] = yield* implement
         assert.strictEqual(attempt?.state, 'waiting_attention')
       }).pipe(Effect.provide(runtime(file, {}, { agents: broken })))
@@ -444,7 +445,8 @@ describe('A step a restart stopped', () => {
       ).pipe(Layer.provide(fakeAgents()))
       yield* Effect.gen(function* () {
         const [call] = yield* until(callsOf(task.taskId), (rows) => rows.length === 1)
-        assert.deepStrictEqual(call, { kind: 'stuck', state: 'open', why: 'failed_to_start' })
+        // An agent that isn't there stops for that: installing it is the way on.
+        assert.deepStrictEqual(call, { kind: 'stuck', state: 'open', why: 'not_installed' })
         const [attempt] = yield* implement
         assert.strictEqual(attempt?.state, 'waiting_attention')
       }).pipe(Effect.provide(runtime(file, {}, { agents: gone })))
