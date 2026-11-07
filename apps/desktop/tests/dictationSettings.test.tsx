@@ -31,7 +31,7 @@ const state = (overrides: Partial<DictationState> = {}, model: Partial<Dictation
 
 const gone = { ready: false, got: 0 }
 
-const fakeDictation = (initial: DictationState) => {
+const fakeDictation = (initial: DictationState, overrides: Partial<DictationHost> = {}) => {
   let now = initial
   const listeners = new Set<(event: unknown) => void>()
   const dictation: DictationHost = {
@@ -49,8 +49,13 @@ const fakeDictation = (initial: DictationState) => {
       listeners.add(listener)
       return () => void listeners.delete(listener)
     }),
+    ...overrides,
   }
-  return { dictation, send: (event: unknown) => act(() => listeners.forEach((listener) => listener(event))) }
+  return {
+    dictation,
+    set: (next: DictationState) => (now = next),
+    send: (event: unknown) => act(() => listeners.forEach((listener) => listener(event))),
+  }
 }
 
 const devices = (list: Array<{ deviceId: string; label: string }>) =>
@@ -158,6 +163,18 @@ describe('Settings, Dictation: the permission', () => {
 })
 
 describe('Settings, Dictation: the speech model', () => {
+  it('says so when Remove didn’t work, and keeps the model shown', async () => {
+    const host = fakeDictation(state(), {
+      remove: vi.fn(async () => {
+        throw new Error('busy')
+      }),
+    })
+    show(host.dictation)
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove' }))
+    expect(await screen.findByText('The speech model couldn’t be removed. Try again.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeTruthy()
+  })
+
   it('shows its name and size, then removes it, and says dictating downloads it again', async () => {
     const host = fakeDictation(state())
     show(host.dictation)
@@ -211,6 +228,17 @@ describe('Settings, Dictation: the speech model', () => {
     host.send({ type: 'removed' })
     expect(await screen.findByText(/isn’t on this computer/)).toBeTruthy()
     within(document.body)
+  })
+})
+
+describe('Settings, Dictation: a download from another window', () => {
+  it('shows a download that starts while Settings is open', async () => {
+    const host = fakeDictation(state({}, gone))
+    show(host.dictation)
+    expect(await screen.findByText(/isn’t on this computer/)).toBeTruthy()
+    host.set(state({}, { ...gone, got: 100_000_000, downloading: true }))
+    host.send({ type: 'progress', got: 100_000_000, size: SIZE })
+    expect(await screen.findByText(/Downloading Parakeet TDT 0.6B v3: 100 MB of 670 MB/)).toBeTruthy()
   })
 })
 

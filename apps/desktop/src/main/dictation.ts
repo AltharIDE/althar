@@ -201,7 +201,14 @@ export function startDictation(options: DictationOptions) {
     downloading = false
     got = 0
     clearTimeout(idle)
-    child?.kill()
+    // Windows can't delete files the process still has open: wait for it to be gone.
+    const running = child
+    if (running !== undefined)
+      await new Promise<void>((done) => {
+        running.once('exit', () => done())
+        running.kill()
+      })
+    child = undefined
     await remove(join(options.models(), PARAKEET.id))
     broadcast({ type: 'removed' })
   })

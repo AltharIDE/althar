@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { DictationPermission } from '@althar/ui'
 
@@ -30,6 +30,8 @@ export interface DictationSettingsModel {
     readonly got: string
   }
   readonly removing: boolean
+  /** Remove didn't work. */
+  readonly failed: boolean
   readonly remove: () => void
 }
 
@@ -43,6 +45,9 @@ export const useDictationSettings = (): DictationSettingsModel | null => {
   const voice = host.dictation
   const [state, setState] = useState<DictationState | null>(null)
   const [removing, setRemoving] = useState(false)
+  const [failed, setFailed] = useState(false)
+  /* Whether a download is known to be under way: the first progress from another window reads the state again. */
+  const downloading = useRef(false)
   const chosen = useChosenMicrophone()
   const { microphones } = useMicrophones()
 
@@ -52,11 +57,16 @@ export const useDictationSettings = (): DictationSettingsModel | null => {
     const read = () =>
       void voice
         .state()
-        .then((next) => live && setState(next))
+        .then((next) => {
+          if (!live) return
+          downloading.current = next.model.downloading
+          setState(next)
+        })
         .catch(() => {})
     read()
     const off = voice.onEvent((event) => {
-      if ((event as { type?: unknown } | null)?.type !== 'progress') read()
+      const type = (event as { type?: unknown } | null)?.type
+      if (type !== 'progress' || !downloading.current) read()
     })
     return () => {
       live = false
@@ -81,13 +91,15 @@ export const useDictationSettings = (): DictationSettingsModel | null => {
       got: bytes(model.got),
     },
     removing,
+    failed,
     remove: () => {
       setRemoving(true)
+      setFailed(false)
       void voice
         .remove()
         .then(() => voice.state())
         .then(setState)
-        .catch(() => {})
+        .catch(() => setFailed(true))
         .finally(() => setRemoving(false))
     },
   }

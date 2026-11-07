@@ -716,16 +716,19 @@ function DictationSection() {
   const dictation = useDictationSettings()
   if (dictation === null) return <p className={s.quiet}>{text.noDictation}</p>
   return (
-    <DictationSettings
-      microphones={dictation.microphones}
-      microphone={dictation.microphone}
-      onMicrophone={dictation.choose}
-      permission={dictation.permission}
-      {...(dictation.openSettings === undefined ? {} : { onOpenSettings: dictation.openSettings })}
-      model={dictation.model}
-      onRemove={dictation.remove}
-      removing={dictation.removing}
-    />
+    <>
+      <DictationSettings
+        microphones={dictation.microphones}
+        microphone={dictation.microphone}
+        onMicrophone={dictation.choose}
+        permission={dictation.permission}
+        {...(dictation.openSettings === undefined ? {} : { onOpenSettings: dictation.openSettings })}
+        model={dictation.model}
+        onRemove={dictation.remove}
+        removing={dictation.removing}
+      />
+      <Failed when={dictation.failed}>{text.removeFailed}</Failed>
+    </>
   )
 }
 
