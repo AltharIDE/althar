@@ -284,8 +284,10 @@ flowchart LR
   person keeps cookies only that long. Their pages close then, and the
   windows hear it.
 - **Pages are the main process's, not a window's.** A window that closes
-  leaves its pages hidden; one opened after asks how each stands, and
-  shows it again where it was.
+  or reloads (as when the runtime restarts) leaves its pages hidden. The
+  window keeps where each shows in its storage; one opened or reloaded
+  after asks the main process which it still has and how each stands, and
+  shows those where they were.
 
 ### Window close and application quit
 

@@ -204,9 +204,14 @@
     where it was when shown, without its history. Asleep isn't closed for
     the person, who never closed it: its session stays, so its sign-ins
     hold as it wakes, even where cookies are kept until the page closes.
-  - **Pages outlive the window that showed them.** Closing the window on a
-    Mac, or working in the background, hides them. A window opened after
-    asks the main process how each stands, and shows it again where it was.
+  - **Pages outlive the window that showed them.** A window that closes
+    (on a Mac, or working in the background) or reloads (as it does when
+    the runtime restarts) hides them, as nothing of its document is left to
+    say where they go. The window keeps where each shows, beside its
+    conversation or in a tab, in its storage. One opened or reloaded after
+    asks the main process which pages it still has and how each stands,
+    and shows those where they were; the others, closed with their tasks
+    or as Althar quit, are forgotten.
   - **A page's session persists on disk** until the person's choice clears
     it.
   - **A sign-in to a service other than the four** (a company's own SSO, a

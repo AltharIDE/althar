@@ -163,13 +163,35 @@ describe('a page as windows come and go', () => {
     expect(first.children.has(view)).toBe(true)
 
     first.close()
-    pages.windowClosed(first.window)
+    pages.hideIn(first.window)
     // The window opened after hears how it stands, and shows it where it was.
     expect(pages.states().map((state) => state.address)).toEqual(['http://localhost:5173/refunds'])
     const second = windowOf()
     expect(() => pages.show(second.window, owner(1), PLACE)).not.toThrow()
     expect(second.children.has(view)).toBe(true)
     expect(view?.visible).toBe(true)
+  })
+
+  it('is taken off a window whose document went, reloaded as the runtime restarts, until the new one shows it again', () => {
+    const { pages } = started()
+    const window = windowOf()
+    pages.open(owner(1), 'http://localhost:5173/refunds')
+    pages.open(owner(2), 'http://localhost:5173/other')
+    pages.show(window.window, owner(1), PLACE)
+    const view = viewAt('http://localhost:5173/refunds')
+    const other = windowOf()
+    pages.show(other.window, owner(2), PLACE)
+
+    pages.hideIn(window.window)
+    // Nothing of the reloaded window's says where the page goes: it isn't drawn over it, nor anywhere.
+    expect(window.children.size).toBe(0)
+    // Another window's page stays where it is.
+    expect(other.children.size).toBe(1)
+    // The new document hears how it stands, and lays it where it was again.
+    expect(pages.states().map((state) => state.address)).toEqual(['http://localhost:5173/refunds', 'http://localhost:5173/other'])
+    pages.show(window.window, owner(1), PLACE)
+    expect(window.children.has(view)).toBe(true)
+    expect(view?.webContents.destroyed).toBe(false)
   })
 
   it('moves to another window without touching one already gone, even before main hears it closed', () => {
@@ -233,6 +255,14 @@ describe('pages hidden past the few kept', () => {
     expect(viewAt('http://localhost:5173/1')?.webContents.destroyed).toBe(true)
     expect(electron.sessions.get(`persist:task-${'0'.repeat(31)}1`)?.clearStorageData).not.toHaveBeenCalled()
     expect(options.closed).not.toHaveBeenCalled()
+    // A window that asks hears of it as it will wake: where it was, without its history.
+    expect(pages.states().find((state) => state.owner === owner(1))).toMatchObject({
+      address: 'http://localhost:5173/1',
+      back: false,
+      forward: false,
+      loading: false,
+    })
+    expect(pages.states()).toHaveLength(4)
     pages.show(window.window, owner(1), PLACE)
     const woke = viewAt('http://localhost:5173/1')
     expect(woke?.webContents.destroyed).toBe(false)
@@ -265,7 +295,7 @@ describe('a key pressed in the page', () => {
     pages.open(owner(1), 'http://localhost:5173/')
     pages.show(window.window, owner(1), PLACE)
     window.close()
-    pages.windowClosed(window.window)
+    pages.hideIn(window.window)
     expect(() => press(viewAt('http://localhost:5173/'), 'l')).not.toThrow()
     expect(window.raw.webContents.focus).not.toHaveBeenCalled()
     expect(options.pressed).toHaveBeenCalledWith(owner(1), 'address')

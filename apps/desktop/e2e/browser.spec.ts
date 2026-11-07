@@ -168,6 +168,28 @@ const pressAddressKeyInPage = (electronApp: ElectronApplication) =>
     view.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'L', modifiers })
   }, process.platform === 'darwin')
 
+/** The runtime's process, while one runs. */
+const runtimePid = (electronApp: ElectronApplication) =>
+  electronApp.evaluate(
+    ({ app }) => app.getAppMetrics().find((metric) => metric.type === 'Utility' && metric.name === 'Althar runtime')?.pid ?? null,
+  )
+
+/** Waits for the window to have loaded again: a mark left on its document goes with it. */
+const reloading = async (page: Page, reload: () => Promise<unknown>) => {
+  await page.evaluate(() => Object.assign(window, { beforeReload: true }))
+  await reload()
+  // Asked mid-reload, the document has no context to answer from: still reloading.
+  await expect.poll(() => page.evaluate(() => 'beforeReload' in window).catch(() => true)).toBe(false)
+}
+
+/** Reloads the window's own document, as the person's ⌘R would. */
+const reloadWindow = (electronApp: ElectronApplication) =>
+  electronApp.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()
+      .find((one) => one.webContents.getURL().includes('/renderer/index.html'))
+      ?.webContents.reload(),
+  )
+
 /** What the main process opened in the person's browser, as it would. */
 const openedOutside = (electronApp: ElectronApplication) =>
   electronApp.evaluate(() => (globalThis as unknown as { opened?: Array<string> }).opened ?? [])
@@ -412,12 +434,36 @@ test('from the coordinator, the project’s run opens beside its conversation, t
     await page.keyboard.press('Escape')
     await expect.poll(async () => (await drawn(electronApp)).length).toBe(1)
 
-    // In a tab of its own, the bar's Close closes the page and goes back to the conversation it came from.
+    // A window reloaded that doesn't know where the page showed has none drawn over it: main hid it as the document went.
+    await page.evaluate(() => window.localStorage.removeItem('althar.pages'))
+    await reloading(page, () => reloadWindow(electronApp))
+    await expect(page.getByRole('radio', { name: 'Conversation', checked: true })).toBeVisible()
+    await expect(panel).toHaveCount(0)
+    await expect.poll(async () => (await drawn(electronApp)).length).toBe(0)
+    // Opened again, it is where it was.
+    await page.getByRole('radio', { name: 'Home' }).click()
+    await open.click()
+    await expect(panel.getByRole('textbox', { name: 'Address' })).toHaveValue(address)
+    await expect.poll(() => onItsPlace(electronApp, panel)).toBe(true)
+
+    // The runtime stops and starts again (its run with it), and the window reloads: the page shows again beside the conversation, where it was.
+    const stopped = await runtimePid(electronApp)
+    expect(stopped).not.toBeNull()
+    await reloading(page, () => electronApp.evaluate((_electron, pid) => process.kill(pid, 'SIGKILL'), stopped ?? 0))
+    await expect.poll(() => runtimePid(electronApp)).not.toBe(stopped)
+    await expect(page.getByRole('radio', { name: 'Conversation', checked: true })).toBeVisible()
+    await expect(panel.getByRole('textbox', { name: 'Address' })).toHaveValue(address)
+    await expect.poll(() => onItsPlace(electronApp, panel)).toBe(true)
+    await expect.poll(async () => (await drawn(electronApp)).length).toBe(1)
+
+    // In a tab of its own, it is there again as the window reloads on it; the bar's Close closes it and goes back to the conversation it came from.
     await panel.getByRole('button', { name: 'Open as a tab' }).click()
-    await expect(page.getByRole('list', { name: 'Pages' }).getByRole('button', { name: 'Refunds', exact: true })).toHaveAttribute(
-      'aria-current',
-      'page',
-    )
+    const tab = page.getByRole('list', { name: 'Pages' }).getByRole('button', { name: 'Refunds', exact: true })
+    await expect(tab).toHaveAttribute('aria-current', 'page')
+    await reloading(page, () => reloadWindow(electronApp))
+    await expect(tab).toHaveAttribute('aria-current', 'page')
+    await expect(panel.getByRole('textbox', { name: 'Address' })).toHaveValue(address)
+    await expect.poll(() => onItsPlace(electronApp, panel)).toBe(true)
     await page.getByRole('complementary', { name: 'Page' }).getByRole('button', { name: 'Close' }).click()
     await expect(page.getByRole('list', { name: 'Pages' })).toHaveCount(0)
     await expect(page.getByRole('radio', { name: 'Conversation', checked: true })).toBeVisible()

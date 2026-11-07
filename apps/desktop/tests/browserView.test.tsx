@@ -9,7 +9,9 @@ import type { Host, PagesHost } from '../src/renderer/data/services'
 import { ServicesProvider } from '../src/renderer/data/services'
 import { coveredNow } from '../src/renderer/features/browser/cover'
 import { useOpener } from '../src/renderer/features/browser/opener'
-import { forgetPages, pages, usePage } from '../src/renderer/features/browser/pages'
+import { forgetPages, pages, storedFrom, usePage } from '../src/renderer/features/browser/pages'
+import { pageRoute } from '../src/renderer/features/browser/route'
+import { rootRoute } from '../src/renderer/root'
 import { PageView } from '../src/renderer/features/browser/PageView'
 import { commentsOf, forgetComments, gather } from '../src/renderer/shared/comments'
 import { fakeClient, fakeHost } from './fixtures'
@@ -121,7 +123,6 @@ beforeEach(() => {
 })
 afterEach(() => {
   vi.restoreAllMocks()
-  forgetPages()
   forgetComments()
 })
 
@@ -450,11 +451,127 @@ describe('the pages this window shows', () => {
     expect(pages.state(OWNER)?.address).toBe('http://localhost:5173/now')
   })
 
+  it('show again where they were in a window reloaded or opened after them, each main still has', async () => {
+    pages.place(OWNER, 'beside')
+    pages.place('task_b', 'tab', { kind: 'task', threadId: 'thr_b', draft: 'task:thr_b' })
+    pages.place('proj_c', 'tab', { kind: 'project', projectId: 'proj_c', draft: 'coordinator:proj_c' })
+    // The window reloads: nothing of it stays but what its storage kept.
+    forgetPages()
+    const fake = fakePages()
+    let answer: (states: ReadonlyArray<PageState>) => void = () => {}
+    vi.mocked(fake.host.states).mockReturnValue(new Promise((resolve) => (answer = resolve)))
+    renderHook(() => usePage(OWNER, fake.host))
+    // Where each came from is there at once, for a tab's address to open; where each shows waits for main's word.
+    expect(pages.originOf('task_b')).toEqual({ kind: 'task', threadId: 'thr_b', draft: 'task:thr_b' })
+    expect(pages.where(OWNER)).toBeNull()
+    expect(pages.waking('task_b')).toBe(true)
+    // Main still has two: the project's closed as Althar quit.
+    await act(async () => answer([stateOf(), stateOf({ owner: 'task_b' })]))
+    expect(pages.where(OWNER)).toBe('beside')
+    expect(pages.tabs()).toEqual(['task_b'])
+    expect(pages.waking('task_b')).toBe(false)
+    expect(storedFrom(window.localStorage.getItem('althar.pages'))).toEqual({
+      placed: [
+        [OWNER, 'beside'],
+        ['task_b', 'tab'],
+      ],
+      origins: { task_b: { kind: 'task', threadId: 'thr_b', draft: 'task:thr_b' } },
+    })
+  })
+
+  it('stay where the person placed or hid them while main was asked, and show nowhere where main can’t say', async () => {
+    pages.place(OWNER, 'tab', { kind: 'task', threadId: 'thr_1', draft: DRAFT })
+    pages.place('task_b', 'beside')
+    forgetPages()
+    const fake = fakePages()
+    let answer: (states: ReadonlyArray<PageState>) => void = () => {}
+    vi.mocked(fake.host.states).mockReturnValue(new Promise((resolve) => (answer = resolve)))
+    const before = renderHook(() => usePage(OWNER, fake.host))
+    act(() => pages.place(OWNER, 'beside'))
+    await act(async () => answer([stateOf(), stateOf({ owner: 'task_b' })]))
+    expect(pages.where(OWNER)).toBe('beside')
+    expect(pages.tabs()).toEqual([])
+
+    // A window has one main to hear: the one before goes as the window reloads.
+    before.unmount()
+    forgetPages()
+    const failing = fakePages()
+    vi.mocked(failing.host.states).mockRejectedValue(new Error('No main'))
+    renderHook(() => usePage(OWNER, failing.host))
+    await waitFor(() => expect(pages.waking(OWNER)).toBe(false))
+    expect(pages.where(OWNER)).toBeNull()
+    expect(pages.where('task_b')).toBeNull()
+  })
+
+  it('take up only what reads as it should from the window’s storage', () => {
+    const none = { placed: [], origins: {} }
+    expect(storedFrom(null)).toEqual(none)
+    expect(storedFrom('{not json')).toEqual(none)
+    expect(storedFrom('[]')).toEqual(none)
+    const task = { kind: 'task', threadId: 'thr_a', draft: 'task:thr_a' }
+    const project = { kind: 'project', projectId: 'proj_c', draft: 'coordinator:proj_c' }
+    const raw = JSON.stringify({
+      placed: [['task_a', 'tab'], ['task_b', 'floating'], [3, 'beside'], 'proj_c', ['proj_c', 'beside']],
+      origins: { task_a: task, task_b: { kind: 'task', draft: 'x' }, proj_c: project, task_d: null },
+    })
+    expect(storedFrom(raw)).toEqual({
+      placed: [
+        ['task_a', 'tab'],
+        ['proj_c', 'beside'],
+      ],
+      origins: { task_a: task, proj_c: project },
+    })
+  })
+
   it('hand a comment to open again to the page that takes it, once', () => {
     pages.reopen('task_a', 'c1')
     expect(pages.reopenWaiting('task_a')).toBe('c1')
     expect(pages.takeReopen('task_a')).toBe('c1')
     expect(pages.takeReopen('task_a')).toBeNull()
+  })
+})
+
+describe('a page’s tab, the window reloaded on it', () => {
+  /** The app's window on a page's tab, as it reloads: its storage kept the tab, and main answers when the test says. */
+  const reloadedOn = () => {
+    window.localStorage.setItem(
+      'althar.pages',
+      JSON.stringify({ placed: [[OWNER, 'tab']], origins: { [OWNER]: { kind: 'task', threadId: 'thr_1', draft: DRAFT } } }),
+    )
+    const fake = fakePages()
+    let answer: (states: ReadonlyArray<PageState>) => void = () => {}
+    vi.mocked(fake.host.states).mockReturnValue(new Promise((resolve) => (answer = resolve)))
+    const { client } = fakeClient()
+    const services = servicesFor(client, fakeHost({ pages: fake.host }))
+    const thread = createRoute({ getParentRoute: () => rootRoute, path: '/threads/$threadId', component: () => <p>The thread</p> })
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([pageRoute, thread]),
+      history: createMemoryHistory({ initialEntries: [`/pages/${OWNER}`] }),
+      context: { client, cache: services.cache },
+    })
+    render(
+      <ServicesProvider value={services}>
+        <RouterProvider router={router} />
+      </ServicesProvider>,
+    )
+    return { router, answer: (states: ReadonlyArray<PageState>) => act(async () => answer(states)) }
+  }
+
+  it('shows the page again in its tab once main says it still has it, going nowhere meanwhile', async () => {
+    const { router, answer } = reloadedOn()
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/pages/${OWNER}`))
+    expect(screen.queryByRole('complementary', { name: 'Page' })).toBeNull()
+    await answer([stateOf({ title: 'Refunds' })])
+    expect(await screen.findByRole('complementary', { name: 'Page' })).toBeTruthy()
+    expect(router.state.location.pathname).toBe(`/pages/${OWNER}`)
+  })
+
+  it('goes back to the conversation it came from where main no longer has it', async () => {
+    const { router, answer } = reloadedOn()
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/pages/${OWNER}`))
+    await answer([])
+    await waitFor(() => expect(router.state.location.pathname).toBe('/threads/thr_1'))
+    expect(screen.queryByRole('complementary', { name: 'Page' })).toBeNull()
   })
 })
 

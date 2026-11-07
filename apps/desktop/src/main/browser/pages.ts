@@ -167,7 +167,7 @@ export const startPages = (options: PagesOptions) => {
   /* How many times a page was hidden, so the one hidden longest is known without a clock. */
   let hidings = 0
   /* What a page closed while hidden was showing, to open it again where it was. */
-  const asleep = new Map<string, { readonly address: string; readonly viewport: Viewport }>()
+  const asleep = new Map<string, { readonly address: string; readonly title: string; readonly viewport: Viewport }>()
 
   const stateOf = (page: Page): PageState => {
     const history = page.contents.navigationHistory
@@ -448,7 +448,7 @@ export const startPages = (options: PagesOptions) => {
   const sleep = () => {
     const hidden = [...pages.values()].filter((page) => page.panel === null).sort((a, b) => a.hiddenSince - b.hiddenSince)
     for (const page of hidden.slice(0, Math.max(0, hidden.length - KEPT_HIDDEN))) {
-      asleep.set(page.owner.id, { address: page.contents.getURL(), viewport: page.viewport })
+      asleep.set(page.owner.id, { address: page.contents.getURL(), title: page.contents.getTitle(), viewport: page.viewport })
       close(page)
     }
   }
@@ -529,8 +529,25 @@ export const startPages = (options: PagesOptions) => {
       }
       return stateOf(page)
     },
-    /** How each page open stands: for a window opened after them, which hasn't heard. */
-    states: (): ReadonlyArray<PageState> => [...pages.values()].flatMap((page) => (page.contents.isDestroyed() ? [] : [stateOf(page)])),
+    /**
+     * How each page open stands, for a window opened or reloaded after them,
+     * which hasn't heard: one asleep as it will wake, where it was, without
+     * its history.
+     */
+    states: (): ReadonlyArray<PageState> => [
+      ...[...pages.values()].flatMap((page) => (page.contents.isDestroyed() ? [] : [stateOf(page)])),
+      ...[...asleep].map(([owner, kept]): PageState => ({
+        owner,
+        address: kept.address,
+        title: kept.title,
+        loading: false,
+        back: false,
+        forward: false,
+        viewport: kept.viewport,
+        pointing: false,
+        line: null,
+      })),
+    ],
     /** Lays the page over the window where it keeps its place, or takes it off while no conversation shows it. */
     show: (window: BrowserWindow, ownerId: string, panel: Rect | null) => {
       const owner = ownerOf(ownerId)
@@ -620,8 +637,12 @@ export const startPages = (options: PagesOptions) => {
       const picture = await page.contents.capturePage().catch(() => null)
       return picture === null || picture.isEmpty() ? null : dataUrl(picture, 'jpeg')
     },
-    /** A window closed: the pages it showed are hidden, to show again in a window that asks for them. */
-    windowClosed: (window: BrowserWindow) => {
+    /**
+     * A window closed, or its document went (reloaded as the runtime
+     * restarts): nothing there will say where the pages it showed go now, so
+     * they are hidden, to show again where a window asks for them.
+     */
+    hideIn: (window: BrowserWindow) => {
       for (const page of pages.values()) if (page.window === window) hide(page)
       sleep()
     },

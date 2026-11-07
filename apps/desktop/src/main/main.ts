@@ -827,11 +827,13 @@ const openWindow = () => {
   window.on('closed', () => {
     windows.delete(window)
     // The pages it showed stay, hidden, for a window opened after to show again.
-    pages?.windowClosed(window)
+    pages?.hideIn(window)
     // Off a Mac, closing Althar's last window quits, as it did before the edge kept pages of its own open, unless the person chose to keep working in the background.
     if (windows.size === 0 && process.platform !== 'darwin' && !keepingOn) quitWhenNoneLeft()
   })
   window.webContents.on('did-finish-load', () => connect(window))
+  // A document of the window's gone, as it reloads when the runtime restarts, takes with it what said where its pages show: they hide until the new one says.
+  window.webContents.on('did-navigate', () => pages?.hideIn(window))
   window.once('ready-to-show', () => (quiet ? window.showInactive() : window.show()))
   // The window shows Althar and nothing else: links open in the browser, and the window never goes anywhere.
   window.webContents.setWindowOpenHandler(({ url }) => {

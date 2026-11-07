@@ -17,6 +17,8 @@ import s from './PageTab.module.css'
  * conversation it came from: they wait in that conversation's composer, and
  * show at the tab's foot, each opening again on the page. Once the page is
  * no longer in its tab, closed or back beside, the window goes back there.
+ * A window reloaded on the tab waits for main's word that the page is still
+ * there before it shows it, or goes back.
  */
 
 export const text = {
@@ -35,11 +37,11 @@ function PageTab() {
   const { where } = usePage(owner, useServices().host.pages)
   const origin = pages.originOf(owner)
   const comments = useComments(origin?.draft ?? '')
-  const away = where !== 'tab'
+  const away = where !== 'tab' && !pages.waking(owner)
   useEffect(() => {
     if (away && origin !== null) void toOrigin(navigate, origin)
   }, [away, origin, navigate])
-  if (origin === null || away) return null
+  if (origin === null || where !== 'tab') return null
   return (
     <div className={s.tab}>
       <div className={s.page}>
@@ -62,7 +64,7 @@ function PageTab() {
   )
 }
 
-/** A page in a tab of its own, by its owner: /pages/task_…. One the window doesn't know (after a reload) goes to the home. */
+/** A page in a tab of its own, by its owner: /pages/task_…. One the window doesn't know, nor kept where it came from, goes to the home. */
 export const pageRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/pages/$owner',
