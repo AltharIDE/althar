@@ -51,6 +51,8 @@ export class Plans extends Context.Service<
       /** Where it works (ADR-091), and why, where that isn't the project's default (`PlanParameters.worksIn`). */
       readonly worksIn?: WorksIn
       readonly worksInWhy?: string | null
+      /** What the proposing call was, as the coordinator made it: kept with the plan through the person's changes, so a repeat of the call is known for one (`Coordinator.propose`). */
+      readonly proposal?: string
     }): Effect.Effect<string, unknown>
     /**
      * Starts a proposed plan now: its first step is under way (`running`), or
@@ -140,6 +142,7 @@ export class Plans extends Context.Service<
           reads?: boolean
           worksIn?: WorksIn
           worksInWhy?: string | null
+          proposal?: string
         }
 
       /** Whether a plan still counts down. */
@@ -187,6 +190,7 @@ export class Plans extends Context.Service<
                     ...(input.reads === true ? { reads: true } : {}),
                     ...(input.worksIn === undefined ? {} : { worksIn: input.worksIn }),
                     ...(input.worksInWhy == null || input.worksInWhy.trim() === '' ? {} : { worksInWhy: input.worksInWhy.trim() }),
+                    ...(input.proposal === undefined ? {} : { proposal: input.proposal }),
                   }),
                   proposedByActorId: input.actorId,
                   state: 'proposed',
@@ -294,6 +298,7 @@ export class Plans extends Context.Service<
                   ...(before.reads === true ? { reads: true } : {}),
                   ...(where === undefined ? {} : { worksIn: where }),
                   ...(why == null ? {} : { worksInWhy: why }),
+                  ...(before.proposal === undefined ? {} : { proposal: before.proposal }),
                 })
               }
               const plan = yield* load(planId)

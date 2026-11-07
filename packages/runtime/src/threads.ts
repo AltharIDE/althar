@@ -134,6 +134,48 @@ export const toolItem = (sessionId: string, toolCallId: string) =>
     return row === undefined ? undefined : { id: row.id, content: JSON.parse(row.content) as Record<string, unknown> }
   })
 
+/** How much of an Althar tool's input, and of its error, a thread keeps of a call made inside another tool. */
+const CALL_KEPT = 300
+
+/**
+ * Keeps on an agent's code tool (OpenCode 2.x's `execute`, which runs the model's JavaScript and names nothing it calls)
+ * the Althar tool that code called, what it was given, shortened, and why it failed where it did. Without it the thread
+ * shows a bare `execute`, and a refusal or a malformed argument is lost with it. The latest such call still open takes it;
+ * none, or a call that already says its command, takes nothing.
+ */
+export const keepAltharCall = (
+  place: { readonly projectId: ProjectId; readonly threadId: string; readonly sessionId: string },
+  call: { readonly tool: string; readonly input: unknown; readonly error?: string },
+) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const open = yield* sql<{ id: string; content: string }>`
+      SELECT id, content FROM thread_items
+      WHERE thread_id = ${place.threadId} AND provider_session_id = ${place.sessionId} AND kind = 'tool_call'
+      ORDER BY sequence DESC LIMIT 8`
+    for (const row of open) {
+      const content = JSON.parse(row.content) as Record<string, unknown>
+      const running = content.status === 'pending' || content.status === 'in_progress'
+      const bare = content.rawInput === undefined || Object.keys(content.rawInput as object).length === 0
+      if (content.kind !== 'execute' || !running || !bare) continue
+      const shown = (value: unknown) => {
+        const text = typeof value === 'string' ? value : (JSON.stringify(value) ?? '')
+        return text.length > CALL_KEPT ? `${text.slice(0, CALL_KEPT)}…` : text
+      }
+      const input =
+        typeof call.input === 'object' && call.input !== null && !Array.isArray(call.input)
+          ? Object.fromEntries(Object.entries(call.input).map(([key, value]) => [key, shown(value)]))
+          : {}
+      const kept = {
+        tool: call.tool,
+        input,
+        ...(call.error === undefined ? {} : { error: shown(call.error) }),
+      }
+      const before = Array.isArray(content.althar) ? content.althar : []
+      return yield* updateItem(place.projectId, row.id, { ...content, althar: [...before, kept] })
+    }
+  })
+
 /** Whether a path is inside a folder: the folder itself isn't. */
 const inside = (path: string, folder: string) => path.startsWith(`${folder}/`) || path.startsWith(`${folder}\\`)
 

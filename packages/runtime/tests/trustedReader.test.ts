@@ -38,6 +38,20 @@ const coordinator = as(true)
 const containedCoordinator = as('contained')
 const reviewLead = as(false)
 
+describe('a process substitution that is only text', () => {
+  it('is not read as one when it stands in quotes, for the coordinator and a review lead alike', () => {
+    for (const read of [coordinator, reviewLead]) {
+      assert.equal(read('git grep -E "<(a|b)" -- src'), 'allowed')
+      assert.equal(read("git grep -E '<(a|b)' -- src"), 'allowed')
+      assert.equal(read('git grep -E "<(img|Image)\\b|next/image" -- src'), 'allowed')
+      assert.equal(read('rg ">(x)" src'), 'allowed')
+    }
+    // Unquoted, it still runs a command, wherever the rules read it.
+    assert.include(reviewLead('git grep -E <(a|b) -- src'), 'A process substitution')
+    assert.include(reviewLead('cat <(./run.sh)'), 'A process substitution')
+  })
+})
+
 describe('the coordinator, a trusted reader in its own copies', () => {
   it('runs a substitution whose command only looks, as a line of its own', () => {
     for (const command of [
@@ -123,7 +137,11 @@ describe('the coordinator, a trusted reader in its own copies', () => {
     assert.include(coordinator('for f in -p --output=out.txt; do git log "$f"; done'), '`git log --output=out.txt` writes')
     assert.include(coordinator('x=$(cat flags.txt); git log $x'), 'could start with a dash')
     // What runs a command of its own, sets a variable as it expands, or has a shell read more than its script.
-    assert.include(coordinator('diff <(git show HEAD:a) b'), 'A process substitution')
+    // A process substitution is read as `$(…)` is: its command only looks, or it is refused as that command is.
+    assert.equal(coordinator('diff <(git show HEAD:a) <(git show HEAD:b)'), 'allowed')
+    assert.include(coordinator('cat <(rm -r src)'), 'It would write to src')
+    assert.include(coordinator('tee >(./run.sh) < x'), 'runs what that folder holds')
+    assert.include(reviewLead('diff <(git show HEAD:a) b'), 'A process substitution')
     assert.include(coordinator('ls; (cd src; ls)'), 'Parentheses start a subshell')
     assert.include(coordinator('echo ${X:=rm}'), 'An expansion such as `${X:=…}`')
     assert.include(coordinator('bash -i -c "ls"'), '`bash -i` has the shell read or run more than its script')
