@@ -18,6 +18,8 @@ import { homeWith } from './agentHome'
  * environment says, as the agents do.
  */
 
+// The fake agent commands are scripts started by their shebang, which Windows doesn't read.
+
 const fakeBin = () => {
   const bin = mkdtempSync(join(tmpdir(), 'althar-fake-bin-'))
   const script = (body: string) => `#!${process.execPath}\nconst fs = require('node:fs'); const path = require('node:path');\n${body}\n`
@@ -74,73 +76,79 @@ describe('an agent’s command, as sync runs it', () => {
     expect(commandEnv('/h', { CODEX_HOME: '/h/codex-home' })['CODEX_HOME']).toBe('/h/codex-home')
   })
 
-  it('writes where sync read, through the agents’ commands, and nothing where the inherited places point', async () => {
-    const elsewhere = mkdtempSync(join(tmpdir(), 'althar-elsewhere-'))
-    mkdirSync(join(elsewhere, 'codex'))
-    process.env['CODEX_HOME'] = join(elsewhere, 'codex')
-    process.env['XDG_CONFIG_HOME'] = elsewhere
-    process.env['CLAUDE_CONFIG_DIR'] = join(elsewhere, 'claude')
-    const home = homeWith({
-      claude: { mcpServers: { fromclaude: { type: 'stdio', command: 'one', args: [] } } },
-      codex: { mcp_servers: { fromcodex: { command: 'two', args: [] } } },
-    })
-    const env = { PATH: fakeBin() }
-    const io: SyncIo = {
-      home: { homeDir: home, env },
-      folder: join(home, 'profile'),
-      run: runIn(home, env),
-      now: () => '2026-11-07T18:00:00.000Z',
-    }
-    const { errors } = await turnOn(io)
-    expect(errors).toEqual([])
-    expect(
-      agentServers('codex', { homeDir: home, env })
-        .servers.map((one) => one.name)
-        .sort(),
-    ).toEqual(['fromclaude', 'fromcodex'])
-    expect(
-      agentServers('claude', { homeDir: home, env })
-        .servers.map((one) => one.name)
-        .sort(),
-    ).toEqual(['fromclaude', 'fromcodex'])
-    expect(
-      readRecord(io)
-        .added.map((one) => `${one.spec.name}→${one.agent}`)
-        .sort(),
-    ).toEqual(['fromclaude→codex', 'fromclaude→opencode', 'fromcodex→claude', 'fromcodex→opencode'])
-    // Nothing went where Althar's inherited places pointed.
-    expect(readdirSync(elsewhere).sort()).toEqual(['codex'])
-    expect(readdirSync(join(elsewhere, 'codex'))).toEqual([])
-    expect(existsSync(join(elsewhere, 'claude'))).toBe(false)
-  })
-  it('reads, backs up and takes back Claude Code’s servers where a configured CLAUDE_CONFIG_DIR keeps them, as its command writes', async () => {
-    const home = homeWith({ codex: { mcp_servers: { fromcodex: { command: 'two', args: [] } } } })
-    const claudeDir = join(home, 'claude-config')
-    mkdirSync(claudeDir)
-    writeFileSync(
-      join(claudeDir, '.claude.json'),
-      JSON.stringify({ mcpServers: { fromclaude: { type: 'stdio', command: 'one', args: [] } } }),
-    )
-    const env = { PATH: fakeBin(), CLAUDE_CONFIG_DIR: claudeDir }
-    const io: SyncIo = {
-      home: { homeDir: home, env },
-      folder: join(home, 'profile'),
-      run: runIn(home, env),
-      now: () => '2026-11-07T18:00:00.000Z',
-    }
-    expect(agentServers('claude', { homeDir: home, env }).servers.map((one) => one.name)).toEqual(['fromclaude'])
-    const { errors } = await turnOn(io)
-    expect(errors).toEqual([])
-    expect(
-      agentServers('claude', { homeDir: home, env })
-        .servers.map((one) => one.name)
-        .sort(),
-    ).toEqual(['fromclaude', 'fromcodex'])
-    // Nothing in the home's own file, and the copy kept is of the configured one.
-    expect(existsSync(join(home, '.claude.json'))).toBe(false)
-    expect(readRecord(io).backups.claude).toMatch(/claude-/)
-    const off = await turnOff(io, true)
-    expect(off.errors).toEqual([])
-    expect(agentServers('claude', { homeDir: home, env }).servers.map((one) => one.name)).toEqual(['fromclaude'])
-  })
+  it.skipIf(process.platform === 'win32')(
+    'writes where sync read, through the agents’ commands, and nothing where the inherited places point',
+    async () => {
+      const elsewhere = mkdtempSync(join(tmpdir(), 'althar-elsewhere-'))
+      mkdirSync(join(elsewhere, 'codex'))
+      process.env['CODEX_HOME'] = join(elsewhere, 'codex')
+      process.env['XDG_CONFIG_HOME'] = elsewhere
+      process.env['CLAUDE_CONFIG_DIR'] = join(elsewhere, 'claude')
+      const home = homeWith({
+        claude: { mcpServers: { fromclaude: { type: 'stdio', command: 'one', args: [] } } },
+        codex: { mcp_servers: { fromcodex: { command: 'two', args: [] } } },
+      })
+      const env = { PATH: fakeBin() }
+      const io: SyncIo = {
+        home: { homeDir: home, env },
+        folder: join(home, 'profile'),
+        run: runIn(home, env),
+        now: () => '2026-11-07T18:00:00.000Z',
+      }
+      const { errors } = await turnOn(io)
+      expect(errors).toEqual([])
+      expect(
+        agentServers('codex', { homeDir: home, env })
+          .servers.map((one) => one.name)
+          .sort(),
+      ).toEqual(['fromclaude', 'fromcodex'])
+      expect(
+        agentServers('claude', { homeDir: home, env })
+          .servers.map((one) => one.name)
+          .sort(),
+      ).toEqual(['fromclaude', 'fromcodex'])
+      expect(
+        readRecord(io)
+          .added.map((one) => `${one.spec.name}→${one.agent}`)
+          .sort(),
+      ).toEqual(['fromclaude→codex', 'fromclaude→opencode', 'fromcodex→claude', 'fromcodex→opencode'])
+      // Nothing went where Althar's inherited places pointed.
+      expect(readdirSync(elsewhere).sort()).toEqual(['codex'])
+      expect(readdirSync(join(elsewhere, 'codex'))).toEqual([])
+      expect(existsSync(join(elsewhere, 'claude'))).toBe(false)
+    },
+  )
+  it.skipIf(process.platform === 'win32')(
+    'reads, backs up and takes back Claude Code’s servers where a configured CLAUDE_CONFIG_DIR keeps them, as its command writes',
+    async () => {
+      const home = homeWith({ codex: { mcp_servers: { fromcodex: { command: 'two', args: [] } } } })
+      const claudeDir = join(home, 'claude-config')
+      mkdirSync(claudeDir)
+      writeFileSync(
+        join(claudeDir, '.claude.json'),
+        JSON.stringify({ mcpServers: { fromclaude: { type: 'stdio', command: 'one', args: [] } } }),
+      )
+      const env = { PATH: fakeBin(), CLAUDE_CONFIG_DIR: claudeDir }
+      const io: SyncIo = {
+        home: { homeDir: home, env },
+        folder: join(home, 'profile'),
+        run: runIn(home, env),
+        now: () => '2026-11-07T18:00:00.000Z',
+      }
+      expect(agentServers('claude', { homeDir: home, env }).servers.map((one) => one.name)).toEqual(['fromclaude'])
+      const { errors } = await turnOn(io)
+      expect(errors).toEqual([])
+      expect(
+        agentServers('claude', { homeDir: home, env })
+          .servers.map((one) => one.name)
+          .sort(),
+      ).toEqual(['fromclaude', 'fromcodex'])
+      // Nothing in the home's own file, and the copy kept is of the configured one.
+      expect(existsSync(join(home, '.claude.json'))).toBe(false)
+      expect(readRecord(io).backups.claude).toMatch(/claude-/)
+      const off = await turnOff(io, true)
+      expect(off.errors).toEqual([])
+      expect(agentServers('claude', { homeDir: home, env }).servers.map((one) => one.name)).toEqual(['fromclaude'])
+    },
+  )
 })
