@@ -310,12 +310,14 @@ const PAIRS: ReadonlyArray<readonly [ink: string, on: ReadonlyArray<string>, at:
   ['--ok-ink', ['--n-2'], TEXT],
   ['--field-edge', ['--n-2'], MARK], // light only: dark keeps its hairline
   ['--field-edge', ['--n-1'], MARK],
+  ['--field-edge', ['--paper'], MARK], // a field on the raised paper
+  ['--field-edge-hover', ['--n-2', '--n-1', '--paper'], MARK],
   ['--t-3', ['--signal-paper'], TEXT],
   ['--signal-ink', ['--signal-dim'], TEXT], // a status chip on the page
 ]
 
 /** Light pairs outside DEV-152's table that still fall short: not asserted for light until they are fixed. */
-const LIGHT_ONLY = new Set(['--field-edge'])
+const LIGHT_ONLY = new Set(['--field-edge', '--field-edge-hover'])
 const LIGHT_OPEN = new Set(['--kbd-ink', '--danger-dim', '--knob-off'])
 
 describe.each(['dark', 'light'] as const)('the %s theme, read', (theme) => {
