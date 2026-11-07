@@ -9,7 +9,7 @@ import { Changes } from '../src/Changes'
 import { Connections } from '../src/Connections'
 import { Coordinator, CoordinatorOff } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
-import { away, clearAway, recordAct, undoAct } from '../src/outsideActs'
+import { away, clearAway, recordAct, releasedIn, undoAct } from '../src/outsideActs'
 import { Plans } from '../src/Plans'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
@@ -153,7 +153,12 @@ describe('while you were away', () => {
         undo: { way: 'revert', url: 'https://github.test/meridian/api/pull/634', name: '#634', branch: 'main' },
         actorId: instance.systemId,
       })
+      // A release from that repository holds it: the row says so, and its revert is still offered, for what comes next.
+      yield* releasedIn(projectId, 'meridian/web', 'v0.8.3')
+      assert.isNull((yield* away(projectId, instance.personId)).acts[0]?.cant)
+      yield* releasedIn(projectId, 'meridian/api', 'v0.8.4')
       const [merged] = (yield* away(projectId, instance.personId)).acts
+      assert.deepStrictEqual([merged?.cant, merged?.undo], ['Released in v0.8.4', 'revert'])
       const asked: Array<{ readonly title: string; readonly toward: string }> = []
       yield* undoAct(merged!.id, (task) => Effect.sync(() => (asked.push({ title: task.title, toward: task.toward }), { id: revert })))
       assert.deepStrictEqual(asked, [{ title: 'Revert #634', toward: 'main' }])

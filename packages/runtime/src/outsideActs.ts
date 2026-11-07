@@ -150,6 +150,31 @@ export const settleAct = (
     )
   })
 
+/**
+ * A release went out from a repository: each merge into it the board shows,
+ * whose revert is still offered, now says what holds it. A revert takes it
+ * out of what comes next, never out of what went out.
+ */
+export const releasedIn = (projectId: string, repository: string, tag: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const ledger = yield* Effect.serviceOption(Ledger)
+    const merges = yield* sql<{ id: string }>`
+      SELECT id FROM outside_acts
+      WHERE project_id = ${projectId} AND kind = 'merge' AND state = 'done' AND cant IS NULL
+        AND json_extract(undo_with, '$.url') LIKE ${`%/${repository}/%`}`
+    for (const merge of merges) {
+      const revision = yield* change('outside_acts', merge.id, { cant: `Released in ${tag}`, updatedAt: yield* timestamp })
+      if (ledger._tag === 'Some')
+        yield* ledger.value.notify({
+          projectId: projectId as ProjectId,
+          aggregateType: 'outside_act',
+          aggregateId: merge.id,
+          aggregateRevision: revision,
+        })
+    }
+  }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not say which merges a release holds', cause)))
+
 /** How many acts the board shows at most: the newest. */
 export const AWAY_SHOWN = 30
 

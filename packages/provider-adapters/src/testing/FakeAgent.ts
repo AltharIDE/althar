@@ -1221,6 +1221,22 @@ const playRole = async (
         await commitIn(session.cwd, 'more.txt', 'Tidy up while here')
         return 'Fixed the failing check, committed it, and tidied up while here.'
       }
+      // Starts another task from its own, as a lead may (ADR-097): what its line says before the marker is the title.
+      if (available.has('start_task') && text.includes('[lead:start-task]')) {
+        const line = text.split('\n').find((one) => one.includes('[lead:start-task]')) ?? ''
+        const title =
+          line
+            .slice(0, line.indexOf('[lead:start-task]'))
+            .replace(/^\[\w+\]\s*/, '')
+            .trim() || 'Try it'
+        await call('start_task', {
+          title,
+          description: 'Try it and say how it went.',
+          lead: { agent: 'claude-code', reason: 'Quick to start.' },
+        })
+        await call('finish_step', { summary: `Started “${title}”.` })
+        return `Started “${title}”.`
+      }
       // Works until it is stopped: for a lead that goes in the middle of its step.
       if (text.includes('[lead:wait]')) {
         await untilStopped(session, '[lead:wait]')

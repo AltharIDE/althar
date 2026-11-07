@@ -568,6 +568,57 @@ to it runs no coordinator session. How a task started without it gets its
 plan and models fast is phase 2's, beside the work on making small changes
 finish in minutes.
 
+### Turning it off
+
+"Use the coordinator" is a switch in a project's General settings, kept
+with its rules (`coordinator`, on without it), which agents may change with
+`change_settings` like any other. Off:
+
+- The project's Conversation says "The coordinator is off in <project>. What
+  you write here starts a task." with Turn it on, in the middle of a
+  conversation that hasn't begun, or under what the coordinator said before.
+- The composer reads "Describe a task" and starts one at once
+  (`StartTask` with `worksIn` and `toward` where given, the project's own
+  where not), its title the first line of what was written. Its picker is the
+  lead's, on Auto unless the person picks a model; images aren't taken yet.
+- Auto, until the coordinator's own routing is shared, gives the task the team
+  of the project's last planned task (its lead and reviewer, where their
+  agents can still work and their models aren't switched off), else the first
+  agent that can work, on its own model. The plan's reason says which.
+- Nothing wakes the coordinator: `Coordinator.say` drops news and Althar's
+  own words (the merge line's, an answer to a question it asked) and refuses
+  the person's (`CoordinatorOff`), so nothing starts its session; switching
+  it off stops one that runs. A task a lead starts still starts, through the
+  plan's countdown as before.
+- The board's empty Up next offers New task, which puts the person in the
+  composer, rather than "Talk to the coordinator".
+
+### While you were away
+
+What agents did outside their worktrees is on the board, over the lanes,
+with the coordinator or without it, rather than in its conversation: newest
+first, by task and time, × to clear. Each act is kept once
+(`outside_acts`, by what it acted on), with how it is taken back and what
+that needs, and why it can't be now:
+
+| Act | Kept when | Taken back | Why not, in its place |
+| --- | --- | --- | --- |
+| A merge | The merge line lands it (`merge_pull_request` on the person's word, merged later) | Revert it: a task of its own, Auto's, toward the branch it went into, which reverts the merge commit in a pull request; the row says Reverting and opens it | "Released in 0.8.4" once Althar publishes a release from that repository; Revert it stays, for what comes next |
+| A lead's comment or reply on its pull request | `reply_on_pull_request` posts it | Delete, through the same host (GitHub's and GitLab's), unless someone wrote after it | "dana replied"; "Already sent" where the host can't delete |
+| An issue changed at once | A change applied with no press of the person's: a lead's or the coordinator's at once, or Althar moving a task's issue along | Undo, through the same tracker, for a status move: back to the status it had | A comment on an issue: "Already sent" |
+| A review posted by the person's setting | It posts itself | None | "Reviews stay posted" |
+| Tasks a lead started | `start_task`, `propose_plan` and the rest from a lead | Stop, from the task: the row opens it | None; started in the same minute from one task, one row, "Started 2 tasks" |
+
+Where this goes another way than #640's README: the list starts from the last
+act the person had seen when they last pressed ×, not from when they last
+left the board, so nothing goes before they have seen it; the mark is per
+person (`away_looks`, the person's actor), kept by the runtime, so every
+window and device shows the same list. Not kept yet, and said so in its
+pull request: what a lead does with the person's MCP servers (the parent
+change reads those calls as acts, and they come to this list once it lands),
+a merge or release a lead makes with `gh`, the coordinator's own replies, and
+a release published outside Althar.
+
 ## What stays, and why
 
 | Kept | Why |

@@ -70,7 +70,7 @@ export const text = {
   },
   coordinator: {
     title: 'Use the coordinator',
-    line: 'Off, what you write in the project’s conversation starts a task at once, and its lead is picked for you.',
+    line: 'Off, what you write in the project’s conversation starts a task at once.',
   },
   repositoryFiles: 'Repository files',
 }
