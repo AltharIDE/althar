@@ -64,3 +64,12 @@ export const Clears: Story = {
     await expect(args.onClear).toHaveBeenCalled()
   },
 }
+
+/** More happened than the list shows: the way to the earlier ones, under the newest. */
+export const Earlier: Story = {
+  args: { earlier: 12, onEarlier: fn() },
+  play: async ({ canvasElement, args }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: '12 earlier' }))
+    await expect(args.onEarlier).toHaveBeenCalled()
+  },
+}

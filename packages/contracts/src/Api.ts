@@ -3184,6 +3184,10 @@ export const AwaySnapshot = Schema.Struct({
   /** When the person last cleared it; null before they ever did. */
   looked: Schema.NullOr(Schema.String),
   acts: Schema.Array(AwayAct),
+  /** The newest act shown, as a mark: Clear sends it back, so what came after this read still shows. 0 with none. */
+  upTo: Schema.Number,
+  /** How many acts not seen yet are older than those shown, read with `all`. */
+  earlier: Schema.Number,
 })
 export type AwaySnapshot = typeof AwaySnapshot.Type
 
@@ -3777,9 +3781,9 @@ export const Api = RpcGroup.make(
   /** The home, across every project; what the loop did, from `since` where the window says, else from when the person last left the home. */
   call('GetHome', { since: Schema.optional(Schema.String) }, HomeSnapshot),
   /** What agents did outside their worktrees in a project since the person last looked (ADR-097). */
-  call('GetAway', { projectId: Schema.String }, AwaySnapshot),
-  /** The person has seen it: the list starts again from now. */
-  command('ClearAway', { projectId: Schema.String }, Schema.Void),
+  call('GetAway', { projectId: Schema.String, all: Schema.optional(Schema.Boolean) }, AwaySnapshot),
+  /** The person has seen it, up to the newest act their read showed (`upTo`): the list starts again after it. */
+  command('ClearAway', { projectId: Schema.String, upTo: Schema.Number }, Schema.Void),
   /** Takes back something an agent did outside its worktree, the way its row says: a revert starts a task, an undo goes through the same host or tracker. */
   command('UndoAway', { actId: Schema.String }, Schema.Void),
 

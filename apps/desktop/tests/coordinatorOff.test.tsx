@@ -120,13 +120,15 @@ const AWAY: AwaySnapshot = {
       undoTask: null,
     },
   ],
+  upTo: 7,
+  earlier: 0,
 }
 
 describe('while you were away', () => {
-  it('sits over the lanes: each row taken back its way, or why not; × clears it', async () => {
+  it('sits over the lanes: each row taken back its way, or why not; × clears what it showed', async () => {
     let cleared = false
     const { client } = fakeClient({
-      getAway: vi.fn(async () => (cleared ? { looked: '2026-09-29T12:00:00.000Z', acts: [] } : AWAY)),
+      getAway: vi.fn(async () => (cleared ? { looked: '2026-09-29T12:00:00.000Z', acts: [], upTo: 7, earlier: 0 } : AWAY)),
       clearAway: vi.fn(async () => void (cleared = true)),
     })
     withServices(<Project room={Room.Board} />, client)
@@ -138,7 +140,23 @@ describe('while you were away', () => {
     await userEvent.click(within(away).getByRole('button', { name: 'Revert it' }))
     expect(client.undoAway).toHaveBeenCalledWith('oac_merge')
     await userEvent.click(within(away).getByRole('button', { name: 'Clear' }))
-    expect(client.clearAway).toHaveBeenCalledWith('p1')
+    expect(client.clearAway).toHaveBeenCalledWith('p1', 7)
     await waitFor(() => expect(screen.queryByRole('region', { name: 'While you were away' })).toBeNull())
+  })
+
+  it('says how many earlier acts there are, and shows them when asked', async () => {
+    const { client } = fakeClient({
+      getAway: vi.fn(async (_projectId: string, all?: boolean) =>
+        all === true
+          ? { ...AWAY, acts: [...AWAY.acts, { ...AWAY.acts[1]!, id: 'oac_old', what: 'Commented on #600' }] }
+          : { ...AWAY, earlier: 1 },
+      ),
+    })
+    withServices(<Project room={Room.Board} />, client)
+    const away = await screen.findByRole('region', { name: 'While you were away' })
+    await userEvent.click(within(away).getByRole('button', { name: '1 earlier' }))
+    expect(await within(away).findByText('Commented on #600')).toBeTruthy()
+    expect(client.getAway).toHaveBeenCalledWith('p1', true)
+    expect(within(away).queryByRole('button', { name: '1 earlier' })).toBeNull()
   })
 })

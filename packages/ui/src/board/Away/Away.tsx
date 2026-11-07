@@ -12,8 +12,9 @@ import s from './Away.module.css'
  * first, a row each: what it did, its task, when. Where it can be taken back,
  * the way, at the row's end (Revert it, Undo); where it can't now, why, in
  * the same place ("dana replied"). A revert of something already released is
- * still offered, with why it undoes less than it seems beside it. × clears
- * the list: the next one starts from then.
+ * still offered, with why it undoes less than it seems beside it. Under the
+ * newest, how many earlier ones there are, to show them. × clears the list:
+ * the next one starts from then.
  */
 
 /** What kind of act it was, as its glyph says it. */
@@ -54,6 +55,7 @@ export interface AwayText {
   clear: string
   /** Read before a row's task, which is shown alone. */
   task: string
+  earlier: (n: number) => string
 }
 
 export const awayText: AwayText = {
@@ -61,6 +63,7 @@ export const awayText: AwayText = {
   since: (at) => `since ${at}`,
   clear: 'Clear',
   task: 'Task',
+  earlier: (n) => `${n} earlier`,
 }
 
 export type AwayProps = RootProps<
@@ -76,11 +79,14 @@ export type AwayProps = RootProps<
     onOpen?: (id: string) => void
     /** Clears the list, until something else is done. */
     onClear: () => void
+    /** How many acts are older than those shown, and the way to show them; nothing under the list without both. */
+    earlier?: number
+    onEarlier?: () => void
     text?: Partial<AwayText>
   }
 >
 
-export function Away({ since, acts, onUndo, onOpen, onClear, className, text, ...rest }: AwayProps) {
+export function Away({ since, acts, onUndo, onOpen, onClear, earlier = 0, onEarlier, className, text, ...rest }: AwayProps) {
   const t = { ...awayText, ...text }
   return (
     <section aria-label={t.title} className={cx(s.away, className)} {...rest}>
@@ -127,6 +133,11 @@ export function Away({ since, acts, onUndo, onOpen, onClear, className, text, ..
           </li>
         ))}
       </ul>
+      {earlier > 0 && onEarlier !== undefined && (
+        <p className={s.earlier}>
+          <LinkButton onClick={onEarlier}>{t.earlier(earlier)}</LinkButton>
+        </p>
+      )}
     </section>
   )
 }

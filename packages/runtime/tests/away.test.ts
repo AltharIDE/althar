@@ -9,7 +9,7 @@ import { Changes } from '../src/Changes'
 import { Connections } from '../src/Connections'
 import { Coordinator, CoordinatorOff } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
-import { away, clearAway, recordAct, releasedIn, undoAct } from '../src/outsideActs'
+import { AWAY_SHOWN, away, CLAIM_HOLDS_MS, clearAway, recordAct, releasedIn, type RevertTask, undoAct } from '../src/outsideActs'
 import { Plans } from '../src/Plans'
 import { hasCoordinator, Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
@@ -96,16 +96,47 @@ describe('while you were away', () => {
         ],
       )
 
-      // Cleared, it starts again from then: only what comes after shows.
-      yield* clearAway(projectId, instance.personId)
+      // Cleared up to what that read showed: one done after the read, before the press, still shows.
+      yield* act('merge:635', { what: 'Merged #635 into main' })
+      yield* clearAway(projectId, instance.personId, seen.upTo)
       const cleared = yield* away(projectId, instance.personId)
       assert.isNotNull(cleared.looked)
-      assert.lengthOf(cleared.acts, 0)
-      yield* act('merge:635', { what: 'Merged #635 into main' })
       assert.deepStrictEqual(
-        (yield* away(projectId, instance.personId)).acts.map((one) => one.what),
+        cleared.acts.map((one) => one.what),
         ['Merged #635 into main'],
       )
+      // A window's older read doesn't bring back what a newer one cleared.
+      yield* clearAway(projectId, instance.personId, cleared.upTo)
+      yield* clearAway(projectId, instance.personId, seen.upTo)
+      assert.lengthOf((yield* away(projectId, instance.personId)).acts, 0)
+    }).pipe(Effect.provide(withServices())),
+  )
+
+  it.live('shows the newest, says how many earlier there are, and shows those when asked', () =>
+    Effect.gen(function* () {
+      const { projectId, threadId } = yield* project()
+      const instance = yield* Instance
+      const tabs = yield* aTask(projectId, 'Tabs keep their order')
+      const merged = (n: number) =>
+        recordAct({
+          projectId,
+          taskId: tabs,
+          threadId,
+          kind: 'merge',
+          what: `Merged #${n} into main`,
+          source: `merge:${n}`,
+          actorId: instance.systemId,
+        })
+      for (let n = 1; n <= AWAY_SHOWN + 2; n += 1) yield* merged(n)
+      const newest = yield* away(projectId, instance.personId)
+      assert.deepStrictEqual(
+        [newest.acts.length, newest.earlier, newest.acts[0]?.what],
+        [AWAY_SHOWN, 2, `Merged #${AWAY_SHOWN + 2} into main`],
+      )
+      const every = yield* away(projectId, instance.personId, true)
+      assert.deepStrictEqual([every.acts.length, every.earlier, every.acts.at(-1)?.what], [AWAY_SHOWN + 2, 0, 'Merged #1 into main'])
+      yield* clearAway(projectId, instance.personId, every.upTo)
+      assert.deepStrictEqual((yield* away(projectId, instance.personId)).acts.length, 0)
     }).pipe(Effect.provide(withServices())),
   )
 
@@ -161,10 +192,50 @@ describe('while you were away', () => {
       const [merged] = (yield* away(projectId, instance.personId)).acts
       assert.deepStrictEqual([merged?.cant, merged?.undo], ['Released in v0.8.4', 'revert'])
       const asked: Array<{ readonly title: string; readonly toward: string }> = []
-      yield* undoAct(merged!.id, (task) => Effect.sync(() => (asked.push({ title: task.title, toward: task.toward }), { id: revert })))
+      // Pressed in two windows at once: one revert's task, not two.
+      const start = (task: RevertTask) =>
+        Effect.sync(() => asked.push({ title: task.title, toward: task.toward })).pipe(
+          Effect.andThen(Effect.sleep('50 millis')),
+          Effect.as({ id: revert }),
+        )
+      yield* Effect.all([undoAct(merged!.id, start), undoAct(merged!.id, start)], { concurrency: 'unbounded' })
       assert.deepStrictEqual(asked, [{ title: 'Revert #634', toward: 'main' }])
       const [now] = (yield* away(projectId, instance.personId)).acts
       assert.deepStrictEqual([now?.state, now?.undoTask?.title], ['undoing', 'Revert #634'])
+    }).pipe(Effect.provide(withServices())),
+  )
+
+  it.live('a take-back cut short by Althar stopping says so, and can be pressed again', () =>
+    Effect.gen(function* () {
+      const { projectId, threadId } = yield* project()
+      const instance = yield* Instance
+      const sql = yield* SqlClient.SqlClient
+      const tabs = yield* aTask(projectId, 'Tabs keep their order')
+      const revert = yield* aTask(projectId, 'Revert #634')
+      yield* recordAct({
+        projectId,
+        taskId: tabs,
+        threadId,
+        kind: 'merge',
+        what: 'Merged #634 into main',
+        source: 'merge:634',
+        undo: { way: 'revert', url: 'https://github.test/meridian/api/pull/634', name: '#634', branch: 'main' },
+        actorId: instance.systemId,
+      })
+      const [merged] = (yield* away(projectId, instance.personId)).acts
+      // Claimed, and Althar stopped before the revert's task started.
+      const long = new Date(Date.now() - CLAIM_HOLDS_MS - 60_000).toISOString()
+      yield* sql`UPDATE outside_acts SET state = 'undoing', updated_at = ${long} WHERE id = ${merged!.id}`
+      const [stuck] = (yield* away(projectId, instance.personId)).acts
+      assert.deepStrictEqual([stuck?.state, stuck?.error], ['failed', 'Althar stopped before it was taken back.'])
+      yield* undoAct(merged!.id, () => Effect.succeed({ id: revert }))
+      const [now] = (yield* away(projectId, instance.personId)).acts
+      assert.deepStrictEqual([now?.state, now?.undoTask?.title], ['undoing', 'Revert #634'])
+      // A claim still holding isn't taken again.
+      yield* sql`UPDATE outside_acts SET undo_task_id = NULL WHERE id = ${merged!.id}`
+      const again: Array<string> = []
+      yield* undoAct(merged!.id, (task) => Effect.sync(() => (again.push(task.title), { id: revert })))
+      assert.lengthOf(again, 0)
     }).pipe(Effect.provide(withServices())),
   )
 })

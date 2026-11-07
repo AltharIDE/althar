@@ -103,6 +103,7 @@ export interface ActRow {
   readonly error: string | null
   readonly undoTaskId: string | null
   readonly doneAt: string
+  readonly updatedAt: string
 }
 
 export const decodeUndo = (row: Pick<ActRow, 'undoWith'>): UndoWith | undefined => {
@@ -118,7 +119,7 @@ export const actRow = (actId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const [row] = yield* sql<ActRow>`
-      SELECT id, project_id, task_id, thread_id, kind, what, undo, undo_with, cant, state, error, undo_task_id, done_at
+      SELECT id, project_id, task_id, thread_id, kind, what, undo, undo_with, cant, state, error, undo_task_id, done_at, updated_at
       FROM outside_acts WHERE id = ${actId}`
     return row
   })
@@ -175,8 +176,48 @@ export const releasedIn = (projectId: string, repository: string, tag: string) =
     }
   }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not say which merges a release holds', cause)))
 
-/** How many acts the board shows at most: the newest. */
+/**
+ * How long a claim to take an act back holds without its revert's task or an
+ * answer: one older is taken as cut short, by Althar stopping in the middle,
+ * and can be pressed again.
+ */
+export const CLAIM_HOLDS_MS = 5 * 60_000
+
+const STOPPED = 'Althar stopped before it was taken back.'
+
+/** Whether a row under way was cut short: claimed, with no revert's task, longer ago than a claim holds. */
+const cutShort = (row: Pick<ActRow, 'state' | 'undoTaskId' | 'updatedAt'>, now: Date) =>
+  row.state === 'undoing' && row.undoTaskId === null && now.getTime() - Date.parse(row.updatedAt) > CLAIM_HOLDS_MS
+
+/**
+ * Claims an act for taking back, in one write: from done or failed, or from a
+ * claim cut short, to under way. One claim wins, so two windows pressing at
+ * once take it back once. Whether this one won.
+ */
+const claimAct = (row: Pick<ActRow, 'id' | 'projectId'>) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const ledger = yield* Ledger
+    const at = yield* timestamp
+    const before = new Date(Date.parse(at) - CLAIM_HOLDS_MS).toISOString()
+    const [won] = yield* sql<{ revision: number }>`
+      UPDATE outside_acts SET state = 'undoing', error = NULL, updated_at = ${at}, revision = revision + 1
+      WHERE id = ${row.id}
+        AND (state IN ('done', 'failed') OR (state = 'undoing' AND undo_task_id IS NULL AND updated_at < ${before}))
+      RETURNING revision`
+    if (won === undefined) return false
+    yield* ledger.notify({
+      projectId: row.projectId as ProjectId,
+      aggregateType: 'outside_act',
+      aggregateId: row.id,
+      aggregateRevision: won.revision,
+    })
+    return true
+  })
+
+/** How many acts the board shows at most, the newest; and with the earlier ones asked for. */
 export const AWAY_SHOWN = 30
+export const AWAY_ALL = 500
 
 /** A run of tasks a lead started together: one row, "Started 2 tasks", where they came in the same minute from the same task. */
 const together = (a: ActRow, b: ActRow) =>
@@ -184,17 +225,24 @@ const together = (a: ActRow, b: ActRow) =>
 
 const Titled = Schema.Struct({ id: Schema.String, threadId: Schema.String, title: Schema.String })
 
-/** What agents did outside their worktrees in a project since the person last looked there, newest first. */
-export const away = (projectId: string, personId: ActorId) =>
+/**
+ * What agents did outside their worktrees in a project since the person last
+ * looked there, newest first: the newest few, or with `all` the earlier ones
+ * too; how many older aren't shown; and the newest's mark, for Clear.
+ */
+export const away = (projectId: string, personId: ActorId, all = false) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const [look] = yield* sql<{ lookedAt: string; seen: number }>`
       SELECT looked_at, seen FROM away_looks WHERE project_id = ${projectId} AND actor_id = ${personId}`
     const looked = look?.lookedAt ?? null
-    const rows = yield* sql<ActRow>`
-      SELECT id, project_id, task_id, thread_id, kind, what, undo, undo_with, cant, state, error, undo_task_id, done_at
-      FROM outside_acts WHERE project_id = ${projectId} AND rowid > ${look?.seen ?? 0}
-      ORDER BY rowid DESC LIMIT ${AWAY_SHOWN}`
+    const seen = look?.seen ?? 0
+    const rows = yield* sql<ActRow & { readonly mark: number }>`
+      SELECT rowid AS mark, id, project_id, task_id, thread_id, kind, what, undo, undo_with, cant, state, error, undo_task_id, done_at, updated_at
+      FROM outside_acts WHERE project_id = ${projectId} AND rowid > ${seen}
+      ORDER BY rowid DESC LIMIT ${all ? AWAY_ALL : AWAY_SHOWN}`
+    const [unseen] = yield* sql<{ n: number }>`
+      SELECT count(*) AS n FROM outside_acts WHERE project_id = ${projectId} AND rowid > ${seen}`
     const ids = [...new Set(rows.flatMap((row) => [row.taskId, row.undoTaskId].filter((one): one is string => one !== null)))]
     const tasks =
       ids.length === 0
@@ -206,6 +254,7 @@ export const away = (projectId: string, personId: ActorId) =>
       const found = id === null ? undefined : tasks.find((task) => task.id === id)
       return found === undefined ? null : { taskId: found.id, threadId: found.threadId, title: found.title }
     }
+    const now = new Date(yield* timestamp)
     const acts: Array<AwayAct> = []
     for (const [index, row] of rows.entries()) {
       const before = rows[index - 1]
@@ -220,25 +269,27 @@ export const away = (projectId: string, personId: ActorId) =>
         task: taskOf(row.taskId),
         undo: row.undo,
         cant: row.cant,
-        state: row.state,
-        error: row.error,
+        ...(cutShort(row, now) ? { state: 'failed' as const, error: STOPPED } : { state: row.state, error: row.error }),
         undoTask: taskOf(row.undoTaskId),
       })
     }
-    return { looked, acts } satisfies AwaySnapshot
+    return { looked, acts, upTo: rows[0]?.mark ?? seen, earlier: (unseen?.n ?? 0) - rows.length } satisfies AwaySnapshot
   })
 
-/** The person has looked: the list starts again from now. */
-export const clearAway = (projectId: string, personId: ActorId) =>
+/**
+ * The person has looked, up to the newest act their read showed (`upTo`, its
+ * mark): the list starts again after it. What came after that read, and
+ * nothing before it, stays. A mark never moves back.
+ */
+export const clearAway = (projectId: string, personId: ActorId, upTo: number) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const ledger = yield* Ledger
     const at = yield* timestamp
-    // Up to the last act there is: one kept as they clear it, after it, still shows.
     yield* sql`
       INSERT INTO away_looks (project_id, actor_id, looked_at, seen)
-      VALUES (${projectId}, ${personId}, ${at}, (SELECT coalesce(max(rowid), 0) FROM outside_acts WHERE project_id = ${projectId}))
-      ON CONFLICT (project_id, actor_id) DO UPDATE SET looked_at = excluded.looked_at, seen = excluded.seen`
+      VALUES (${projectId}, ${personId}, ${at}, min(${upTo}, (SELECT coalesce(max(rowid), 0) FROM outside_acts)))
+      ON CONFLICT (project_id, actor_id) DO UPDATE SET looked_at = excluded.looked_at, seen = max(seen, excluded.seen)`
     yield* ledger.notify({ projectId: projectId as ProjectId, aggregateType: 'outside_act', aggregateId: projectId, aggregateRevision: 1 })
   })
 
@@ -266,9 +317,10 @@ export const undoAct = <R>(
     const instance = yield* Instance
     const row = yield* actRow(actId)
     if (row === undefined) return yield* new NotFound({ kind: 'act', id: actId })
-    if (row.state === 'undoing' || row.state === 'undone') return
     const how = decodeUndo(row)
     if (how === undefined || row.undo === null) return yield* new NotFound({ kind: 'way to take it back', id: actId })
+    // Taken back once: one press claims it, and another, from this window or one beside it, finds it under way.
+    if (!(yield* claimAct(row))) return
     const failed = (error: unknown) => settleAct(row, { state: 'failed', error: words(error, agentName).message })
     switch (how.way) {
       case 'revert': {
@@ -310,7 +362,8 @@ export const undoAct = <R>(
           (yield* Changes).unpost(how.taskId, { url: how.linkUrl, commentId: how.commentId, at: how.at, inThread: how.inThread === true }),
         )
         if (gone._tag === 'Failure') return yield* failed(gone.failure)
-        if ('replied' in gone.success) return yield* settleAct(row, { cant: `${gone.success.replied} replied`, undo: null })
+        if ('replied' in gone.success)
+          return yield* settleAct(row, { state: 'done', error: null, cant: `${gone.success.replied} replied`, undo: null })
         return yield* settleAct(row, { state: 'undone', error: null })
       }
     }

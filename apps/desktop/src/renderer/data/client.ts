@@ -177,9 +177,9 @@ export interface Client {
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
   readonly getBoard: (projectId: string) => Promise<BoardSnapshot>
   /** What agents did outside their worktrees in the project since the person last looked (ADR-097). */
-  readonly getAway: (projectId: string) => Promise<AwaySnapshot>
+  readonly getAway: (projectId: string, all?: boolean) => Promise<AwaySnapshot>
   /** The person has seen it: the list starts again from now. */
-  readonly clearAway: (projectId: string) => Promise<void>
+  readonly clearAway: (projectId: string, upTo: number) => Promise<void>
   /** Takes back one of those acts, the way its row says. */
   readonly undoAway: (actId: string) => Promise<void>
   /** The next page of a project's settled tasks, older than the one settled at `before` (`taskId` breaking a tie). */
@@ -715,8 +715,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
         }),
       ),
     getBoard: (projectId) => settle(api.GetBoard({ projectId })),
-    getAway: (projectId) => settle(api.GetAway({ projectId })),
-    clearAway: (projectId) => command((commandId) => api.ClearAway({ commandId, projectId })),
+    getAway: (projectId, all) => settle(api.GetAway({ projectId, ...(all === true ? { all } : {}) })),
+    clearAway: (projectId, upTo) => command((commandId) => api.ClearAway({ commandId, projectId, upTo })),
     undoAway: (actId) => command((commandId) => api.UndoAway({ commandId, actId })),
     getOlderSettled: (projectId, before, taskId) => settle(api.GetOlderSettled({ projectId, before, taskId })).then((older) => older.tasks),
     getHome: (since) => settle(api.GetHome(since === undefined ? {} : { since })),

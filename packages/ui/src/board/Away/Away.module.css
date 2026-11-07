@@ -138,3 +138,10 @@
     grid-area: undo;
   }
 }
+/* Under the newest: the way to the older ones, ruled off like a row. */
+.earlier {
+  margin: 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}

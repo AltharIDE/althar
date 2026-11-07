@@ -1332,9 +1332,9 @@ export const handlers = Api.toLayer(
       GetCoordinator: ({ projectId, before, limit }) =>
         api(queries.coordinator(projectId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })),
       StartTask: ({ commandId, ...asked }) => once(commandId, api(Effect.provideContext(startNow(commandId, asked), folderStore))),
-      GetAway: ({ projectId }) => api(Effect.provideContext(away(projectId, instance.personId), folderStore)),
-      ClearAway: ({ commandId, projectId }) =>
-        once(commandId, api(Effect.provideContext(clearAway(projectId, instance.personId), folderStore))),
+      GetAway: ({ projectId, all }) => api(Effect.provideContext(away(projectId, instance.personId, all === true), folderStore)),
+      ClearAway: ({ commandId, projectId, upTo }) =>
+        once(commandId, api(Effect.provideContext(clearAway(projectId, instance.personId, upTo), folderStore))),
       UndoAway: ({ commandId, actId }) => once(commandId, api(Effect.provideContext(undoAway(commandId, actId), folderStore))),
       StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, instance.personId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),

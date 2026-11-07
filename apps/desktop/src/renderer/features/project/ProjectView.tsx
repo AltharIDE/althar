@@ -834,6 +834,8 @@ export function ProjectView({
                           if (thread !== null) onTask(thread)
                         }}
                         onClear={away.clear}
+                        earlier={away.earlier}
+                        onEarlier={away.showEarlier}
                       />
                     )}
                     <BoardView

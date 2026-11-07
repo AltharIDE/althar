@@ -113,7 +113,8 @@ describe('what the client sends', () => {
       (await sent(heard, client.startTask({ projectId: 'proj_1', title: 'Fix it', worksIn: 'checkout', toward: 'release/0.8' }))).payload,
     ).toEqual({ projectId: 'proj_1', title: 'Fix it', worksIn: 'checkout', toward: 'release/0.8' })
     expect(await sent(heard, client.getAway('proj_1'))).toEqual({ tag: 'GetAway', payload: { projectId: 'proj_1' } })
-    expect(await sent(heard, client.clearAway('proj_1'))).toEqual({ tag: 'ClearAway', payload: { projectId: 'proj_1' } })
+    expect(await sent(heard, client.getAway('proj_1', true))).toEqual({ tag: 'GetAway', payload: { projectId: 'proj_1', all: true } })
+    expect(await sent(heard, client.clearAway('proj_1', 7))).toEqual({ tag: 'ClearAway', payload: { projectId: 'proj_1', upTo: 7 } })
     expect(await sent(heard, client.undoAway('oac_1'))).toEqual({ tag: 'UndoAway', payload: { actId: 'oac_1' } })
   })
 
