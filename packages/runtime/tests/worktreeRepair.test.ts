@@ -11,7 +11,7 @@ import { git as runtimeGit, repairWorktree } from '../src/git'
 import { Projects } from '../src/Projects'
 import { reviewCopyOf } from '../src/reviewCopy'
 import * as Runtime from '../src/Runtime'
-import { BROKEN_LINK, linkOf } from '../src/worktreeLinks'
+import { BROKEN_LINK, linkOf, takenFrom } from '../src/worktreeLinks'
 import { repairedWords, WorktreeRepair } from '../src/WorktreeRepair'
 import { Queries } from '../src/Queries'
 import { repository, runtime } from './support'
@@ -120,6 +120,53 @@ describe('a worktree whose link broke', () => {
     const failed = await Effect.runPromise(Effect.flip(repairWorktree(main, folder)))
     assert.match(failed.message, /^git worktree: unable to locate repository/)
     assert.strictEqual(readFileSync(join(folder, '.git'), 'utf8'), before)
+  })
+
+  it('whose .git names another live worktree’s record: git’s own repair would take that record from it', async () => {
+    const { at, main } = fixture(['a', 'd'])
+    const [a, d] = [join(at, 'a'), join(at, 'd')]
+    // As a prune leaves it: a's record gone, and its .git naming the record another worktree has now.
+    rmSync(join(main, '.git', 'worktrees', 'a'), { recursive: true })
+    writeFileSync(join(a, '.git'), `gitdir: ${join(main, '.git', 'worktrees', 'd')}\n`)
+    assert.deepInclude(linkOf(a), { state: 'broken', why: 'back_link' })
+    assert.deepStrictEqual(linkOf(d), { state: 'fine' })
+    await repaired(main, a)
+    assert.deepStrictEqual(linkOf(a), { state: 'fine' })
+    assert.notDeepEqual(linkOf(d), { state: 'fine' })
+  })
+
+  it('is another’s to repair where the record it would be joined to names a worktree that is there', () => {
+    const { at, main } = fixture(['a', 'd'])
+    const [a, d] = [join(at, 'a'), join(at, 'd')]
+    rmSync(join(main, '.git', 'worktrees', 'a'), { recursive: true })
+    const records = join(main, '.git', 'worktrees')
+    const before = readFileSync(join(records, 'd', 'gitdir'), 'utf8')
+    // Its .git naming the other's record where it is, or, from before the repository moved, by its name.
+    for (const named of [join(records, 'd'), '/nowhere/old-profile/.git/worktrees/d']) {
+      writeFileSync(join(a, '.git'), `gitdir: ${named}\n`)
+      assert.deepStrictEqual(takenFrom(a, linkOf(a), main, 'a'), { folder: d })
+    }
+    assert.strictEqual(readFileSync(join(records, 'd', 'gitdir'), 'utf8'), before)
+    assert.deepStrictEqual(linkOf(d), { state: 'fine' })
+  })
+
+  it('is another’s to repair where that record is on another branch, though its folder is gone', () => {
+    const { at, main } = fixture(['a', 'e'])
+    const a = join(at, 'a')
+    rmSync(join(main, '.git', 'worktrees', 'a'), { recursive: true })
+    rmSync(join(at, 'e'), { recursive: true })
+    writeFileSync(join(a, '.git'), 'gitdir: /nowhere/old-profile/.git/worktrees/e\n')
+    assert.deepStrictEqual(takenFrom(a, linkOf(a), main, 'a'), { branch: 'e' })
+    // A review's copy is never on a branch.
+    assert.deepStrictEqual(takenFrom(a, linkOf(a), main, false), { branch: 'e' })
+    assert.isNull(takenFrom(a, linkOf(a), main, 'e'))
+  })
+
+  it('is its own to repair where the repository’s record of it names it, whatever its .git names', () => {
+    const { at, main } = fixture(['a', 'd'])
+    const a = join(at, 'a')
+    writeFileSync(join(a, '.git'), 'gitdir: /nowhere/old-profile/.git/worktrees/d\n')
+    assert.isNull(takenFrom(a, linkOf(a), main, 'a'))
   })
 
   it('isn’t one where its folder isn’t there, or where it is a repository’s own checkout', () => {
@@ -258,6 +305,51 @@ describe('a task’s worktree whose link broke, in the runtime', () => {
       // Not tried again on the next command that fails there.
       yield* Effect.flip(runtimeGit(task.worktree, 'status'))
       assert.lengthOf(yield* folderLines(task.threadId), 1)
+    }).pipe(Effect.provide(withRepair())),
+  )
+
+  it.live('isn’t joined to another task’s record that a prune freed its name for, and that task’s folder is left as it was', () =>
+    Effect.gen(function* () {
+      const [moved, live] = yield* tasks(['Fix the login', 'Fix the logout'])
+      const nameOf = (task: { worktree: string }) => readFileSync(join(task.worktree, '.git'), 'utf8').trim().split('/').at(-1) ?? ''
+      const records = join(moved!.root, '.git', 'worktrees')
+      rmSync(join(records, nameOf(moved!)), { recursive: true })
+      const other = join(records, nameOf(live!))
+      writeFileSync(join(moved!.worktree, '.git'), `gitdir: /nowhere/old-profile/.git/worktrees/${nameOf(live!)}\n`)
+      const before = [readFileSync(join(other, 'gitdir'), 'utf8'), readFileSync(join(moved!.worktree, '.git'), 'utf8')]
+      yield* Effect.flip(runtimeGit(moved!.worktree, 'status'))
+      assert.deepStrictEqual([readFileSync(join(other, 'gitdir'), 'utf8'), readFileSync(join(moved!.worktree, '.git'), 'utf8')], before)
+      assert.deepStrictEqual(linkOf(live!.worktree), { state: 'fine' })
+      assert.isTrue(tried(live!.worktree, 'status').ok)
+      const [line] = yield* folderLines(moved!.threadId)
+      assert.match(
+        line?.title ?? '',
+        /^Althar couldn’t repair this task’s folder link to the repository: the repository’s record it names is another folder’s, .+, so nothing was changed\.$/,
+      )
+      assert.strictEqual(line?.severity, 'warning')
+      assert.strictEqual((yield* factsOf(moved!.workspaceId))[0]?.type, 'workspace.repair_failed')
+      assert.lengthOf(yield* folderLines(live!.threadId), 0)
+    }).pipe(Effect.provide(withRepair())),
+  )
+
+  it.live('leaves one whose .git names another live task’s record as it is, at startup too', () =>
+    Effect.gen(function* () {
+      const [moved, live] = yield* tasks(['Fix the login', 'Fix the logout'])
+      const nameOf = (task: { worktree: string }) => readFileSync(join(task.worktree, '.git'), 'utf8').trim().split('/').at(-1) ?? ''
+      const records = join(moved!.root, '.git', 'worktrees')
+      rmSync(join(records, nameOf(moved!)), { recursive: true })
+      const other = join(records, nameOf(live!))
+      writeFileSync(join(moved!.worktree, '.git'), `gitdir: ${other}\n`)
+      const before = readFileSync(join(other, 'gitdir'), 'utf8')
+      const done = yield* (yield* WorktreeRepair).sweep
+      assert.deepStrictEqual(
+        done.map((one) => [one.folder, one.why, one.repaired]),
+        [[moved!.worktree, 'back_link', false]],
+      )
+      assert.strictEqual(readFileSync(join(other, 'gitdir'), 'utf8'), before)
+      assert.deepStrictEqual(linkOf(live!.worktree), { state: 'fine' })
+      // Not looked at again.
+      assert.deepStrictEqual(yield* (yield* WorktreeRepair).sweep, [])
     }).pipe(Effect.provide(withRepair())),
   )
 })

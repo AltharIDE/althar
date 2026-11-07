@@ -30,6 +30,20 @@
     through the main checkout's record of it, yet still exits 1 where the
     `.git` file named a worktree by another name. What counts is whether the
     link reads right afterwards.
+  - **Never another worktree's record.** Git names a repository's records of
+    its worktrees by their folders' names, and every task's worktree of a
+    repository has the same name, so they are `<name>`, `<name>1`, and so on.
+    A prune, which Althar runs itself, drops the record of a worktree whose
+    folder moved and frees its name, and the next worktree made takes it. The
+    moved folder's `.git` then names another task's record, and git's repair
+    would point that record at it, with the other task's HEAD, branch and
+    index. So before it runs git, Althar finds the record the repair would
+    join the folder to: one that names this folder, else the git directory
+    its `.git` names, else the record by that directory's name. It repairs
+    only where that record names this folder or a place that isn't there,
+    and isn't on a branch other than the task's (for a review's copy, on no
+    branch). Otherwise it records `workspace.repair_failed`, says the record
+    is another folder's, or on another branch, and changes nothing.
   - **What it records:** a `workspace.repaired` (or
     `workspace.repair_failed`) fact on the workspace, a line in the task's
     thread ("Althar repaired this task's folder link to the repository"), and

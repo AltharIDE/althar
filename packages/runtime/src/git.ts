@@ -493,9 +493,14 @@ export const fetchedInto = (cwd: string, target: { readonly url: string; readonl
     signedIn(target),
   ).pipe(Effect.andThen(commitOf(cwd, ref)))
 
-/** A fetch that failed, kept in the log with all git said (its fields, redacted, by the logger) where its caller goes on without it. */
+/**
+ * A fetch that failed, kept in the debug log with all git said (its fields,
+ * redacted, by the logger) where its caller goes on without it: some ask for
+ * what may not be there, as a branch before a tag, and a miss is no failure.
+ * A caller to which it is one uses `fetchedInto`, and has git's reason.
+ */
 const loggedFetch = (what: string) => (failed: GitFailed) =>
-  Effect.logInfo(`Althar couldn't fetch ${what}; going on without it`, Cause.fail(failed))
+  Effect.logDebug(`Althar couldn't fetch ${what}; going on without it`, Cause.fail(failed))
 
 /** As fetchedInto, but null where it can't be fetched, the reason only in the log. */
 export const fetchInto = (cwd: string, target: { readonly url: string; readonly header: string | null }, branch: string, ref: string) =>

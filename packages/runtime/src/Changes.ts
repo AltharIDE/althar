@@ -147,7 +147,7 @@ import { spanOf } from './stallWatch'
 import { addItem, updateItem } from './threads'
 import { readReviewed, reviewOf } from './reviewing'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
-import { gitLine, gitSummary } from './gitSaid'
+import { gitLine, gitSummary, redacted } from './gitSaid'
 import { summarize, words } from './words'
 import { BETWEEN_AGENTS_MS, betweenAgents } from './needsYou'
 
@@ -3133,7 +3133,7 @@ export class Changes extends Context.Service<
                           : refused.why === 'refused'
                             ? `${remote} refused ${tag}${refused.said === undefined || refused.said === '' ? '' : `: ${refused.said}`}. Tell the person.`
                             : refused.why === 'failed'
-                              ? `Pushing ${tag} failed: ${failed.stderr.trim().split('\n').at(-1) ?? ''}`
+                              ? `Pushing ${tag} failed: ${redacted(failed.stderr.trim().split('\n').at(-1) ?? '')}`
                               : `${tag} wasn't pushed. ${words(refused, String).message} Tell the person.`,
                       ),
                     ),

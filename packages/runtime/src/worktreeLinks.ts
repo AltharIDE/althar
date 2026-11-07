@@ -1,5 +1,5 @@
-import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
 
 /*
  * Whether a linked worktree still reaches its repository, read from the
@@ -56,6 +56,93 @@ export const linkOf = (folder: string): Link => {
     return { state: 'broken', why: 'back_link', gitdir }
   }
   return back !== '' && same(resolve(gitdir, back), dotGit) ? { state: 'fine' } : { state: 'broken', why: 'back_link', gitdir }
+}
+
+const read = (file: string): string | null => {
+  try {
+    return readFileSync(file, 'utf8').trim()
+  } catch {
+    return null
+  }
+}
+
+/** The git directory a repository's worktrees share, from its main checkout: its `.git`, or what a `.git` file names, through its `commondir`. */
+const commonDirOf = (root: string): string | null => {
+  const dotGit = join(root, '.git')
+  try {
+    if (lstatSync(dotGit).isDirectory()) return dotGit
+  } catch {
+    return null
+  }
+  const named = /^gitdir:\s*(.+?)\s*$/m.exec(read(dotGit) ?? '')?.[1]
+  if (named === undefined) return null
+  const gitdir = resolve(root, named)
+  const common = read(join(gitdir, 'commondir'))
+  return common === null ? gitdir : resolve(gitdir, common)
+}
+
+/** The worktree a repository's record of one names, by its `gitdir` file: that worktree's `.git`. Null where it names none. */
+const namedBy = (record: string): string | null => {
+  const back = read(join(record, 'gitdir'))
+  return back === null || back === '' ? null : resolve(record, back)
+}
+
+/**
+ * The record in a repository that `git worktree repair` joins a broken
+ * folder to: one whose `gitdir` names this folder, which git puts right
+ * first; else the git directory its `.git` names, where that is there; else
+ * the record by that git directory's name, which git infers it by. Null
+ * where there is none, and git has nothing to join it to.
+ */
+const recordFor = (folder: string, link: Link, common: string): string | null => {
+  const records = join(common, 'worktrees')
+  let names: ReadonlyArray<string>
+  try {
+    names = readdirSync(records)
+  } catch {
+    names = []
+  }
+  const dotGit = join(folder, '.git')
+  const own = names
+    .map((name) => join(records, name))
+    .find((record) => {
+      const named = namedBy(record)
+      return named !== null && same(named, dotGit)
+    })
+  if (own !== undefined) return own
+  if (link.state !== 'broken' || link.gitdir === null) return null
+  if (existsSync(join(link.gitdir, 'HEAD'))) return link.gitdir
+  const byName = join(records, basename(link.gitdir))
+  return existsSync(join(byName, 'HEAD')) ? byName : null
+}
+
+/** Why repairing a broken folder would take a record that is another's: the folder that has it, or the branch it is on. */
+export type Taken = { readonly folder: string } | { readonly branch: string }
+
+/**
+ * Whether repairing a broken folder would join it to a record in its
+ * repository that is another worktree's. Git names a repository's records
+ * of its worktrees by their folders' names, and every task's worktree of a
+ * repository has the same name, so they are `<name>`, `<name>1`, …; a prune
+ * frees the name of one whose folder moved, and the next worktree made takes
+ * it. A moved folder's `.git` then names another task's record, and git's
+ * repair would point that record at it, with the other task's HEAD, branch
+ * and index. A record is this folder's to take where it names this folder,
+ * or a place that isn't there, and where `branch` says which branch the
+ * folder is on, if it is on one, the record isn't on another; a review's
+ * copy, which never is on a branch, is `branch` `false`. Null where the
+ * record is free, or there is none.
+ */
+export const takenFrom = (folder: string, link: Link, root: string, branch: string | false | null): Taken | null => {
+  const common = commonDirOf(root)
+  if (common === null) return null
+  const record = recordFor(folder, link, common)
+  if (record === null) return null
+  const named = namedBy(record)
+  if (named !== null && !same(named, join(folder, '.git')) && existsSync(named)) return { folder: dirname(named) }
+  const on = /^ref:\s*refs\/heads\/(.+)$/.exec(read(join(record, 'HEAD')) ?? '')?.[1]
+  if (on !== undefined && branch !== null && on !== branch) return { branch: on }
+  return null
 }
 
 /**

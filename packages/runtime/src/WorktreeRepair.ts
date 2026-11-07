@@ -17,7 +17,7 @@ import { fact } from './records'
 import { reviewCopyOf } from './reviewCopy'
 import { afterOpen } from './startup'
 import { addItem } from './threads'
-import { type BrokenWhy, linkOf, worktreeAt } from './worktreeLinks'
+import { type BrokenWhy, type Link, linkOf, type Taken, takenFrom, worktreeAt } from './worktreeLinks'
 
 /*
  * Worktrees whose link to their repository broke, repaired (ADR-101). A
@@ -32,7 +32,10 @@ import { type BrokenWhy, linkOf, worktreeAt } from './worktreeLinks'
  * a git command in it fails so. What it repaired goes in the record, its
  * task's thread and the log. It never moves, removes, resets or prunes
  * anything: where git can't repair it, what git said goes to the thread and
- * the log, and the folder stays as it is. A folder that isn't there at all
+ * the log, and the folder stays as it is. Nor does it have git join a folder
+ * to a record in the repository that is another worktree's, as a prune
+ * freeing a moved one's name for the next leaves it: that is said the same
+ * way, and nothing is changed. A folder that isn't there at all
  * is left to what says so ("its folder isn't on this computer").
  */
 
@@ -45,6 +48,8 @@ interface Kept {
   readonly projectId: ProjectId
   readonly path: string
   readonly root: string
+  /** The branch its work is on, or will be once it is made. */
+  readonly branch: string | null
 }
 
 /** A folder Althar repaired, or couldn't: the worktree it belongs to, whether it is the copy reviews read, and what git said. */
@@ -92,7 +97,7 @@ export class WorktreeRepair extends Context.Service<
       const kept = Effect.flatMap(
         SqlClient.SqlClient,
         (sql) => sql<Kept>`
-          SELECT w.id, w.task_id, w.project_id, w.path, l.path AS root FROM workspaces w
+          SELECT w.id, w.task_id, w.project_id, w.path, l.path AS root, w.branch FROM workspaces w
           JOIN repository_locations l ON l.binding_id = w.binding_id AND l.device_id = ${instance.deviceId}
           WHERE w.device_id = ${instance.deviceId} AND w.state <> 'cleaned' AND w.kind IS NULL
           ORDER BY w.created_at, w.rowid`,
@@ -136,9 +141,38 @@ export class WorktreeRepair extends Context.Service<
             })
         })
 
-      /** Has git repair one folder's link from the repository's main checkout, and records how it went. */
-      const repair = (worktree: Kept, folder: string, copy: boolean, why: BrokenWhy) =>
+      /** What a refusal says, for a record that is another's. */
+      const takenWords = (taken: Taken) =>
+        'folder' in taken
+          ? `the repository’s record it names is another folder’s, ${homeShortened(taken.folder)}, so nothing was changed`
+          : `the repository’s record it names is on another branch, ${taken.branch}, so nothing was changed`
+
+      /** Records that a folder wasn't repaired, for the record git would join it to being another worktree's: git isn't run. */
+      const refuse = (worktree: Kept, folder: string, copy: boolean, why: BrokenWhy, taken: Taken) =>
         Effect.gen(function* () {
+          const done: Repaired = {
+            workspaceId: worktree.id,
+            taskId: worktree.taskId,
+            folder,
+            copy,
+            why,
+            repaired: false,
+            said: takenWords(taken),
+          }
+          unrepaired.add(folder)
+          yield* Effect.logWarning('Did not repair a worktree’s link: the record it names is another worktree’s').pipe(
+            Effect.annotateLogs({ task: worktree.taskId, workspace: worktree.id, folder, copy, why, repository: worktree.root, ...taken }),
+          )
+          yield* record(worktree, done).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record a worktree’s repair', cause)))
+          return done
+        })
+
+      /** Has git repair one folder's link from the repository's main checkout, and records how it went; not where it would take another's record. */
+      const repair = (worktree: Kept, folder: string, copy: boolean, link: Link & { readonly state: 'broken' }) =>
+        Effect.gen(function* () {
+          const why = link.why
+          const taken = takenFrom(folder, link, worktree.root, copy ? false : worktree.branch)
+          if (taken !== null) return yield* refuse(worktree, folder, copy, why, taken)
           const ran = yield* Effect.result(repairWorktree(worktree.root, folder))
           // Whether it reaches its repository now is what counts: git repairs a worktree by the main checkout's record of it,
           // and still fails where its `.git` named a worktree by another name.
@@ -186,14 +220,19 @@ export class WorktreeRepair extends Context.Service<
        */
       const repairBroken = (of: (worktree: Kept) => boolean) =>
         Effect.gen(function* () {
-          const broken: Array<{ readonly worktree: Kept; readonly folder: string; readonly copy: boolean; readonly why: BrokenWhy }> = []
+          const broken: Array<{
+            readonly worktree: Kept
+            readonly folder: string
+            readonly copy: boolean
+            readonly link: Link & { readonly state: 'broken' }
+          }> = []
           for (const worktree of (yield* kept).filter(of))
             for (const { folder, copy } of foldersOf(worktree)) {
               const link = linkOf(folder)
-              if (link.state === 'broken' && !unrepaired.has(folder)) broken.push({ worktree, folder, copy, why: link.why })
+              if (link.state === 'broken' && !unrepaired.has(folder)) broken.push({ worktree, folder, copy, link })
             }
           const done: Array<Repaired> = []
-          for (const { worktree, folder, copy, why } of broken) done.push(yield* repair(worktree, folder, copy, why))
+          for (const { worktree, folder, copy, link } of broken) done.push(yield* repair(worktree, folder, copy, link))
           return done
         })
 
