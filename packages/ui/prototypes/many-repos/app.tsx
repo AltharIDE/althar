@@ -233,7 +233,7 @@ function Strip() {
           { value: 'all', label: 'Every state' },
         ]}
       />
-      <label className={p.row} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+      <label className={p.toggle}>
         <Switch checked={now.narrow} onChange={(narrow) => proto.set({ narrow })} label="Narrow window" />
         Narrow
       </label>

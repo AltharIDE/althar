@@ -68,7 +68,7 @@ export function CardC(props: CardProps) {
   const shown = tab === 'all' ? repos : repos.filter((repo) => repo.slug === tab)
   return (
     <article className={cs.change} aria-label={label}>
-      <div className={cs.decide}>
+      <div className={cx(cs.decide, actsOf(repos).length > 0 && cs.acting)}>
         <div className={cs.facts}>
           <ol className={p.track} aria-label="In the order they merge">
             {repos.map((repo, at) => {
@@ -79,9 +79,8 @@ export function CardC(props: CardProps) {
                   className={cx(
                     p.stop,
                     stopOf(repo),
-                    repos[at + 1]?.state === 'merged' || (repo.state === 'merged' && repos[at + 1]?.state === 'merging')
-                      ? p.linkDone
-                      : null,
+                    // The track through a merged stop is done.
+                    repo.state === 'merged' ? p.linkDone : null,
                   )}
                 >
                   <span className={p.node} aria-hidden="true">

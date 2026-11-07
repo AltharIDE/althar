@@ -53,6 +53,7 @@
   list-style: none;
 }
 .row {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -63,15 +64,19 @@
   gap: 8px;
   min-width: 0;
   min-height: 24px;
+  white-space: nowrap;
   margin: 0;
   font-size: 13px;
   font-weight: 600;
   color: var(--t-1);
 }
-/* each repository's own press, shown as the pointer comes to its row, or a key to it */
+/* each repository's own press, over the end of its row as the pointer comes to it, or a key: at rest it takes no room */
 .rowAct {
-  margin-left: auto;
-  margin-right: -8px;
+  position: absolute;
+  top: 0;
+  right: -8px;
+  box-shadow: -12px 0 10px -2px var(--paper);
+  background: var(--paper);
   opacity: 0;
   transition: opacity var(--fast, 0.12s) ease-out;
 }
@@ -246,8 +251,18 @@
   overflow-x: auto;
 }
 
-/* wide, as alone on the page: a little more room between rows */
+/* wide, as alone on the page: a row per repository on one line, its line beside its name; a little more room in sections */
 @container (min-width: 520px) {
+  .row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+    column-gap: 20px;
+    align-items: start;
+  }
+  .row > :nth-child(2) {
+    grid-column: 2;
+    grid-row: 1;
+  }
   .sectionHead {
     padding: 8px 22px;
   }
@@ -274,9 +289,17 @@
   color: var(--t-3);
   white-space: nowrap;
 }
+.strip > * {
+  flex: none;
+}
 .grow {
-  flex: 1;
+  flex: 1 !important;
   min-width: 0;
+}
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 .frame {
   height: calc(100% - 48px);

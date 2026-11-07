@@ -26,7 +26,7 @@ export function CardA(props: CardProps) {
   const acts = actsOf(repos)
   return (
     <article className={cs.change} aria-label={label}>
-      <div className={cs.decide}>
+      <div className={cx(cs.decide, actsOf(repos).length > 0 && cs.acting)}>
         <div className={cs.facts}>
           <ul className={p.rows}>
             {repos.map((repo) => {

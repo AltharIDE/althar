@@ -52,7 +52,8 @@ const overallOf = (repos: readonly Repo[]) => {
   if (drafts.length > 0) return { tone: 'quiet' as const, said: `Waiting on ${names(drafts)}`, draft: true }
   const running = repos.filter((repo) => lineOf(repo).tone === 'running')
   if (running.length > 0) return { tone: 'running' as const, said: `Checks running in ${names(running)}` }
-  return { tone: 'good' as const, said: merged.length > 0 ? `${names(merged)} merged; the rest ready` : 'Ready to accept' }
+  const left = repos.filter((repo) => repo.state !== 'merged')
+  return { tone: 'good' as const, said: merged.length > 0 ? `${names(merged)} merged, ${names(left)} ready` : 'Ready to accept' }
 }
 
 function Section({
@@ -128,7 +129,7 @@ export function CardB(props: CardProps) {
   const most = mostOf(repos)
   return (
     <article className={cs.change} aria-label={label}>
-      <div className={cs.decide}>
+      <div className={cx(cs.decide, actsOf(repos).length > 0 && cs.acting)}>
         <div className={cs.facts}>
           <p className={cx(p.overall, toneClass(overall.tone))}>
             <span className={cs.mark}>{markOf(overall.tone, 'merging' in overall)}</span>

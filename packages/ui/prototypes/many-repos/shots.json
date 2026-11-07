@@ -1,0 +1,13 @@
+[
+  { "id": "1-today-drafts", "page": "?d=Today&s=drafts#/threads/th1" },
+  { "id": "2-today-unconnected", "page": "?d=Today&s=unconnected#/threads/th1" },
+  { "id": "3-today-every-state", "page": "?d=Today&s=drafts&v=all", "full": true },
+  { "id": "4-a-drafts", "page": "?d=A&s=drafts#/threads/th1" },
+  { "id": "5-a-every-state", "page": "?d=A&s=drafts&v=all", "full": true },
+  { "id": "6-a-narrow-four", "page": "?d=A&s=four#/threads/th1", "width": 900 },
+  { "id": "7-a-review-the-diff", "page": "?d=A&s=ready#/threads/th1", "click": ["button[aria-label='Open frontend’s diff']"] },
+  { "id": "8-b-failing", "page": "?d=B&s=failing#/threads/th1" },
+  { "id": "9-b-every-state", "page": "?d=B&s=drafts&v=all", "full": true },
+  { "id": "10-c-four", "page": "?d=C&s=four#/threads/th1" },
+  { "id": "11-c-every-state", "page": "?d=C&s=drafts&v=all", "full": true }
+]
