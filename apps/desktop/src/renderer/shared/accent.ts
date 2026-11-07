@@ -135,11 +135,11 @@ const tokensFor = (accent: Rgb, scheme: 'light' | 'dark'): Record<string, string
     b: Math.round(text.b * 0.1 + surface.b * 0.9),
   })
   const ink = legibleShade(text, [wash(hexToRgb(surfaces.page)), wash(hexToRgb(surfaces.raised))], 4.5)
-  if (scheme === 'light' && ink === undefined) return undefined
   return scheme === 'light'
     ? {
         ...states,
-        '--signal-ink': hex(ink!),
+        // Where no shade reads on the wash, the chip keeps the accent itself rather than refusing the accent.
+        '--signal-ink': hex(ink ?? text),
         '--signal-dim': rgba(text, 0.1),
         '--selection': rgba(text, 0.1),
         '--signal-line': rgba(text, 0.32),
@@ -148,6 +148,8 @@ const tokensFor = (accent: Rgb, scheme: 'light' | 'dark'): Record<string, string
       }
     : {
         ...states,
+        // Dark's chip words are the accent itself, as in dark.css; the key is here so the light block's never leaks into dark.
+        '--signal-ink': hex(text),
         '--signal-dim': rgba(text, 0.13),
         '--selection': rgba(text, 0.34),
         '--signal-line': rgba(text, 0.42),

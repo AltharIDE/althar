@@ -80,6 +80,27 @@ describe('the system’s accent, kept legible', () => {
     expect(contrast(ink, wash(hexToRgb('#fcfbf8')))).toBeGreaterThanOrEqual(4.5)
   })
 
+  it.each(SYSTEM_ACCENTS)('sets the same tokens in both schemes for %s, so none leaks from light into dark', (hex) => {
+    const tokens = accentTokens(hexToRgb(hex))
+    if (tokens === undefined) return
+    for (const name of Object.keys(tokens.light)) expect(tokens.dark, name).toHaveProperty([name])
+  })
+
+  it('gives dark a status chip ink that reads on its wash', () => {
+    const dark = accentTokens(GNOME_BLUE)?.dark
+    expect(dark?.['--signal-ink']).toBeDefined()
+    expect(dark?.['--signal']).toBeDefined()
+    const ink = hexToRgb(dark!['--signal-ink']!)
+    const signal = hexToRgb(dark!['--signal']!)
+    const page = hexToRgb('#1c1a17')
+    const wash = {
+      r: Math.round(signal.r * 0.13 + page.r * 0.87),
+      g: Math.round(signal.g * 0.13 + page.g * 0.87),
+      b: Math.round(signal.b * 0.13 + page.b * 0.87),
+    }
+    expect(contrast(ink, wash)).toBeGreaterThanOrEqual(4.5)
+  })
+
   it('keeps GNOME’s blue’s dark hover readable under white words, still lighter than its fill', () => {
     const dark = accentTokens(GNOME_BLUE)?.dark
     const fill = hexToRgb(dark?.['--signal-fill'] ?? '#ffffff')
