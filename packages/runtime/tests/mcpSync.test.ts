@@ -243,4 +243,21 @@ describe('keeping the agents’ MCP servers the same', () => {
     expect(names(home, 'codex')).toEqual([])
     expect(readRecord(working.io).added).toEqual([])
   })
+  it('asks the pick again, rather than writing over it, where the person changed a server it wrote', async () => {
+    const home = homeWith({
+      claude: { mcpServers: { github: { type: 'stdio', command: 'npx', args: ['-y', '@github/github-mcp-server'] } } },
+      codex: { mcp_servers: { github: { command: 'docker', args: ['run', '-i', 'ghcr.io/github/github-mcp-server'] } } },
+    })
+    const { io } = fakeAgents(home)
+    await turnOn(io)
+    await pickWay(io, 'github', 'claude')
+    expect(agentServers('codex', { homeDir: home }).servers[0]?.command).toBe('npx')
+    // The person points Codex's at their own build.
+    writeFileSync(join(home, '.codex', 'config.toml'), stringify({ mcp_servers: { github: { command: 'my-github-mcp' } } }))
+    await reconcile(io)
+    expect(agentServers('codex', { homeDir: home }).servers[0]?.command).toBe('my-github-mcp')
+    expect(readRecord(io).picks['github']).toBeUndefined()
+    expect(readRecord(io).added.some((each) => each.agent === 'codex' && each.spec.name === 'github')).toBe(false)
+    expect(syncState(io).plan.settle).toContainEqual(expect.objectContaining({ kind: 'differs', server: 'github' }))
+  })
 })

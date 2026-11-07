@@ -110,4 +110,31 @@ describe('the person’s MCP servers, through the API', () => {
       }),
     ),
   )
+  it.live('keeps saying a chip’s take-back that failed, and takes it back once the agent’s command works', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const home = homeWith({ claude: { mcpServers: { a: { command: 'a' } } } })
+        const working = fakeCommands(home)
+        let broken = false
+        const run: NonNullable<RuntimeOptions['agentConfigs']>['run'] = (command, args) =>
+          broken && command === 'codex' && args[1] === 'remove'
+            ? Promise.resolve({ code: 1, output: "codex: couldn't write its settings" })
+            : working.io.run(command, args)
+        const client = yield* connected({ homeDir: home, folder: working.io.folder, run })
+        yield* client.SetToolSync({ commandId: commandId(), kind: 'server', on: true, takeBack: false })
+        broken = true
+        yield* client.SetToolKeptOut({ commandId: commandId(), kind: 'server', agent: 'codex', name: 'a', out: true })
+        const after = yield* client.GetAgentTools({ projectId: null })
+        assert.deepStrictEqual(after.serverSync.errors, ["Codex: codex: couldn't write its settings"])
+        assert.deepStrictEqual(
+          agentServers('codex', { homeDir: home }).servers.map((one) => one.name),
+          ['a'],
+        )
+        broken = false
+        const again = yield* client.GetAgentTools({ projectId: null })
+        assert.deepStrictEqual(again.serverSync.errors, [])
+        assert.deepStrictEqual(agentServers('codex', { homeDir: home }).servers, [])
+      }),
+    ),
+  )
 })

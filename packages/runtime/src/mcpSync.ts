@@ -427,7 +427,29 @@ const reconcileNow = async (io: SyncIo): Promise<{ readonly record: SyncRecord; 
         since.unshift({ id: idOf(io, name, found.agent), at: io.now(), server: name, kind: 'tookOut', from: found.agent, to: [] })
       }
   }
-  record = { ...record, keptOut, added, since }
+  // One Althar wrote that the person changed since is theirs now: it is no longer Althar's to take back, and a pick that made it
+  // so is asked again, under To settle, rather than written over their change.
+  const picks = { ...record.picks }
+  for (const each of [...added]) {
+    const found = agents.find((agent) => agent.agent === each.agent)
+    const now = found?.problem === undefined ? found?.servers.find((server) => server.name === each.spec.name) : undefined
+    if (now === undefined || asWritten(now, each.spec)) continue
+    added = added.filter((one) => one !== each)
+    if (picks[each.spec.name] !== undefined && picks[each.spec.name] !== 'apart') delete picks[each.spec.name]
+  }
+  // One kept out of an agent that Althar couldn't take back yet, still as written there: taken back again now, or said again.
+  for (const each of [...added]) {
+    if (!keptOut[each.agent].includes(each.spec.name)) continue
+    const found = agents.find((agent) => agent.agent === each.agent)
+    if (found === undefined || found.problem !== undefined) continue
+    try {
+      await unwrite(io, each.agent, found.path, each.spec.name)
+      added = added.filter((one) => one !== each)
+    } catch (error) {
+      errors.push(said(error))
+    }
+  }
+  record = { ...record, keptOut, added, since, picks }
   const plan = planSync(record, agents)
   const copied = new Map<string, Array<SyncedAgent>>()
   for (const { agent, spec } of [...plan.replaces, ...plan.adds]) {
@@ -436,7 +458,10 @@ const reconcileNow = async (io: SyncIo): Promise<{ readonly record: SyncRecord; 
       record = backUp(io, record, agent, path)
       if (plan.replaces.some((each) => each.agent === agent && each.spec.name === spec.name)) await unwrite(io, agent, path, spec.name)
       await write(io, agent, path, spec)
-      record = { ...record, added: [...record.added, { agent, spec, at: io.now() }] }
+      record = {
+        ...record,
+        added: [...record.added.filter((one) => !(one.agent === agent && one.spec.name === spec.name)), { agent, spec, at: io.now() }],
+      }
       if (fresh.has(spec.name)) copied.set(spec.name, [...(copied.get(spec.name) ?? []), agent])
     } catch (error) {
       errors.push(said(error))
