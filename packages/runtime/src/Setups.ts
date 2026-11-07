@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { cp, lstat, realpath } from 'node:fs/promises'
 import { basename, isAbsolute, join, normalize, sep } from 'node:path'
 
@@ -9,13 +10,14 @@ import { Cause, Context, type Crypto, Deferred, Duration, Effect, Exit, Fiber, L
 import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
+import { coordinatorFolderAt } from './coordinatorFolder'
 import { makeKeyedLock } from './keyedLock'
 import { Instance } from './Instance'
 import { printedMore, uncoloured } from './leftRunning'
 import { change, fact, timestamp } from './records'
 import { installIn } from './runCommand'
 import { addItem, updateItem } from './threads'
-import { type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
+import { POOL, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
 
 /*
  * A task's worktree set up by Althar itself, outside any agent's sandbox,
@@ -411,8 +413,12 @@ export class Setups extends Context.Service<
           }),
         )
 
-      /** Sets up a worktree that isn't yet: its item in the thread first, then the setup, kept, then the item saying how it ended. */
-      const setUp = (unset: Unset) =>
+      /**
+       * Sets up a worktree that isn't yet: its item in the thread first, then the setup, kept, then the item saying how it
+       * ended. A copy of the coordinator's has no worktree's record to keep it in (`record` false): its copies are made again
+       * for each of its turns.
+       */
+      const setUp = (unset: Unset, record = true) =>
         Effect.gen(function* () {
           const folder = unset.within === null ? unset.worktree : join(unset.worktree, unset.within)
           const recorded = recordedOf(unset.recorded)
@@ -425,7 +431,7 @@ export class Setups extends Context.Service<
                 : shownOf(recorded)
               : (unset.kept ?? installIn(folder, unset.worktree))
           if (command === null) {
-            yield* kept(unset, { at: yield* timestamp, command: null, code: null, timedOut: false, last: null })
+            if (record) yield* kept(unset, { at: yield* timestamp, command: null, code: null, timedOut: false, last: null })
             return undefined
           }
           // A recorded setup installs what the repository needs, as the lockfile's would: the card says so, as for that.
@@ -447,7 +453,7 @@ export class Setups extends Context.Service<
           // What it copied, then the end of what it printed, kept either way: the thread shows it folded.
           const last = printed === '' ? null : printed
           const done: SetUp = { at: yield* timestamp, command, ...ran, last, ...(missing.length === 0 ? {} : { missing }) }
-          yield* kept(unset, done)
+          if (record) yield* kept(unset, done)
           yield* updateItem(unset.projectId, item, {
             ...shown,
             ended: {
@@ -553,6 +559,38 @@ export class Setups extends Context.Service<
           return found
         })
 
+      /**
+       * The coordinator's copies of the project's repositories (ADR-058), to set up as a worktree is (ADR-097: it installs,
+       * builds and runs tests in them). Where its folder keeps them; the copies themselves are made for each of its turns.
+       */
+      const copiesOf = (access: ToolAccess, named: string | undefined) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const config = yield* RuntimeConfig
+          const [project] = yield* sql<{ slug: string }>`SELECT slug FROM projects WHERE id = ${access.projectId}`
+          if (project === undefined) return []
+          const folder = coordinatorFolderAt(config.worktreeRoot, project.slug)
+          const all = (yield* sql<Omit<Again, 'worktree' | 'threadId' | 'projectId'>>`
+            SELECT b.id, b.folder AS within, b.display_name AS name, b.run_setup AS kept, b.recorded_setup AS recorded,
+              b.slug AS binding_slug, b.id AS binding_id,
+              (SELECT l.path FROM repository_locations l WHERE l.binding_id = b.id AND l.device_id = ${instance.deviceId}) AS checkout
+            FROM repository_bindings b WHERE b.project_id = ${access.projectId} AND b.detached_at IS NULL
+            ORDER BY b.created_at, b.rowid`).map((one): Again => ({
+            ...one,
+            projectId: access.projectId as ProjectId,
+            threadId: access.threadId,
+            worktree: join(folder, one.bindingSlug),
+          }))
+          if (named === undefined) return all
+          const wanted = named.trim().toLowerCase()
+          const found = all.filter((one) => one.name.toLowerCase() === wanted || one.bindingSlug === wanted)
+          if (found.length === 0)
+            return yield* new ToolRefused({
+              message: `The project has no repository called ${named}. Its repositories: ${all.map((one) => one.name).join(', ') || 'none'}.`,
+            })
+          return found
+        })
+
       /** Keeps a repository's setup, replacing what was recorded; the project changes with it, so its settings read it again. */
       const record = (projectId: ProjectId, bindingId: string, name: string, recorded: Recorded | null, actorId: ActorId) =>
         Effect.gen(function* () {
@@ -577,8 +615,13 @@ export class Setups extends Context.Service<
         })
 
       /** How a setup the lead asked for went, in words for it, with the end of what it printed either way. */
-      const saidOf = (name: string, several: boolean, ran: { readonly setUp: SetUp; readonly printed: string } | undefined) => {
-        const where = several ? `${name}'s worktree` : 'the worktree'
+      const saidOf = (
+        name: string,
+        several: boolean,
+        ran: { readonly setUp: SetUp; readonly printed: string } | undefined,
+        folder = 'worktree',
+      ) => {
+        const where = several ? `${name}'s ${folder}` : `the ${folder}`
         if (ran === undefined || ran.setUp.command === null)
           return `${several ? name : 'The repository'} has no setup recorded, and nothing Althar can tell to install: there is no lockfile or manifest it knows. If it needs one, get the folder ready yourself and record what worked with record_setup.`
         const { setUp, printed } = ran
@@ -592,14 +635,28 @@ export class Setups extends Context.Service<
       const installTool = {
         name: 'install_dependencies',
         description:
-          "Runs the project's setup again in your worktree, outside your sandbox, as Althar ran it when the worktree was made: the setup kept for the repository (set_run_command keeps it), else the install its lockfile names, which never changes the lockfile. Use it where an install fails in your sandbox (a lock in .git, the package manager's cache or its temporary folders), or once what you changed needs installing, such as a dependency added to package.json with its lockfile. It runs only that setup, never a command you give, for ten minutes at most, and returns once it ends, with how it went and the end of what it printed; the task's thread shows it too. In a task of several repositories, repository names the one; without, each is set up.",
+          "Runs the project's setup again in your folder, outside your sandbox, as Althar ran it when the folder was made: the setup kept for the repository (set_run_command keeps it), else the install its lockfile names, which never changes the lockfile. A task's lead sets up its worktree; the coordinator its copies of the project's repositories, to build or run tests there (they are made again for each of its turns). Use it where an install fails in your sandbox (a lock in .git, the package manager's cache or its temporary folders), or once what you changed needs installing, such as a dependency added to package.json with its lockfile. It runs only that setup, never a command you give, for ten minutes at most, and returns once it ends, with how it went and the end of what it printed; your thread shows it too. In a project of several repositories, repository names the one; without, each is set up.",
         input: { type: 'object', properties: { repository: { type: 'string' } } },
         call: (input: unknown, access: ToolAccess) =>
           Effect.gen(function* () {
             const taskId = access.taskId
-            if (taskId === null) return yield* new ToolRefused({ message: 'This tool is for a task’s lead.' })
             const asked = (typeof input === 'object' && input !== null ? input : {}) as { readonly repository?: unknown }
             const named = typeof asked.repository === 'string' && asked.repository.trim() !== '' ? asked.repository : undefined
+            // The coordinator's copies, set up as a worktree is, with nothing kept of it: they are made again each turn.
+            if (access.role === 'coordinator') {
+              const copies = yield* provide(copiesOf(access, named))
+              if (copies.length === 0)
+                return yield* new ToolRefused({ message: 'The project has no repository on this computer to set up.' })
+              // Made as its turn starts: outside one, there is nothing to set up yet.
+              const missing = copies.filter((one) => !existsSync(one.worktree))
+              if (missing.length > 0)
+                return yield* new ToolRefused({
+                  message: `Your copy of ${missing.map((one) => one.name).join(' and ')} isn't on this computer: your copies are made as each of your turns starts.`,
+                })
+              const ran = yield* Effect.forEach(copies, (one) => locked(`copy:${one.worktree}`, provide(setUp(one, false))))
+              return copies.map((one, at) => saidOf(one.name, copies.length > 1, ran[at], 'copy')).join('\n\n')
+            }
+            if (taskId === null) return yield* new ToolRefused({ message: 'This tool is for a task’s lead or the coordinator.' })
             const again = yield* provide(againOf(taskId, named))
             if (again.length === 0)
               return yield* new ToolRefused({
@@ -676,7 +733,9 @@ export class Setups extends Context.Service<
             ),
           ),
       }
-      yield* (yield* ToolServer).serve('lead', [installTool, recordTool])
+      // Installing in one's own folder is in the shared set (ADR-097); recording a repository's setup is a lead's, from its worktree.
+      yield* (yield* ToolServer).serve(POOL, [installTool])
+      yield* (yield* ToolServer).serve('lead', [recordTool])
 
       return Setups.of({
         begin: (taskId) => Effect.asVoid(Effect.forkIn(ready(taskId), setupsScope)),

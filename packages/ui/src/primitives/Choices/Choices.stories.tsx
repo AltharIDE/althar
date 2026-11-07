@@ -8,7 +8,7 @@ import { Choices, type ChoiceOption } from './Choices'
 
 type Limit = 'move' | 'wait' | 'ask'
 const OPTIONS: ChoiceOption<Limit>[] = [
-  { value: 'move', title: 'Move the work to the next agent free', note: 'In the order of your connections.' },
+  { value: 'move', title: 'Move to the strongest model with usage left', note: 'On any of your plans.' },
   { value: 'wait', title: 'Wait for the reset', note: 'The task keeps its place and resumes on its own.' },
   { value: 'ask', title: 'Ask me' },
 ]

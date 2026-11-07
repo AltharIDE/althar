@@ -1,16 +1,24 @@
-/* Two finishes: paper keeps the thread one material; dark reads as a machine at a glance. The host sets data-term.
-   On its own it is a whole block; in a Tool's sheet, the sheet squares its top and drops its edge. */
+/* A quiet block in the reading column, a step off the page with no edge of its own. Two finishes: paper keeps the
+   thread one material; dark reads as a machine at a glance. The host sets data-term. */
 .term {
-  border-radius: 10px;
+  overflow: hidden;
+  border-radius: 8px;
   background: var(--n-1);
-  box-shadow: inset 0 0 0 1px var(--line-2);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 .out {
   margin: 0;
-  padding: 11px 14px 12px;
-  font: 11.5px/1.65 var(--mono);
-  white-space: pre-wrap;
+  padding: 8px 12px 9px;
+  font: 11.5px/1.6 var(--mono);
   color: var(--t-2);
+}
+/* each line its own block: a long one wraps under its own start, a hanging indent, rather than running on like prose */
+.line {
+  display: block;
+  padding-left: 2ch;
+  text-indent: -2ch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .command {
   color: var(--t-1);
@@ -19,13 +27,35 @@
   color: var(--t-3);
   user-select: none;
 }
-/* the way back to what scrolled past, in the output's own flow */
+/* the way to what came before the tail: a control over the block, not one of its lines */
 .earlier {
-  display: block;
-  margin: 1px 0 3px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 26px;
+  padding: 0 12px;
+  font: 11.5px var(--font);
+  color: var(--t-3);
+  box-shadow: inset 0 -1px 0 var(--line);
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
 }
-.earlier button {
-  font: 11px var(--font);
+.earlier:hover {
+  background: var(--pressed-paper);
+  color: var(--t-1);
+}
+.earlier:focus-visible {
+  outline: 1.5px solid var(--signal);
+  outline-offset: -1.5px;
+}
+.chevron {
+  color: var(--t-4);
+  transition: transform var(--fold) var(--ease-fold);
+}
+.earlier[aria-expanded='true'] .chevron {
+  transform: rotate(180deg);
 }
 .err {
   color: var(--danger);
@@ -38,6 +68,13 @@
   font-family: var(--font);
   font-size: 11.5px;
   color: var(--t-3);
+}
+/* a failure's code, ending what it printed, where nothing above says it */
+.exit {
+  margin-top: 2px;
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--danger);
 }
 /* the output's lines, still being read */
 .reading {
@@ -65,19 +102,10 @@
   .cursor {
     animation: none;
   }
-}
-.foot {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: -8px;
-  padding: 0 14px 10px;
-}
-.exit {
-  font: 500 10.5px var(--mono);
-  color: var(--t-3);
-}
-.bad {
-  color: var(--danger);
+  .earlier,
+  .chevron {
+    transition: none;
+  }
 }
 
 :global([data-term='dark']) .term {
@@ -90,12 +118,10 @@
 :global([data-term='dark']) .command {
   color: var(--term-t1);
 }
-:global([data-term='dark']) .prompt,
-:global([data-term='dark']) .exit {
+:global([data-term='dark']) .prompt {
   color: var(--term-t4);
 }
-:global([data-term='dark']) .err,
-:global([data-term='dark']) .bad {
+:global([data-term='dark']) :is(.err, .exit) {
   color: var(--term-danger);
 }
 :global([data-term='dark']) .live {
@@ -104,6 +130,14 @@
 :global([data-term='dark']) .said {
   color: var(--term-t4);
 }
-:global([data-term='dark']) .earlier button {
-  color: var(--on-dark-2);
+:global([data-term='dark']) .earlier {
+  color: var(--term-t4);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.07);
+}
+:global([data-term='dark']) .earlier:hover {
+  background: var(--term-raised);
+  color: var(--term-t1);
+}
+:global([data-term='dark']) .chevron {
+  color: var(--term-t4);
 }

@@ -1,7 +1,7 @@
 import { useState, type ReactNode, type RefObject } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
-import { Model, type ModelInfo } from '../../primitives/Model/Model'
+import { Model, ModelList, type ModelInfo } from '../../primitives/Model/Model'
 import { FindingState, FindingsReach, Severity, StepState, ToolState, Verdict, unreachable } from '../../foundations/vocabulary'
 import { findingsReachText, type ChoiceWords } from '../../foundations/vocabularyText'
 import { useControlled } from '../../lib/controlled'
@@ -468,9 +468,7 @@ function FindingRow({ f, many, pass, canUndo, onAnswer, onUndo, onReason, t }: F
           <span className={s.at}>{f.at}</span>
           {many && (
             <span className={s.by}>
-              {f.by.map((m) => (
-                <Model key={m.id} model={m} short />
-              ))}
+              <ModelList models={f.by} short />
             </span>
           )}
         </div>

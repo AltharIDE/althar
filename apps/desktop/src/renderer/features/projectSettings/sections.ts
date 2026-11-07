@@ -1,3 +1,4 @@
+import { PROJECT_SETTINGS_SECTIONS } from '@althar/contracts'
 import type { IconName } from '@althar/ui'
 
 /*
@@ -9,7 +10,8 @@ import type { IconName } from '@althar/ui'
  * section: it is the one thing to do at the foot of the side.
  */
 
-export const PROJECT_SECTIONS = ['general', 'code', 'rules', 'running', 'notes'] as const
+/** As contracts lists them, so the agents' read_settings names the same sections (ADR-097). */
+export const PROJECT_SECTIONS = PROJECT_SETTINGS_SECTIONS
 
 export type ProjectSection = (typeof PROJECT_SECTIONS)[number]
 

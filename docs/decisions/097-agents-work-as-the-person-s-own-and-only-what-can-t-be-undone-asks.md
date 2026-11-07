@@ -422,6 +422,14 @@ and the same skills. Two things differ, and neither is a matter of safety:
 **Leads may start new tasks:** `draft_task`, `start_task`,
 `review_pull_request` and `propose_plan` for what they drafted. A task a
 lead started says so in its thread, and is the project's like any other.
+It records the lead's task as its parent (`tasks.parent_task_id`): its card
+says "Started by" that task, and the lead's thread has a line linking to
+it. What a lead starts waits the plan's countdown, its quick tasks too, so
+the person can hold it, and a lead starts at most three tasks in a turn
+and ten from its task in all (`LEAD_STARTS`). A lead turns its own task
+into another kind this way: a prototype's real build, or a review's fix, is
+a task of its own, started from it; `make_it_a_change` still turns a quick
+task into a change in place.
 
 **The coordinator directs leads.** It tells a lead what to do next
 (`message_lead`), tells one to push or pushes its task as the Push button

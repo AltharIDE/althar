@@ -208,9 +208,14 @@ const skillsRead = (place: ItemPlace, content: Readonly<Record<string, unknown>>
     const printing = command.split(/&&|\|\||;|\|/).filter((part) => PRINTS.test(part))
     const line = yield* skillsLine(place.threadId)
     return (line?.content.skills ?? []).flatMap((skill) => {
+      // From the repository too, as Windows spells it and with forward slashes, which agents' shells take there as well.
       const spellings = [
         skill.path,
-        ...spelledBoth(place.folders).flatMap((folder) => (inside(skill.path, folder) ? [relative(folder, skill.path)] : [])),
+        ...spelledBoth(place.folders).flatMap((folder) => {
+          if (!inside(skill.path, folder)) return []
+          const from = relative(folder, skill.path)
+          return [...new Set([from, from.replaceAll('\\', '/')])]
+        }),
       ]
       return paths.some((path) => spellings.includes(path)) || printing.some((part) => spellings.some((one) => part.includes(one)))
         ? [skill.name]

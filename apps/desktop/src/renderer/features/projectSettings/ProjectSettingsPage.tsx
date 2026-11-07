@@ -8,6 +8,7 @@ import { ConnectDialog, type Opening } from '../connections/ConnectDialog'
 import type { ConnectionsModel } from '../connections/useConnections'
 import type { Tracker } from '../project/front'
 import { RulesSection } from '../rules/RulesSection'
+import { ChangedBy } from '../settings/ChangedBy'
 import { type RulesModel, useRules } from '../rules/useRules'
 import { CodeSection } from './CodeSection'
 import { GeneralSection } from './GeneralSection'
@@ -92,6 +93,7 @@ export function ProjectSettingsPage({
           />
         }
       >
+        <ChangedBy projectId={projectId} section={`project/${section}`} />
         <SectionBody
           section={section}
           projectId={projectId}

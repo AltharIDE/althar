@@ -29,6 +29,7 @@ import { PermissionJudge } from './PermissionJudge'
 import { Policies } from './Policies'
 import { Projects } from './Projects'
 import { Coordinator } from './Coordinator'
+import { SettingsTools } from './SettingsTools'
 import { TaskActions } from './TaskActions'
 import { Plans } from './Plans'
 import { Reviews } from './Reviews'
@@ -110,11 +111,8 @@ export const layer = (options: RuntimeLayerOptions) => {
   // The models each agent offers, read from its sessions, or asked of it once: sessions name them to the coordinator.
   // Whether the computer is online, as the app says, and whether an agent's service answers (ADR-060).
   const connected = startupLayer('connectivity', Connectivity.layer).pipe(Layer.provideMerge(base))
-  const able = Layer.mergeAll(
-    startupLayer('limits', Limits.layer),
-    startupLayer('models', Models.layer),
-    startupLayer('planusage', PlanUsage.layer),
-  ).pipe(
+  const able = Layer.mergeAll(startupLayer('limits', Limits.layer), startupLayer('planusage', PlanUsage.layer)).pipe(
+    Layer.provideMerge(startupLayer('models', Models.layer)),
     Layer.provideMerge(
       startupLayer('signins', SignIns.layer).pipe(
         Layer.provideMerge(
@@ -161,6 +159,8 @@ export const layer = (options: RuntimeLayerOptions) => {
       Layer.mergeAll(
         startupLayer('coordinator', Coordinator.layer),
         TaskActions.layer,
+        // The settings, read and changed by the coordinator and leads as the person can (ADR-097).
+        SettingsTools.layer,
         MachineLoad.layer,
         Overlaps.layer,
         startupLayer('search-index', fillIndex),

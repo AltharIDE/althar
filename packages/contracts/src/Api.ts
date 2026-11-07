@@ -4,6 +4,7 @@ import { Rpc, RpcGroup, RpcMiddleware } from 'effect/rpc'
 import { MESSAGE_FILES } from './files'
 import { AutomationCard, AutomationDefinition, AutomationSnapshot, AutomationsSnapshot, FromAutomation } from './automations'
 import { MESSAGE_IMAGES } from './pictures'
+import { SettingChangeCard, SettingChanged } from './settings'
 
 /*
  * What a client can ask the runtime (docs/architecture/02): commands that
@@ -1534,6 +1535,8 @@ export const NoticeItem = Schema.Struct({
      * back, a line across the thread (ADR-056).
      */
     role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder', 'skills'])),
+    /** A task the line is about, which it links to: one this task's lead started (ADR-097). */
+    task: Schema.optional(Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String })),
     /** For what a lead's agent could see: each skill, and whether it is the person's or the repository's. */
     skills: Schema.optional(
       Schema.Array(Schema.Struct({ name: Schema.String, path: Schema.String, from: Schema.Literals(['person', 'repository']) })),
@@ -1744,11 +1747,13 @@ export const Unshipped = Schema.Struct({
 export type Unshipped = typeof Unshipped.Type
 
 /**
- * Where a task stands, as the coordinator's thread shows it. `kept` is a
- * finished task that isn't a change, which the person kept for later: out of
- * Needs you as it is, not settled.
+ * Where a task stands, as the coordinator's thread shows it. `drafting` is a
+ * task drafted before its plan is proposed: off the board until the plan comes,
+ * as its card in the coordinator's thread is. `kept` is a finished task that
+ * isn't a change, which the person kept for later: out of Needs you as it is,
+ * not settled.
  */
-export const TaskPhase = Schema.Literals(['planned', 'held', 'running', 'waiting', 'ready', 'kept', 'stopped', 'settled'])
+export const TaskPhase = Schema.Literals(['drafting', 'planned', 'held', 'running', 'waiting', 'ready', 'kept', 'stopped', 'settled'])
 export type TaskPhase = typeof TaskPhase.Type
 
 /**
@@ -1881,7 +1886,8 @@ export const TaskCard = Schema.Struct({
   phase: TaskPhase,
   /**
    * Stopped, no agent on it: what stopped its lead, and when. Absent while it isn't stopped; `by` is null where nothing says,
-   * `at` where nothing says when. Only a task an agent worked on is stopped: one whose lead is on its way is under way.
+   * `at` where nothing says when. Only a task an agent worked on is stopped, or one drafted whose plan never came: one whose
+   * lead is on its way is under way.
    */
   stopped: Schema.optional(
     Schema.NullOr(
@@ -1900,6 +1906,8 @@ export const TaskCard = Schema.Struct({
   settingUp: Schema.optional(Schema.Literals(['install', 'kept'])),
   /** What it makes, read from what it has now: its card's word, and what the card shows. */
   kind: TaskKind,
+  /** The task whose lead started it (ADR-097: leads start tasks), which its card names; absent for one the person or the coordinator started. */
+  startedBy: Schema.optional(Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String })),
   /** A plain task's pictures and files, while it has some; null or absent otherwise. */
   handed: Schema.optional(Schema.NullOr(Handed)),
   /** The pull request a review task reads, and how its review stands; null or absent for any other task. */
@@ -2421,7 +2429,18 @@ export const TaskAskItem = Schema.Struct({
   }),
 })
 
+/**
+ * An agent's change to a setting, in its thread (ADR-097): a line with Undo, or a card the person presses where it loosens
+ * what asks and no message of theirs asked for it. Althar posts it and keeps it current.
+ */
+export const SettingItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('setting'),
+  content: SettingChangeCard,
+})
+
 export const ThreadItem = Schema.Union([
+  SettingItem,
   UserMessageItem,
   AgentTextItem,
   ToolCallItem,
@@ -3924,6 +3943,15 @@ export const Api = RpcGroup.make(
   command('AnswerTaskAsk', { itemId: Schema.String, yes: Schema.Boolean }, Schema.Void),
   /** Puts back what the coordinator changed an automation from, as the card in its thread shows it. */
   command('UndoAutomationChange', { itemId: Schema.String }, Schema.Void),
+  /** The person answers an agent's card asking to change a setting that loosens what asks: yes makes it, as their own change. */
+  command('AnswerSettingChange', { itemId: Schema.String, yes: Schema.Boolean }, Schema.Void),
+  /** Puts back what an agent changed a setting from, as its line shows it: the person's press, so it goes at once. */
+  command('UndoSettingChange', { itemId: Schema.String }, Schema.Void),
+  /**
+   * The settings an agent changed last and that are still as it left them, with who and when (ADR-097): a project's, or,
+   * with no project, Althar's own.
+   */
+  call('GetSettingChanges', { projectId: Schema.NullOr(Schema.String) }, Schema.Array(SettingChanged)),
   /** Whether an automation's reviews post themselves once drafted, as the person said on its first; an outside pull request's still waits. */
   command('SetAutomationPostsReviews', { automationId: Schema.String, on: Schema.Boolean }, Schema.Void),
   /** Pauses every automation, or lets them run again. Runs under way finish. */

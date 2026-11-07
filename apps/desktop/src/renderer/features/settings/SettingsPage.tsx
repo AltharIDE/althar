@@ -4,6 +4,7 @@ import { type AgentStatus, MOST_AT_ONCE } from '@althar/contracts'
 import {
   AgentInstall,
   AgentsAtOnce,
+  BrowserPreferences,
   type AgentTab,
   AgentTabList,
   AgentTabPanel,
@@ -68,6 +69,7 @@ import type { StartModel } from '../start/useStart'
 import { EXAMPLE, IslandPicture, MenuPicture, shownGlance } from './EdgePicture'
 import { ModelsView } from './ModelsView'
 import { QuickCards } from './QuickCards'
+import { ChangedBy } from './ChangedBy'
 import { GROUPS, type Section, sectionText } from './sections'
 import s from './Settings.module.css'
 import { text } from './text'
@@ -171,6 +173,7 @@ export function SettingsPage({ start, section, onSection, onTask, signIn, accoun
         </>
       }
     >
+      <ChangedBy projectId={null} section={`althar/${section}`} />
       <SectionBody
         section={section}
         start={start}
@@ -229,6 +232,8 @@ function SectionBody({
       return <AppearanceSection {...looks} />
     case 'editor':
       return <EditorSection />
+    case 'browser':
+      return <BrowserSection />
     case 'about':
       return <AboutSection start={start} />
   }
@@ -702,6 +707,39 @@ function EditorSection() {
         }))}
         value={editors.find((editor) => editor.id === preferences.editor)?.id ?? editors[0]?.id ?? null}
         onChange={(editor) => set('editor', editor)}
+      />
+      <Failed when={failed} />
+    </>
+  )
+}
+
+/* ---- the browser ------------------------------------------------------------------ */
+
+/**
+ * The pages beside conversations (ADR-100): where a thread's links open, how
+ * long pages keep cookies, and clearing what every page kept, at once.
+ */
+function BrowserSection() {
+  const { preferences, set, failed } = usePreferences()
+  const pages = useServices().host.pages
+  const [clearing, setClearing] = useState<'no' | 'clearing' | 'cleared'>('no')
+  return (
+    <>
+      <BrowserPreferences
+        links={preferences.browserLinks}
+        onLinks={(links) => set('browserLinks', links)}
+        keep={preferences.browserCookies}
+        onKeep={(keep) => set('browserCookies', keep)}
+        onClear={() => {
+          if (pages === undefined) return
+          setClearing('clearing')
+          void pages.clearAll().then(
+            () => setClearing('cleared'),
+            () => setClearing('no'),
+          )
+        }}
+        clearing={clearing === 'clearing'}
+        cleared={clearing === 'cleared'}
       />
       <Failed when={failed} />
     </>

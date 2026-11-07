@@ -46,7 +46,9 @@ export const Starting: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByRole('combobox', { name: 'Permission requests' })).toHaveTextContent('Allow, except what you keep')
-    await expect(c.getByRole('combobox', { name: 'When an account runs out' })).toHaveTextContent('Move to the next agent')
+    await expect(c.getByRole('combobox', { name: 'When an account runs out' })).toHaveTextContent(
+      'Move to the strongest model with usage left',
+    )
     await expect(c.getByRole('switch', { name: 'Try an agent’s other accounts first' })).not.toBeChecked()
     await expect(c.getByRole('combobox', { name: 'When a task is done' })).toHaveTextContent('Open a draft pull request')
     await expect(c.queryByRole('button', { name: /^Use / })).toBeNull()
