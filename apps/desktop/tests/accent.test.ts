@@ -66,10 +66,14 @@ describe('the system’s accent, kept legible', () => {
   })
 
   it('gives light a status chip ink that reads on the accent’s own wash', () => {
-    const light = accentTokens(GNOME_BLUE)?.light ?? {}
-    const ink = hexToRgb(light['--signal-ink'] ?? '#000000')
+    const light = accentTokens(GNOME_BLUE)?.light
+    const inkHex = light?.['--signal-ink']
+    const signalHex = light?.['--signal']
+    expect(inkHex).toBeDefined()
+    expect(signalHex).toBeDefined()
+    const ink = hexToRgb(inkHex!)
     const wash = (s: typeof WHITE) => {
-      const t = hexToRgb(light['--signal'] ?? '#000000')
+      const t = hexToRgb(signalHex!)
       return { r: Math.round(t.r * 0.1 + s.r * 0.9), g: Math.round(t.g * 0.1 + s.g * 0.9), b: Math.round(t.b * 0.1 + s.b * 0.9) }
     }
     expect(contrast(ink, wash(PAGE.light))).toBeGreaterThanOrEqual(4.5)
