@@ -26,13 +26,13 @@ The other two are still honest in each direction: open tasks, running errands an
 | **B · What it knows** | What it knows in the header, and New chat | nothing; it answers from the brief | the brief, the open cards and the earlier chat | Earlier chat › Read; a new chat deletes nothing | the brief's Forget everything… |
 | **C · Focus** | Focus in the project header | nothing; it answers from the whole conversation | the whole conversation and the session | Show all, in the header or the line | Settings › Notes › Forget everything |
 
-**A** closes the current page into the one above and opens a new session with a written handover: where things stand, what is open, what it will do. The page before is one line at the top, and opens in place. The coordinator speaks first because the handover is its first message.
+**A** closes the current page into a line and opens the next with a written handover: where things stand, what is open, what it will do. The page before is one line at the top, and opens in place. The coordinator speaks first because the handover is its first message.
 
 **B** makes the coordinator's memory a thing you can see and change. The brief is four lines — an errand, a plan, a draft, the usage — with a × on each; forgetting one changes what it says next. New chat empties the talk and starts a fresh session briefed from the brief; the earlier chat stays as one line, readable. Nothing is lost except the transcript's place on screen.
 
 **C** is a view, not an event: Focus hides finished work and everything before the last exchange, with a line saying how much is hidden. Show all puts it back. The session never notices. Forgetting is in the project's settings, beside its notes, where it is not something done in passing.
 
-In every direction the thread after a clear is still the same thread: the task cards keep running, the plan keeps counting down, the draft still waits for you. What a clear removes is talk, and in B what it removes is the brief.
+In every direction the thread after a clear is still the same thread: the task cards keep running, the plan keeps counting down, the draft still waits for you. Talk is what a clear takes; the brief, the pages and the work are how each direction keeps the rest.
 
 ## What the runtime would need
 
@@ -55,7 +55,7 @@ What each asks for:
 
 - **A · Pages.** Several pages in a project's conversation: either page marks over one thread, or several coordinator conversations with one current. A handover turn at each page start (a summary the live model writes, or one Althar writes from its records without a model), stored as the page's first item and used as the fresh session's brief in place of the last 12 messages. `read_thread` reads earlier pages, so "read the page before" has a path. Undo holds the page boundary and the new session until the first message on it. Forget ends every session, drops what waits in the queue, and deletes the items, so neither `read_thread` nor a brief can reach them; notes, tasks and errands stay. The cost is one summary turn per page.
 - **B · What it knows.** The brief is the new piece: persisted per project, shown, edited, and injected into every session. Today's handover record is composed at session start and thrown away; this one is kept and becomes the coordinator's memory. The coordinator maintains it — a tool that adds, changes or drops a line, or a diff at the end of a turn — and the person can correct it. New chat starts a session briefed from the brief, so the context is freed and the brief is the only thing carried; the chat is a range of the thread, readable later. Forget deletes the brief and the thread's items and ends the session. This is the most runtime work, and the only one that makes "keep what it knows" inspectable and correctable.
-- **C · Focus.** A view preference per project, kept somewhere in its settings; no runtime change, and no session to end until Forget. The line's counts come from the items the view hides. Forgetting is A's, and the context can be compacted with the existing `/compact`.
+- **C · Focus.** A view preference per project, kept somewhere in its settings; no runtime change, and no session to end until Forget. The line's counts come from the items the view hides. Forgetting is the same as A's, and the context can be compacted with the existing `/compact`.
 
 ## Recommendation
 
