@@ -40,6 +40,8 @@ export type ReviewerProps = RootProps<
     findings: ReadonlyArray<ReviewerFinding>
     /** Opens a finding where it is in the code, by where it is in the list: each finding is then a line, its words there. */
     onOpen?: (index: number) => void
+    /** Its verdict in a sentence first; off where a line over it says it already, as a review's line does. */
+    said?: boolean
     text?: Partial<ReviewerText>
   }
 >
@@ -58,12 +60,12 @@ const shortAt = (at: string) => {
  * the finding there; else its full words follow. What it says besides goes
  * under it, as any message does.
  */
-export function Reviewer({ verdict, findings, onOpen, text, className, ...rest }: ReviewerProps) {
+export function Reviewer({ verdict, findings, onOpen, said = true, text, className, ...rest }: ReviewerProps) {
   const t = { ...reviewerText, ...text }
   const n = findings.length
   return (
     <div className={cx(s.verdict, className)} {...rest}>
-      <p className={s.said}>{verdict === Verdict.Pass ? (n === 0 ? t.pass : t.passWith(n)) : t.changes(n)}</p>
+      {said && <p className={s.said}>{verdict === Verdict.Pass ? (n === 0 ? t.pass : t.passWith(n)) : t.changes(n)}</p>}
       {n > 0 && onOpen !== undefined && (
         <ol className={s.lines}>
           {findings.map((finding, index) => (

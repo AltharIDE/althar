@@ -474,6 +474,30 @@ describe('taking the person to a place in the conversation', () => {
     expect(endless).toHaveBeenCalledTimes(10)
     root.remove()
   })
+
+  it('finds a report folded into a review’s line by the line, and opens it', async () => {
+    const { reveal } = await import('../src/renderer/features/task/reveal')
+    const root = document.createElement('div')
+    document.body.append(root)
+    const line = document.createElement('div')
+    Object.assign(line.dataset, { item: 'review_1', items: 'settle_1', review: '', state: 'closed' })
+    const open = document.createElement('button')
+    open.setAttribute('aria-expanded', 'false')
+    const opened = vi.fn()
+    open.addEventListener('click', opened)
+    line.append(open)
+    root.append(line)
+    expect(
+      await reveal(
+        'settle_1',
+        vi.fn(async () => false),
+        root,
+      ),
+    ).toBe(true)
+    expect(opened).toHaveBeenCalledOnce()
+    expect(document.activeElement).toBe(line)
+    root.remove()
+  })
 })
 
 describe('a step’s popover on the Graph face', () => {
