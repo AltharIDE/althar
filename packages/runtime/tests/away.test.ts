@@ -11,10 +11,11 @@ import { Coordinator, CoordinatorOff } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { away, clearAway, recordAct, releasedIn, undoAct } from '../src/outsideActs'
 import { Plans } from '../src/Plans'
-import { Policies } from '../src/Policies'
+import { hasCoordinator, Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
+import { Sessions } from '../src/Sessions'
 import type { ToolAccess } from '../src/ToolServer'
 import { ask, cards, connect, runtimeWith, tipOf } from './changesSupport'
 import { callTool, fakeConnectors, HOST, hosted, repository, runtime, until } from './support'
@@ -198,6 +199,27 @@ describe('the coordinator off', () => {
       const [sessions] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM provider_sessions WHERE thread_id = ${threadId}`
       const [inputs] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM user_inputs WHERE thread_id = ${threadId}`
       assert.deepStrictEqual([sessions?.n, inputs?.n], [0, 0])
+    }).pipe(Effect.provide(withServices())),
+  )
+
+  it.live('turned off through change_settings, as through the window, the coordinator’s running session stops', () =>
+    Effect.gen(function* () {
+      const { projectId, threadId, access } = yield* project()
+      const sessions = yield* Sessions
+      yield* (yield* Coordinator).say({
+        envelope: yield* Runtime.envelope('thread.send', { threadId }),
+        threadId,
+        body: 'What is up next?',
+        disposition: 'after_current',
+      })
+      const live = Effect.map(sessions.running(threadId), (running) => (Option.isSome(running) ? [true] : []))
+      yield* until(live, (rows) => rows.length === 1)
+      assert.match(
+        yield* callTool(access, 'change_settings', { section: 'project/general', change: { coordinator: false } }),
+        /^Changed General/,
+      )
+      assert.isFalse(hasCoordinator((yield* (yield* Policies).current(projectId)).rules))
+      yield* until(live, (rows) => rows.length === 0)
     }).pipe(Effect.provide(withServices())),
   )
 

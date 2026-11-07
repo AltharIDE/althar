@@ -1688,13 +1688,9 @@ export const handlers = Api.toLayer(
                 Effect.provideService(Permissions, permissions),
                 Effect.provideService(Changes, pullRequests),
                 Effect.provideService(PullRequestScreenshots, screenshots),
+                Effect.provideService(Sessions, sessions),
+                Effect.provideService(SqlClient.SqlClient, sql),
               )
-              // Turned off, the coordinator stops: nothing wakes it until it is on again (ADR-097).
-              if (sent.coordinator === false) {
-                const [home] = yield* sql<{ id: string }>`
-                  SELECT id FROM threads WHERE project_id = ${projectId} AND kind = 'coordinator' AND owner_actor_id = ${instance.personId}`
-                if (home !== undefined) yield* sessions.stop(home.id).pipe(Effect.catchTag('NoSession', () => Effect.void))
-              }
               return yield* rulesView(projectId, kept)
             }),
           ),

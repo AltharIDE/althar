@@ -61,6 +61,7 @@ import { fact, timestamp } from './records'
 import { postTeamReviews, setPostTeamReviews } from './Reviews'
 import { applyRules, type RulesSent } from './rulesChange'
 import { workedOutReach } from './sandboxReach'
+import { Sessions } from './Sessions'
 import { listSkills } from './Skills'
 import { addItem, updateItem } from './threads'
 import { POOL, ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
@@ -119,6 +120,7 @@ type Needs =
   | Permissions
   | Changes
   | PullRequestScreenshots
+  | Sessions
   | Projects
   | Busy
   | FolderCleanup
