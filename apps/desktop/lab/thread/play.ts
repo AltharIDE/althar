@@ -85,7 +85,8 @@ export const usePlayed = (
         const show = (running = true) =>
           setPlayed({ items: thread, streaming, running, turnStarted, turnEnded: running ? null : new Date().toISOString() })
         show()
-        await sleep(900, stopped)
+        // A model takes a moment before its first word: the reply's place shows it thinking meanwhile.
+        await sleep(2000, stopped)
         for (const beat of beats) {
           if (gone) return
           if ('pause' in beat) {

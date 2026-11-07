@@ -21,9 +21,14 @@ import s from './Markdown.module.css'
  */
 
 /** How long a word takes to brighten, in ms: as long as `--stream-in`. */
-export const FADE = 520
+export const FADE = 700
 /** A text first drawn as it streams, no longer than this, is its first words: they fade in too. */
 const FIRST_WORDS = 80
+/**
+ * What shows within this many ms of a stretch joins it, as one span: a span a frame would be forty fading at once for each
+ * text. A word that joins late starts its fade a few hundredths in, which doesn't show.
+ */
+const TOGETHER = 50
 
 interface Reveal {
   readonly id: number
@@ -48,7 +53,12 @@ export class Freshness {
     // What grows while it streams fades in, and what shows at once as it stops; what was there when it first drew shows as
     // it is, but for the first words of a text drawn as they start.
     const from = this.shown >= 0 ? this.shown : streaming && length <= FIRST_WORDS ? 0 : length
-    if ((streaming || this.streamed) && length > from) this.reveals = [...this.reveals, { id: (this.made += 1), from, to: length, at: now }]
+    const last = this.reveals.at(-1)
+    if ((streaming || this.streamed) && length > from)
+      this.reveals =
+        last !== undefined && last.to === from && now - last.at < TOGETHER
+          ? [...this.reveals.slice(0, -1), { ...last, to: length }]
+          : [...this.reveals, { id: (this.made += 1), from, to: length, at: now }]
     else if (length < this.shown) this.reveals = this.reveals.filter((one) => one.to <= length)
     this.shown = length
     this.streamed = streaming

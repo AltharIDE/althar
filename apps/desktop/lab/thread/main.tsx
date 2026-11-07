@@ -117,7 +117,7 @@ const leadBeats: ReadonlyArray<Beat> = [
   { think: CODEX_THOUGHT },
   { say: 'I’ll check what the merge line reads back when Althar starts, and keep the wait in the store if it reads nothing.' },
   { tool: 'Read MergeLine.ts', kind: 'read', path: `${WORKTREE}/packages/runtime/src/MergeLine.ts`, ms: 1600 },
-  { tool: 'grep -rn "change_polls" packages', kind: 'search', ms: 1400 },
+  { tool: 'Search change_polls', kind: 'search', ms: 1400 },
   { think: LIVE_THOUGHT },
   { tool: 'Edit 0142-reset-at.sql', kind: 'edit', path: `${WORKTREE}/packages/persistence-sqlite/migrations/0142-reset-at.sql`, ms: 1400 },
   { tool: 'bunx vitest run tests/mergeLine.test.ts', kind: 'execute', command: 'bunx vitest run tests/mergeLine.test.ts', ms: 2000 },
