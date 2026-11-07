@@ -183,7 +183,7 @@ export function ChangeSet({
           {(checked || review !== undefined) && (
             <div className={s.lines}>
               {checked && <ChecksLine checks={checks ?? []} t={t} />}
-              {review !== undefined && <ReviewLine review={review} t={t} />}
+              {review !== undefined && <ChangeReviewLine review={review} t={t} />}
             </div>
           )}
         </div>
@@ -205,11 +205,7 @@ export function ChangeSet({
               </Button>
             )}
           </div>
-          {files.length > LISTED ? (
-            <Folders files={files} root={root} shown={folders} onOpenFile={onOpenFile} t={t} />
-          ) : (
-            <Listed files={files} root={root} onOpenFile={onOpenFile} t={t} />
-          )}
+          <ChangeFiles files={files} root={root} folders={folders} onOpenFile={onOpenFile} t={t} />
         </div>
       )}
     </article>
@@ -317,7 +313,13 @@ function Head({
 }
 
 /** Its checks in a line: what failed by name, else what waits on you, else how far they are; opening to the list. */
-function ChecksLine({ checks, t }: { checks: readonly ChangeCheck[]; t: ChangeSetText }) {
+export function ChecksLine({
+  checks,
+  t,
+}: {
+  checks: readonly ChangeCheck[]
+  t: Pick<ChangeSetText, 'noChecks' | 'checks' | 'checksPassed' | 'checksFailed' | 'checksRunning' | 'checksHeld'>
+}) {
   if (checks.length === 0) return <p className={cx(s.line, s.quiet)}>{t.noChecks}</p>
   const failed = checks.filter((check) => check.state === CheckState.Failed)
   const held = checks.find((check) => check.state === CheckState.Held)
@@ -350,7 +352,8 @@ function ChecksLine({ checks, t }: { checks: readonly ChangeCheck[]; t: ChangeSe
   )
 }
 
-function ReviewLine({ review, t }: { review: ChangeReview; t: ChangeSetText }) {
+/** Its review in a line: how it ended, by whom. */
+export function ChangeReviewLine({ review, t }: { review: ChangeReview; t: Pick<ChangeSetText, 'reviewed'> }) {
   const [mark, said, tone] =
     review.state === CheckState.Failed
       ? [<Icon key="m" name="close" size={12} />, t.reviewed.failed, s.bad]
@@ -447,6 +450,36 @@ export const foldersOf = (files: readonly ChangedFile[]): Folder[] => {
 /** As many files as are listed themselves; past it, their folders, each opening to its files. */
 const LISTED = 20
 
+type FilesText = Pick<ChangeSetText, 'files' | 'openFile' | 'more' | 'fewer'>
+
+/**
+ * Its files: each by its path, under its folder where folders hold several; past twenty, by folder, the most first, each opening
+ * to its files, `folders` of them shown before the rest are a press away. Their bars on the scale of `most`, the largest of them
+ * by default; `root` names the top of the repository.
+ */
+export function ChangeFiles({
+  files,
+  root,
+  folders = 6,
+  most,
+  onOpenFile,
+  t,
+}: {
+  files: readonly ChangedFile[]
+  root: string
+  folders?: number
+  most?: number
+  onOpenFile: ((path: string) => void) | undefined
+  t: FilesText
+}) {
+  const scale = most ?? Math.max(1, ...files.map((file) => file.add + file.del))
+  return files.length > LISTED ? (
+    <Folders files={files} root={root} shown={folders} most={scale} onOpenFile={onOpenFile} t={t} />
+  ) : (
+    <Listed files={files} root={root} most={scale} onOpenFile={onOpenFile} t={t} />
+  )
+}
+
 /** A folder's files, each by its path in it, opening its diff by its whole path; all on one scale. */
 function FilesIn({
   folder,
@@ -457,7 +490,7 @@ function FilesIn({
   folder: Folder
   most: number
   onOpenFile: ((path: string) => void) | undefined
-  t: ChangeSetText
+  t: FilesText
 }) {
   const whole = (path: string) => (folder.path === '' ? path : `${folder.path}/${path}`)
   return (
@@ -474,15 +507,16 @@ function FilesIn({
 function Listed({
   files,
   root,
+  most,
   onOpenFile,
   t,
 }: {
   files: readonly ChangedFile[]
   root: string
+  most: number
   onOpenFile: ((path: string) => void) | undefined
-  t: ChangeSetText
+  t: FilesText
 }) {
-  const most = Math.max(1, ...files.map((file) => file.add + file.del))
   const groups = groupsOf(files)
   if (groups === null) return <FilesIn folder={{ path: '', files: [...files].sort(byPlace) }} most={most} onOpenFile={onOpenFile} t={t} />
   return (
@@ -502,18 +536,19 @@ function Folders({
   files,
   root,
   shown,
+  most,
   onOpenFile,
   t,
 }: {
   files: readonly ChangedFile[]
   root: string
   shown: number
+  most: number
   onOpenFile: ((path: string) => void) | undefined
-  t: ChangeSetText
+  t: FilesText
 }) {
   const [all, setAll] = useState(false)
   const folders = foldersOf(files)
-  const most = Math.max(1, ...files.map((file) => file.add + file.del))
   // Folding away one or two folders saves nothing: they show.
   const cut = folders.length - shown <= 2 ? folders.length : shown
   const left = folders.length - cut
