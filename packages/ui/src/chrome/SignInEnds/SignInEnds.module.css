@@ -17,7 +17,7 @@
 }
 .says {
   overflow: hidden;
-  max-width: 32ch;
+  max-width: 52ch;
   color: var(--t-2);
   text-overflow: ellipsis;
 }

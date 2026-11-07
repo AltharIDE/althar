@@ -41,7 +41,7 @@ export const AllStates: Story = {
   parameters: statesOn({ hover: 'button', focus: 'button', pressed: 'button' }),
   render: (args) => (
     <States
-      size="wide"
+      size="thread"
       cells={[
         ...['rest', 'hover', 'focus', 'pressed'].map((state) => ({ state, node: <SignInEnds {...args} /> })),
         { state: 'one of several', node: <SignInEnds {...args} whose="Claude Code (work)" /> },
