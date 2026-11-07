@@ -1356,11 +1356,46 @@ describe("the coordinator's tools", () => {
       assert.include(refused, 'lead and review are objects, not strings')
       assert.include(refused, '"lead": { "model"')
       assert.lengthOf(yield* sql`SELECT id FROM task_plans`, 0)
-      // A call repeated for want of knowing whether it went through (the socket closed) leaves one plan, not two.
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('takes a propose_plan repeated after its answer was lost for the plan it made, held, changed or started since', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const plans = yield* Plans
+      const { projectId, threadId } = yield* opened
+      const [person] = yield* sql<{ id: string }>`SELECT id FROM actors WHERE kind = 'person'`
+      const actor = (person?.id ?? '') as Parameters<typeof plans.hold>[1]
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      const live = () => sql<{ id: string; state: string; startsAt: string | null }>`
+        SELECT id, state, starts_at FROM task_plans WHERE state IN ('proposed', 'accepted')`
+      yield* callTool(access, 'draft_task', { title: 'Shape it' })
       const plan = { task: 'shape-it', lead: { agent: 'codex', model: 'large' } }
-      yield* callTool(access, 'propose_plan', plan)
-      yield* callTool(access, 'propose_plan', plan)
-      assert.lengthOf(yield* sql`SELECT id FROM task_plans WHERE state IN ('proposed', 'accepted')`, 1)
+      assert.include(yield* callTool(access, 'propose_plan', plan), 'Planned shape-it.')
+      const [first] = yield* live()
+      if (first === undefined) return assert.fail('no plan was proposed')
+      // Repeated for want of knowing whether it went through (the socket closed): the same plan, the same countdown, no second.
+      assert.include(yield* callTool(access, 'propose_plan', plan), 'already proposed')
+      assert.deepStrictEqual(yield* live(), [first])
+      // The person held it, then it is repeated: still held, still the one plan.
+      yield* plans.hold(first?.id ?? '', actor)
+      assert.include(yield* callTool(access, 'propose_plan', plan), 'already proposed')
+      assert.deepStrictEqual(yield* live(), [{ ...first, startsAt: null }])
+      // A different call is a new plan, as an intended re-plan is.
+      yield* callTool(access, 'propose_plan', { ...plan, lead: { agent: 'codex', model: 'large', reason: 'faster' } })
+      const [second] = yield* live()
+      assert.notStrictEqual(second?.id, first?.id)
+      // Started before the repeat came: it says so, and a call that differs is refused as it was.
+      yield* plans.start(second?.id ?? '', actor)
+      assert.include(
+        yield* callTool(access, 'propose_plan', { ...plan, lead: { agent: 'codex', model: 'large', reason: 'faster' } }),
+        'has started',
+      )
+      assert.deepStrictEqual(
+        (yield* live()).map((one) => one.id),
+        [second?.id],
+      )
+      assert.include(yield* callTool(access, 'propose_plan', plan), 'has started already; message its lead instead')
     }).pipe(Effect.provide(withQueries())),
   )
 

@@ -1444,6 +1444,22 @@ export class Coordinator extends Context.Service<
         Effect.gen(function* () {
           const proposed = yield* read(Proposed, input, PLAN_SHAPE)
           const task = yield* taskOf(access, proposed.task)
+          // The same call again, as when its answer was lost to a closed connection: the plan it made stands, whatever became of it
+          // since (held, changed by the person, started), and nothing is proposed twice. A different call is a new plan, as ever.
+          const proposal = createHash('sha256')
+            .update(JSON.stringify([task.id, proposed]))
+            .digest('hex')
+          {
+            const sql = yield* SqlClient.SqlClient
+            const [made] = yield* sql<{ state: string }>`
+              SELECT state FROM task_plans
+              WHERE task_id = ${task.id} AND state IN ('proposed', 'accepted') AND json_extract(parameters, '$.proposal') = ${proposal}
+              LIMIT 1`
+            if (made !== undefined)
+              return made.state === 'proposed'
+                ? `Planned ${task.slug}: this plan is already proposed, so nothing changed. It starts when its countdown ends unless the person holds or changes it; they see it as a card.`
+                : `Planned ${task.slug}: this plan went through and ${task.slug} has started. Nothing changed.`
+          }
           if (task.state !== 'draft')
             return yield* new ToolRefused({ message: `${task.slug} has started already; message its lead instead.` })
           // A lead plans the tasks it drafted; the coordinator any.
@@ -1484,6 +1500,7 @@ export class Coordinator extends Context.Service<
             actorId: instance.coordinatorId,
             end: yield* changes.endFor(access.projectId, task.id),
             worksIn,
+            proposal,
             ...(proposed.works_in_why === undefined ? {} : { worksInWhy: proposed.works_in_why }),
           })
           const where = yield* localLine(access.projectId, task.id, worksIn)
