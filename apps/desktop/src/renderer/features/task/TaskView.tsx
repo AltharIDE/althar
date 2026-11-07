@@ -795,6 +795,7 @@ export function TaskView({
   // Its parts, just before the faces: what it changed is in its worktree's, which opens the changes over the window (ADR-097).
   const partsActions: PartsActions = {
     seeChanges: () => changes.show(),
+    changesKey: text.diffKey,
     ...(snapshot.task.worktree === null || editor === undefined
       ? {}
       : { openInEditor: { name: editor.name, open: () => editors.open(editor.id) } }),

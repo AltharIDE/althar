@@ -128,9 +128,9 @@ const runIn =
     })
 
 const ioOf = (configs: NonNullable<RuntimeOptions['agentConfigs']>, now: string): mcp.SyncIo & skills.SkillIo => ({
-  home: { homeDir: configs.homeDir, env: process.env },
+  home: { homeDir: configs.homeDir, env: configs.env ?? process.env },
   homeDir: configs.homeDir,
-  env: process.env,
+  env: configs.env ?? process.env,
   folder: configs.folder,
   run: configs.run ?? runIn(configs.homeDir),
   now: () => now,
@@ -313,7 +313,7 @@ export const serversFor = (role: ToolRole, projectId: string, http: boolean) =>
     // A session starting is when its agent reads its settings: the person's agents are brought in step meanwhile, not waited on.
     yield* Effect.forkDetach(refresh(ioOf(config.agentConfigs, yield* timestamp)))
     const roles = yield* readRoles
-    const home = { homeDir: config.agentConfigs.homeDir, env: process.env }
+    const home = { homeDir: config.agentConfigs.homeDir, env: config.agentConfigs.env ?? process.env }
     const seen = new Set<string>()
     const given: Array<McpServer> = []
     for (const agent of SYNCED_AGENTS)

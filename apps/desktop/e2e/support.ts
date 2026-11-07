@@ -305,6 +305,18 @@ export const backToWork = async (page: Page) => {
     .click()
 }
 
+/**
+ * Has the project ask about more than what can't be undone, as it did before
+ * allowing everything was the default (ADR-097): from its Rules' What asks;
+ * then back to the conversation.
+ */
+export const askAboutMore = async (page: Page) => {
+  await projectSettings(page, 'Rules')
+  await page.getByRole('button', { name: 'Ask about more' }).click()
+  await page.getByRole('listitem', { name: 'The rest' }).waitFor()
+  await backToWork(page)
+}
+
 /** Leaves what the lead commits for the person's Push, as before it went up on its own (ADR-072); then back to the conversation. */
 export const pushByHand = async (page: Page) => {
   await projectSettings(page, 'General')

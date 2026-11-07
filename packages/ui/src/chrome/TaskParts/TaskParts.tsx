@@ -31,6 +31,8 @@ export interface PartAction {
   confirm?: { says: string; keep: string; go: string }
   /** At the row's end, apart from the others: Remove, Stop. */
   end?: boolean
+  /** Its key, said on the button: ⌘D. */
+  kbd?: string
 }
 
 export interface TaskPartModel {
@@ -108,6 +110,7 @@ function Act({ action, sure, onSure }: { action: PartAction; sure: boolean; onSu
       size="small"
       {...(variant === 'default' ? {} : { variant })}
       {...(action.icon === undefined ? {} : { icon: action.icon })}
+      {...(action.kbd === undefined ? {} : { kbd: action.kbd })}
       className={action.end === true ? s.end : undefined}
       onClick={() => (action.confirm !== undefined && !sure ? onSure(true) : action.onClick())}
     >

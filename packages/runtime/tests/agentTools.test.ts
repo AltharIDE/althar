@@ -61,7 +61,7 @@ describe('the person’s MCP servers, through the API', () => {
       Effect.gen(function* () {
         const home = homeWith({ claude: { mcpServers: { linear: { type: 'http', url: 'https://mcp.linear.app/mcp' } } } })
         const { io } = fakeCommands(home)
-        const client = yield* connected({ homeDir: home, folder: io.folder, run: io.run })
+        const client = yield* connected({ homeDir: home, folder: io.folder, run: io.run, env: {} })
         const before = yield* client.GetAgentTools({ projectId: null })
         assert.deepStrictEqual(
           before.servers.map((one) => [one.name, one.roles]),
@@ -78,7 +78,7 @@ describe('the person’s MCP servers, through the API', () => {
       Effect.gen(function* () {
         const home = homeWith({ claude: { mcpServers: { a: { command: 'a' } } } })
         const { io } = fakeCommands(home)
-        const client = yield* connected({ homeDir: home, folder: io.folder, run: io.run })
+        const client = yield* connected({ homeDir: home, folder: io.folder, run: io.run, env: {} })
         yield* client.SetToolSync({ commandId: commandId(), kind: 'server', on: true, takeBack: false })
         // The person adds one to Claude Code, by hand.
         const claude = JSON.parse(readFileSync(join(home, '.claude.json'), 'utf8')) as { mcpServers: Record<string, unknown> }
@@ -100,7 +100,7 @@ describe('the person’s MCP servers, through the API', () => {
       Effect.gen(function* () {
         const home = homeWith({ claude: { mcpServers: { a: { command: 'a' } } } })
         const { io } = fakeCommands(home, ['codex'])
-        const client = yield* connected({ homeDir: home, folder: io.folder, run: io.run })
+        const client = yield* connected({ homeDir: home, folder: io.folder, run: io.run, env: {} })
         yield* client.SetToolSync({ commandId: commandId(), kind: 'server', on: true, takeBack: false })
         const tools = yield* client.GetAgentTools({ projectId: null })
         assert.deepStrictEqual(tools.serverSync.errors, ["Codex: codex: couldn't write its settings"])
@@ -120,7 +120,7 @@ describe('the person’s MCP servers, through the API', () => {
           broken && command === 'codex' && args[1] === 'remove'
             ? Promise.resolve({ code: 1, output: "codex: couldn't write its settings" })
             : working.io.run(command, args)
-        const client = yield* connected({ homeDir: home, folder: working.io.folder, run })
+        const client = yield* connected({ homeDir: home, folder: working.io.folder, run, env: {} })
         yield* client.SetToolSync({ commandId: commandId(), kind: 'server', on: true, takeBack: false })
         broken = true
         yield* client.SetToolKeptOut({ commandId: commandId(), kind: 'server', agent: 'codex', name: 'a', out: true })

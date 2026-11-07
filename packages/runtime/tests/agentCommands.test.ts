@@ -38,11 +38,11 @@ it.skipIf(!installed('claude') || !installed('codex'))(
       },
       codex: { mcp_servers: { fromcodex: { command: 'uvx', args: ['some-mcp'] } } },
     })
-    const env = { ...process.env, HOME: home, CODEX_HOME: join(home, '.codex'), PATH }
+    const env = { ...process.env, HOME: home, CODEX_HOME: join(home, '.codex'), XDG_CONFIG_HOME: join(home, '.config'), PATH }
     const said: Array<string> = []
     const run: SyncIo['run'] = (command, args) =>
       new Promise((resolve) =>
-        execFile(command, [...args], { env, timeout: 60_000 }, (error, stdout, stderr) => {
+        execFile(command, [...args], { env }, (error, stdout, stderr) => {
           said.push(`$ ${command} ${args.join(' ')}\n${stdout}${stderr}`.trim())
           resolve({ code: error === null ? 0 : typeof error.code === 'number' ? error.code : 1, output: `${stdout}${stderr}` })
         }),

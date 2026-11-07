@@ -93,6 +93,8 @@ export const partsText = {
 
 export interface PartsActions {
   readonly seeChanges: () => void
+  /** The key that shows the changes too: ⌘D. */
+  readonly changesKey?: string
   readonly openInEditor?: { readonly name: string; readonly open: () => void }
   readonly removeFolder?: () => void
   readonly merge: (change: ChangeSummary) => void
@@ -141,7 +143,9 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
             ),
           }),
       actions: [
-        ...(task.files.length === 0 ? [] : [{ label: t.seeChanges, onClick: act.seeChanges }]),
+        ...(task.files.length === 0
+          ? []
+          : [{ label: t.seeChanges, onClick: act.seeChanges, ...(act.changesKey === undefined ? {} : { kbd: act.changesKey }) }]),
         ...(act.openInEditor === undefined
           ? []
           : [

@@ -101,6 +101,8 @@ export interface RuntimeOptions {
   readonly agentConfigs?: {
     readonly homeDir: string
     readonly folder: string
+    /** The environment that says where each agent keeps its settings (CODEX_HOME, XDG_CONFIG_HOME): Althar's own without it. */
+    readonly env?: Readonly<Record<string, string | undefined>>
     /** Runs one of the person's agents' own commands, as sync writes through them; the agents' own on this computer without it. */
     readonly run?: (command: string, args: ReadonlyArray<string>) => Promise<{ readonly code: number; readonly output: string }>
   }

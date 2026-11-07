@@ -313,6 +313,7 @@ describe('a lead’s session', () => {
     Effect.gen(function* () {
       const sandbox = yield* leading({
         permissions: 'ask',
+        allowEverything: false,
         sandbox: {
           commands: { added: ['make  e2e *', 'bun run test:e2e'], removed: ['env -i'] },
           hosts: { added: ['https://Pkgs.Acme.dev:8443/simple'], removed: [] },

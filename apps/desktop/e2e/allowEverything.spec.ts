@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, planTask, projectSettings, say, shown, startTask, still, toConversation } from './support'
+import { askAboutMore, launch, openFirstProject, planTask, projectSettings, say, shown, startTask, still, toConversation } from './support'
 
 /*
  * Allow everything (ADR-043), as the person meets it: a new project always
@@ -44,6 +44,8 @@ test('allows everything on a task or a project, clearing what waits, and says so
   try {
     await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    // Asking about more than what can't be undone, as the person may: allowing everything is the default (ADR-097).
+    await askAboutMore(page)
     await startTask(page, 'Ship the fix')
     await openReady(page, 'Ship the fix')
 

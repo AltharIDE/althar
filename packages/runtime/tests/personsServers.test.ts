@@ -20,7 +20,7 @@ import { items, runtime, task, turns, until } from './support'
  */
 
 const home = homeWith({ codex: { mcp_servers: { context7: { command: 'npx', args: ['-y', '@upstash/context7-mcp'] } } } })
-const agentConfigs = { homeDir: home, folder: mkdtempSync(join(tmpdir(), 'althar-agent-sync-')) }
+const agentConfigs = { homeDir: home, folder: mkdtempSync(join(tmpdir(), 'althar-agent-sync-')), env: {} }
 
 const servers = (role: 'given' | 'taken off') =>
   Effect.gen(function* () {
