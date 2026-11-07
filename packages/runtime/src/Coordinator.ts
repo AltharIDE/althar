@@ -1544,6 +1544,8 @@ export class Coordinator extends Context.Service<
         Effect.gen(function* () {
           const asked = yield* read(PartOf, input)
           const task = yield* taskOf(access, asked.task)
+          if ((yield* issues.ofTask(task.id)) === null)
+            return yield* new ToolRefused({ message: `${task.slug} didn't come from an issue: there is nothing to set.` })
           yield* issues.setPart(task.id, asked.part_of)
           const how = asked.part_of ? 'does only part of its issue' : 'does all of its issue'
           yield* saidOn(access, input, task, `“${task.title}” ${how} now`, `set this task as one that ${how}`)
