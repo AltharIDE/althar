@@ -269,6 +269,7 @@ describe('a coordinator turn whose connection is lost', () => {
         waiting.map((input) => input.body),
         [body],
       )
+      assert.isTrue((yield* (yield* Queries).coordinator(project.projectId)).retryable)
       // Back, Try again sends it again, to the same session, and it is answered.
       state.down = undefined
       assert.isTrue(yield* sessions.tryAgain(threadId))

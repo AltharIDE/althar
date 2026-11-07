@@ -8,6 +8,9 @@ import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Artifacts } from '../src/Artifacts'
+import { RuntimeConfig } from '../src/Config'
+import { Coordinator } from '../src/Coordinator'
+import { coordinatorFolderAt } from '../src/coordinatorFolder'
 import { PICTURE_KEPT } from '../src/handed'
 import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
@@ -43,6 +46,31 @@ const shown = (threadId: string) =>
   })
 
 describe('pictures a lead shows in its thread', () => {
+  it.live('the coordinator shows one from its copies, named from the copy it works in (ADR-097)', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { project } = yield* task('Look at the board')
+      const threadId = yield* (yield* Coordinator).thread(project.projectId)
+      const coordinator: ToolAccess = { role: 'coordinator', projectId: project.projectId, threadId, sessionId: 'none', taskId: null }
+      const [projectRow] = yield* sql<{ slug: string }>`SELECT slug FROM projects WHERE id = ${project.projectId}`
+      const [binding] = yield* sql<{ slug: string }>`SELECT slug FROM repository_bindings WHERE project_id = ${project.projectId}`
+      const copy = join(coordinatorFolderAt((yield* RuntimeConfig).worktreeRoot, projectRow?.slug ?? ''), binding?.slug ?? '')
+      mkdirSync(join(copy, 'test-results'), { recursive: true })
+      writeFileSync(join(copy, 'test-results', 'board.png'), PNG)
+      assert.match(
+        yield* callTool(coordinator, 'show_pictures', { pictures: [{ path: 'test-results/board.png', caption: 'The board' }] }),
+        /^Althar shows the 1 in the thread now|^Althar shows it in the thread now/,
+      )
+      const [item] = yield* sql<{ kind: string }>`SELECT kind FROM thread_items WHERE thread_id = ${threadId} AND kind = 'pictures'`
+      assert.strictEqual(item?.kind, 'pictures')
+      // One that isn't there is refused, saying where it was looked for.
+      assert.match(
+        yield* callTool(coordinator, 'show_pictures', { pictures: [{ path: 'nowhere.png', caption: 'Nothing' }] }),
+        /couldn’t find nowhere\.png in your copies of the project/,
+      )
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+  )
+
   it.live('show with no step open, in order with their captions, and stay once the files are gone', () =>
     Effect.gen(function* () {
       const { lead, threadId, worktree } = yield* quick

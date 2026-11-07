@@ -1,0 +1,150 @@
+/* A change across several repositories: the card is ChangeSet's; this is its track, and its files by repository. */
+
+/* the order they merge in, as stops on one track */
+.track {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.stop {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  padding-bottom: 8px;
+}
+.stop:last-child {
+  padding-bottom: 0;
+}
+/* the track, from one stop down to the next; through a merged one, done */
+.stop:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  top: 23px;
+  bottom: 1px;
+  left: 8.25px;
+  width: 1.5px;
+  border-radius: 1px;
+  background: var(--line-2);
+}
+.merged:not(:last-child)::before {
+  background: var(--ok);
+}
+.node {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--t-3);
+  border-radius: 99px;
+  background: var(--paper);
+  font-size: 10px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-1);
+}
+.draft .node,
+.waiting .node {
+  border-style: dashed;
+  border-color: var(--t-4);
+  color: var(--t-3);
+}
+.stopped .node {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.merged .node {
+  border-color: var(--ok);
+  background: var(--ok);
+  color: var(--paper);
+}
+.merging .node {
+  border-color: transparent;
+}
+.body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+/* its pull request: its state right after its name, never across the card from it */
+.body .pr {
+  justify-content: flex-start;
+  min-height: 20px;
+}
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* a sentence, as why its host refused it, wraps rather than being cut */
+.sentence {
+  align-items: flex-start;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  line-height: 18px;
+}
+.sentence > :first-child {
+  height: 18px;
+  align-items: center;
+}
+.said {
+  flex: 1;
+  min-width: 0;
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+}
+.dash {
+  width: 7px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: var(--t-4);
+}
+
+/* narrow, a press with its menu as wide as the card, as one button is; wide, at its own width */
+.acts > [role='group'] {
+  flex: 1 1 0;
+}
+.acts > [role='group'] > :first-child {
+  flex: 1;
+  justify-content: center;
+}
+@container (min-width: 520px) {
+  .acts > [role='group'] {
+    flex: none;
+  }
+}
+
+/* its files: of every repository, or of one; long names keep their width, and the choice scrolls */
+.tabs {
+  align-self: flex-start;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabs > [role='radio'] {
+  flex: none;
+}
+.repositories {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.repository {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.repositoryName {
+  margin: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--t-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -70,6 +70,29 @@ describe('a task’s thread', () => {
     drawn.length = 0
   })
 
+  it('refreshes Try again from the runtime’s rule even when the failed round stays the same', async () => {
+    const failed = {
+      ...round('r1', ''),
+      result: null,
+      failed: {
+        kind: 'notice' as const,
+        id: 'failure1',
+        text: 'The connection to Claude was lost.',
+        failure: 'transient',
+        tone: 'error' as const,
+      },
+    }
+    const onTryAgain = vi.fn()
+    const props = { threadId: 'th1', rounds: [failed], versionOf: () => '', onTryAgain }
+    const show = shown({ ...props, retryable: false })
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+    show({ ...props, retryable: true })
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(onTryAgain).toHaveBeenCalledOnce()
+    show({ ...props, retryable: false })
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+  })
+
   it('draws a finished round again only when what it shows changed, and opens its files as the person now does', async () => {
     const before = vi.fn()
     const now = vi.fn()
@@ -96,6 +119,27 @@ describe('a task’s thread', () => {
     await userEvent.click(screen.getByRole('button', { name: /Open/ }))
     expect(now).toHaveBeenCalledWith('/work/notes.csv')
     expect(before).not.toHaveBeenCalled()
+  })
+
+  it('links the line saying its lead started a task to that task (ADR-097)', async () => {
+    const open = vi.fn()
+    shown({
+      threadId: 'th1',
+      versionOf: () => '',
+      onOpenTask: open,
+      rounds: [
+        {
+          kind: 'althar',
+          id: 'n1',
+          text: 'Started “Built-in browser beside the conversation”',
+          tone: 'info',
+          task: { threadId: 'th2', title: 'Built-in browser beside the conversation' },
+        },
+      ],
+    })
+    expect(screen.getByText(/^Started/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Built-in browser beside the conversation' }))
+    expect(open).toHaveBeenCalledWith('th2')
   })
 
   it('shows a round at work as Codex does: how long, what it said on the way, one line for what it does now; its thinking only opened', async () => {

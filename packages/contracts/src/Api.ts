@@ -4,6 +4,7 @@ import { Rpc, RpcGroup, RpcMiddleware } from 'effect/rpc'
 import { MESSAGE_FILES } from './files'
 import { AutomationCard, AutomationDefinition, AutomationSnapshot, AutomationsSnapshot, FromAutomation } from './automations'
 import { MESSAGE_IMAGES } from './pictures'
+import { SettingChangeCard, SettingChanged } from './settings'
 
 /*
  * What a client can ask the runtime (docs/architecture/02): commands that
@@ -1520,6 +1521,8 @@ export const NoticeItem = Schema.Struct({
      * back, a line across the thread (ADR-056).
      */
     role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder', 'skills'])),
+    /** A task the line is about, which it links to: one this task's lead started (ADR-097). */
+    task: Schema.optional(Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String })),
     /** For what a lead's agent could see: each skill, and whether it is the person's or the repository's. */
     skills: Schema.optional(
       Schema.Array(Schema.Struct({ name: Schema.String, path: Schema.String, from: Schema.Literals(['person', 'repository']) })),
@@ -1889,6 +1892,8 @@ export const TaskCard = Schema.Struct({
   settingUp: Schema.optional(Schema.Literals(['install', 'kept'])),
   /** What it makes, read from what it has now: its card's word, and what the card shows. */
   kind: TaskKind,
+  /** The task whose lead started it (ADR-097: leads start tasks), which its card names; absent for one the person or the coordinator started. */
+  startedBy: Schema.optional(Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String })),
   /** A plain task's pictures and files, while it has some; null or absent otherwise. */
   handed: Schema.optional(Schema.NullOr(Handed)),
   /** The pull request a review task reads, and how its review stands; null or absent for any other task. */
@@ -2410,7 +2415,18 @@ export const TaskAskItem = Schema.Struct({
   }),
 })
 
+/**
+ * An agent's change to a setting, in its thread (ADR-097): a line with Undo, or a card the person presses where it loosens
+ * what asks and no message of theirs asked for it. Althar posts it and keeps it current.
+ */
+export const SettingItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('setting'),
+  content: SettingChangeCard,
+})
+
 export const ThreadItem = Schema.Union([
+  SettingItem,
   UserMessageItem,
   AgentTextItem,
   ToolCallItem,
@@ -3001,6 +3017,8 @@ export const ThreadSnapshot = Schema.Struct({
     review: Schema.optional(Schema.NullOr(ReviewBrief)),
   }),
   session: Schema.NullOr(SessionSummary),
+  /** Whether Try again can act now, from the runtime's retry rule. */
+  retryable: Schema.optional(Schema.Boolean),
   attention: Schema.Array(AttentionRequest),
   /** The newest items before the page's start, oldest first. */
   items: Schema.Array(ThreadItem),
@@ -3128,6 +3146,8 @@ export const CoordinatorSnapshot = Schema.Struct({
   usage: Schema.optional(Schema.Array(AccountUse)),
   project: Schema.Struct({ id: Schema.String, name: Schema.String }),
   session: Schema.NullOr(SessionSummary),
+  /** Whether Try again can act now, from the runtime's retry rule. */
+  retryable: Schema.optional(Schema.Boolean),
   /** The agent, model and effort it starts on: whatever you used last. Unavailable when that agent isn't signed in. */
   suggested: Schema.NullOr(
     Schema.Struct({
@@ -3913,6 +3933,15 @@ export const Api = RpcGroup.make(
   command('AnswerTaskAsk', { itemId: Schema.String, yes: Schema.Boolean }, Schema.Void),
   /** Puts back what the coordinator changed an automation from, as the card in its thread shows it. */
   command('UndoAutomationChange', { itemId: Schema.String }, Schema.Void),
+  /** The person answers an agent's card asking to change a setting that loosens what asks: yes makes it, as their own change. */
+  command('AnswerSettingChange', { itemId: Schema.String, yes: Schema.Boolean }, Schema.Void),
+  /** Puts back what an agent changed a setting from, as its line shows it: the person's press, so it goes at once. */
+  command('UndoSettingChange', { itemId: Schema.String }, Schema.Void),
+  /**
+   * The settings an agent changed last and that are still as it left them, with who and when (ADR-097): a project's, or,
+   * with no project, Althar's own.
+   */
+  call('GetSettingChanges', { projectId: Schema.NullOr(Schema.String) }, Schema.Array(SettingChanged)),
   /** Whether an automation's reviews post themselves once drafted, as the person said on its first; an outside pull request's still waits. */
   command('SetAutomationPostsReviews', { automationId: Schema.String, on: Schema.Boolean }, Schema.Void),
   /** Pauses every automation, or lets them run again. Runs under way finish. */

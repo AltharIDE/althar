@@ -27,5 +27,14 @@ export const TaskScreen = memo(function TaskScreen({ threadId }: { threadId: str
       : {
           onRules: () => void navigate({ to: '/projects/$projectId', params: { projectId: project.id }, search: settingsSearch('rules') }),
         }
-  return <TaskView model={model} onBack={back} {...rules} onSignIn={ways.signIn} onConnections={ways.connections} />
+  return (
+    <TaskView
+      model={model}
+      onBack={back}
+      {...rules}
+      onSignIn={ways.signIn}
+      onConnections={ways.connections}
+      onOpenTask={(other) => void navigate({ to: '/threads/$threadId', params: { threadId: other } })}
+    />
+  )
 })

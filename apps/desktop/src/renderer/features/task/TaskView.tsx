@@ -342,6 +342,7 @@ export function TaskView({
   onRules,
   onSignIn,
   onConnections,
+  onOpenTask,
 }: {
   model: TaskModel
   /** Back to the project, on Escape. */
@@ -352,6 +353,8 @@ export function TaskView({
   onSignIn?: (agentId: string) => void
   /** Opens the code hosts and trackers in Settings, for one to connect or sign in to again. */
   onConnections?: () => void
+  /** Opens another task, by its thread: one this task's lead started, from its thread's line. */
+  onOpenTask?: (threadId: string) => void
 }) {
   // What the person writes to the lead, kept by the task while they are elsewhere, as are its images and what they dictate.
   const kept = draftKey.task(model.snapshot?.threadId ?? '')
@@ -1124,6 +1127,9 @@ export function TaskView({
                     })
                   }
                   onMarkReady={(url) => void model.markReady(url)}
+                  onMarkAllReady={(urls) => void model.markAllReady(urls)}
+                  merging={model.merging}
+                  mergeRefused={model.mergeRefused}
                   onPostScreenshots={model.postScreenshots}
                   onOpenFile={changes.show}
                   conflict={model.conflict}
@@ -1206,11 +1212,13 @@ export function TaskView({
                     worktree={snapshot.task.worktree}
                     {...(openFile === undefined ? {} : { openFile })}
                     session={session}
+                    retryable={snapshot.retryable}
                     project={snapshot.project.name}
                     // A failed turn is tried again here, unless its step waits on the person, whose call has its ways on.
                     {...(busy || stuckOpen ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
                     {...(onSignIn === undefined || stuckOpen ? {} : { onSignIn })}
                     onPassOn={(words) => void model.send(words)}
+                    {...(onOpenTask === undefined ? {} : { onOpenTask })}
                     onAnswerQuestion={model.answerQuestion}
                     {...(asking == null ? {} : { focusQuestion: asking })}
                     run={(run) => (

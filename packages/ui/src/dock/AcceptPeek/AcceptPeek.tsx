@@ -3,7 +3,7 @@ import { useState, type ReactNode } from 'react'
 import { Icon } from '../../foundations/Icon/Icon'
 import type { CodeHost } from '../../foundations/codeHost'
 import { BrandMark } from '../../foundations/Marks/Marks'
-import { Model, type ModelInfo } from '../../primitives/Model/Model'
+import { Model, ModelList, type ModelInfo } from '../../primitives/Model/Model'
 import { useRefocus } from '../../lib/refocus'
 import { safeHref } from '../../lib/safeHref'
 import { Button } from '../../primitives/Button/Button'
@@ -150,13 +150,10 @@ export function AcceptPeek({
       <p className={s.by}>
         {t.led} <Model model={lead} className={s.model} />
         {reviewers.length > 0 && (
-          <>
+          <span>
             {' · '}
-            {t.reviewed}{' '}
-            {reviewers.map((m) => (
-              <Model key={m.id} model={m} className={s.model} />
-            ))}
-          </>
+            {t.reviewed} <ModelList models={reviewers} className={s.model} />
+          </span>
         )}
       </p>
       <PeekSection

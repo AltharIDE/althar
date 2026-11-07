@@ -35,6 +35,8 @@ export const keys = {
   /** Where issues can be filed on a tracker connected: its teams. */
   containers: (connectionId: string) => ['containers', connectionId] as const,
   settings: ['settings'] as const,
+  /** The settings an agent changed last, with who and when: a project's, or (null) Althar's own (ADR-097). */
+  settingChanges: (projectId: string | null) => ['settingChanges', projectId] as const,
   /** Every account's plan usage: kept whole as the runtime sends it. */
   planUsage: ['planUsage'] as const,
   /** Each model's room where work on it would start, in a project or (null) anywhere: read again as plan usage changes. */
@@ -138,6 +140,8 @@ export const reads = (client: Client) => ({
   containers: (connectionId: string) =>
     queryOptions({ queryKey: keys.containers(connectionId), queryFn: () => client.listContainers(connectionId), staleTime: 60_000 }),
   settings: () => queryOptions({ queryKey: keys.settings, queryFn: () => client.getSettings() }),
+  settingChanges: (projectId: string | null) =>
+    queryOptions({ queryKey: keys.settingChanges(projectId), queryFn: () => client.getSettingChanges(projectId) }),
   // The runtime sends it whole on the feed whenever it changes, so it is read once a window, and again only by asking.
   planUsage: () => queryOptions({ queryKey: keys.planUsage, queryFn: () => client.getPlanUsage() }),
   // Shared by every picker in the window, and read again as the feed says plan usage changed.
