@@ -96,8 +96,10 @@ describe('a lead reading another task', () => {
 
       const lead = leadOf(projectId, mine)
       assert.includeMembers(yield* listTools(lead), ['list_tasks', 'find_tasks', 'read_task', 'read_thread', 'read_task_diff'])
-      // Read-only: nothing that messages another lead or changes another task.
-      assert.notIncludeMembers(yield* listTools(lead), ['message_lead', 'draft_task', 'rename_task'])
+      // One tool set with the coordinator (ADR-097): it messages other leads and moves tasks too.
+      assert.includeMembers(yield* listTools(lead), ['message_lead', 'draft_task', 'rename_task'])
+      // A task's reviewer only reads.
+      assert.notIncludeMembers(yield* listTools({ ...lead, role: 'reviewer' }), ['message_lead', 'draft_task', 'rename_task'])
 
       const listed = yield* callTool(lead, 'list_tasks')
       assert.match(listed, new RegExp(`- ${mine.slug}: Retry the checkout [^\\n]*\\n {2}Yours: the task you are on; works in a worktree;`))
@@ -402,6 +404,8 @@ describe('a lead’s brief', () => {
   it('says what it can read of other tasks, and when to', () => {
     assert.include(OTHER_TASKS, 'read_task_diff')
     assert.include(OTHER_TASKS, 'before you change code another open task changes, and where your brief names another task')
-    assert.include(OTHER_TASKS, "you can't message another task's lead")
+    assert.include(OTHER_TASKS, 'draft it with draft_task and plan it with propose_plan')
+    assert.include(OTHER_TASKS, 'Accepting and merging stay on the person')
+    assert.include(OTHER_TASKS, 'read_settings and change_settings')
   })
 })

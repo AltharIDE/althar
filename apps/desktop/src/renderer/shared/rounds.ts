@@ -88,7 +88,14 @@ export type RoundBlock =
   /** What the coordinator passed on to the lead: an ask, in a line of what it is and the rest. */
   | { readonly kind: 'relayed'; readonly id: string; readonly title: string | null; readonly body: string }
   /** Althar, saying something the person should know: a conflict, checks. */
-  | { readonly kind: 'althar'; readonly id: string; readonly text: string; readonly tone: 'info' | 'warning' }
+  | {
+      readonly kind: 'althar'
+      readonly id: string
+      readonly text: string
+      readonly tone: 'info' | 'warning'
+      /** A task the line is about, which it links to: one this task's lead started (ADR-097). */
+      readonly task?: { readonly threadId: string; readonly title: string }
+    }
   /** Its folder went, or came back: a line across the thread, a change of scene (ADR-056). */
   | { readonly kind: 'folder'; readonly id: string; readonly text: string }
   /** What a lead's agent could see of the person's skills and the repository's. */
@@ -356,7 +363,13 @@ export const roundsOf = (
           out.push({ kind: 'folder', id: block.id, text: block.text })
           return
         }
-        out.push({ kind: 'althar', id: block.id, text: shorter(block.text), tone: content.severity === 'info' ? 'info' : 'warning' })
+        out.push({
+          kind: 'althar',
+          id: block.id,
+          text: shorter(block.text),
+          tone: content.severity === 'info' ? 'info' : 'warning',
+          ...(content.task === undefined ? {} : { task: { threadId: content.task.threadId, title: content.task.title } }),
+        })
         return
       }
       case 'setup': {

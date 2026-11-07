@@ -101,6 +101,7 @@ export type PushRequestContent = Extract<ThreadItem, { kind: 'push_request' }>['
 export type ReviewDraftContent = Extract<ThreadItem, { kind: 'review_draft' }>['content']
 export type AutomationCardContent = Extract<ThreadItem, { kind: 'automation' }>['content']
 export type TaskAskContent = Extract<ThreadItem, { kind: 'task_ask' }>['content']
+export type SettingChangeContent = Extract<ThreadItem, { kind: 'setting' }>['content']
 
 export type Block =
   | {
@@ -168,6 +169,8 @@ export type Block =
   | { readonly kind: 'automation'; readonly id: string; readonly automation: AutomationCardContent }
   /** The coordinator asking the person to stop, hold, restart or settle a task: answered where it is. */
   | { readonly kind: 'task_ask'; readonly id: string; readonly ask: TaskAskContent }
+  /** An agent's change to a setting: a line with Undo, or a card the person presses first (ADR-097). */
+  | { readonly kind: 'setting'; readonly id: string; readonly change: SettingChangeContent }
   /**
    * The agent's turn runs on what it was last asked, and it hasn't said
    * anything yet: where its reply will start, held for it, with how long it
@@ -613,6 +616,9 @@ export const blocksOf = (
         continue
       case 'task_ask':
         blocks.push({ kind: 'task_ask', id: item.id, ask: item.content })
+        continue
+      case 'setting':
+        blocks.push({ kind: 'setting', id: item.id, change: item.content })
         continue
       case 'notice':
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.

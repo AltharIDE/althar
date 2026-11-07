@@ -96,6 +96,27 @@ describe('a task’s thread', () => {
     expect(before).not.toHaveBeenCalled()
   })
 
+  it('links the line saying its lead started a task to that task (ADR-097)', async () => {
+    const open = vi.fn()
+    shown({
+      threadId: 'th1',
+      versionOf: () => '',
+      onOpenTask: open,
+      rounds: [
+        {
+          kind: 'althar',
+          id: 'n1',
+          text: 'Started “Built-in browser beside the conversation”',
+          tone: 'info',
+          task: { threadId: 'th2', title: 'Built-in browser beside the conversation' },
+        },
+      ],
+    })
+    expect(screen.getByText(/^Started/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Built-in browser beside the conversation' }))
+    expect(open).toHaveBeenCalledWith('th2')
+  })
+
   it('shows what the lead thinks under its line while it works, but not while it settles a review', async () => {
     const thinking: Round = {
       ...round('r3', 'unused'),

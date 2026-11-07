@@ -115,6 +115,8 @@ export const settled = (item: ThreadItem): boolean => {
       return item.content.state !== 'open'
     case 'automation':
       return item.content.state === 'deleted' || item.content.ask?.done === true
+    case 'setting':
+      return item.content.state !== 'asked'
     case 'agent_message':
     case 'agent_thought':
     case 'notice':

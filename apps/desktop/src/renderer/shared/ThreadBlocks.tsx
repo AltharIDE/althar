@@ -26,6 +26,7 @@ import {
 } from '@althar/ui'
 
 import { CommandOutput } from './CommandOutput'
+import { SettingChangeOf } from './SettingChangeOf'
 import { shotsOf } from './evidence'
 import { HandedBack } from './HandedBack'
 import { documentVersions } from './handed'
@@ -566,6 +567,8 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{automation?.(block.automation, block.id)}</Fragment>
       case 'task_ask':
         return <Fragment key={block.id}>{taskAsk?.(block.ask, block.id)}</Fragment>
+      case 'setting':
+        return <SettingChangeOf key={block.id} change={block.change} itemId={block.id} />
       case 'waiting':
         return (
           <Turn key={block.id} model={turnModel(session?.agentId ?? null)}>
