@@ -555,13 +555,26 @@ export class Setups extends Context.Service<
         })
 
       /** Keeps a repository's setup, replacing what was recorded; the project changes with it, so its settings read it again. */
-      const record = (projectId: ProjectId, bindingId: string, name: string, recorded: Recorded | null, actorId: ActorId) =>
+      const record = (
+        projectId: ProjectId,
+        bindingId: string,
+        name: string,
+        recorded: Recorded | null,
+        actorId: ActorId,
+        personAgreed = true,
+      ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          yield* sql.withTransaction(
+          return yield* sql.withTransaction(
             Effect.gen(function* () {
-              yield* sql`UPDATE repository_bindings SET recorded_setup = ${recorded === null ? null : JSON.stringify(recorded)}
-                WHERE id = ${bindingId}`
+              // One statement decides and writes, so an edit the person saved meanwhile is never replaced without their agreement.
+              const written = yield* sql<{
+                id: string
+              }>`UPDATE repository_bindings SET recorded_setup = ${recorded === null ? null : JSON.stringify(recorded)}
+                WHERE id = ${bindingId}
+                  AND (${personAgreed ? 1 : 0} = 1 OR recorded_setup IS NULL OR json_extract(recorded_setup, '$.taskId') IS NOT NULL)
+                RETURNING id`
+              if (written.length === 0) return false
               const [project] = yield* sql<{ revision: number }>`SELECT revision FROM projects WHERE id = ${projectId}`
               const revision = yield* bumpRevision('projects', projectId, project?.revision ?? 1)
               yield* fact({
@@ -573,6 +586,7 @@ export class Setups extends Context.Service<
                 payload: { repository: name, ...(recorded === null ? {} : { copy: recorded.copy, commands: recorded.commands }) },
                 actorId,
               })
+              return true
             }),
           )
         })
@@ -661,11 +675,12 @@ export class Setups extends Context.Service<
               })
             // What the person edited is theirs: it is replaced only once they agreed to it.
             if (recordedOf(one.recorded)?.taskId === null && asked.person_agreed !== true)
-              return yield* new ToolRefused({
-                message: `The person edited ${one.name}'s setup themselves, so it stays as they left it. Tell them what you would change and why, and ask. Only once they agree, call record_setup again with person_agreed true.`,
-              })
+              return yield* new ToolRefused({ message: personEdited(one.name) })
             const recorded: Recorded = { copy: [...copy], commands: [...commands], at: yield* provide(timestamp), taskId }
-            yield* provide(record(one.projectId, one.bindingId, one.name, recorded, instance.systemId))
+            const kept = yield* provide(
+              record(one.projectId, one.bindingId, one.name, recorded, instance.systemId, asked.person_agreed === true),
+            )
+            if (!kept) return yield* new ToolRefused({ message: personEdited(one.name) })
             const copied = copy.length === 0 ? [] : (yield* copyInto(one.checkout, one.worktree, copy)).said
             if (commands.length === 0 && copy.length === 0)
               return `Recorded that ${one.name} needs nothing set up: later tasks' leads won't be asked again.`
@@ -694,6 +709,9 @@ export class Setups extends Context.Service<
     }),
   )
 }
+
+const personEdited = (name: string) =>
+  `The person edited ${name}'s setup themselves, so it stays as they left it. Tell them what you would change and why, and ask. Only once they agree, call record_setup again with person_agreed true.`
 
 /** How a setup that failed ended, in words for the lead. */
 const howItFailed = (setUp: SetUp) => {
