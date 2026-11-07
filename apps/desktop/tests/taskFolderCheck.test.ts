@@ -2,13 +2,18 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { type Disk, refusalOf, refusals, taskFolderRefusal, taskRootIn } from '../src/main/taskFolderCheck'
+import { type Disk, refusalOf, refusals, ROOT_MARKER, statusOf, taskFolderRefusal, taskRootIn } from '../src/main/taskFolderCheck'
 
 /** A disk of folders by path; `readOnly` ones can't be written, `repositories` have a .git. */
-const disk = (folders: ReadonlyArray<string>, readOnly: ReadonlyArray<string> = [], repositories: ReadonlyArray<string> = []): Disk => ({
+const disk = (
+  folders: ReadonlyArray<string>,
+  readOnly: ReadonlyArray<string> = [],
+  repositories: ReadonlyArray<string> = [],
+  files: ReadonlyArray<string> = [],
+): Disk => ({
   isDirectory: (path) => folders.includes(path),
   writable: (path) => !readOnly.includes(path),
-  exists: (path) => repositories.some((repository) => path === join(repository, '.git')),
+  exists: (path) => files.includes(path) || repositories.some((repository) => path === join(repository, '.git')),
   real: (path) => path,
 })
 
@@ -65,8 +70,8 @@ describe('the folder made in a pick', () => {
     expect(taskRootIn('/data/stuff')).toBe(join('/data/stuff', 'Althar'))
   })
 
-  it('is the pick itself where it is named Althar already', () => {
-    expect(taskRootIn('/data/Althar')).toBe('/data/Althar')
+  it('is a folder of its own even where the pick is named Althar, so a pick holding checkouts keeps them apart', () => {
+    expect(taskRootIn('/home/ada/Projects/Althar')).toBe(join('/home/ada/Projects/Althar', 'Althar'))
   })
 })
 
@@ -78,5 +83,31 @@ describe('a pick through the sandbox’s file portal', () => {
 
   it('is otherwise checked as any folder', () => {
     expect(taskFolderRefusal('/data/tasks', profile, disk(['/data/tasks']), '/home/ada')).toBeNull()
+  })
+})
+
+describe('a pick inside a root Althar made', () => {
+  it('is refused, whichever root it was and however deep', () => {
+    const inside = '/data/Althar/meridian'
+    const folders = disk([inside, '/data/Althar'], [], [], [join('/data/Althar', ROOT_MARKER)])
+    expect(taskFolderRefusal(inside, profile, folders, '/home/ada')).toBe(refusals.kept)
+    expect(taskFolderRefusal('/data/Althar', profile, folders, '/home/ada')).toBe(refusals.kept)
+  })
+
+  it('does not refuse a folder beside one', () => {
+    const folders = disk(['/data/other', '/data/Althar'], [], [], [join('/data/Althar', ROOT_MARKER)])
+    expect(taskFolderRefusal('/data/other', profile, folders, '/home/ada')).toBeNull()
+  })
+})
+
+describe('what an unusable chosen folder means', () => {
+  it('says what happened, what it stops and the way out, for each reason', () => {
+    for (const refusal of [refusals.missing, refusals.readOnly, refusals.repository]) {
+      const line = statusOf('/Volumes/Ext/Althar', refusal, '/home/ada/Althar')
+      expect(line).toContain('/Volumes/Ext/Althar')
+      expect(line).toContain('new tasks are made in /home/ada/Althar for now')
+      expect(line).toContain('use the default')
+    }
+    expect(statusOf('/x', refusals.missing, '/d')).toContain('can’t find')
   })
 })

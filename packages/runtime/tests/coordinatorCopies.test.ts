@@ -6,7 +6,7 @@ import { join, sep } from 'node:path'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
-import { earlierFolders, freshCopy, readsOf } from '../src/coordinatorFolder'
+import { earlierRoots, freshCopy, readsOf } from '../src/coordinatorFolder'
 
 /*
  * The coordinator's copies of the project's repositories (ADR-058): each a
@@ -166,7 +166,12 @@ describe("the coordinator's copies", () => {
   it('may read git’s config files but never its credential store, which is in the same folder', () => {
     const home = realpathSync(mkdtempSync(join(tmpdir(), 'althar-home-')))
     const projectFolder = join(home, 'worktrees', 'meridian')
-    const place = { home, projectFolder, folder: join(projectFolder, '.coordinator'), mirrors: join(projectFolder, '.coordinator-mirrors') }
+    const place = {
+      home,
+      root: join(home, 'worktrees'),
+      folder: join(projectFolder, '.coordinator'),
+      mirrors: join(projectFolder, '.coordinator-mirrors'),
+    }
     const within = (path: string, places: ReadonlyArray<string>) => places.some((given) => path === given || path.startsWith(`${given}/`))
     const holds = (gitConfig: string, xdgConfig?: string) => {
       mkdirSync(gitConfig, { recursive: true })
@@ -185,57 +190,55 @@ describe("the coordinator's copies", () => {
     rmSync(elsewhere, { recursive: true, force: true })
   })
 
-  it('keeps denying the task folders made under an earlier root, once the person has moved the root', () => {
+  it('denies the whole of the root and of an earlier one, outside home, with two projects, and gives back only the coordinator’s own folder', () => {
     const home = realpathSync(mkdtempSync(join(tmpdir(), 'althar-home-')))
     const before = realpathSync(mkdtempSync(join(tmpdir(), 'althar-before-')))
     const now = realpathSync(mkdtempSync(join(tmpdir(), 'althar-now-')))
     const projectFolder = join(now, 'meridian')
-    const earlier = [join(before, 'meridian')]
     const { allowed, denied } = readsOf({
       home,
-      projectFolder,
-      earlier,
+      root: now,
+      earlier: [before],
       folder: join(projectFolder, '.coordinator'),
       mirrors: join(projectFolder, '.coordinator-mirrors'),
       objects: [],
       repositories: [],
     })
-    assert.isTrue(denied.includes(before + '/meridian'), 'the earlier root’s task folders aren’t denied')
-    assert.isTrue(denied.includes(projectFolder), 'the current root’s task folders aren’t denied')
-    assert.isFalse(
-      allowed.some((path) => path.startsWith(before)),
-      'the earlier root is given back',
-    )
+    assert.isTrue(denied.includes(before), 'the earlier root isn’t denied')
+    assert.isTrue(denied.includes(now), 'the current root isn’t denied, so another project’s task folders are readable')
+    assert.isTrue(allowed.includes(join(projectFolder, '.coordinator')), 'its own folder isn’t given back')
+    assert.isFalse(allowed.some((path) => path === now || path.startsWith(before)))
     for (const folder of [home, before, now]) rmSync(folder, { recursive: true, force: true })
   })
 
-  it('does not give back a toolchain folder that holds the task folders, whether the root is in it now or was', () => {
+  it('does not give back a toolchain folder that holds the task folders', () => {
     const home = realpathSync(mkdtempSync(join(tmpdir(), 'althar-home-')))
     mkdirSync(join(home, '.bun'))
-    const projectFolder = join(home, '.bun', 'tasks', 'meridian')
+    const root = join(home, '.bun', 'tasks')
     const { allowed, denied } = readsOf({
       home,
-      projectFolder,
+      root,
       earlier: [],
-      folder: join(projectFolder, '.coordinator'),
-      mirrors: join(projectFolder, '.coordinator-mirrors'),
+      folder: join(root, 'meridian', '.coordinator'),
+      mirrors: join(root, 'meridian', '.coordinator-mirrors'),
       objects: [],
       repositories: [],
     })
     assert.isFalse(allowed.includes(join(home, '.bun')), 'the toolchain folder that holds the task folders is allowed whole')
-    assert.isTrue(denied.includes(projectFolder))
+    assert.isTrue(denied.includes(root))
     rmSync(home, { recursive: true, force: true })
   })
 })
 
-describe('the project folders of earlier task roots', () => {
-  it('are the grandparents of the worktrees, once each, and never the project folder now', () => {
-    const now = '/data/tasks/meridian'
-    const worktrees = ['/old/meridian/t1/app', '/old/meridian/t2/app', '/old/meridian/t2/docs', `${now}/t3/app`]
-    assert.deepEqual(earlierFolders(worktrees, now), ['/old/meridian'])
+describe('the earlier roots', () => {
+  it('are the roots of the worktrees, once each, and never the root now or what is in it', () => {
+    const now = '/data/tasks'
+    const worktrees = ['/old/meridian/t1/app', '/old/meridian/t2/app', '/old/meridian/t2/docs', `${now}/meridian/t3/app`]
+    assert.deepEqual(earlierRoots(worktrees, now, '/home/ada'), ['/old'])
   })
 
-  it('never name a filesystem or drive root, as a moved checkout’s path would', () => {
-    assert.deepEqual(earlierFolders(['/srv/foo', '/workspace/foo', '/foo'], '/data/tasks/meridian'), [])
+  it('never name a filesystem or drive root, or home or what holds it', () => {
+    assert.deepEqual(earlierRoots(['/srv/foo', '/workspace/foo', '/foo', '/a/foo'], '/data/tasks', '/home/ada'), [])
+    assert.deepEqual(earlierRoots(['/home/ada/meridian/t1/app', '/home/p/t/app'], '/data/tasks', '/home/ada'), [])
   })
 })

@@ -20,7 +20,10 @@ export interface TaskFolderLocationModel extends TaskFolderState {
   readonly refusal: string | null
 }
 
-export const text = { failed: 'That folder couldn’t be kept. Try again.' }
+export const text = {
+  failed: 'That folder couldn’t be kept. Try again.',
+  defaultFailed: 'Couldn’t go back to the default folder. Try again.',
+}
 
 export const useTaskFolderLocation = (): TaskFolderLocationModel | null => {
   const { host } = useServices()
@@ -28,18 +31,23 @@ export const useTaskFolderLocation = (): TaskFolderLocationModel | null => {
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
 
+  // As it stands now, not as it was when the page opened: a drive may have gone or come back since.
   useEffect(() => {
     let live = true
-    void host.taskFolder?.().then(
-      (now) => live && setState(now),
-      () => undefined,
-    )
+    const read = () =>
+      void host.taskFolder?.().then(
+        (now) => live && setState(now),
+        () => undefined,
+      )
+    read()
+    window.addEventListener('focus', read)
     return () => {
       live = false
+      window.removeEventListener('focus', read)
     }
   }, [host])
 
-  const ask = useCallback((asking: (() => Promise<TaskFolderChoice>) | undefined) => {
+  const ask = useCallback((asking: (() => Promise<TaskFolderChoice>) | undefined, failed: string) => {
     if (asking === undefined) return
     setBusy(true)
     setRefusal(null)
@@ -52,12 +60,12 @@ export const useTaskFolderLocation = (): TaskFolderLocationModel | null => {
       },
       () => {
         setBusy(false)
-        setRefusal(text.failed)
+        setRefusal(failed)
       },
     )
   }, [])
-  const change = useCallback(() => ask(host.chooseTaskFolder), [ask, host])
-  const useDefault = useCallback(() => ask(host.useDefaultTaskFolder), [ask, host])
+  const change = useCallback(() => ask(host.chooseTaskFolder, text.failed), [ask, host])
+  const useDefault = useCallback(() => ask(host.useDefaultTaskFolder, text.defaultFailed), [ask, host])
 
   return state === null ? null : { ...state, change, useDefault, busy, refusal }
 }

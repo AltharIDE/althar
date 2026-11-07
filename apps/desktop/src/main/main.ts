@@ -1,12 +1,12 @@
 import { isStartupStage, type StartupStage } from '../startup'
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { homedir, hostname, userInfo } from 'node:os'
 import { join, resolve } from 'node:path'
 
 import { locations as locationsOf, taskFolder as taskFolderOf } from './locations'
-import { refusalOf, refusals, taskFolderRefusal, taskRootIn } from './taskFolderCheck'
+import { refusalOf, refusals, ROOT_MARKER, statusOf, taskFolderRefusal, taskRootIn } from './taskFolderCheck'
 
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
 import { type AppPreferences, DEFAULT_PREFERENCES, doNotTrack, isPreferenceKey } from './appPreferences'
@@ -170,9 +170,21 @@ let storeFailure: StoreFailure | undefined
 let retrying = false
 
 /** The profile and worktrees, as the command-line client has them: a Flatpak's home is a fresh empty one each run, so it keeps worktrees beside its profile (locations.ts). */
-const locations = () => locationsOf(process.env, process.platform, homedir(), undefined, preferences.worktrees)
+const locations = () => ({
+  ...locationsOf(process.env, process.platform, homedir(), undefined, preferences.worktrees),
+  worktrees: taskFolderUsed(),
+})
 /** Where new tasks' worktrees go now, and who decided: the environment, the person's choice in Settings, or the platform (locations.ts). */
 const taskFolderNow = () => taskFolderOf(process.env, process.platform, homedir(), undefined, preferences.worktrees)
+const defaultTaskFolder = () => taskFolderOf(process.env, process.platform, homedir(), undefined, null).folder
+/**
+ * Where new tasks' worktrees are made: the folder now, but where the person chose it and it can't be used (an unmounted drive, a folder gone),
+ * the platform's default, so the runtime never creates it where it isn't.
+ */
+const taskFolderUsed = () => {
+  const now = taskFolderNow()
+  return now.from === 'setting' && refusalOf(now.folder, now.profile) !== null ? defaultTaskFolder() : now.folder
+}
 
 // Althar is the name windows, window managers and the desktop see, whichever way the app was started.
 app.setName('Althar')
@@ -570,6 +582,7 @@ if (__ALTHAR_TEST_HOOKS__)
 
 const startRuntime = () => {
   const { profile, worktrees } = locations()
+  toldRoot = worktrees
   startupMark('runtime-start')
   const child = utilityProcess.fork(join(here, '../runtime/runtime.js'), [], {
     serviceName: 'Althar runtime',
@@ -1005,15 +1018,26 @@ ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unkn
 const environmentSets = 'ALTHAR_WORKTREES sets this folder; it can’t be changed here.'
 /** The folder as it stands; where the person's choice has gone missing or can't be written, why, so the row can say so. */
 const taskFolderState = () => {
-  const { folder, from } = taskFolderNow()
-  const problem = from === 'setting' ? refusalOf(folder, locations().profile) : null
-  return problem === null ? { folder, from } : { folder, from, problem }
+  const { folder, from, profile } = taskFolderNow()
+  const refusal = from === 'setting' ? refusalOf(folder, profile) : null
+  tellRuntimeTaskFolder()
+  const defaultFolder = defaultTaskFolder()
+  return refusal === null
+    ? { folder, from, defaultFolder }
+    : { folder, from, defaultFolder, problem: statusOf(folder, refusal, defaultFolder) }
+}
+/** The root the runtime was last told; told again when it changes, as a drive comes back or goes. */
+let toldRoot: string | undefined
+const tellRuntimeTaskFolder = () => {
+  const root = taskFolderUsed()
+  if (root === toldRoot) return
+  toldRoot = root
+  runtime?.postMessage({ type: 'worktrees', root })
 }
 /** Keeps the person's choice (null for the platform's default) and tells the runtime: the next task's worktree goes there, those made stay where they are. */
 const keepTaskFolder = async (chosen: string | null) => {
   const kept = await writeAppPreference(locations().profile, 'worktrees', chosen)
   preferences = { ...preferences, worktrees: kept }
-  runtime?.postMessage({ type: 'worktrees', root: taskFolderNow().folder })
   return taskFolderState()
 }
 ipcMain.handle('althar:task-folder', async () => {
@@ -1032,7 +1056,7 @@ ipcMain.handle('althar:choose-task-folder', async (event) => {
   const options = {
     properties: ['openDirectory' as const, 'createDirectory' as const],
     title: 'Choose where task folders go',
-    message: 'Choose the folder new tasks’ folders are made in',
+    message: 'Althar makes a folder named Althar in the one you choose, and makes new tasks’ folders in it',
     defaultPath: taskFolderNow().folder,
   }
   const result = window === null ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(window, options)
@@ -1041,13 +1065,16 @@ ipcMain.handle('althar:choose-task-folder', async (event) => {
   // Where the platform keeps them is no choice to check: it is the default, kept as none.
   if (resolve(picked) === resolve(taskFolderOf(process.env, process.platform, homedir(), undefined, null).folder))
     return keepTaskFolder(null)
+  // The root chosen already, picked again: nothing to change.
+  if (taskFolderNow().from === 'setting' && resolve(picked) === resolve(taskFolderNow().folder)) return taskFolderState()
   const refused = taskFolderRefusal(picked, locations().profile)
   if (refused !== null) return { refused }
   // Althar owns what it makes in the folder (it clears runs and keeps the coordinator's copies there), so it makes them in a folder of its own
-  // in the pick, never among the person's own: a pick named Althar is that folder already.
+  // in the pick, never among the person's own, whatever the pick is named; a marker says it is one, so no later pick lands inside it.
   const root = taskRootIn(picked)
   try {
     mkdirSync(root, { recursive: true })
+    writeFileSync(join(root, ROOT_MARKER), 'Althar keeps task folders in this folder.\n')
   } catch {
     return { refused: refusals.readOnly }
   }

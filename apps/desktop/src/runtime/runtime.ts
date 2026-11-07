@@ -160,7 +160,10 @@ const failingUpdate =
  */
 let worktreeRoot = required('ALTHAR_WORKTREES')
 
-/** The options with `worktreeRoot` read when used, so a change reaches every service, copies of the options included. */
+/**
+ * The options with `worktreeRoot` read when used, so a change reaches every service. It holds only while the object itself is what readers
+ * keep and they read `config.worktreeRoot` where they use it: a spread (`{ ...config }`) calls the getter and copies the value, freezing the root.
+ */
 const withLiveRoot = <T extends object>(given: T): T =>
   Object.defineProperty({ ...given }, 'worktreeRoot', { get: () => worktreeRoot, enumerable: true, configurable: true })
 

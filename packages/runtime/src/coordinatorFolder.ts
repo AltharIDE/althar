@@ -91,12 +91,13 @@ const real = (path: string): string => {
 export const readsOf = (place: {
   readonly home: string
   readonly xdgConfig?: string | undefined
-  readonly projectFolder: string
+  /** Where every project's task folders are made now (ADR-058: the coordinator reads none of them, other projects' included). */
+  readonly root: string
   readonly folder: string
   readonly mirrors: string
   readonly objects: ReadonlyArray<string>
   readonly repositories: ReadonlyArray<string>
-  /** The project's task folders made where its folders went before (Settings can move them): they stay where they are, and stay denied. */
+  /** The roots task folders were made in before the person moved it (Settings can): what is in them stays where it is, and stays denied. */
   readonly earlier?: ReadonlyArray<string>
 }) => {
   const gitConfig = join(place.xdgConfig === undefined || place.xdgConfig === '' ? join(place.home, '.config') : place.xdgConfig, 'git')
@@ -108,7 +109,7 @@ export const readsOf = (place: {
     // Whether or not they are there: git reading one held from it fails rather than going without.
     ...GIT_CONFIG_FILES.map((file) => join(gitConfig, file)),
   ].map(real)
-  const taskFolders = [place.projectFolder, ...(place.earlier ?? [])].map(real)
+  const taskFolders = [place.root, ...(place.earlier ?? [])].map(real)
   const denied = [place.home, ...taskFolders, ...place.repositories, join(gitConfig, 'credentials')].map(real)
   // A place that holds task folders is not given back whole: a task root chosen in Settings may sit in a toolchain's folder (~/.bun), and
   // the broader allowance would otherwise override the denial of the task folders in it.
@@ -277,12 +278,13 @@ export const coordinatorFolder = (projectId: string) =>
       ORDER BY b.created_at, b.rowid`
     const projectFolder = join(config.worktreeRoot, project.slug)
     // Task folders made under another root, before the person moved it (Settings › Task folders), are still there.
-    const earlier = earlierFolders(
+    const earlier = earlierRoots(
       (yield* sql<{ path: string }>`
         SELECT path FROM workspaces WHERE project_id = ${projectId} AND device_id = ${instance.deviceId} AND kind IS NULL`).map(
         (workspace) => workspace.path,
       ),
-      projectFolder,
+      config.worktreeRoot,
+      homedir(),
     )
     const folder = coordinatorFolderAt(config.worktreeRoot, project.slug)
     // Beside the coordinator's folder, never in it: what its commands may write is only that folder.
@@ -307,7 +309,7 @@ export const coordinatorFolder = (projectId: string) =>
     const reads = readsOf({
       home: homedir(),
       xdgConfig: process.env.XDG_CONFIG_HOME,
-      projectFolder,
+      root: config.worktreeRoot,
       earlier,
       folder,
       mirrors,
@@ -318,10 +320,13 @@ export const coordinatorFolder = (projectId: string) =>
   })
 
 /**
- * The project's folders in earlier task roots, from the paths of its worktrees (root/project/task/repository). The person's own checkouts
- * (kind 'checkout') aren't asked for, and a path too shallow to have a root (a filesystem or drive root would deny everything) is skipped.
+ * The earlier roots task folders were made in, from the paths of the project's worktrees (root/project/task/repository). The person's own
+ * checkouts (kind 'checkout') aren't asked for. A root that is a filesystem or drive root, or home or holds it, is skipped (it would deny
+ * everything), as is the current root and what is in it.
  */
-export const earlierFolders = (worktrees: ReadonlyArray<string>, projectFolder: string): ReadonlyArray<string> => {
-  const folders = worktrees.map((path) => dirname(dirname(path))).filter((path) => dirname(path) !== path)
-  return [...new Set(folders)].filter((path) => path !== projectFolder && !path.startsWith(projectFolder + sep))
+export const earlierRoots = (worktrees: ReadonlyArray<string>, root: string, home: string): ReadonlyArray<string> => {
+  const roots = worktrees.map((path) => dirname(dirname(dirname(path)))).filter((path) => dirname(path) !== path)
+  return [...new Set(roots)].filter(
+    (path) => path !== home && !home.startsWith(path + sep) && path !== root && !path.startsWith(root + sep),
+  )
 }

@@ -430,6 +430,7 @@ function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
           <TaskFolderLocation
             folder={taskFolder.folder}
             from={taskFolder.from}
+            {...(taskFolder.defaultFolder === undefined ? {} : { defaultFolder: taskFolder.defaultFolder })}
             onChange={taskFolder.change}
             onUseDefault={taskFolder.useDefault}
             {...(taskFolder.problem === undefined ? {} : { problem: taskFolder.problem })}

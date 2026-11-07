@@ -18,6 +18,28 @@
   display: block;
 }
 
+.lines {
+  display: grid;
+  gap: 6px;
+}
+
+/* a lasting state of the setting: short of danger */
+.problem {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--warm);
+}
+
+.problem > svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+/* the answer to what the person just did */
 .refusal {
   margin: 0;
   font-size: 12px;

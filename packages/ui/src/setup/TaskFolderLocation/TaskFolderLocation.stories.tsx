@@ -35,7 +35,7 @@ const meta = {
   title: 'Setup/TaskFolderLocation',
   component: TaskFolderLocation,
   parameters: { layout: 'centered' },
-  decorators: [(Story) => <div style={{ width: 680 }}>{Story()}</div>],
+  decorators: [(Story) => <div style={{ width: 760 }}>{Story()}</div>],
   args: { folder: '/home/ada/Althar', from: 'default', onChange },
 } satisfies Meta<typeof TaskFolderLocation>
 export default meta
@@ -48,7 +48,7 @@ export const Default: Story = {
     const c = within(canvasElement)
     await expect(c.getByText('/home/ada/Althar')).toBeVisible()
     await expect(c.getByText(/Folders already made stay where they are/)).toBeVisible()
-    await expect(c.getByRole('button', { name: 'Task folders' })).toBeEnabled()
+    await expect(c.getByRole('button', { name: /Change/ })).toBeEnabled()
   },
 }
 
@@ -57,25 +57,44 @@ export const Refused: Story = {
   render: () => <Row />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await userEvent.click(c.getByRole('button', { name: 'Task folders' }))
+    await userEvent.click(c.getByRole('button', { name: /Change/ }))
     await expect(c.getByRole('alert')).toHaveTextContent('inside a repository')
     await expect(c.getByText('/home/ada/Althar')).toBeVisible()
-    await userEvent.click(c.getByRole('button', { name: 'Task folders' }))
+    await userEvent.click(c.getByRole('button', { name: /Change/ }))
     await expect(c.getByText('/data/task-folders')).toBeVisible()
   },
 }
 
-/** A folder the person chose has gone missing: the row says so, and Use the default goes back. */
+/** A folder the person chose is gone (a drive not connected): a calm line saying what it stops and the way out, and Use the default as the main action. */
 export const Missing: Story = {
   args: {
-    folder: '/mnt/gone/Althar',
+    folder: '/Volumes/Ext/Althar',
     from: 'setting',
-    problem: 'That folder is missing; new tasks can’t be made there. Choose another, or use the default.',
+    defaultFolder: '/home/ada/Althar',
+    problem:
+      'Althar can’t find /Volumes/Ext/Althar, perhaps a drive that isn’t connected, so new tasks are made in /home/ada/Althar for now. Reconnect it, choose another folder, or use the default.',
   },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByRole('alert')).toHaveTextContent('missing')
-    await expect(c.getByRole('button', { name: 'Use the default' })).toBeEnabled()
+    await expect(c.getByText(/can’t find \/Volumes\/Ext\/Althar/)).toBeVisible()
+    await expect(c.queryByRole('alert')).toBeNull()
+    await expect(c.getByRole('button', { name: /Use the default/ })).toBeEnabled()
+    await expect(c.getByRole('button', { name: /Change/ })).toHaveAccessibleDescription(/can’t find/)
+  },
+  render: (args) => (
+    <SettingList>
+      <TaskFolderLocation {...args} onUseDefault={fn()} />
+    </SettingList>
+  ),
+}
+
+/** The folder is gone and the last pick was refused too: both lines show, the lasting one calm and the answer in red. */
+export const MissingAndRefused: Story = {
+  args: { ...Missing.args, refusal: 'That folder is inside a repository; choose one outside any checkout.' },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText(/can’t find/)).toBeVisible()
+    await expect(c.getByRole('alert')).toHaveTextContent('inside a repository')
   },
   render: (args) => (
     <SettingList>
@@ -90,7 +109,7 @@ export const SetByEnvironment: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByText(/Set by ALTHAR_WORKTREES/)).toBeVisible()
-    await expect(c.getByRole('button', { name: 'Task folders' })).toBeDisabled()
+    await expect(c.getByRole('button', { name: /Change/ })).toBeDisabled()
   },
   render: (args) => (
     <SettingList>

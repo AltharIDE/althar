@@ -1,6 +1,6 @@
 import { accessSync, constants, existsSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, isAbsolute, join, relative } from 'node:path'
+import { dirname, isAbsolute, join, relative } from 'node:path'
 
 import { TOOLCHAINS } from '@althar/runtime/locations'
 
@@ -53,6 +53,7 @@ export const refusals = {
   repository: 'That folder is inside a repository; choose one outside any checkout.',
   toolchain: 'That folder is inside a toolchain’s folder (such as ~/.bun); choose another.',
   portal: 'That folder comes through the sandbox’s file portal, which task folders can’t use yet; choose one in your home folder.',
+  kept: 'That folder is inside one Althar already keeps task folders in; choose another.',
   profile: 'That folder is inside Althar’s own data; choose another.',
 }
 
@@ -78,10 +79,40 @@ export const refusalOf = (folder: string, profile: string, disk: Disk = onDisk, 
   return null
 }
 
-/** The folder task folders are made in, for a pick: a folder named Althar is one already, any other gets one of its own. */
-export const taskRootIn = (picked: string): string => (basename(picked) === ROOT_NAME ? picked : join(picked, ROOT_NAME))
+/**
+ * The folder task folders are made in, for a pick: always one of Althar's own inside it, even where the pick is named Althar, as Althar
+ * clears runs and keeps the coordinator's copies in every folder of the root, and a folder of the person's own may be among them.
+ */
+export const taskRootIn = (picked: string): string => join(picked, ROOT_NAME)
 const ROOT_NAME = 'Althar'
+
+/** What Althar writes in a root it made, so a later pick inside it is known for one. */
+export const ROOT_MARKER = '.althar-task-folders'
+
+/** Whether `folder` is, or is inside, a root Althar made. */
+const insideRoot = (folder: string, disk: Disk): boolean => {
+  for (let at = disk.real(folder); ; at = dirname(at)) {
+    if (disk.exists(join(at, ROOT_MARKER))) return true
+    if (dirname(at) === at) return false
+  }
+}
 
 /** Why a pick can't be used at all, before the folder of Althar's own is made in it: a portal path, or any refusal of `refusalOf`. */
 export const taskFolderRefusal = (picked: string, profile: string, disk: Disk = onDisk, home: string = homedir()): string | null =>
-  /^\/run\/flatpak\/doc(\/|$)/.test(picked) ? refusals.portal : refusalOf(picked, profile, disk, home)
+  /^\/run\/flatpak\/doc(\/|$)/.test(picked)
+    ? refusals.portal
+    : (refusalOf(picked, profile, disk, home) ?? (insideRoot(picked, disk) ? refusals.kept : null))
+
+/**
+ * What it means that the folder the person chose can't be used now, in a line: what has happened, what it stops (new tasks are made in
+ * `fallback` meanwhile) and the way out. `refusal` is why `refusalOf` refuses it.
+ */
+export const statusOf = (folder: string, refusal: string, fallback: string): string => {
+  const what =
+    refusal === refusals.missing
+      ? `Althar can’t find ${folder}, perhaps a drive that isn’t connected`
+      : refusal === refusals.readOnly
+        ? `Althar can’t write to ${folder} any more`
+        : `${folder} can’t hold task folders now`
+  return `${what}, so new tasks are made in ${fallback} for now. Reconnect it, choose another folder, or use the default.`
+}

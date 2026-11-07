@@ -106,7 +106,7 @@
   gap: 8px;
 }
 .under {
-  grid-column: 2 / -1;
+  grid-column: 1 / -1;
   margin-top: 10px;
 }
 .withGlyph .under {

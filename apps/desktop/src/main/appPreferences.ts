@@ -131,6 +131,8 @@ export const doNotTrack = (env: Readonly<Record<string, string | undefined>>): b
 export interface TaskFolderState {
   readonly folder: string
   readonly from: 'environment' | 'setting' | 'default'
+  /** Where the platform keeps them: what going back to the default goes back to. */
+  readonly defaultFolder?: string
   /** Why the folder can't be used now (it was chosen, and has gone missing or can't be written), in a line. */
   readonly problem?: string
 }
