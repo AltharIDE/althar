@@ -5,6 +5,8 @@ import { createContext, type ReactNode, useContext, useEffect, useEffectEvent } 
 import type { WatchEvent } from '@althar/contracts'
 
 import type { AppPreferences, PreferenceKey } from '../../main/appPreferences'
+import type { Viewport } from '../../main/browser/devices'
+import type { PageKey, PageMove, PagePin, PageState, Pointed } from '../../main/browser/page'
 import type { DesktopChrome } from '../../main/desktop'
 import type { Opened, ReportChoices, ReportContext, ReportPreview, Sent } from '../../main/report/bundle'
 import type { UpdateGlance } from '../../main/updates'
@@ -250,6 +252,50 @@ export interface Host {
   readonly quit?: QuitHost
   /** Keeps an error the page didn't handle in main's log. */
   readonly logError?: (error: WindowError) => void
+  /** The pages beside the conversations (ADR-099); absent where a page can't have them, as the edge's. */
+  readonly pages?: PagesHost
+}
+
+/**
+ * The pages beside the conversations, as the main process holds them
+ * (`main/browser`): each by its owner, the task or project whose
+ * conversation it is beside, in that owner's own session.
+ */
+export interface PagesHost {
+  /** Opens an address beside the owner's conversation (typed, a link, a run's); how the page then stands, or null for an owner that can't have one. */
+  readonly open: (owner: string, address: string) => Promise<PageState | null>
+  /** How the owner's page stands, where it has one. */
+  readonly state: (owner: string) => Promise<PageState | null>
+  /** Lays the page over the window where it keeps its place, in the window's pixels; null takes it off. Sent each frame of a drag. */
+  readonly show: (owner: string, panel: { x: number; y: number; width: number; height: number } | null) => void
+  readonly move: (owner: string, move: PageMove) => Promise<void>
+  readonly viewport: (owner: string, viewport: Viewport) => Promise<void>
+  /** Points at the page: the element pressed, with its crop and a picture of the page; null where pointing stopped. */
+  readonly point: (owner: string) => Promise<Pointed | null>
+  readonly stopPointing: (owner: string) => Promise<void>
+  /** The comments' pins, each drawn on the page it was made on. */
+  readonly pins: (owner: string, pins: ReadonlyArray<PagePin>) => Promise<void>
+  /** An element found again on its page and brought into view, to write its comment again over; null where it is gone. */
+  readonly find: (owner: string, selector: string, address: string) => Promise<Pointed | null>
+  /** A picture of the page as it shows, for the window to show in its place while something of its own is over it. */
+  readonly still: (owner: string) => Promise<string | null>
+  /** Hides the page while something of the window's is over it, and shows it again. */
+  readonly cover: (owner: string, covered: boolean) => Promise<void>
+  readonly focus: (owner: string) => Promise<void>
+  /** The page, or the download it was refused, in the person's browser. */
+  readonly outside: (owner: string, what: 'page' | 'download') => Promise<void>
+  /** Takes away the line under the page's bar. */
+  readonly dismiss: (owner: string) => Promise<void>
+  /** Closes the owner's page; its cookies go where they are kept only until it closes. */
+  readonly close: (owner: string) => Promise<void>
+  /** The owner's cookies and storage, gone. */
+  readonly clear: (owner: string) => Promise<void>
+  /** Every page's cookies and storage, gone. */
+  readonly clearAll: () => Promise<void>
+  /** Calls `listener` as any page's state changes, until the returned function is called. */
+  readonly onState: (listener: (state: PageState) => void) => () => void
+  /** Calls `listener` as the person presses, in a page, a key the window acts on. */
+  readonly onKey: (listener: (owner: string, key: PageKey) => void) => () => void
 }
 
 export interface Services {
