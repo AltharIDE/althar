@@ -41,23 +41,10 @@
   font-size: 12.5px;
   color: var(--t-3);
 }
-.list {
-  display: grid;
-  gap: 4px;
-  margin: 0;
-  padding-left: 18px;
-  line-height: 1.45;
-  color: var(--t-2);
-}
 .acts {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-.note {
-  margin-left: 4px;
-  font-size: 12px;
-  color: var(--t-3);
 }
 .steps {
   display: grid;
@@ -97,16 +84,14 @@ li[data-done] > .dot {
   font-variant-numeric: tabular-nums;
   color: var(--t-3);
 }
-.done,
-.batch {
+.done {
   display: grid;
   gap: 1px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
-.done li,
-.batch li {
+.done li {
   display: grid;
   grid-template-columns: 16px minmax(0, auto) minmax(0, 1fr) auto 64px;
   align-items: center;
@@ -115,15 +100,9 @@ li[data-done] > .dot {
   border-top: 1px solid var(--line);
   font-size: 12.5px;
 }
-.batch li {
-  grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
-}
 .done li[data-undone] .doneWhat {
   color: var(--t-4);
   text-decoration: line-through;
-}
-.batch li:not([data-started]) .doneWhat {
-  color: var(--t-2);
 }
 .glyph {
   display: grid;
@@ -147,5 +126,134 @@ li[data-done] > .dot {
   font-size: 12px;
 }
 .undone {
+  color: var(--t-4);
+}
+
+/* —— the first time: a line each, with where to change it —— */
+.close {
+  margin-left: auto;
+}
+.lines {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  line-height: 1.45;
+  color: var(--t-2);
+}
+.lines li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.lines li > span {
+  flex: 1;
+}
+.lines li > button {
+  flex: none;
+  font-size: 12.5px;
+}
+
+/* —— a server that fails: the call, then its fix —— */
+.call {
+  display: grid;
+  gap: 4px;
+  margin: 2px 0 8px;
+}
+.call[data-failed] .fix > span {
+  color: var(--danger);
+}
+.fix {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 0 22px;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+
+/* —— a lead that started several —— */
+.started {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 10px;
+  font-size: 13px;
+}
+.startedHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--t-1);
+}
+.startedHead > svg {
+  color: var(--t-3);
+}
+.startedList {
+  display: grid;
+  margin: 0 0 0 5px;
+  padding: 0 0 0 13px;
+  border-left: 1px solid var(--line-2);
+  list-style: none;
+}
+.startedList li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.startedOpen {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 12px minmax(0, 1fr) auto 150px;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--t-1);
+  text-align: left;
+  cursor: pointer;
+}
+.startedOpen:hover {
+  background: var(--n-1);
+}
+.startedDot {
+  display: grid;
+  place-items: center;
+}
+.restDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--t-4);
+}
+.startedTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.startedModel,
+.startedStands {
+  font-size: 12px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.startedStop {
+  width: 72px;
+  font-size: 12px;
+  color: var(--t-3);
+  opacity: 0;
+}
+.startedList li:hover .startedStop,
+.startedStop:focus-visible,
+.startedList li[data-off] .startedStop {
+  opacity: 1;
+}
+.startedList li[data-off] .startedTitle {
   color: var(--t-4);
 }

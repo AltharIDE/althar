@@ -156,21 +156,9 @@ What the runtime needs:
 
 ## 5 · A task's parts
 
-A task's parts are its worktree, its pull requests, its reviews, the issues it came from, what it runs, what it made and the access it was given; Add takes on another any time (a worktree, a pull request, a review, an issue, a browser, access). They replace Fix these and make-it-a-change. The person's rule: **the faces (Conversation, Outputs), Run and the menu never move.** So the faces sit just before Run, the files button goes into the worktree part ("6 files changed"), and one Parts button sits just before the faces. Three looks for the button and what it opens, seen on the ADR's task (three parts), on the Runs task (ten), and on a review (two):
+A task's parts are its worktree, its pull requests, its reviews, the issues it came from, what it runs, what it made and the access it was given; Add takes on another any time (a worktree, a pull request, a review, an issue, a browser, access). They replace Fix these and make-it-a-change. The person's rule: **the faces (Conversation, Outputs), Run and the menu never move.** So the faces sit just before Run, the files button goes into the worktree part ("6 files changed"), and the parts sit just before the faces.
 
-| Direction | The button | What it opens |
-| --- | --- | --- |
-| A · List | Parts, its count, a dot when something waits on the person | Every part by group, each with where it stands |
-| B · Tiles | The same | A tile each, two to a row, what waits first: its group, its name, where it stands, and its button (Merge, See the check, Post it) |
-| C · Waits first | The parts' own icons, the first four, then +6; one that waits in its colour | What waits on the person, each with its button; what runs; the rest, a chip each |
-| Today | Files, Run and the menu; a pull request is attached from the menu | |
-
-**Recommendation: A's button with C's popover.** C answers what the person opens it for: what wants them, and the one click that settles it, with the rest out of the way but one press off. Its row of icons in the bar reads poorly, though: two pull request icons and a folder say less than "Parts 10" with a dot. B's tiles are the easiest to read one at a time, but ten of them are a tall wall for a popover. The earlier D, the rail beside the thread, is a side panel, which DESIGN.md rules out.
-
-What the runtime needs:
-- **A task's parts as one list** (the plan's phase 5, the task-as-parts ADR): each with its kind, name, where it stands in a few words, and whether it waits on the person or failed. Today these are separate fields (`worktree`, `changes`, `review`, `launches`), read by separate pieces of the window.
-- **An Add command per kind**, for any task, any time: attach a worktree, open or attach a pull request (AttachPullRequest exists), add a review of a pull request, link an issue, open a browser, give access.
-- The worktree part carries the files count the bar's Files button shows today.
+**Chosen (7 Nov): C, waits first.** The parts' own icons in the bar, the first four, then +6, one that waits on the person in its colour; it opens what waits on them, each with its button, then what runs, then the rest as chips. The person liked its hierarchy. A (a list by group behind "Parts 10") and B (tiles) are gone from the page; their code is in the history at 5462af1. The page shows C and Today.
 
 ### C, clicked through
 
@@ -187,10 +175,10 @@ Sketches are single states, not choices between directions: things the decisions
 - **A push the lead made itself**, with `gh` as the person: Althar shows it once it sees it on GitHub, the commits and Compare, and that nothing held it.
 - **Where a lead-started task came from**, as its thread opens: "Started by the lead of ADR: agents work…, from your words there."
 - **A small change** ("The Run menu says Strat"): one card that says what it skipped (Sonnet 5.5, no plan, reviewed after it merges), each step with its time, and Merge, which still asks; Make it a full task.
-- **The first time**, in the coordinator's conversation: agents now go ahead, only the four kinds ask, your 7 servers and 9 skills load in every role, leads start tasks. Got it, What still asks, Servers and skills, and Ask as before in althar.
+- **The first time**, in the coordinator's conversation: "Agents can do more now", a line each with where to change it. They go ahead, only the four kinds ask (What asks); your 7 servers and 9 skills load in every role (Choose which); leads start tasks; and a project the person had set to ask first still does, as they set it (Change). A close, no other buttons: the first version's Got it, What still asks, Servers and skills and "Ask as before in althar" didn't say what they did.
 - **While you were away**: what agents did outside their worktrees across the project (merged, posted, moved an issue, started a task, changed a setting), by task and time, with Revert it, Delete it or Undo where it can be undone.
-- **A server that fails**: linear signed out in Codex, so the lead couldn't move DEV-188; Sign in to Codex, or Go on without it; the lead goes on with the rest meanwhile.
-- **A lead that starts several**: "Starting 4 tasks from your 'split it by ADR'", each with its model and when it starts, Hold the rest and Change one.
+- **A server that fails**: the call itself, where it ran in the thread ("Move DEV-188 to In Review", Linear), and under it in red "Claude Code isn't signed in to Linear", Sign in. The lead's own words after it say what it did without it and that it moves DEV-188 once signed in. Signing in turns the call to Moved. No card: the first version's warning card read as a block apart from the thread.
+- **A lead that starts several**: "Started 4 tasks from your 'split it by ADR'", started at once, with no countdown: starting a task can be undone by stopping it, so nothing asks. Each is a row that opens it, with its model and where it stands (Running, Planning, After ADR-013 merges); Stop on hover, then Start again. The first version's Hold the rest and Change one didn't say what they'd hold or change.
 
 What the runtime needs: a small-change path (a plan of one step, a lighter model, review after); a log of acts outside worktrees across the project, each with how it is undone; a server's failure as a thread item, by agent and cause; a batch of starts as one item with one hold; a review's `outside` from the host's author association, and a Run it command that gives it a worktree; pushes seen on the host that Althar didn't make, attributed to the task by branch, as a thread item.
 
@@ -198,6 +186,21 @@ What the runtime needs: a small-change path (a plan of one step, a lighter model
 
 The person keeps starting tasks with the coordinator for now (6 Nov). The three directions (a dialog, the composer, a card on the board) are gone from the page; their code is in the history up to 7274e40. If it comes back, it needs a StartTask command from the window (words or issue keys, the lead or Auto, effort, review, `toward`, `worksIn`, started at once), and Auto as routing the coordinator shares.
 
+## Each project its own servers and skills
+
+**Inside Althar, yes, for each project and role, without touching the person's files.** Althar starts every agent itself, so it can give each launch its own list. It already does this for its own tools (`packages/provider-adapters/src/ownTools.ts`): it switches the person's servers off by name, for Codex in `CODEX_CONFIG` (`mcp_servers.<name>.enabled = false`) and for OpenCode in `OPENCODE_CONFIG_CONTENT` (`mcp.<name>.enabled: false`). The same keys can switch servers on and off for each project. Claude Code takes `--mcp-config` with `--strict-mcp-config`. Skills one at a time: Claude Code's `skillOverrides` setting (on, off, name only), given with `--settings`; Codex's `skills.config` entries, by name or path. For OpenCode I found only a switch for all of Claude Code's skills at once (`OPENCODE_DISABLE_CLAUDE_CODE_SKILLS`); one skill at a time there is unconfirmed.
+
+**Outside Althar, in the person's own terminal, only partly.** Sync writes to each agent's own settings, which apply in every project. A project's own list lives in the repository (`.mcp.json`, `.codex/config.toml`, `opencode.json`, `.claude/skills`), which is the project's to change, not the person's. Claude Code alone keeps a per-project list outside the repository (its `local` scope). So sync stays global, and per-project choices are Althar's.
+
 ## What else needs prototyping
 
 The sketches in 6 draw the first state of each of these: a small change, the first time, while you were away, a server that fails, a lead that starts several. Each needs directions once one matters. Leads (1) is still open.
+
+Not drawn yet, most important first:
+1. **A Never rule an agent meets**: what the lead is told, and what the person sees afterwards.
+2. **An ask that waits while the person is away**: where it reaches them (the bar, a notification, a paired phone), and what a lead does meanwhile.
+3. **A lead-started task that fails or is stopped**: what its parent's lead hears, and what the parent's thread shows.
+4. **Working without the coordinator**: the project's Conversation room when it's off or never used, and where Up next lives then.
+5. **Two tasks changing the same files**: now that leads start tasks freely, who notices first, and what the person sees.
+6. **Auto routing when plan usage runs low**: a lead moved to a lighter model, and how the person sees it.
+7. **An undo that can't be done**: a merge already deployed, a post someone answered.

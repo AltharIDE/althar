@@ -129,12 +129,11 @@ export const SURFACES: ReadonlyArray<SurfaceInfo> = [
       { label: 'A review', hash: REVIEW },
     ],
     directions: [
-      { value: 'A', name: 'List', about: 'Parts and its count before the faces; it opens every part by group, each with where it stands' },
-      { value: 'B', name: 'Tiles', about: 'The same button; a tile each, what waits on you first, with what to do with it' },
       {
         value: 'C',
         name: 'Waits first',
-        about: 'The parts’ own icons in the bar; what waits on you first, with its button, then what runs, then a chip each',
+        about:
+          'Chosen: the parts’ own icons in the bar; what waits on you first, then what runs, then the rest; each opens in place, and Add',
       },
       { value: 'Today', name: 'Today', about: 'Files, Run and the menu; a pull request is attached from the menu' },
     ],

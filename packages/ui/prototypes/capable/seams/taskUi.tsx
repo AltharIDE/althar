@@ -3,7 +3,7 @@ import { Children, type ComponentProps, isValidElement, type ReactElement, type 
 
 import { TaskHeader as RealTaskHeader } from '../../../src/chrome/TaskHeader/TaskHeader'
 import { Segmented } from '../../../src/primitives/Segmented/Segmented'
-import { type Look, PartsButton, partsOf } from '../directions/parts/Parts'
+import { PartsButton, partsOf } from '../directions/parts/Parts'
 import s from '../directions/parts/parts.module.css'
 import { useProto } from '../state'
 
@@ -12,7 +12,6 @@ export * from '../../../src/index'
 type P = ReturnType<typeof useProto>
 const on = (p: P) => p.surface === 'parts' && p.direction !== 'Today'
 const parts = () => partsOf(window.location.hash)
-const LOOKS: Readonly<Record<'A' | 'B' | 'C', Look>> = { A: 'list', B: 'tiles', C: 'waits' }
 
 /** The bar's own buttons, as the screen made them: what it changed (the files) goes into the worktree part; Run and the menu stay. */
 const split = (actions: ReactNode) => {
@@ -29,7 +28,7 @@ export function TaskHeader<F extends string>(props: ComponentProps<typeof RealTa
       {...rest}
       actions={
         <>
-          <PartsButton parts={parts()} look={LOOKS[p.direction as keyof typeof LOOKS]} />
+          <PartsButton parts={parts()} />
           <Segmented label="Face" options={[...faces]} value={face} onChange={onFace} className={s.faces} />
           {split(props.actions)}
         </>

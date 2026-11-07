@@ -4,8 +4,13 @@ import { useState } from 'react'
 import { Brand } from '../../../../src/foundations/brands/brands'
 import { Icon, type IconName } from '../../../../src/foundations/Icon/Icon'
 import { BrandMark } from '../../../../src/foundations/Marks/Marks'
+import { ToolKind, ToolState } from '../../../../src/foundations/vocabulary'
 import { Button } from '../../../../src/primitives/Button/Button'
+import { IconButton } from '../../../../src/primitives/IconButton/IconButton'
 import { LinkButton } from '../../../../src/primitives/LinkButton/LinkButton'
+import { LiveDot } from '../../../../src/primitives/LiveDot/LiveDot'
+import { Tool } from '../../../../src/thread/Tool/Tool'
+import { ServerName } from '../tools/Calls'
 import s from './more.module.css'
 
 /** A small change, from the person's words to merged: what it skipped, and each step with its time. */
@@ -49,35 +54,40 @@ export function FastLane() {
   )
 }
 
-/** The first time a project opens after the change: what is different, and the one way back. */
+/** The first time after the change: what is different, each line with where to change it, and a project the person had set to ask stays so. */
 export function CapableNow() {
   const [gone, setGone] = useState(false)
   if (gone) return null
+  const to = (hash: string) => () => window.location.assign(hash)
   return (
     <div className={s.card} data-tone="signal">
-      <p className={s.title}>Agents now go ahead without asking</p>
-      <ul className={s.list}>
+      <p className={s.head}>
+        <span className={s.title}>Agents can do more now</span>
+        <IconButton icon="close" label="Close" size="small" tooltipAlign="end" className={s.close} onClick={() => setGone(true)} />
+      </p>
+      <ul className={s.lines}>
         <li>
-          In <strong>althar</strong> and <strong>site</strong>. Only what can’t be undone still asks: lost work, publishing and merging,
-          speaking for you, secrets.
+          <span>
+            They go ahead without asking. Only what can’t be undone asks: lost work, publishing and merging, speaking for you, secrets.
+          </span>
+          <LinkButton onClick={to('#/projects/p1?room=settings&section=rules')}>What asks</LinkButton>
         </li>
         <li>
-          Your <strong>7 MCP servers</strong> and <strong>9 skills</strong> load in every role, from Claude Code, Codex and OpenCode.
+          <span>
+            Your <strong>7 MCP servers</strong> and <strong>9 skills</strong> load in every role.
+          </span>
+          <LinkButton onClick={to('#/settings/mcp')}>Choose which</LinkButton>
         </li>
-        <li>Leads can start tasks of their own. You see each under the task that started it.</li>
+        <li>
+          <span>Leads can start tasks. Each shows under the task that started it.</span>
+        </li>
+        <li>
+          <span>
+            <strong>site</strong> still asks first, as you set it.
+          </span>
+          <LinkButton onClick={to('#/projects/p2?room=settings&section=rules')}>Change</LinkButton>
+        </li>
       </ul>
-      <div className={s.acts}>
-        <Button size="small" onClick={() => setGone(true)}>
-          Got it
-        </Button>
-        <Button size="small" variant="quiet" onClick={() => window.location.assign('#/projects/p1?room=settings&section=rules')}>
-          What still asks
-        </Button>
-        <Button size="small" variant="quiet" onClick={() => window.location.assign('#/settings/mcp')}>
-          Servers and skills
-        </Button>
-        <LinkButton className={s.aside}>Ask as before in althar</LinkButton>
-      </div>
     </div>
   )
 }
@@ -140,74 +150,77 @@ export function WhileAway() {
   )
 }
 
-/** A server the lead reached for and couldn't use, and the one click that lets it go on. */
+/** A call to the person's server that failed because the lead's agent isn't signed in: the call, in red, and the fix under it. Once signed in, the lead tries it again. */
 export function ServerFails() {
   const [fixed, setFixed] = useState(false)
+  const linear = <ServerName server={{ name: 'Linear', brand: Brand.Linear }} />
   return (
-    <div className={s.card} data-tone={fixed ? undefined : 'warn'}>
-      <p className={s.head}>
-        <BrandMark brand={Brand.Linear} size={13} />
-        <span>
-          {fixed ? (
-            <>
-              <strong>linear</strong> is signed in again. The lead went on.
-            </>
-          ) : (
-            <>
-              <strong>linear</strong> is signed out in Codex, so the lead couldn’t move DEV-188.
-            </>
-          )}
-        </span>
-      </p>
+    <div className={s.call} data-failed={!fixed || undefined}>
+      <Tool
+        kind={ToolKind.Comment}
+        verb={fixed ? 'Moved' : 'Move'}
+        target="DEV-188 to In Review"
+        state={fixed ? ToolState.Done : ToolState.Failed}
+        meta={linear}
+      />
       {!fixed && (
-        <div className={s.acts}>
-          <Button size="small" variant="signal" onClick={() => setFixed(true)}>
-            Sign in to Codex
+        <p className={s.fix}>
+          <span>Claude Code isn’t signed in to Linear.</span>
+          <Button size="small" onClick={() => setFixed(true)}>
+            Sign in
           </Button>
-          <Button size="small" variant="quiet">
-            Go on without it
-          </Button>
-          <span className={s.note}>The lead waits for one of these, and goes on with the rest meanwhile.</span>
-        </div>
+        </p>
       )}
     </div>
   )
 }
 
-/** A lead starting several tasks at once, from the person's words: one card, a hold for all, each to open. */
+interface Started {
+  readonly id: string
+  readonly title: string
+  readonly model: string
+  /** Where it stands: running, planning, or waiting on another. */
+  readonly stands: string
+  readonly live?: boolean
+}
+
+const STARTED: ReadonlyArray<Started> = [
+  { id: 'net', title: 'Codex leads reach the network in their shell', model: 'Sonnet 5.5', stands: 'Running · 3m', live: true },
+  { id: '013', title: 'ADR-013: leads start tasks', model: 'Opus 5.5', stands: 'Planning', live: true },
+  { id: '088', title: 'ADR-088: the coordinator directs leads', model: 'Opus 5.5', stands: 'Planning', live: true },
+  { id: 'judge', title: 'Drop the judge from allow everything', model: 'Sonnet 5.5', stands: 'After ADR-013 merges' },
+]
+
+/** A lead that started several tasks from the person's words: one call, each task a row that opens it, and Stop on the one not wanted. */
 export function Batch() {
-  const [held, setHeld] = useState(false)
-  const tasks = [
-    ['Codex leads reach the network in their shell', 'Sonnet 5.5', 'Started'],
-    ['ADR-013: leads start tasks', 'Opus 5.5', held ? 'Held' : 'In 18s'],
-    ['ADR-088: the coordinator directs leads', 'Opus 5.5', held ? 'Held' : 'In 18s'],
-    ['Drop the judge from allow everything', 'Sonnet 5.5', held ? 'Held' : 'In 18s'],
-  ] as const
+  const [stopped, setStopped] = useState<ReadonlyArray<string>>([])
+  const toggle = (id: string) => setStopped((now) => (now.includes(id) ? now.filter((one) => one !== id) : [...now, id]))
   return (
-    <div className={s.card}>
-      <p className={s.head}>
+    <div className={s.started}>
+      <p className={s.startedHead}>
         <Icon name="create" size={13} />
         <span>
-          <strong>Starting 4 tasks</strong> from your “split it by ADR”
+          <strong>{`Started ${STARTED.length} tasks`}</strong> from your “split it by ADR”
         </span>
       </p>
-      <ul className={s.batch}>
-        {tasks.map(([title, model, when]) => (
-          <li key={title} data-started={when === 'Started' || undefined}>
-            <span className={s.doneWhat}>{title}</span>
-            <span className={s.doneTask}>{model}</span>
-            <span className={s.when}>{when}</span>
-          </li>
-        ))}
+      <ul className={s.startedList}>
+        {STARTED.map((one) => {
+          const off = stopped.includes(one.id)
+          return (
+            <li key={one.id} data-off={off || undefined}>
+              <button type="button" className={s.startedOpen} onClick={() => window.location.assign('#/threads/th-codex-net')}>
+                <span className={s.startedDot}>{one.live && !off ? <LiveDot ping /> : <span className={s.restDot} />}</span>
+                <span className={s.startedTitle}>{one.title}</span>
+                <span className={s.startedModel}>{one.model}</span>
+                <span className={s.startedStands}>{off ? 'Stopped' : one.stands}</span>
+              </button>
+              <LinkButton className={s.startedStop} onClick={() => toggle(one.id)}>
+                {off ? 'Start again' : 'Stop'}
+              </LinkButton>
+            </li>
+          )
+        })}
       </ul>
-      <div className={s.acts}>
-        <Button size="small" variant={held ? 'signal' : 'default'} onClick={() => setHeld(!held)}>
-          {held ? 'Start them' : 'Hold the rest'}
-        </Button>
-        <Button size="small" variant="quiet">
-          Change one
-        </Button>
-      </div>
     </div>
   )
 }

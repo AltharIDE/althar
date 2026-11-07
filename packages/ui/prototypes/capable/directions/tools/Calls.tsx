@@ -35,7 +35,7 @@ export const mcpOf = (target: string) => {
   return { server, tool: match[2]!, verb: words.verb, target: words.target(target), acts: words.acts === true }
 }
 
-const ServerName = ({ server }: { server: { name: string; brand?: Brand } }) => (
+export const ServerName = ({ server }: { server: { name: string; brand?: Brand } }) => (
   <span className={s.server}>
     {server.brand !== undefined ? <BrandMark brand={server.brand} size={11} /> : <Icon name="plug" size={11} />}
     {server.name}

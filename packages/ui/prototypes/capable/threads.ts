@@ -1,7 +1,11 @@
 // Scrappy: each task's thread as the runtime would give it. A runtime notice whose words start with § marks where a direction draws a piece of its own.
 import { items } from '../../../../apps/desktop/tests/fixtures'
 import { at } from './data'
+import { proto } from './state'
 import type { AttentionRequest, ThreadItem, ThreadSnapshot } from './deps'
+
+/** In the sketches, the design review's Linear call fails: Claude Code isn't signed in to it. */
+const failing = () => proto.get().surface === 'sketches'
 
 export interface Own {
   readonly items: ThreadItem[]
@@ -46,16 +50,27 @@ export const threads: Record<string, () => Own> = {
       mcp('mcp__playwright__browser_take_screenshot', '{"url":"http://localhost:5173"}', 9),
       mcp('mcp__linear__get_issue', '{"id":"DEV-188"}', 8),
       mcp('mcp__github__create_pull_request_review', '{"pullNumber":612,"event":"COMMENT"}', 2),
-      mcp('mcp__linear__update_issue', '{"id":"DEV-188","state":"In Review"}', 2),
-      at(
-        items.says(
-          'The tour’s second card sits 12px lower than its story, and its title wraps at 900px. Posted that on #612 with three screenshots, and moved DEV-188 to In Review.',
-        ),
-        1,
-      ),
+      ...(failing()
+        ? [
+            mark('§mcpfail', 2),
+            at(
+              items.says(
+                'The tour’s second card sits 12px lower than its story, and its title wraps at 900px. Posted that on #612 with three screenshots. DEV-188 stays where it is until Linear is signed in; I’ll move it then.',
+              ),
+              1,
+            ),
+          ]
+        : [
+            mcp('mcp__linear__update_issue', '{"id":"DEV-188","state":"In Review"}', 2),
+            at(
+              items.says(
+                'The tour’s second card sits 12px lower than its story, and its title wraps at 900px. Posted that on #612 with three screenshots, and moved DEV-188 to In Review.',
+              ),
+              1,
+            ),
+          ]),
       mark('§act-review', 1),
       mark('§act-linear', 1),
-      mark('§mcpfail', 0),
     ],
   }),
   // A review of an outside author's pull request: read only until the person says to run it.

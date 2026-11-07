@@ -166,36 +166,8 @@ const shots = [
     go: (page) => page.getByRole('switch', { name: 'Keep your agents’ skills the same' }).click(),
   },
 
-  // 5 · A task's parts: one button just before the faces, three looks for it and what it opens.
+  // 5 · A task's parts: C, chosen: the parts' icons just before the faces, and what each opens.
   { id: '5t-1-today', s: 'parts', d: 'Today', hash: MANY, clip: BAR, go: () => undefined },
-  { id: '5a-1-few', s: 'parts', d: 'A', hash: FEW, clip: BAR, go: () => undefined },
-  {
-    id: '5a-2-many',
-    s: 'parts',
-    d: 'A',
-    hash: MANY,
-    keep: true,
-    clip: POP,
-    go: (page) => page.getByRole('button', { name: /^Parts/ }).click(),
-  },
-  {
-    id: '5b-1-many',
-    s: 'parts',
-    d: 'B',
-    hash: MANY,
-    keep: true,
-    clip: POP,
-    go: (page) => page.getByRole('button', { name: /^Parts/ }).click(),
-  },
-  {
-    id: '5b-2-review',
-    s: 'parts',
-    d: 'B',
-    hash: '#/threads/th-review',
-    keep: true,
-    clip: { x: 640, y: 0, width: 640, height: 300 },
-    go: (page) => page.getByRole('button', { name: /^Parts/ }).click(),
-  },
   { id: '5c-1-few', s: 'parts', d: 'C', hash: FEW, clip: BAR, go: () => undefined },
   {
     id: '5c-2-many',

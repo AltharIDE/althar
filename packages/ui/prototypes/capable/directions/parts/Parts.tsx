@@ -1,12 +1,7 @@
-// Scrappy, surface 5: a task's parts (its workspace, pull requests, reviews, issues, runs, outputs, access) behind one Parts button just before the faces, which never move. Three looks for it and what it opens: a list by group (A), tiles (B), what waits on you first (C).
-import type { ReactElement } from 'react'
-
-import { ChromeButton } from '../../../../src/chrome/ChromeButton/ChromeButton'
+// Scrappy, surface 5: a task's parts (its workspace, pull requests, reviews, issues, runs, outputs, access) behind one Parts button just before the faces, which never move. Chosen (7 Nov): C, the parts' own icons, what waits on you first, each part opening in place.
 import { Brand } from '../../../../src/foundations/brands/brands'
 import { Icon, type IconName } from '../../../../src/foundations/Icon/Icon'
 import { BrandMark } from '../../../../src/foundations/Marks/Marks'
-import { Button } from '../../../../src/primitives/Button/Button'
-import { Menu, MenuItem, MenuSeparator } from '../../../../src/primitives/Menu/Menu'
 import { Popover } from '../../../../src/primitives/Popover/Popover'
 import { PartsDrill } from './Drill'
 import s from './parts.module.css'
@@ -68,109 +63,7 @@ const isBrand = (icon: Part['icon']): icon is Brand => (Object.values(Brand) as 
 export const glyph = (part: Part, size = 13) =>
   isBrand(part.icon) ? <BrandMark brand={part.icon} size={size - 1} /> : <Icon name={part.icon} size={size} />
 
-/** + Add: what a task can take on, any time. */
-export function AddMenu({ trigger }: { trigger: ReactElement }) {
-  return (
-    <Menu label="Add to this task" width={280} trigger={trigger}>
-      <MenuItem icon="folder" description="A checkout of its own, to change code in" onSelect={() => undefined}>
-        A worktree
-      </MenuItem>
-      <MenuItem icon="pr" description="Opened from its branch, or one that exists" onSelect={() => undefined}>
-        A pull request
-      </MenuItem>
-      <MenuItem icon="answer" description="A draft of a review of any pull request" onSelect={() => undefined}>
-        A review
-      </MenuItem>
-      <MenuItem icon="list" description="From Linear or GitHub, for its lead to read" onSelect={() => undefined}>
-        An issue
-      </MenuItem>
-      <MenuItem icon="globe" description="A page its lead can see and click" onSelect={() => undefined}>
-        A browser
-      </MenuItem>
-      <MenuSeparator />
-      <MenuItem icon="lock" description="What its lead may run and reach" onSelect={() => undefined}>
-        Access
-      </MenuItem>
-    </Menu>
-  )
-}
-
-const AddButton = () => (
-  <AddMenu
-    trigger={
-      <button type="button" className={s.add}>
-        <Icon name="plus" size={12} />
-        Add
-      </button>
-    }
-  />
-)
-
 const waits = (part: Part) => part.tone === 'you' || part.tone === 'bad'
-
-/** A: every part by group, each with where it stands. */
-export function PartsList({ parts }: { parts: ReadonlyArray<Part> }) {
-  const groups = [...new Set(parts.map((one) => one.group))]
-  return (
-    <div className={s.list}>
-      <div className={s.listHead}>
-        <span className={s.listTitle}>Parts</span>
-        <AddButton />
-      </div>
-      {groups.map((group) => (
-        <section key={group} className={s.group}>
-          <h4 className={s.groupName}>{GROUPS[group]}</h4>
-          <ul className={s.items}>
-            {parts
-              .filter((one) => one.group === group)
-              .map((one) => (
-                <li key={one.id}>
-                  <button type="button" className={s.item} data-tone={one.tone}>
-                    <span className={s.itemGlyph}>{glyph(one)}</span>
-                    <span className={s.itemName}>{one.name}</span>
-                    <span className={s.itemDetail}>{one.detail}</span>
-                  </button>
-                </li>
-              ))}
-          </ul>
-        </section>
-      ))}
-    </div>
-  )
-}
-
-/** B: a tile each, two to a row, what waits first: its group over its name, where it stands under it, and what to do with it. */
-export function PartsTiles({ parts }: { parts: ReadonlyArray<Part> }) {
-  const ordered = [...parts.filter(waits), ...parts.filter((one) => !waits(one))]
-  return (
-    <div className={s.list}>
-      <div className={s.listHead}>
-        <span className={s.listTitle}>Parts</span>
-        <AddButton />
-      </div>
-      <ul className={s.tiles}>
-        {ordered.map((one) => (
-          <li key={one.id} className={s.tile} data-tone={one.tone}>
-            <span className={s.tileHead}>
-              <span className={s.tileGlyph}>{glyph(one, 14)}</span>
-              <span className={s.tileGroup}>{GROUPS[one.group]}</span>
-              {one.tone === 'live' && <span className={s.liveDot} aria-hidden />}
-            </span>
-            <span className={s.tileName}>{one.name}</span>
-            <span className={s.tileDetail}>{one.detail}</span>
-            {one.act !== undefined && (
-              <Button size="small" variant={one.tone === 'you' ? 'default' : 'quiet'} className={s.tileAct}>
-                {one.act}
-              </Button>
-            )}
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
-}
-
-export type Look = 'list' | 'tiles' | 'waits'
 
 /** C's button: the parts' own glyphs, the first four, then how many more; one that waits on you in its colour. */
 const GlyphStack = ({ parts, ...rest }: { parts: ReadonlyArray<Part> }) => {
@@ -189,25 +82,11 @@ const GlyphStack = ({ parts, ...rest }: { parts: ReadonlyArray<Part> }) => {
   )
 }
 
-/** One button in the bar, just before the faces, that opens every part. */
-export function PartsButton({ parts, look }: { parts: ReadonlyArray<Part>; look: Look }) {
-  const waiting = parts.some(waits)
-  const trigger =
-    look === 'waits' ? (
-      <GlyphStack parts={parts} />
-    ) : (
-      <ChromeButton icon="clip" label="Parts" count={parts.length} {...(waiting ? { mark: 'Something waits on you' } : {})} />
-    )
+/** One button in the bar, just before the faces, that opens every part: what waits first, and each opens in place. */
+export function PartsButton({ parts }: { parts: ReadonlyArray<Part> }) {
   return (
-    <Popover
-      label="This task’s parts"
-      placement="below"
-      align="end"
-      width={look === 'tiles' ? 460 : look === 'waits' ? 380 : 340}
-      padded={false}
-      trigger={trigger}
-    >
-      {look === 'list' ? <PartsList parts={parts} /> : look === 'tiles' ? <PartsTiles parts={parts} /> : <PartsDrill parts={parts} />}
+    <Popover label="This task’s parts" placement="below" align="end" width={380} padded={false} trigger={<GlyphStack parts={parts} />}>
+      <PartsDrill parts={parts} />
     </Popover>
   )
 }
