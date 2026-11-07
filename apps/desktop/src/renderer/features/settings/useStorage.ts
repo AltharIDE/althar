@@ -37,7 +37,14 @@ const remembered = new WeakMap<object, Record<StoragePlace, StorageFigure>>()
 export const useStorage = (): StorageModel => {
   const { host } = useServices()
   const [paths, setPaths] = useState<Partial<Record<StoragePlace, string>>>({})
-  const [figures, setFigures] = useState(() => remembered.get(host) ?? measuringAll())
+  const [figures, setFigures] = useState(() => {
+    // Only a size is worth showing again: a place that wasn't there may be by now.
+    const last = remembered.get(host)
+    const fresh = measuringAll()
+    return last === undefined
+      ? fresh
+      : { ...fresh, ...Object.fromEntries(Object.entries(last).filter(([, figure]) => figure.state === 'done')) }
+  })
   const [problems, setProblems] = useState<Partial<Record<StoragePlace, string>>>({})
   const keep = useCallback(
     (place: StoragePlace, figure: StorageFigure) =>

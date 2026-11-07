@@ -1,5 +1,5 @@
-import type { Stats } from 'node:fs'
-import { lstat, readdir, stat } from 'node:fs/promises'
+import type { BigIntStats } from 'node:fs'
+import { lstat, readdir, realpath, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 /*
@@ -37,9 +37,15 @@ export interface MeasureOptions {
   readonly now?: () => number
   /** Directories read at once. */
   readonly parallel?: number
+  /** The system's name, for how paths compare; tests give their own. */
+  readonly platform?: string
+  /** Lists a directory; tests give one that never answers. */
+  readonly list?: (folder: string) => Promise<Array<{ name: string }>>
 }
 
 export const MEASURE_TIMEOUT = 30_000
+/** What a Measure again may take: the person asked for a real number, so it is given longer. */
+export const REFRESH_TIMEOUT = 180_000
 const PARALLEL = 8
 /** Entries read at once in a directory; the clock is looked at between batches. */
 const BATCH = 64
@@ -61,19 +67,31 @@ const io = async <T>(read: () => Promise<T>): Promise<T> => {
   }
 }
 
-const onDisk = (stats: Stats) => (stats.blocks > 0 ? stats.blocks * 512 : stats.size)
+// Inodes are read as bigints: on Windows and some network disks they pass 2^53, where two files would look like one.
+type Stats = BigIntStats
+
+const onDisk = (stats: Stats) => (stats.blocks > 0n ? Number(stats.blocks) * 512 : Number(stats.size))
+
+/** Paths compare without case where the system does (Windows). */
+export const fold = (path: string, platform: string = process.platform) => (platform === 'win32' ? path.toLowerCase() : path)
 
 export const measure = async (root: string, options: MeasureOptions = {}): Promise<Size> => {
-  const { timeout = MEASURE_TIMEOUT, now = Date.now, parallel = PARALLEL } = options
-  const excluded = new Set((options.exclude ?? []).map((path) => resolve(path)))
-  excluded.delete(resolve(root))
+  const {
+    timeout = MEASURE_TIMEOUT,
+    now = Date.now,
+    parallel = PARALLEL,
+    platform = process.platform,
+    list = async (folder) => (await readdir(folder)).map((name) => ({ name })),
+  } = options
+  const excluded = new Set((options.exclude ?? []).map((path) => fold(resolve(path), platform)))
+  excluded.delete(fold(resolve(root), platform))
   const until = now() + timeout
   const late = () => now() >= until
 
   let top: Stats
   try {
     // stat, not lstat: where the place is itself a link, it is what it points to that is measured.
-    top = await stat(root)
+    top = await stat(root, { bigint: true })
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'ENOENT' || (error as NodeJS.ErrnoException).code === 'ENOTDIR'
       ? { state: 'missing' }
@@ -88,7 +106,7 @@ export const measure = async (root: string, options: MeasureOptions = {}): Promi
   // Files with more than one link, by device and inode: each counts once.
   const linked = new Set<string>()
   const count = (stats: Stats) => {
-    if (stats.nlink > 1 && !stats.isDirectory()) {
+    if (stats.nlink > 1n && !stats.isDirectory()) {
       const key = `${stats.dev}:${stats.ino}`
       if (linked.has(key)) return
       linked.add(key)
@@ -135,7 +153,7 @@ export const measure = async (root: string, options: MeasureOptions = {}): Promi
       const look = async (folder: string) => {
         let names
         try {
-          names = await io(() => (over ? Promise.resolve([]) : readdir(folder, { withFileTypes: true })))
+          names = await io(() => (over ? Promise.resolve([]) : list(folder)))
         } catch {
           if (folder === root) unlisted = true
           unreadable++
@@ -149,11 +167,11 @@ export const measure = async (root: string, options: MeasureOptions = {}): Promi
           await Promise.all(
             names.slice(from, from + BATCH).map(async (entry) => {
               const path = join(folder, entry.name)
-              if (excluded.has(path)) return
+              if (excluded.has(fold(path, platform))) return
               let stats: Stats
               try {
                 // lstat: a symlink is itself, never what it points to.
-                stats = await io(() => lstat(path))
+                stats = await io(() => lstat(path, { bigint: true }))
               } catch {
                 unreadable++
                 return
@@ -183,17 +201,22 @@ export type PlaceId = 'profile' | 'logs' | 'worktrees'
 export const PLACES: ReadonlyArray<PlaceId> = ['profile', 'logs', 'worktrees']
 export const isPlace = (value: unknown): value is PlaceId => PLACES.some((place) => place === value)
 
-const inside = (outer: string, path: string) => {
-  const from = resolve(outer)
-  const to = resolve(path)
+const inside = (outer: string, path: string, platform: string = process.platform) => {
+  const from = fold(resolve(outer), platform)
+  const to = fold(resolve(path), platform)
   return to !== from && to.startsWith(from.endsWith('/') || from.endsWith('\\') ? from : `${from}${from.includes('\\') ? '\\' : '/'}`)
 }
 
+/** Where a path really is, so a place reached through a link still matches the one it holds. */
+const real = (path: string) => realpath(path).catch(() => resolve(path))
+
 /**
- * Sizes kept for the session, by place; a refresh measures again. Asking while
- * a measure is under way joins it. Where the logs or the task folders sit
- * inside the profile (a Flatpak keeps its worktrees there), the profile's size
- * leaves them out: they have their own rows.
+ * Sizes kept for the session, by place; a refresh measures again, and longer.
+ * Asking while a measure is under way joins it. A place that wasn't there, or
+ * couldn't be measured, isn't kept: the first task's folder appears after About
+ * was opened, and the next look should find it. Where the logs or the task
+ * folders sit inside the profile (a Flatpak keeps its worktrees there), the
+ * profile's size leaves them out: they have their own rows.
  */
 export const storageSizes = (places: () => Readonly<Record<PlaceId, string>>, measureIt: typeof measure = measure) => {
   const kept = new Map<PlaceId, Promise<Size>>()
@@ -202,10 +225,22 @@ export const storageSizes = (places: () => Readonly<Record<PlaceId, string>>, me
     size: (place: PlaceId, refresh = false): Promise<Size> => {
       const found = kept.get(place)
       if (found !== undefined && !refresh) return found
-      const where = places()
-      const exclude = PLACES.filter((other) => other !== place && inside(where[place], where[other])).map((other) => where[other])
-      const next = measureIt(where[place], { exclude })
+      const next = (async () => {
+        const where = places()
+        const here = await real(where[place])
+        const others = await Promise.all(PLACES.filter((other) => other !== place).map(async (other) => real(where[other])))
+        const exclude = others.filter((other) => inside(here, other))
+        return measureIt(here, { exclude, timeout: refresh ? REFRESH_TIMEOUT : MEASURE_TIMEOUT })
+      })()
       kept.set(place, next)
+      void next.then(
+        (size) => {
+          if (size.state !== 'done' && kept.get(place) === next) kept.delete(place)
+        },
+        () => {
+          if (kept.get(place) === next) kept.delete(place)
+        },
+      )
       return next
     },
   }

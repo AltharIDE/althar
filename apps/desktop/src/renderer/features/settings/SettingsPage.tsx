@@ -741,7 +741,7 @@ function AboutSection({ start }: { start: StartModel }) {
         }))}
         onShow={(id) => storage.show(id as StoragePlace)}
         onMeasureAgain={storage.measureAgain}
-        text={{ show: text.storage.show }}
+        text={{ note: text.storage.note, show: text.storage.show }}
       />
       <SettingList>
         <UsageData on={preferences.usageData} onChange={(on) => set('usageData', on)} doNotTrack={host.doNotTrack === true} />

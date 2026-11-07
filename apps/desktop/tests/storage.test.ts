@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { measure, showPlace, storageSizes, type Size } from '../src/main/storage'
+import { fold, measure, REFRESH_TIMEOUT, showPlace, storageSizes, type Size } from '../src/main/storage'
 
 /* The size walk behind About › Storage: it counts what is there, once, and never leaves the folder. */
 
@@ -145,6 +145,57 @@ describe('showing a place in the file manager', () => {
   })
   it('fails with what the system said where it could not open it', async () => {
     await expect(showPlace(where, 'logs', async () => 'no file manager')).rejects.toThrow('no file manager')
+  })
+})
+
+describe('the timer', () => {
+  it('ends the wait at the limit where one directory never answers', async () => {
+    const root = await folder()
+    const started = Date.now()
+    // The clock never moves, so only the timer can end this.
+    const size = await measure(root, { timeout: 100, now: () => 0, list: () => new Promise(() => {}) })
+    expect(Date.now() - started).toBeLessThan(5_000)
+    expect(size).toMatchObject({ state: 'done', approximate: true })
+  })
+})
+
+describe('paths on Windows', () => {
+  it('compare without case', async () => {
+    expect(fold('C:\\Users\\Me\\Althar', 'win32')).toBe(fold('c:\\users\\me\\althar', 'win32'))
+    expect(fold('/Home/Me', 'linux')).toBe('/Home/Me')
+    const root = await folder()
+    await mkdir(join(root, 'Inner'))
+    await file(join(root, 'Inner', 'a'), 2_000_000)
+    const wrong = join(root, 'INNER')
+    // Where case counts, a folder spelled another way is another folder, and is counted.
+    expect(done(await measure(root, { exclude: [wrong], platform: 'linux' })).bytes).toBeGreaterThan(2_000_000)
+    // On Windows it is the same folder, and is left out.
+    expect(done(await measure(root, { exclude: [wrong], platform: 'win32' })).bytes).toBeLessThan(100_000)
+  })
+})
+
+describe('what is not kept', () => {
+  const places = () => ({ profile: '/p', logs: '/p/logs', worktrees: '/w-not-there' })
+  it('measures a missing place again at the next look, as the first task may have made it', async () => {
+    let calls = 0
+    const sizes = storageSizes(places, async () =>
+      ++calls === 1 ? { state: 'missing' } : { state: 'done', bytes: 5, approximate: false, unreadable: 0 },
+    )
+    expect(await sizes.size('worktrees')).toEqual({ state: 'missing' })
+    expect(done(await sizes.size('worktrees')).bytes).toBe(5)
+    expect(calls).toBe(2)
+  })
+
+  it('gives a refresh longer than the first look', async () => {
+    const limits: Array<number | undefined> = []
+    const sizes = storageSizes(places, async (_root, options) => {
+      limits.push(options?.timeout)
+      return { state: 'done', bytes: 1, approximate: false, unreadable: 0 }
+    })
+    await sizes.size('logs')
+    await sizes.size('logs', true)
+    expect(limits[0]).toBeLessThan(limits[1] as number)
+    expect(limits[1]).toBe(REFRESH_TIMEOUT)
   })
 })
 

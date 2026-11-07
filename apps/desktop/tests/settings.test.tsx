@@ -851,7 +851,7 @@ describe('the Settings tab', () => {
     expect(await within(main).findByText('/home/me/Althar')).toBeTruthy()
     expect(within(main).getByText('/home/me/.local/share/althar/logs')).toBeTruthy()
     expect((await within(main).findAllByText('3.0 GB')).length).toBe(3)
-    await userEvent.click(within(main).getByRole('button', { name: 'Show Task folders in the file manager' }))
+    await userEvent.click(within(main).getByRole('button', { name: /^Show in (Finder|Explorer|Files), Task folders$/ }))
     expect(host.storage.show).toHaveBeenCalledWith('worktrees')
     await userEvent.click(within(main).getByRole('button', { name: 'Measure again' }))
     await waitFor(() => expect(host.storage.size).toHaveBeenCalledWith('profile', true))
@@ -864,7 +864,7 @@ describe('the Settings tab', () => {
     )
     withServices(<Settings at="about" />, fakeClient().client, host)
     const main = screen.getByRole('main')
-    await userEvent.click(await within(main).findByRole('button', { name: 'Show Logs in the file manager' }))
+    await userEvent.click(await within(main).findByRole('button', { name: /^Show in (Finder|Explorer|Files), Logs$/ }))
     expect((await within(main).findByRole('alert')).textContent).toBe('Couldn’t open it: No application can open folders')
   })
 

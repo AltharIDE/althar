@@ -54,8 +54,8 @@ export interface StorageText {
   failed: string
   /** Opens the place in the system's file manager: Show in Finder. */
   show: string
-  /** Names the place a Show button is for, for a screen reader. */
-  showLabel: (place: string) => string
+  /** Names a Show button for a screen reader: the visible text first, then the place. */
+  showLabel: (show: string, place: string) => string
   measureAgain: string
 }
 
@@ -84,7 +84,7 @@ export const storageText: StorageText = {
   missing: 'not there yet',
   failed: 'couldn’t be measured',
   show: 'Show in Files',
-  showLabel: (place) => `Show ${place} in the file manager`,
+  showLabel: (show, place) => `${show}, ${place}`,
   measureAgain: 'Measure again',
 }
 
@@ -121,7 +121,7 @@ export function Storage({ places, onShow, onMeasureAgain, text, headingLevel }: 
                   size="small"
                   icon="folder"
                   disabled={place.figure.state === 'missing'}
-                  aria-label={t.showLabel(place.title)}
+                  aria-label={t.showLabel(t.show, place.title)}
                   onClick={() => onShow(place.id)}
                 >
                   {t.show}
@@ -162,9 +162,11 @@ function Figure({ figure, t }: { figure: StorageFigure; t: StorageText }) {
   if (figure.state === 'failed') return <span className={s.figure}>{t.failed}</span>
   const size = t.size(figure.bytes)
   const unreadable = figure.unreadable ?? 0
+  // What ran out of time, or couldn't all be read, is a lower bound either way.
   return (
-    <span className={s.figure} title={unreadable > 0 ? t.unreadable(unreadable) : undefined}>
-      {figure.approximate === true ? t.approximate(size) : size}
+    <span className={s.figure}>
+      {figure.approximate === true || unreadable > 0 ? t.approximate(size) : size}
+      {unreadable > 0 && <span className={s.fine}>{t.unreadable(unreadable)}</span>}
     </span>
   )
 }

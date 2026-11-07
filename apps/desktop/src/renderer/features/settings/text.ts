@@ -24,9 +24,13 @@ export const text = {
   report: 'Report a problem',
   /* About › Storage (DEV-147). */
   storage: {
-    profile: { title: 'Profile', note: 'Projects, tasks and settings. ' },
-    logs: { title: 'Logs', note: 'What Althar writes as it runs. ' },
-    worktrees: { title: 'Task folders', note: 'A copy of each project for every task. ' },
+    note: 'Where Althar keeps its data on this computer. The window’s own state and caches are kept elsewhere and aren’t counted here.',
+    profile: { title: 'Profile', note: 'Projects, tasks and settings. Best not edited by hand.' },
+    logs: { title: 'Logs', note: 'What Althar writes as it runs.' },
+    worktrees: {
+      title: 'Task folders',
+      note: 'A copy of each project for every task. To free space, remove task folders under Task folders, in Settings.',
+    },
     show: platform === 'darwin' ? 'Show in Finder' : platform === 'win32' ? 'Show in Explorer' : 'Show in Files',
   },
   off: 'Off',

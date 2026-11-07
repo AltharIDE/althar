@@ -22,3 +22,9 @@
   font-size: 12px;
   color: var(--danger);
 }
+
+.fine {
+  display: block;
+  font-size: 11px;
+  color: var(--t-3, var(--t-2));
+}
