@@ -47,6 +47,8 @@ export const keys = {
   automation: (automationId: string) => ['automation', automationId] as const,
   /** The skills store: read before the skills show, and again as a skill changes, in this window or another (feed.ts). */
   skills: ['skills'] as const,
+  /** The person's MCP servers and skills, for every project (null) or one: read again after each change from Settings. */
+  agentTools: (projectId: string | null) => ['agentTools', projectId] as const,
   /** Finished tasks' folders on this computer, and the disk they are on: read again as the feed says they changed. */
   folders: ['folders'] as const,
   /** Tasks found by words, in a project or (null) in every one. */
@@ -156,6 +158,8 @@ export const reads = (client: Client) => ({
   automation: (automationId: string) =>
     queryOptions({ queryKey: keys.automation(automationId), queryFn: () => client.getAutomation(automationId), gcTime: 5 * 60_000 }),
   skills: () => queryOptions({ queryKey: keys.skills, queryFn: () => client.listSkills() }),
+  agentTools: (projectId: string | null) =>
+    queryOptions({ queryKey: keys.agentTools(projectId), queryFn: () => client.getAgentTools(projectId) }),
   // Read again every second or so while their sizes are still being measured; after that, as the feed says.
   folders: () =>
     queryOptions({

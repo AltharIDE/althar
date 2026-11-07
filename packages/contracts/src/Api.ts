@@ -402,6 +402,102 @@ export const NEW_PROJECT_DEFAULTS: NewProjectDefaults = { permissions: 'rules', 
 export const SealStyle = Schema.Literals(['ring', 'wax', 'colophon'])
 export type SealStyle = typeof SealStyle.Type
 
+/** The roles the person's MCP servers and skills load in (ADR-097): a task's lead, the reviewer, the coordinator. */
+export const ToolRole = Schema.Literals(['lead', 'reviewer', 'coordinator'])
+export type ToolRole = typeof ToolRole.Type
+
+/** The person's agents whose servers and skills Althar reads, and keeps the same where they ask it to. */
+export const SyncedAgent = Schema.Literals(['claude', 'codex', 'opencode'])
+export type SyncedAgent = typeof SyncedAgent.Type
+
+/** Where a server or a skill was found: one of the person's agents, a repository of the project, a plugin, or Althar's catalog. */
+export const ToolSource = Schema.Struct({
+  from: Schema.Literals(['claude', 'codex', 'opencode', 'repository', 'plugin', 'althar']),
+  /** The file or folder, as the person names it: ~/.claude.json, .mcp.json. */
+  where: Schema.String,
+})
+export type ToolSource = typeof ToolSource.Type
+
+/** How a server or a skill stands in each of the person's agents, for sync's marks beside its name. */
+export const ToolHere = Schema.Literals(['in', 'added', 'missing', 'out', 'differs', 'cant'])
+export type ToolHere = typeof ToolHere.Type
+
+/** One of the person's MCP servers or skills, a row of Settings' table: where it was found, which roles get it, and how it stands in each agent. */
+export const ToolRow = Schema.Struct({
+  name: Schema.String,
+  /** What a server runs or calls; what a skill is for. */
+  about: Schema.String,
+  sources: Schema.Array(ToolSource),
+  /** The roles that get it, here: for every project, or the project asked about. */
+  roles: Schema.Array(ToolRole),
+  here: Schema.Record(SyncedAgent, ToolHere),
+})
+export type ToolRow = typeof ToolRow.Type
+
+/** Something sync can't do alone, which the person settles: under To settle, problems first. */
+export const SyncSettle = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('unreadable'), agent: SyncedAgent, file: Schema.String, problem: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literal('differs'),
+    name: Schema.String,
+    ways: Schema.Array(Schema.Struct({ agent: SyncedAgent, runs: Schema.String })),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal('cant'),
+    name: Schema.String,
+    agent: SyncedAgent,
+    why: Schema.Literals(['sse', 'secret', 'headers', 'reference']),
+  }),
+  Schema.Struct({ kind: Schema.Literal('signIn'), name: Schema.String, agents: Schema.Array(SyncedAgent) }),
+])
+export type SyncSettle = typeof SyncSettle.Type
+
+/** One agent's file or folder that sync writes to, and what it added there or would. */
+export const SyncTarget = Schema.Struct({
+  agent: SyncedAgent,
+  /** As the person names it: ~/.codex/config.toml. */
+  where: Schema.String,
+  /** What it added there, while on; what turning it on would add, while off. */
+  adds: Schema.Array(Schema.String),
+  /** What is kept out of it. */
+  out: Schema.Array(Schema.String),
+})
+export type SyncTarget = typeof SyncTarget.Type
+
+/** A change sync saw or made since it was turned on: a line under Since, with its Undo or Put it back. */
+export const SyncSince = Schema.Struct({
+  id: Schema.String,
+  at: Schema.String,
+  name: Schema.String,
+  kind: Schema.Literals(['copied', 'tookOut']),
+  from: SyncedAgent,
+  to: Schema.Array(SyncedAgent),
+  undone: Schema.Boolean,
+})
+export type SyncSince = typeof SyncSince.Type
+
+/** How a sync switch stands: on or off, To settle, Since, and each agent's file. */
+export const SyncView = Schema.Struct({
+  on: Schema.Boolean,
+  settle: Schema.Array(SyncSettle),
+  since: Schema.Array(SyncSince),
+  targets: Schema.Array(SyncTarget),
+  /** What its last write couldn't do, in each agent's own words. */
+  errors: Schema.Array(Schema.String),
+})
+export type SyncView = typeof SyncView.Type
+
+/** The person's MCP servers and skills, as Settings shows them, and the two switches that keep their agents the same. */
+export const AgentTools = Schema.Struct({
+  /** False where this Althar reads no agent's settings (a test, a sandbox): the sections say so and nothing else. */
+  enabled: Schema.Boolean,
+  servers: Schema.Array(ToolRow),
+  skills: Schema.Array(ToolRow),
+  serverSync: SyncView,
+  skillSync: SyncView,
+})
+export type AgentTools = typeof AgentTools.Type
+
 /** The person's settings for the app as a whole. */
 export const AppSettings = Schema.Struct({
   plansAndReviews: PlansAndReviews,
@@ -3945,6 +4041,37 @@ export const Api = RpcGroup.make(
   /** Switches one of an agent's models off, or on again: one switched off is never planned, and no picker offers it. */
   command('SetModelBlocked', { agentId: Schema.String, model: Schema.String, blocked: Schema.Boolean }, Schema.Void),
   call('GetSettings', {}, AppSettings),
+  /** The person's MCP servers and skills, which roles get each, for every project or one, and how sync stands (ADR-097). */
+  call('GetAgentTools', { projectId: Schema.NullOr(Schema.String) }, AgentTools),
+  /** Which roles get one of the person's servers or skills: for every project, or for one. */
+  command(
+    'SetToolRoles',
+    {
+      kind: Schema.Literals(['server', 'skill']),
+      name: Schema.String,
+      roles: Schema.Array(ToolRole),
+      projectId: Schema.NullOr(Schema.String),
+    },
+    Schema.Void,
+  ),
+  /** Turns a sync switch on, or off with what it added left in or taken back out. */
+  command('SetToolSync', { kind: Schema.Literals(['server', 'skill']), on: Schema.Boolean, takeBack: Schema.Boolean }, Schema.Void),
+  /** Keeps a server or a skill out of one agent (taken back out where sync added it), or puts it back. */
+  command(
+    'SetToolKeptOut',
+    { kind: Schema.Literals(['server', 'skill']), agent: SyncedAgent, name: Schema.String, out: Schema.Boolean },
+    Schema.Void,
+  ),
+  /** For one set up two ways: whose way it runs everywhere, or left out of syncing. */
+  command(
+    'PickToolWay',
+    { kind: Schema.Literals(['server', 'skill']), name: Schema.String, way: Schema.Literals(['claude', 'codex', 'opencode', 'apart']) },
+    Schema.Void,
+  ),
+  /** Undoes a line under Since. */
+  command('UndoToolSync', { id: Schema.String }, Schema.Void),
+  /** Starts a server's sign-in in one of the person's agents, through its own command. */
+  command('SignInToolServer', { agent: SyncedAgent, name: Schema.String }, Schema.Void),
   /** Turns Althar's co-authoring of commits and pull requests on or off; the agents' own credit lines go either way. */
   command('SetCoAuthor', { on: Schema.Boolean }, Schema.Void),
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */

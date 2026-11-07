@@ -493,12 +493,15 @@ export const undoSince = async (io: SyncIo, id: string) => {
   else await putBack(io, entry.from, entry.server)
 }
 
-/** Starts a server's sign-in in one agent, through its own command; it goes off To settle once started. */
-export const signIn = async (io: SyncIo, agent: SyncedAgent, server: string) => {
+/**
+ * A server's sign-in in one agent, as the line the person runs in a terminal:
+ * each agent keeps its own, so each signs in on its own. It goes off To settle
+ * once started. OpenCode's is started from OpenCode itself.
+ */
+export const signIn = (io: SyncIo, agent: SyncedAgent, server: string): string | undefined => {
   const record = readRecord(io)
   writeRecord(io, { ...record, signedIn: [...new Set([...record.signedIn, `${server}:${agent}`])] })
-  if (agent === 'claude') await io.run('claude', ['mcp', 'login', server])
-  else if (agent === 'codex') await io.run('codex', ['mcp', 'login', server])
+  return agent === 'claude' ? `claude mcp login ${server}` : agent === 'codex' ? `codex mcp login ${server}` : undefined
 }
 
 /** How the switch stands, and what turning it on would do: for Settings. */

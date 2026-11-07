@@ -187,6 +187,9 @@ const options = {
             path: device.path,
           }),
   },
+  // The person's own agents' settings, whose MCP servers and skills every role gets and sync keeps the same (ADR-097).
+  // ALTHAR_AGENT_HOME names another home for them, as a demo or a screenshot does, so the person's own aren't touched.
+  agentConfigs: { homeDir: process.env.ALTHAR_AGENT_HOME ?? homedir(), folder: join(profile, 'agent-sync') },
   appVersion: process.env.ALTHAR_APP_VERSION ?? '0.0.0',
   deviceName: hostname(),
   ...(agents === null ? {} : { agentStderr: agents.stderr }),
@@ -254,6 +257,8 @@ const program = Effect.gen(function* () {
           secrets: Secrets.memory(),
           // Nothing opens in Terminal while the tests drive the app.
           openTerminal: () => Effect.succeed(false),
+          // The person's agents' settings are a home of the profile's own, never this computer's.
+          agentConfigs: { homeDir: process.env.ALTHAR_AGENT_HOME ?? join(profile, 'agent-home'), folder: join(profile, 'agent-sync') },
           openUrl: () => Effect.succeed(false),
           // How many agents work at once comes from the machine a test names (`cores,GB`), else a large one, never the one running them.
           busy: { machine: machineIn(process.env.ALTHAR_MACHINE) },

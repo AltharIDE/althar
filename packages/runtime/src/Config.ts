@@ -91,6 +91,14 @@ export interface RuntimeOptions {
     readonly list: () => ReadonlyArray<{ readonly id: string; readonly name: string }>
     readonly open: (editor: string, folder: string, file: string | null, line: number | null) => Effect.Effect<boolean>
   }
+  /**
+   * The person's own agents' settings (ADR-097): the home their MCP servers
+   * and skills are read from, which load in every role, and which sync keeps
+   * the same; and Althar's folder for sync's record and the copies of the
+   * files it changed. Without it, none is read or written: a test's runtime
+   * never touches the home it runs in.
+   */
+  readonly agentConfigs?: { readonly homeDir: string; readonly folder: string }
   readonly appVersion: string
   /** What this device is called, when the profile is new. */
   readonly deviceName: string
