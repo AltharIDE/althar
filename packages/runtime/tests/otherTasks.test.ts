@@ -406,5 +406,6 @@ describe('a lead’s brief', () => {
     assert.include(OTHER_TASKS, 'before you change code another open task changes, and where your brief names another task')
     assert.include(OTHER_TASKS, 'draft it with draft_task and plan it with propose_plan')
     assert.include(OTHER_TASKS, 'Accepting and merging stay on the person')
+    assert.include(OTHER_TASKS, 'read_settings and change_settings')
   })
 })
