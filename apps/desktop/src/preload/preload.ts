@@ -4,6 +4,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { doNotTrack } from '../main/appPreferences'
 import { chromeFromArgs, type DesktopChrome, isDesktopChrome } from '../main/desktop'
 import type { WindowAction } from '../renderer/data/services'
+import type { PageKey, PageState } from '../main/browser/page'
 
 /*
  * The window's bridge to the main process, and nothing more: the port to the
@@ -21,7 +22,8 @@ import type { WindowAction } from '../renderer/data/services'
  * store, with where its copy is as the person knows the place, which main
  * shows in the file manager when asked. Quit with work under way, asking what to do. Whether DO_NOT_TRACK is set, which
  * keeps usage data off. And reporting a problem, and the page's own errors,
- * for the log. The page never sees or sends a path. It gets no Node, no
+ * for the log. And the pages beside the conversations (ADR-100): opening,
+ * placing and pointing at one, as main holds it, and how each stands. The page never sees or sends a path. It gets no Node, no
  * file system, no shell.
  */
 
@@ -102,6 +104,20 @@ const quitAsked = new Set<(question: unknown) => void>()
 ipcRenderer.on('althar:quit-ask', (_event, question: unknown) => {
   quitQuestion = question
   for (const listener of quitAsked) listener(question)
+})
+
+/* How each page beside a conversation stands, and what the person pressed in one that the window acts on, as main says. */
+const paging = new Set<(state: PageState) => void>()
+ipcRenderer.on('althar:page', (_event, state: PageState) => {
+  for (const listener of paging) listener(state)
+})
+const pageKeys = new Set<(owner: string, key: PageKey) => void>()
+ipcRenderer.on('althar:page-key', (_event, owner: string, key: PageKey) => {
+  for (const listener of pageKeys) listener(owner, key)
+})
+const pagesClosed = new Set<(owner: string) => void>()
+ipcRenderer.on('althar:page-closed', (_event, owner: string) => {
+  for (const listener of pagesClosed) listener(owner)
 })
 
 contextBridge.exposeInMainWorld('althar', {
@@ -216,6 +232,39 @@ contextBridge.exposeInMainWorld('althar', {
       return () => void quitAsked.delete(listener)
     },
     answer: (answer: string): void => ipcRenderer.send('althar:quit-answer', answer),
+  },
+  // The pages beside the conversations: each by its owner, a task's id or a project's (ADR-100).
+  pages: {
+    open: (owner: string, address: string): Promise<unknown> => ipcRenderer.invoke('althar:page-open', owner, address),
+    states: (): Promise<unknown> => ipcRenderer.invoke('althar:pages-states'),
+    show: (owner: string, panel: { x: number; y: number; width: number; height: number } | null): void =>
+      ipcRenderer.send('althar:page-show', owner, panel),
+    move: (owner: string, move: string): Promise<void> => ipcRenderer.invoke('althar:page-move', owner, move),
+    viewport: (owner: string, viewport: string): Promise<void> => ipcRenderer.invoke('althar:page-viewport', owner, viewport),
+    point: (owner: string): Promise<unknown> => ipcRenderer.invoke('althar:page-point', owner),
+    stopPointing: (owner: string): Promise<void> => ipcRenderer.invoke('althar:page-stop-pointing', owner),
+    pins: (owner: string, pins: unknown): Promise<void> => ipcRenderer.invoke('althar:page-pins', owner, pins),
+    find: (owner: string, selector: string, address: string): Promise<unknown> =>
+      ipcRenderer.invoke('althar:page-find', owner, selector, address),
+    still: (owner: string): Promise<string | null> => ipcRenderer.invoke('althar:page-still', owner),
+    cover: (owner: string, covered: boolean): Promise<void> => ipcRenderer.invoke('althar:page-cover', owner, covered),
+    outside: (owner: string, what: 'page' | 'download'): Promise<void> => ipcRenderer.invoke('althar:page-outside', owner, what),
+    dismiss: (owner: string): Promise<void> => ipcRenderer.invoke('althar:page-dismiss', owner),
+    close: (owner: string): Promise<void> => ipcRenderer.invoke('althar:page-close', owner),
+    clear: (owner: string): Promise<void> => ipcRenderer.invoke('althar:page-clear', owner),
+    clearAll: (): Promise<void> => ipcRenderer.invoke('althar:pages-clear'),
+    onState: (listener: (state: PageState) => void): (() => void) => {
+      paging.add(listener)
+      return () => void paging.delete(listener)
+    },
+    onKey: (listener: (owner: string, key: PageKey) => void): (() => void) => {
+      pageKeys.add(listener)
+      return () => void pageKeys.delete(listener)
+    },
+    onClosed: (listener: (owner: string) => void): (() => void) => {
+      pagesClosed.add(listener)
+      return () => void pagesClosed.delete(listener)
+    },
   },
   // What the page couldn't handle, for main's log: its message and stack, nothing else.
   logError: (error: { kind: 'error' | 'rejection'; message: string; stack: string; source?: string }): void =>

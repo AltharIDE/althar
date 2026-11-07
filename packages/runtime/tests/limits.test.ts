@@ -16,6 +16,7 @@ import { NotFound } from '../src/errors'
 import { type Failure, failureOf, Failures } from '../src/Failures'
 import { Instance } from '../src/Instance'
 import { Limits, outWords, whenWords } from '../src/Limits'
+import { Models } from '../src/Models'
 import { Policies, usageLimitOf } from '../src/Policies'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
@@ -305,6 +306,8 @@ describe('an agent out of usage', () => {
 
   /** A task planned on Claude Code with Codex reviewing, Codex already out from another task, and what its thread said once it is ready. */
   const reviewerOut = Effect.gen(function* () {
+    // Make the replacement model known before a takeover can be selected.
+    yield* until((yield* Models).catalog, (catalog) => catalog.every((agent) => !agent.probing))
     const sessions = yield* Sessions
     const projects = yield* Projects
     const limits = yield* Limits
@@ -330,7 +333,7 @@ describe('an agent out of usage', () => {
       const lines = yield* reviewerOut
       assert.include(
         lines,
-        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake opencode takes the review over.`,
+        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake opencode takes the review over, on Small.`,
       )
       assert.include(lines, 'review: The change holds.')
     }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: { until: back } } })))
@@ -342,7 +345,7 @@ describe('an agent out of usage', () => {
       const lines = yield* reviewerOut
       assert.include(
         lines,
-        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake claude-code takes the review over, on Small, and reviews its own work.`,
+        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake claude-code takes the review over, on Small, with the review by the same maker.`,
       )
     }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: { until: back } } }, ['opencode'])))
   })
@@ -369,6 +372,8 @@ describe('an agent out of usage', () => {
   it.live('moves the coordinator on, with what the person said waiting for the agent that takes over', () => {
     const back = Date.now() + HOUR
     return Effect.gen(function* () {
+      // Make the replacement model known before a takeover can be selected.
+      yield* until((yield* Models).catalog, (catalog) => catalog.every((agent) => !agent.probing))
       const projects = yield* Projects
       const coordinator = yield* Coordinator
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
@@ -386,7 +391,7 @@ describe('an agent out of usage', () => {
       assert.include(reply, 'Fake claude-code was working on this when it reached its usage limit, and may have done some of it already.')
       assert.include(
         yield* said(threadId),
-        `Fake claude-code ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake codex takes over.`,
+        `Fake claude-code ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake codex takes over, on Small.`,
       )
     }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })))
   })
@@ -868,7 +873,7 @@ describe('limits', () => {
       assert.isNull(out?.resetsAt)
       assert.closeTo(Date.parse(out?.until ?? '') - Date.now(), HOUR, 60_000)
       assert.isTrue(Option.isNone(yield* limits.out('opencode')))
-      assert.strictEqual(yield* limits.free(['claude-code']), 'opencode')
+      assert.strictEqual((yield* limits.free({ besides: ['claude-code'] }))?.agentId, 'opencode')
 
       // The rule is the project's: a revision of its rules each time the person changes it, recorded as theirs.
       const policies = yield* Policies

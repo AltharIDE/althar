@@ -13,6 +13,8 @@ import { ControlSheet } from '../ControlCenter/ControlCenter'
 import { EdgeMini } from '../EdgeMini/EdgeMini'
 import {
   AgentsAtOnce,
+  BrowserPreferences,
+  type CookieKeep,
   CrashReports,
   CrashReportsLine,
   EdgeHere,
@@ -21,6 +23,7 @@ import {
   EdgePlaces,
   EdgeScene,
   KeepAwake,
+  type LinksOpen,
   NotificationSettings,
   NotificationSound,
   type NotifyChoices,
@@ -680,3 +683,27 @@ export const DictationDownloading: Story = {
     await expect(c.queryByRole('button', { name: 'Remove' })).toBeNull()
   },
 }
+
+function Browser() {
+  const [links, setLinks] = useState<LinksOpen>('beside')
+  const [keep, setKeep] = useState<CookieKeep>('task')
+  const [cleared, setCleared] = useState(false)
+  return (
+    <BrowserPreferences links={links} onLinks={setLinks} keep={keep} onKeep={setKeep} onClear={() => setCleared(true)} cleared={cleared} />
+  )
+}
+
+/** Settings › Browser: where a thread's links open (a task's run beside its conversation either way), how long pages keep cookies, and clearing all of them. */
+export const BrowserSettings: Story = {
+  decorators: [(Story) => <div style={{ width: 620 }}>{Story()}</div>],
+  render: () => <Browser />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('radio', { name: 'Beside the conversation' })).toBeChecked()
+    await userEvent.click(c.getByRole('radio', { name: 'In your browser' }))
+    await expect(c.getByRole('radio', { name: 'In your browser' })).toBeChecked()
+    await userEvent.click(c.getByRole('button', { name: 'Clear all' }))
+    await expect(c.getByText('None kept.')).toBeInTheDocument()
+  },
+}
+export const BrowserSettingsDark: Story = { ...BrowserSettings, globals: { theme: 'dark' } }

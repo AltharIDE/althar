@@ -6,11 +6,13 @@
  * through the main process, which is where they take effect: keeping the
  * Mac awake while work runs, which notifications show, the Dock's count and
  * a sound, whether anonymous usage data is sent, and whether Althar opens at
- * login. Which editor files
- * open in, and whether the bar shows how hard the computer works, are the
- * window's to use. Nothing here touches Node, so the window may read the
+ * login, and how long pages beside a conversation keep their cookies. Which
+ * editor files open in, where a thread's links open, and whether the bar
+ * shows how hard the computer works, are the window's to use. Nothing here touches Node, so the window may read the
  * defaults and keys too.
  */
+
+import { type CookieKeep, isCookieKeep } from './browser/cookies'
 
 interface Kind<T> {
   readonly starts: T
@@ -47,6 +49,16 @@ const accent: Kind<AccentSource> = {
   holds: (value): value is AccentSource => value === 'althar' || value === 'system',
 }
 
+/** Where a link in a thread opens: beside the conversation, or in the person's browser. A task's run opens beside it either way. */
+export type LinksOpen = 'beside' | 'outside'
+
+const links: Kind<LinksOpen> = {
+  starts: 'beside',
+  holds: (value): value is LinksOpen => value === 'beside' || value === 'outside',
+}
+
+const cookies: Kind<CookieKeep> = { starts: 'task', holds: isCookieKeep }
+
 export const PREFERENCES = {
   /** Keeps the Mac from sleeping while any work runs or waits; the display may still sleep. */
   keepAwake: onOff(true),
@@ -78,6 +90,10 @@ export const PREFERENCES = {
   accent,
   /** Althar opens at login, in the background, with no window, so automations run after a restart (loginItem.ts). */
   openAtLogin: onOff(false),
+  /** Where a link in a thread opens: beside the conversation, or in the person's browser (browser/, ADR-100). */
+  browserLinks: links,
+  /** How long pages beside a conversation keep cookies and storage; the main process clears them at that moment (browser/cookies.ts). */
+  browserCookies: cookies,
 } as const
 
 type Kinds = typeof PREFERENCES

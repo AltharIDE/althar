@@ -9,6 +9,7 @@ import { Choices } from '../../primitives/Choices/Choices'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Segmented } from '../../primitives/Segmented/Segmented'
 import { Select } from '../../primitives/Select/Select'
 import { Switch } from '../../primitives/Switch/Switch'
 import s from './Preferences.module.css'
@@ -971,5 +972,110 @@ export function EdgeHere({ title, note, why, picture, className }: EdgeHereProps
         {why !== undefined && <span className={s.hereWhy}>{why}</span>}
       </div>
     </div>
+  )
+}
+
+/* ---- browser --------------------------------------------------------------------- */
+
+/** Where a link in a thread opens: beside the conversation, or in the person's browser. */
+export type LinksOpen = 'beside' | 'outside'
+
+/** How long pages keep cookies: until the page closes, until Althar quits, until the task is done, or as long as each site asks. */
+export type CookieKeep = 'page' | 'quit' | 'task' | 'site'
+
+export interface BrowserPreferencesText {
+  links: string
+  linksNote: string
+  beside: string
+  outside: string
+  keep: string
+  keepNote: string
+  keeps: Readonly<Record<CookieKeep, string>>
+  stored: string
+  storedNote: string
+  cleared: string
+  clear: string
+}
+
+export const browserPreferencesText: BrowserPreferencesText = {
+  links: 'Links from threads',
+  linksNote: 'A task’s run opens beside its conversation either way.',
+  beside: 'Beside the conversation',
+  outside: 'In your browser',
+  keep: 'Keep cookies',
+  keepNote: 'Each task’s pages keep their own, apart from your browser’s and other tasks’.',
+  keeps: {
+    page: 'Until the page closes',
+    quit: 'Until Althar quits',
+    task: 'Until the task is done',
+    site: 'As long as each site asks',
+  },
+  stored: 'Cookies and storage',
+  storedNote: 'What every page beside a conversation has kept.',
+  cleared: 'None kept.',
+  clear: 'Clear all',
+}
+
+export interface BrowserPreferencesProps {
+  links: LinksOpen
+  onLinks: (links: LinksOpen) => void
+  keep: CookieKeep
+  onKeep: (keep: CookieKeep) => void
+  /** Clears every page's cookies and storage. */
+  onClear: () => void
+  /** Clearing is under way. */
+  clearing?: boolean
+  /** Cleared, since this section opened. */
+  cleared?: boolean
+  text?: Partial<BrowserPreferencesText>
+}
+
+/** The pages beside conversations: where a thread's links open, how long pages keep cookies, and clearing what they kept. */
+export function BrowserPreferences({
+  links,
+  onLinks,
+  keep,
+  onKeep,
+  onClear,
+  clearing = false,
+  cleared = false,
+  text,
+}: BrowserPreferencesProps) {
+  const t = { ...browserPreferencesText, ...text }
+  const keeps: ReadonlyArray<CookieKeep> = ['page', 'quit', 'task', 'site']
+  return (
+    <SettingList>
+      <SettingRow title={t.links} note={t.linksNote} glyph={<Icon name="globe" size={15} />}>
+        {() => (
+          <Segmented<LinksOpen>
+            label={t.links}
+            value={links}
+            onChange={onLinks}
+            options={[
+              { value: 'beside', label: t.beside },
+              { value: 'outside', label: t.outside },
+            ]}
+          />
+        )}
+      </SettingRow>
+      <SettingRow title={t.keep} note={t.keepNote} glyph={<Icon name="cookie" size={15} />}>
+        {() => (
+          <Select<CookieKeep>
+            label={t.keep}
+            width={230}
+            options={keeps.map((value) => ({ value, label: t.keeps[value] }))}
+            value={keep}
+            onChange={onKeep}
+          />
+        )}
+      </SettingRow>
+      <SettingRow title={t.stored} note={cleared ? t.cleared : t.storedNote} glyph={<Icon name="remove" size={15} />}>
+        {() => (
+          <Button size="small" busy={clearing} onClick={onClear}>
+            {t.clear}
+          </Button>
+        )}
+      </SettingRow>
+    </SettingList>
   )
 }

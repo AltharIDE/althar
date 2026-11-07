@@ -4,6 +4,7 @@ import { type AgentStatus, MOST_AT_ONCE } from '@althar/contracts'
 import {
   AgentInstall,
   AgentsAtOnce,
+  BrowserPreferences,
   type AgentTab,
   AgentTabList,
   AgentTabPanel,
@@ -230,6 +231,8 @@ function SectionBody({
       return <AppearanceSection {...looks} />
     case 'editor':
       return <EditorSection />
+    case 'browser':
+      return <BrowserSection />
     case 'about':
       return <AboutSection start={start} />
   }
@@ -728,6 +731,39 @@ function DictationSection() {
         removing={dictation.removing}
       />
       <Failed when={dictation.failed}>{text.removeFailed}</Failed>
+    </>
+  )
+}
+
+/* ---- the browser ------------------------------------------------------------------ */
+
+/**
+ * The pages beside conversations (ADR-100): where a thread's links open, how
+ * long pages keep cookies, and clearing what every page kept, at once.
+ */
+function BrowserSection() {
+  const { preferences, set, failed } = usePreferences()
+  const pages = useServices().host.pages
+  const [clearing, setClearing] = useState<'no' | 'clearing' | 'cleared'>('no')
+  return (
+    <>
+      <BrowserPreferences
+        links={preferences.browserLinks}
+        onLinks={(links) => set('browserLinks', links)}
+        keep={preferences.browserCookies}
+        onKeep={(keep) => set('browserCookies', keep)}
+        onClear={() => {
+          if (pages === undefined) return
+          setClearing('clearing')
+          void pages.clearAll().then(
+            () => setClearing('cleared'),
+            () => setClearing('no'),
+          )
+        }}
+        clearing={clearing === 'clearing'}
+        cleared={clearing === 'cleared'}
+      />
+      <Failed when={failed} />
     </>
   )
 }

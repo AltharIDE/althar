@@ -85,6 +85,15 @@ export interface ThreadShell {
   openStep?: (step: StepRef) => void
   /** The code an agent names: without it, a name in backticks is code text, as any other. */
   code?: CodeShell
+  /**
+   * Opens a web link a message holds, as the host chooses: beside the
+   * conversation, or in the person's browser. A link pressed with a
+   * modifier, or with any button but the first, is left to open in a new
+   * tab. Without it, every link does.
+   */
+  openLink?: (href: string) => void
+  /** What a link says it does, for assistive technology, where `openLink` takes it. */
+  linkNote?: string
 }
 
 const ThreadShellContext = createContext<ThreadShell>({})
