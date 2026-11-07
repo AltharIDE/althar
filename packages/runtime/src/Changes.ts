@@ -5386,6 +5386,9 @@ export class Changes extends Context.Service<
        * workspace at most every few turns, unless `fresh`: the worktrees of a
        * repository share what one fetched. Null where it couldn't be fetched.
        */
+      /** Where the branch a fork's pull request goes into is fetched, where none of its clone's remotes has its parent. */
+      const PARENT_FETCHED = 'refs/althar/parent/'
+
       const baseOf = (
         workspace: { readonly path: string; readonly binding: string },
         host: CodeHost,
@@ -5399,7 +5402,12 @@ export class Changes extends Context.Service<
           const at = yield* Clock.currentTimeMillis
           const known = fetchedAt.get(key)
           if (!fresh && known !== undefined && at - known.at < baseEvery) return known.tip
-          const tip = yield* fetchInto(workspace.path, yield* host.pushTarget(repository), branch, `refs/remotes/${ref}`)
+          const tip = yield* fetchInto(
+            workspace.path,
+            yield* host.pushTarget(repository),
+            branch,
+            ref.startsWith('refs/') ? ref : `refs/remotes/${ref}`,
+          )
           if (tip !== null) fetchedAt.set(key, { at, tip })
           return tip
         })
@@ -5458,16 +5466,17 @@ export class Changes extends Context.Service<
           if (workspace === undefined)
             return yield* Effect.as(couldnt(`Its folder isn’t on this computer, so Althar can’t merge ${now.target} into it here.`), false)
           // Into the repository a fork came from, its branch is that remote's, by whatever name the clone has it; otherwise origin's,
-          // as `git fetch` names them.
+          // as `git fetch` names them. A parent among none of the clone's remotes has its branch fetched beside them, never into
+          // origin's, which is the fork's.
           const fork = yield* namedRemotes(workspace.path).pipe(
-            Effect.map(forkOf),
+            Effect.map((remotes) => forkOf(remotes)),
             Effect.orElseSucceed(() => null),
           )
           const remote =
             fork !== null && repository.path.join('/').toLowerCase() === fork.upstream.path.join('/').toLowerCase()
-              ? (fork.upstream.remote ?? 'origin')
+              ? fork.upstream.remote
               : 'origin'
-          const ref = `${remote}/${now.target}`
+          const ref = remote === null ? `${PARENT_FETCHED}${now.target}` : `${remote}/${now.target}`
           const target = yield* baseOf(workspace, host, repository, now.target, ref, how.fresh || says)
           const from = yield* commitOf(workspace.path, 'HEAD').pipe(Effect.orElseSucceed(() => null))
           if (target === null || from === null)
