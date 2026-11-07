@@ -1,3 +1,4 @@
+import { SETTINGS_SECTIONS } from '@althar/contracts'
 import type { IconName } from '@althar/ui'
 
 import { device } from '../../shared/device'
@@ -12,19 +13,8 @@ import { device } from '../../shared/device'
  * section to come between those it sits among.
  */
 
-export const SECTIONS = [
-  'agents',
-  'skills',
-  'code-hosts',
-  'this-mac',
-  'plans-and-reviews',
-  'new-projects',
-  'reviews',
-  'notifications',
-  'appearance',
-  'editor',
-  'about',
-] as const
+/** As contracts lists them, so the agents' read_settings names the same sections (ADR-097). */
+export const SECTIONS = SETTINGS_SECTIONS
 
 export type Section = (typeof SECTIONS)[number]
 
