@@ -128,7 +128,9 @@ export type Taken = { readonly folder: string } | { readonly branch: string }
  * it. A moved folder's `.git` then names another task's record, and git's
  * repair would point that record at it, with the other task's HEAD, branch
  * and index. A record is this folder's to take where it names this folder,
- * or a place that isn't there, and where `branch` says which branch the
+ * or a place whose folder isn't there (a folder that is there, its `.git`
+ * gone or not, is another's, which a detached review's copy has no branch
+ * to tell apart), and where `branch` says which branch the
  * folder is on, if it is on one, the record isn't on another; a review's
  * copy, which never is on a branch, is `branch` `false`. Null where the
  * record is free, or there is none.
@@ -139,7 +141,8 @@ export const takenFrom = (folder: string, link: Link, root: string, branch: stri
   const record = recordFor(folder, link, common)
   if (record === null) return null
   const named = namedBy(record)
-  if (named !== null && !same(named, join(folder, '.git')) && existsSync(named)) return { folder: dirname(named) }
+  const owner = named === null ? null : dirname(named)
+  if (owner !== null && !same(owner, folder) && existsSync(owner)) return { folder: owner }
   const on = /^ref:\s*refs\/heads\/(.+)$/.exec(read(join(record, 'HEAD')) ?? '')?.[1]
   if (on !== undefined && branch !== null && on !== branch) return { branch: on }
   return null

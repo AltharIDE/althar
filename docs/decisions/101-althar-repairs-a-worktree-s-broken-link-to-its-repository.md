@@ -40,8 +40,9 @@
     index. So before it runs git, Althar finds the record the repair would
     join the folder to: one that names this folder, else the git directory
     its `.git` names, else the record by that directory's name. It repairs
-    only where that record names this folder or a place that isn't there,
-    and isn't on a branch other than the task's (for a review's copy, on no
+    only where that record names this folder or a folder that isn't there
+    (one that is there counts as another's even without its `.git`, since a
+    detached review copy has no branch to tell it by), and isn't on a branch other than the task's (for a review's copy, on no
     branch). Otherwise it records `workspace.repair_failed`, says the record
     is another folder's, or on another branch, and changes nothing.
   - **What it records:** a `workspace.repaired` (or

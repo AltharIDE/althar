@@ -150,6 +150,25 @@ describe('a worktree whose link broke', () => {
     assert.deepStrictEqual(linkOf(d), { state: 'fine' })
   })
 
+  it('is another’s to repair where the record names a detached copy whose folder is there without its .git', async () => {
+    const at = mkdtempSync(join(tmpdir(), 'althar-links-'))
+    const main = join(at, 'main')
+    execFileSync('git', ['init', '-q', '-b', 'main', main])
+    git(main, 'commit', '-q', '--allow-empty', '-m', 'init')
+    const [a, d] = [join(at, 'a'), join(at, 'd')]
+    for (const copy of [a, d]) git(main, 'worktree', 'add', '-q', '--detach', copy)
+    const records = join(main, '.git', 'worktrees')
+    rmSync(join(records, 'a'), { recursive: true })
+    rmSync(join(d, '.git'))
+    writeFileSync(join(a, '.git'), `gitdir: ${join(records, 'd')}\n`)
+    const before = readFileSync(join(records, 'd', 'gitdir'), 'utf8')
+    // Detached, the record names no branch to tell it by: its folder being there is what says it is another's.
+    assert.deepStrictEqual(takenFrom(a, linkOf(a), main, false), { folder: d })
+    // Git's own repair would take it.
+    await repaired(main, a)
+    assert.notStrictEqual(readFileSync(join(records, 'd', 'gitdir'), 'utf8'), before)
+  })
+
   it('is another’s to repair where that record is on another branch, though its folder is gone', () => {
     const { at, main } = fixture(['a', 'e'])
     const a = join(at, 'a')
