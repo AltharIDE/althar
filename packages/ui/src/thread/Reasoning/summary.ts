@@ -9,8 +9,20 @@
  * it set out to do.
  */
 
-/** A line that is a heading and nothing else: bold, as Codex's are, or a markdown heading. */
-const HEADING = /^\s*(?:\*\*([^*\n]+?)\*\*|#{1,6}\s+(.+?))\s*:?\s*$/
+/**
+ * The words of a line that is a heading and nothing else, bold as Codex's are or a markdown heading, a colon after it or
+ * not: null for any other. Trimmed first, so no pattern has spaces to read two ways, as one for the whole line would.
+ */
+const headingIn = (line: string): string | null => {
+  const trimmed = line.trim()
+  const whole = trimmed.endsWith(':') ? trimmed.slice(0, -1).trimEnd() : trimmed
+  if (whole.length > 4 && whole.startsWith('**') && whole.endsWith('**')) {
+    const words = whole.slice(2, -2)
+    return words.includes('*') ? null : words
+  }
+  const hashes = /^#{1,6}\s/.exec(whole)?.[0]
+  return hashes === undefined ? null : whole.slice(hashes.length)
+}
 
 /** How long the line may be, in characters. */
 const LONG = 90
@@ -38,9 +50,8 @@ export const headingOf = (text: string): string | null => {
   const lines = text.split('\n')
   // A last line not yet ended may still be a heading being written: only one that is whole counts.
   for (let at = lines.length - 1; at >= 0; at--) {
-    const found = HEADING.exec(lines[at] ?? '')
-    const words = found?.[1] ?? found?.[2]
-    if (words !== undefined && plain(words) !== '') return short(plain(words))
+    const words = headingIn(lines[at] ?? '')
+    if (words !== null && plain(words) !== '') return short(plain(words))
   }
   return null
 }

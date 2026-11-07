@@ -93,6 +93,11 @@ describe('markdown cut off mid-stream', () => {
     expect(streamable('```ts\nconst a = 1\n``')).toBe('```ts\nconst a = 1\n')
   })
 
+  it('reads a long line of brackets at once, as it reads a short one', () => {
+    expect(streamable(`See ${'[a'.repeat(20_000)}`)).toBe(`See a${'[a'.repeat(19_999)}`)
+    expect(streamable('[]('.repeat(20_000))).toBe('')
+  })
+
   it('draws every cut of an answer without a block that turns into another: what it shows is what it will be, as far as it goes', () => {
     const kinds = (text: string) => Lexer.lex(text).flatMap((token) => (token.type === 'space' ? [] : [token.type]))
     const whole = kinds(ANSWER)
@@ -166,6 +171,13 @@ describe('what a thought was about', () => {
     expect(headingOf(`${CODEX}.\n\n**Writing the mig`)).toBe('Tracing the poll to the store')
     expect(headingOf('## Plan\n\nFirst')).toBe('Plan')
     expect(headingOf('No heading here.')).toBeNull()
+    // A colon alone titles nothing.
+    expect(headingOf('## :')).toBeNull()
+  })
+
+  it('reads a long line of spaces at once, as it reads a short one', () => {
+    expect(headingOf(`## Plan${' '.repeat(20_000)}x`)).toBe('Plan x')
+    expect(headingOf(`**)**${' '.repeat(20_000)}x`)).toBeNull()
   })
 
   it('is its first sentence otherwise, plain and short, without the words it opens with', () => {

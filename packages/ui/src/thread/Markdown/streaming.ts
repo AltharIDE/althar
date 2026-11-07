@@ -26,7 +26,6 @@ const UNSURE = [
   /^ {0,3}(`{1,}|~{1,})[^`\s]*$/,
 ]
 const TABLE_ROW = /^\s*\|/
-const TABLE_RULE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-*:?\s*)*\|?\s*$/
 
 /** Whether the text ends inside a code fence that hasn't closed. */
 export const inOpenFence = (text: string): boolean => {
@@ -46,9 +45,8 @@ const withoutUnsureTable = (lines: ReadonlyArray<string>): ReadonlyArray<string>
   while (start > 0 && TABLE_ROW.test(lines[start - 1] ?? '')) start -= 1
   const rows = lines.slice(start)
   if (rows.length === 0) return lines
-  // Its rule, whole, under its header: the table is sure; only a row still being written waits.
-  const ruled = rows.length >= 3 || (rows.length === 2 && TABLE_RULE.test(rows[1] ?? '') && lines.length > start + 2)
-  return ruled ? lines : lines.slice(0, start)
+  // A line after the rule under its header, and it is sure, a table or not: only its header and its rule still being written wait.
+  return rows.length >= 3 ? lines : lines.slice(0, start)
 }
 
 /**
@@ -96,8 +94,24 @@ const openMarks = (text: string): { readonly marks: ReadonlyArray<string>; reado
   return { marks: (dangling > 0 ? marks.slice(0, -1) : marks).map((one) => one.mark), dangling }
 }
 
-/** A link still being written: its words show, and its address waits until it closes. */
-const OPEN_LINK = /\[([^\]\n]*)\](\([^)\n]*)?$|\[([^\]\n]*)$/
+/**
+ * The text with a link still being written at its end cut to its words: `[words`, `[words]` and `[words](address` show
+ * their words, and the address waits until it closes. The first `[` on the last line that starts one is the one; read in
+ * one pass, as a pattern for it would take time growing with the square of a long line of brackets.
+ */
+const withoutOpenLink = (text: string): string => {
+  const lastParen = text.lastIndexOf(')')
+  for (let at = text.indexOf('[', text.lastIndexOf('\n') + 1); at !== -1;) {
+    const close = text.indexOf(']', at + 1)
+    if (close === -1) return text.slice(0, at) + text.slice(at + 1)
+    // Its words closed, at the very end or with an address opened after them that hasn't closed.
+    if (close === text.length - 1 || (text[close + 1] === '(' && lastParen < close + 2))
+      return text.slice(0, at) + text.slice(at + 1, close)
+    // Every `[` before this `]` closes on it: the next to try is after it.
+    at = text.indexOf('[', close + 1)
+  }
+  return text
+}
 
 /** Markdown cut off mid-stream, as it can be shown now: what would change its mind held back, what is open closed for now. */
 export const streamable = (text: string): string => {
@@ -117,7 +131,7 @@ export const streamable = (text: string): string => {
   const start = blank === -1 ? 0 : blank + 2
   const paragraph = sure.slice(start)
   if (TABLE_ROW.test(paragraph) || /^ {4}|^\t/.test(paragraph)) return sure
-  const linked = paragraph.replace(OPEN_LINK, (_all, words?: string, _address?: string, bare?: string) => words ?? bare ?? '')
+  const linked = withoutOpenLink(paragraph)
   const { marks, dangling } = openMarks(linked)
   const kept = dangling > 0 ? linked.slice(0, linked.length - dangling) : linked
   return sure.slice(0, start) + kept + [...marks].reverse().join('')
