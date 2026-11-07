@@ -754,11 +754,11 @@ this ADR or the prototype's README.
   allowed there is nothing to give a task but what can't be undone, which
   the card asks for each time; Run a check again, and taking an issue off a
   task, which have no command yet.
-- **The Situations and the fast lane** are three tasks of their own, started
-  from this one: the board (while you were away, the coordinator off), the
-  thread (a Never rule met, an ask that waits, a lead-started task that
-  stops, two tasks on the same files, a server that fails), and the fast lane
-  with Auto's lighter model.
+- **The Situations and the fast lane** are tasks of their own, started from
+  this one: the thread (a Never rule met, an ask that waits, a lead-started
+  task that stops, two tasks on the same files, a server that fails), and the
+  fast lane with Auto's lighter model. The coordinator is never something to
+  turn off, in any project.
 
 ## What each ADR it supersedes loses
 
