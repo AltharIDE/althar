@@ -63,6 +63,11 @@ export const Repository = Schema.Struct({
   canPush: Schema.Boolean,
   /** How the repository lets changes be merged, as its settings say, in the order Althar prefers them. */
   merges: Schema.Array(MergeMethod),
+  /**
+   * The repository it was forked from, by its path on the same host: null where the host says it is no fork; absent where the
+   * host doesn't say, or the read didn't ask.
+   */
+  parent: Schema.optional(Schema.NullOr(Schema.Struct({ path: Schema.Array(Schema.String) }))),
 })
 export type Repository = typeof Repository.Type
 

@@ -84,6 +84,8 @@ const ProjectAnswer = Schema.Struct({
   // Premium's: whether merge requests merge through a merge train. Absent on a tier without them.
   merge_trains_enabled: Schema.optional(Schema.NullOr(Schema.Boolean)),
   permissions: Schema.optional(Schema.NullOr(Schema.Struct({ project_access: Access, group_access: Access }))),
+  // The project it was forked from: given only for a fork, and only where the account can see that project.
+  forked_from_project: Schema.optional(Schema.NullOr(Schema.Struct({ path_with_namespace: Schema.String }))),
 })
 
 const Pipeline = Schema.Struct({
@@ -941,6 +943,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
         canPush:
           Math.max(answer.permissions?.project_access?.access_level ?? 0, answer.permissions?.group_access?.access_level ?? 0) >= DEVELOPER,
         merges: mergesOf(answer.merge_method, answer.squash_option),
+        parent: answer.forked_from_project == null ? null : { path: answer.forked_from_project.path_with_namespace.split('/') },
       })),
     findChange,
     openChange: (repository, change) =>

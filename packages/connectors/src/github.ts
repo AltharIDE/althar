@@ -90,6 +90,9 @@ const RepositoryAnswer = Schema.Struct({
   full_name: Schema.String,
   default_branch: Schema.String,
   html_url: Schema.String,
+  // Whether it is a fork, and the repository it was forked from, which GitHub gives on a read of the repository alone.
+  fork: Schema.optional(Schema.Boolean),
+  parent: Schema.optional(Schema.Struct({ full_name: Schema.String })),
   permissions: Schema.optional(Schema.Struct({ push: Schema.optional(Schema.Boolean) })),
   // Said only to someone who can push; anyone else can't merge anyway.
   allow_squash_merge: Schema.optional(Schema.Boolean),
@@ -1293,6 +1296,11 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           ...(answer.allow_merge_commit !== false ? (['merge'] as const) : []),
           ...(answer.allow_rebase_merge === true ? (['rebase'] as const) : []),
         ],
+        ...(answer.parent !== undefined
+          ? { parent: { path: answer.parent.full_name.split('/') } }
+          : answer.fork === false
+            ? { parent: null }
+            : {}),
       })),
     findChange,
     openChange: (repository, change) =>
