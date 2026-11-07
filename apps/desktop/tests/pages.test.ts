@@ -217,11 +217,12 @@ describe('a page whose task settles', () => {
     shown.close()
     const breaks = viewAt('http://localhost:5173/two')
     if (breaks !== undefined) breaks.webContents.breaksOnClose = true
-    // A task with no page this launch keeps only its folder on disk.
-    const folder = join(partitions, `task-${'0'.repeat(31)}3`)
+    // A task with no page this launch keeps only its folder on disk. Sessions last the process, so it is one no test opens.
+    const unopened = owner(0xd15c)
+    const folder = join(partitions, unopened.replace('task_', 'task-'))
     mkdirSync(folder)
 
-    await pages.moment('settled', [owner(1), owner(2), owner(3)])
+    await pages.moment('settled', [owner(1), owner(2), unopened])
 
     expect(options.closed.mock.calls).toEqual([[owner(1)], [owner(2)]])
     expect(pages.states()).toEqual([])
