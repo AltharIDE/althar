@@ -1117,10 +1117,11 @@ export class SettingsTools extends Context.Service<
             return yield* settle(row, 'moot', 'It changed since it was asked, so nothing was done.')
           const sql = yield* SqlClient.SqlClient
           const after = JSON.parse(row.after) as Values
-          // The person's press is their word: made as their own change, its line the card's.
+          // The person's press is their word: made as their own change, its line the card's. They wrote nothing, so no words
+          // are kept: the card, pressed, is the record (`pressed` on the fact).
           yield* section.write!(projectId, JSON.parse(row.change) as Values, instance.personId)
           const at = yield* timestamp
-          yield* sql`UPDATE setting_changes SET state = 'done', words = ${'Pressed on its card.'}, updated_at = ${at}, revision = revision + 1 WHERE id = ${row.id}`
+          yield* sql`UPDATE setting_changes SET state = 'done', updated_at = ${at}, revision = revision + 1 WHERE id = ${row.id}`
           const [item] = yield* sql<{
             content: string
             projectId: ProjectId

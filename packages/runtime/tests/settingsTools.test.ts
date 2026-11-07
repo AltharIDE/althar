@@ -170,6 +170,13 @@ describe('settings, for the coordinator and leads', () => {
       yield* (yield* SettingsTools).answer(cardId ?? '', true)
       assert.isTrue((yield* rulesNow(projectId)).allowEverything === true)
       assert.strictEqual((yield* lines(lead.threadId))[0]?.state, 'done')
+      // A press is no words of theirs: the line doesn't quote any, and neither does the record.
+      assert.isNull((yield* lines(lead.threadId))[0]?.words)
+      const sql = yield* SqlClient.SqlClient
+      assert.deepStrictEqual(
+        yield* sql<{ words: string | null }>`SELECT words FROM setting_changes WHERE state = 'done' ORDER BY created_at DESC LIMIT 1`,
+        [{ words: null }],
+      )
 
       // With the person's own message in the turn, it goes, and the line quotes them.
       yield* turn(coordinator, 'Turn on posting the team’s reviews without asking', true)
