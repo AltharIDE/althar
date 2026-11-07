@@ -11,7 +11,7 @@ export type Direction = 'A' | 'B' | 'C' | 'Today'
 export const DIRECTIONS: ReadonlyArray<{ readonly value: Direction; readonly name: string; readonly about: string }> = [
   { value: 'A', name: 'Composer', about: 'Clear sits in the composer, beside the model; /clear does it from the field' },
   { value: 'B', name: 'Thread head', about: 'A conversation bar above the thread holds Clear, beside what it clears' },
-  { value: 'C', name: 'Session ring', about: 'Clear sits in the context ring, where Compact already is' },
+  { value: 'C', name: 'Session ring', about: 'Clear chat… sits in the ring’s foot, beside Compact, and asks before it ends the session' },
   { value: 'Today', name: 'Today', about: 'The conversation as built: nothing clears it' },
 ]
 

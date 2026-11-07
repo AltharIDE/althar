@@ -28,13 +28,15 @@ const ring = async (page) => {
 /** The clear, from wherever the direction puts it, and the kind chosen. */
 const clear = async (page, direction, kind) => {
   if (direction === 'C') await ring(page)
-  await (direction === 'C' ? page.getByRole('button', { name: 'Clear…' }).click() : exact(page, 'Clear'))
+  await (direction === 'C' ? page.getByRole('button', { name: 'Clear chat…' }).click() : exact(page, 'Clear'))
   await page.waitForTimeout(500)
   if (kind === 'forget') {
     await page.getByRole('radio', { name: /Forget it too/ }).click()
     await page.waitForTimeout(200)
     await page.getByRole('button', { name: 'Clear and forget' }).click()
   } else {
+    await page.getByRole('radio', { name: /Keep what the coordinator knows/ }).click()
+    await page.waitForTimeout(200)
     await page.getByRole('button', { name: 'Clear the view' }).click()
   }
   await page.waitForTimeout(900)
@@ -81,17 +83,27 @@ const shots = [
   },
   { id: 'b4-forgot', d: 'B', go: (page) => clear(page, 'B', 'forget') },
 
-  // C: the clear in the context ring's detail, where Compact already is.
+  // C: the clear in the context ring's foot, beside Compact.
   { id: 'c1-ring', d: 'C', go: (page) => ring(page), settle: false },
   {
-    id: 'c2-cleared',
+    id: 'c2-dialog',
+    d: 'C',
+    settle: false,
+    go: async (page) => {
+      await ring(page)
+      await page.getByRole('button', { name: 'Clear chat…' }).click()
+      await page.waitForTimeout(500)
+    },
+  },
+  {
+    id: 'c3-cleared',
     d: 'C',
     go: async (page) => {
       await clear(page, 'C', 'view')
       await settle(page)
     },
   },
-  { id: 'c3-forgot', d: 'C', go: (page) => clear(page, 'C', 'forget') },
+  { id: 'c4-forgot', d: 'C', go: (page) => clear(page, 'C', 'forget') },
 
   // The one question, and what the coordinator says after each kind.
   {

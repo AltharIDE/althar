@@ -5,7 +5,7 @@ import { useState } from 'react'
 import { Composer as RealComposer } from '../../../src/composer/Composer/Composer'
 import { ContextRing as RealContextRing } from '../../../src/composer/ContextRing/ContextRing'
 import { TaskFace as RealTaskFace } from '../../../src/thread/TaskFace/TaskFace'
-import { ClearDialog, ComposerClear, RingClear } from '../directions/Clear'
+import { ClearDialog, ComposerClear, RingActions } from '../directions/Clear'
 import { ConversationHead } from '../directions/ThreadHead'
 import { hasConversation, useProto } from '../state'
 import s from '../directions/directions.module.css'
@@ -66,19 +66,11 @@ export function TaskFace(props: ComponentProps<typeof RealTaskFace>) {
   )
 }
 
-/** C: Clear in the context ring's detail, under the numbers and beside Compact. */
+/** C: the ring's foot takes both session actions, Clear chat… and Compact, on one line under the numbers. */
 export function ContextRing(props: ComponentProps<typeof RealContextRing>) {
   const p = useProto()
   if (p.direction !== 'C') return <RealContextRing {...props} />
-  return (
-    <RealContextRing
-      {...props}
-      note={
-        <>
-          {props.note}
-          <RingClear />
-        </>
-      }
-    />
-  )
+  // The foot is drawn here so the clear can stand beside Compact, as a footer slot in the ring would in the build.
+  const { onCompact, compacting, note: _note, ...rest } = props
+  return <RealContextRing {...rest} note={<RingActions onCompact={onCompact} compacting={compacting} />} />
 }

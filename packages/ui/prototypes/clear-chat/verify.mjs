@@ -35,11 +35,13 @@ const ring = async () => {
 }
 const ask = async (direction) => {
   if (direction === 'C') await ring()
-  await (direction === 'C' ? click('Clear…') : exact('Clear'))
+  await (direction === 'C' ? click('Clear chat…') : exact('Clear'))
   await page.waitForTimeout(500)
 }
 const clearView = async (direction) => {
   await ask(direction)
+  await page.getByRole('radio', { name: /Keep what the coordinator knows/ }).click()
+  await page.waitForTimeout(200)
   await click('Clear the view')
   await page.waitForTimeout(900)
 }
@@ -127,9 +129,16 @@ check('B wipes the conversation', (await has('Fresh session')) && !(await has('G
 // C: the context ring, the same session after a light clear, none after a wipe.
 await open('C')
 await ring()
-check('C has Clear in the ring', (await page.getByRole('button', { name: 'Clear…' }).count()) === 1)
-await page.getByRole('button', { name: 'Clear…' }).click()
+check(
+  "C has the ring's foot: Clear chat… and Compact",
+  (await page.getByRole('button', { name: 'Clear chat…' }).count()) === 1 &&
+    (await page.getByRole('button', { name: 'Compact' }).count()) === 1,
+)
+await page.getByRole('button', { name: 'Clear chat…' }).click()
 await page.waitForTimeout(500)
+check('C opens on the wipe, with the light clear offered', (await page.getByRole('radio', { name: /Forget it too/ }).isChecked()) === true)
+await page.getByRole('radio', { name: /Keep what the coordinator knows/ }).click()
+await page.waitForTimeout(200)
 await click('Clear the view')
 await page.waitForTimeout(900)
 check('C clears the view', (await has('Cleared')) && !(await has('GitLab pipelines stop at 100')))

@@ -15,10 +15,12 @@
   color: var(--t-1);
 }
 
-/* C: Clear in the context ring's detail, on a line of its own under the numbers. */
-.ringClear {
-  display: block;
-  padding-top: 2px;
+/* C: the ring's foot, both session actions on one line, the clear at the start and Compact at the end. */
+.ringFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 /* B: the conversation's bar, above the thread and in its measure. */
