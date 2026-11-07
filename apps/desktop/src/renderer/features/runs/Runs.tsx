@@ -11,6 +11,7 @@ import {
   Runnables,
   type RunPlace,
   RunPlacePicker,
+  type RunRepository,
   type RunTarget,
   type RunTargetRun,
 } from '@althar/ui'
@@ -67,21 +68,48 @@ export const text = {
 /** The default branch, where the project's Run runs until another place is picked. */
 export const MAIN: RunPlace = { key: 'main', kind: 'main', label: 'main' }
 
+/** Said of several repositories that go different ways: which one moved, and how many stay on their defaults. */
+export const mixText = {
+  /** None moved, and their defaults differ. */
+  defaults: 'Default branches',
+  one: (repository: string, branch: string, rest: number) => `${repository}: ${branch} · ${rest} on ${rest === 1 ? 'default' : 'defaults'}`,
+  several: (moved: number, rest: number) => `${moved} moved · ${rest} on ${rest === 1 ? 'default' : 'defaults'}`,
+  all: (moved: number) => `${moved} repositories moved`,
+}
+
+/** The branch a repository's Run copies: the one its project works toward in it, else its default. */
+const branchOf = (one: Pick<ProjectRepository, 'defaultBranch' | 'workToward'>) => one.workToward ?? one.defaultBranch ?? MAIN.label
+
 /**
  * Where a run with no task runs, by name. While one runs there, the branch
  * its copy is of, as it says: the copy stays as it was until nothing runs
  * there, even where Work toward has moved since. Otherwise the branch the
  * project works toward (ADR-093), which the next run copies, else its default
- * branch; with repositories that go different ways, the default branch's word.
+ * branch; with repositories that go different ways, a sum of them (the one moved off its default, and how many stay).
  */
 export const mainOf = (
-  repositories: ReadonlyArray<Pick<ProjectRepository, 'defaultBranch' | 'workToward'>> | undefined,
+  repositories: ReadonlyArray<Pick<ProjectRepository, 'defaultBranch' | 'workToward'> & { readonly name?: string }> | undefined,
   launches: ReadonlyArray<Launch> = [],
 ): RunPlace => {
-  const running = launches.find((launch) => launch.taskId === null && launch.branch == null && launch.ended === null)
-  if (running !== undefined) return { ...MAIN, label: running.where }
-  const names = [...new Set((repositories ?? []).map((one) => one.workToward ?? one.defaultBranch ?? MAIN.label))]
-  return names.length === 1 && names[0] !== undefined ? { ...MAIN, label: names[0] } : MAIN
+  const names = [...new Set((repositories ?? []).map(branchOf))]
+  if (names.length <= 1) {
+    const running = launches.find((launch) => launch.taskId === null && launch.branch == null && launch.ended === null)
+    const label = running?.where ?? names[0]
+    return label === undefined ? MAIN : { ...MAIN, label }
+  }
+  // Repositories that go different ways: no one branch is the word. Those moved off their defaults are said by name.
+  const moved = (repositories ?? []).filter((one) => one.workToward != null && one.workToward !== one.defaultBranch)
+  const rest = (repositories?.length ?? 0) - moved.length
+  const [first] = moved
+  const label =
+    first === undefined
+      ? mixText.defaults
+      : moved.length === 1
+        ? mixText.one(first.name ?? '', branchOf(first), rest)
+        : rest === 0
+          ? mixText.all(moved.length)
+          : mixText.several(moved.length, rest)
+  return { ...MAIN, label, several: true }
 }
 
 /** A pull request's number in what a run of it was fetched as: PR #12 · feature/x, MR !12. */
@@ -90,27 +118,33 @@ const pullNumber = (label: string) => {
   return found === undefined ? null : Number(found)
 }
 
-/** Whether a run is at a place: the default branch's, a task's, or one fetched of that pull request or branch. */
-export const runsAt = (launch: Launch, place: RunPlace) => {
+/**
+ * Whether a run is at a place: the default branch's, a task's, or one fetched of that pull request or branch. A run
+ * doesn't say its repository, so where the project has several, `repository` is its runnable's: a branch of the same
+ * name in another repository is another place.
+ */
+export const runsAt = (launch: Launch, place: RunPlace, repository?: string) => {
   if (place.kind === 'main') return launch.taskId === null && launch.branch == null
   if (place.kind === 'task') return launch.taskId === place.key.slice('task:'.length)
   if (launch.taskId !== null || launch.branch == null) return false
   const choice = place.choice
+  if (repository !== undefined && choice?.repository !== undefined && choice.repository !== repository) return false
   if (choice?.kind === 'pull') return pullNumber(launch.branch) === choice.number
   return choice?.kind === 'branch' && pullNumber(launch.branch) === null && launch.branch === choice.branch
 }
 
-/** The place a run is at, from what it says of itself. */
-export const placeOfLaunch = (launch: Launch): RunPlace => {
+/** The place a run is at, from what it says of itself, and the repository of its runnable where the project has several. */
+export const placeOfLaunch = (launch: Launch, repository?: string): RunPlace => {
+  const of = repository === undefined ? {} : { repository }
   if (launch.taskId !== null) return { key: `task:${launch.taskId}`, kind: 'task', label: launch.where }
   if (launch.branch == null) return MAIN
   const number = pullNumber(launch.branch)
   if (number === null) {
-    const choice: BranchChoice = { kind: 'branch', branch: launch.branch }
+    const choice: BranchChoice = { kind: 'branch', branch: launch.branch, ...of }
     return { key: choiceKey(choice), kind: 'branch', label: launch.branch, choice }
   }
   const [name = launch.branch, branch] = launch.branch.split(' · ')
-  const choice: BranchChoice = { kind: 'pull', number, name, title: branch ?? name, ...(branch === undefined ? {} : { branch }) }
+  const choice: BranchChoice = { kind: 'pull', number, name, title: branch ?? name, ...(branch === undefined ? {} : { branch }), ...of }
   return { key: choiceKey(choice), kind: 'pull', label: name, ...(branch === undefined ? {} : { detail: branch }), choice }
 }
 
@@ -136,26 +170,29 @@ export const targetsOf = (
   now: string,
   attempts: ReadonlyMap<string, Attempt> = new Map(),
 ): ReadonlyArray<RunTarget> =>
-  runnables.map((one) => {
-    const attempt = attempts.get(attemptKey(place, one.id))
-    const mine = launches.filter((launch) => launch.runnableId === one.id && runsAt(launch, place))
-    const here = mine.find((launch) => launch.ended === null) ?? mine.at(-1)
-    const run: RunTargetRun | undefined =
-      attempt?.state === 'fetching'
-        ? { state: 'fetching' }
-        : attempt?.state === 'unfetched'
-          ? { state: 'unfetched', why: attempt.why, since: ago(attempt.at, new Date(now)) }
-          : here === undefined
-            ? undefined
-            : runOf(here, now)
-    return {
-      id: one.id,
-      ...(one.name === null ? {} : { name: one.name }),
-      command: one.command,
-      from: one.from,
-      ...(run === undefined ? {} : { run }),
-    }
-  })
+  // A pull request or branch is one repository's: only what that repository runs can run there.
+  runnables
+    .filter((one) => place.choice?.repository === undefined || one.repository === place.choice.repository)
+    .map((one) => {
+      const attempt = attempts.get(attemptKey(place, one.id))
+      const mine = launches.filter((launch) => launch.runnableId === one.id && runsAt(launch, place, one.repository))
+      const here = mine.find((launch) => launch.ended === null) ?? mine.at(-1)
+      const run: RunTargetRun | undefined =
+        attempt?.state === 'fetching'
+          ? { state: 'fetching' }
+          : attempt?.state === 'unfetched'
+            ? { state: 'unfetched', why: attempt.why, since: ago(attempt.at, new Date(now)) }
+            : here === undefined
+              ? undefined
+              : runOf(here, now)
+      return {
+        id: one.id,
+        ...(one.name === null ? {} : { name: one.name }),
+        command: one.command,
+        from: one.from,
+        ...(run === undefined ? {} : { run }),
+      }
+    })
 
 /** Where the project's Run runs, kept per project on this Mac, so it stays picked. */
 const placeKey = (projectId: string) => `althar.runOn.${projectId}`
@@ -362,6 +399,7 @@ function PlaceSwitcher({
   createFrom,
   repositories,
   about,
+  onConnect,
 }: {
   readonly projectId: string
   readonly current: RunPlace
@@ -369,8 +407,10 @@ function PlaceSwitcher({
   readonly onPick: (place: RunPlace) => void
   readonly onCreate: (branch: string, repository?: string) => void
   readonly createFrom: string | undefined
-  /** The project's repositories by name, where it has several. */
-  readonly repositories: ReadonlyArray<string> | undefined
+  /** The project's repositories and the branch each one's Run copies, where it has several. */
+  readonly repositories: ReadonlyArray<RunRepository> | undefined
+  /** Opens where a code host is connected. */
+  readonly onConnect: (() => void) | undefined
   /** A line at the list's foot, where the remote has nothing to say: what a branch picked here does. */
   readonly about: string
 }) {
@@ -404,6 +444,8 @@ function PlaceSwitcher({
   const listed = offered.data === undefined ? [] : choicesOf(offered.data)
   const found = more && searchable(words) && searched.data !== undefined ? choicesOf(searched.data) : []
   const keys = new Set(listed.map(choiceKey))
+  // Hosts Althar has no connection to, named once whatever the number of repositories on each.
+  const hosts = [...new Set(offered.data?.flatMap((one) => (one.unconnected === null ? [] : [one.unconnected])) ?? [])]
   return (
     <RunPlacePicker
       current={current}
@@ -419,6 +461,8 @@ function PlaceSwitcher({
       onCreate={onCreate}
       {...(createFrom === undefined ? {} : { createFrom })}
       {...(repositories === undefined ? {} : { repositories })}
+      hosts={hosts}
+      {...(onConnect === undefined ? {} : { onConnect })}
       open={open}
       onOpenChange={(next) => {
         setOpen(next)
@@ -434,12 +478,14 @@ const saidAt = (
   runnables: ReadonlyArray<Runnable>,
   launches: ReadonlyArray<Launch>,
   attempts: ReadonlyMap<string, Attempt>,
+  several: boolean,
 ) => {
+  const repositoryOf = (launch: Launch) => (several ? runnables.find((one) => one.id === launch.runnableId)?.repository : undefined)
   const nameOf = (id: string | null) => {
     const one = runnables.find((runnable) => runnable.id === id)
     return one?.name ?? one?.command ?? ''
   }
-  const here = launches.filter((launch) => runsAt(launch, place))
+  const here = launches.filter((launch) => runsAt(launch, place, repositoryOf(launch)))
   const failed = [
     ...here
       .filter((launch) => launch.ended !== null && launch.ended.code !== 0)
@@ -468,6 +514,7 @@ export function Runs({
   onStop,
   onClear,
   onRunRef,
+  onConnect,
 }: {
   readonly projectId: string
   /** The project's name, for the list's title. */
@@ -489,6 +536,8 @@ export function Runs({
   readonly onClear: (launchId: string) => void
   /** Runs one on a branch or a pull request, in a copy of its own; throws what went wrong. Without it, only the default branch is offered. */
   readonly onRunRef?: (runnableId: string, ref: RunRef) => Promise<void>
+  /** Opens where a code host is connected, from the picker's band for one that isn't. */
+  readonly onConnect?: () => void
 }) {
   const dialogs = useRunDialogs(projectId)
   const { client } = useServices()
@@ -496,6 +545,7 @@ export function Runs({
   const repositories = useQuery(reads(client).repositories(projectId)).data
   // Each repository's Work toward as the person just picked it, while it is on its way.
   const shown = repositories?.map((one) => ({ ...one, workToward: toward.shown(one.id, one.workToward ?? null) }))
+  const several = (repositories?.length ?? 0) > 1
   const main = mainOf(shown, launches)
   const [kept, setPicked] = useState(() => (taskId === null ? readPlace(projectId) : MAIN))
   // The default branch's place says the branch it runs now, whatever it was called when it was kept.
@@ -543,18 +593,23 @@ export function Runs({
   // Where the new branch starts: the default branch, where the repositories share one.
   const defaults = [...new Set((repositories ?? []).map((one) => one.defaultBranch ?? MAIN.label))]
   // What the list's foot says: why a branch picked didn't hold; that a run goes on where it is until it stops; or what picking does.
-  const going = launches.filter((launch) => launch.taskId === null && launch.branch == null && launch.ended === null)
-  const next = mainOf(shown).label
+  const staying = launches
+    .filter((launch) => launch.taskId === null && launch.branch == null && launch.ended === null)
+    .flatMap((launch) => {
+      const one = runnables.find((runnable) => runnable.id === launch.runnableId)
+      // The branch its own repository's next run takes; with one repository, the project's.
+      const toward = shown?.find((each) => each.name === one?.repository) ?? (shown?.length === 1 ? shown[0] : undefined)
+      return toward === undefined || branchOf(toward) === launch.where
+        ? []
+        : [{ launch, name: one?.name ?? one?.command ?? '', next: branchOf(toward) }]
+    })
   const about =
     toward.failed?.message ??
-    (going.length > 0 && going[0]?.where !== next && repositories !== undefined
+    (staying[0] !== undefined
       ? text.runsOn(
-          going.map((launch) => {
-            const one = runnables.find((runnable) => runnable.id === launch.runnableId)
-            return one?.name ?? one?.command ?? ''
-          }),
-          going[0]?.where ?? '',
-          next,
+          staying.filter((one) => one.launch.where === staying[0]!.launch.where).map((one) => one.name),
+          staying[0].launch.where,
+          staying[0].next,
         )
       : text.picks)
 
@@ -586,8 +641,9 @@ export function Runs({
       if (!all.some((known) => known.key === one.key || sameRef(known, one))) all.push(one)
     }
     if (place.kind !== 'main') add(place)
-    for (const launch of launches) add(placeOfLaunch(launch))
-    return all.map((one) => saidAt(one, runnables, launches, attempts))
+    for (const launch of launches)
+      add(placeOfLaunch(launch, several ? runnables.find((one) => one.id === launch.runnableId)?.repository : undefined))
+    return all.map((one) => saidAt(one, runnables, launches, attempts, several))
   })()
 
   return (
@@ -600,8 +656,17 @@ export function Runs({
           onPick={pickOrMove}
           onCreate={create}
           createFrom={defaults.length === 1 ? defaults[0] : undefined}
-          repositories={(repositories?.length ?? 0) > 1 ? repositories?.map((one) => one.name) : undefined}
+          repositories={
+            several
+              ? shown?.map((one): RunRepository => ({
+                  name: one.name,
+                  defaultBranch: one.defaultBranch ?? MAIN.label,
+                  branch: branchOf(one),
+                }))
+              : undefined
+          }
           about={about}
+          onConnect={onConnect}
         />
       )}
       <RunButton

@@ -4,7 +4,8 @@
 
 Each project has a coordinator: the agent you talk to about the project as a
 whole. It plans work, hands it out and directs the leads. It never writes
-code. It is optional: a task also starts from the board, the composer or a
+code. It is always on: there is no switch, setting or mode to turn it off. A
+task can also start from the board, the composer or a
 lead, and the coordinator stays the place for triage, routing, launching a
 batch from the tracker, and merging ([ADR-097](../decisions/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md)).
 

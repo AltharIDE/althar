@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { join } from 'node:path'
 
 import { ConnectorFailed } from '@althar/connectors'
 import {
@@ -32,10 +33,11 @@ import { Busy, type Order } from './Busy'
 import type { Artifacts } from './Artifacts'
 import { touchCard } from './cards'
 import { Agents, RuntimeConfig } from './Config'
+import { ReviewRefused } from './Reviews'
 import { Changes, type Published } from './Changes'
 import { Connectivity } from './Connectivity'
 import { NotConnected } from './Connections'
-import { AttentionClosed, GitFailed, NoChangeToOpen, NotFound, NotHeld, NothingToWaitFor, PushRefused } from './errors'
+import { AttentionClosed, GitFailed, NoChangeToOpen, NotFound, NotHeld, NothingToWaitFor, PushRefused, TaskRefused } from './errors'
 import { backoff, contained, keptGoing } from './Failures'
 import { branchOnFirstWrite, unbranched } from './firstWrite'
 import { Instance } from './Instance'
@@ -77,7 +79,8 @@ import { LeftBehind } from './LeftBehind'
 import { type GiveUp, watchStalls } from './Stalls'
 import type { Tried } from './stallWatch'
 import { addItem } from './threads'
-import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
+import { coordinatorFolderAt } from './coordinatorFolder'
+import { POOL, ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
 import { signedOutWords, summarize } from './words'
 
 /*
@@ -146,6 +149,12 @@ export const PlanStep = Schema.Struct({
 })
 export type PlanStep = typeof PlanStep.Type
 
+/** What changing a team changed: its lead, and its review (null with none), and when each takes effect. */
+export interface TeamChanged {
+  readonly lead?: { readonly step: PlanStep; readonly was: PlanStep; readonly when: 'next_turn' | 'now' }
+  readonly review?: { readonly step: PlanStep | null; readonly was: PlanStep | null; readonly when: 'now' | 'next_round' }
+}
+
 /**
  * What a task does when its steps are done (the kit's "When the work is
  * done"): open a draft pull request, open one for review, or push its branch
@@ -189,6 +198,11 @@ export const PlanParameters = Schema.Struct({
   worksIn: Schema.optional(WorksIn),
   /** Why it works there, in the coordinator's words, where that isn't the project's default. */
   worksInWhy: Schema.optional(Schema.NullOr(Schema.String)),
+  /**
+   * When its lead was last changed after its steps began (`changeTeam`): who leads it is the plan's from then, until a session
+   * of the lead starts after, as the thread's lead reads.
+   */
+  leadChanged: Schema.optional(Schema.String),
 })
 export type PlanParameters = typeof PlanParameters.Type
 
@@ -553,6 +567,36 @@ export const planWaits = (taskId: string) =>
     return waitingOf(only.output, '').place.how === 'start'
   })
 
+/**
+ * Where a task's reviewer stands to change: `now`, before its review round starts or between rounds; `next_round`, in a round
+ * under way, which the change waits for; `never`, once its review is done: its run over, or its review passed or went on to the
+ * run's ending, though that still publishes or waits.
+ */
+export const reviewerChange = (taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [latest] = yield* sql<{ state: string; executionId: string }>`
+      SELECT r.state, e.id AS execution_id FROM runs r JOIN workflow_executions e ON e.run_id = r.id
+      WHERE r.task_id = ${taskId} ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1`
+    // Its first step not begun: nothing of its review has.
+    if (latest === undefined) return 'now' as const
+    // Its run over, its review is done, or was never to come.
+    if (latest.state !== 'running' && latest.state !== 'suspended') return 'never' as const
+    // Its review passed, or its run went on to its ending without another round: done, though the run still publishes or waits.
+    const [finished] = yield* sql<{ one: number }>`
+      SELECT 1 AS one FROM nodes n WHERE n.execution_id = ${latest.executionId} AND n.node_key = 'publish'
+      UNION ALL
+      SELECT 1 AS one FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+      WHERE n.execution_id = ${latest.executionId} AND n.node_key = 'review' AND a.state = 'succeeded'
+        AND (json_extract(a.output, '$.verdict') = 'pass' OR json_extract(a.output, '$.findings') = 0) LIMIT 1`
+    if (finished !== undefined) return 'never' as const
+    const [under] = yield* sql<{ one: number }>`
+      SELECT 1 AS one FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+      WHERE n.execution_id = ${latest.executionId} AND n.node_key = 'review'
+        AND a.state IN ('admitted', 'running', 'waiting_attention', 'held') LIMIT 1`
+    return under === undefined ? ('now' as const) : ('next_round' as const)
+  })
+
 export class Runs extends Context.Service<
   Runs,
   {
@@ -642,6 +686,21 @@ export class Runs extends Context.Service<
       end: TaskEnd | null,
       actorId: ActorId,
     ): Effect.Effect<boolean, unknown, SqlClient.SqlClient | Ledger | Crypto.Crypto>
+    /**
+     * Where the reviewer of a task stands to change: `now`, before its review round starts or between rounds; `next_round`, in a
+     * round under way, which the change waits for; `never`, once its review is done.
+     */
+    reviewerChange(taskId: string): Effect.Effect<'now' | 'next_round' | 'never', unknown, SqlClient.SqlClient>
+    /**
+     * Changes who leads and who reviews a task that has begun, at any time before it merges. The lead changes from its next turn,
+     * never in the one it is in; the reviewer until its review round starts, and from the next round during one. Says what it
+     * changed, for its caller to say in the task's thread. Refused once it merged, and for a reviewer once its review is done.
+     */
+    changeTeam(input: {
+      readonly taskId: string
+      readonly steps: ReadonlyArray<PlanStep>
+      readonly actorId: ActorId
+    }): Effect.Effect<TeamChanged, unknown>
     /**
      * Opens the round a quick task made a change after its last run ended
      * works in (ADR-034), on its lead's session, which is in its turn: with
@@ -3770,14 +3829,25 @@ export class Runs extends Context.Service<
        */
       const showPictures = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
-          if (access.taskId === null) return yield* new ToolRefused({ message: 'This tool is for a task’s lead.' })
           const sql = yield* SqlClient.SqlClient
           const { pictures: given } = yield* read(Shown, input)
-          const worktrees = yield* worktreesOf(access.taskId)
-          const shown = yield* readShown(
-            given,
-            worktrees.map((worktree) => worktree.path),
-          )
+          // A lead's from its worktrees; the coordinator's from its copies (ADR-097: one tool set).
+          const folders =
+            access.role === 'coordinator'
+              ? yield* Effect.gen(function* () {
+                  const [project] = yield* sql<{ slug: string }>`SELECT slug FROM projects WHERE id = ${access.projectId}`
+                  if (project === undefined) return []
+                  const folder = coordinatorFolderAt((yield* RuntimeConfig).worktreeRoot, project.slug)
+                  // Each copy first, as the coordinator works in one and names a picture from there, then the folder itself.
+                  const copies = yield* sql<{ slug: string }>`
+                    SELECT slug FROM repository_bindings WHERE project_id = ${access.projectId} AND detached_at IS NULL
+                    ORDER BY created_at, rowid`
+                  return [...copies.map((copy) => join(folder, copy.slug)), folder]
+                })
+              : access.taskId === null
+                ? yield* new ToolRefused({ message: 'This tool is for a task’s lead or the coordinator.' })
+                : (yield* worktreesOf(access.taskId)).map((worktree) => worktree.path)
+          const shown = yield* readShown(given, folders, access.role === 'coordinator' ? 'your copies of the project' : undefined)
           const itemId = yield* newId(Ids.threadItem)
           const pictures = yield* keepShown({ projectId: access.projectId as ProjectId, itemId, folders: [] }, shown)
           const [session] = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE id = ${access.sessionId}`
@@ -4034,9 +4104,12 @@ export class Runs extends Context.Service<
           },
           finishStep,
         ),
+      ])
+      // Showing pictures is in the shared set (ADR-097): a lead's from its worktree, the coordinator's from its copies.
+      yield* toolServer.serve(POOL, [
         tool(
           'show_pictures',
-          `Shows the person pictures in the task's thread, at any time, with a step open or none: when they ask to see something, show it this way rather than naming the files. Each is a PNG, JPEG, GIF or WebP file in the worktree (its scratch folder too), by its path, with a caption saying what it shows; up to ${SHOWN_MOST} at once, in the order given, each up to 20 MB. Althar keeps a copy, so they stay once the worktree is gone; the files needn't be committed. What shows your step's work still goes in finish_step's evidence when you finish it.`,
+          `Shows the person pictures in your thread, at any time, with a step open or none: when they ask to see something, show it this way rather than naming the files. Each is a PNG, JPEG, GIF or WebP file in your folder (a lead's worktree and its scratch folder; the coordinator's copies), by its path, with a caption saying what it shows; up to ${SHOWN_MOST} at once, in the order given, each up to 20 MB. Althar keeps a copy, so they stay once the worktree is gone; the files needn't be committed. What shows your step's work still goes in finish_step's evidence when you finish it.`,
           {
             type: 'object',
             properties: {
@@ -4045,7 +4118,7 @@ export class Runs extends Context.Service<
                 items: {
                   type: 'object',
                   properties: {
-                    path: { type: 'string', description: 'The picture, from the worktree.' },
+                    path: { type: 'string', description: 'The picture, from your folder.' },
                     caption: { type: 'string', description: 'What it shows, in a line: "The settings page in the dark theme".' },
                   },
                   required: ['path', 'caption'],
@@ -5534,6 +5607,153 @@ export class Runs extends Context.Service<
           return underWay
         })
 
+      const changeTeam = (input: Parameters<Runs['Service']['changeTeam']>[0]) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))
+          const [task] = yield* sql<{ state: string; threadId: string }>`
+            SELECT k.state, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${input.taskId}`
+          if (task === undefined) return yield* new NotFound({ kind: 'task', id: input.taskId })
+          if (task.state === 'abandoned') return yield* new TaskRefused({ taskId: input.taskId, why: 'abandoned' })
+          // Merged, its change is in: the one it shows is the open one, else its latest.
+          const pulls = yield* changes.ofTask(input.taskId)
+          const shown = pulls.find((one) => one.state === 'open') ?? pulls.at(-1)
+          if (task.state === 'done' || shown?.state === 'merged') return yield* new TaskRefused({ taskId: input.taskId, why: 'merged' })
+          const [plan] = yield* sql<{ id: string; projectId: ProjectId; parameters: string }>`
+            SELECT id, project_id, parameters FROM task_plans WHERE task_id = ${input.taskId} AND state IN ('proposed', 'accepted')
+            ORDER BY proposed_at DESC LIMIT 1`
+          if (plan === undefined) return yield* new TaskRefused({ taskId: input.taskId, why: 'no_lead' })
+          const before = yield* decode(plan.parameters)
+          const lead = before.steps.find((step) => step.key === 'implement')
+          if (lead === undefined) return yield* new TaskRefused({ taskId: input.taskId, why: 'no_lead' })
+          const review = before.steps.find((step) => step.key === 'review')
+          const wantedLead = input.steps.find((step) => step.key === 'implement')
+          const wantedReview = input.steps.find((step) => step.key === 'review')
+          const alike = (a: PlanStep, b: PlanStep) =>
+            a.agentId === b.agentId && (a.model ?? null) === (b.model ?? null) && (a.effort ?? null) === (b.effort ?? null)
+          // A review's lead only reads: an agent that can't be held to that can't take either step, whoever asks (Reviews.canLead).
+          if (before.reads === true)
+            for (const step of input.steps) {
+              if (step.skipped) continue
+              const held = agentsHere.list.find((entry) => entry.definition.id === step.agentId)
+              if (held?.definition.reviewing?.outside === true) continue
+              const names = agentsHere.list
+                .filter((entry) => entry.definition.reviewing?.outside === true)
+                .map((entry) => entry.definition.name)
+              return yield* new ReviewRefused({
+                message:
+                  held === undefined
+                    ? 'Althar has no such agent.'
+                    : `${held.definition.name} can't be held to reading only: it runs commands its sandbox contains without asking, so it could run this pull request's code. Review it with ${names.join(' or ')}.`,
+              })
+            }
+          const leadChanges = wantedLead !== undefined && !alike(lead, wantedLead)
+          const reviewed = review !== undefined && !review.skipped
+          const reviews = wantedReview !== undefined && !wantedReview.skipped
+          const reviewChanges = reviewed !== reviews || (reviews && review !== undefined && !alike(review, wantedReview))
+          if (!leadChanges && !reviewChanges) return {} as TeamChanged
+          const reviewWhen = reviewChanges ? yield* reviewerChange(input.taskId) : 'now'
+          if (reviewWhen === 'never') return yield* new TaskRefused({ taskId: input.taskId, why: 'review_done' })
+          const at = yield* timestamp
+          // Each row's own steps: a round of work may have had its review skipped, which a change to the lead leaves as it is.
+          const reshaped = (steps: ReadonlyArray<PlanStep>) => {
+            const moved = steps.map((step): PlanStep =>
+              step.key === 'implement' && leadChanges && wantedLead !== undefined
+                ? { ...wantedLead, key: 'implement', skipped: false }
+                : step,
+            )
+            if (!reviewChanges) return moved
+            const own = steps.find((step) => step.key === 'review')
+            const rest = moved.filter((step) => step.key !== 'review')
+            if (reviews && wantedReview !== undefined) return [...rest, { ...wantedReview, key: 'review' as const, skipped: false }]
+            return own === undefined ? rest : [...rest, { ...own, skipped: true }]
+          }
+          const rewritten = (parameters: string) =>
+            Effect.map(decode(parameters), (now) =>
+              JSON.stringify({ ...JSON.parse(parameters), steps: reshaped(now.steps), ...(leadChanges ? { leadChanged: at } : {}) }),
+            )
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const planChange = yield* change('task_plans', plan.id, { parameters: yield* rewritten(plan.parameters) })
+              yield* fact({
+                projectId: plan.projectId,
+                aggregateType: 'task_plan',
+                aggregateId: plan.id,
+                revision: planChange,
+                type: 'task_plan.changed',
+                actorId: input.actorId,
+              })
+              // The plan's run, which the rounds after it copy, and the latest run, a round of it or the same.
+              const rows = yield* sql<{
+                id: string
+                projectId: ProjectId
+                planId: string | null
+                parameters: string
+                state: string
+                executionId: string
+              }>`
+                SELECT r.id, r.project_id, r.plan_id, r.parameters, r.state, e.id AS execution_id
+                FROM runs r JOIN workflow_executions e ON e.run_id = r.id
+                WHERE r.task_id = ${input.taskId} AND (r.plan_id = ${plan.id}
+                  OR r.id = (SELECT id FROM runs WHERE task_id = ${input.taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1))`
+              for (const run of rows) {
+                const parameters = yield* rewritten(run.parameters)
+                const revision = yield* change('runs', run.id, { parameters })
+                yield* fact({
+                  projectId: run.projectId,
+                  aggregateType: 'run',
+                  aggregateId: run.id,
+                  revision,
+                  type: 'run.plan_changed',
+                  actorId: input.actorId,
+                })
+                // Under way, its graph has the review it has now, as a patch to it.
+                if (!reviewChanges || (run.state !== 'running' && run.state !== 'suspended')) continue
+                const [graph] = yield* sql<{
+                  revision: number
+                }>`SELECT graph_revision AS revision FROM workflow_executions WHERE id = ${run.executionId}`
+                const next = (graph?.revision ?? 1) + 1
+                yield* sql`INSERT INTO execution_graph_revisions ${sql.insert({
+                  projectId: run.projectId,
+                  executionId: run.executionId,
+                  revision: next,
+                  graph: JSON.stringify({
+                    steps: (yield* decode(parameters)).steps.filter((step) => !step.skipped),
+                    review: { rounds: yield* roundsNow },
+                    ...(run.planId === null ? { round: true } : {}),
+                  }),
+                  cause: 'patch',
+                  createdAt: at,
+                })}`
+                yield* change('workflow_executions', run.executionId, { graphRevision: next })
+              }
+            }),
+          )
+          // The lead it has now takes over from its next turn, never in the one it is in.
+          const leadWhen =
+            leadChanges && wantedLead !== undefined
+              ? (yield* sessions.changeLead({
+                  threadId: task.threadId,
+                  agentId: wantedLead.agentId,
+                  ...(wantedLead.model === null ? {} : { model: wantedLead.model }),
+                  ...(wantedLead.effort == null ? {} : { effort: wantedLead.effort }),
+                })) === 'later'
+                ? ('next_turn' as const)
+                : ('now' as const)
+              : ('now' as const)
+          yield* touchCard(input.taskId)
+          const done: { lead?: TeamChanged['lead']; review?: TeamChanged['review'] } = {}
+          if (leadChanges && wantedLead !== undefined)
+            done.lead = { step: { ...wantedLead, key: 'implement', skipped: false }, was: lead, when: leadWhen }
+          if (reviewChanges)
+            done.review = {
+              step: reviews && wantedReview !== undefined ? { ...wantedReview, key: 'review', skipped: false } : null,
+              was: reviewed ? (review ?? null) : null,
+              when: reviewWhen,
+            }
+          return done as TeamChanged
+        })
+
       const skipReview = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -5633,6 +5853,8 @@ export class Runs extends Context.Service<
         resume: (input) => provide(resume(input)),
         answered: (input) => provide(answered(input)),
         planWaits,
+        reviewerChange,
+        changeTeam: (input) => provide(changeTeam(input)),
         makeChange,
         madeRound: (taskId, sessionId) => provide(Effect.map(openRound(taskId, sessionId, false, true), (opened) => opened !== undefined)),
         answerCheckout: (input) => provide(answerCheckout(input)),

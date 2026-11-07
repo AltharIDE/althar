@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
-import { type BranchChoice, type RunPlace, RunPlacePicker } from './RunPlace'
+import { type BranchChoice, type RunPlace, RunPlacePicker, type RunRepository } from './RunPlace'
 
 const MAIN: RunPlace = { key: 'main', kind: 'main', label: 'main', running: ['Dashboard', 'API'] }
 
@@ -115,9 +115,14 @@ export const NothingToCreate: Story = {
   },
 }
 
+const PAIR: RunRepository[] = [
+  { name: 'api', defaultBranch: 'main', branch: 'main' },
+  { name: 'web', defaultBranch: 'main', branch: 'main' },
+]
+
 /** In a project of several repositories, a row for each, with its name. */
 export const CreatingInOneOfSeveral: Story = {
-  args: { onCreate: fn(), createFrom: 'main', repositories: ['api', 'web'], defaultOpen: true },
+  args: { onCreate: fn(), createFrom: 'main', repositories: PAIR, defaultOpen: true },
   play: async ({ args }) => {
     const page = within(document.body)
     await userEvent.type(await page.findByRole('combobox', { name: 'Find a task, pull request or branch' }), 'release/2.5')
@@ -138,3 +143,111 @@ export const CreateOffered: Story = {
   },
 }
 export const CreateOfferedDark: Story = { ...CreateOffered, globals: { theme: 'dark' } }
+
+/* The fnt project: five repositories, three on main, one on develop, one on master; engine moved to a branch. */
+const FNT: RunRepository[] = [
+  { name: 'engine', defaultBranch: 'main', branch: 'fix/redirects' },
+  { name: 'frontend', defaultBranch: 'main', branch: 'main' },
+  { name: 'api', defaultBranch: 'develop', branch: 'develop' },
+  { name: 'docs', defaultBranch: 'master', branch: 'master' },
+  { name: 'shared', defaultBranch: 'main', branch: 'main' },
+]
+const FNT_MAIN: RunPlace = { key: 'main', kind: 'main', label: 'engine: fix/redirects · 4 on defaults', several: true }
+const FNT_REMOTE: BranchChoice[] = [
+  { kind: 'branch', branch: 'main', repository: 'engine' },
+  { kind: 'branch', branch: 'fix/redirects', repository: 'engine' },
+  { kind: 'branch', branch: 'main', repository: 'frontend' },
+  { kind: 'branch', branch: 'fix/redirects', repository: 'frontend' },
+  { kind: 'branch', branch: 'develop', repository: 'api' },
+  { kind: 'branch', branch: 'master', repository: 'docs' },
+  { kind: 'branch', branch: 'main', repository: 'shared' },
+]
+const SEVERAL = {
+  current: FNT_MAIN,
+  places: [FNT_MAIN, { key: 'task:t1', kind: 'task', label: 'Cache the redirect table' }] satisfies RunPlace[],
+  remote: FNT_REMOTE,
+  repositories: FNT,
+  defaultOpen: true,
+} as const
+
+/** Several repositories: the first row sums them up; each repository is a group with its default, and the one moved off it says where it is. */
+export const SeveralRepositories: Story = {
+  args: SEVERAL,
+  play: async () => {
+    const page = within(document.body)
+    await expect(await page.findByRole('group', { name: 'engine' })).toBeInTheDocument()
+    // Two repositories have a fix/redirects; each is in its own group, and only engine's is where Run copies.
+    const there = (repository: string) =>
+      within(page.getByRole('group', { name: repository })).getAllByRole('option', { name: /fix\/redirects/ })
+    await expect(there('engine')).toHaveLength(1)
+    await expect(there('frontend')).toHaveLength(1)
+    await expect(page.getByRole('option', { name: /^engine: fix\/redirects · 4 on defaults/ })).toBeInTheDocument()
+  },
+}
+export const SeveralRepositoriesDark: Story = { ...SeveralRepositories, globals: { theme: 'dark' } }
+
+/** A branch picked in one repository is that repository's; the pick says which. */
+export const PickingInOneRepository: Story = {
+  args: SEVERAL,
+  play: async ({ args }) => {
+    const page = within(document.body)
+    const api = await page.findByRole('group', { name: 'frontend' })
+    await userEvent.click(within(api).getByRole('option', { name: /fix\/redirects/ }))
+    await expect(args.onPick).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'branch', label: 'fix/redirects', choice: expect.objectContaining({ repository: 'frontend' }) }),
+    )
+  },
+}
+
+/** Typing a repository's name finds all it has; its group stays whole. */
+export const FindingARepository: Story = {
+  args: SEVERAL,
+  play: async () => {
+    const page = within(document.body)
+    await userEvent.type(await page.findByRole('combobox', { name: 'Find a task, pull request or branch' }), 'docs')
+    await expect(page.queryByRole('group', { name: 'engine' })).toBeNull()
+    await expect(within(page.getByRole('group', { name: 'docs' })).getByRole('option', { name: /master/ })).toBeInTheDocument()
+  },
+}
+
+/** The remote out of reach: each repository's default is still there to go back to. */
+export const SeveralOutOfReach: Story = {
+  args: { ...SEVERAL, remote: [], note: 'Althar couldn’t reach engine’s remote: this computer may be offline.' },
+  play: async () => {
+    const page = within(document.body)
+    await expect(await page.findAllByRole('option', { name: /Default/ })).toHaveLength(5)
+  },
+}
+
+/** A host Althar has no connection to is named, with the way to connect it. */
+export const HostNotConnected: Story = {
+  args: { ...SEVERAL, hosts: ['gitlab.fnt.example'], onConnect: fn() },
+  play: async ({ args }) => {
+    const page = within(document.body)
+    await expect(await page.findByText('gitlab.fnt.example')).toBeInTheDocument()
+    await userEvent.click(page.getByRole('button', { name: 'Connect gitlab.fnt.example' }))
+    await expect(args.onConnect).toHaveBeenCalledWith('gitlab.fnt.example')
+  },
+}
+export const HostNotConnectedDark: Story = { ...HostNotConnected, globals: { theme: 'dark' } }
+
+/** A host name too long for the band gives way to ellipsis; the button keeps its size. */
+export const LongHostName: Story = {
+  args: { hosts: ['git.engineering.internal.a-very-long-company-name.example.com'], onConnect: fn(), defaultOpen: true },
+  play: async () => {
+    const page = within(document.body)
+    const button = await page.findByRole('button', { name: /^Connect / })
+    await expect(button).toBeVisible()
+    const picker = button.closest('[role="dialog"]')!
+    await expect(button.getBoundingClientRect().right).toBeLessThanOrEqual(picker.getBoundingClientRect().right)
+  },
+}
+
+/** One repository: the picker is as it was, with no grouping and no repository's name. */
+export const OneRepository: Story = {
+  args: { repositories: [{ name: 'api', defaultBranch: 'main', branch: 'main' }], defaultOpen: true },
+  play: async () => {
+    const page = within(document.body)
+    await expect(page.queryByRole('group', { name: 'api' })).toBeNull()
+  },
+}

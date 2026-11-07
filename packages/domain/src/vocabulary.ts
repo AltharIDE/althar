@@ -119,6 +119,8 @@ export const ThreadItemKind = Schema.Literals([
   'pictures',
   /** The coordinator asking the person to stop, hold, restart or settle a task, where no message of theirs asked it to: one button, pressed there. Althar posts it and keeps it current. */
   'task_ask',
+  /** An agent's change to a setting, with Undo; or, where it loosens what asks, a card the person presses (ADR-097). Althar posts it and keeps it current. */
+  'setting',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 
@@ -369,5 +371,6 @@ export const AggregateType = Schema.Literals([
   'automation',
   'automation_occurrence',
   'skill',
+  'setting',
 ])
 export type AggregateType = typeof AggregateType.Type

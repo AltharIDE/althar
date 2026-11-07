@@ -16,15 +16,13 @@ import { You } from '../You/You'
 import { stepAudience, StepPanel, stepPanelText, type StepTab } from './StepPanel'
 
 const INSTRUCTIONS = { path: '.althar/review.md', ...reviewDoc }
-const SAID: Record<string, { took: string; summary: string; text: string }> = {
+const SAID: Record<string, { took: string; text: string }> = {
   [SONNET.id]: {
     took: '3m 50s',
-    summary: 'read 6 files · 1 search',
     text: 'Two findings. The limiter runs after the idempotency lookup, so a replay spends budget; and refunds share the charges bucket, which will refuse refunds for a partner at full charge volume.',
   },
   [GEMINI_PRO.id]: {
     took: '4m 20s',
-    summary: 'read 5 files',
     text: 'Two findings. Same one on limiter order; and the reset test waits on the wall clock. The shared bucket matches the spec, so I did not flag it.',
   },
 }
@@ -34,7 +32,7 @@ function Said({ model }: { model: ModelInfo }) {
   if (!said) return null
   return (
     <Turn model={model} at="2h ago">
-      <WorkedFor took={said.took} summary={said.summary}>
+      <WorkedFor took={said.took}>
         <Tool kind={ToolKind.Read} verb="Read" target="src/refunds/router.ts" meta="151 lines" />
         <Tool kind={ToolKind.Read} verb="Read" target="src/charges/limit.ts" meta="88 lines" />
       </WorkedFor>

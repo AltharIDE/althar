@@ -8,7 +8,7 @@ import { ToolKind, ToolState } from '@althar/ui'
 
 import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
-import { countsOf, nowOf, type Round, type RoundBlock, roundsOf, shorter, withoutShotList } from '../src/renderer/shared/rounds'
+import { countsOf, type Round, type RoundBlock, roundsOf, shorter, withoutShotList } from '../src/renderer/shared/rounds'
 import { fakeClient, items, snapshot } from './fixtures'
 import { withServices } from './render'
 
@@ -139,7 +139,7 @@ describe('a task’s thread in rounds', () => {
     expect(going?.handed.pictures.map((one) => one.name)).toEqual(['found.png'])
   })
 
-  it('says while it works what it is on, in its own last words, or its last call', () => {
+  it('says while it works what it is doing now, its latest step; and what it writes now stands apart, where its result will', () => {
     const live = roundOf(
       read(
         [
@@ -147,7 +147,7 @@ describe('a task’s thread in rounds', () => {
           when(items.says('On it.'), 0),
           when(items.tool({ toolKind: 'edit' }), 1),
           when(items.says('Now the tests, then the docs:'), 2),
-          when(items.tool({}), 3),
+          when(items.tool({ title: 'Read checkout.ts', toolKind: 'read' }), 3),
         ],
         true,
       ),
@@ -155,13 +155,40 @@ describe('a task’s thread in rounds', () => {
     expect(live?.live).toBe(true)
     expect(live?.ack?.text).toBe('On it.')
     expect(live?.result).toBeNull()
-    expect(live?.work?.now).toBe('Now the tests, then the docs')
-    const quiet = roundOf(read([items.you('Go'), when(items.tool({ title: 'Read checkout.ts' }), 0)], true))
-    expect(quiet?.work?.now).toBe('Read checkout.ts')
-    // Said, and at work with nothing done yet: a line all the same.
+    expect(live?.writing).toBeNull()
+    // Its latest call, as it runs, by its kind; what it said on the way is in its work, not on the line.
+    expect(live?.work?.doing).toEqual({ tool: ToolKind.Read, text: 'Reading checkout.ts' })
+    expect(live?.work?.steps.some((step) => step.kind === 'message' && step.text.startsWith('Now the tests'))).toBe(true)
+    // Thinking, by its latest heading where it has one; else Thinking.
+    const thinking = roundOf(read([items.you('Go'), when(items.thinks('**Finding the poll**\n\nIt is in Follow.ts.'), 0)], true))
+    expect(thinking?.work?.doing).toEqual({ tool: null, text: 'Finding the poll' })
+    const plain = roundOf(read([items.you('Go'), when(items.thinks('Where is the poll?'), 0)], true))
+    expect(plain?.work?.doing).toEqual({ tool: null, text: 'Thinking' })
+    // Writing: what it writes stands apart, its acknowledgement-to-be among it, and no step is said.
     const started = roundOf(read([items.you('Go'), when(items.says('On it.'), 0)], true))
     expect(started?.work).not.toBeNull()
     expect(started?.work?.steps).toEqual([])
+    expect(started?.ack).toBeNull()
+    expect(started?.writing?.text).toBe('On it.')
+    expect(started?.work?.doing).toBeNull()
+    expect(started?.answered).toBe(false)
+  })
+
+  it('folds its work as it writes after its report, its answer; and stays one round from its report until then', () => {
+    const before = [
+      items.you('Go'),
+      when(items.says('On it.'), 0),
+      when(items.tool({ toolKind: 'edit' }), 1),
+      when(items.step({ summary: 'Done.', agentId: 'claude-code' }), 2),
+    ]
+    // Reported, not yet answering: one round, still at work, its report's words held for its answer.
+    const reported = read(before, true).filter((block) => block.kind === 'round')
+    expect(reported).toHaveLength(1)
+    expect(reported[0]).toMatchObject({ live: true, answered: false, report: { result: { summary: 'Done.' } } })
+    // Answering: its work folds, timed until its report.
+    const answering = roundOf(read([...before, when(items.says('It works now.'), 30)], true))
+    expect(answering).toMatchObject({ live: true, answered: true, writing: { text: 'It works now.' } })
+    expect(answering?.work?.took).toBe('1m 0s')
   })
 
   it('times a turn that has said nothing yet after a restart from nothing before it, not from the round Althar stopped', () => {
@@ -340,10 +367,6 @@ describe('a task’s thread in rounds', () => {
         skillStep('e', ToolKind.Run, ['read-two'], false),
       ]),
     ).toBe('loaded 1 skill, read 2 skills, ran 1 command')
-    const long = nowOf(`**Now** the ${'long '.repeat(40)}part:`)
-    expect(long.length).toBeLessThanOrEqual(110)
-    expect(long.endsWith('…')).toBe(true)
-    expect(nowOf('Now `this`:')).toBe('Now this')
     expect(shorter('Conflicts, in one/file.ts. Asked.')).toBe('Conflicts, in one/file.ts. Asked.')
   })
 
@@ -400,7 +423,9 @@ describe('a task’s lead that is signed out', () => {
   })
   const show = (overrides: Partial<ThreadSnapshot> = {}) => {
     const onSignIn = vi.fn()
-    const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [items.you('Go'), signedOut], ...overrides })) })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => snapshot({ retryable: true, items: [items.you('Go'), signedOut], ...overrides })),
+    })
     withServices(<Task onSignIn={onSignIn} />, client)
     return { client, onSignIn }
   }
@@ -575,7 +600,7 @@ describe('a task’s thread in rounds, on its screen', () => {
     expect(screen.queryByText(/Installed dependencies/)).toBeNull()
   })
 
-  it('shows a round at work with what it is on, and one that said nothing as a line with who worked', async () => {
+  it('shows a round at work under how long it has worked, and one that said nothing as a line with who worked', async () => {
     const base = snapshot({
       items: [
         items.you('Go'),
@@ -590,7 +615,7 @@ describe('a task’s thread in rounds, on its screen', () => {
     withServices(<Task />, client)
     const quiet = await screen.findByRole('button', { name: /worked 0s/ })
     expect(within(quiet).getByText('Claude Opus')).toBeTruthy()
-    await waitFor(() => expect(screen.getByText(/^Working · /)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/^Working for /)).toBeTruthy())
   })
 
   it('names each round by the model its own turn ran on, not the one the session moved to', async () => {
@@ -607,7 +632,8 @@ describe('a task’s thread in rounds, on its screen', () => {
     )
     const names = (await screen.findAllByRole('article')).map((one) => one.getAttribute('aria-label'))
     expect(names).toContain('Claude Opus')
-    expect(names).toContain('Claude Sonnet')
+    // The review, a line of its own, on its own model.
+    expect(screen.getByRole('button', { name: /Review.*Claude Sonnet.*Passed/ })).toBeTruthy()
   })
 
   it('shows the lead thinking under its name before its first word, with the round before it as it was', async () => {

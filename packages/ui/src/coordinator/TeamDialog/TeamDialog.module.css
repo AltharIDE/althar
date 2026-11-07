@@ -58,6 +58,10 @@
   font-size: 13px;
   color: var(--t-3);
 }
+.locked {
+  font-size: 13px;
+  color: var(--t-2);
+}
 .why {
   margin: 0;
   max-width: 52ch;

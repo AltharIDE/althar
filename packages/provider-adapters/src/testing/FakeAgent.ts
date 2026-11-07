@@ -61,6 +61,8 @@ const sawFile = (block: acp.ContentBlock): string => {
 export const scenarios = {
   /** Two message chunks, then the turn ends with usage. */
   hello: 'hello',
+  /** Answers, then reports an idle worker loss once connection() reads lost. */
+  idleLoss: 'idle-loss',
   /** A thought, then a message. */
   think: 'think',
   /** A tool call that asks permission, then succeeds or fails on the answer. */
@@ -247,6 +249,9 @@ export const codexLikeMeanings = {
 }
 
 export interface FakeAgentOptions {
+  /** Lets a test deliver a connection failure between turns, or close ACP during one. */
+  readonly sessionControls?: (controls: { readonly lose: () => Promise<void>; readonly close: () => void }) => void
+
   /** Hold `session/new` open to exercise startup timeout cleanup. */
   readonly beforeNewSession?: () => Promise<void>
   /** Hold `initialize` open, the first thing a connection asks, to exercise the same cleanup. */
@@ -314,7 +319,7 @@ export interface FakeAgentOptions {
    * nothing; `waits`, as Codex waits for the network, its turn not ending
    * until the connection is back, when it carries on, or it is cancelled.
    */
-  readonly connection?: () => 'offline' | 'server' | 'waits' | undefined
+  readonly connection?: () => 'offline' | 'server' | 'waits' | 'lost' | undefined
   /**
    * Offer effort as OpenCode does: as a model's variants, with a `default`
    * that leaves it at its own. The small model has none, and a third, huge
@@ -1466,6 +1471,22 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         leftForGood: false,
       }
       sessions.set(sessionId, session)
+      options.sessionControls?.({
+        lose: () =>
+          client.notify(acp.methods.client.session.update, {
+            sessionId,
+            update: {
+              sessionUpdate: 'session_info_update',
+              _meta: failureMeta({
+                category: 'connection',
+                severity: 'error',
+                title: 'The connection to Claude was lost.',
+                actions: ['new_session'],
+              }),
+            },
+          }),
+        close: () => connections.get(shared(client))?.close(),
+      })
       // Its connection going stops it too: what a session works at until stopped doesn't outlive the agent.
       connections.get(shared(client))?.signal.addEventListener('abort', () => (session.closed = true), { once: true })
       return {
@@ -2154,6 +2175,24 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await update({ sessionUpdate: 'current_mode_update', currentModeId: session.mode })
           await update({ sessionUpdate: 'available_commands_update', availableCommands: [] })
           return ended()
+        case scenarios.idleLoss: {
+          await say('Committed and pushed.')
+          const later = async () => {
+            while (!session.closed && options.connection?.() !== 'lost') await pause(10)
+            if (!session.closed)
+              await update({
+                sessionUpdate: 'session_info_update',
+                _meta: failureMeta({
+                  category: 'connection',
+                  severity: 'error',
+                  title: 'The connection to Claude was lost.',
+                  actions: ['new_session'],
+                }),
+              })
+          }
+          void later().catch(() => undefined)
+          return ended()
+        }
         case scenarios.slow:
           await say('Starting')
           await untilStopped(session, scenarios.slow)
