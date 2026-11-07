@@ -1,6 +1,6 @@
-# Clearing a coordinator chat
+# Clearing a coordinator chat, again
 
-A prototype, to be deleted once a direction is picked. It is the real desktop app (router, project screen, board, settings, kit) on the tests' fake client, in a browser, opened on althar's conversation with its coordinator beside its board: a task at work with an errand on it, one merged, an issue draft and a plan counting down to start. Seams in `vite.config.mjs` wrap the real `useProject` (what the thread shows after a clear, and the coordinator answering on the page), the kit's `ProjectHeader` and `Composer` for the project screen alone (the direction's ⋯ and undo), the thread's blocks (the divider where it was cleared) and the project's notes in its settings (B's forgetting).
+A prototype, to be deleted once a direction is picked. It is the real desktop app (router, project screen, board, settings, kit) on the tests' fake client, in a browser, opened on althar's conversation with its coordinator beside its board: a task at work with an errand on it, one merged, an issue draft and a plan counting down to start.
 
 From the repository's root:
 
@@ -8,38 +8,59 @@ From the repository's root:
 cd packages/ui && ./node_modules/.bin/vp dev --config prototypes/clear-chat/vite.config.mjs
 ```
 
-Then <http://localhost:5363/>. The strip under the window switches the direction (keys 1 to 4, or `[` and `]`); Start over puts the conversation back as it was. Say anything ("Where were we?") after a clear to see what the coordinator still knows. `?d=B` opens on a direction, `bare` leaves out the strip, and `node shoot.mjs` takes every state into `.althar/scratch/clear-chat`.
+Then <http://localhost:5363/>. The strip under the window switches the direction (keys 1 to 4, or `[` and `]`); Start over puts the conversation back as it was. `?d=B` opens on a direction, `bare` leaves out the strip, and `node shoot.mjs` takes every state into `.althar/scratch/clear-chat`.
 
-| Direction | Clearing the view, keeping what it knows | Forgetting it | Undo |
-| --- | --- | --- | --- |
-| A · One clear, two kinds | ⋯ › Clear the conversation…, a confirm with both kinds, keeping chosen. The thread starts under "Earlier conversation · Show". | The same confirm, Forget it too: the button turns to Clear and forget, in red. | Cleared. Undo / Forgotten. Undo at the composer's edge, for 10 seconds or until you write. |
-| B · Light clear | ⋯ › Clear the conversation, no confirm. The thread starts under "Cleared · Undo ··· Show earlier". | Settings › Notes, at their foot: Forget the conversation…, which asks first and says it can't be undone. | Undo in the divider until you write; forgetting has none. |
-| C · New conversation | ⋯ › New conversation: a fresh session, its first word a summary of the last, under "New conversation · Undo ··· Read the last one". Earlier ones are listed in ⋯. | An earlier conversation, open to read, has Delete…: the coordinator forgets it and the summary carried from it. | Undo in the divider until you write; deleting has none. |
-| Today | Nothing clears the conversation. | | |
+## What changed from the first round
 
-In every direction what is still open stays in view, at the top of what remains: tasks at work (their errands on their cards), plans counting down, drafts and asks waiting on you. Tasks keep running; the board doesn't change. What was finished goes with the earlier conversation. The coordinator says nothing first after a clear (it speaks when spoken to); in C its summary is its first word.
+The first round had three placements of one "clear" ceremony: a confirm with two kinds, a light clear with undo, a new conversation with a list. This round takes the word apart. What people want from "clear the chat" is three different things, and each direction gives one of them the control:
 
-## What "keeps what it knows" can mean
+- **less on screen** — C's Focus;
+- **a fresh start** — A's pages;
+- **knowing, and correcting, what it knows** — B's brief.
 
-Today one coordinator thread per project holds the conversation; its session lives as long as its agent does. After a restart, or once its context is 80% full (ADR-031), Althar starts it afresh, briefed from its records by `handoverRecord`: the project, its notes, open tasks and errands, and the last 12 messages word for word; anything older it reads with `read_thread`. There is no resuming a provider session.
+The other two are still honest in each direction: open tasks, running errands and pending cards are never stopped or moved by a clear; the board doesn't change; the full wipe is always a separate, deliberate act.
+
+| Direction | The control | The coordinator's first word | What stays | The way back | Forgetting |
+| --- | --- | --- | --- | --- | --- |
+| **A · Pages** | New page in the project header | "Where we left off: …", a handover, in a fresh session | open cards, and every page before | the page line: read the page before, or Undo until you write | ⋯ › Forget everything… |
+| **B · What it knows** | What it knows in the header, and New chat | nothing; it answers from the brief | the brief, the open cards and the earlier chat | Earlier chat › Read; a new chat deletes nothing | the brief's Forget everything… |
+| **C · Focus** | Focus in the project header | nothing; it answers from the whole conversation | the whole conversation and the session | Show all, in the header or the line | Settings › Notes › Forget everything |
+
+**A** closes the current page into the one above and opens a new session with a written handover: where things stand, what is open, what it will do. The page before is one line at the top, and opens in place. The coordinator speaks first because the handover is its first message.
+
+**B** makes the coordinator's memory a thing you can see and change. The brief is four lines — an errand, a plan, a draft, the usage — with a × on each; forgetting one changes what it says next. New chat empties the talk and starts a fresh session briefed from the brief; the earlier chat stays as one line, readable. Nothing is lost except the transcript's place on screen.
+
+**C** is a view, not an event: Focus hides finished work and everything before the last exchange, with a line saying how much is hidden. Show all puts it back. The session never notices. Forgetting is in the project's settings, beside its notes, where it is not something done in passing.
+
+In every direction the thread after a clear is still the same thread: the task cards keep running, the plan keeps counting down, the draft still waits for you. What a clear removes is talk, and in B what it removes is the brief.
+
+## What the runtime would need
+
+Today one coordinator thread per project holds the conversation; its session lives as long as its agent does. After a restart, or once its context is 80% full (ADR-031), Althar starts it afresh, briefed from its records by `handoverRecord`: the project, its notes, open tasks and errands, and the last 12 messages word for word; anything older it reads with `read_thread`. There is no resuming a provider session. `thread.compact` already sends the agent its own `/compact`, so freeing the context within a session needs nothing new.
 
 ```mermaid
 flowchart LR
-  P[You clear] --> V{Which kind}
-  V -->|Clear the view<br/>A keep, B| M[A mark on the thread<br/>same session, compacted if full]
-  V -->|New conversation<br/>C| S[Summary turn, then a fresh session<br/>briefed with it]
-  V -->|Forget<br/>A, B settings, C delete| W[Session ended, items deleted<br/>fresh session, no transcript]
-  M --> H[Restart or handover:<br/>brief still reads across the mark]
-  S --> R[read_thread reads<br/>earlier conversations]
-  W --> F[Brief: project, notes,<br/>open tasks and errands only]
+  W[What does "clear" mean here?] --> C1[Less on screen]
+  W --> C2[A fresh start]
+  W --> C3[What does it know?]
+  C1 --> F[C · Focus<br/>hide settled and older talk<br/>a view, no data change]
+  C2 --> P[A · Pages<br/>a handover, a fresh session<br/>the page before kept]
+  C3 --> B[B · What it knows<br/>the brief is the memory<br/>a fresh session from it]
+  P --> D1[Forget everything<br/>sessions end, items go]
+  B --> D1
+  F --> D2[Settings › Forget everything<br/>sessions end, items go]
 ```
 
-What the runtime would need for each:
+What each asks for:
 
-- **Clear the view, same session (A's keep, B).** A clear mark on the coordinator thread (a sequence, or a notice item), dropped again on undo. `GetCoordinator` pages from the mark, with `earlier` saying there is more and a `before` read still reaching it for Show earlier. Open cards from before the mark come with the head page, or are moved past it as `moveToEnd` moves queued inputs. The session doesn't change, and `handoverRecord` and `read_thread` read across the mark, so a restart still carries the last messages. Cheap, and true to the word "keep". A mark alone doesn't free the context, but Althar can already free it in the same session: `thread.compact` sends the agent its own `/compact` as a turn of its own (the composer's context meter offers it). A clear could be followed by one, quietly, where the context is past some fill; nothing new is needed for that.
-- **A summary carried into a fresh session (C).** Several conversations per project: either several coordinator threads with one current (the thread lookup by project, kind and owner becomes "the current one"), or starts within the one thread. On New conversation, a quiet turn asks the live session for a summary (a turn's wait and cost), or Althar writes one from its records without a model; it is stored as the new conversation's first item and goes in the fresh session's brief in place of the last 12 messages. `read_thread` reads earlier conversations by an argument. The context is freed; what wasn't in the summary is only reachable by reading.
-- **Forget (A's forget, B's settings, C's delete).** Interrupt a running turn, end the session and never resume it, drop what waits in its queue, withdraw its open questions, and delete the thread's items (or the conversation's), so neither `read_thread` nor a brief can reach them. Open cards move into what remains. Notes, tasks, their errands and automations stay as records, so a fresh coordinator still knows them from its brief. A's 10-second undo means the deletion waits for the undo to go (or for the next message).
+- **A · Pages.** Several pages in a project's conversation: either page marks over one thread, or several coordinator conversations with one current. A handover turn at each page start (a summary the live model writes, or one Althar writes from its records without a model), stored as the page's first item and used as the fresh session's brief in place of the last 12 messages. `read_thread` reads earlier pages, so "read the page before" has a path. Undo holds the page boundary and the new session until the first message on it. Forget ends every session, drops what waits in the queue, and deletes the items, so neither `read_thread` nor a brief can reach them; notes, tasks and errands stay. The cost is one summary turn per page.
+- **B · What it knows.** The brief is the new piece: persisted per project, shown, edited, and injected into every session. Today's handover record is composed at session start and thrown away; this one is kept and becomes the coordinator's memory. The coordinator maintains it — a tool that adds, changes or drops a line, or a diff at the end of a turn — and the person can correct it. New chat starts a session briefed from the brief, so the context is freed and the brief is the only thing carried; the chat is a range of the thread, readable later. Forget deletes the brief and the thread's items and ends the session. This is the most runtime work, and the only one that makes "keep what it knows" inspectable and correctable.
+- **C · Focus.** A view preference per project, kept somewhere in its settings; no runtime change, and no session to end until Forget. The line's counts come from the items the view hides. Forgetting is A's, and the context can be compacted with the existing `/compact`.
 
 ## Recommendation
 
-B. Clearing the screen is what's wanted most days: one press, no question, undo right there, and the coordinator still knows everything, which is also the cheapest thing for the runtime (a mark). Forgetting is rare and deliberate, and it sits beside the notes that survive it. A asks a technical question every time someone only wants a clean screen. C is the most honest about memory, but it costs a summary turn per clear and a model of several conversations. Freeing the context doesn't need it: B's clear can be followed by the `/compact` Althar already sends. C is the step to take only if the person wants past conversations kept apart, as a list to go back to.
+**B, with C's Focus as the everyday lens.** B removes the question the old directions kept asking — "what will it still know?" — by making the answer a short, editable list. Clearing the talk then costs nothing and the coordinator's memory is inspectable, which is worth the one new runtime piece. C is the cheapest and quietest and can sit on top of any of them as the default view; on its own it never gives a fresh session. A is for when a hard boundary is wanted — a new session, a fresh context — and one summary turn per page is acceptable; it is the best version of the old "new conversation", with the page in the thread rather than a list.
+
+## What the prototype leaves out
+
+The fake client has no runtime behind it: the handover and the brief's answer are written into the page, not by a model. Pages beyond the last are read all at once, and the brief is not yet maintained by the coordinator — both are described above as work the real thing needs. The earlier-chat line reads the last one; a real history would list them all. The narrow header keeps glyphs with the labels in tooltips, which is the kit's own compact button.

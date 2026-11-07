@@ -1,4 +1,4 @@
-// Scrappy: the thread's blocks as the app makes them, made for each side of the clear apart, so the divider falls between turns.
+// Scrappy: the thread's blocks as the app makes them, made for each side of the direction's line apart, so it falls between turns.
 import { blocksOf as realBlocksOf } from '../../../../../apps/desktop/src/renderer/shared/thread'
 import { proto, shownOf } from '../state'
 
