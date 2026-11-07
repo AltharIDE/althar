@@ -387,8 +387,43 @@ describe('what the window says of a plan', () => {
     // Even where the window's own clock hasn't passed its reset yet, the runtime has said it has.
     const early = planOf(sent, NOW, memory).agents[0]?.accounts[0]?.windows
     expect(early?.every((window) => window.unread === true && window.resets?.startsWith('reset at'))).toBe(true)
-    // Nothing remembered (a restart): no windows to show, as before.
+    // A restart that kept what was read shows them the same; one that kept nothing has none to show, as before.
+    const restarted: WindowMemory = new Map(JSON.parse(JSON.stringify([...memory])))
+    expect(planOf(sent, after, restarted).agents[0]?.accounts[0]?.windows).toHaveLength(2)
     expect(planOf(sent, after).agents[0]?.accounts[0]?.windows).toEqual([])
+  })
+
+  it('keeps a window the runtime leaves out after its reset, beside those still read, until it is read again', () => {
+    const memory: WindowMemory = new Map()
+    remember(memory, planUsage([claudeBoth]))
+    // The five hours reset at RESET; the runtime sends only the week, and has not said all have reset.
+    const after = new Date('2026-10-15T15:01:00.000Z')
+    const sent = planUsage([{ ...claudeBoth, windows: claudeBoth.windows.slice(1) }])
+    remember(memory, sent)
+    const rows = (at: Date) =>
+      planOf(sent, at, memory).agents[0]?.accounts[0]?.windows.map((window) => [window.label, window.unread === true])
+    expect(rows(after)).toEqual([
+      ['Week', false],
+      ['5 hours', true],
+    ])
+    // The figure is still the week's alone, and the five hours show nothing before they have reset.
+    expect(planOf(sent, after, memory).agents[0]).toMatchObject({ left: 60, limit: 'weekly limit' })
+    expect(rows(NOW)).toEqual([['Week', false]])
+    // Read again, the five hours are the reading's, not the old one.
+    const again = planUsage([
+      {
+        ...claudeBoth,
+        windows: [
+          { kind: 'five_hour', label: null, usedPercent: 10, resetsAt: '2026-10-15T20:00:00.000Z' },
+          ...claudeBoth.windows.slice(1),
+        ],
+      },
+    ])
+    remember(memory, again)
+    expect(planOf(again, after, memory).agents[0]?.accounts[0]?.windows.map((window) => [window.label, window.unread === true])).toEqual([
+      ['5 hours', false],
+      ['Week', false],
+    ])
   })
 
   it('leaves out a window whose reset has passed, as unknown, and a model’s room with it', () => {

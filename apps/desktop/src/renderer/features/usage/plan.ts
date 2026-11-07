@@ -97,12 +97,25 @@ const tightest = (account: AccountUsage): UsageWindow | undefined => {
 /** A read that failed for a moment (a rate limit, no answer, an error) and will pass on its own: nothing the person can do, so the peek keeps to the last numbers and how old they are. */
 const passing = (account: AccountUsage) => account.fault?.kind === 'unreachable'
 
-/** The windows last read of each account, by its id: what the runtime sends none of once every one has reset. */
+/** A window by what names it within its account. */
+const keyOf = (window: Pick<UsageWindow, 'kind' | 'label'>) => `${window.kind}:${window.label ?? ''}`
+
+/**
+ * The windows last read of each account, by its id: the runtime leaves out a window once it has reset, and sends none at all
+ * once every one has, so what was read of them is kept until that window is read again.
+ */
 export type WindowMemory = Map<string, ReadonlyArray<UsageWindow>>
 
-/** Keeps each account's windows as they are read; an account sent with none keeps its last, until it is read again. */
+/** Keeps each window as it is read, those the runtime leaves out after (a reset) as last read; an account sent with none keeps all of its. */
 export const remember = (memory: WindowMemory, usage: PlanUsage | null): void => {
-  for (const account of usage?.accounts ?? []) if (account.windows.length > 0) memory.set(account.accountId, account.windows)
+  for (const account of usage?.accounts ?? []) {
+    if (account.windows.length === 0) continue
+    const read = new Set(account.windows.map(keyOf))
+    memory.set(account.accountId, [
+      ...account.windows,
+      ...(memory.get(account.accountId) ?? []).filter((window) => !read.has(keyOf(window))),
+    ])
+  }
 }
 
 /** What a window says of when it resets: the time and the time left, that it reset and wasn't read since, or that no time is known. */
@@ -160,9 +173,17 @@ export const planOf = (usage: PlanUsage | null, now: Date, memory?: WindowMemory
   // Accounts the runtime sent no windows of, as every one has reset: shown with the windows last read of them, as reset.
   const forgotten = new Set<string>()
   for (const read of usage?.accounts ?? []) {
-    const last = read.resetSince && read.windows.length === 0 ? memory?.get(read.accountId) : undefined
-    if (last !== undefined) forgotten.add(read.accountId)
-    asRead.set(read.accountId, last === undefined ? read : { ...read, windows: last })
+    const last = memory?.get(read.accountId)
+    if (last !== undefined && read.resetSince && read.windows.length === 0) {
+      // Every window has reset, by the runtime's clock: all that were read of it, as reset.
+      forgotten.add(read.accountId)
+      asRead.set(read.accountId, { ...read, windows: last })
+    } else if (last !== undefined && read.windows.length > 0) {
+      // One reset and the rest haven't: it is read no more, and shows as reset once its own time has passed.
+      const sent = new Set(read.windows.map(keyOf))
+      const gone = last.filter((window) => !sent.has(keyOf(window)) && past(window.resetsAt, now))
+      asRead.set(read.accountId, gone.length === 0 ? read : { ...read, windows: [...read.windows, ...gone] })
+    } else asRead.set(read.accountId, read)
     const account = current(read, now)
     if (read.resetSince || read.windows.length > 0) wasRead.add(account.accountId)
     byAgent.set(account.agentId, [...(byAgent.get(account.agentId) ?? []), account])
