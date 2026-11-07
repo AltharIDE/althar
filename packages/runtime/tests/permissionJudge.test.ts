@@ -26,7 +26,7 @@ const setup = Effect.gen(function* () {
   const instance = yield* Instance
   const sessions = yield* Sessions
   const sql = yield* SqlClient.SqlClient
-  yield* policies.set(project.projectId, { permissions: 'coordinator', alwaysAsk: [] }, instance.personId)
+  yield* policies.set(project.projectId, { permissions: 'coordinator', allowEverything: false, alwaysAsk: [] }, instance.personId)
   // The coordinator's model is deliberately different from the task's.
   yield* sessions.start({ threadId: project.coordinatorThreadId, agentId: 'claude-code', model: 'small' })
   const sessionId = yield* sessions.start({ threadId: created.threadId, agentId: 'codex', model: 'large' })

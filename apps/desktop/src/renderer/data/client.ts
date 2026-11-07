@@ -10,6 +10,9 @@ import {
   type AccountStatus,
   type AgentModels,
   type AlwaysScope,
+  type AgentTools,
+  type SyncedAgent,
+  type ToolRole,
   type AppSettings,
   type Attachment,
   type AutomationDefinition,
@@ -206,6 +209,14 @@ export interface Client {
   readonly setModelBlocked: (input: { readonly agentId: string; readonly model: string; readonly blocked: boolean }) => Promise<void>
   /** The person's settings for the app as a whole. */
   readonly getSettings: () => Promise<AppSettings>
+  /** The person's MCP servers and skills, the roles each gets, for every project or one, and how sync stands (ADR-097). */
+  readonly getAgentTools: (projectId: string | null) => Promise<AgentTools>
+  readonly setToolRoles: (kind: 'server' | 'skill', name: string, roles: ReadonlyArray<ToolRole>, projectId: string | null) => Promise<void>
+  readonly setToolSync: (kind: 'server' | 'skill', on: boolean, takeBack: boolean) => Promise<void>
+  readonly setToolKeptOut: (kind: 'server' | 'skill', agent: SyncedAgent, name: string, out: boolean) => Promise<void>
+  readonly pickToolWay: (kind: 'server' | 'skill', name: string, way: SyncedAgent | 'apart') => Promise<void>
+  readonly undoToolSync: (id: string) => Promise<void>
+  readonly signInToolServer: (agent: SyncedAgent, name: string) => Promise<void>
   /** Althar as co-author of the commits and pull requests it sends, or not. */
   readonly setCoAuthor: (on: boolean) => Promise<void>
   /** How many agents work at once on this machine: the person's number, or null for the default again. */
@@ -733,6 +744,14 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setDefaultEffort: (input) => command((commandId) => api.SetDefaultEffort({ commandId, ...input })),
     setModelBlocked: (input) => command((commandId) => api.SetModelBlocked({ commandId, ...input })),
     getSettings: () => settle(api.GetSettings({})),
+    getAgentTools: (projectId) => settle(api.GetAgentTools({ projectId })),
+    setToolRoles: (kind, name, roles, projectId) =>
+      command((commandId) => api.SetToolRoles({ commandId, kind, name, roles: [...roles], projectId })),
+    setToolSync: (kind, on, takeBack) => command((commandId) => api.SetToolSync({ commandId, kind, on, takeBack })),
+    setToolKeptOut: (kind, agent, name, out) => command((commandId) => api.SetToolKeptOut({ commandId, kind, agent, name, out })),
+    pickToolWay: (kind, name, way) => command((commandId) => api.PickToolWay({ commandId, kind, name, way })),
+    undoToolSync: (id) => command((commandId) => api.UndoToolSync({ commandId, id })),
+    signInToolServer: (agent, name) => command((commandId) => api.SignInToolServer({ commandId, agent, name })),
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
     setReviewSeal: (on) => command((commandId) => api.SetReviewSeal({ commandId, on })),

@@ -113,3 +113,9 @@
   border-top: 1px solid var(--line);
   color: var(--t-3);
 }
+
+/* the task's parts, just before the faces */
+.parts {
+  display: inline-flex;
+  flex: none;
+}

@@ -2,6 +2,8 @@ import type { AllowedBy, AlwaysScope, AttentionRequest, RuleKind } from '@althar
 import { titleOf } from './callCommand'
 import { Decision, type PermissionAnswer, type PermissionRequest, PermissionScope } from '@althar/ui'
 
+import { serverBrand } from './mcpServers'
+
 /*
  * A permission call as the kit asks it, and its answer as the runtime takes
  * it (ADR-018). The runtime says what an "always" would keep and the scopes
@@ -19,6 +21,7 @@ export const text = {
     'delete-branch': 'deleting branches that aren’t the task’s',
     deploy: 'deploying and publishing',
     outside: 'writing outside the task’s worktree',
+    speak: 'posting for you',
   } satisfies Record<RuleKind, string>,
   /** A rule that let a request through, as its receipt says it. */
   prefix: (pattern: string) => `commands starting “${pattern}”`,
@@ -53,6 +56,27 @@ export const permissionOf = (call: AttentionRequest): PermissionRequest => {
   const deny = call.always?.deny ?? []
   const prefix = call.always?.prefix ?? null
   const kind = call.always?.kind ?? null
+  const lasting = call.irreversible
+  // What can't be undone has its own card: the action, what stays, the words, where it goes; Not now or the action (ADR-097).
+  if (lasting !== undefined)
+    return {
+      id: call.id,
+      what: titleOf(call),
+      cmd: call.command ?? call.title,
+      irreversible: {
+        verb: lasting.verb,
+        done: lasting.done,
+        stays: lasting.stays,
+        ...(lasting.words === undefined ? {} : { words: lasting.words }),
+        through:
+          'command' in lasting.through
+            ? { command: lasting.through.command }
+            : (() => {
+                const brand = serverBrand(lasting.through.server)
+                return { server: lasting.through.server, tool: lasting.through.tool, ...(brand === undefined ? {} : { brand }) }
+              })(),
+      },
+    }
   return {
     id: call.id,
     what: titleOf(call),

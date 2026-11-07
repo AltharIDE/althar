@@ -1315,7 +1315,7 @@ describe('a project’s rules, as the coordinator is told them', () => {
   it('says what waits for the person and what is never allowed, by the mode', () => {
     assert.strictEqual(
       sayRules(MVP_RULES),
-      "Agents may do anything but these, which wait for the person: pushing to the default branch; force pushes; pushing every branch, tags, or a pattern of branches; deleting branches that aren't the task's; deploying and publishing; writing outside the task's worktree.",
+      "Agents may do anything but these, which wait for the person: pushing to the default branch; force pushes; pushing every branch, tags, or a pattern of branches; deleting branches that aren't the task's; deploying and publishing; writing outside the task's worktree; posting for you on a pull request, an issue or another service.",
     )
     assert.strictEqual(
       sayRules({ mode: 'rules', ask: [], never: ['deploy'], allow: [], commands: [{ pattern: 'terraform *', decision: 'never' }] }),
@@ -1327,7 +1327,7 @@ describe('a project’s rules, as the coordinator is told them', () => {
     )
     assert.strictEqual(
       sayRules({ mode: 'allow', ask: RULES, never: [], allow: [], commands: [{ pattern: 'npm publish', decision: 'ask' }] }),
-      'Agents may do anything.',
+      "Agents may do anything but what can't be undone, which waits for the person: losing work or history (a force push, a push to the default branch, deleting another branch), publishing, a release or a merge, and posting for the person; and before running commands starting `npm publish`.",
     )
     assert.strictEqual(
       sayRules({ mode: 'rules', ask: ['force-push'], never: [], allow: [], commands: [{ pattern: 'npm publish', decision: 'ask' }] }),

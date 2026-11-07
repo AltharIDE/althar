@@ -2,6 +2,7 @@ import type {
   AccountSignInState,
   AgentModels,
   AgentStatus,
+  AgentTools,
   AutomationCard,
   AutomationDefinition,
   AutomationRun,
@@ -1044,6 +1045,15 @@ export const skillCard: SkillReviewCard = {
 }
 
 /** A client whose every call resolves with the fixtures, and whose watch the test drives with `emit`. */
+/** The person's MCP servers and skills, as a profile that reads none has them. */
+export const agentTools: AgentTools = {
+  enabled: true,
+  servers: [],
+  skills: [],
+  serverSync: { on: false, settle: [], since: [], targets: [], errors: [] },
+  skillSync: { on: false, settle: [], since: [], targets: [], errors: [] },
+}
+
 export const fakeClient = (overrides: Partial<Client> = {}) => {
   const listeners = new Set<(event: WatchEvent) => void>()
   const watching: Array<number | undefined> = []
@@ -1120,6 +1130,13 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getModels: vi.fn(async () => models),
     setDefaultEffort: vi.fn(async () => {}),
     setModelBlocked: vi.fn(async () => {}),
+    getAgentTools: vi.fn(async () => agentTools),
+    setToolRoles: vi.fn(async () => {}),
+    setToolSync: vi.fn(async () => {}),
+    setToolKeptOut: vi.fn(async () => {}),
+    pickToolWay: vi.fn(async () => {}),
+    undoToolSync: vi.fn(async () => {}),
+    signInToolServer: vi.fn(async () => {}),
     getSettings: vi.fn(async () => ({
       coAuthor: { on: true, line: 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>' },
       reviewSeal: { on: true, style: 'ring' as const },

@@ -46,9 +46,11 @@ describe('a task on Windows', () => {
     }
     const { client } = fakeClient({ getThread: vi.fn(async () => running) })
     withServices(<Task />, client)
-    // Its key is said in its tooltip, not as a chip on the bar.
-    await userEvent.hover(await screen.findByRole('button', { name: /1 file/ }))
-    expect((await screen.findByRole('tooltip')).textContent).toContain('Ctrl+D')
+    // Its key for the changes is said where they open from: its worktree's part.
+    await userEvent.click(await screen.findByRole('button', { name: /^Parts, / }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Worktree' }))
+    expect((await screen.findByRole('button', { name: /^See the changes/ })).textContent).toContain('Ctrl+D')
+    await userEvent.keyboard('{Escape}')
     // Sending now, over the turn under way.
     await userEvent.type(await screen.findByRole('textbox', { name: /^Add to the queue/ }), 'Stop there')
     expect(screen.getByRole('button', { name: /Send now/ }).textContent).toContain('Ctrl+Enter')

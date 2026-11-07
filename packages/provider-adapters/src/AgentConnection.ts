@@ -23,6 +23,7 @@ import {
   takingBackground,
 } from './background'
 import { type CapturedFrame, type OwnedProcess, type ProcessExit, spawnOwned, type StopReport } from './process'
+import { type McpCall, mcpCallOf } from './mcpCalls'
 import { type Question, type QuestionAnswer, type QuestionField, questionFields } from './questions'
 import { type LaunchSpec, type PermissionMeanings, REFUSAL_META } from './registry'
 
@@ -72,6 +73,8 @@ export interface PermissionRequest {
   /** The files the action touches, as the agent reported them. */
   readonly paths: ReadonlyArray<string>
   readonly options: ReadonlyArray<PermissionOption>
+  /** The person's MCP server and tool it calls, where it is a call to one (`mcpCalls.ts`). */
+  readonly mcp?: McpCall
 }
 
 /**
@@ -352,18 +355,22 @@ const SILENT_AFTER_REFUSAL =
 
 const toolKinds: ReadonlyArray<string> = ['read', 'edit', 'delete', 'move', 'search', 'execute', 'think', 'fetch', 'switch_mode', 'other']
 
-const permissionRequest = (params: acp.RequestPermissionRequest): PermissionRequest => ({
-  sessionId: params.sessionId,
-  toolCallId: params.toolCall.toolCallId,
-  title: params.toolCall.title ?? '',
-  kind:
-    params.toolCall.kind !== null && params.toolCall.kind !== undefined && toolKinds.includes(params.toolCall.kind)
-      ? (params.toolCall.kind as ToolKind)
-      : 'other',
-  ...(params.toolCall.rawInput === undefined ? {} : { rawInput: params.toolCall.rawInput }),
-  paths: (params.toolCall.locations ?? []).map((location) => location.path),
-  options: params.options.map((option) => ({ optionId: option.optionId, name: option.name, kind: option.kind })),
-})
+const permissionRequest = (params: acp.RequestPermissionRequest): PermissionRequest => {
+  const mcp = mcpCallOf(params.toolCall.title ?? '', params.toolCall._meta)
+  return {
+    sessionId: params.sessionId,
+    toolCallId: params.toolCall.toolCallId,
+    title: params.toolCall.title ?? '',
+    kind:
+      params.toolCall.kind !== null && params.toolCall.kind !== undefined && toolKinds.includes(params.toolCall.kind)
+        ? (params.toolCall.kind as ToolKind)
+        : 'other',
+    ...(params.toolCall.rawInput === undefined ? {} : { rawInput: params.toolCall.rawInput }),
+    paths: (params.toolCall.locations ?? []).map((location) => location.path),
+    options: params.options.map((option) => ({ optionId: option.optionId, name: option.name, kind: option.kind })),
+    ...(mcp === undefined ? {} : { mcp }),
+  }
+}
 
 const mcpServer = (server: McpServer): acp.McpServer =>
   server.type === 'stdio'
