@@ -185,11 +185,11 @@ describe('the agent registry', () => {
   })
 
   it('lets a Claude Code lead listen on localhost in its sandbox, and a reader not', () => {
-    type Sandbox = { network?: { allowLocalBinding?: boolean } }
+    type Sandbox = { network?: { allowLocalBinding?: boolean; allowedDomains?: string[] } }
     const sandboxOf = (role?: 'reader') =>
       (agents['claude-code'].sessionMeta?.(role) as { claudeCode: { options: { settings: { sandbox: Sandbox } } } }).claudeCode.options
         .settings.sandbox
-    assert.deepStrictEqual(sandboxOf().network, { allowLocalBinding: true })
+    assert.deepStrictEqual(sandboxOf().network, { allowLocalBinding: true, allowedDomains: ['*'] })
     assert.isUndefined(sandboxOf('reader').network)
   })
 
@@ -217,7 +217,7 @@ describe('the agent registry', () => {
       'env -i',
       'env -i *',
     ])
-    assert.deepStrictEqual(lead.sandbox.network, { allowLocalBinding: true, allowedDomains: ['github.com', 'registry.npmjs.org'] })
+    assert.deepStrictEqual(lead.sandbox.network, { allowLocalBinding: true, allowedDomains: ['*'] })
     // Without caches given, it writes nowhere beyond its folder.
     assert.isUndefined(lead.sandbox.filesystem)
     // The tools' caches it writes to, but never where keys and sign-ins are kept, nor anything not from the home folder.
@@ -239,7 +239,7 @@ describe('the agent registry', () => {
     // Without known commands or hosts, the settings say nothing of them.
     const plain = sandboxOf('lead', { sandbox: { commands: [], hosts: [] } }).sandbox
     assert.isUndefined(plain.excludedCommands)
-    assert.deepStrictEqual(plain.network, { allowLocalBinding: true })
+    assert.deepStrictEqual(plain.network, { allowLocalBinding: true, allowedDomains: ['*'] })
     // A reader is given neither, whatever it is passed.
     const reader = sandboxOf('reader', { sandbox: upFront }).sandbox
     assert.isUndefined(reader.excludedCommands)
@@ -346,7 +346,7 @@ describe('the agent registry', () => {
       autoAllowBashIfSandboxed: true,
       allowUnsandboxedCommands: false,
       failIfUnavailable: true,
-      network: { allowedDomains: [], strictAllowlist: true, allowLocalBinding: false, allowAllUnixSockets: false },
+      network: { allowedDomains: ['*'], allowLocalBinding: true },
       // It writes only its folder, and reads none of the home folder or the person's checkouts but what it is given back.
       filesystem: { allowWrite: [folder], denyRead: reads.denied, allowRead: reads.allowed },
     })
@@ -409,6 +409,7 @@ describe('the agent registry', () => {
     assert.isTrue(agents['claude-code'].reviewing?.outside)
     assert.isTrue(agents.opencode.reviewing?.outside)
     // codex-acp starts every turn on its mode's approval policy, on-request: what its sandbox contains runs without asking.
+    assert.isTrue(JSON.parse(agents.codex.sessionEnv?.({}, {}).CODEX_CONFIG ?? '{}')['sandbox_workspace_write.network_access'])
     assert.isFalse(agents.codex.reviewing?.outside)
   })
 
@@ -525,7 +526,7 @@ describe('project web tools', () => {
       assert.includeMembers(offline.permissions.deny, ['WebSearch', 'WebFetch'])
     }
   })
-  it('sets live Codex search and fetch, with shell network closed, and disables it when off or offline', () => {
+  it('opens Codex shell networking independently of native web tools, keeping outside reviews offline', () => {
     const own = { CODEX_CONFIG: JSON.stringify({ 'mcp_servers.test.enabled': false }) }
     for (const [options, search] of [
       [{ web: true }, 'live'],
@@ -534,9 +535,10 @@ describe('project web tools', () => {
     ] as const) {
       const config = JSON.parse(agents.codex.sessionEnv?.(own, options).CODEX_CONFIG ?? '{}')
       assert.strictEqual(config.web_search, search)
-      assert.strictEqual(config['sandbox_workspace_write.network_access'], false)
+      assert.strictEqual(config['sandbox_workspace_write.network_access'], !('offline' in options && options.offline))
       assert.strictEqual(config['mcp_servers.test.enabled'], false)
     }
+    assert.isTrue(JSON.parse(agents.codex.sessionEnv?.({}, {}).CODEX_CONFIG ?? '{}')['sandbox_workspace_write.network_access'])
     assert.isFalse(agents.codex.reviewing?.outside)
   })
   it('allows OpenCode search and fetch globally and for both agents, but offline and off still ask', () => {
@@ -552,4 +554,9 @@ describe('project web tools', () => {
       }
     }
   })
+})
+
+it('keeps Copilot’s built-in tools available while self-approval stays off', () => {
+  assert.notInclude(agents.copilot.launch('node').args, '--disable-builtin-mcps')
+  assert.strictEqual(agents.copilot.options.held?.allow_all, 'off')
 })

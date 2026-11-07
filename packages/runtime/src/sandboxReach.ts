@@ -53,7 +53,30 @@ export interface Edits {
  * can't list processes, and `env -i`, the clean environment a test run of a
  * desktop app starts from; what it runs still meets the rules.
  */
-export const ALWAYS: ReadonlyArray<string> = ['ps', 'env -i']
+const SERVERS_AND_TESTS = [
+  'vite',
+  'next dev',
+  'next start',
+  'astro dev',
+  'nuxt dev',
+  'storybook dev',
+  'webpack serve',
+  'react-scripts start',
+  'vitest',
+  'jest',
+  'playwright',
+  'electron',
+  'vp dev',
+  'vp test',
+]
+export const ALWAYS: ReadonlyArray<string> = [
+  'ps',
+  'env -i',
+  ...SERVERS_AND_TESTS.flatMap((command) => [command, ...['npx', 'bunx', 'pnpm exec', 'yarn'].map((runner) => `${runner} ${command}`)]),
+  ...['npm', 'pnpm', 'yarn'].flatMap((manager) =>
+    ['dev', 'start', 'test'].flatMap((script) => [`${manager} run ${script}`, `${manager} ${script}`]),
+  ),
+]
 
 /** Tools a package names that start a browser, Electron or a test runner, which a Mac's sandbox stops: by the packages that bring them. */
 const TOOLS: ReadonlyArray<{ readonly packages: ReadonlyArray<string>; readonly bin: string }> = [
@@ -67,7 +90,7 @@ const TOOLS: ReadonlyArray<{ readonly packages: ReadonlyArray<string>; readonly 
 const RUNNERS: Readonly<Record<string, string>> = { bun: 'bunx', npm: 'npx', pnpm: 'pnpm exec', yarn: 'yarn' }
 
 /** A script that runs tests or drives a browser, by its name: `test`, `test:e2e`, `e2e`, `playwright`. */
-const testing = (name: string) => name === 'test' || /e2e|playwright|screenshot/.test(name)
+const testing = (name: string) => /^(dev|start|serve|test)(:|$)/.test(name) || /e2e|playwright|screenshot/.test(name)
 
 const recordOf = (value: unknown): Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Readonly<Record<string, unknown>>) : {}

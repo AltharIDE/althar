@@ -95,6 +95,7 @@ describe('what a repository says its leads run outside the sandbox', () => {
       'pnpm exec jest',
       'pnpm run test',
       'pnpm run e2e',
+      'pnpm run dev',
     ])
   })
 
@@ -116,7 +117,7 @@ describe('what a repository says its leads run outside the sandbox', () => {
         }),
       },
     )
-    assert.deepStrictEqual(commandsIn(root), ['bunx playwright', 'bunx vp test run', 'node scripts/e2e.ts'])
+    assert.deepStrictEqual(commandsIn(root), ['bunx playwright', 'bunx vp test run', 'node scripts/e2e.ts', 'electron .'])
     assert.deepStrictEqual(
       ['bun run test:e2e', '/opt/bin/bun x', 'bunx playwright', 'node scripts/e2e.ts', 'bundle exec rspec'].map(runsOutside),
       [false, false, true, true, true],
@@ -136,8 +137,23 @@ describe('what a repository says its leads run outside the sandbox', () => {
     assert.deepStrictEqual(runCommandsOf('bun --filter @althar/ui storybook'), ['bun --filter @althar/ui storybook'])
   })
 
-  it('always names ps and env -i', () => {
-    assert.deepStrictEqual(ALWAYS, ['ps', 'env -i'])
+  it('runs hand-started dev servers and test runners outside, with their usual launchers', () => {
+    assert.includeMembers(
+      [...ALWAYS],
+      [
+        'ps',
+        'env -i',
+        'next dev',
+        'npx next dev',
+        'bunx vite',
+        'pnpm exec vitest',
+        'yarn jest',
+        'npm run dev',
+        'pnpm test',
+        'bunx vp test',
+      ],
+    )
+    assert.isTrue(ALWAYS.every(runsOutside))
   })
 })
 
@@ -282,7 +298,10 @@ describe('a lead’s session', () => {
     Effect.gen(function* () {
       const sandbox = yield* leading({ permissions: 'rules' })
       // Not `bun run dev` or `bun install`, which Claude Code would run in the sandbox anyway.
-      assert.deepStrictEqual(sandbox?.commands, ['bunx playwright', 'bunx electron', 'bunx vitest', 'node scripts/e2e.ts', 'ps', 'env -i'])
+      assert.sameMembers(
+        [...(sandbox?.commands ?? [])],
+        [...new Set(['bunx playwright', 'bunx electron', 'bunx vitest', 'node scripts/e2e.ts', ...ALWAYS])],
+      )
       // GitHub's release downloads too, where Electron's build comes from: a host, not a release script.
       assert.deepStrictEqual(sandbox?.hosts, [
         'github.com',
@@ -322,8 +341,9 @@ describe('a lead’s session', () => {
         'bunx playwright',
         'bunx electron',
         'bunx vitest',
+        'vite',
         'node scripts/e2e.ts',
-        'ps',
+        ...ALWAYS.filter((command) => !['env -i', 'vite', 'bunx playwright', 'bunx electron', 'bunx vitest'].includes(command)),
         'make e2e',
       ])
       assert.deepStrictEqual(sandbox?.hosts, [])

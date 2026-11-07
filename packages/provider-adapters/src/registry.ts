@@ -749,10 +749,9 @@ const codexReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<
  * (`excludedCommands`), so a browser, Electron or a test runner, which its
  * sandbox stops on a Mac, doesn't fail once first: Claude Code's settings
  * say an excluded command still goes through its permission flow, so it
- * asks, and meets Althar's rules, as it would on its second try. Known hosts
- * (`network.allowedDomains`) a command in the sandbox reaches without
- * asking: the project's code hosts, registries and trackers, only where its
- * rules would let them through anyway. Known caches
+ * asks, and meets Althar's rules, as it would on its second try. Sandboxed
+ * commands reach any host: no project host discovery or allowlist gates the
+ * network (ADR-097). Known caches
  * (`filesystem.allowWrite`) its commands write to without asking, outside
  * the worktree: those of the tools its project installs with, so Electron's
  * build and Playwright's browsers download inside the sandbox, never where
@@ -785,7 +784,7 @@ const claudeAsks = (
           allowUnsandboxedCommands: true,
           failIfUnavailable: starts,
           ...(sandbox.commands.length === 0 ? {} : { excludedCommands: excludedCommandsOf(sandbox.commands) }),
-          network: { allowLocalBinding: true, ...(sandbox.hosts.length === 0 ? {} : { allowedDomains: [...sandbox.hosts] }) },
+          network: { allowLocalBinding: true, allowedDomains: ['*'] },
           ...(writes.length === 0 ? {} : { filesystem: { allowWrite: [...writes] } }),
         },
       },
@@ -883,9 +882,8 @@ const claudeHolds = (role: 'lead' | 'reader' = 'lead', options: SessionOptions =
  * folder, the person's checkouts or the project's task folders but what
  * Althar gives back (the folder, the mirrors its copies fetch from, the
  * objects they borrow, the toolchains in the home folder), and nothing
- * where the person keeps keys and sign-ins; reach no network
- * (`strictAllowlist` with no domain refuses every host without asking) and
- * no socket; and never run outside it (`allowUnsandboxedCommands: false`).
+ * where the person keeps keys and sign-ins. Commands reach any host and may
+ * listen locally, and never run outside it (`allowUnsandboxedCommands: false`).
  * It loads no settings file (`settingSources: []`) and runs no hook, as a
  * review's lead: no allow rule or sandbox exemption of the person's or the
  * repository's lets a command out, and no hook of theirs runs beside it. Its
@@ -908,7 +906,7 @@ const claudeContains = ({ folder, reads }: Contained) => ({
           autoAllowBashIfSandboxed: true,
           allowUnsandboxedCommands: false,
           failIfUnavailable: true,
-          network: { allowedDomains: [], strictAllowlist: true, allowLocalBinding: false, allowAllUnixSockets: false },
+          network: { allowedDomains: ['*'], allowLocalBinding: true },
           filesystem: { allowWrite: [folder], denyRead: [...reads.denied], allowRead: [...reads.allowed] },
         },
       },
@@ -1079,17 +1077,15 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     version: () => ({ command: 'codex', args: ['--version'] }),
     withoutOwnTools: codexWithoutOwnTools,
     reviewing: { outside: false, env: codexReviewing },
-    sessionEnv: (own, options) =>
-      options.web === undefined && options.offline !== true
-        ? {}
-        : {
-            CODEX_CONFIG: JSON.stringify({
-              ...JSON.parse(own.CODEX_CONFIG ?? '{}'),
-              web_search: options.web === true && options.offline !== true ? 'live' : 'disabled',
-              // Opening this would also allow uploads and POSTs without the rules.
-              'sandbox_workspace_write.network_access': false,
-            }),
-          },
+    sessionEnv: (own, options) => ({
+      CODEX_CONFIG: JSON.stringify({
+        ...JSON.parse(own.CODEX_CONFIG ?? '{}'),
+        ...(options.web === undefined && options.offline !== true
+          ? {}
+          : { web_search: options.web === true && options.offline !== true ? 'live' : 'disabled' }),
+        'sandbox_workspace_write.network_access': options.offline !== true,
+      }),
+    }),
     /*
      * codex-acp 2.2.2 sets Codex's extra skill roots to `<dir>/.agents/skills` of each of a session's added directories
      * (`skills/extraRoots/set`, Codex 0.160). That also makes the folder writable in its sandbox: only the run's own
@@ -1107,18 +1103,13 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       allowScopes: { allow_once: 'once', allow_permissions_turn: 'turn', allow_permissions_turn_strict_auto_review: 'turn' },
     },
     /*
-     * A project's known commands and hosts (`UpFront`) aren't passed: its
-     * `workspace-write` sandbox has no list of commands that run outside it,
-     * and its network is one switch (`sandbox_workspace_write.network_access`).
-     * Codex 0.160's list of allowed domains belongs to its permission
-     * profiles' network proxy, experimental, which codex-acp's modes don't
-     * use. Network stays off: enabling it would also let POSTs and uploads
-     * bypass the rules. Native web_search is live with the project switch
-     * on; clear HTTP reads that reach the rules may be allowed there.
+     * Codex has no per-command sandbox exclusions. Shell networking is open
+     * unless the session is explicitly offline (an outside review). The web
+     * switch controls native search separately, not a shell's network.
      */
     knownGaps: [
       'It works inside its sandbox without asking: it edits the workspace and runs commands there, and asks only to go beyond it, such as for the network. As a reader too, so it never leads a review of a pull request from outside.',
-      "Shell network stays off because its sandbox cannot allow only GETs. Native web search and page opening are live when the project's web switch is on.",
+      "Shell networking is open. The project's web switch controls native search and page opening separately.",
       "codex-acp marks every session folder trusted, so a repository's own `.codex` config and hooks apply; a review's lead has hooks off.",
       'The adapter holds usage limits but sends them nowhere over ACP (/status prints text); Althar asks the Codex app-server for them (`usage.ts`).',
       "Beside Althar's skills it loads the person's own from the shared `skills` folder and `~/.agents/skills`, as it always does.",
@@ -1322,7 +1313,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     failsInText: 'Error: ',
     launch: () => ({
       command: 'copilot',
-      args: ['--acp', '--no-auto-update', '--disable-builtin-mcps'],
+      args: ['--acp', '--no-auto-update'],
       env: { COPILOT_AUTO_UPDATE: 'false', COPILOT_DISABLE_LOGIN_SHELL_ENV: '1' },
       // GH_HOST names a GHE.com tenant (`yourorg.ghe.com`) for those whose Copilot is there, as `copilot login --host` does.
       inheritEnv: ['COPILOT_HOME', 'GH_HOST'],

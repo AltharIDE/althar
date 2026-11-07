@@ -2,7 +2,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, w
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
-import { removeFully } from '@althar/provider-adapters'
+import { removeFully, SECRET_PLACES } from '@althar/provider-adapters'
 import { Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -119,7 +119,7 @@ export const readsOf = (place: {
     // Whether or not they are there: git reading one held from it fails rather than going without.
     ...GIT_CONFIG_FILES.map((file) => join(gitConfig, file)),
   ].map(real)
-  const denied = [place.home, place.projectFolder, ...place.repositories, join(gitConfig, 'credentials')].map(real)
+  const denied = [...SECRET_PLACES.map((secret) => join(place.home, secret)), join(gitConfig, 'credentials')].map(real)
   return { allowed: [...new Set(allowed)], denied: [...new Set(denied)] }
 }
 
