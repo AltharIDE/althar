@@ -571,8 +571,9 @@ export function ThreadBlocks({
       case 'turn': {
         // What Copy takes: what it said, open under its work.
         const said = block.said.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part.text] : [])).join('\n\n')
-        // At work, what it said on the way so far, as it said it.
-        const onTheWay = block.live ? block.work.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part] : [])) : []
+        // At work, what it said on the way so far, as it said it; once it answers, that folds with the rest of its work.
+        const working = block.live && !block.answering
+        const onTheWay = working ? block.work.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part] : [])) : []
         const doing = block.doing
         return (
           <Turn
@@ -584,7 +585,7 @@ export function ThreadBlocks({
             {block.work.length > 0 && (
               <WorkedFor
                 took={block.took}
-                live={block.live}
+                live={working}
                 {...(onTheWay.length === 0
                   ? {}
                   : {

@@ -128,10 +128,13 @@ const leadBeats: ReadonlyArray<Beat> = [
 /** A thread that only reads: nothing plays. */
 const STILL: ReadonlyArray<Beat> = []
 
+/** Codex says which of what it says is its answer: the coordinator's work folds as it starts it. */
 const coordinatorBeats: ReadonlyArray<Beat> = [
   { think: CODEX_THOUGHT },
-  { tool: 'Call list_tasks', kind: 'other', ms: 700 },
-  { say: COORDINATOR_ANSWER },
+  { say: 'I’ll check the board for what is waiting on you, then each task that needs you.', answer: false },
+  { tool: 'Call list_tasks', kind: 'other', ms: 1600 },
+  { tool: 'Call read_task', kind: 'other', ms: 1200 },
+  { say: COORDINATOR_ANSWER, answer: true },
 ]
 
 function Composer() {

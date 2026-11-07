@@ -125,13 +125,17 @@ if (mode === 'shots') {
     await shot('6-answering')
     await turn.getByText(/write the migration first, then the test/).waitFor(wait)
   } else {
-    await turn.getByText(/^Using /).waitFor(wait)
-    await page.waitForTimeout(300)
-    await shot('3-using')
     await turn.locator('[class*="fresh"]').first().waitFor(wait)
-    await page.waitForTimeout(900)
-    await shot('4-answering')
+    await page.waitForTimeout(250)
+    await shot('3-saying')
+    await turn.getByText(/^Using /).waitFor(wait)
+    await page.waitForTimeout(500)
+    await shot('4-using')
+    // Its work folds as it starts to answer, its turn still running.
     await turn.getByRole('button', { name: /^Worked for/ }).waitFor(wait)
+    await page.waitForTimeout(900)
+    await shot('6-answering')
+    await turn.getByRole('button', { name: 'Copy' }).waitFor(wait)
   }
   await page.waitForTimeout(1200)
   await shot('7-over')

@@ -167,6 +167,23 @@ for (const agent of Object.values(agents)) {
   }
   contract(subject)
 
+  // Codex says which of its messages is its answer, and which a word on the way, from each one's first words (ADR-099).
+  if (agent.id === 'codex')
+    it.live('Codex says which of its messages is its answer', () =>
+      withConnection(subject, (connection) =>
+        Effect.gen(function* () {
+          const session = yield* sessionIn(subject, connection)
+          const events = yield* Stream.runCollect(
+            session.prompt('Say in one sentence what you will look at, list the files here with ls, then say how many there are.'),
+          )
+          const said = events.flatMap((event) => (event._tag === 'AgentMessage' ? [event] : []))
+          process.stdout.write(`Codex's messages: ${said.map((event) => `${event.messageId ?? '?'}=${String(event.answer)}`).join(' ')}\n`)
+          assert.strictEqual(said.at(-1)?.answer, true)
+          assert.isTrue(said.every((event) => event.answer !== undefined))
+        }),
+      ),
+    )
+
   if (agent.id === 'codex') {
     it.live('Codex commits in a worktree once Althar allows it', () => {
       const main = repository()

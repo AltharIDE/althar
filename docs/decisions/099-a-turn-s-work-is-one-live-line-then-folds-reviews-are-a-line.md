@@ -50,9 +50,18 @@
     handoff after its report, so once it writes after its report, its work
     folds and its time stops there. A round stays one round from its report
     to its answer, its report's words held back while it may still write
-    one. The coordinator can't tell its answer from what it says on the way
-    until its turn ends (no agent says which a message is), so its fold
-    comes then. A finished thread shows only the headers and the answers;
+    one. The coordinator's turn folds as it starts its answer, its time
+    stopping there: Codex says of each message whether it is its final
+    answer or commentary, and codex-acp passes that on, from a message's
+    first words, to a JetBrains AIR client, as Althar is (`answerOf`), so
+    Althar keeps it on the message (`answer`). Claude Code and OpenCode say
+    nothing of it, so what such a turn writes after its work is taken for
+    its answer once it is more than a word on the way: longer than a
+    sentence or two (280 characters), or with a list, a heading, a table or
+    code (`answers`); a short answer folds as the turn ends. Should a step
+    follow after all, it was a word on the way, and the work goes on, open.
+    Opened while it ran, the work folds as it ends all the same, and opens
+    again on a click. A finished thread shows only the headers and the answers;
     a round's acknowledgement is part of its work now. What needs the
     person (a stuck step, a question, a permission, an error and its way
     out) never folds.
@@ -107,6 +116,10 @@
   - **Folding as soon as the coordinator writes, taken for its answer.** A
     tool after it would unfold it again, and the next message fold it: the
     work would flicker open and shut on every word said on the way.
+  - **Folding the coordinator's work only as its turn ends.** Honest where
+    the agent doesn't say, but what it said on the way, and the clock, stand
+    over its whole answer as it streams, not the shape the person asked for;
+    Codex says, and Claude Code's answers are seldom a sentence.
   - **A summary written by a small model for each thought.** Better words
     for Claude's thinking, at a model call per thought, and a wait before
     the line has them.
@@ -115,8 +128,10 @@
     and a line's start never fades.
   - **Folding every settle round into its review.** The latest is the
     lead's handoff, often the one the person needs on opening the task.
-- **Trade-off:** The coordinator's work folds only as its turn ends, so
-  what it said on the way stands over its answer while it streams. A round's
+- **Trade-off:** Where the agent doesn't say which message is its answer,
+  the coordinator's work folds a sentence or two into it, and a long word on
+  the way between steps folds the work until the next step opens it again;
+  a short answer folds only as the turn ends. A round's
   acknowledgement no longer stands open once it hands over; the handoff
   says what it did. The pace trails what has arrived by a burst or so,
   about a fifth of a second at a model's usual pace, and drawing on every
@@ -134,9 +149,8 @@
   the work), [ADR-069](069-motion-is-one-system-named-by-what-happens.md)
   (motion), [ADR-076](076-a-pull-request-shows-the-review-its-change-had.md)
   (a pull request shows the review its change had, as before).
-- **Revisit when:** an agent says which of its messages is its answer (as
-  Codex's own protocol does, which ACP doesn't pass on), so the coordinator's
-  work folds as its answer starts; Claude Code's adapter passes on
+- **Revisit when:** Claude Code's or OpenCode's adapter says which of its
+  messages is its answer, as codex-acp does; Claude Code's adapter passes on
   summarized thinking with headings of its own; the person wants earlier
   handoffs folded too; or a review's findings need the person more often
   than the line lets on.

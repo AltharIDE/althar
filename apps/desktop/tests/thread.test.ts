@@ -337,6 +337,28 @@ describe('work, folded', () => {
     expect(noted).toMatchObject({ doing: { tool: null, text: 'Thinking' } })
   })
 
+  it('has a running turn’s work over once what it writes after it is its answer: as Codex says, else once it is more than a note', () => {
+    const work = [items.you('What runs?'), items.says('I’ll check the board.'), items.tool({ status: 'completed' })]
+    const writing = (message: ThreadItem) =>
+      blocksOf(source([...work, later(message, 20)], true), new Map(), at, '2026-09-29T12:01:00.000Z')[1]
+    const marked = (text: string, answer: boolean): ThreadItem => {
+      const said = items.says(text)
+      return said.kind === 'agent_message' ? { ...said, content: { ...said.content, answer } } : said
+    }
+    // Codex says so: its answer from its first word, its work as long as it took until then.
+    expect(writing(marked('Two', true))).toMatchObject({ live: true, answering: true, took: '20s', doing: null })
+    // A word on the way, however long, is not: its work goes on.
+    expect(writing(marked('Now the tasks. '.repeat(30), false))).toMatchObject({ answering: false, took: '1m 0s' })
+    // Where the agent doesn't say: a sentence or two is a word on the way; more, or a list, a table or code, is its answer.
+    expect(writing(items.says('Now the second task.'))).toMatchObject({ answering: false })
+    expect(writing(items.says('Two tasks run:\n\n- Checkout\n- Search'))).toMatchObject({ answering: true })
+    expect(writing(items.says('| Task | State |'))).toMatchObject({ answering: true })
+    expect(writing(items.says('word '.repeat(70)))).toMatchObject({ answering: true })
+    // Before any work, nor over, there is no work to fold.
+    expect(blocksOf(source([items.you('Hi'), marked('Hello.', true)], true), new Map(), at)[1]).toMatchObject({ answering: false })
+    expect(blocksOf(source([...work, marked('Two', true)]), new Map(), at)[1]).toMatchObject({ live: false, answering: false })
+  })
+
   it("folds all of a turn a step's result ends, and stands the result under it; a task's card is a block of its own", () => {
     const result = later(items.step({ step: 'implement', summary: 'Added the retry.' }), 90)
     const thread = [items.tool(), items.says('Done.'), result, items.card(card())]

@@ -784,6 +784,25 @@ describe('the Talk room', () => {
     expect(screen.queryByRole('button', { name: /Working for/ })).toBeNull()
   })
 
+  it('folds the coordinator’s work under how long it took as it starts to answer, its turn still running', async () => {
+    const said = items.says('Two tasks are running.')
+    const answer: ThreadItem = said.kind === 'agent_message' ? { ...said, content: { ...said.content, answer: true } } : said
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({
+          session: { ...session, turnRunning: true },
+          items: [items.you('What runs?'), items.says('I’ll check the board.'), items.tool({ title: 'Read checkout.ts' }), answer],
+        }),
+      ),
+    })
+    withServices(<Project room={Room.Talk} />, client)
+    expect(await screen.findByText('Two tasks are running.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Worked for / }).getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByRole('button', { name: /^Working for / })).toBeNull()
+    // What it said on the way folded with the rest of its work.
+    expect(screen.queryByText('I’ll check the board.')).toBeNull()
+  })
+
   it('lets go of Thinking once the coordinator’s turn ended with nothing said, as when it was interrupted before its first word', async () => {
     const asked = { ...items.you('And the docs?'), createdAt: new Date(Date.now() - 5000).toISOString() }
     const { client } = fakeClient({

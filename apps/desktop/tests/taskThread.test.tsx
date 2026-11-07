@@ -148,7 +148,11 @@ describe('a task’s thread', () => {
       ],
     })
     expect(screen.getByText('It starts in Follow.ts.')).toBe(words)
-    expect(screen.getByRole('button', { name: /^Worked for 12s/ })).toBeTruthy()
+    // Opened to watch it, its work folds as its round ends all the same, and opens again on a click.
+    const worked = screen.getByRole('button', { name: /^Worked for 12s/ })
+    expect(worked.getAttribute('aria-expanded')).toBe('false')
+    await userEvent.click(worked)
+    expect(worked.getAttribute('aria-expanded')).toBe('true')
   })
 
   it('draws a review as one line, what became of its findings in it, and a review running as a line at the end', async () => {

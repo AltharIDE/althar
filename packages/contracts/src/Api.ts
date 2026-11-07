@@ -1393,11 +1393,14 @@ const handedFields = {
   files: Schema.Array(FileMention),
 }
 
-/** What an agent said or thought, as far as the store has it, and the pictures and files it handed back as it spoke. */
+/**
+ * What an agent said or thought, as far as the store has it, and the pictures and files it handed back as it spoke; and,
+ * where the agent says (Codex), whether a message is its answer, ending its turn, or a word on the way.
+ */
 export const AgentTextItem = Schema.Struct({
   ...itemFields,
   kind: Schema.Literals(['agent_message', 'agent_thought']),
-  content: Schema.Struct({ text: Schema.String, ...handedFields }),
+  content: Schema.Struct({ text: Schema.String, ...handedFields, answer: Schema.optional(Schema.Boolean) }),
 })
 
 /**

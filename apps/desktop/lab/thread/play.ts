@@ -17,7 +17,8 @@ import { items } from '../../tests/fixtures'
 
 export type Beat =
   | { readonly think: string }
-  | { readonly say: string }
+  /** What it says: its answer, or a word on the way, where its agent says which (Codex). */
+  | { readonly say: string; readonly answer?: boolean }
   | { readonly tool: string; readonly kind: string; readonly path?: string; readonly command?: string; readonly ms: number }
   | { readonly pause: number }
   | { readonly report: string }
@@ -125,7 +126,15 @@ export const usePlayed = (
           }
           const kind = 'think' in beat ? ('agent_thought' as const) : ('agent_message' as const)
           const whole = 'think' in beat ? beat.think : beat.say
-          const first = mine(kind === 'agent_thought' ? items.thinks('', agentId) : items.says('', agentId))
+          const answer = 'say' in beat ? beat.answer : undefined
+          const said = items.says('', agentId)
+          const first = mine(
+            kind === 'agent_thought'
+              ? items.thinks('', agentId)
+              : answer === undefined
+                ? said
+                : ({ ...said, content: { text: '', pictures: [], files: [], answer } } as ThreadItem),
+          )
           let sent = 0
           let stored = 0
           let placed = false

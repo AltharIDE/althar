@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { type ReactNode, useLayoutEffect, useRef } from 'react'
 
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { useControlled } from '../../lib/controlled'
@@ -21,7 +21,8 @@ export interface WorkedForProps extends Disclosable {
   /**
    * The turn is at work: its header counts, and under it stand what it has
    * said on the way and what it is doing now, until it answers or ends,
-   * when they fold away under the header.
+   * when they fold away under the header, as does its work where the person
+   * opened it meanwhile.
    */
   live?: boolean
   /** While it works: what it has said on the way, in order, as it said it to the person. */
@@ -57,6 +58,12 @@ export function WorkedFor({
 }: WorkedForProps) {
   const t = { ...workedForText, ...text }
   const [opened, setOpened] = useControlled(open, defaultOpen, onOpenChange)
+  // Its work folds as it ends, opened to watch it or not; once over, it opens again on a click.
+  const wasLive = useRef(live)
+  useLayoutEffect(() => {
+    if (wasLive.current && !live && opened) setOpened(false)
+    wasLive.current = live
+  }, [live, opened, setOpened])
   const opens = children !== undefined && children !== null
   const head = (
     <>
