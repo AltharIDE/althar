@@ -2,6 +2,9 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-28
+- **Proposed amendment:** [ADR-103](103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
+  keeps the utility process for local projects and lets the desktop attach
+  to a remote project home without starting a second writer for it.
 - **Owner:** Repository maintainers
 - **Context:** Althar is a native desktop app from day one. The candidates
   were Electron, Tauri, and Flutter. All code is TypeScript, and the runtime
