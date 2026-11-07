@@ -84,6 +84,7 @@ import {
   type Launch,
   type OfferedRefs,
   type RepositoryScript,
+  type SettingChanged,
 } from '@althar/contracts'
 import { Cause, Duration, Effect, Exit, Fiber, Layer, Option, Scope, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
@@ -255,6 +256,12 @@ export interface Client {
   readonly deleteAutomation: (automationId: string) => Promise<void>
   /** Puts back what the coordinator changed an automation from, as its card in the thread shows it. */
   readonly undoAutomationChange: (itemId: string) => Promise<void>
+  /** Answers an agent's card asking to change a setting that loosens what asks: yes makes it. */
+  readonly answerSettingChange: (itemId: string, yes: boolean) => Promise<void>
+  /** Puts back what an agent changed a setting from, as its line shows it. */
+  readonly undoSettingChange: (itemId: string) => Promise<void>
+  /** The settings an agent changed that stay as it left them, with who and when: a project's, or (null) Althar's own. */
+  readonly getSettingChanges: (projectId: string | null) => Promise<ReadonlyArray<SettingChanged>>
   /** Whether an automation's reviews post themselves once drafted; an outside pull request's still waits. */
   readonly setAutomationPostsReviews: (automationId: string, on: boolean) => Promise<void>
   /** Pauses every automation, or lets them run again. Runs under way finish. */
@@ -729,6 +736,9 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     deleteAutomation: (automationId) => command((commandId) => api.DeleteAutomation({ commandId, automationId })),
     answerTaskAsk: (itemId, yes) => command((commandId) => api.AnswerTaskAsk({ commandId, itemId, yes })),
     undoAutomationChange: (itemId) => command((commandId) => api.UndoAutomationChange({ commandId, itemId })),
+    answerSettingChange: (itemId, yes) => command((commandId) => api.AnswerSettingChange({ commandId, itemId, yes })),
+    undoSettingChange: (itemId) => command((commandId) => api.UndoSettingChange({ commandId, itemId })),
+    getSettingChanges: (projectId) => settle(api.GetSettingChanges({ projectId })),
     setAutomationPostsReviews: (automationId, on) => command((commandId) => api.SetAutomationPostsReviews({ commandId, automationId, on })),
     setAutomationsPaused: (paused) => command((commandId) => api.SetAutomationsPaused({ commandId, paused })),
     listSkills: () => settle(api.ListSkills({})),

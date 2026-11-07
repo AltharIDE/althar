@@ -81,6 +81,7 @@ import { usePostTeamReviews } from '../settings/usePostTeamReviews'
 import { HeldLimit } from './LimitCall'
 import { StuckCall } from './StuckCall'
 import { TaskThread } from './TaskThread'
+import { latestReport, reviewsIn, useReviewOutcomes } from './reviewOutcomes'
 import { ConnectPanel } from '../connections/ConnectPanel'
 import { serviceOfProduct } from '../connections/ways'
 import { useServices } from '../../data/services'
@@ -341,6 +342,7 @@ export function TaskView({
   onRules,
   onSignIn,
   onConnections,
+  onOpenTask,
 }: {
   model: TaskModel
   /** Back to the project, on Escape. */
@@ -351,6 +353,8 @@ export function TaskView({
   onSignIn?: (agentId: string) => void
   /** Opens the code hosts and trackers in Settings, for one to connect or sign in to again. */
   onConnections?: () => void
+  /** Opens another task, by its thread: one this task's lead started, from its thread's line. */
+  onOpenTask?: (threadId: string) => void
 }) {
   // What the person writes to the lead, kept by the task while they are elsewhere, as are its images and what they dictate.
   const kept = draftKey.task(model.snapshot?.threadId ?? '')
@@ -426,6 +430,12 @@ export function TaskView({
     setPermitting(false)
   }
   const named = useModelNames()
+  // What became of each review's findings, for its line in the thread, read again as each step reports.
+  const settledOf = useReviewOutcomes(
+    model.snapshot?.task.id ?? '',
+    reviewsIn(model.snapshot?.items ?? []),
+    latestReport(model.snapshot?.items ?? []),
+  )
   const editors = useEditors(model.snapshot?.task.id ?? '')
   const editor = editors.main
   // A page beside the conversation (ADR-100): the task's run and the thread's links open there, and the conversation comes to the front for it.
@@ -636,11 +646,17 @@ export function TaskView({
       now,
     ),
   ]
-  // What each document was last changed by, so one open beside the thread follows its edits.
+  // What each document was last changed by, so one open beside the thread follows its edits: a round folded into its review's line too.
   const versionOf = documentVersions(
-    blocks.flatMap((block) => (block.kind === 'round' ? block.parts : [])),
+    blocks.flatMap((block) => (block.kind === 'round' ? block.parts : block.kind === 'verdict' ? (block.settle?.parts ?? []) : [])),
     snapshot.task.worktree,
   )
+  // A review running now, while its lead waits: a line at the thread's end, by who reviews and for how long.
+  const reviewer = snapshot.task.steps.find((one) => one.key === 'review' && !one.skipped)
+  const reviewing =
+    snapshot.task.phase === 'running' && snapshot.task.step === 'review' && !busy && reviewer !== undefined
+      ? { model: named(reviewer.agentId, reviewer.model), took: took ?? '' }
+      : null
   // A file the lead wrote or pointed at opens in the person's editor, as its changes do.
   const openFile = editor === undefined ? undefined : (path: string) => editors.open(editor.id, { path })
   // The document open beside the thread, as the editor opens it: by its whole path inside the task's folder.
@@ -1187,6 +1203,10 @@ export function TaskView({
                   <TaskThread
                     rounds={blocks}
                     versionOf={versionOf}
+                    settledOf={settledOf}
+                    reviewing={reviewing}
+                    // Settling a review, its lead works quietly.
+                    settling={snapshot.task.step === 'settle'}
                     threadId={snapshot.threadId}
                     worktree={snapshot.task.worktree}
                     {...(openFile === undefined ? {} : { openFile })}
@@ -1196,6 +1216,7 @@ export function TaskView({
                     {...(busy || stuckOpen ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
                     {...(onSignIn === undefined || stuckOpen ? {} : { onSignIn })}
                     onPassOn={(words) => void model.send(words)}
+                    {...(onOpenTask === undefined ? {} : { onOpenTask })}
                     onAnswerQuestion={model.answerQuestion}
                     {...(asking == null ? {} : { focusQuestion: asking })}
                     run={(run) => (

@@ -107,7 +107,9 @@ describe('what an agent could see', () => {
       ['config-home', 'nested', 'person-agents', 'person-claude', 'repo-agents', 'repo-claude', 'repo-opencode'],
     )
     // Where XDG_CONFIG_HOME says, as OpenCode takes it.
-    assert.isTrue(agents.opencode.skillFolders?.({ env: { XDG_CONFIG_HOME: '/x' }, homeDir: home, cwd }).includes('/x/opencode/skills'))
+    assert.isTrue(
+      agents.opencode.skillFolders?.({ env: { XDG_CONFIG_HOME: '/x' }, homeDir: home, cwd }).includes(join('/x', 'opencode', 'skills')),
+    )
   })
 
   it("names the person's config folder to an OpenCode inside a Flatpak, whose config home is the app's", () => {
@@ -127,7 +129,7 @@ describe('what an agent could see', () => {
 
   it('keeps that setting through what a session and a review change of its config', () => {
     const own = agents.opencode.withoutOwnTools?.({ env: {}, homeDir: '/h', cwd: '/h', inSandbox: true }) ?? {}
-    const paths = { paths: ['/h/.config/opencode/skills'] }
+    const paths = { paths: [join('/h', '.config', 'opencode', 'skills')] }
     assert.deepStrictEqual(JSON.parse(agents.opencode.reviewing?.env?.(own).OPENCODE_CONFIG_CONTENT ?? '{}').skills, paths)
     assert.deepStrictEqual(JSON.parse(agents.opencode.sessionEnv?.(own, { web: false }).OPENCODE_CONFIG_CONTENT ?? '{}').skills, paths)
   })

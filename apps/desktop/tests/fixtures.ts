@@ -688,6 +688,27 @@ export const items = {
       ...content,
     },
   }),
+  /** An agent's change to a setting: made, with Undo, unless said otherwise. */
+  setting: (content: Partial<Extract<ThreadItem, { kind: 'setting' }>['content']> = {}, id?: string): ThreadItem => ({
+    ...next(),
+    ...(id === undefined ? {} : { id }),
+    agentId: null,
+    kind: 'setting',
+    content: {
+      changeId: 'change1',
+      section: 'althar/plans-and-reviews',
+      title: 'Plans and reviews',
+      project: null,
+      moves: [{ key: 'rounds', label: 'Review rounds', before: '3', after: '5' }],
+      by: { kind: 'coordinator', taskId: null, title: null },
+      loosens: false,
+      words: null,
+      why: null,
+      state: 'done',
+      said: null,
+      ...content,
+    },
+  }),
 }
 
 /** What an automation is: the morning review, of each new pull request, every weekday at 9:00, led by Claude Code. */
@@ -1122,6 +1143,9 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     answerTaskAsk: vi.fn(async () => {}),
     deleteAutomation: vi.fn(async () => {}),
     undoAutomationChange: vi.fn(async () => {}),
+    answerSettingChange: vi.fn(async () => {}),
+    undoSettingChange: vi.fn(async () => {}),
+    getSettingChanges: vi.fn(async () => []),
     setAutomationPostsReviews: vi.fn(async () => {}),
     setAutomationsPaused: vi.fn(async () => {}),
     listSkills: vi.fn(async () => ({ enabled: true, catalogRevision: 'fixture-1', skills: [installedSkill] })),

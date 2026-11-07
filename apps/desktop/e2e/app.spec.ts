@@ -114,7 +114,8 @@ test('makes the first project of a repository it found, starts a task, and talks
       .getByRole('button', { name: /[Ww]orked \d/ })
       .last()
       .click()
-    await expect(page.getByRole('button', { name: 'Thought' })).toBeVisible()
+    // A thought folds to its line once the turn has moved on.
+    await expect(page.getByRole('button', { name: /^Thought/ })).toBeVisible()
     // A round with nothing to say is its line alone, with who worked.
     const folds = page.getByRole('button', { name: /[Ww]orked \d/ })
     const before = await folds.count()
@@ -197,9 +198,14 @@ test('asks the coordinator, which plans a task that is implemented, reviewed, se
     await page.screenshot({ path: 'test-results/outputs.png' })
     await toConversation(page)
     await expect(page.getByText(/Checkout retries once when the payment call fails/).first()).toBeVisible()
-    // The reviewer in its own voice: what it found, then, after the lead settled it, that it holds.
+    // Each review is a line: what it found, then, after the lead settled it, that it holds; opened, the reviewer in its own voice.
+    const reviews = page.locator('[data-review]')
+    await expect(reviews.filter({ hasText: 'Passed' })).toBeVisible()
+    await reviews
+      .getByRole('button', { name: /finding/ })
+      .first()
+      .click()
     await expect(page.getByText('The heading needs fixing.')).toBeVisible()
-    await expect(page.getByText('Looks good to me.')).toBeVisible()
     await page.screenshot({ path: 'test-results/steps.png' })
   } finally {
     await electronApp.close()

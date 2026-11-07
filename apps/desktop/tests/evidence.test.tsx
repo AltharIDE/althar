@@ -277,8 +277,9 @@ describe('evidence, as the window draws it', () => {
     const result = await screen.findByText('Try a checkout with the network off.')
     expect(screen.queryByRole('article', { name: 'What the task built' })).toBeNull()
     expect(screen.getAllByRole('button', { name: 'What it printed: The kit’s tests' })).toHaveLength(1)
-    // The reviewer has the last word, after the result it reviewed.
-    expect(result.compareDocumentPosition(screen.getByText('It holds.')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // The review is the last word, a line after the result it reviewed.
+    const review = screen.getByRole('button', { name: /^Review.*Passed/ })
+    expect(result.compareDocumentPosition(review) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('shows what a report showed under it while a step is under way too, with no card for what the task built', async () => {

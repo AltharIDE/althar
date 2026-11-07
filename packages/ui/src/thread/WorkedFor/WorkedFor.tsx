@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
-import { Caret, Disclosure, DisclosureTrigger, Fold, type Disclosable } from '../../primitives/Fold/Fold'
+import { useControlled } from '../../lib/controlled'
+import { Caret, Disclosure, DisclosureTrigger, Fold, Unfold, type Disclosable } from '../../primitives/Fold/Fold'
 import { Spinner } from '../../primitives/Spinner/Spinner'
 import { Rhythm } from '../../lib/rhythm'
 import s from './WorkedFor.module.css'
@@ -21,6 +22,8 @@ export interface WorkedForProps extends Disclosable {
   /** The turn is still running: the line says it is working, and what it does now. */
   live?: boolean
   children: ReactNode
+  /** While the turn runs, what it is thinking, under the line (a live Reasoning); it folds away with the turn, and while the work is open. */
+  thinking?: ReactNode
   text?: Partial<WorkedForText>
 }
 
@@ -30,10 +33,21 @@ export interface WorkedForProps extends Disclosable {
  * the turn runs, its work folds too, under how long it has worked so far and
  * what it is doing now, so the thread shows what was said, not every read.
  */
-export function WorkedFor({ took, summary, live = false, children, text, ...disclosure }: WorkedForProps) {
+export function WorkedFor({
+  took,
+  summary,
+  live = false,
+  children,
+  thinking,
+  text,
+  open,
+  defaultOpen = false,
+  onOpenChange,
+}: WorkedForProps) {
   const t = { ...workedForText, ...text }
+  const [opened, setOpened] = useControlled(open, defaultOpen, onOpenChange)
   return (
-    <Disclosure {...disclosure} rhythm={Rhythm.Fold}>
+    <Disclosure open={opened} onOpenChange={setOpened} rhythm={Rhythm.Fold}>
       <DisclosureTrigger>
         <button type="button" className={s.row} aria-busy={live || undefined}>
           {live && <Spinner size="small" />}
@@ -46,6 +60,7 @@ export function WorkedFor({ took, summary, live = false, children, text, ...disc
       <Fold>
         <div className={s.body}>{children}</div>
       </Fold>
+      <Unfold open={live && thinking !== undefined && thinking !== null && !opened}>{thinking}</Unfold>
     </Disclosure>
   )
 }

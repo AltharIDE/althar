@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { OPUS, SONNET } from '../src/fixtures/models'
+import { GEMINI_PRO, OPUS, SONNET } from '../src/fixtures/models'
 import { GITHUB } from '../src/fixtures/outputs'
 import { ChangeState, CheckState } from '../src/foundations/vocabulary'
 import { ChangeSet, foldersOf, groupsOf, type PullRequest } from '../src/outputs/ChangeSet/ChangeSet'
@@ -92,6 +92,21 @@ describe('its checks and review, a line each', () => {
   it('says a review still going is being done, and by whom', () => {
     render(<ChangeSet state={ChangeState.Ready} prs={one()} review={{ state: CheckState.Running, by: [OPUS] }} />)
     expect(screen.getByText(/Being reviewed by/)).toBeInTheDocument()
+  })
+
+  it('reads two reviewers as a list, and three as A, B and C', () => {
+    const { unmount } = render(
+      <ChangeSet state={ChangeState.Ready} prs={one()} review={{ state: CheckState.Passed, by: [SONNET, OPUS] }} />,
+    )
+    expect(screen.getByText(/^Reviewed by/)).toHaveTextContent('Reviewed by Claude Sonnet 5 and Claude Opus 5')
+    unmount()
+    render(<ChangeSet state={ChangeState.Ready} prs={one()} review={{ state: CheckState.Passed, by: [SONNET, OPUS, GEMINI_PRO] }} />)
+    expect(screen.getByText(/^Reviewed by/)).toHaveTextContent('Reviewed by Claude Sonnet 5, Claude Opus 5 and Gemini 3 Pro')
+  })
+
+  it('names a reviewer once where the same model reviewed twice', () => {
+    render(<ChangeSet state={ChangeState.Ready} prs={one()} review={{ state: CheckState.Passed, by: [SONNET, OPUS, SONNET] }} />)
+    expect(screen.getByText(/^Reviewed by/)).toHaveTextContent('Reviewed by Claude Sonnet 5 and Claude Opus 5')
   })
 })
 

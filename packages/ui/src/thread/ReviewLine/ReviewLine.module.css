@@ -1,0 +1,72 @@
+.review {
+  display: block;
+}
+/* one faint line, as a round's work is: it sits back from what the lead says */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 22px;
+  font-size: 12px;
+  color: var(--t-4);
+  text-align: left;
+  transition: color var(--fast) var(--ease);
+}
+button.row:hover,
+.review[data-state='open'] .row {
+  color: var(--t-3);
+}
+.mark {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 12px;
+}
+.chevron {
+  transition: transform var(--fold) var(--ease-fold);
+}
+.review[data-state='open'] .chevron {
+  transform: rotate(90deg);
+}
+.what {
+  flex: none;
+  color: var(--t-3);
+}
+.who {
+  flex: none;
+  font-size: 12px;
+}
+.who::before,
+.found::before,
+.settled::before {
+  content: '·';
+  margin-right: 6px;
+  color: var(--t-4);
+}
+.found {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.settled {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* opened: the reviewer's findings and words, then the lead settling them, on the quiet sheet a round's work opens to */
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 6px 0 4px;
+  padding: 12px 14px;
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+@media (prefers-reduced-motion: reduce) {
+  .chevron {
+    transition: none;
+  }
+}

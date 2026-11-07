@@ -30,7 +30,7 @@ import { movesIssues, Policies } from './Policies'
 import { change, fact, timestamp } from './records'
 import { Sessions } from './Sessions'
 import { addItem, updateItem } from './threads'
-import { type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
+import { POOL, type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
 
 export type { Wanted } from './issueFields'
 
@@ -1400,7 +1400,8 @@ export class IssueChanges extends Context.Service<
           changeTool,
         ),
       ])
-      yield* toolServer.serve('coordinator', [
+      // Leads and the coordinator alike (ADR-097).
+      yield* toolServer.serve(POOL, [
         tool(
           'change_issues',
           `Changes issues on the person’s trackers, by key or link, several on one card: “move DEV-67 to Done, set DEV-142 to Low”. Each can change its status (any of its tracker’s), close it, or set its priority, assignees, labels, project, milestone, cycle, parent, estimate, type, components, due date, title or description. As a card the person applies in your thread, unless at_once: where the project’s notes say issues are changed at once, or the person just said to. You hear what they decide. Althar reads each name against its tracker, changes what it can, paces a big batch to the tracker’s limits, and says what it couldn’t and why: a name it hasn’t, with what it has, or a field that tracker hasn’t.\n\n${changeTable()}`,

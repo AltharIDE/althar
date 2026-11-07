@@ -1,7 +1,8 @@
 import { Lexer, type MarkedToken, type Token } from 'marked'
-import { createContext, useContext, useMemo, type ReactNode } from 'react'
+import { createContext, memo, useContext, useMemo, useState, type ReactNode } from 'react'
 
 import { cx } from '../../lib/cx'
+import { usePacedText } from '../../lib/pace'
 import type { RootProps } from '../../lib/props'
 import { safeHref } from '../../lib/safeHref'
 import { Code } from '../../primitives/Code/Code'
@@ -14,7 +15,9 @@ import { type CodeShell, useThreadShell } from '../Shell/Shell'
 import { Table, type TableText } from '../Table/Table'
 import { closedFence, isDiagram } from './drawing'
 import { CodeBlock, Diagram, type DiagramText } from './Diagram'
+import { blocksOf, type Lexed, lexAll, lexOn } from './lexed'
 import s from './Markdown.module.css'
+import { streamable } from './streaming'
 
 /*
  * Markdown as agents write it: GitHub-flavoured, parsed by marked's lexer
@@ -25,6 +28,11 @@ import s from './Markdown.module.css'
  * path in backticks, a name in code, a path written into the words) are
  * the files they name, to peek at and open. A ```mermaid block is drawn
  * (Diagram), mermaid fetched the first time one shows.
+ *
+ * Still being written (`streaming`), it is shown at an even pace
+ * (lib/pace), and without what would change its mind as it grows
+ * (streaming.ts); a block read and drawn already isn't read or drawn again
+ * for the next words, only the one they are in (lexed.ts).
  */
 
 const KNOWN: ReadonlySet<string> = new Set<MarkedToken['type']>([
@@ -87,6 +95,8 @@ export type MarkdownProps = RootProps<
     size?: 'thread' | 'panel'
     /** The rank a `#` heading takes in the page's outline; `##` is one below. */
     headingLevel?: HeadingLevel
+    /** Still being written: shown at an even pace as it grows, and whole at once when it stops being. */
+    streaming?: boolean
     text?: Partial<MarkdownText>
   }
 >
@@ -121,15 +131,36 @@ export const codeNamesIn = (tokens: readonly Token[]): string[] => {
   return [...new Set(names)]
 }
 
-export function Markdown({ source, from = 0, to, size = 'thread', headingLevel = 3, text, className, ...rest }: MarkdownProps) {
-  const t = { ...markdownText, ...text }
-  const blocks = useMemo(() => Lexer.lex(source).filter((b) => b.type !== 'space' && b.type !== 'def'), [source])
+export function Markdown({
+  source,
+  from = 0,
+  to,
+  size = 'thread',
+  headingLevel = 3,
+  streaming = false,
+  text,
+  className,
+  ...rest
+}: MarkdownProps) {
+  const t = useMemo(() => ({ ...markdownText, ...text }), [text])
+  const paced = usePacedText(source, streaming)
+  const shown = streaming ? streamable(paced) : source
+  // Streaming, read on from where it was settled; else whole.
+  const [lexed, setLexed] = useState<Lexed | null>(null)
+  const read = !streaming ? null : lexed !== null && lexed.text === shown ? lexed : lexOn(shown, lexed)
+  if (read !== null && read !== lexed) setLexed(read)
+  const whole = useMemo(() => (streaming ? null : lexAll(shown)), [streaming, shown])
+  const doc = read ?? whole ?? lexAll(shown)
+  const blocks = useMemo(() => blocksOf(doc.tokens), [doc])
   const code = useThreadShell().code
   const finds = code !== undefined
-  const names = useMemo(() => (finds ? codeNamesIn(blocks.slice(from, to)) : []), [finds, blocks, from, to])
-  const drawn = blocks.slice(from, to).map((b, i) => <Block key={i} token={b} base={headingLevel} t={t} />)
+  // The names in what is still being written are looked for once its words are whole, as each block is: a path half-written
+  // names nothing. So they are read again only as a block settles.
+  const named = read === null ? blocks : read.settled
+  const names = useMemo(() => (finds ? codeNamesIn(blocksOf(named).slice(from, to)) : []), [finds, named, from, to])
+  const drawn = blocks.slice(from, to).map((b, i) => <Block key={i} token={b} defs={doc.defs} base={headingLevel} t={t} />)
   return (
-    <div className={cx(s.md, size === 'panel' && s.panel, className)} {...rest}>
+    <div className={cx(s.md, size === 'panel' && s.panel, className)} aria-busy={streaming || undefined} {...rest}>
       {code !== undefined && names.length > 0 ? (
         <WithCode code={code} names={names}>
           {drawn}
@@ -148,7 +179,30 @@ function WithCode({ code, names, children }: { code: CodeShell; names: readonly 
   return <Found.Provider value={value}>{children}</Found.Provider>
 }
 
-function Block({ token, base, t }: { token: Token; base: HeadingLevel; t: MarkdownText }): ReactNode {
+interface BlockProps {
+  readonly token: Token
+  /** The definitions the text's links were read with (lexed.ts): where they change, a link may now go somewhere. */
+  readonly defs: string
+  readonly base: HeadingLevel
+  readonly t: MarkdownText
+}
+
+/**
+ * A block, drawn again only when what it is read from changed: the words still streaming in redraw the block they are in. The
+ * same source of the same kind, read with the same definitions, reads the same.
+ */
+const Block = memo(
+  function Block(props: BlockProps): ReactNode {
+    return <BlockOf {...props} />
+  },
+  (before, after) =>
+    before.defs === after.defs &&
+    before.base === after.base &&
+    before.t === after.t &&
+    (before.token === after.token || (before.token.type === after.token.type && before.token.raw === after.token.raw)),
+)
+
+function BlockOf({ token, defs, base, t }: BlockProps): ReactNode {
   if (!known(token)) return token.raw
   switch (token.type) {
     case 'heading':
@@ -168,7 +222,11 @@ function Block({ token, base, t }: { token: Token; base: HeadingLevel; t: Markdo
             </span>
           )}
           {item.tokens.map((c, j) =>
-            c.type === 'text' ? <span key={j}>{inline(c.tokens ?? [c], t)}</span> : <Block key={j} token={c} base={base} t={t} />,
+            c.type === 'text' ? (
+              <span key={j}>{inline(c.tokens ?? [c], t)}</span>
+            ) : (
+              <Block key={j} token={c} defs={defs} base={base} t={t} />
+            ),
           )}
         </li>
       ))
@@ -188,7 +246,7 @@ function Block({ token, base, t }: { token: Token; base: HeadingLevel; t: Markdo
       return (
         <blockquote>
           {token.tokens.map((c, j) => (
-            <Block key={j} token={c} base={base} t={t} />
+            <Block key={j} token={c} defs={defs} base={base} t={t} />
           ))}
         </blockquote>
       )
