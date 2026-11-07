@@ -346,6 +346,10 @@ class RawFailure extends Data.TaggedError('RawFailure')<{ readonly cause: unknow
 /** How many times one turn is resumed after rejections that stopped it, before it is left stopped. */
 const MAX_RESUMES = 3
 
+/** What an agent is told when a refusal ended its turn with nothing said, and Althar has no reason of its own to give. */
+const SILENT_AFTER_REFUSAL =
+  "Althar's rules refused this call of yours, and your turn ended without a reply. Carry on without it, and tell the person."
+
 const toolKinds: ReadonlyArray<string> = ['read', 'edit', 'delete', 'move', 'search', 'execute', 'think', 'fetch', 'switch_mode', 'other']
 
 const permissionRequest = (params: acp.RequestPermissionRequest): PermissionRequest => ({
@@ -386,6 +390,10 @@ interface Turn {
   resumes: number
   cancelled: boolean
   failure: Classified | undefined
+  /** Althar refused one of its calls in this turn. */
+  refused: boolean
+  /** The agent said something to the person in this turn. */
+  spoke: boolean
 }
 
 /** What reaches a session from the agent, in the order it arrived. */
@@ -985,9 +993,11 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
 
         /** Passes an event to the current turn, or to the between-turns stream. */
         const deliver = (event: SessionEvent) =>
-          Effect.flatMap(Ref.get(state.current), (turn) =>
-            Option.isSome(turn) ? Effect.asVoid(Queue.offer(turn.value.queue, event)) : Effect.asVoid(PubSub.publish(state.between, event)),
-          )
+          Effect.flatMap(Ref.get(state.current), (turn) => {
+            if (!Option.isSome(turn)) return Effect.asVoid(PubSub.publish(state.between, event))
+            if (event._tag === 'AgentMessage') turn.value.spoke = true
+            return Effect.asVoid(Queue.offer(turn.value.queue, event))
+          })
 
         const endTurn = (turn: Turn, ending: Effect.Effect<void>) =>
           Effect.gen(function* () {
@@ -1012,17 +1022,28 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         /** Explain pending refusals before ending the turn. ACP's permission response has no portable reason field. */
         const stopped = (turn: Turn, response: acp.PromptResponse) =>
           Effect.gen(function* () {
+            // A turn that ended on a refusal without a word to the person is never left so: the agent is asked once more,
+            // where refusals go with the next prompt too, and where it still says nothing the thread says what happened.
+            const silent = !turn.cancelled && turn.refused && !turn.spoke
+            const again =
+              turn.cancelled || turn.resumes >= MAX_RESUMES
+                ? undefined
+                : sessionOptions.refusals === 'withNext'
+                  ? silent
+                    ? (turn.resumeWith ?? SILENT_AFTER_REFUSAL)
+                    : undefined
+                  : turn.resumeWith
+            if (again !== undefined) {
+              turn.resumeWith = undefined
+              turn.resumes += 1
+              yield* Queue.offer(turn.queue, { _tag: 'Resumed', reason: again })
+              yield* send(again)
+              return
+            }
             if (sessionOptions.refusals === 'withNext') {
               // No turn of its own: one that stopped the turn goes with the next prompt, one it carried on past is dropped.
               carried = !turn.cancelled && turn.stoppedByRefusal ? turn.resumeWith : undefined
               turn.resumeWith = undefined
-            } else if (!turn.cancelled && turn.resumeWith !== undefined && turn.resumes < MAX_RESUMES) {
-              const reason = turn.resumeWith
-              turn.resumeWith = undefined
-              turn.resumes += 1
-              yield* Queue.offer(turn.queue, { _tag: 'Resumed', reason })
-              yield* send(reason)
-              return
             }
             const usage = normalizeUsage(response.usage)
             // Claude Code and Codex end a turn that failed as any other, `end_turn`, with the failure on the response itself.
@@ -1031,6 +1052,13 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
             yield* endTurn(
               turn,
               Effect.gen(function* () {
+                if (silent)
+                  yield* Queue.offer(turn.queue, {
+                    _tag: 'Notice',
+                    severity: 'warning',
+                    title: 'A command was refused and the agent stopped without saying anything.',
+                    description: 'Ask it to carry on, and it will go on without what was refused.',
+                  })
                 yield* Queue.offer(turn.queue, {
                   _tag: 'TurnEnded',
                   stopReason: response.stopReason,
@@ -1053,6 +1081,8 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
                   for (const event of yield* interpret(inbound.update)) yield* deliver(event)
                   return
                 case 'Event':
+                  if (turn !== undefined && inbound.event._tag === 'PermissionAnswered' && inbound.event.decision === 'reject')
+                    turn.refused = true
                   if (turn !== undefined && inbound.resumeWith !== undefined) {
                     turn.resumeWith = [turn.resumeWith, inbound.resumeWith]
                       .filter((line) => line !== undefined)
@@ -1095,6 +1125,8 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
                 resumes: 0,
                 cancelled: false,
                 failure: undefined,
+                refused: false,
+                spoke: false,
               }
               const idle = yield* Ref.modify(state.current, (running) =>
                 Option.isSome(running) ? [false, running] : [true, Option.some(turn)],
