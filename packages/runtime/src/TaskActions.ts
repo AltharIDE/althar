@@ -19,6 +19,7 @@ import { Sessions } from './Sessions'
 import { actionsOf, standingOf, Tasks } from './Tasks'
 import { addItem, updateItem } from './threads'
 import { POOL, ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
+import { expected, words } from './words'
 
 /*
  * The coordinator and the leads steering a task as the person's buttons do
@@ -159,7 +160,7 @@ const DID_HERE: Readonly<Record<TaskMove, string>> = {
 }
 
 /** Why a task's branch can't be merged here, as the card's Accept says it (CantMerge). */
-const cantMerge = (slug: string, error: CantMerge) => {
+export const cantMerge = (slug: string, error: CantMerge) => {
   const into = error.into ?? 'its default branch'
   const files = error.files === undefined || error.files.length === 0 ? '' : ` (${error.files.join(', ')})`
   switch (error.why) {
@@ -188,7 +189,7 @@ const cantMerge = (slug: string, error: CantMerge) => {
 }
 
 /** Why a push didn't go, as the card's Push says it (PushRefused). */
-const pushRefused = (error: PushRefused) =>
+export const pushRefused = (error: PushRefused) =>
   error.why === 'behind'
     ? `${error.remote} has commits this Mac doesn’t: nothing was pushed, and nothing is forced. The person pulls first.`
     : `${error.remote} didn’t take the push (${error.why})${error.said === undefined ? '' : `: ${error.said}`}. Nothing is forced.`
@@ -834,22 +835,21 @@ export class TaskActions extends Context.Service<
           yield* line(task.projectId, task.threadId, `${own ? 'Its lead' : yield* whoOf(access)} ${here}${as}`)
         })
 
-      /** A failure Changes or Runs said in words the person would read, passed on; anything else is Althar's. */
+      /**
+       * A failure Changes or Runs said, in the words the window says it in (words.ts), passed on: a tagged error's own
+       * message is empty. Anything else is Althar's.
+       */
       const plainly = <A, R>(effect: Effect.Effect<A, unknown, R>, slug: string) =>
         effect.pipe(
-          Effect.catch((error) =>
-            Effect.fail(
-              error instanceof ToolRefused
-                ? error
-                : error instanceof PushRefused
-                  ? new ToolRefused({ message: pushRefused(error) })
-                  : error instanceof CantMerge
-                    ? new ToolRefused({ message: cantMerge(slug, error) })
-                    : typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
-                      ? new ToolRefused({ message: `Nothing changed for ${slug}: ${error.message}` })
-                      : error,
-            ),
-          ),
+          Effect.catch((error) => {
+            if (error instanceof ToolRefused) return Effect.fail(error)
+            if (error instanceof PushRefused) return Effect.fail(new ToolRefused({ message: pushRefused(error) }))
+            if (error instanceof CantMerge) return Effect.fail(new ToolRefused({ message: cantMerge(slug, error) }))
+            const said = words(error, (agentId) => agentId)
+            return Effect.fail(
+              expected.has(said.reason) ? new ToolRefused({ message: `Nothing changed for ${slug}: ${said.message}` }) : error,
+            )
+          }),
         )
 
       const pushTask = (access: ToolAccess, input: unknown) =>
