@@ -8,6 +8,7 @@ import { BrandMark } from '../../../../src/foundations/Marks/Marks'
 import { Button } from '../../../../src/primitives/Button/Button'
 import { Menu, MenuItem, MenuSeparator } from '../../../../src/primitives/Menu/Menu'
 import { Popover } from '../../../../src/primitives/Popover/Popover'
+import { PartsDrill } from './Drill'
 import s from './parts.module.css'
 
 type Group = 'code' | 'review' | 'issues' | 'running' | 'outputs' | 'access'
@@ -169,66 +170,6 @@ export function PartsTiles({ parts }: { parts: ReadonlyArray<Part> }) {
   )
 }
 
-/** C: what waits on you, each with what to do; what runs, live; the rest, a chip each. */
-export function PartsWaitsFirst({ parts }: { parts: ReadonlyArray<Part> }) {
-  const now = parts.filter(waits)
-  const live = parts.filter((one) => one.tone === 'live')
-  const rest = parts.filter((one) => !waits(one) && one.tone !== 'live')
-  return (
-    <div className={s.list}>
-      <div className={s.listHead}>
-        <span className={s.listTitle}>Parts</span>
-        <AddButton />
-      </div>
-      {now.length > 0 && (
-        <section className={s.waitsOn}>
-          {now.map((one) => (
-            <div key={one.id} className={s.waitRow} data-tone={one.tone}>
-              <span className={s.itemGlyph}>{glyph(one, 14)}</span>
-              <span className={s.waitText}>
-                <span className={s.itemName}>{one.name}</span>
-                <span className={s.itemDetail}>{one.detail}</span>
-              </span>
-              {one.act !== undefined && (
-                <Button size="small" variant={one.tone === 'you' ? 'signal' : 'default'}>
-                  {one.act}
-                </Button>
-              )}
-            </div>
-          ))}
-        </section>
-      )}
-      {live.length > 0 && (
-        <section className={s.group}>
-          <ul className={s.items}>
-            {live.map((one) => (
-              <li key={one.id}>
-                <button type="button" className={s.item} data-tone={one.tone}>
-                  <span className={s.itemGlyph}>{glyph(one)}</span>
-                  <span className={s.itemName}>{one.name}</span>
-                  <span className={s.itemDetail}>{one.detail}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {rest.length > 0 && (
-        <ul className={s.chips}>
-          {rest.map((one) => (
-            <li key={one.id}>
-              <button type="button" className={s.chip} title={one.detail}>
-                {glyph(one, 12)}
-                <span>{one.name}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  )
-}
-
 export type Look = 'list' | 'tiles' | 'waits'
 
 /** C's button: the parts' own glyphs, the first four, then how many more; one that waits on you in its colour. */
@@ -258,8 +199,15 @@ export function PartsButton({ parts, look }: { parts: ReadonlyArray<Part>; look:
       <ChromeButton icon="clip" label="Parts" count={parts.length} {...(waiting ? { mark: 'Something waits on you' } : {})} />
     )
   return (
-    <Popover label="This task’s parts" placement="below" align="end" width={look === 'tiles' ? 460 : 340} padded={false} trigger={trigger}>
-      {look === 'list' ? <PartsList parts={parts} /> : look === 'tiles' ? <PartsTiles parts={parts} /> : <PartsWaitsFirst parts={parts} />}
+    <Popover
+      label="This task’s parts"
+      placement="below"
+      align="end"
+      width={look === 'tiles' ? 460 : look === 'waits' ? 380 : 340}
+      padded={false}
+      trigger={trigger}
+    >
+      {look === 'list' ? <PartsList parts={parts} /> : look === 'tiles' ? <PartsTiles parts={parts} /> : <PartsDrill parts={parts} />}
     </Popover>
   )
 }

@@ -1,4 +1,4 @@
-// Scrappy, surface 3: Settings › MCP servers and skills: one table of what each role gets, and the switch that keeps the person's agents the same.
+// Scrappy, surface 3: Settings › MCP servers, and Settings › Skills, apart: each a table of what each role gets, and the switch that keeps the person's agents the same.
 import { Checkbox } from 'radix-ui'
 import { Fragment, useState } from 'react'
 
@@ -9,6 +9,7 @@ import { VisuallyHidden } from '../../../../src/primitives/VisuallyHidden/Visual
 import box from '../../../../src/primitives/CheckList/CheckList.module.css'
 import { useProto } from '../../state'
 import { type Found, type Reach, reachOf, ROLES, type Role, SERVERS, SKILLS, SOURCES, type SourceId } from './found'
+import { KeepSkills, SkillMarks, useSkillSync } from './SkillSync'
 import { AgentMarks, KeepSame, useSync } from './Sync'
 import s from './tools.module.css'
 
@@ -53,11 +54,13 @@ const useReaches = () => {
 }
 
 /** One table, a row each, a column for each role; above it, which project it is for. With sync, each server says which of your agents have it, and one switch keeps them the same. */
-export function ToolsByRole({ sync: syncing }: { sync: boolean }) {
+export function ToolsByRole({ kind }: { kind: 'servers' | 'skills' }) {
+  const syncing = true
   const p = useProto()
   const { reach, set } = useReaches()
   const [scope, setScope] = useState<'every' | 'althar'>('every')
   const agents = useSync({ week: p.week, confirm: p.direction === 'A' })
+  const skills = useSkillSync()
   const tick = (one: Found, role: Role) => {
     const now = reach(one)
     const inScope = scope === 'every' || now.projects.includes('althar')
@@ -77,13 +80,8 @@ export function ToolsByRole({ sync: syncing }: { sync: boolean }) {
       </Checkbox.Root>
     )
   }
-  const rows = (title: string, list: ReadonlyArray<Found>) => (
+  const rows = (list: ReadonlyArray<Found>) => (
     <>
-      <tr className={s.groupRow}>
-        <th scope="rowgroup" colSpan={4}>
-          {title}
-        </th>
-      </tr>
       {list.map((one) => (
         <tr key={one.id}>
           <th scope="row" className={s.nameCell}>
@@ -93,6 +91,8 @@ export function ToolsByRole({ sync: syncing }: { sync: boolean }) {
                 <span className={s.name}>{one.name}</span>
                 {syncing && SERVERS.includes(one) ? (
                   <AgentMarks found={one} sync={agents} />
+                ) : syncing ? (
+                  <SkillMarks found={one} sync={skills} />
                 ) : (
                   <span className={s.sources} title={one.sources.map((id) => `${SOURCES[id].name}: ${SOURCES[id].path}`).join('\n')}>
                     {one.sources.map((id) => (
@@ -126,7 +126,7 @@ export function ToolsByRole({ sync: syncing }: { sync: boolean }) {
           ]}
         />
       </div>
-      {syncing && <KeepSame sync={agents} inline={p.direction === 'B'} />}
+      {kind === 'servers' ? <KeepSame sync={agents} inline={p.direction === 'B'} /> : <KeepSkills sync={skills} />}
       <table className={s.table}>
         <thead>
           <tr>
@@ -140,10 +140,7 @@ export function ToolsByRole({ sync: syncing }: { sync: boolean }) {
             ))}
           </tr>
         </thead>
-        <tbody>
-          {rows(toolsText.servers, syncing ? agents.servers : SERVERS)}
-          {rows(toolsText.skills, SKILLS)}
-        </tbody>
+        <tbody>{kind === 'servers' ? rows(agents.servers) : rows(SKILLS)}</tbody>
       </table>
     </div>
   )

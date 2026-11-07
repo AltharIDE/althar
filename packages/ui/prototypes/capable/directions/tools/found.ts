@@ -10,14 +10,26 @@ export const ROLES: ReadonlyArray<{ id: Role; name: string; plural: string }> = 
 
 export const PROJECTS = ['althar', 'site', 'meridian'] as const
 
-export type SourceId = 'claude' | 'codex' | 'opencode' | 'project' | 'mine' | 'plugin' | 'repository' | 'althar'
+export type SourceId =
+  | 'claude'
+  | 'codex'
+  | 'opencode'
+  | 'project'
+  | 'mine'
+  | 'shared'
+  | 'opencodeSkills'
+  | 'plugin'
+  | 'repository'
+  | 'althar'
 
 export const SOURCES: Readonly<Record<SourceId, { name: string; path: string; brand?: Brand }>> = {
   claude: { name: 'Claude Code', path: '~/.claude.json', brand: Brand.ClaudeCode },
   codex: { name: 'Codex', path: '~/.codex/config.toml', brand: Brand.Codex },
   opencode: { name: 'OpenCode', path: '~/.config/opencode/opencode.json', brand: Brand.OpenCode },
   project: { name: 'althar', path: '.mcp.json' },
-  mine: { name: 'Yours', path: '~/.claude/skills', brand: Brand.ClaudeCode },
+  mine: { name: 'Claude Code', path: '~/.claude/skills', brand: Brand.ClaudeCode },
+  shared: { name: 'Codex', path: '~/.agents/skills', brand: Brand.Codex },
+  opencodeSkills: { name: 'OpenCode', path: '~/.config/opencode/skills', brand: Brand.OpenCode },
   plugin: { name: 'superpowers', path: 'a Claude Code plugin', brand: Brand.ClaudeCode },
   repository: { name: 'althar', path: '.claude/skills' },
   althar: { name: 'Althar’s catalog', path: 'kept by Althar' },
@@ -77,9 +89,23 @@ export const SKILLS: ReadonlyArray<Found> = [
   {
     id: 'release-notes',
     name: 'release-notes',
-    sources: ['mine'],
+    sources: ['mine', 'shared'],
     runs: 'Writes a release’s notes from its merged pull requests',
     roles: EVERY,
+  },
+  {
+    id: 'impeccable',
+    name: 'impeccable',
+    sources: ['opencodeSkills'],
+    runs: 'Polishes an interface against a design direction',
+    roles: ['lead'],
+  },
+  {
+    id: 'improve',
+    name: 'improve',
+    sources: ['shared', 'mine'],
+    runs: 'Surveys a codebase and writes plans for other agents',
+    roles: ['lead', 'coordinator'],
   },
   {
     id: 'brainstorming',

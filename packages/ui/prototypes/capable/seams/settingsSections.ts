@@ -1,4 +1,4 @@
-// Scrappy: Althar's Settings sections, with What asks among them, for What asks' B: the person's own, in every project.
+// Scrappy: Althar's Settings sections, with What asks among them, for What asks' B: the person's own, in every project; and MCP servers, beside Skills.
 import type { IconName } from '../../../src/foundations/Icon/Icon'
 import {
   FIRST_SECTION as REAL_FIRST,
@@ -7,7 +7,7 @@ import {
   sectionText as realText,
 } from '../../../../../apps/desktop/src/renderer/features/settings/sections'
 
-export const SECTIONS = [...REAL_SECTIONS, 'what-asks'] as const
+export const SECTIONS = [...REAL_SECTIONS, 'what-asks', 'mcp'] as const
 export type Section = (typeof SECTIONS)[number]
 export const isSection = (value: unknown): value is Section =>
   typeof value === 'string' && (SECTIONS as ReadonlyArray<string>).includes(value)
@@ -17,4 +17,5 @@ export const GROUPS = REAL_GROUPS
 export const sectionText: Readonly<Record<Section, { readonly title: string; readonly icon: IconName }>> = {
   ...realText,
   'what-asks': { title: 'What asks', icon: 'lock' },
+  mcp: { title: 'MCP servers', icon: 'plug' },
 }

@@ -79,6 +79,20 @@ export const TASKS = {
         checks: { outcome: 'running', passed: 3, failed: 0, running: 3, total: 6, failing: [], list: [] },
       }),
     }),
+  /** A sketch: a one-line fix on the fast lane, started a few minutes ago. */
+  typo: (): Card =>
+    card({
+      taskId: 'tk-typo',
+      threadId: 'th-typo',
+      title: 'Run menu says “Strat”',
+      slug: 'run-menu-says-strat',
+      ...sonnet,
+      phase: 'running',
+      step: 'implement',
+      plan: { id: 'pln-typo', steps: noReview, startsAt: null, reason: null, end: null },
+      branch: 'althar/run-menu-says-strat',
+      startedAt: minutes(4),
+    }),
   command: (): Card =>
     card({
       taskId: 'tk-command',
@@ -195,6 +209,12 @@ export const coordinatorTalk = (): ThreadItem[] => [
   at(items.you('Plan the ADR for agents working as my own. Opus 5.5, xhigh.'), 52),
   at(items.says('Planned **ADR: agents work as the person’s own** on Opus 5.5 at xhigh, reviewed by GPT-6.1 Sol.'), 51),
   at(items.card(TASKS.adr(), 'card-adr'), 51),
+  ...(proto.get().surface === 'sketches'
+    ? [
+        at(items.notice({ title: '§capable-now', source: 'runtime' }, null), 1),
+        at(items.notice({ title: '§away', source: 'runtime' }, null), 0),
+      ]
+    : []),
   ...(proto.get().surface === 'tune' ? tuning() : []),
 ]
 

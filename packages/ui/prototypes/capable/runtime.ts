@@ -43,6 +43,7 @@ const CARDS: Record<string, () => ReturnType<typeof card>> = {
   'th-adr': TASKS.adr,
   'th-codex-net': TASKS.child,
   'th-small': TASKS.small,
+  'th-typo': TASKS.typo,
   'th-command': TASKS.command,
   'th-runs': TASKS.runs,
   'th-flatpak': TASKS.flatpak,

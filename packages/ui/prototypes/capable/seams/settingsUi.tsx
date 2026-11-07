@@ -1,4 +1,4 @@
-// Scrappy: the kit as Althar's Settings see it here: the Skills section is "MCP servers and skills", the role table with each direction's way to sync; and in What asks' B, a section of its own.
+// Scrappy: the kit as Althar's Settings see it here: MCP servers, a section of its own before Skills, each the role table with its sync; and in What asks' B, a section of its own.
 import type { ComponentProps } from 'react'
 
 import { Button as RealButton } from '../../../src/primitives/Button/Button'
@@ -11,14 +11,13 @@ import { useProto } from '../state'
 
 export * from '../../../src/index'
 
-const TITLE = 'MCP servers and skills'
 const on = (p: ReturnType<typeof useProto>) => p.surface === 'tools' && p.direction !== 'Today'
 const asks = (p: ReturnType<typeof useProto>) => p.surface === 'rules' && p.direction === 'B'
 
 export function SkillList(props: ComponentProps<typeof RealSkillList>) {
   const p = useProto()
   if (!on(p)) return <RealSkillList {...props} />
-  return <ToolsByRole sync />
+  return <ToolsByRole kind="skills" />
 }
 
 export function SkillInstall(props: ComponentProps<typeof RealSkillInstall>) {
@@ -32,14 +31,19 @@ export function Button(props: ComponentProps<typeof RealButton>) {
 }
 
 export function SettingsLayout(props: ComponentProps<typeof RealSettingsLayout>) {
-  const p = useProto()
   if ((props.section as string) === 'what-asks')
     return (
       <RealSettingsLayout {...props}>
         <WhatAsks where="account" />
       </RealSettingsLayout>
     )
-  return <RealSettingsLayout {...props} title={on(p) && props.title === 'Skills' ? TITLE : props.title} />
+  if ((props.section as string) === 'mcp')
+    return (
+      <RealSettingsLayout {...props} title="MCP servers">
+        <ToolsByRole kind="servers" />
+      </RealSettingsLayout>
+    )
+  return <RealSettingsLayout {...props} />
 }
 
 export function SettingsNav<V extends string>(props: ComponentProps<typeof RealSettingsNav<V>>) {
@@ -51,7 +55,7 @@ export function SettingsNav<V extends string>(props: ComponentProps<typeof RealS
       groups={props.groups.map((group) =>
         group.flatMap((item) =>
           on(p) && item.title === 'Skills'
-            ? [{ ...item, title: TITLE, icon: 'plug' as const }]
+            ? [{ id: 'mcp' as V, title: 'MCP servers', icon: 'plug' as const }, item]
             : asks(p) && item.title === 'Agents'
               ? [item, { id: 'what-asks' as V, title: 'What asks', icon: 'lock' as const }]
               : [item],

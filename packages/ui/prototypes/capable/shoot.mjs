@@ -74,12 +74,12 @@ const shots = [
   },
 
   // 3 · MCP servers and skills: the role table and one switch (chosen); what it writes, before it starts (A) or on its card (B).
-  { id: '3a-1-off', s: 'tools', d: 'A', hash: '#/settings/skills', clip: { x: 324, y: 60, width: 916, height: 420 }, go: () => undefined },
+  { id: '3a-1-off', s: 'tools', d: 'A', hash: '#/settings/mcp', clip: { x: 324, y: 60, width: 916, height: 420 }, go: () => undefined },
   {
     id: '3a-2-dialog',
     s: 'tools',
     d: 'A',
-    hash: '#/settings/skills',
+    hash: '#/settings/mcp',
     height: 900,
     go: (page) => page.getByRole('switch', { name: 'Keep your agents’ servers the same' }).click(),
   },
@@ -87,20 +87,20 @@ const shots = [
     id: '3a-3-on',
     s: 'tools',
     d: 'A',
-    hash: '#/settings/skills',
+    hash: '#/settings/mcp',
     height: 1000,
     go: async (page) => {
       await page.getByRole('switch', { name: 'Keep your agents’ servers the same' }).click()
       await press(page, 'Turn on')
     },
   },
-  { id: '3b-1-off', s: 'tools', d: 'B', hash: '#/settings/skills', clip: { x: 324, y: 60, width: 916, height: 560 }, go: () => undefined },
+  { id: '3b-1-off', s: 'tools', d: 'B', hash: '#/settings/mcp', clip: { x: 324, y: 60, width: 916, height: 560 }, go: () => undefined },
   {
     id: '3b-2-week',
     s: 'tools',
     d: 'B',
     q: '&week',
-    hash: '#/settings/skills',
+    hash: '#/settings/mcp',
     height: 1000,
     go: () => undefined,
   },
@@ -109,7 +109,7 @@ const shots = [
     s: 'tools',
     d: 'B',
     q: '&week',
-    hash: '#/settings/skills',
+    hash: '#/settings/mcp',
     height: 1100,
     keep: true,
     go: async (page) => {
@@ -122,7 +122,7 @@ const shots = [
     s: 'tools',
     d: 'B',
     q: '&week',
-    hash: '#/settings/skills',
+    hash: '#/settings/mcp',
     clip: { x: 324, y: 60, width: 916, height: 300 },
     go: (page) => page.getByRole('switch', { name: 'Keep your agents’ servers the same' }).click(),
   },
@@ -153,6 +153,17 @@ const shots = [
         window.location.hash = '#/projects/p1?room=settings&section=rules'
       })
     },
+  },
+
+  // 3 · Skills, a section of its own, with its own switch.
+  { id: '3s-1-off', s: 'tools', d: 'A', hash: '#/settings/skills', height: 1000, go: () => undefined },
+  {
+    id: '3s-2-on',
+    s: 'tools',
+    d: 'A',
+    hash: '#/settings/skills',
+    height: 1000,
+    go: (page) => page.getByRole('switch', { name: 'Keep your agents’ skills the same' }).click(),
   },
 
   // 5 · A task's parts: one button just before the faces, three looks for it and what it opens.
@@ -196,9 +207,102 @@ const shots = [
     go: (page) => page.getByRole('button', { name: /^Parts/ }).click(),
   },
 
+  {
+    id: '5c-3-check',
+    s: 'parts',
+    d: 'C',
+    hash: MANY,
+    keep: true,
+    clip: POP,
+    go: async (page) => {
+      await page.getByRole('button', { name: /^Parts/ }).click()
+      await press(page, 'See the check')
+    },
+  },
+  {
+    id: '5c-4-worktree',
+    s: 'parts',
+    d: 'C',
+    hash: MANY,
+    keep: true,
+    clip: POP,
+    go: async (page) => {
+      await page.getByRole('button', { name: /^Parts/ }).click()
+      await press(page, 'Worktree')
+    },
+  },
+  {
+    id: '5c-5-merged',
+    s: 'parts',
+    d: 'C',
+    hash: MANY,
+    keep: true,
+    clip: POP,
+    go: async (page) => {
+      await page.getByRole('button', { name: /^Parts/ }).click()
+      await press(page, 'Merge')
+    },
+  },
+  {
+    id: '5c-6-add',
+    s: 'parts',
+    d: 'C',
+    hash: MANY,
+    keep: true,
+    clip: POP,
+    go: async (page) => {
+      await page.getByRole('button', { name: /^Parts/ }).click()
+      await press(page, 'Add')
+    },
+  },
+  {
+    id: '5c-7-add-review',
+    s: 'parts',
+    d: 'C',
+    hash: MANY,
+    keep: true,
+    clip: POP,
+    go: async (page) => {
+      await page.getByRole('button', { name: /^Parts/ }).click()
+      await press(page, 'Add')
+      await press(page, /A review/)
+    },
+  },
+  {
+    id: '5c-8-add-access',
+    s: 'parts',
+    d: 'C',
+    hash: MANY,
+    keep: true,
+    clip: POP,
+    go: async (page) => {
+      await page.getByRole('button', { name: /^Parts/ }).click()
+      await press(page, 'Add')
+      await press(page, /^Access/)
+    },
+  },
+  {
+    id: '5c-9-added',
+    s: 'parts',
+    d: 'C',
+    hash: MANY,
+    keep: true,
+    clip: POP,
+    go: async (page) => {
+      await page.getByRole('button', { name: /^Parts/ }).click()
+      await press(page, 'Add')
+      await press(page, /A review/)
+      await press(page, 'Start')
+    },
+  },
+
   // 6 · Sketches.
   { id: '6-1-review', s: 'sketches', d: 'A', hash: '#/threads/th-review', go: () => undefined },
   { id: '6-2-self-push', s: 'sketches', d: 'A', hash: '#/threads/th-codex-net', go: () => undefined },
+  { id: '6-3-small', s: 'sketches', d: 'A', hash: '#/threads/th-typo', go: () => undefined },
+  { id: '6-4-first-time', s: 'sketches', d: 'A', hash: '#/projects/p1?room=talk', height: 1000, go: () => undefined },
+  { id: '6-5-server-fails', s: 'sketches', d: 'A', hash: '#/threads/th-design', go: () => undefined },
+  { id: '6-6-batch', s: 'sketches', d: 'A', hash: '#/threads/th-adr', go: (page) => to(page, 'Starting 4 tasks') },
 ]
 
 const browser = await chromium.launch()

@@ -55,6 +55,7 @@ export const threads: Record<string, () => Own> = {
       ),
       mark('§act-review', 1),
       mark('§act-linear', 1),
+      mark('§mcpfail', 0),
     ],
   }),
   // A review of an outside author's pull request: read only until the person says to run it.
@@ -132,6 +133,7 @@ export const threads: Record<string, () => Own> = {
         20,
       ),
       mark('§child', 20),
+      mark('§batch', 20),
       mark('§coordinator', 6),
       at(
         items.arrival({
@@ -149,6 +151,23 @@ export const threads: Record<string, () => Own> = {
         2,
       ),
       mark('§unasked', 2),
+    ],
+  }),
+  // A sketch: a one-line fix the person asked for, on the fast lane.
+  'th-typo': () => ({
+    task: { request: 'The Run menu says “Strat”. Fix it.' },
+    items: [
+      mark('§fast', 4),
+      read('packages/ui/src/chrome/RunMenu/RunMenu.tsx', 4),
+      at(
+        items.tool({
+          title: 'Edit packages/ui/src/chrome/RunMenu/RunMenu.tsx',
+          toolKind: 'edit',
+          locations: [{ path: 'packages/ui/src/chrome/RunMenu/RunMenu.tsx' }],
+        }),
+        3,
+      ),
+      at(items.says('Fixed: “Strat” is “Start”. Pull request #643 is open and its checks pass.'), 1),
     ],
   }),
   // The task the ADR's lead started.

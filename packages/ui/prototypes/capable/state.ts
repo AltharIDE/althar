@@ -26,7 +26,8 @@ const PARENT = '#/threads/th-adr'
 const CHILD = '#/threads/th-codex-net'
 const RULES = '#/projects/p1?room=settings&section=rules'
 const ASK = '#/threads/th-runs'
-const TOOLS = '#/settings/skills'
+const TOOLS = '#/settings/mcp'
+const SKILLS = '#/settings/skills'
 const MCP = '#/threads/th-design'
 const REVIEW = '#/threads/th-review'
 const TALK = '#/projects/p1?room=talk'
@@ -82,8 +83,9 @@ export const SURFACES: ReadonlyArray<SurfaceInfo> = [
     name: 'MCP and skills',
     short: 'MCP',
     places: [
-      { label: 'Settings', hash: TOOLS, set: { week: false } },
+      { label: 'MCP servers', hash: TOOLS, set: { week: false } },
       { label: 'A week on', hash: TOOLS, set: { week: true } },
+      { label: 'Skills', hash: SKILLS, set: { week: false } },
       { label: 'Calls in a thread', hash: MCP },
     ],
     directions: [
@@ -143,8 +145,19 @@ export const SURFACES: ReadonlyArray<SurfaceInfo> = [
     places: [
       { label: 'A review', hash: REVIEW },
       { label: 'A push by an agent', hash: CHILD },
+      { label: 'A small change', hash: '#/threads/th-typo' },
+      { label: 'The first time', hash: TALK },
+      { label: 'A server fails', hash: MCP },
+      { label: 'A lead starts 4', hash: PARENT },
     ],
-    directions: [{ value: 'A', name: 'Sketch', about: 'A review that says whether it runs the code; an agent’s own push' }],
+    directions: [
+      {
+        value: 'A',
+        name: 'Sketch',
+        about:
+          'One state each, not yet choices: a review that runs or reads; an agent’s own push; a small change; the first time; while you were away; a server that fails; a lead that starts several',
+      },
+    ],
   },
 ]
 

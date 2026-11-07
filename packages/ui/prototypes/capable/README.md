@@ -73,7 +73,7 @@ What the runtime needs:
 
 ## 3 · MCP servers and skills
 
-Settings' Skills becomes **MCP servers and skills**: the role table (chosen), a row each, a column each for leads, reviewers and the coordinator; above, Every project or althar. In a thread, each MCP call says its server, and what acted on the outside world is a card: the server, what it did, what it said, Open. The "could see" line from #596 counts both: "Claude Code could see 6 skills and 7 MCP servers", opening by whose. Seen there and in a design review the person's own skill ran on dana's #612.
+Settings gets **MCP servers** as a section of its own, before **Skills** (split on 7 Nov). Each is the role table (chosen), a row each, a column each for leads, reviewers and the coordinator; above, Every project or althar. In a thread, each MCP call says its server, and what acted on the outside world is a card: the server, what it did, what it said, Open. The "could see" line from #596 counts both: "Claude Code could see 6 skills and 7 MCP servers", opening by whose. Seen there and in a design review the person's own skill ran on dana's #612.
 
 Inside Althar nothing needs syncing: each role gets what's ticked, whichever agent's settings it was found in. Syncing is for the person's agents on their own: Claude Code, Codex and OpenCode each keep their own list, and here they disagree (github runs with npx in Claude Code and in Docker in Codex; linear, figma and sentry are only in Claude Code; context7 only in Codex; playwright only in OpenCode). The person chose **one switch**, "Keep your agents' servers the same". It writes into files that are theirs, so it has to say what it writes, to which file, and what it won't touch. Two ways to say it:
 
@@ -125,7 +125,15 @@ What the runtime needs:
 - #596's skills notice also lists the servers each session got.
 - **Syncing**, as above: reading each agent's servers, matching them by name, then command or URL ("differs" where the name matches and the rest doesn't), writing through each agent's own command, a record of each change for Undo, a kept-out list per agent, and watching the three files while it's on.
 - **Each agent's sign-in to a remote server** (OAuth), readable per agent, and a way to start it from the window.
-- Skills could sync the same way where an agent reads them from a folder; left out here.
+- **Skill sync**, as below: each agent's skill folders read, links made and removed, nothing moved.
+
+### Skills: a switch of their own
+
+**Worth it, and simpler than servers.** A skill is a folder with a `SKILL.md`, so there is nothing to translate and no secret or sign-in to carry: Althar links each skill into the other agents' folders, and the skill stays where it is, so a change to it reaches every agent. That's how `npx skills` already works on this computer (`~/.claude/skills/improve` links to `~/.agents/skills/improve`). The folders: Claude Code reads `~/.claude/skills`; Codex reads `~/.agents/skills`; OpenCode reads its own `~/.config/opencode/skills` and Claude Code's too.
+
+The card says it on the card, with no dialog: it only adds links, so turning it on is cheap and turning it off takes them out. **Links** per folder, each skill a chip that leaves it out. **To settle**: one name, two versions (release-notes in Claude Code and an older one in Codex), pick one or keep both. **It leaves alone** a plugin's skills (they update with it), the repository's `.claude/skills` (the project's to change), and Althar's own (every role gets them in Althar already). One limit, said once: what only Claude Code understands in a skill, such as which tools it may use, the others ignore.
+
+**Do others do this?** Not that I found. [Orca](https://www.onorca.dev/docs/cli/skills) installs its own skills into the skill folders of each agent it finds, and lets you register MCP endpoints in its settings, but doesn't sync the person's own between agents. Superset provisions its own skills at launch and reaches integrations through its own MCP proxy, not the person's agents' configs. So syncing the person's own is Althar's to work out.
 
 ## 4 · Settings an agent changed
 
@@ -164,13 +172,27 @@ What the runtime needs:
 - **An Add command per kind**, for any task, any time: attach a worktree, open or attach a pull request (AttachPullRequest exists), add a review of a pull request, link an issue, open a browser, give access.
 - The worktree part carries the files count the bar's Files button shows today.
 
+### C, clicked through
+
+The person likes C's hierarchy (7 Nov), so its popover now works:
+- **A part opens in place**, with a back arrow: where it stands and what to do. The worktree: its branch, where it is, the files it changed, See the changes, Open in editor, and Remove, which says what isn't committed before it removes anything. A pull request that waits: its checks and review, Merge. One that fails: the failing check's last lines, Ask the lead to fix it, Run it again. A review draft: its findings, Post it. An issue: Take off this task. What runs: Open, Stop. Screenshots: thumbnails, See them in Outputs. Access: Take it back.
+- **Merge and Post it act from the row**; See the check opens the part.
+- **Add** lists what a task can take on, then a short form for the one picked: a worktree (its branch, from the task's branch or main); a pull request (open one from the branch as a draft, or attach one); a review (which pull request, by GPT-6.1 Sol, Terra or DeepSeek Flash, and that an outside author's is read only); an issue (search, pick); a browser (an address); access (one of the kinds that ask, given for this task). What's added shows at once, setting up.
+
 ## 6 · Sketches
+
+Sketches are single states, not choices between directions: things the decisions need that are worth seeing once before anyone picks a way. Each sits where it would be, on the real screen.
 
 - **A review's header** says whether it runs the code: an outside author's is read only, with Run it; a member's runs in a worktree.
 - **A push the lead made itself**, with `gh` as the person: Althar shows it once it sees it on GitHub, the commits and Compare, and that nothing held it.
 - **Where a lead-started task came from**, as its thread opens: "Started by the lead of ADR: agents work…, from your words there."
+- **A small change** ("The Run menu says Strat"): one card that says what it skipped (Sonnet 5.5, no plan, reviewed after it merges), each step with its time, and Merge, which still asks; Make it a full task.
+- **The first time**, in the coordinator's conversation: agents now go ahead, only the four kinds ask, your 7 servers and 9 skills load in every role, leads start tasks. Got it, What still asks, Servers and skills, and Ask as before in althar.
+- **While you were away**: what agents did outside their worktrees across the project (merged, posted, moved an issue, started a task, changed a setting), by task and time, with Revert it, Delete it or Undo where it can be undone.
+- **A server that fails**: linear signed out in Codex, so the lead couldn't move DEV-188; Sign in to Codex, or Go on without it; the lead goes on with the rest meanwhile.
+- **A lead that starts several**: "Starting 4 tasks from your 'split it by ADR'", each with its model and when it starts, Hold the rest and Change one.
 
-What the runtime needs: a review's `outside` from the host's author association, and a Run it command that gives it a worktree; pushes seen on the host that Althar didn't make, attributed to the task by branch, as a thread item.
+What the runtime needs: a small-change path (a plan of one step, a lighter model, review after); a log of acts outside worktrees across the project, each with how it is undone; a server's failure as a thread item, by agent and cause; a batch of starts as one item with one hold; a review's `outside` from the host's author association, and a Run it command that gives it a worktree; pushes seen on the host that Althar didn't make, attributed to the task by branch, as a thread item.
 
 ## Set aside: New task without the coordinator
 
@@ -178,10 +200,4 @@ The person keeps starting tasks with the coordinator for now (6 Nov). The three 
 
 ## What else needs prototyping
 
-For these decisions to work, and not yet drawn:
-
-1. **A small change, fast, through the coordinator.** With New task set aside, the one-line fix that took 40 minutes has to get fast on the coordinator's path: what it starts for "fix the typo in X" (no plan to approve, no countdown, a lighter model and effort, review after rather than before), and how that task reads on the board as it goes by in a few minutes.
-2. **The first time, for someone already using Althar.** Allow everything becomes the default where it was off, and their own servers load in every role. One notice that says what changed in which project, and where to change it back.
-3. **What agents did, afterwards.** With fewer asks, the person learns of pushes, posts, merges, issue changes and settings changes after they happen, each in its own thread today. A view across the project, or a "while you were away", with Undo where it can be undone.
-4. **A server that fails in a task:** signed out, down, or switched off. What the lead and the person see in the thread, and the one click that fixes it.
-5. **Leads (1)**, still open, and a lead that starts many tasks at once.
+The sketches in 6 draw the first state of each of these: a small change, the first time, while you were away, a server that fails, a lead that starts several. Each needs directions once one matters. Leads (1) is still open.
