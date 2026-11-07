@@ -59,7 +59,7 @@ export const AsksFirst: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('button', { name: 'Change' }))
-    await expect(c.getByText('Allow everything')).toBeInTheDocument()
+    await expect(c.getByText(/^Allow everything/)).toBeInTheDocument()
     await expect(c.queryByRole('button', { name: 'Change' })).not.toBeInTheDocument()
   },
 }
