@@ -72,17 +72,20 @@ export interface ThreadHost {
 /**
  * A thread's host; `documents` false where there is no panel to open one
  * in. With `code`, the thread whose agent's names open the code they name.
+ * With `conversation` false, the thread is off screen (a task's outputs or
+ * graph), so its page steps aside, kept where it is for when it shows again.
  */
 export const useThreadHost = (
   documents = true,
   code: { readonly threadId: string | null; readonly taskId: string | null } | null = null,
   page: ThreadPage | null = null,
+  conversation = true,
 ): ThreadHost => {
   const [pictures, setPictures] = useState<{ readonly set: readonly ImageRef[]; readonly at: number } | null>(null)
   const [doc, setDoc] = useState<DocRef | null>(null)
   const [opened, setOpen] = useState<(CodeOpen & { readonly threadId: string | null }) | null>(null)
   const owner = page?.owner ?? null
-  const beside = usePage(owner, useServices().host.pages).where === 'beside'
+  const beside = usePage(owner, useServices().host.pages).where === 'beside' && conversation
   // A page opened beside the conversation takes the workbench from a document or a file; one of those opened takes it back.
   useEffect(() => {
     if (!beside) return

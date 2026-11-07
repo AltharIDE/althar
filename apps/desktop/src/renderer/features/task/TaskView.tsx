@@ -443,6 +443,8 @@ export function TaskView({
   const opener = useOpener(taskId ?? null, showTalk)
   const navigate = useNavigate()
   const comments = useComments(kept)
+  // The page belongs to the conversation: Outputs and Graph leave it out, and coming back brings it as it was (ADR-100).
+  const conversation = face === null || face === 'talk' || (face === 'graph' && (model.snapshot?.task.graph?.length ?? 0) === 0)
   // What the thread's parts open: a picture in the lightbox, a document or a file the lead names, or a page, beside the thread.
   const host = useThreadHost(
     true,
@@ -459,6 +461,7 @@ export function TaskView({
             void navigate({ to: '/pages/$owner', params: { owner: taskId } })
           },
         },
+    conversation,
   )
   // Report this, on a stuck step: Report a problem, with this task (DEV-61).
   const { reportProblem } = useServices().host
