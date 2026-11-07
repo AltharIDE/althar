@@ -394,6 +394,8 @@ interface Turn {
   refused: boolean
   /** The agent said something to the person in this turn. */
   spoke: boolean
+  /** The agent was asked to carry on after a refusal that ended its turn: where it ends again with nothing said, the thread says so. */
+  recovering: boolean
 }
 
 /** What reaches a session from the agent, in the order it arrived. */
@@ -1024,18 +1026,22 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
           Effect.gen(function* () {
             // A turn the agent cut short (stop reason cancelled, though the person did not) after a refusal, with no word to the person, is never left so: the agent is asked once more,
             // where refusals go with the next prompt too, and where it still says nothing the thread says what happened.
-            const silent = !turn.cancelled && response.stopReason === 'cancelled' && turn.refused && !turn.spoke
+            const unanswered = !turn.cancelled && turn.refused && !turn.spoke
+            const cutShort = unanswered && response.stopReason === 'cancelled'
+            // Asked once to carry on, an agent that ends again with nothing said, however it ends, is not asked again: the thread says so.
+            const silent = cutShort || (unanswered && turn.recovering)
             const again =
               turn.cancelled || turn.resumes >= MAX_RESUMES
                 ? undefined
                 : sessionOptions.refusals === 'withNext'
-                  ? silent
+                  ? cutShort
                     ? (turn.resumeWith ?? SILENT_AFTER_REFUSAL)
                     : undefined
                   : turn.resumeWith
             if (again !== undefined) {
               turn.resumeWith = undefined
               turn.resumes += 1
+              if (turn.refused) turn.recovering = true
               yield* Queue.offer(turn.queue, { _tag: 'Resumed', reason: again })
               yield* send(again)
               return
@@ -1127,6 +1133,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
                 failure: undefined,
                 refused: false,
                 spoke: false,
+                recovering: false,
               }
               const idle = yield* Ref.modify(state.current, (running) =>
                 Option.isSome(running) ? [false, running] : [true, Option.some(turn)],

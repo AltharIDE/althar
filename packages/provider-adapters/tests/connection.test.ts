@@ -658,6 +658,17 @@ describe('AgentConnection', () => {
       }),
     )
 
+    it.live('puts a notice in the turn when the agent, asked to carry on after a refusal, ends normally with nothing said', () =>
+      Effect.gen(function* () {
+        const { one, two } = yield* twoTurns(scenarios.silentThenEnds, rules)
+        assert.lengthOf(find(one, 'Resumed'), 1)
+        assert.lengthOf(find(one, 'AgentMessage'), 0)
+        assert.lengthOf(find(one, 'Notice'), 1)
+        assert.strictEqual(stopReason(one), 'end_turn')
+        assert.strictEqual(text(two), 'echo: what next?')
+      }),
+    )
+
     it.live('carries nothing to the next prompt after the person cancels, where refusals go with it', () =>
       withConnection(
         fake,

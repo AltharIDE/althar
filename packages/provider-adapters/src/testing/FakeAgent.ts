@@ -99,6 +99,8 @@ export const scenarios = {
   silentAfterRefusal: 'silent-after-refusal',
   /** Like `silentAfterRefusal`, but it stays silent when asked to carry on, every time. */
   silentForever: 'silent-forever',
+  /** Like `silentAfterRefusal`, but asked to carry on it ends its turn normally, with nothing said. */
+  silentThenEnds: 'silent-then-ends',
   /** Like `fileEdit`, but it asks again every time the turn is resumed. */
   stubborn: 'stubborn',
   /** Asks the person a plain question, as an MCP server's form does, and repeats the answer. */
@@ -386,6 +388,8 @@ interface SessionState {
   stubborn: boolean
   /** It never answers a resume with a word (`silentForever`). */
   mute: boolean
+  /** It ends a resumed turn normally and says nothing (`silentThenEnds`). */
+  endsQuietly: boolean
   abort: AbortController | undefined
   directories: number
   mcpServers: number
@@ -1452,6 +1456,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         closed: false,
         stubborn: false,
         mute: false,
+        endsQuietly: false,
         abort: undefined,
         directories: params.additionalDirectories?.length ?? 0,
         mcpServers: params.mcpServers.length,
@@ -1893,6 +1898,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       }
       const resumed = /Althar's rules refused this|not allowed by the coordinator|The person declined/.test(text)
       if (resumed && session.mute) return { stopReason: 'cancelled' }
+      if (resumed && session.endsQuietly) return ended()
+      if (text === scenarios.silentThenEnds) session.endsQuietly = true
       if (text === scenarios.silentForever) session.mute = true
       if (resumed && !session.stubborn) {
         await say('carrying on without it')
@@ -1908,6 +1915,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             : text
 
       switch (scenario) {
+        case scenarios.silentThenEnds:
         case scenarios.silentForever:
         case scenarios.silentAfterRefusal: {
           const toolCall = { toolCallId: 'call-3', title: 'Run git grep x', kind: 'execute' as const, rawInput: { command: 'git grep x' } }
