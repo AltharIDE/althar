@@ -1,7 +1,7 @@
 # The fast lane: what a small change's time went on, and what it cuts
 
 Measured 6 November 2026 against `6fa8c335ec25` and read again on 7 November
-from a copy of the profile's store, for [ADR-101](../decisions/101-a-small-change-is-one-step-reviewed-after-merge-and-auto-moves-to-a-lighter-model.md)
+from a copy of the profile's store, for [ADR-102](../decisions/102-a-small-change-is-one-step-reviewed-after-merge-and-auto-moves-to-a-lighter-model.md)
 and the person's note of 6 November: a one-line fix
 ([#599](https://github.com/AltharIDE/althar/pull/599), one CSS width) took
 41 minutes from its task's creation to its merge, which they called

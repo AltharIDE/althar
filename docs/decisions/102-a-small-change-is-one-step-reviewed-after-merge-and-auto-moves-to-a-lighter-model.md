@@ -1,4 +1,4 @@
-# ADR-101: A small change takes one step and is reviewed after it merges; Auto moves a lead to a lighter model as its plan runs out
+# ADR-102: A small change takes one step and is reviewed after it merges; Auto moves a lead to a lighter model as its plan runs out
 
 - **Status:** Accepted; built 2026-11-07
 - **Date:** 2026-11-07

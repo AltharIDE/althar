@@ -381,6 +381,43 @@ describe('schema', () => {
     ),
   )
 
+  it.effect(
+    'opens a database from before the cleared view with the coordinator’s thread whole, and keeps a mark only as a place and whether the earlier conversation shows',
+    () =>
+      withFile((filename) =>
+        Effect.gen(function* () {
+          const before = migrations.findIndex((migration) => migration.key === '0066_cleared_view')
+          const made = Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const { projectId, actorId, createdAt } = yield* seed
+            const threadId = yield* newId(Ids.thread)
+            yield* sql`INSERT INTO threads ${sql.insert({ id: threadId, projectId, kind: 'coordinator', ownerActorId: actorId, createdAt })}`
+            return threadId
+          }).pipe(Effect.provide(WebCrypto))
+          const threadId = yield* Effect.provide(made, Layer.fresh(Database.layer({ filename, migrations: migrations.slice(0, before) })))
+          const read = Effect.flatMap(
+            SqlClient.SqlClient,
+            (sql) =>
+              sql<{ viewFrom: number | null; earlierShown: number }>`SELECT view_from, earlier_shown FROM threads WHERE id = ${threadId}`,
+          )
+          const opened = yield* Effect.provide(read, Layer.fresh(Database.layer({ filename })))
+          assert.deepStrictEqual(opened, [{ viewFrom: null, earlierShown: 0 }])
+          const marked = Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            yield* sql`UPDATE threads SET view_from = 7, earlier_shown = 1 WHERE id = ${threadId}`
+            const kept = yield* read
+            // A mark is a place in the thread, and whether the earlier conversation shows is yes or no.
+            const place = yield* succeeds(sql`UPDATE threads SET view_from = 0 WHERE id = ${threadId}`)
+            const shown = yield* succeeds(sql`UPDATE threads SET earlier_shown = 2 WHERE id = ${threadId}`)
+            return { kept, place, shown }
+          })
+          const { kept, place, shown } = yield* Effect.provide(marked, Layer.fresh(Database.layer({ filename })))
+          assert.deepStrictEqual(kept, [{ viewFrom: 7, earlierShown: 1 }])
+          assert.deepStrictEqual([place, shown], [false, false])
+        }),
+      ),
+  )
+
   it.effect('keeps a connection made before workspaces, and lets one account connect once per workspace and a project bind to one', () =>
     withFile((filename) =>
       Effect.gen(function* () {
