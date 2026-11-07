@@ -74,6 +74,7 @@ describe('a connection lost after a clean turn', () => {
       const sessions = yield* Sessions
       yield* sessions.start({ threadId: created.threadId, agentId: 'claude-code' })
       yield* until(turns(created.threadId), (all) => all[0]?.state === 'failed')
+      assert.isTrue((yield* (yield* Queries).thread(created.threadId)).retryable)
       assert.isTrue(yield* sessions.tryAgain(created.threadId))
       const all = yield* until(turns(created.threadId), (all) => all[1]?.state === 'failed')
       assert.include(all[1]?.prompt ?? '', 'Retry checkout')

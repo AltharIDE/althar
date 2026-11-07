@@ -400,7 +400,9 @@ describe('a task’s lead that is signed out', () => {
   })
   const show = (overrides: Partial<ThreadSnapshot> = {}) => {
     const onSignIn = vi.fn()
-    const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [items.you('Go'), signedOut], ...overrides })) })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => snapshot({ retryable: true, items: [items.you('Go'), signedOut], ...overrides })),
+    })
     withServices(<Task onSignIn={onSignIn} />, client)
     return { client, onSignIn }
   }
