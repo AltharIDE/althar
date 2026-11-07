@@ -57,9 +57,6 @@ export const windowWords = (kind: 'five_hour' | 'weekly' | 'monthly' | 'other'):
 export const planName = (agentId: string): string =>
   ({ 'claude-code': 'Claude', codex: 'ChatGPT', 'opencode-go': 'OpenCode Go', opencode: 'OpenCode' })[agentId] ?? agentId
 
-/** What a move is, in the words its line uses: "Moved to Sonnet 5.5". */
-export const movedTo = (name: string) => `Moved to ${name}`
-
 /** How much of the plan is used, rounded down to the percent its line says: "92%". */
 export const usedPercent = (leftPercent: number) => Math.max(0, Math.min(100, Math.floor(100 - leftPercent)))
 

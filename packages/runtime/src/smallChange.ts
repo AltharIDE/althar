@@ -1,4 +1,4 @@
-import { type PlanStep, TaskEnd } from './Runs'
+import type { PlanStep } from './Runs'
 
 /*
  * The fast lane: a change of a few lines takes one step, on a lighter model,
@@ -75,6 +75,3 @@ export const changedWords = (input: {
   if (lines !== null && lines > 0) return one(lines, 'line')
   return 'the code'
 }
-
-/** The end a small change takes by default: a draft pull request where the host is connected, else its branch. */
-export const SMALL_END: TaskEnd | null = 'draft'
