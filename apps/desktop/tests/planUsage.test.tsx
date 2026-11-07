@@ -9,7 +9,7 @@ import { PlanGauge } from '@althar/ui'
 
 import type { Host } from '../src/renderer/data/services'
 import { TabsFrame } from '../src/renderer/features/tabs/TabsFrame'
-import { limitWords, planOf, roomOf, windowName } from '../src/renderer/features/usage/plan'
+import { limitWords, planOf, remember, roomOf, windowName, type WindowMemory } from '../src/renderer/features/usage/plan'
 import { waitsWords } from '../src/renderer/shared/agents'
 import { ModelChoice } from '../src/renderer/shared/ModelChoice'
 import { clock } from '../src/renderer/shared/time'
@@ -348,6 +348,98 @@ describe('what the window says of a plan', () => {
     expect(roomOf({ id: 'gemini-cli:gemini-3-pro' }, rooms, usage, NOW)).toBeUndefined()
   })
 
+  it('says for every window when it resets and how long is left, that one reset is not read since, and that no time was given', () => {
+    const account = usageAccount({
+      windows: [
+        { kind: 'five_hour', label: null, usedPercent: 21, resetsAt: RESET },
+        { kind: 'weekly', label: null, usedPercent: 50, resetsAt: WEEK },
+        { kind: 'weekly', label: 'Opus', usedPercent: 40, resetsAt: null },
+      ],
+    })
+    const windows = (at: Date) => planOf(planUsage([account]), at).agents[0]?.accounts[0]?.windows
+    expect(windows(NOW)?.map((window) => window.resets)).toEqual([
+      `resets ${clock(RESET, NOW)} · in 4 h 55 m`,
+      `resets ${clock(WEEK, NOW)} · in 3 d 22 h`,
+      'no reset time given',
+    ])
+    // The time left moves with the clock, though nothing is read again.
+    const later = new Date('2026-10-15T12:35:00.000Z')
+    expect(windows(later)?.[0]?.resets).toBe(`resets ${clock(RESET, later)} · in 2 h 25 m`)
+    // Reset since it was read: said so, with no figure that could read as an empty limit.
+    const after = new Date('2026-10-15T15:01:00.000Z')
+    expect(windows(after)?.[0]).toMatchObject({ resets: `reset at ${clock(RESET, after)} · not read since`, unread: true })
+    expect(windows(after)?.[1]).not.toHaveProperty('unread')
+  })
+
+  it('keeps showing each reset window as not read since once the runtime sends none, until it is read again', () => {
+    const memory: WindowMemory = new Map()
+    const read = planUsage([claudeBoth])
+    remember(memory, read)
+    // The runtime's own clock has passed them all: no windows, and said so.
+    const after = new Date('2026-10-20T00:00:00.000Z')
+    const sent = planUsage([{ ...claudeBoth, windows: [], resetSince: true }])
+    remember(memory, sent)
+    const [agent] = planOf(sent, after, memory).agents
+    expect(agent).toMatchObject({ unread: 'Not read since reset' })
+    expect(agent?.accounts[0]?.windows.map((window) => [window.label, window.unread, window.resets])).toEqual(
+      claudeBoth.windows.map((window) => [windowName(window), true, `reset at ${clock(window.resetsAt ?? '', after)} · not read since`]),
+    )
+    // Even where the window's own clock hasn't passed its reset yet, the runtime has said it has.
+    const early = planOf(sent, NOW, memory).agents[0]?.accounts[0]?.windows
+    expect(early?.every((window) => window.unread === true && window.resets?.startsWith('reset at'))).toBe(true)
+    // A restart that kept what was read shows them the same; one that kept nothing has none to show, as before.
+    const restarted: WindowMemory = new Map(JSON.parse(JSON.stringify([...memory])))
+    expect(planOf(sent, after, restarted).agents[0]?.accounts[0]?.windows).toHaveLength(2)
+    expect(planOf(sent, after).agents[0]?.accounts[0]?.windows).toEqual([])
+  })
+
+  it('keeps a window the runtime leaves out after its reset, beside those still read, until it is read again', () => {
+    const memory: WindowMemory = new Map()
+    remember(memory, planUsage([claudeBoth]))
+    // The five hours reset at RESET; the runtime sends only the week, and has not said all have reset.
+    const after = new Date('2026-10-15T15:01:00.000Z')
+    const sent = planUsage([{ ...claudeBoth, windows: claudeBoth.windows.slice(1) }])
+    remember(memory, sent)
+    const rows = (at: Date) =>
+      planOf(sent, at, memory).agents[0]?.accounts[0]?.windows.map((window) => [window.label, window.unread === true])
+    expect(rows(after)).toEqual([
+      ['Week', false],
+      ['5 hours', true],
+    ])
+    // The figure is still the week's alone, and the five hours show nothing before they have reset.
+    expect(planOf(sent, after, memory).agents[0]).toMatchObject({ left: 60, limit: 'weekly limit' })
+    expect(rows(NOW)).toEqual([['Week', false]])
+    // Read again, the five hours are the reading's, not the old one.
+    const again = planUsage([
+      {
+        ...claudeBoth,
+        windows: [
+          { kind: 'five_hour', label: null, usedPercent: 10, resetsAt: '2026-10-15T20:00:00.000Z' },
+          ...claudeBoth.windows.slice(1),
+        ],
+      },
+    ])
+    remember(memory, again)
+    expect(planOf(again, after, memory).agents[0]?.accounts[0]?.windows.map((window) => [window.label, window.unread === true])).toEqual([
+      ['5 hours', false],
+      ['Week', false],
+    ])
+  })
+
+  it('forgets an account the runtime no longer lists, and a window reset for longer than any window lasts', () => {
+    const memory: WindowMemory = new Map()
+    remember(memory, planUsage([claudeBoth]), NOW)
+    expect(memory.size).toBe(1)
+    // A fortnight on, with nothing read of it: its old windows are not shown as unread forever.
+    const later = new Date('2026-11-01T00:00:00.000Z')
+    remember(memory, planUsage([{ ...claudeBoth, windows: [], resetSince: true }]), later)
+    expect(memory.size).toBe(0)
+    // An account that is gone takes its windows with it.
+    remember(memory, planUsage([claudeBoth]), NOW)
+    remember(memory, planUsage([{ ...claudeBoth, accountId: 'other' }]), NOW)
+    expect([...memory.keys()]).toEqual(['other'])
+  })
+
   it('leaves out a window whose reset has passed, as unknown, and a model’s room with it', () => {
     const rooms: ReadonlyArray<ModelRoom> = [
       {
@@ -368,13 +460,17 @@ describe('what the window says of a plan', () => {
     expect(roomOf({ id: 'claude-code:sonnet' }, rooms, usage, NOW)).toMatchObject({ left: 3 })
     // Its five hours have started again, and how much of them is used no one has said yet: the week says, alone.
     const [agent] = planOf(usage, after).agents
-    expect([agent?.left, agent?.limit, agent?.accounts[0]?.windows.map((window) => window.label)]).toEqual([60, 'weekly limit', ['Week']])
+    expect([agent?.left, agent?.limit, agent?.accounts[0]?.windows.map((window) => window.label)]).toEqual([
+      60,
+      'weekly limit',
+      ['5 hours', 'Week'],
+    ])
     expect(roomOf({ id: 'claude-code:sonnet' }, rooms, usage, after)).toBeUndefined()
     expect(roomOf({ id: 'claude-code:' }, rooms, usage, after)).toEqual({ left: 60, until: clock(WEEK, after), account: null })
     // With none of its windows still known, it has no figure, and a model's room is no reading, never all of its plan.
     const fiveHours = planUsage([{ ...claudeBoth, windows: claudeBoth.windows.slice(0, 1) }])
     expect(planOf(fiveHours, after).agents).toMatchObject([
-      { id: 'claude-code', unread: 'Not read since reset', accounts: [{ windows: [] }] },
+      { id: 'claude-code', unread: 'Not read since reset', accounts: [{ windows: [{ unread: true }] }] },
     ])
     expect(roomOf({ id: 'claude-code:sonnet' }, rooms, fiveHours, after)).toBeNull()
     expect(roomOf({ id: 'claude-code:' }, rooms, fiveHours, after)).toBeNull()

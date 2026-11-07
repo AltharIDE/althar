@@ -158,7 +158,8 @@ ul.windows {
 }
 .window {
   display: grid;
-  grid-template-columns: 74px minmax(40px, 1fr) 34px 66px;
+  grid-template-columns: 74px minmax(40px, 1fr) 34px;
+  row-gap: 1px;
   align-items: center;
   column-gap: 8px;
   font-size: 11.5px;
@@ -177,8 +178,17 @@ ul.windows {
   color: var(--t-1);
   font-weight: 600;
 }
+.windowUnknown {
+  grid-column: span 2;
+}
+/* when it resets, under the window's figure */
 .windowUntil {
-  white-space: nowrap;
+  grid-column: 1 / -1;
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
+.window[data-unread] .windowUntil {
+  color: var(--t-2);
 }
 
 @media (prefers-reduced-motion: reduce) {
