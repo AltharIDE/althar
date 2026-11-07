@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 
 import { removeFully } from '@althar/provider-adapters'
 import { Effect, Option } from 'effect'
@@ -109,6 +109,8 @@ export const readsOf = (place: {
   readonly mirrors: string
   readonly objects: ReadonlyArray<string>
   readonly repositories: ReadonlyArray<string>
+  /** The project's task folders made where its folders went before (Settings can move them): they stay where they are, and stay denied. */
+  readonly earlier?: ReadonlyArray<string>
 }) => {
   const gitConfig = join(place.xdgConfig === undefined || place.xdgConfig === '' ? join(place.home, '.config') : place.xdgConfig, 'git')
   const allowed = [
@@ -119,7 +121,9 @@ export const readsOf = (place: {
     // Whether or not they are there: git reading one held from it fails rather than going without.
     ...GIT_CONFIG_FILES.map((file) => join(gitConfig, file)),
   ].map(real)
-  const denied = [place.home, place.projectFolder, ...place.repositories, join(gitConfig, 'credentials')].map(real)
+  const denied = [place.home, place.projectFolder, ...(place.earlier ?? []), ...place.repositories, join(gitConfig, 'credentials')].map(
+    real,
+  )
   return { allowed: [...new Set(allowed)], denied: [...new Set(denied)] }
 }
 
@@ -283,6 +287,14 @@ export const coordinatorFolder = (projectId: string) =>
       WHERE b.project_id = ${projectId} AND b.detached_at IS NULL
       ORDER BY b.created_at, b.rowid`
     const projectFolder = join(config.worktreeRoot, project.slug)
+    // Task folders made under another root, before the person moved it (Settings › Task folders), are still there.
+    const earlier = (yield* sql<{ path: string }>`
+      SELECT path FROM workspaces WHERE project_id = ${projectId} AND device_id = ${instance.deviceId} AND access = 'write'`)
+      // A worktree is root/project/task/repository: the project's folder in that root, once.
+      // A task working in the person's own checkout (Local) has no folder of its own here.
+      .filter((workspace) => !bindings.some((binding) => binding.repository === workspace.path))
+      .map((workspace) => dirname(dirname(workspace.path)))
+      .filter((path) => path !== projectFolder && !path.startsWith(projectFolder + sep))
     const folder = coordinatorFolderAt(config.worktreeRoot, project.slug)
     // Beside the coordinator's folder, never in it: what its commands may write is only that folder.
     const mirrors = join(projectFolder, '.coordinator-mirrors')
@@ -307,6 +319,7 @@ export const coordinatorFolder = (projectId: string) =>
       home: homedir(),
       xdgConfig: process.env.XDG_CONFIG_HOME,
       projectFolder,
+      earlier,
       folder,
       mirrors,
       objects: yield* Effect.forEach(bindings, (binding) => objectsOf(binding.repository)),

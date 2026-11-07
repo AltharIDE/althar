@@ -184,4 +184,28 @@ describe("the coordinator's copies", () => {
     rmSync(home, { recursive: true, force: true })
     rmSync(elsewhere, { recursive: true, force: true })
   })
+
+  it('keeps denying the task folders made under an earlier root, once the person has moved the root', () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), 'althar-home-')))
+    const before = realpathSync(mkdtempSync(join(tmpdir(), 'althar-before-')))
+    const now = realpathSync(mkdtempSync(join(tmpdir(), 'althar-now-')))
+    const projectFolder = join(now, 'meridian')
+    const earlier = [join(before, 'meridian')]
+    const { allowed, denied } = readsOf({
+      home,
+      projectFolder,
+      earlier,
+      folder: join(projectFolder, '.coordinator'),
+      mirrors: join(projectFolder, '.coordinator-mirrors'),
+      objects: [],
+      repositories: [],
+    })
+    assert.isTrue(denied.includes(before + '/meridian'), 'the earlier root’s task folders aren’t denied')
+    assert.isTrue(denied.includes(projectFolder), 'the current root’s task folders aren’t denied')
+    assert.isFalse(
+      allowed.some((path) => path.startsWith(before)),
+      'the earlier root is given back',
+    )
+    for (const folder of [home, before, now]) rmSync(folder, { recursive: true, force: true })
+  })
 })
