@@ -221,7 +221,8 @@ describe('what a task changed, card by card', () => {
     )
     show(reviewed)
     expect(await screen.findByText(/Changes asked by/)).toBeTruthy()
-    expect(screen.getByText('Changes asked by').closest('p')?.textContent).toMatch(/gpt-5\.2/)
+    // The plan's model, named as people read it until the agent lists it ("GPT 5.2"), then as the agent does ("gpt-5.2").
+    expect(screen.getByText('Changes asked by').closest('p')?.textContent).toMatch(/gpt[-\s]5\.2/i)
   })
 
   it('shows its review on its branch where it has no pull request yet', async () => {
