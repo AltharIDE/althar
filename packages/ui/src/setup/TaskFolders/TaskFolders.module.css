@@ -201,7 +201,7 @@
 }
 
 .merged {
-  color: var(--ok);
+  color: var(--ok-ink);
 }
 
 /* it needs a hand, but nothing is lost yet: warm, never red */
