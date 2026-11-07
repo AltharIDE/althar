@@ -3028,7 +3028,8 @@ describe('a task', () => {
     // A round that said nothing is its line alone, with who worked.
     await userEvent.click(await screen.findByRole('button', { name: /worked 0s/ }))
     await userEvent.click(await screen.findByText("python3 - <<'EOF' …"))
-    expect(await screen.findByText("print('hi')")).toBeTruthy()
+    // Opened, the row shows it whole, each line under its start.
+    expect(await screen.findByText(/<<'EOF' print\('hi'\) EOF/)).toBeTruthy()
   })
 
   it('opens a long one-line command too, since its row clips it', async () => {
@@ -3046,8 +3047,12 @@ describe('a task', () => {
     })
     withServices(<Task />, client)
     await userEvent.click(await screen.findByRole('button', { name: /worked 0s/ }))
-    await userEvent.click(await screen.findByText(pipeline))
-    expect(await screen.findByRole('figure')).toBeTruthy()
+    const row = (await screen.findByText(pipeline)).closest('button')
+    if (row === null) throw new Error('the row doesn’t open')
+    await userEvent.click(row)
+    // Opened, the row shows it whole, wrapping, rather than over a copy of it.
+    expect(row.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.queryByRole('figure')).toBeNull()
     // A short one has nothing more to show, so its row doesn't open.
     expect(screen.getByText(short).closest('button')).toBeNull()
   })
