@@ -144,19 +144,26 @@ describe('while you were away', () => {
     await waitFor(() => expect(screen.queryByRole('region', { name: 'While you were away' })).toBeNull())
   })
 
-  it('says how many earlier acts there are, and shows them when asked', async () => {
+  it('says how many earlier acts there are, and shows them a page at a time when asked', async () => {
+    const older = (n: number) => ({ ...AWAY.acts[1]!, id: `oac_old${n}`, what: `Commented on #${600 - n}` })
+    // Two pages of earlier ones: each press asks for the next.
     const { client } = fakeClient({
-      getAway: vi.fn(async (_projectId: string, all?: boolean) =>
-        all === true
-          ? { ...AWAY, acts: [...AWAY.acts, { ...AWAY.acts[1]!, id: 'oac_old', what: 'Commented on #600' }] }
-          : { ...AWAY, earlier: 1 },
+      getAway: vi.fn(async (_projectId: string, shown?: number) =>
+        shown === undefined
+          ? { ...AWAY, earlier: 2 }
+          : shown === 230
+            ? { ...AWAY, acts: [...AWAY.acts, older(1)], earlier: 1 }
+            : { ...AWAY, acts: [...AWAY.acts, older(1), older(2)] },
       ),
     })
     withServices(<Project room={Room.Board} />, client)
     const away = await screen.findByRole('region', { name: 'While you were away' })
+    await userEvent.click(within(away).getByRole('button', { name: '2 earlier' }))
+    expect(await within(away).findByText('Commented on #599')).toBeTruthy()
+    expect(client.getAway).toHaveBeenCalledWith('p1', 230)
     await userEvent.click(within(away).getByRole('button', { name: '1 earlier' }))
-    expect(await within(away).findByText('Commented on #600')).toBeTruthy()
-    expect(client.getAway).toHaveBeenCalledWith('p1', true)
-    expect(within(away).queryByRole('button', { name: '1 earlier' })).toBeNull()
+    expect(await within(away).findByText('Commented on #598')).toBeTruthy()
+    expect(client.getAway).toHaveBeenCalledWith('p1', 430)
+    expect(within(away).queryByRole('button', { name: /earlier/ })).toBeNull()
   })
 })

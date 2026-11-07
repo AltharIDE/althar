@@ -4,7 +4,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useCallback, useState } from 'react'
 
 import { messageOf } from '../../data/client'
-import { keys, reads } from '../../data/reads'
+import { AWAY_FIRST, AWAY_MORE, keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 
 /*
@@ -12,7 +12,7 @@ import { useServices } from '../../data/services'
  * worktrees in the project since the person last cleared it, newest first.
  * Each row says how it is taken back (Revert it, Delete, Undo) or why it
  * can't be; pressed, it says so in place until the runtime answers, and how
- * it went after. The newest show, and the earlier ones once asked for. ×
+ * it went after. The newest show, and the earlier ones a page at a time as asked for. ×
  * clears what this read showed at once: what came after it shows again.
  */
 
@@ -65,9 +65,9 @@ export const rowOf = (act: Kept, pressed: boolean, refused: string | undefined, 
 
 export const useAway = (projectId: string) => {
   const { client, cache } = useServices()
-  const [all, setAll] = useState(false)
-  // Asked for the earlier ones, the newest stay on screen until they come.
-  const read = useQuery({ ...reads(client).away(projectId, all), enabled: projectId !== '', placeholderData: keepPreviousData })
+  const [shown, setShown] = useState(AWAY_FIRST)
+  // Asked for the earlier ones, those on screen stay until the next page comes.
+  const read = useQuery({ ...reads(client).away(projectId, shown), enabled: projectId !== '', placeholderData: keepPreviousData })
   const [pressed, setPressed] = useState<ReadonlySet<string>>(new Set())
   const [refused, setRefused] = useState<ReadonlyMap<string, string>>(new Map())
   const away = read.data ?? null
@@ -75,14 +75,14 @@ export const useAway = (projectId: string) => {
   const upTo = away?.upTo ?? 0
   const clear = useCallback(() => {
     // Gone at once, up to what this read showed; read again once the runtime has kept it.
-    // Both reads, the newest and with the earlier ones, so going back to the newest shows nothing cleared.
+    // Every page it holds, so going back to the first shows nothing cleared.
     cache.setQueriesData({ queryKey: keys.away(projectId) }, (now: typeof away | undefined) =>
       now == null ? now : { ...now, acts: [], earlier: 0 },
     )
-    setAll(false)
+    setShown(AWAY_FIRST)
     void client.clearAway(projectId, upTo).finally(() => cache.invalidateQueries({ queryKey: keys.away(projectId) }))
   }, [cache, client, projectId, upTo])
-  const showEarlier = useCallback(() => setAll(true), [])
+  const showEarlier = useCallback(() => setShown((was) => was + AWAY_MORE), [])
 
   const undo = useCallback(
     (actId: string) => {

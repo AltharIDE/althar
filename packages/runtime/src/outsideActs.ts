@@ -177,17 +177,26 @@ export const releasedIn = (projectId: string, repository: string, tag: string) =
   }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not say which merges a release holds', cause)))
 
 /**
- * How long a claim to take an act back holds without its revert's task or an
- * answer: one older is taken as cut short, by Althar stopping in the middle,
+ * How long a claim to take an act back holds without an answer or a revert
+ * started: one older is taken as cut short, by Althar stopping in the middle,
  * and can be pressed again.
  */
 export const CLAIM_HOLDS_MS = 5 * 60_000
 
 const STOPPED = 'Althar stopped before it was taken back.'
 
-/** Whether a row under way was cut short: claimed, with no revert's task, longer ago than a claim holds. */
-const cutShort = (row: Pick<ActRow, 'state' | 'undoTaskId' | 'updatedAt'>, now: Date) =>
-  row.state === 'undoing' && row.undoTaskId === null && now.getTime() - Date.parse(row.updatedAt) > CLAIM_HOLDS_MS
+/** A revert's task that has started: it has a plan. Until then a claim on its act can still be cut short. */
+const LAUNCHED = 'EXISTS (SELECT 1 FROM task_plans p WHERE p.task_id = outside_acts.undo_task_id)'
+
+/** Whether a row under way was cut short: claimed longer ago than a claim holds, and no revert's task started. */
+const cutShort = (row: Pick<ActRow, 'state' | 'updatedAt'> & { readonly launched: number }, now: Date) =>
+  row.state === 'undoing' && row.launched === 0 && now.getTime() - Date.parse(row.updatedAt) > CLAIM_HOLDS_MS
+
+/**
+ * The command a revert's task is made by, one for each act: made again, as a
+ * claim cut short is pressed again, it is the same task, from its receipt.
+ */
+export const revertCommand = (actId: string) => `cmd_${actId.slice(actId.indexOf('_') + 1)}`
 
 /**
  * Claims an act for taking back, in one write: from done or failed, or from a
@@ -201,9 +210,9 @@ const claimAct = (row: Pick<ActRow, 'id' | 'projectId'>) =>
     const at = yield* timestamp
     const before = new Date(Date.parse(at) - CLAIM_HOLDS_MS).toISOString()
     const [won] = yield* sql<{ revision: number }>`
-      UPDATE outside_acts SET state = 'undoing', error = NULL, updated_at = ${at}, revision = revision + 1
+      UPDATE outside_acts SET state = 'undoing', error = NULL, undo_task_id = NULL, updated_at = ${at}, revision = revision + 1
       WHERE id = ${row.id}
-        AND (state IN ('done', 'failed') OR (state = 'undoing' AND undo_task_id IS NULL AND updated_at < ${before}))
+        AND (state IN ('done', 'failed') OR (state = 'undoing' AND updated_at < ${before} AND NOT ${sql.unsafe(LAUNCHED)}))
       RETURNING revision`
     if (won === undefined) return false
     yield* ledger.notify({
@@ -215,9 +224,32 @@ const claimAct = (row: Pick<ActRow, 'id' | 'projectId'>) =>
     return true
   })
 
-/** How many acts the board shows at most, the newest; and with the earlier ones asked for. */
+/**
+ * Links a revert's task to its act, in one write, while the act is claimed
+ * and has none: the attempt that links it starts it. Another, a claim taken
+ * again while this one ran on, finds it linked and leaves it.
+ */
+const linkRevert = (row: Pick<ActRow, 'id' | 'projectId'>, taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const ledger = yield* Ledger
+    const [won] = yield* sql<{ revision: number }>`
+      UPDATE outside_acts SET undo_task_id = ${taskId}, updated_at = ${yield* timestamp}, revision = revision + 1
+      WHERE id = ${row.id} AND state = 'undoing' AND undo_task_id IS NULL
+      RETURNING revision`
+    if (won === undefined) return false
+    yield* ledger.notify({
+      projectId: row.projectId as ProjectId,
+      aggregateType: 'outside_act',
+      aggregateId: row.id,
+      aggregateRevision: won.revision,
+    })
+    return true
+  })
+
+/** How many acts the board shows at first, the newest; each "N earlier" shows this many more. */
 export const AWAY_SHOWN = 30
-export const AWAY_ALL = 500
+export const AWAY_MORE = 200
 
 /** A run of tasks a lead started together: one row, "Started 2 tasks", where they came in the same minute from the same task. */
 const together = (a: ActRow, b: ActRow) =>
@@ -227,20 +259,21 @@ const Titled = Schema.Struct({ id: Schema.String, threadId: Schema.String, title
 
 /**
  * What agents did outside their worktrees in a project since the person last
- * looked there, newest first: the newest few, or with `all` the earlier ones
- * too; how many older aren't shown; and the newest's mark, for Clear.
+ * looked there, newest first: the newest `shown`; how many older aren't
+ * shown, for the window to ask for more; and the newest's mark, for Clear.
  */
-export const away = (projectId: string, personId: ActorId, all = false) =>
+export const away = (projectId: string, personId: ActorId, shown: number = AWAY_SHOWN) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const [look] = yield* sql<{ lookedAt: string; seen: number }>`
       SELECT looked_at, seen FROM away_looks WHERE project_id = ${projectId} AND actor_id = ${personId}`
     const looked = look?.lookedAt ?? null
     const seen = look?.seen ?? 0
-    const rows = yield* sql<ActRow & { readonly mark: number }>`
-      SELECT rowid AS mark, id, project_id, task_id, thread_id, kind, what, undo, undo_with, cant, state, error, undo_task_id, done_at, updated_at
+    const rows = yield* sql<ActRow & { readonly mark: number; readonly launched: number }>`
+      SELECT rowid AS mark, id, project_id, task_id, thread_id, kind, what, undo, undo_with, cant, state, error, undo_task_id, done_at,
+        updated_at, ${sql.unsafe(LAUNCHED)} AS launched
       FROM outside_acts WHERE project_id = ${projectId} AND rowid > ${seen}
-      ORDER BY rowid DESC LIMIT ${all ? AWAY_ALL : AWAY_SHOWN}`
+      ORDER BY rowid DESC LIMIT ${Math.max(1, Math.floor(shown))}`
     const [unseen] = yield* sql<{ n: number }>`
       SELECT count(*) AS n FROM outside_acts WHERE project_id = ${projectId} AND rowid > ${seen}`
     const ids = [...new Set(rows.flatMap((row) => [row.taskId, row.undoTaskId].filter((one): one is string => one !== null)))]
@@ -301,15 +334,22 @@ export interface RevertTask {
   readonly toward: string
 }
 
+/** How a revert's task is made and started: made as a draft by its command, once for it; then planned and started. */
+export interface Revert<Made, Launched> {
+  readonly make: (task: RevertTask, commandId: string) => Effect.Effect<{ readonly id: string }, unknown, Made>
+  readonly launch: (task: RevertTask, taskId: string) => Effect.Effect<unknown, unknown, Launched>
+}
+
 /**
  * Takes back an act the way its row says (ADR-097): a merge by a task that
- * reverts it, which `start` starts; an issue moved back through its tracker,
- * to the status it had; a lead's comment deleted, unless someone wrote after
- * it, which the row then says in its place. How it went, the row says too.
+ * reverts it, made once for the act, linked to it, then started; an issue
+ * moved back through its tracker, to the status it had; a lead's comment
+ * deleted, unless someone wrote after it, which the row then says in its
+ * place. How it went, the row says too.
  */
-export const undoAct = <R>(
+export const undoAct = <Made, Launched>(
   actId: string,
-  start: (task: RevertTask) => Effect.Effect<{ readonly id: string }, unknown, R>,
+  revert: Revert<Made, Launched>,
   agentName: (agentId: string) => string = (agentId) => agentId,
 ) =>
   Effect.gen(function* () {
@@ -324,16 +364,20 @@ export const undoAct = <R>(
     const failed = (error: unknown) => settleAct(row, { state: 'failed', error: words(error, agentName).message })
     switch (how.way) {
       case 'revert': {
-        const started = yield* Effect.result(
-          start({
-            projectId: row.projectId,
-            title: `Revert ${how.name}`,
-            description: `Revert the merge of ${how.name} (${how.url}) into ${how.branch}: a revert of its merge commit, on a branch of its own, in a pull request into ${how.branch}. Nothing else.`,
-            toward: how.branch,
-          }),
-        )
-        if (started._tag === 'Failure') return yield* failed(started.failure)
-        return yield* settleAct(row, { state: 'undoing', error: null, undoTaskId: started.success.id })
+        const task: RevertTask = {
+          projectId: row.projectId,
+          title: `Revert ${how.name}`,
+          description: `Revert the merge of ${how.name} (${how.url}) into ${how.branch}: a revert of its merge commit, on a branch of its own, in a pull request into ${how.branch}. Nothing else.`,
+          toward: how.branch,
+        }
+        // Made once for the act: Althar stopping after it was made, and the press again, find the same task.
+        const made = yield* Effect.result(revert.make(task, revertCommand(row.id)))
+        if (made._tag === 'Failure') return yield* failed(made.failure)
+        if (!(yield* linkRevert(row, made.success.id))) return
+        const launched = yield* Effect.result(revert.launch(task, made.success.id))
+        if (launched._tag === 'Failure')
+          return yield* settleAct(row, { state: 'failed', error: words(launched.failure, agentName).message, undoTaskId: null })
+        return
       }
       case 'issue': {
         const [home] = yield* sql<{ id: string }>`

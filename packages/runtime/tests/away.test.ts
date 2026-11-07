@@ -1,7 +1,7 @@
 import { makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Cause, Effect, Exit, Layer, Option } from 'effect'
+import { Cause, type Duration, Effect, Exit, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { autoTeam } from '../src/autoTeam'
@@ -9,7 +9,18 @@ import { Changes } from '../src/Changes'
 import { Connections } from '../src/Connections'
 import { Coordinator, CoordinatorOff } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
-import { AWAY_SHOWN, away, CLAIM_HOLDS_MS, clearAway, recordAct, releasedIn, type RevertTask, undoAct } from '../src/outsideActs'
+import {
+  AWAY_MORE,
+  AWAY_SHOWN,
+  away,
+  CLAIM_HOLDS_MS,
+  clearAway,
+  recordAct,
+  releasedIn,
+  type RevertTask,
+  revertCommand,
+  undoAct,
+} from '../src/outsideActs'
 import { Plans } from '../src/Plans'
 import { hasCoordinator, Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
@@ -57,6 +68,41 @@ const aTask = (projectId: string, title: string) =>
   Effect.gen(function* () {
     const created = yield* (yield* Projects).createTask({ envelope: yield* Runtime.envelope('task.create', { title }), projectId, title })
     return created.taskId
+  })
+
+/**
+ * How a revert's task is made and started, as the API does it: made by the
+ * act's command, so made again it is the same task; started with a plan, held
+ * here so no agent runs. What each was asked, by task.
+ */
+const reverts = (projectId: ProjectId, slow: Duration.Input = 0) =>
+  Effect.gen(function* () {
+    const projects = yield* Projects
+    const plans = yield* Plans
+    const instance = yield* Instance
+    const made: Array<string> = []
+    const launched: Array<string> = []
+    const revert = {
+      make: (task: RevertTask, commandId: string) =>
+        Effect.gen(function* () {
+          yield* Effect.sleep(slow)
+          const created = yield* projects.createTask({
+            envelope: yield* Runtime.envelope('task.create', { title: task.title }, commandId),
+            projectId: task.projectId,
+            title: task.title,
+            draft: true,
+          })
+          made.push(created.taskId)
+          return { id: created.taskId }
+        }),
+      launch: (_task: RevertTask, taskId: string) =>
+        Effect.gen(function* () {
+          launched.push(taskId)
+          const team = yield* autoTeam(projectId)
+          yield* plans.propose({ projectId, taskId, steps: team?.steps ?? [], reason: null, actorId: instance.personId, held: true })
+        }),
+    }
+    return { revert, made, launched }
   })
 
 describe('while you were away', () => {
@@ -127,14 +173,18 @@ describe('while you were away', () => {
           source: `merge:${n}`,
           actorId: instance.systemId,
         })
-      for (let n = 1; n <= AWAY_SHOWN + 2; n += 1) yield* merged(n)
+      const all = AWAY_SHOWN + AWAY_MORE + 2
+      for (let n = 1; n <= all; n += 1) yield* merged(n)
       const newest = yield* away(projectId, instance.personId)
       assert.deepStrictEqual(
         [newest.acts.length, newest.earlier, newest.acts[0]?.what],
-        [AWAY_SHOWN, 2, `Merged #${AWAY_SHOWN + 2} into main`],
+        [AWAY_SHOWN, all - AWAY_SHOWN, `Merged #${all} into main`],
       )
-      const every = yield* away(projectId, instance.personId, true)
-      assert.deepStrictEqual([every.acts.length, every.earlier, every.acts.at(-1)?.what], [AWAY_SHOWN + 2, 0, 'Merged #1 into main'])
+      // Each "N earlier" shows the next page, until there are none.
+      const more = yield* away(projectId, instance.personId, AWAY_SHOWN + AWAY_MORE)
+      assert.deepStrictEqual([more.acts.length, more.earlier], [AWAY_SHOWN + AWAY_MORE, 2])
+      const every = yield* away(projectId, instance.personId, AWAY_SHOWN + 2 * AWAY_MORE)
+      assert.deepStrictEqual([every.acts.length, every.earlier, every.acts.at(-1)?.what], [all, 0, 'Merged #1 into main'])
       yield* clearAway(projectId, instance.personId, every.upTo)
       assert.deepStrictEqual((yield* away(projectId, instance.personId)).acts.length, 0)
     }).pipe(Effect.provide(withServices())),
@@ -159,12 +209,12 @@ describe('while you were away', () => {
       )
       const moved = listed[1]!
       const started: Array<string> = []
-      yield* undoAct(moved.id, (task) => Effect.sync(() => (started.push(task.title), { id: '' })))
+      yield* undoAct(moved.id, { make: (task) => Effect.sync(() => (started.push(task.title), { id: '' })), launch: () => Effect.void })
       assert.strictEqual((yield* tracker.issue('MER-231')).status.name, before)
       const [now] = (yield* away(projectId, instance.personId)).acts.filter((one) => one.id === moved.id)
       assert.strictEqual(now?.state, 'undone')
       // Done, it isn't done again, and nothing else started.
-      yield* undoAct(moved.id, (task) => Effect.sync(() => (started.push(task.title), { id: '' })))
+      yield* undoAct(moved.id, { make: (task) => Effect.sync(() => (started.push(task.title), { id: '' })), launch: () => Effect.void })
       assert.lengthOf(started, 0)
     }).pipe(Effect.provide(withServices({ linear: tracker })))
   })
@@ -174,7 +224,6 @@ describe('while you were away', () => {
       const { projectId, threadId } = yield* project()
       const instance = yield* Instance
       const tabs = yield* aTask(projectId, 'Tabs keep their order')
-      const revert = yield* aTask(projectId, 'Revert #634')
       yield* recordAct({
         projectId,
         taskId: tabs,
@@ -191,27 +240,21 @@ describe('while you were away', () => {
       yield* releasedIn(projectId, 'meridian/api', 'v0.8.4')
       const [merged] = (yield* away(projectId, instance.personId)).acts
       assert.deepStrictEqual([merged?.cant, merged?.undo], ['Released in v0.8.4', 'revert'])
-      const asked: Array<{ readonly title: string; readonly toward: string }> = []
-      // Pressed in two windows at once: one revert's task, not two.
-      const start = (task: RevertTask) =>
-        Effect.sync(() => asked.push({ title: task.title, toward: task.toward })).pipe(
-          Effect.andThen(Effect.sleep('50 millis')),
-          Effect.as({ id: revert }),
-        )
-      yield* Effect.all([undoAct(merged!.id, start), undoAct(merged!.id, start)], { concurrency: 'unbounded' })
-      assert.deepStrictEqual(asked, [{ title: 'Revert #634', toward: 'main' }])
+      // Pressed in two windows at once: one revert's task, not two, started once.
+      const { revert, made, launched } = yield* reverts(projectId, '50 millis')
+      yield* Effect.all([undoAct(merged!.id, revert), undoAct(merged!.id, revert)], { concurrency: 'unbounded' })
+      assert.deepStrictEqual([made.length, launched.length], [1, 1])
       const [now] = (yield* away(projectId, instance.personId)).acts
       assert.deepStrictEqual([now?.state, now?.undoTask?.title], ['undoing', 'Revert #634'])
     }).pipe(Effect.provide(withServices())),
   )
 
-  it.live('a take-back cut short by Althar stopping says so, and can be pressed again', () =>
+  it.live('a take-back cut short by Althar stopping says so, and pressed again makes no second revert', () =>
     Effect.gen(function* () {
       const { projectId, threadId } = yield* project()
       const instance = yield* Instance
       const sql = yield* SqlClient.SqlClient
       const tabs = yield* aTask(projectId, 'Tabs keep their order')
-      const revert = yield* aTask(projectId, 'Revert #634')
       yield* recordAct({
         projectId,
         taskId: tabs,
@@ -223,19 +266,32 @@ describe('while you were away', () => {
         actorId: instance.systemId,
       })
       const [merged] = (yield* away(projectId, instance.personId)).acts
-      // Claimed, and Althar stopped before the revert's task started.
       const long = new Date(Date.now() - CLAIM_HOLDS_MS - 60_000).toISOString()
-      yield* sql`UPDATE outside_acts SET state = 'undoing', updated_at = ${long} WHERE id = ${merged!.id}`
-      const [stuck] = (yield* away(projectId, instance.personId)).acts
-      assert.deepStrictEqual([stuck?.state, stuck?.error], ['failed', 'Althar stopped before it was taken back.'])
-      yield* undoAct(merged!.id, () => Effect.succeed({ id: revert }))
+      const reverts_ = () => sql<{ n: number }>`SELECT count(*) AS n FROM tasks WHERE title = 'Revert #634'`
+      // Claimed, its revert's task made, and Althar stopped before the act was linked to it, or before it started.
+      const { revert, made, launched } = yield* reverts(projectId)
+      const first = yield* revert.make({ projectId, title: 'Revert #634', description: '', toward: 'main' }, revertCommand(merged!.id))
+      for (const linked of [null, first.id]) {
+        yield* sql`UPDATE outside_acts SET state = 'undoing', undo_task_id = ${linked}, updated_at = ${long} WHERE id = ${merged!.id}`
+        const [stuck] = (yield* away(projectId, instance.personId)).acts
+        assert.deepStrictEqual([stuck?.state, stuck?.error], ['failed', 'Althar stopped before it was taken back.'])
+      }
+      made.length = 0
+      yield* undoAct(merged!.id, revert)
+      // Pressed again, it is the same task, now started: one revert.
+      assert.deepStrictEqual([made, launched], [[first.id], [first.id]])
+      assert.strictEqual((yield* reverts_())[0]?.n, 1)
       const [now] = (yield* away(projectId, instance.personId)).acts
-      assert.deepStrictEqual([now?.state, now?.undoTask?.title], ['undoing', 'Revert #634'])
-      // A claim still holding isn't taken again.
-      yield* sql`UPDATE outside_acts SET undo_task_id = NULL WHERE id = ${merged!.id}`
-      const again: Array<string> = []
-      yield* undoAct(merged!.id, (task) => Effect.sync(() => (again.push(task.title), { id: revert })))
-      assert.lengthOf(again, 0)
+      assert.deepStrictEqual([now?.state, now?.undoTask?.taskId], ['undoing', first.id])
+      // Started, it holds however long it runs: a press, however much later, starts nothing.
+      yield* sql`UPDATE outside_acts SET updated_at = ${long} WHERE id = ${merged!.id}`
+      assert.strictEqual((yield* away(projectId, instance.personId)).acts[0]?.state, 'undoing')
+      yield* undoAct(merged!.id, revert)
+      assert.deepStrictEqual([made.length, launched.length], [1, 1])
+      // A claim still holding, with nothing linked yet, isn't taken again either: a slow start goes on alone.
+      yield* sql`UPDATE outside_acts SET undo_task_id = NULL, updated_at = ${new Date().toISOString()} WHERE id = ${merged!.id}`
+      yield* undoAct(merged!.id, revert)
+      assert.deepStrictEqual([made.length, launched.length], [1, 1])
     }).pipe(Effect.provide(withServices())),
   )
 })
@@ -344,7 +400,7 @@ describe('a lead’s comment on its pull request', () => {
       const taskId = ready?.taskId ?? ''
       const posts = Effect.map(away(projectId, instance.personId), (seen) => seen.acts.filter((one) => one.kind === 'post'))
       const said = (body: string) => github.commentsOn(1).filter((comment) => comment.body.startsWith(body))
-      const noRevert = () => Effect.die('a comment is never reverted')
+      const noRevert = { make: () => Effect.die('a comment is never reverted'), launch: () => Effect.void }
 
       yield* changes.reply(taskId, { body: 'Renamed it.', threadId: null, by: 'Claude Code' })
       const [first] = yield* posts

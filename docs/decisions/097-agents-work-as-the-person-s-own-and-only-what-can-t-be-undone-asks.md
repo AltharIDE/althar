@@ -612,13 +612,18 @@ that needs, and why it can't be now:
 | Tasks a lead started | `start_task`, `propose_plan` and the rest from a lead | Stop, from the task: the row opens it | None; started in the same minute from one task, one row, "Started 2 tasks" |
 
 The board shows the newest 30, and under them "12 earlier", which shows the
-rest. × clears up to the newest act the window's read showed (its mark,
+next 200 each time it is pressed, until none are left. × clears up to the newest act the window's read showed (its mark,
 `upTo`), never further, so an act done between the read and the press still
 shows; a mark never moves back, so an older window's press doesn't bring back
 what a newer one cleared. Taking an act back first claims it in one write
 (done or failed to under way), so two windows pressing at once take it back
-once; a claim with no revert's task after five minutes, as when Althar stopped
-in the middle, reads as failed and can be pressed again.
+once. A revert's task is made by a command of the act's own (`cmd_` and the
+act's id), so made again it is the same task, from its receipt; the press
+whose write links that task to the act starts it, and any other leaves it. A
+claim whose revert hasn't started (no plan) after five minutes, as when
+Althar stopped in the middle, reads as failed and can be pressed again, which
+finds the same task and starts it; one that has started holds however long
+it runs.
 
 Where this goes another way than #640's README: the list starts from the last
 act the person had seen when they last pressed ×, not from when they last

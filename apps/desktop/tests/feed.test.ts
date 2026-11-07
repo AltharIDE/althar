@@ -247,17 +247,17 @@ describe('the window’s watch', () => {
     expect(cache.getQueryState(keys.rules('p1'))?.isInvalidated).toBe(true)
   })
 
-  it('reads what agents did outside their worktrees again as one acts, the newest and with the earlier ones, only while it shows', async () => {
+  it('reads what agents did outside their worktrees again as one acts, each page held, only while it shows', async () => {
     const { client, cache, emit, read } = opened()
     await cache.fetchQuery(read.away('p1'))
-    await cache.fetchQuery(read.away('p1', true))
+    await cache.fetchQuery(read.away('p1', 230))
     const showing = new QueryObserver(cache, read.away('p1'))
     const stop = showing.subscribe(() => undefined)
     emit(changed('outside_act', 'oac1', null, 'p1'))
     await settle()
     expect(client.getAway).toHaveBeenCalledTimes(3)
     // The one not on screen is read again once it shows.
-    expect(cache.getQueryState(keys.awayAll('p1', true))?.isInvalidated).toBe(true)
+    expect(cache.getQueryState(keys.awayShown('p1', 230))?.isInvalidated).toBe(true)
     stop()
   })
 

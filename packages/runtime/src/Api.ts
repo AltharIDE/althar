@@ -688,41 +688,37 @@ export const handlers = Api.toLayer(
       ),
     )
 
-    /**
-     * A task the person starts from the window, as StartTask has it: planned like any other and started at once, its card
-     * in the coordinator's thread. Without steps, Auto picks who does it (ADR-097).
-     */
-    const startNow = (
+    /** Who does a task: the steps asked for, or Auto's; none where no agent can work. */
+    const teamOf = (projectId: string, picked: ReadonlyArray<PlanStep> | undefined) =>
+      Effect.gen(function* () {
+        if (picked !== undefined) return { steps: picked, reason: null }
+        const auto = yield* autoTeam(projectId).pipe(Effect.provideService(Agents, agents), Effect.provideService(SignIns, signIns))
+        if (auto === null) return yield* new NoAgentCanWork()
+        return { steps: auto.steps, reason: auto.reason }
+      })
+
+    /** A task the person starts, made as a draft: once for its command, so asked again with the same id it is the same task. */
+    const makeTask = (
       commandId: string,
       {
         projectId,
         title,
         description,
-        steps: picked,
         worksIn,
         toward,
         issue,
-        end,
         repositories,
       }: {
         readonly projectId: string
         readonly title: string
         readonly description?: string | undefined
-        readonly steps?: ReadonlyArray<PlanStep> | undefined
         readonly worksIn?: WorksIn | undefined
         readonly toward?: string | undefined
         readonly issue?: string | undefined
-        readonly end?: TaskEnd | null | undefined
         readonly repositories?: ReadonlyArray<string> | undefined
       },
     ) =>
       Effect.gen(function* () {
-        const auto =
-          picked === undefined
-            ? yield* autoTeam(projectId).pipe(Effect.provideService(Agents, agents), Effect.provideService(SignIns, signIns))
-            : null
-        if (picked === undefined && auto === null) return yield* new NoAgentCanWork()
-        const steps = picked ?? auto?.steps ?? []
         const from = yield* issueFor(projectId, issue)
         const created = yield* projects.createTask({
           envelope: yield* envelope('task.create', { projectId, title, description, issue }, commandId),
@@ -736,28 +732,73 @@ export const handlers = Api.toLayer(
           ...(worksIn === undefined ? {} : { worksIn }),
           ...(toward === undefined || toward.trim() === '' ? {} : { toward }),
         })
-        if (issue !== undefined) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue })
-        // A task you start yourself is planned like any other, and starts at once; its card shows in the coordinator's thread.
+        return created.taskId
+      })
+
+    /** A draft task planned like any other and started at once, its card in the coordinator's thread. */
+    const launchTask = (
+      projectId: string,
+      taskId: string,
+      team: { readonly steps: ReadonlyArray<PlanStep>; readonly reason: string | null },
+      {
+        worksIn,
+        issue,
+        end,
+      }: { readonly worksIn?: WorksIn | undefined; readonly issue?: string | undefined; readonly end?: TaskEnd | null | undefined } = {},
+    ) =>
+      Effect.gen(function* () {
+        if (issue !== undefined) yield* issues.attach({ projectId: projectId as ProjectId, taskId, issue })
         const planId = yield* plans.propose({
           projectId: projectId as ProjectId,
-          taskId: created.taskId,
-          steps,
-          reason: auto?.reason ?? null,
+          taskId,
+          steps: team.steps,
+          reason: team.reason,
           ...(worksIn === undefined ? {} : { worksIn }),
           actorId: instance.personId,
           startsIn: Duration.zero,
-          end: end === undefined ? yield* pullRequests.endFor(projectId, created.taskId) : end,
+          end: end === undefined ? yield* pullRequests.endFor(projectId, taskId) : end,
         })
         yield* plans.start(planId, instance.personId)
-        return yield* queries.task(created.taskId)
       })
 
-    /** Takes back something an agent did outside its worktree, the way the board's row says (ADR-097); a revert is a task of its own. */
-    const undoAway = (commandId: string, actId: string) =>
-      undoAct(actId, (task) => startNow(commandId, task), agentName).pipe(
-        Effect.provideService(IssueChanges, issueChanges),
-        Effect.provideService(Changes, pullRequests),
-      )
+    /**
+     * A task the person starts from the window, as StartTask has it: planned like any other and started at once, its card
+     * in the coordinator's thread. Without steps, Auto picks who does it (ADR-097).
+     */
+    const startNow = (
+      commandId: string,
+      input: Parameters<typeof makeTask>[1] & {
+        readonly steps?: ReadonlyArray<PlanStep> | undefined
+        readonly end?: TaskEnd | null | undefined
+      },
+    ) =>
+      Effect.gen(function* () {
+        const team = yield* teamOf(input.projectId, input.steps)
+        const taskId = yield* makeTask(commandId, input)
+        yield* launchTask(input.projectId, taskId, team, input)
+        return yield* queries.task(taskId)
+      })
+
+    /**
+     * Takes back something an agent did outside its worktree, the way the board's row says (ADR-097); a revert is a task
+     * of its own, Auto's, made once for the act and started by the press that links it.
+     */
+    const undoAway = (actId: string) =>
+      undoAct(
+        actId,
+        {
+          make: (task, commandId) =>
+            Effect.gen(function* () {
+              yield* teamOf(task.projectId, undefined)
+              return { id: yield* makeTask(commandId, task) }
+            }),
+          launch: (task, taskId) =>
+            Effect.gen(function* () {
+              yield* launchTask(task.projectId, taskId, yield* teamOf(task.projectId, undefined))
+            }),
+        },
+        agentName,
+      ).pipe(Effect.provideService(IssueChanges, issueChanges), Effect.provideService(Changes, pullRequests))
 
     return Api.of({
       Status: ({ recheck }) =>
@@ -1332,10 +1373,10 @@ export const handlers = Api.toLayer(
       GetCoordinator: ({ projectId, before, limit }) =>
         api(queries.coordinator(projectId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })),
       StartTask: ({ commandId, ...asked }) => once(commandId, api(Effect.provideContext(startNow(commandId, asked), folderStore))),
-      GetAway: ({ projectId, all }) => api(Effect.provideContext(away(projectId, instance.personId, all === true), folderStore)),
+      GetAway: ({ projectId, shown }) => api(Effect.provideContext(away(projectId, instance.personId, shown), folderStore)),
       ClearAway: ({ commandId, projectId, upTo }) =>
         once(commandId, api(Effect.provideContext(clearAway(projectId, instance.personId, upTo), folderStore))),
-      UndoAway: ({ commandId, actId }) => once(commandId, api(Effect.provideContext(undoAway(commandId, actId), folderStore))),
+      UndoAway: ({ commandId, actId }) => once(commandId, api(Effect.provideContext(undoAway(actId), folderStore))),
       StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, instance.personId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
       ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>

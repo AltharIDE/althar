@@ -3780,8 +3780,8 @@ export const Api = RpcGroup.make(
   ),
   /** The home, across every project; what the loop did, from `since` where the window says, else from when the person last left the home. */
   call('GetHome', { since: Schema.optional(Schema.String) }, HomeSnapshot),
-  /** What agents did outside their worktrees in a project since the person last looked (ADR-097). */
-  call('GetAway', { projectId: Schema.String, all: Schema.optional(Schema.Boolean) }, AwaySnapshot),
+  /** What agents did outside their worktrees in a project since the person last looked (ADR-097): the newest `shown`, 30 unless said. */
+  call('GetAway', { projectId: Schema.String, shown: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))) }, AwaySnapshot),
   /** The person has seen it, up to the newest act their read showed (`upTo`): the list starts again after it. */
   command('ClearAway', { projectId: Schema.String, upTo: Schema.Number }, Schema.Void),
   /** Takes back something an agent did outside its worktree, the way its row says: a revert starts a task, an undo goes through the same host or tracker. */
