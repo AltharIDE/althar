@@ -4,6 +4,7 @@ import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { FastLane } from '../src/fastLane'
+import { Ids, newId } from '@althar/domain'
 import { Instance } from '../src/Instance'
 import { lighterOf, MOVE_AT, planName, usedPercent, windowWords } from '../src/modelMoves'
 import { Plans } from '../src/Plans'
@@ -99,6 +100,102 @@ describe('a small change', () => {
         ],
       )
       assert.isNotNull(card.content.steps[0]?.at)
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+  )
+
+  it.effect('reads its steps from what happened: the report, the checks, the merge and the review it started', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const plans = yield* Plans
+      const instance = yield* Instance
+      const sql = yield* SqlClient.SqlClient
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const created = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'The Run menu says Strat',
+        draft: true,
+      })
+      yield* plans.propose({
+        projectId: project.projectId as ProjectId,
+        taskId: created.taskId,
+        steps: smallChangeSteps({
+          lead: { agentId: 'claude-code', model: 'claude-sonnet-5', effort: 'low' },
+          review: { agentId: 'codex', model: 'gpt-6-sol' },
+        }),
+        reason: null,
+        actorId: instance.personId,
+        reviewAfterMerge: true,
+        startsIn: Duration.zero,
+      })
+      const at = '2026-11-06T14:03:00.000Z'
+      yield* addItem({ projectId: project.projectId as ProjectId, threadId: created.threadId }, 'step_result', {
+        step: 'implement',
+        round: 0,
+        summary: 'The menu says Start.',
+      })
+      const url = 'https://github.test/meridian/api/pull/641'
+      const snapshot = {
+        number: 641,
+        title: 'The Run menu says Strat',
+        url,
+        state: 'merged',
+        draft: false,
+        headSha: 'abcdef',
+        additions: 1,
+        deletions: 1,
+        changedFiles: 1,
+        repository: ['meridian', 'api'],
+        words: { noun: 'pull request', short: 'PR', prefix: '#' },
+        checks: { sha: 'abcdef', outcome: 'passed', passed: 1, failed: 0, running: 0, total: 1, failing: [] },
+      }
+      const linkId = yield* newId(Ids.externalLink)
+      yield* sql`
+        INSERT INTO external_links ${sql.insert({
+          id: linkId,
+          projectId: project.projectId,
+          taskId: created.taskId,
+          product: 'github',
+          kind: 'change',
+          externalId: '641',
+          ref: 'PR #641',
+          key: '641',
+          url,
+          snapshot: JSON.stringify(snapshot),
+          listening: 0,
+          createdAt: at,
+          updatedAt: at,
+        })}`
+      yield* addItem({ projectId: project.projectId as ProjectId, threadId: created.threadId }, 'arrival', {
+        source: 'github',
+        kind: 'checks',
+        from: null,
+        where: 'PR #641',
+        url,
+        passed: 1,
+        failed: 0,
+      })
+      yield* addItem({ projectId: project.projectId as ProjectId, threadId: created.threadId }, 'arrival', {
+        source: 'github',
+        kind: 'merged',
+        from: null,
+        where: 'PR #641',
+        url,
+      })
+      const thread = yield* (yield* Queries).thread(created.threadId, { limit: 50 })
+      const card = thread.items.find((item) => item.kind === 'small_change')
+      if (card?.kind !== 'small_change') return assert.fail('no card')
+      assert.strictEqual(card.content.change?.number, 641)
+      assert.deepStrictEqual(
+        card.content.steps.map((step) => [step.key, step.what, step.done]),
+        [
+          ['started', 'Started', true],
+          ['changed', 'Changed 2 lines', true],
+          ['checks', 'Checks pass', true],
+          ['merged', 'Merged', true],
+        ],
+      )
+      assert.isString(card.content.steps[1]?.at)
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 })
