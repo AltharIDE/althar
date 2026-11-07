@@ -6,10 +6,16 @@ import {
   Button,
   ChangeSet,
   ChangeState,
+  ChangeTrack,
   CheckState,
   type ChangeReview,
   Diverged,
+  Menu,
+  MenuItem,
   type PullRequest,
+  SplitButton,
+  type TrackStanding,
+  type TrackStop,
   UsageCard,
   WhatItMade,
   modKey,
@@ -59,8 +65,17 @@ export const text = {
   connect: (host: string) => `Connect ${host}`,
   closed: (change: ChangeSummary, host: string) => `${change.short} ${change.prefix}${change.number} was closed on ${host}.`,
   accept: (n: number) => (n > 2 ? `Accept and merge all ${n}` : n === 2 ? 'Accept and merge both' : 'Accept and merge'),
+  /** In a task of several, what is left of it once some merged: by name. */
+  acceptLeft: (names: ReadonlyArray<string>) => `Accept and merge ${andOf(names)}`,
+  /** Only the first of those left, the one the others build on. */
+  mergeOnly: (repository: string) => `Merge ${repository} only`,
+  /** What else can be done, each repository on its own: the menu beside the press, read out. */
+  eachAlone: 'Each on its own',
   markReady: 'Mark ready for review',
   markReadyIn: (repository: string) => `Mark ${repository} ready for review`,
+  /** Every draft of a task of several, or as many as are drafts where others aren't. */
+  markAllReady: (n: number, all: boolean) =>
+    all ? (n === 2 ? 'Mark both ready for review' : `Mark all ${n} ready for review`) : `Mark ${n} drafts ready for review`,
   /** Opening a pull request from here opens a draft: its lead's work may not be done. */
   openChange: 'Open a draft pull request',
   openNewChange: 'Open a new draft pull request',
@@ -135,6 +150,10 @@ const fewOf = (files: ReadonlyArray<string>) => {
 /** A repository by its name alone: `web` for `meridian/web`. */
 const nameOf = (repository: string) => repository.slice(repository.lastIndexOf('/') + 1)
 
+/** Names in a sentence: api, web and docs. */
+const andOf = (names: ReadonlyArray<string>) =>
+  names.length <= 2 ? names.join(' and ') : `${names.slice(0, -1).join(', ')} and ${names.at(-1) ?? ''}`
+
 /** The files under a repository's folder, in a task of several, where each path starts with its name; all of them in a task of one. */
 const filesIn = (files: ReadonlyArray<ChangedFile>, name: string, several: boolean) =>
   (several ? files.filter((file) => file.path.startsWith(`${name}/`)) : files).map((file) => ({
@@ -170,6 +189,9 @@ export function Outputs({
   onOpenChange,
   onPush,
   onMarkReady,
+  onMarkAllReady,
+  merging = null,
+  mergeRefused = null,
   onPostScreenshots,
   onOpenFile,
   conflict = null,
@@ -198,8 +220,15 @@ export function Outputs({
   onPushBranch: () => void
   /** Opens where the project's code host is connected. */
   onConnect: () => void
-  /** Accepts its pull requests: each merged on its host in turn, at the head shown, stopping at the first refused. */
+  /**
+   * Accepts its pull requests: each merged on its host in turn, at the head shown, the next once the one before has landed,
+   * stopping at the first refused.
+   */
   onAccept: (changes: ReadonlyArray<{ readonly head: string; readonly url: string }>) => void
+  /** Of its pull requests being accepted in turn, the one merging now, by its address. */
+  merging?: string | null
+  /** The pull request whose merge the error is about, by its address: said on its own part of the card. */
+  mergeRefused?: string | null
   onMergeHere: () => void
   onOpenChange: () => void
   onPush: (head: string, url: string) => void
@@ -210,6 +239,8 @@ export function Outputs({
   /** Has the lead merge a pull request's commits into its branch, so a plain push works. */
   onBringIn: (url: string) => void
   onMarkReady: (url: string) => void
+  /** Marks each of these drafts ready for review, in turn. */
+  onMarkAllReady: (urls: ReadonlyArray<string>) => void
   /**
    * Puts the screenshots What it looks like shows in the comment on the pull
    * request at `url`, without the views left out (ADR-077): null once
@@ -293,6 +324,7 @@ export function Outputs({
           const checked = open.some((one) => one.checks != null)
           // What the lead committed since goes up first: accepting merges what the pull request has.
           const accepting = (ready || task.mergeable === true) && state === ChangeState.Ready && pushes.length === 0
+          if (open.length > 1) return track(accepting)
           const actions: ReactNode[] = [
             // Only those Althar held, where the project's rules push the lead's commits on their own (ADR-072).
             ...pushes.filter(personPushes).map((one) => (
@@ -344,6 +376,128 @@ export function Outputs({
             />
           )
         })()
+
+  /**
+   * Several repositories, a pull request in each: one track, in the order they merge, which is the order they opened in and
+   * accepting merges them in. Each says where it stands and how its checks do; what can be done is one press for all of them,
+   * each one's own a menu away.
+   */
+  function track(accepting: boolean) {
+    const left = open.filter((one) => one.state === 'open')
+    const at = merging === null ? -1 : open.findIndex((one) => one.url === merging)
+    const refusedAt = error === null ? null : mergeRefused
+    const standingOf = (one: ChangeSummary, i: number): TrackStanding =>
+      one.state === 'merged'
+        ? 'merged'
+        : refusedAt === one.url
+          ? 'refused'
+          : merging === one.url
+            ? 'merging'
+            : at !== -1 && i > at && acting === doing.accept
+              ? 'waiting'
+              : one.queued === true
+                ? 'queued'
+                : one.draft
+                  ? 'draft'
+                  : 'open'
+    const stops = open.map((one, i): TrackStop => {
+      const brand = productBrand(one.product)
+      // Its files are under its repository's folder here, which needn't be named as the host names it.
+      const folder = one.slug ?? nameOf(one.repository)
+      return {
+        name: nameOf(one.repository),
+        number: `${one.prefix}${one.number}`,
+        url: one.url,
+        host: { name: productName(one.product), ...(brand === undefined ? {} : { brand }) },
+        standing: standingOf(one, i),
+        ...(one.target === undefined ? {} : { target: one.target }),
+        ...(one.checks == null ? {} : { checks: one.checks.list.map(checkOf) }),
+        ...(one.conflicts === true ? { conflicts: true } : {}),
+        ...(refusedAt === one.url && error !== null ? { refused: error } : {}),
+        files: filesIn(task.files, folder, true).map((file) => ({ ...file, path: file.path.slice(folder.length + 1) })),
+        folder,
+      }
+    })
+    const [next] = left
+    const merge = (changes: ReadonlyArray<ChangeSummary>) => onAccept(changes.map((one) => ({ head: one.head ?? '', url: one.url })))
+    // The next to merge still in its merge queue holds the rest: nothing to press until it has landed.
+    const accept =
+      accepting && next !== undefined && next.queued !== true ? (
+        left.length === 1 ? (
+          <Button key="accept" variant="signal" {...pressed(doing.accept)} onClick={() => merge(left)}>
+            {left.length === open.length ? text.accept(1) : text.acceptLeft([nameOf(next.repository)])}
+          </Button>
+        ) : (
+          <SplitButton
+            key="accept"
+            variant="signal"
+            moreLabel={text.eachAlone}
+            {...pressed(doing.accept)}
+            // In order, each at the head shown, so one that moved on since isn't merged unseen; the next once this one landed.
+            onClick={() => merge(left)}
+            menu={(trigger) => (
+              <Menu trigger={trigger} label={text.eachAlone} align="end">
+                <MenuItem onSelect={() => merge([next])}>{text.mergeOnly(nameOf(next.repository))}</MenuItem>
+              </Menu>
+            )}
+          >
+            {left.length === open.length ? text.accept(left.length) : text.acceptLeft(left.map((one) => nameOf(one.repository)))}
+          </SplitButton>
+        )
+      ) : null
+    const [draft] = drafts
+    const markReady =
+      draft === undefined ? null : drafts.length === 1 ? (
+        <Button key="ready" {...pressed(doing.markReady(draft.url))} onClick={() => onMarkReady(draft.url)}>
+          {text.markReadyIn(nameOf(draft.repository))}
+        </Button>
+      ) : (
+        <SplitButton
+          key="ready"
+          moreLabel={text.eachAlone}
+          {...pressed(doing.markAllReady)}
+          onClick={() => onMarkAllReady(drafts.map((one) => one.url))}
+          menu={(trigger) => (
+            <Menu trigger={trigger} label={text.eachAlone} align="end">
+              {drafts.map((one) => (
+                <MenuItem key={one.url} onSelect={() => onMarkReady(one.url)}>
+                  {text.markReadyIn(nameOf(one.repository))}
+                </MenuItem>
+              ))}
+            </Menu>
+          )}
+        >
+          {text.markAllReady(drafts.length, drafts.length === left.length)}
+        </SplitButton>
+      )
+    const actions: ReactNode[] = [
+      // Only those Althar held, where the project's rules push the lead's commits on their own (ADR-072).
+      ...pushes.filter(personPushes).map((one) => (
+        <Button
+          key={`push-${one.url}`}
+          variant="signal"
+          {...pressed(doing.push(one.url))}
+          onClick={() => onPush(one.localHead ?? '', one.url)}
+        >
+          {text.pushTo(one.unpushed, nameOf(one.repository))}
+        </Button>
+      )),
+      ...(accept === null ? [] : [accept]),
+      ...(markReady === null ? [] : [markReady]),
+      ...(openNew === false ? [] : [openNew]),
+    ]
+    return (
+      <ChangeTrack
+        stops={stops}
+        {...(review === undefined ? {} : { review })}
+        {...(actions.length === 0 ? {} : { actions })}
+        {...files}
+        // A merge refused is said on its own repository's stop.
+        {...(refusedAt !== null && open.some((one) => one.url === refusedAt) ? {} : failure())}
+        text={label}
+      />
+    )
+  }
 
   // A merge that conflicts is the lead's to settle: one press asks it.
   const conflicted = (
