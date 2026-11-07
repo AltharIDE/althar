@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { type CSSProperties, useMemo, useState, type ReactNode } from 'react'
+import { type CSSProperties, useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import {
   DocPanel,
@@ -15,7 +15,10 @@ import {
 import { messageOf } from '../data/client'
 import { reads } from '../data/reads'
 import { useServices } from '../data/services'
-import { type BenchWidth, useBenchWidth } from './code/bench'
+import type { PageOpener } from '../features/browser/opener'
+import { pages, usePage } from '../features/browser/pages'
+import { PageView } from '../features/browser/PageView'
+import { type BenchWidth, PAGE_BENCH, useBenchWidth } from './code/bench'
 import { type CodeOpen, useCodeHost } from './code/CodeHost'
 
 /*
@@ -26,8 +29,20 @@ import { type CodeOpen, useCodeHost } from './code/CodeHost'
  * document is read again as the agent edits it (DocumentPanel). Opening
  * another from the thread replaces what is there; a file opened from inside
  * the document goes on top of it, with Back. Escape or Close gives focus
- * back to what opened it.
+ * back to what opened it. Where the conversation has pages (ADR-099), its
+ * page goes there too, in place of a document, as wide as half the window
+ * to start; a link in a message opens there, or in the person's browser,
+ * as the person keeps links.
  */
+
+/** A conversation's page beside it: whose it is, the draft its comments go to, where its links open, and its way to a tab of its own. */
+export interface ThreadPage {
+  readonly owner: string
+  readonly kind: 'task' | 'project'
+  readonly draft: string
+  readonly opener: PageOpener
+  readonly onDock: () => void
+}
 
 export interface ThreadHost {
   readonly shell: ThreadShell
@@ -61,11 +76,25 @@ export interface ThreadHost {
 export const useThreadHost = (
   documents = true,
   code: { readonly threadId: string | null; readonly taskId: string | null } | null = null,
+  page: ThreadPage | null = null,
 ): ThreadHost => {
   const [pictures, setPictures] = useState<{ readonly set: readonly ImageRef[]; readonly at: number } | null>(null)
   const [doc, setDoc] = useState<DocRef | null>(null)
   const [opened, setOpen] = useState<(CodeOpen & { readonly threadId: string | null }) | null>(null)
-  const bench = useBenchWidth()
+  const owner = page?.owner ?? null
+  const beside = usePage(owner, useServices().host.pages).where === 'beside'
+  // A page opened beside the conversation takes the workbench from a document or a file; one of those opened takes it back.
+  useEffect(() => {
+    if (!beside) return
+    setDoc(null)
+    setOpen(null)
+  }, [beside])
+  const hidePage = () => {
+    if (owner !== null && pages.where(owner) === 'beside') pages.hide(owner)
+  }
+  const docBench = useBenchWidth()
+  const pageBench = useBenchWidth(undefined, PAGE_BENCH)
+  const bench = beside ? pageBench : docBench
   const threadId = code?.threadId ?? null
   // The file open is the thread's: another thread's names name other files.
   const open = opened !== null && opened.threadId === threadId ? opened : null
@@ -73,6 +102,7 @@ export const useThreadHost = (
   const openCode = (found: FoundCode, from: HTMLElement | null) => {
     const onTop = from?.closest('[data-workbench]') != null
     if (!onTop) setDoc(null)
+    hidePage()
     setOpen({ found, from, onTop, threadId })
   }
   const coded = useCodeHost({
@@ -94,12 +124,14 @@ export const useThreadHost = (
             openDoc: (opened: DocRef) => {
               setOpen(null)
               setDoc(opened)
+              if (owner !== null && pages.where(owner) === 'beside') pages.hide(owner)
             },
           }
         : {}),
       ...(coded.shell === undefined ? {} : { code: coded.shell }),
+      ...(page === null ? {} : { openLink: page.opener.link, ...(page.opener.links === 'beside' ? { linkNote: text.beside } : {}) }),
     }),
-    [documents, coded.shell],
+    [documents, coded.shell, page, owner],
   )
   const workbench: ThreadHost['workbench'] = (docPanel, over) => {
     // Over something, a sliver of it beside the panel is of no use: the panel takes it all, as wide as it can be.
@@ -107,7 +139,11 @@ export const useThreadHost = (
     const max = over === undefined ? bench.max : whole ? over.room : over.room - over.keep
     const width = whole ? max : Math.min(bench.width, max)
     const file = coded.panel(width)
-    if ((docPanel === null || docPanel === undefined || docPanel === false) && file === null) return undefined
+    const shown =
+      beside && page !== null ? (
+        <PageView owner={page.owner} kind={page.kind} draft={page.draft} where="beside" onDock={page.onDock} />
+      ) : null
+    if ((docPanel === null || docPanel === undefined || docPanel === false) && file === null && shown === null) return undefined
     return (
       <Workbench
         width={width}
@@ -122,8 +158,12 @@ export const useThreadHost = (
       >
         {/* What opens from inside it opens here too: a file the lead's document names. */}
         <ThreadShellProvider value={shell}>
-          {docPanel !== null && docPanel !== undefined && docPanel !== false && <div hidden={file !== null}>{docPanel}</div>}
-          {file}
+          {shown ?? (
+            <>
+              {docPanel !== null && docPanel !== undefined && docPanel !== false && <div hidden={file !== null}>{docPanel}</div>}
+              {file}
+            </>
+          )}
         </ThreadShellProvider>
       </Workbench>
     )
@@ -138,6 +178,8 @@ export const useThreadHost = (
     workbench,
   }
 }
+
+const text = { beside: '(opens beside the conversation)' } as const
 
 /** A document in the side panel: as it was when it opened, then as it is now, read again at each `version`. */
 export function DocumentPanel({

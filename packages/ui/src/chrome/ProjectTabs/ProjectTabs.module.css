@@ -124,6 +124,10 @@
 .home {
   flex: none;
 }
+/* the pages' tabs: after the projects', each as wide as its title needs, up to a project's */
+.pages .name {
+  max-width: 160px;
+}
 .tab:not(.current):hover {
   background: var(--line);
 }

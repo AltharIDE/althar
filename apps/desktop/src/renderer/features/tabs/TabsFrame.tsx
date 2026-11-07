@@ -1,9 +1,12 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState, useSyncExternalStore } from 'react'
-import { useNavigate } from '@tanstack/react-router'
+import { useNavigate, useRouterState } from '@tanstack/react-router'
 
 import { commandDown, LoadMeter, modKey, Offline, primaryDown, ProjectTabs, Room, TitleBar, UpdateReady } from '@althar/ui'
 
 import { useServices } from '../../data/services'
+import { shownAddress } from '../../../main/browser/addresses'
+import { pages, usePageTabs } from '../browser/pages'
+import { toOrigin } from '../browser/route'
 import { FinderView } from '../finder/FinderView'
 import { QuickSettings } from '../settings/QuickSettings'
 import { CarriedAtFoot, CarriedBack } from '../../shared/dictation/Carried'
@@ -17,6 +20,11 @@ import { beside, byNumber } from './tabs'
 import s from './Tabs.module.css'
 import { SLOTS, text as loadText, useLoad } from './useLoad'
 import { useTabs } from './useTabs'
+
+const text = {
+  /** A page's tab, before it has a title or an address. */
+  page: 'Page',
+} as const
 
 /*
  * Every screen under the window's tabs: the home's, Althar's settings' while
@@ -103,10 +111,27 @@ function TabsBar({
   const online = useOnline()
   const load = useLoad(tabs.tabs.length > 0 || tabs.others.length > 0)
   const { select, current } = tabs
+  // Pages in tabs of their own, after the projects': each named by its title, or where it is; closed, the page goes, and the window back to where it came from.
+  const navigate = useNavigate()
+  const pathname = useRouterState({ select: (state) => state.location.pathname })
+  const pageTabs = usePageTabs(host.pages).map(({ owner, state }) => ({
+    id: owner,
+    title: state === null ? text.page : state.title.trim() || shownAddress(state.address) || text.page,
+    current: pathname === `/pages/${owner}`,
+    onSelect: () => void navigate({ to: '/pages/$owner', params: { owner } }),
+    onClose: () => {
+      const origin = pages.originOf(owner)
+      const here = pathname === `/pages/${owner}`
+      pages.forget(owner)
+      void host.pages?.close(owner)
+      if (here && origin !== null) void toOrigin(navigate, origin)
+    },
+  }))
   return (
     <ProjectTabs
       tabs={tabs.tabs}
       current={current}
+      pages={pageTabs}
       yours={tabs.yours}
       others={tabs.others}
       {...(tabs.settings.open
