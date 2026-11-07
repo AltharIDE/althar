@@ -20,6 +20,12 @@ interface Runnable {
  * And jsdom lays nothing out, so a play that measures a size reads 0, as a drag along the tabs does.
  */
 const BROWSER_ONLY = new Set<string>([
+  'thread/TaskFace/TaskFace.stories.tsx#ScrolledUp',
+  'thread/TaskFace/TaskFace.stories.tsx#ScrolledUpDark',
+  'thread/TaskFace/TaskFace.stories.tsx#ScrolledUpWithOnePill',
+  'thread/TaskFace/TaskFace.stories.tsx#ScrolledUpWithOnePillDark',
+  'thread/TaskFace/TaskFace.stories.tsx#ScrolledUpWithTwoPills',
+  'thread/TaskFace/TaskFace.stories.tsx#ScrolledUpWithTwoPillsDark',
   'primitives/Fold/Fold.stories.tsx#Opening',
   'thread/Snippet/Snippet.stories.tsx#ShowingAll',
   'thread/WorkedFor/WorkedFor.stories.tsx#Opening',

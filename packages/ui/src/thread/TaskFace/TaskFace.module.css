@@ -44,9 +44,10 @@
   background: var(--face-surface, var(--n-2));
   scrollbar-gutter: stable both-edges;
 }
+/* rests above whatever floats on the composer's edge (--composer-floats, which the composer sets), and 12px up from the composer when nothing does */
 .jump {
   position: absolute;
-  bottom: 12px;
+  bottom: calc(var(--composer-floats, 0px) + 12px);
   left: 50%;
   translate: -50% 0;
 }
