@@ -91,8 +91,8 @@ ADR-097 has the whole of it. In short:
    Ask me, the irreversible list, a server switched back on) needs the
    person's own message in that turn, as the asked-for tools do, so no
    agent can free itself from an ask; tightening goes at once.
-4. **The coordinator is optional.** Tasks start from the board, the
-   composer or a lead.
+4. **The coordinator is always on.** There is no switch, setting or mode to
+   turn it off. Tasks can also start from the board, the composer or a lead.
 5. **Kept:** the sandbox's write boundary, git's guard, no secret files, no
    self-approval, an outside author's code not running without the person's
    word, cost caps, and asked-for tools only on the person's message (an
@@ -214,7 +214,8 @@ lasted of it).
   otherwise), review again, skip the review, open a new pull request, mark
   ready, rename, attach. What can't be undone (accept and merge) stays on
   the person's word (`TaskActions.ts:491-506`).
-- **The coordinator optional.** A task starts from the board, the composer
+- **Tasks start without the coordinator too.** It is always on, with no
+  setting to turn it off, but a task starts from the board, the composer
   or a lead without it; its plan and models come from the person's
   defaults. Its session starts when the person talks to it, or news it acts
   on wakes it. With the task "Small changes finish in minutes, not 40".

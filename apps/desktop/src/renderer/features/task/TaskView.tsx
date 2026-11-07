@@ -686,7 +686,17 @@ export function TaskView({
         ? null
         : { agentId: resume.id, model: null, effort: null })
   const waiting = session === null || !session.held || handover?.agentId === session.agentId ? null : handover
-  const choice = session === null || !session.held ? chosen : (waiting ?? runningOn(session))
+  // Its lead changed from its next turn, by the team dialog or a tool: the picker shows who leads it then.
+  const upcoming = session?.held === true ? session.nextLead : null
+  const pending: Choice | null =
+    session === null || upcoming == null
+      ? null
+      : {
+          agentId: upcoming.agentId,
+          model: upcoming.model ?? (upcoming.agentId === session.agentId ? session.model : null),
+          effort: upcoming.effort ?? (upcoming.agentId === session.agentId ? session.effort : null),
+        }
+  const choice = session === null || !session.held ? chosen : (waiting ?? pending ?? runningOn(session))
 
   // The agent what the person says goes to: one picked to take over, else the lead on it, else the one it would start; and whether it takes images.
   const receiving = waiting?.agentId ?? (session?.held ? session.agentId : undefined) ?? chosen?.agentId ?? null

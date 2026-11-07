@@ -373,6 +373,8 @@ export interface Client {
     /** The branch it works toward (ADR-093), until it starts; null for the default branch. */
     toward?: string | null,
   ) => Promise<void>
+  /** Changes who leads and who reviews a task that has begun: its lead from its next turn, its reviewer until its review is done. */
+  readonly changeTeam: (taskId: string, steps: ReadonlyArray<PlanStep>) => Promise<void>
   /** Changes what an issue the coordinator drafted says, before it is filed. */
   readonly changeIssueDraft: (
     draftId: string,
@@ -815,6 +817,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
           ...(toward === undefined ? {} : { toward }),
         }),
       ),
+    changeTeam: (taskId, steps) => command((commandId) => api.ChangeTeam({ commandId, taskId, steps })),
     changeIssueDraft: (draftId, edit) => command((commandId) => api.ChangeIssueDraft({ commandId, draftId, ...edit })),
     fileIssueDraft: (draftId) => command((commandId) => api.FileIssueDraft({ commandId, draftId })),
     discardIssueDraft: (draftId) => command((commandId) => api.DiscardIssueDraft({ commandId, draftId })),

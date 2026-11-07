@@ -1943,6 +1943,65 @@ describe('the coordinator, through the API', () => {
     ),
   )
 
+  it.live('changes the team of a task at work, and says in its thread who changed what', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const steps = (lead: string, review: string, model: string | null = null) => [
+          { key: 'implement' as const, agentId: lead, model: null, skipped: false },
+          { key: 'review' as const, agentId: review, model, skipped: false },
+        ]
+        const task = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'Tidy the README',
+          description: 'Short. [lead:wait]',
+          steps: steps('claude-code', 'codex'),
+        })
+        const threadId = (yield* until(client.GetCoordinator({ projectId: project.id }), (snapshot) =>
+          snapshot.items.some((item) => item.kind === 'task' && item.content.phase === 'running'),
+        )).items.flatMap((item) => (item.kind === 'task' ? [item.content.threadId] : []))[0]!
+        const titles = () =>
+          Effect.map(client.GetThread({ threadId, limit: 100 }), (thread) =>
+            thread.items.flatMap((item) => (item.kind === 'notice' && item.content.title.startsWith('You ') ? [item.content.title] : [])),
+          )
+        // A change of nothing is no line; the lead and the reviewer each get one, and the card has the reviewer's standing.
+        yield* client.ChangeTeam({ commandId: commandId(), taskId: task.id, steps: steps('claude-code', 'codex') })
+        assert.deepStrictEqual(yield* titles(), [])
+        yield* client.ChangeTeam({ commandId: commandId(), taskId: task.id, steps: steps('codex', 'claude-code', 'large') })
+        assert.deepStrictEqual(yield* titles(), [
+          "You changed the lead to Fake codex's default model. It takes over from its next turn.",
+          'You changed the review to Claude Large',
+        ])
+        // The review taken off is said too, and the card reads as the team now stands.
+        yield* client.ChangeTeam({
+          commandId: commandId(),
+          taskId: task.id,
+          steps: [steps('codex', 'claude-code')[0]!, { ...steps('codex', 'claude-code')[1]!, skipped: true }],
+        })
+        assert.strictEqual((yield* titles()).at(-1), 'You removed the review')
+        const card = (yield* client.GetBoard({ projectId: project.id })).tasks.find((one) => one.taskId === task.id)
+        assert.deepStrictEqual(
+          [card?.plan?.steps.map((step) => [step.agentId, step.skipped]), card?.reviewerChange],
+          [
+            [
+              ['codex', false],
+              ['claude-code', true],
+            ],
+            'now',
+          ],
+        )
+        // A task that isn't there, and a settled one, are refused in words.
+        assert.strictEqual(
+          (yield* Effect.flip(client.ChangeTeam({ commandId: commandId(), taskId: 'tsk_missing', steps: steps('codex', 'codex') })))
+            .message,
+          "That task isn't there any more.",
+        )
+      }),
+    ),
+  )
+
   it.live('starts a task the person plans themselves, and shows it as a card', () =>
     Effect.scoped(
       Effect.gen(function* () {
