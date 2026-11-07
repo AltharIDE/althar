@@ -394,6 +394,14 @@ describe('the review after a merge', () => {
       const [owed] = yield* sql<{ attempts: number }>`
         SELECT attempts FROM reviews_after_merge WHERE task_id = ${created.taskId}`
       assert.strictEqual(owed?.attempts, 1)
+      // A second failure keeps the one line, saying how many times it was tried.
+      github.failNext('changeToReview', 'unreachable')
+      yield* fastLane.reviewMerged(created.taskId)
+      const [again] = yield* sql<{ attempts: number; n: number }>`
+        SELECT r.attempts AS attempts, (SELECT count(*) FROM thread_items x WHERE x.thread_id = ${created.threadId} AND x.kind = 'notice'
+          AND json_extract(x.content, '$.reviewAfterMerge') = 1) AS n
+        FROM reviews_after_merge r WHERE r.task_id = ${created.taskId}`
+      assert.deepStrictEqual(again, { attempts: 2, n: 1 })
       yield* fastLane.retryPendingReviews()
       const [made] = yield* sql<{ n: number }>`
         SELECT count(*) AS n FROM external_links WHERE kind = 'review' AND url = ${pull.url}`

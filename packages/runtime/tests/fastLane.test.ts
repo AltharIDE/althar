@@ -287,8 +287,11 @@ describe('Auto’s lighter model', () => {
     assert.strictEqual(usedPercent(-1), 100)
     assert.strictEqual(windowWords('weekly'), 'the week')
     assert.strictEqual(windowWords('five_hour'), 'five hours')
+    assert.strictEqual(windowWords('monthly'), 'the month')
+    assert.strictEqual(windowWords('other'), 'the plan')
     assert.strictEqual(planName('claude-code'), 'Claude')
     assert.strictEqual(planName('codex'), 'ChatGPT')
+    assert.strictEqual(planName('aider'), 'aider')
   })
 
   it.live('moves a lead whose session is still running when its plan crosses the mark, and says why once', () => {
@@ -308,6 +311,7 @@ describe('Auto’s lighter model', () => {
       const instance = yield* Instance
       const sessions = yield* Sessions
       const sql = yield* SqlClient.SqlClient
+      const when = '2026-11-06T14:03:00.000Z'
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
       const created = yield* projects.createTask({
         envelope: yield* Runtime.envelope('task.create', {}),
@@ -359,6 +363,22 @@ describe('Auto’s lighter model', () => {
         again.items.filter((item) => item.kind === 'model_move'),
         1,
       )
+      const auto = yield* AutoModels
+      const where = {
+        taskId: created.taskId,
+        projectId: project.projectId as ProjectId,
+        threadId: created.threadId,
+        agentId: 'claude-code',
+      }
+      // Nothing to move from or to, and no lighter model there is: it stays.
+      assert.isUndefined(yield* auto.lighter({ ...where, model: null }))
+      assert.isUndefined(yield* auto.lighter({ ...where, agentId: 'nowhere', model: 'large' }))
+      assert.isUndefined(yield* auto.lighter({ ...where, model: 'huge' }))
+      assert.isUndefined(yield* auto.lighter({ ...where, model: 'small' }))
+      // The person kept the model: no move, even with the plan nearly out.
+      yield* sql`
+        INSERT INTO task_model_keeps ${sql.insert({ taskId: created.taskId, agentId: 'claude-code', model: 'large', keptAt: when })}`
+      assert.isUndefined(yield* auto.lighter({ ...where, model: 'large' }))
     }).pipe(
       Effect.provide(
         Queries.layer.pipe(
@@ -390,5 +410,225 @@ describe('Auto’s lighter model', () => {
         ),
       ),
     )
+  })
+})
+
+/** The fast lane's refusals, and what a line or a plan that says nothing does. */
+describe('the fast lane at its edges', () => {
+  const layer = FastLane.layer.pipe(Layer.provideMerge(Queries.layer.pipe(Layer.provideMerge(runtime()))))
+  const reasonOf = (error: unknown) =>
+    typeof error === 'object' && error !== null && 'message' in error ? String((error as { message: unknown }).message) : ''
+
+  it.effect('refuses a line that isn’t there or names no model, and Undo on a line of no task', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const fastLane = yield* FastLane
+      const sql = yield* SqlClient.SqlClient
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const created = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'The Run menu says Strat',
+        draft: true,
+      })
+      const place = { projectId: project.projectId as ProjectId, threadId: created.threadId }
+      const why = { percent: 92, plan: 'Claude', window: 'the week', resetsAt: null }
+      assert.include(reasonOf(yield* Effect.flip(fastLane.keepTheModel('item_missing'))), 'isn’t here any more')
+      // A line whose content Althar can't read as an object is no line either.
+      const odd = yield* addItem(place, 'model_move', 'x')
+      assert.include(reasonOf(yield* Effect.flip(fastLane.keepTheModel(odd))), 'isn’t here any more')
+      // A line that names no model to keep.
+      const bare = yield* addItem(place, 'model_move', { taskId: created.taskId, from: {}, to: {}, why, kept: false })
+      assert.include(reasonOf(yield* Effect.flip(fastLane.keepTheModel(bare))), 'names no model to keep')
+      // Undo on a line of no task puts the line back and leaves the keeps alone.
+      const noTask = yield* addItem(place, 'model_move', { from: {}, to: {}, why, kept: true })
+      yield* fastLane.undoTheModelMove(noTask)
+      const [after] = yield* sql<{ kept: number }>`
+        SELECT json_extract(content, '$.kept') AS kept FROM thread_items WHERE id = ${noTask}`
+      assert.strictEqual(after?.kept, 0)
+      assert.include(reasonOf(yield* Effect.flip(fastLane.undoTheModelMove('item_missing'))), 'isn’t here any more')
+    }).pipe(Effect.provide(layer)),
+  )
+
+  it.effect('refuses a review its plan can’t name, and one with no change to read; a reviewed change starts nothing', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const plans = yield* Plans
+      const instance = yield* Instance
+      const fastLane = yield* FastLane
+      const sql = yield* SqlClient.SqlClient
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const make = (title: string) =>
+        Effect.gen(function* () {
+          return yield* projects.createTask({
+            envelope: yield* Runtime.envelope('task.create', {}),
+            projectId: project.projectId,
+            title,
+            draft: true,
+          })
+        })
+      const planned = (taskId: string, review: boolean) =>
+        plans.propose({
+          projectId: project.projectId as ProjectId,
+          taskId,
+          steps: smallChangeSteps({
+            lead: { agentId: 'claude-code', model: null },
+            review: review ? { agentId: 'codex', model: null } : null,
+          }),
+          reason: null,
+          actorId: instance.personId,
+          reviewAfterMerge: true,
+          startsIn: Duration.hours(1),
+        })
+      // No plan at all, and a plan with no review step.
+      const bare = yield* make('No plan')
+      assert.include(reasonOf(yield* Effect.flip(fastLane.makeFullTask(bare.taskId))), 'names no reviewer')
+      const noReviewer = yield* make('No reviewer')
+      yield* planned(noReviewer.taskId, false)
+      assert.include(reasonOf(yield* Effect.flip(fastLane.makeFullTask(noReviewer.taskId))), 'names no reviewer')
+      // A reviewer, but no pull request to read.
+      const noChange = yield* make('No change')
+      yield* planned(noChange.taskId, true)
+      assert.include(reasonOf(yield* Effect.flip(fastLane.makeFullTask(noChange.taskId))), 'no pull request to review yet')
+      // A change already reviewed: nothing starts again.
+      const reviewed = yield* make('Reviewed')
+      yield* planned(reviewed.taskId, true)
+      const url = 'https://github.test/meridian/api/pull/641'
+      const when = '2026-11-06T14:03:00.000Z'
+      const link = (kind: 'change' | 'review', state: string) =>
+        Effect.gen(function* () {
+          yield* sql`
+            INSERT INTO external_links ${sql.insert({
+              id: yield* newId(Ids.externalLink),
+              projectId: project.projectId,
+              taskId: reviewed.taskId,
+              product: 'github',
+              kind,
+              externalId: '641',
+              ref: 'PR #641',
+              key: '641',
+              url,
+              snapshot: JSON.stringify({ state }),
+              listening: 0,
+              createdAt: when,
+              updatedAt: when,
+            })}`
+        })
+      yield* link('change', 'open')
+      yield* link('review', 'open')
+      yield* fastLane.makeFullTask(reviewed.taskId)
+      const [made] = yield* sql<{ n: number }>`
+        SELECT count(*) AS n FROM external_links WHERE kind = 'review' AND url = ${url}`
+      assert.strictEqual(made?.n, 1)
+    }).pipe(Effect.provide(layer)),
+  )
+
+  it.effect('owes nothing for a task with no reviewer or no change, and clears it once a review is there', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const plans = yield* Plans
+      const instance = yield* Instance
+      const fastLane = yield* FastLane
+      const sql = yield* SqlClient.SqlClient
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const make = (title: string, review: boolean) =>
+        Effect.gen(function* () {
+          const created = yield* projects.createTask({
+            envelope: yield* Runtime.envelope('task.create', {}),
+            projectId: project.projectId,
+            title,
+            draft: true,
+          })
+          yield* plans.propose({
+            projectId: project.projectId as ProjectId,
+            taskId: created.taskId,
+            steps: smallChangeSteps({
+              lead: { agentId: 'claude-code', model: null },
+              review: review ? { agentId: 'codex', model: null } : null,
+            }),
+            reason: null,
+            actorId: instance.personId,
+            reviewAfterMerge: true,
+            startsIn: Duration.hours(1),
+          })
+          return created
+        })
+      const when = '2026-11-06T14:03:00.000Z'
+      const change = (taskId: string, url: string) =>
+        Effect.gen(function* () {
+          yield* sql`
+            INSERT INTO external_links ${sql.insert({
+              id: yield* newId(Ids.externalLink),
+              projectId: project.projectId,
+              taskId,
+              product: 'github',
+              kind: 'change',
+              externalId: '641',
+              ref: 'PR #641',
+              key: '641',
+              url,
+              snapshot: JSON.stringify({ state: 'merged' }),
+              listening: 0,
+              createdAt: when,
+              updatedAt: when,
+            })}`
+        })
+      const owed = (taskId: string) =>
+        Effect.map(sql<{ n: number }>`SELECT count(*) AS n FROM reviews_after_merge WHERE task_id = ${taskId}`, ([row]) => row?.n)
+      // No reviewer to start one.
+      const noReviewer = yield* make('No reviewer', false)
+      yield* change(noReviewer.taskId, 'https://github.test/meridian/api/pull/1')
+      yield* fastLane.reviewMerged(noReviewer.taskId)
+      assert.strictEqual(yield* owed(noReviewer.taskId), 0)
+      // A reviewer, but no change to read.
+      const noChange = yield* make('No change', true)
+      yield* fastLane.reviewMerged(noChange.taskId)
+      assert.strictEqual(yield* owed(noChange.taskId), 0)
+      // Already reviewed: nothing is owed.
+      const reviewed = yield* make('Reviewed', true)
+      const url = 'https://github.test/meridian/api/pull/2'
+      yield* change(reviewed.taskId, url)
+      yield* sql`
+        INSERT INTO external_links ${sql.insert({
+          id: yield* newId(Ids.externalLink),
+          projectId: project.projectId,
+          taskId: reviewed.taskId,
+          product: 'github',
+          kind: 'review',
+          externalId: '2',
+          ref: 'PR #2',
+          key: '2',
+          url,
+          snapshot: JSON.stringify({ state: 'open' }),
+          listening: 0,
+          createdAt: when,
+          updatedAt: when,
+        })}`
+      yield* fastLane.reviewMerged(reviewed.taskId)
+      assert.strictEqual(yield* owed(reviewed.taskId), 0)
+    }).pipe(Effect.provide(layer)),
+  )
+
+  it('reads only a plan that implements something, and leaves a review out where none names one', () => {
+    const lead = { key: 'implement', agentId: 'claude-code', model: null, skipped: false }
+    const noReview = JSON.stringify({ steps: [lead], reviewAfterMerge: true })
+    assert.deepStrictEqual(smallChangeOf(noReview)?.review, null)
+    // A skipped implement has nothing to run.
+    assert.isUndefined(smallChangeOf(JSON.stringify({ steps: [{ ...lead, skipped: true }], reviewAfterMerge: true })))
+    // No reviewer: one step, and no line about a review after the merge.
+    assert.deepStrictEqual(
+      smallChangeSteps({ lead: { agentId: 'claude-code', model: null }, review: null }).map((step) => step.key),
+      ['implement'],
+    )
+    assert.deepStrictEqual(smallChangeSkips(null), ['no plan'])
+  })
+
+  it('says what changed from the pull request’s numbers where the lead left none', () => {
+    assert.strictEqual(
+      changedWords({ files: [{ path: 'a.ts', add: 1, del: 0 }], additions: null, deletions: null, changedFiles: 1 }),
+      'A file in a.ts',
+    )
+    assert.strictEqual(changedWords({ files: [], additions: null, deletions: null, changedFiles: null }), 'the code')
+    assert.strictEqual(changedWords({ files: [], additions: 2, deletions: null, changedFiles: 1 }), '2 lines')
   })
 })

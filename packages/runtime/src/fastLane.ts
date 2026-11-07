@@ -276,15 +276,18 @@ export class FastLane extends Context.Service<
             yield* clearReview(taskId, threadId)
             return
           }
-          const projectId = (yield* projectOf(taskId)) as ProjectId
-          // Called on its own, as from a retry, it is still one owed: keep it until it starts.
-          yield* markReviewPending(taskId, projectId)
           const change = yield* changeOf(taskId)
-          if (change === undefined) return
+          if (change === undefined) {
+            yield* clearReview(taskId, threadId)
+            return
+          }
           if (yield* reviewed(change.url)) {
             yield* clearReview(taskId, threadId)
             return
           }
+          const projectId = (yield* projectOf(taskId)) as ProjectId
+          // Called on its own, as from a retry, it is still one owed: keep it until it starts.
+          yield* markReviewPending(taskId, projectId)
           const outcome = yield* Effect.exit(
             startReview(taskId, {
               afterMerge: true,
