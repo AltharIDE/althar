@@ -461,11 +461,11 @@ export function ProjectView({
         {text.handingOver(named(waiting.agentId, waiting.model).name, named(session.agentId, session.model).name)}{' '}
         <LinkButton onClick={() => setHandover(null)}>{text.keep(named(session.agentId, session.model).name)}</LinkButton>
       </>
-    ) : (session === null || !session.held) && model.agents.length === 0 ? (
+    ) : (session === null || !session.held) && model.agentsKnown && model.agents.length === 0 ? (
       <>
         {text.needsAgent} {ways !== undefined && <LinkButton onClick={ways.agents}>{text.signOneIn}</LinkButton>}
       </>
-    ) : (session === null || !session.held) && suggested !== null && !suggested.available && chosen !== null ? (
+    ) : (session === null || !session.held) && model.agentsKnown && suggested !== null && !suggested.available && chosen !== null ? (
       <>
         {text.signedOut(suggested.agentName, agentName(chosen.agentId))}{' '}
         {ways !== undefined && <LinkButton onClick={() => ways.signIn(suggested.agentId)}>{text.signIn}</LinkButton>}
@@ -646,6 +646,7 @@ export function ProjectView({
                     .filter((task) => task.settledAt === null && task.branch !== null && task.reviewing == null)
                     .map((task) => ({ id: task.taskId, title: task.title })) ?? null
                 }
+                {...(ways === undefined ? {} : { onConnect: ways.connections })}
                 runnables={coordinator.runnables}
                 launches={coordinator.launches}
                 now={now}

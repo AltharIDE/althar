@@ -2553,6 +2553,8 @@ export const OfferedRefs = Schema.Struct({
   branches: Schema.Array(Schema.String),
   /** Why it lists less than it might, in words; null where it lists all. */
   note: Schema.NullOr(Schema.String),
+  /** The host of its remote, by name, where no connection of Althar's reaches it: its pull requests aren't listed until one does. Null where one does, or it has no remote. */
+  unconnected: Schema.NullOr(Schema.String),
   /** Its host has more open pull requests than it listed: asked again with words, it searches them there. */
   more: Schema.Boolean,
 })

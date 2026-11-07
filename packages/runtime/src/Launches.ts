@@ -783,6 +783,12 @@ export class Launches extends Context.Service<
                 ? places.find(({ binding }) => binding.id === asked.bindingId)
                 : (kept.map((one) => places.find(({ binding }) => binding.id === one.bindingId)).find((one) => one !== undefined) ??
                   places[0])
+            // A pull request or branch is one repository's: what another repository runs can't run on it.
+            if (place === undefined && asked !== undefined && input.repository !== undefined && places.length > 0)
+              return yield* new LaunchRefused({
+                why: 'which',
+                message: `${asked.name ?? asked.command} runs in another repository than ${input.repository}, so it can't run on its branch or pull request.`,
+              })
             if (place === undefined)
               return yield* new LaunchRefused({ why: 'elsewhere', message: `Its repository has no copy on ${thisDevice()} to run it in.` })
             const { binding } = place
