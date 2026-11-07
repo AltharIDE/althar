@@ -17,6 +17,13 @@ export interface PlanWindow {
   left: number
   /** When it resets, as the consumer words a time: 14:00, Mon 09:00. */
   until: string | null
+  /**
+   * When it resets, in the consumer's words, for every window: "resets 14:00 · in 2 h 10 m", or "reset at 14:00 · not read
+   * since" where it has reset and no one has read it again, or that the provider gave no time.
+   */
+  resets?: string
+  /** It has reset since it was read: how much of it is used no one has said yet, so no figure or bar, and never an empty limit. */
+  unread?: boolean
 }
 
 export interface PlanAccount {

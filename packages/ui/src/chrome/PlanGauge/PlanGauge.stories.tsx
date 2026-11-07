@@ -3,6 +3,7 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 
 import {
   CLAUDE_PLENTY,
+  CLAUDE_RESETS,
   CLAUDE_TWO,
   CLAUDE_UNREAD,
   CODEX_NEARLY,
@@ -58,7 +59,7 @@ export const Open: Story = {
     await expect(page.getByText('Codex is nearly out')).toBeInTheDocument()
     await expect(page.getByText('Personal · Weekly limit · until Fri 09:00')).toBeInTheDocument()
     // An agent opens in place to every account and window, an old one saying so.
-    await userEvent.click(page.getByRole('button', { name: /Claude Code/ }))
+    await userEvent.click(page.getByRole('button', { name: /^Claude Code/ }))
     await expect(page.getByText('read 2 hours ago')).toBeInTheDocument()
     await expect(page.getByText('Work')).toBeInTheDocument()
   },
@@ -91,6 +92,28 @@ export const AllSignedOut: Story = {
   },
 }
 
+/** Each window says when it resets and how long is left; one that reset since it was read says so, and one with no time says that. */
+export const Resets: Story = {
+  args: { agents: [CLAUDE_RESETS, CODEX_PLENTY], defaultOpen: true },
+  play: async () => {
+    const page = within(document.body)
+    await userEvent.click(page.getByRole('button', { name: /^Claude Code/ }))
+    await expect(page.getByText('resets Fri 09:00 · in 1 d 18 h')).toBeInTheDocument()
+    await expect(page.getByText('reset at 14:00 · not read since')).toBeInTheDocument()
+    await expect(page.getByText('no reset time given')).toBeInTheDocument()
+  },
+}
+
+/** Two accounts, each window with its reset. */
+export const ResetsTwoAccounts: Story = {
+  args: { agents: [CLAUDE_TWO], defaultOpen: true },
+  play: async () => {
+    const page = within(document.body)
+    await userEvent.click(page.getByRole('button', { name: /^Claude Code/ }))
+    await expect(page.getByText('resets 15:40 · in 50 m')).toBeInTheDocument()
+  },
+}
+
 /** Claude Code's windows all reset since it was read: no figure, never all of its plan left, and its detail says why it wasn't read again. */
 export const Unread: Story = {
   args: { agents: [CODEX_PLENTY, CLAUDE_UNREAD], defaultOpen: true },
@@ -98,7 +121,7 @@ export const Unread: Story = {
     const page = within(document.body)
     await expect(within(canvasElement).getByRole('button', { name: /^Plan usage: Codex has / })).toBeInTheDocument()
     await expect(page.getByText('Not read since reset')).toBeInTheDocument()
-    await userEvent.click(page.getByRole('button', { name: /Claude Code/ }))
+    await userEvent.click(page.getByRole('button', { name: /^Claude Code/ }))
     await expect(page.getByText('read 2 days ago')).toBeInTheDocument()
     await expect(page.getByText(/Its sign-in has expired/)).toBeInTheDocument()
   },
