@@ -812,9 +812,9 @@ describe('the Talk room', () => {
     withServices(<Project room={Room.Talk} />, client)
     const busy = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the coordinator' })
     expect(screen.getByText('Queued')).toBeTruthy()
-    // While it works, its work folds too, under how long it has worked so far and what it is doing now.
-    expect(screen.queryByText('checkout.ts')).toBeNull()
-    expect(screen.getByRole('button', { name: /Working for .*Reading checkout\.ts/ })).toBeTruthy()
+    // While it works, its work folds too, under how long it has worked so far, with one line for what it is doing now.
+    expect(screen.getByRole('button', { name: /^Working for / })).toBeTruthy()
+    expect(screen.getByText('Reading checkout.ts')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /Interrupt/ }))
     expect(client.interrupt).toHaveBeenCalledWith('thc')
     await userEvent.type(busy, 'Stop{Meta>}{Enter}{/Meta}')

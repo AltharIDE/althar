@@ -318,15 +318,23 @@ describe('work, folded', () => {
       items.tool({ status: 'in_progress', locations: [{ path: '/w/meridian/src/a.ts' }] }),
     ]
     const [, turn] = blocksOf(source(thread, true), new Map(), at, '2026-09-29T12:01:12.000Z')
-    expect(turn).toMatchObject({ live: true, took: '1m 12s', doing: 'Reading src/a.ts' })
-    expect(counts(turn)).toEqual({ work: ['tool'], said: ['message'] })
-    // Thinking, it says nothing on the line: the thought itself streams under it, live.
+    // What it said on the way is its work, with its steps; what it does now is its latest step, as it runs.
+    expect(turn).toMatchObject({ live: true, took: '1m 12s', doing: { tool: ToolKind.Read, text: 'Reading src/a.ts' } })
+    expect(counts(turn)).toEqual({ work: ['message', 'tool'], said: [] })
+    // Writing, what it writes stands apart, where its answer will, and no step is said.
+    const writing = blocksOf(source([...thread, items.says('Found it.')], true), new Map(), at)[1]
+    expect(writing).toMatchObject({ doing: null })
+    expect(counts(writing)).toEqual({ work: ['message', 'tool'], said: ['message'] })
+    // Thinking, the line says so, by the thought's latest heading where it has one; the thought itself stays in the work.
     const thinking = blocksOf(source([items.thinks('Hm')], true), new Map(), at)[0]
-    expect(thinking).toMatchObject({ doing: null, work: [{ kind: 'thought', live: true }] })
+    expect(thinking).toMatchObject({ doing: { tool: null, text: 'Thinking' }, work: [{ kind: 'thought', live: true }] })
+    const headed = blocksOf(source([items.thinks('**Reading the call**\n\nIt retries.')], true), new Map(), at)[0]
+    expect(headed).toMatchObject({ doing: { tool: null, text: 'Reading the call' } })
+    // A plan, or Althar's note, isn't a step: before any, it is thinking.
     const planning = blocksOf(source([items.plan([{ content: 'Test', status: 'pending' }])], true), new Map(), at)[0]
-    expect(planning).toMatchObject({ doing: 'Planning' })
+    expect(planning).toMatchObject({ doing: { tool: null, text: 'Thinking' } })
     const noted = blocksOf(source([items.notice({ title: 'Hm' })], true), new Map(), at)[0]
-    expect(noted).toMatchObject({ doing: null })
+    expect(noted).toMatchObject({ doing: { tool: null, text: 'Thinking' } })
   })
 
   it("folds all of a turn a step's result ends, and stands the result under it; a task's card is a block of its own", () => {

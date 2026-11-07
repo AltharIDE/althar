@@ -1202,8 +1202,6 @@ export function TaskView({
                     versionOf={versionOf}
                     settledOf={settledOf}
                     reviewing={reviewing}
-                    // Settling a review, its lead works quietly.
-                    settling={snapshot.task.step === 'settle'}
                     threadId={snapshot.threadId}
                     worktree={snapshot.task.worktree}
                     {...(openFile === undefined ? {} : { openFile })}

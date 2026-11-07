@@ -1,5 +1,5 @@
 import type { AllowedBy, AttachedFile, FileMention, Picture, ShownPicture, ThreadItem, Unfurl } from '@althar/contracts'
-import { Delivery, PlanState, ToolKind, ToolState } from '@althar/ui'
+import { Delivery, headingOf, oneLine, PlanState, ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar, type PartHanded, type Ran, ranOf } from './handed'
 import { isSending } from './items'
@@ -17,8 +17,10 @@ import { took } from './time'
  * calls, thoughts and plan, and what it said on the way, under how long it
  * worked. Only its last message stays open, or nothing when a step's result
  * follows, since the step's summary is what the person reads. While it runs,
- * the fold says how long it has worked so far and what it is doing now.
- * Before it has said anything, where its reply will start is held for it.
+ * only what it is writing now stands apart, where its answer will; the rest
+ * is its work, which shows how long it has worked so far, what it said on
+ * the way and what it is doing now (ADR-099). Before it has said anything,
+ * where its reply will start is held for it.
  *
  * A thought says how long it took (until whatever came next), and the
  * message or thought the running turn is on now is live: still being
@@ -133,8 +135,8 @@ export type Block =
       readonly live: boolean
       /** How long it worked, from its first item to its last, or until now while it runs. */
       readonly took: string
-      /** While it runs, what it is doing now, in a few words. */
-      readonly doing: string | null
+      /** While it runs, what it is doing now, in one line; none while it writes. */
+      readonly doing: Doing | null
       /** What it handed back beside its words: pictures, documents, files. */
       readonly handed: Handed
     }
@@ -439,14 +441,20 @@ const partHanded = (part: Part): PartHanded => {
 }
 
 /**
- * A turn's work and what it said: all but its last message folds, and all of it before a step's result. Pictures it showed
- * the person never fold.
+ * A turn's work and what it said: all but its last message folds, and all of it before a step's result; while it runs,
+ * all but what it is writing now. Pictures it showed the person never fold.
  */
-const splitOf = (parts: ReadonlyArray<Part>, beforeStep: boolean) => {
+const splitOf = (parts: ReadonlyArray<Part>, beforeStep: boolean, running: boolean) => {
   // A turn an error ended says so in the open: there's no answer to come.
   const ending = parts.at(-1)
   const failed = ending?.kind === 'notice' && ending.tone === 'error' ? parts.length - 1 : -1
-  const last = beforeStep ? -1 : parts.findLastIndex((part) => part.kind === 'message')
+  const last = running
+    ? ending?.kind === 'message'
+      ? parts.length - 1
+      : -1
+    : beforeStep
+      ? -1
+      : parts.findLastIndex((part) => part.kind === 'message')
   const open = (part: Part, index: number) => index === last || index === failed || part.kind === 'pictures'
   return {
     work: parts.filter((part, index) => !open(part, index)),
@@ -476,20 +484,28 @@ const timed = (
     return { ...part, took: thought, ...(live ? { live } : {}) }
   })
 
-/** What a running turn is doing, from the last thing it did. A thought shows itself, under the line (the turn's `thinking`). */
-const doingOf = (work: ReadonlyArray<Part>): string | null => {
-  const last = work.at(-1)
-  switch (last?.kind) {
-    case 'tool':
-      return `${last.verb} ${last.target}`
-    case 'plan':
-      return text.planning
-    default:
-      return null
-  }
+/** What a running turn is doing now, as its one line says it: a step, by the kind of tool it is, or what it thinks about. */
+export interface Doing {
+  /** The kind of tool it is running, for its icon; null while it thinks. */
+  readonly tool: ToolKind | null
+  readonly text: string
 }
 
-export const text = { thinking: 'Thinking', planning: 'Planning' }
+/**
+ * What a running turn is doing now, from its latest step: the tool it runs,
+ * or ran last, as it runs ("Reading MEMORY.md"), until the next replaces it;
+ * a thought by its latest heading, where it has one (Codex's), else
+ * Thinking; Thinking too before any step. What it says, its plan and
+ * Althar's notes aren't steps. While it writes, none: its words are.
+ */
+export const doingOf = (work: ReadonlyArray<Part>, writing: boolean): Doing | null => {
+  if (writing) return null
+  const step = work.findLast((part) => part.kind === 'tool' || part.kind === 'thought')
+  if (step?.kind === 'tool') return { tool: step.toolKind, text: `${verbs[step.toolKind].running} ${oneLine(step.target)}` }
+  return { tool: null, text: (step?.kind === 'thought' ? headingOf(step.text) : null) ?? text.thinking }
+}
+
+export const text = { thinking: 'Thinking' }
 
 /** The blocks of a thread, oldest first, with what is still being written but not yet read at the end. */
 export const blocksOf = (
@@ -690,7 +706,7 @@ export const blocksOf = (
     const span = known === undefined ? undefined : { ...known, to: endOf(index, known) }
     const running = index === live
     const parts = timed(block.parts, atOf, running, span?.to)
-    const { work, said } = splitOf(parts, !running && merged[index + 1]?.kind === 'step')
+    const { work, said } = splitOf(parts, !running && merged[index + 1]?.kind === 'step', running)
     return {
       ...block,
       parts,
@@ -698,7 +714,7 @@ export const blocksOf = (
       said,
       live: running,
       took: span === undefined ? '' : took(span.from, running ? now : span.to),
-      doing: running ? doingOf(work) : null,
+      doing: running ? doingOf(work, parts.at(-1)?.kind === 'message') : null,
       handed: handedBy(block.parts.map(partHanded), worktree),
     }
   })

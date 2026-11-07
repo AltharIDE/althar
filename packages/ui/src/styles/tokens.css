@@ -239,6 +239,7 @@
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1); /* quick off the mark, a long soft landing */
   --enter: 200ms; /* arrives or answers: an overlay, a new row */
   --exit: 140ms; /* goes, quicker than it came */
+  --stream-in: 520ms; /* a word as it streams in, from dim to bright (Markdown/fresh.tsx's FADE) */
   --scale-pop: 0.96; /* an overlay grows from its trigger from here, never from nothing */
   --scale-press: 0.97; /* a button under the pointer */
   --press: 140ms;
