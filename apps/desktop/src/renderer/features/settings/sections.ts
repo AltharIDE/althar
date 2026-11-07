@@ -21,6 +21,7 @@ export const SECTIONS = [
   'new-projects',
   'reviews',
   'notifications',
+  'dictation',
   'appearance',
   'editor',
   'about',
@@ -37,7 +38,7 @@ export const FIRST_SECTION: Section = 'agents'
 /** The sections in their groups, a little apart down the side. */
 export const GROUPS: ReadonlyArray<ReadonlyArray<Section>> = [
   ['agents', 'skills', 'code-hosts'],
-  ['this-mac', 'plans-and-reviews', 'new-projects', 'reviews', 'notifications', 'appearance', 'editor'],
+  ['this-mac', 'plans-and-reviews', 'new-projects', 'reviews', 'notifications', 'dictation', 'appearance', 'editor'],
   ['about'],
 ]
 
@@ -50,6 +51,7 @@ export const sectionText: Readonly<Record<Section, { readonly title: string; rea
   'new-projects': { title: 'New projects', icon: 'plus' },
   reviews: { title: 'Reviews and pull requests', icon: 'pr' },
   notifications: { title: 'Notifications', icon: 'bell' },
+  dictation: { title: 'Dictation', icon: 'mic' },
   appearance: { title: 'Appearance', icon: 'image' },
   editor: { title: 'Editor', icon: 'file' },
   about: { title: 'About Althar', icon: 'down' },

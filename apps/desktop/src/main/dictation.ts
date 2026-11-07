@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 
-import { PARAKEET, presence, sizeOf } from '../speech/model'
+import { PARAKEET, presence, remove, sizeOf } from '../speech/model'
 
 import {
   BrowserWindow,
@@ -173,7 +173,7 @@ export function startDictation(options: DictationOptions) {
     return {
       platform: process.platform,
       microphone: microphone(),
-      model: { ...here, ...(downloading ? { got: Math.max(here.got, got) } : {}), downloading },
+      model: { name: PARAKEET.name, ...here, ...(downloading ? { got: Math.max(here.got, got) } : {}), downloading },
       settings: SETTINGS[process.platform] !== undefined,
     }
   })
@@ -194,6 +194,16 @@ export function startDictation(options: DictationOptions) {
     downloading = false
     await ask('cancel')
     broadcast({ type: 'cancelled' })
+  })
+  // Frees the model's space. The speech process goes first, since it holds the model open; the next dictation brings it down again.
+  ipcMain.handle('althar:dictation-remove', async (event) => {
+    from(event)
+    downloading = false
+    got = 0
+    clearTimeout(idle)
+    child?.kill()
+    await remove(join(options.models(), PARAKEET.id))
+    broadcast({ type: 'removed' })
   })
   ipcMain.handle('althar:dictation-prepare', async (event) => {
     from(event)

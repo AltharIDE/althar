@@ -14,6 +14,7 @@ import {
   CoAuthor,
   CoAuthorFace,
   CrashReports,
+  DictationSettings,
   DockPreview,
   EdgeHere,
   EdgeMini,
@@ -71,6 +72,7 @@ import { QuickCards } from './QuickCards'
 import { GROUPS, type Section, sectionText } from './sections'
 import s from './Settings.module.css'
 import { text } from './text'
+import { useDictationSettings } from './useDictationSettings'
 import { useAgentsAtOnce } from './useAgentsAtOnce'
 import { useAutomationsPaused } from './useAutomationsPaused'
 import { type AppIconModel, useAppIcon } from './useAppIcon'
@@ -222,6 +224,8 @@ function SectionBody({
       return <ReviewsSection connections={connections} />
     case 'notifications':
       return <NotificationsSection />
+    case 'dictation':
+      return <DictationSection />
     case 'appearance':
       return <AppearanceSection {...looks} />
     case 'editor':
@@ -702,6 +706,26 @@ function EditorSection() {
       />
       <Failed when={failed} />
     </>
+  )
+}
+
+/* ---- dictation -------------------------------------------------------------------- */
+
+/** Which microphone dictation hears, whether the system lets it, and the speech model on disk, with Remove. */
+function DictationSection() {
+  const dictation = useDictationSettings()
+  if (dictation === null) return <p className={s.quiet}>{text.noDictation}</p>
+  return (
+    <DictationSettings
+      microphones={dictation.microphones}
+      microphone={dictation.microphone}
+      onMicrophone={dictation.choose}
+      permission={dictation.permission}
+      {...(dictation.openSettings === undefined ? {} : { onOpenSettings: dictation.openSettings })}
+      model={dictation.model}
+      onRemove={dictation.remove}
+      removing={dictation.removing}
+    />
   )
 }
 

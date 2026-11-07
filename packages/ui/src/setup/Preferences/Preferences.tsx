@@ -4,6 +4,7 @@ import { device } from '../../foundations/device'
 import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
+import { Button } from '../../primitives/Button/Button'
 import { Choices } from '../../primitives/Choices/Choices'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { IconButton } from '../../primitives/IconButton/IconButton'
@@ -423,6 +424,147 @@ export function OpenFilesIn<V extends string>({ editors, value, onChange, text }
         onChange={onChange}
       />
     </div>
+  )
+}
+
+/* ---- dictation -------------------------------------------------------------------- */
+
+export interface DictationSettingsText {
+  microphone: string
+  microphoneNote: string
+  systemDefault: string
+  permission: string
+  allowed: string
+  denied: string
+  /** Where the system asks the first time (macOS). */
+  ask: string
+  /** Where Althar can't tell (Linux). */
+  unknown: string
+  openSettings: string
+  /** The word at the row's end, for each. */
+  states: Record<DictationPermission, string>
+  model: string
+  remove: string
+  /** Under Remove, once the model is here. */
+  removeNote: string
+  /** Where the model isn't on the computer: what dictating does. */
+  absent: (name: string, size: string) => string
+  present: (name: string, onDisk: string) => string
+  downloading: (name: string, got: string, size: string) => string
+}
+
+export const dictationSettingsText: DictationSettingsText = {
+  microphone: 'Microphone',
+  microphoneNote: 'Which input dictation listens to.',
+  systemDefault: 'System default',
+  permission: 'Permission',
+  allowed: 'Dictation is allowed to use the microphone.',
+  denied: 'The microphone is turned off for Althar, so dictation can’t hear you.',
+  ask: 'The system asks the first time you dictate.',
+  unknown: 'Althar can’t check this on your system. Dictation tells you if the microphone can’t be used.',
+  openSettings: 'Open System Settings',
+  states: { allowed: 'Allowed', denied: 'Not allowed', ask: 'Not asked yet', unknown: 'Not checked' },
+  model: 'Speech model',
+  remove: 'Remove',
+  removeNote: 'Removing it frees the space. The next time you dictate, Althar downloads it again.',
+  absent: (name, size) => `${name} isn’t on this computer. Dictating downloads it first (${size}).`,
+  present: (name, onDisk) => `${name}, ${onDisk} on disk.`,
+  downloading: (name, got, size) => `Downloading ${name}: ${got} of ${size}.`,
+}
+
+export type DictationPermission = 'allowed' | 'denied' | 'ask' | 'unknown'
+
+export interface DictationSettingsProps {
+  /** The inputs the system names; none until it lets Althar hear one. */
+  microphones: readonly { id: string; label: string }[]
+  /** The chosen input's id, or null for the system's default. */
+  microphone: string | null
+  onMicrophone: (id: string | null) => void
+  permission: DictationPermission
+  /** Opens the system's microphone settings; absent where there are none to open. */
+  onOpenSettings?: () => void
+  model: {
+    name: string
+    state: 'present' | 'absent' | 'downloading'
+    /** What it takes on disk, as words: 670 MB. */
+    onDisk: string
+    /** What the whole model is, as words. */
+    size: string
+    /** What has come down so far, as words, while it downloads. */
+    got?: string
+  }
+  onRemove: () => void
+  /** Removing is under way. */
+  removing?: boolean
+  text?: Partial<DictationSettingsText>
+}
+
+const DEFAULT_INPUT = 'default'
+
+/** Dictation's settings: the microphone it hears, whether the system lets it, and the speech model on disk, with Remove to free it. */
+export function DictationSettings({
+  microphones,
+  microphone,
+  onMicrophone,
+  permission,
+  onOpenSettings,
+  model,
+  onRemove,
+  removing = false,
+  text,
+}: DictationSettingsProps) {
+  const t = { ...dictationSettingsText, ...text }
+  const there = microphone !== null && microphones.some((m) => m.id === microphone)
+  const modelNote =
+    model.state === 'present'
+      ? t.present(model.name, model.onDisk)
+      : model.state === 'downloading'
+        ? t.downloading(model.name, model.got ?? model.onDisk, model.size)
+        : t.absent(model.name, model.size)
+  return (
+    <SettingList>
+      <SettingRow title={t.microphone} note={t.microphoneNote} glyph={<Icon name="mic" size={15} />}>
+        {() => (
+          <Select
+            variant="filled"
+            width={200}
+            label={t.microphone}
+            options={[{ value: DEFAULT_INPUT, label: t.systemDefault }, ...microphones.map((m) => ({ value: m.id, label: m.label }))]}
+            value={there ? microphone : DEFAULT_INPUT}
+            onChange={(id) => onMicrophone(id === DEFAULT_INPUT ? null : id)}
+          />
+        )}
+      </SettingRow>
+      <SettingRow
+        title={t.permission}
+        note={
+          <>
+            {permission === 'allowed' ? t.allowed : permission === 'denied' ? t.denied : permission === 'ask' ? t.ask : t.unknown}
+            {permission === 'denied' && onOpenSettings !== undefined && (
+              <>
+                {' '}
+                <LinkButton onClick={onOpenSettings}>{t.openSettings}</LinkButton>
+              </>
+            )}
+          </>
+        }
+      >
+        {() => (
+          <span className={s.state} data-state={permission}>
+            {t.states[permission]}
+          </span>
+        )}
+      </SettingRow>
+      <SettingRow title={t.model} note={model.state === 'present' ? `${modelNote} ${t.removeNote}` : modelNote}>
+        {() =>
+          model.state === 'present' ? (
+            <Button size="small" variant="danger" busy={removing} onClick={onRemove}>
+              {t.remove}
+            </Button>
+          ) : null
+        }
+      </SettingRow>
+    </SettingList>
   )
 }
 
