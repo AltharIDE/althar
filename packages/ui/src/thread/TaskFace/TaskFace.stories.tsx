@@ -242,7 +242,7 @@ const scrollerOf = (root: HTMLElement | null) =>
   )
 
 /* Scrolls the thread inside it to the top once it has a size, as a reader scrolling up would. */
-function ReadingUp({ children }: { children: ReactNode }) {
+function ReadingUp({ children, width = 640 }: { children: ReactNode; width?: number }) {
   const box = useRef<HTMLDivElement>(null)
   useEffect(() => {
     // after the thread has settled at its end, so the following doesn't take the reader back down
@@ -250,26 +250,20 @@ function ReadingUp({ children }: { children: ReactNode }) {
     return () => clearTimeout(timer)
   }, [])
   return (
-    <div ref={box} style={{ height: 520, width: 640 }}>
+    <div ref={box} style={{ height: 520, width }}>
       {children}
     </div>
   )
 }
 
-/* The thread scrolled up to read, so the Latest pill shows, over a composer with the given pills on its edge. */
-function scrolledUp(behind?: { sources?: (typeof PR_PILL)[]; processes?: typeof TWO_PROCESSES }): Story {
+/* The thread scrolled up to read, so the Latest pill shows, over a composer with `above` on its edge (and a notice, if given). */
+function scrolledUp(above?: ReactNode, opts: { width?: number; notice?: string } = {}): Story {
   return {
     render: () => (
-      <ReadingUp>
+      <ReadingUp width={opts.width}>
         <TaskFace
           composer={
-            <Composer
-              value=""
-              onChange={() => {}}
-              onSubmit={() => {}}
-              placeholder="Tell the lead"
-              above={behind ? <Behind {...behind} /> : undefined}
-            />
+            <Composer value="" onChange={() => {}} onSubmit={() => {}} placeholder="Tell the lead" above={above} notice={opts.notice} />
           }
         >
           <Thread label="Task 432">{LONG}</Thread>
@@ -283,12 +277,13 @@ function scrolledUp(behind?: { sources?: (typeof PR_PILL)[]; processes?: typeof 
       await expect(scroller).toBeTruthy()
       scroller!.scrollTo({ top: 0 })
       const jump = await c.findByRole('button', { name: /latest/i })
-      const row = c.queryAllByText(/Listening to|\d+ processes?/)[0]
-      if (behind) {
-        await expect(row).toBeTruthy()
-        await expect(jump.getBoundingClientRect().bottom).toBeLessThanOrEqual(row!.getBoundingClientRect().top)
+      // What floats on the edge is one box, however its pills wrap; its top is what the pill must clear.
+      const floats = canvasElement.querySelector('[class*="floats"]')!
+      if (above || opts.notice) {
+        await expect(floats.childElementCount).toBeGreaterThan(0)
+        await expect(jump.getBoundingClientRect().bottom).toBeLessThan(floats.getBoundingClientRect().top)
       } else {
-        await expect(row).toBeUndefined()
+        await expect(floats.childElementCount).toBe(0)
       }
     },
   }
@@ -299,9 +294,19 @@ export const ScrolledUp: Story = scrolledUp()
 export const ScrolledUpDark: Story = { ...ScrolledUp, globals: { theme: 'dark' } }
 
 /** One pill on the composer's edge ("Listening to PR #317"): the Latest pill rests above it, not on it. */
-export const ScrolledUpWithOnePill: Story = scrolledUp({ sources: [PR_PILL] })
+export const ScrolledUpWithOnePill: Story = scrolledUp(<Behind sources={[PR_PILL]} />)
 export const ScrolledUpWithOnePillDark: Story = { ...ScrolledUpWithOnePill, globals: { theme: 'dark' } }
 
 /** Two pills ("Listening to PR #317", "Running 2 processes"): the Latest pill clears both. */
-export const ScrolledUpWithTwoPills: Story = scrolledUp({ sources: [PR_PILL], processes: TWO_PROCESSES })
+export const ScrolledUpWithTwoPills: Story = scrolledUp(<Behind sources={[PR_PILL]} processes={TWO_PROCESSES} />)
 export const ScrolledUpWithTwoPillsDark: Story = { ...ScrolledUpWithTwoPills, globals: { theme: 'dark' } }
+
+/** Two things on the edge (a PR chip and a processes chip) and a notice, in a narrow composer: the row wraps, grows taller, and the Latest pill still clears it. */
+export const ScrolledUpWrapped: Story = scrolledUp(
+  <>
+    <Behind sources={[PR_PILL]} />
+    <Behind processes={TWO_PROCESSES} />
+  </>,
+  { width: 300, notice: 'Sending hands this to the lead, who takes over from here and reads what you wrote before it carries on.' },
+)
+export const ScrolledUpWrappedDark: Story = { ...ScrolledUpWrapped, globals: { theme: 'dark' } }

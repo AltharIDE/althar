@@ -26,6 +26,8 @@ const BROWSER_ONLY = new Set<string>([
   'thread/TaskFace/TaskFace.stories.tsx#ScrolledUpWithOnePillDark',
   'thread/TaskFace/TaskFace.stories.tsx#ScrolledUpWithTwoPills',
   'thread/TaskFace/TaskFace.stories.tsx#ScrolledUpWithTwoPillsDark',
+  'thread/TaskFace/TaskFace.stories.tsx#ScrolledUpWrapped',
+  'thread/TaskFace/TaskFace.stories.tsx#ScrolledUpWrappedDark',
   'primitives/Fold/Fold.stories.tsx#Opening',
   'thread/Snippet/Snippet.stories.tsx#ShowingAll',
   'thread/WorkedFor/WorkedFor.stories.tsx#Opening',
