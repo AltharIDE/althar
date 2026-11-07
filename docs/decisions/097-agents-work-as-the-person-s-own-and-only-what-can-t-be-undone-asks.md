@@ -590,7 +590,10 @@ these changes to its sketches:
   The request belongs to the person, not the session: it stays open when the
   lead's session ends, and is answered all the same. It does not survive
   Althar restarting, whose agent processes end with it; those are withdrawn
-  when it starts.
+  when it starts. Answered after the lead's session has ended, a request of a
+  task still open starts its lead again, in its place among the agents at work,
+  to read the answer (`Runs.answered`, as for a question); a stopped or settled
+  task's lead is left, the answer queued.
 - **A task a lead started that stops reaching its parent.** Settled without a
   change, failed, or stopped by the person (stopped by anyone else says
   nothing): once, a line in the parent's thread in its warning tone, "<child>

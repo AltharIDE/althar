@@ -1,6 +1,6 @@
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Fiber, Layer } from 'effect'
+import { Effect, Fiber, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Instance } from '../src/Instance'
@@ -203,23 +203,34 @@ describe('An ask that waits while the person is away', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('stays open to answer when its session ends, and the allowed call still goes through once', () =>
+  it.live('stays open when its session ends, and answered then it starts the lead again to read it', () =>
     Effect.gen(function* () {
       const permissions = yield* Permissions
       const queries = yield* Queries
+      const sessions = yield* Sessions
+      const sql = yield* SqlClient.SqlClient
       const met = yield* lead
       const asked = yield* Effect.forkChild(met.ask('git status'))
       const call = yield* waiting(met.created.threadId)
       yield* permissions.setAside(call.id)
       yield* Fiber.join(asked)
-      // The lead's session closes, as when it ends its turn, crashes or is stopped.
-      yield* permissions.withdrawAll(met.sessionId)
+      // The lead's session really ends.
+      yield* sessions.stop(met.created.threadId)
+      assert.isTrue(Option.isNone(yield* sessions.running(met.created.threadId)))
       const kept = yield* waiting(met.created.threadId)
       assert.strictEqual(kept.id, call.id)
       assert.isTrue(kept.setAside)
       yield* answer(call.id, 'allow')
       assert.deepStrictEqual((yield* queries.thread(met.created.threadId)).attention, [])
-      assert.strictEqual((yield* met.ask('git status')).decision, 'allow')
+      // A lead is on the thread again, and has been told to make the call again.
+      yield* until(sessions.running(met.created.threadId), Option.isSome)
+      const told = yield* until(
+        sql<{
+          body: string
+        }>`SELECT body FROM user_inputs WHERE thread_id = ${met.created.threadId} AND body LIKE 'The person allowed what you set aside%'`,
+        (rows) => rows.length === 1,
+      )
+      assert.include(told[0]?.body ?? '', 'git status')
     }).pipe(Effect.provide(withQueries())),
   )
 

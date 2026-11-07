@@ -8,6 +8,7 @@ import { Instance } from './Instance'
 import { Live, type LiveEvent } from './Live'
 import { Permissions } from './Permissions'
 import { fact } from './records'
+import { Runs } from './Runs'
 import { Sessions } from './Sessions'
 import { addItem } from './threads'
 
@@ -32,7 +33,7 @@ import { addItem } from './threads'
  * again.
  */
 
-type Store = SqlClient.SqlClient | Instance | Sessions | Ledger | Crypto.Crypto | Permissions | Live
+type Store = SqlClient.SqlClient | Instance | Sessions | Ledger | Crypto.Crypto | Permissions | Live | Runs
 
 /** How long a request waits after it reached the person's device before its lead is let go on without it. */
 export const AWAY_AFTER = Duration.minutes(3)
@@ -79,6 +80,7 @@ export class Situations extends Context.Service<
       const instance = yield* Instance
       const sessions = yield* Sessions
       const permissions = yield* Permissions
+      const runs = yield* Runs
       const live = yield* Live
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
 
@@ -230,13 +232,15 @@ export class Situations extends Context.Service<
             decision === 'allow'
               ? `The person allowed what you set aside: ${title}. Make the call again; it goes through.`
               : `The person declined what you set aside: ${title}. Don't make it again; do it another way, or say in your report what it needed.`
-          yield* sessions.send({
-            envelope: yield* envelope('thread.send', { threadId: event.threadId, body }, undefined, instance.systemId),
-            threadId: event.threadId,
-            body,
-            disposition: 'after_current',
-            quiet: true,
-          })
+          const said = yield* envelope('thread.send', { threadId: event.threadId, body }, undefined, instance.systemId)
+          // The lead's session may have ended since: a task still open has its lead started again to read it, in its place among
+          // the agents at work (Runs.answered); a stopped or settled task is left as it is, the answer queued for when it goes on.
+          const sql = yield* SqlClient.SqlClient
+          const [on] = yield* sql<{ kind: string; state: string }>`
+            SELECT t.kind, k.state FROM threads t LEFT JOIN tasks k ON k.id = t.task_id WHERE t.id = ${event.threadId}`
+          if (on?.kind === 'task' && on.state === 'open' && Option.isNone(yield* sessions.running(event.threadId)))
+            return yield* runs.answered({ envelope: said, threadId: event.threadId, body })
+          yield* sessions.send({ envelope: said, threadId: event.threadId, body, disposition: 'after_current', quiet: true })
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not tell a lead what the person answered', cause)))
 
       yield* Effect.forkScoped(look.pipe(Effect.repeat(Schedule.spaced(LOOK_EVERY))))
