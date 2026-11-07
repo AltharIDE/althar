@@ -20,6 +20,13 @@ import s from './RunPlace.module.css'
  * name that no branch has; the arrows move, Enter picks, Escape closes. Each
  * place says, quietly, what runs there, and a failure there in red, so a run
  * left going is found where it runs.
+ *
+ * In a project of several repositories each one has its own branch (the one
+ * its Run copies), so the list is grouped by repository: its default first,
+ * its pull requests, its branches, and the group says where that repository
+ * is now. The first row sums them up, and a repository moved off its default
+ * stands out. A host Althar has no connection to is named in a band above the
+ * places, with a way to connect it.
  */
 
 /** Something to run on from the remote: an open pull request, or a branch. */
@@ -59,6 +66,16 @@ export interface RunPlace {
   readonly failed?: string
   /** The choice it is, for a pull request or branch. */
   readonly choice?: BranchChoice
+  /** Its label sums up several repositories' branches, not one branch's name. */
+  readonly several?: boolean
+}
+
+/** One of a project's several repositories, and the branch its Run copies now. */
+export interface RunRepository {
+  readonly name: string
+  readonly defaultBranch: string
+  /** What Run copies of it: the branch new tasks work toward, else its default. */
+  readonly branch: string
 }
 
 /** A choice as a place to run on. */
@@ -85,6 +102,14 @@ export interface RunPlaceText {
   /** A name typed that no branch has, to make: Create release/0.9.0; quieter, where it starts. */
   create: string
   from: (branch: string) => string
+  /** A repository's default branch, in its heading. */
+  defaultIs: string
+  /** Quieter, on a repository's default branch. */
+  isDefault: string
+  /** Under a host Althar has no connection to. */
+  needsConnection: string
+  connect: string
+  connectHost: (host: string) => string
 }
 
 export const runPlaceText: RunPlaceText = {
@@ -102,6 +127,11 @@ export const runPlaceText: RunPlaceText = {
   fork: 'From a fork',
   create: 'Create',
   from: (branch) => `from ${branch}`,
+  defaultIs: 'default',
+  isDefault: 'Default',
+  needsConnection: 'Pull requests need a connection',
+  connect: 'Connect',
+  connectHost: (host) => `Connect ${host}`,
 }
 
 export interface RunPlaceProps {
@@ -120,7 +150,11 @@ export interface RunPlaceProps {
    */
   onCreate?: (branch: string, repository?: string) => void
   createFrom?: string
-  repositories?: readonly string[]
+  repositories?: readonly RunRepository[]
+  /** Hosts of its repositories' remotes that Althar has no connection to, by name: their pull requests aren't listed. */
+  hosts?: readonly string[]
+  /** Connects a host: opens where it is done. Without it, the host is named only. */
+  onConnect?: (host: string) => void
   /** What is typed is being searched on the host, past the pull requests listed. */
   searching?: boolean
   query?: string
@@ -169,6 +203,10 @@ const sameRef = (one: RunPlace, other: RunPlace) =>
     : one.choice.kind === 'branch' && other.choice.kind === 'branch' && one.choice.branch === other.choice.branch) &&
   (one.choice.repository === undefined || other.choice.repository === undefined || one.choice.repository === other.choice.repository)
 
+/** Within a repository's group: its default branch, then pull requests, then its other branches. */
+const rank = (place: RunPlace, repository: RunRepository) =>
+  place.choice?.kind === 'branch' && place.choice.branch === repository.defaultBranch ? 0 : place.kind === 'pull' ? 1 : 2
+
 const glyphOf = (kind: RunPlace['kind']) => (kind === 'pull' ? 'pr' : kind === 'task' ? 'agents' : 'branch')
 
 export function RunPlacePicker({
@@ -184,6 +222,8 @@ export function RunPlacePicker({
   onCreate,
   createFrom,
   repositories,
+  hosts,
+  onConnect,
   open,
   defaultOpen,
   onOpenChange,
@@ -202,7 +242,9 @@ export function RunPlacePicker({
       onOpenChange={setOpened}
       trigger={
         <Button size="small" variant="quiet" icon={glyphOf(current.kind)} trailingIcon="chevronD" className={s.chip} title={t.label}>
-          <span className={cx(s.chipLabel, (current.kind === 'main' || current.kind === 'branch') && s.mono)}>{current.label}</span>
+          <span className={cx(s.chipLabel, (current.kind === 'main' || current.kind === 'branch') && current.several !== true && s.mono)}>
+            {current.label}
+          </span>
         </Button>
       }
     >
@@ -222,7 +264,10 @@ export function RunPlacePicker({
           else onPick(place)
           setOpened(false)
         }}
-        creates={onCreate === undefined ? [] : (repositories ?? [undefined])}
+        creates={onCreate === undefined ? [] : (repositories?.map((one) => one.name) ?? [undefined])}
+        {...(repositories === undefined || repositories.length < 2 ? {} : { repositories })}
+        hosts={hosts ?? []}
+        {...(onConnect === undefined ? {} : { onConnect })}
         {...(createFrom === undefined ? {} : { createFrom })}
         t={t}
       />
@@ -250,11 +295,17 @@ function Places({
   onPick,
   creates,
   createFrom,
+  repositories,
+  hosts,
+  onConnect,
   t,
 }: Omit<
   RunPlaceProps,
-  'open' | 'defaultOpen' | 'onOpenChange' | 'text' | 'defaultQuery' | 'searching' | 'onCreate' | 'repositories' | 'createFrom'
+  'open' | 'defaultOpen' | 'onOpenChange' | 'text' | 'defaultQuery' | 'searching' | 'onCreate' | 'repositories' | 'createFrom' | 'hosts'
 > & {
+  /** Set where the project has several: the list is grouped by them. */
+  repositories?: readonly RunRepository[]
+  hosts: readonly string[]
   defaultQuery: string
   searching: boolean
   /** Each repository a typed name is offered to be made in; undefined for the project's one. */
@@ -276,11 +327,16 @@ function Places({
   const known = places.filter(fits)
   // What the remote has, past what is listed already.
   const fresh = (remote === null ? [] : found(remote, words, t)).map(placeOf).filter((place) => !places.some((one) => sameRef(one, place)))
+  // Several repositories: each has its own group, and its default branch is always there to go back to.
+  const choiceOf = (place: RunPlace, repository: string) => place.choice?.repository === repository
+  const defaults: RunPlace[] = (repositories ?? [])
+    .map((one) => placeOf({ kind: 'branch', branch: one.defaultBranch, repository: one.name }))
+    .filter((place) => fits(place) && ![...known, ...fresh].some((one) => sameRef(one, place)))
   // A name typed that no branch has, where git takes it: offered to be made, last.
   const name = words.trim()
   const named = (place: RunPlace) => place.choice?.kind === 'branch' && place.choice.branch === name
   const made: RunPlace[] =
-    remote === null || !branchNameable(name) || [...places, ...fresh].some(named)
+    remote === null || !branchNameable(name) || [...places, ...fresh, ...defaults].some(named)
       ? []
       : creates.map((repository) => ({
           key: `${MADE}${repository ?? ''}:${name}`,
@@ -288,12 +344,28 @@ function Places({
           label: name,
           choice: { kind: 'branch', branch: name, ...(repository === undefined ? {} : { repository }) },
         }))
-  const groups: { label: string | null; places: RunPlace[] }[] = [
-    { label: null, places: known.filter((place) => place.kind === 'main') },
-    { label: t.tasks, places: known.filter((place) => place.kind === 'task') },
-    { label: t.pulls, places: [...known, ...fresh].filter((place) => place.kind === 'pull') },
-    { label: t.branches, places: [...[...known, ...fresh].filter((place) => place.kind === 'branch'), ...made] },
-  ].filter((group) => group.places.length > 0)
+  const refs = [...known, ...fresh, ...defaults].filter((place) => place.kind === 'pull' || place.kind === 'branch')
+  const byRepository = (one: RunRepository): RunPlace[] =>
+    refs.filter((place) => choiceOf(place, one.name)).toSorted((a, b) => rank(a, one) - rank(b, one))
+  const groupedBy = new Set((repositories ?? []).map((one) => one.name))
+  const loose = refs.filter((place) => repositories === undefined || !groupedBy.has(place.choice?.repository ?? ''))
+  const several = repositories !== undefined
+  const groups: { key: string; label: string | null; repository?: RunRepository; places: RunPlace[] }[] = (
+    several
+      ? [
+          { key: 'main', label: null, places: known.filter((place) => place.kind === 'main') },
+          { key: 'tasks', label: t.tasks, places: known.filter((place) => place.kind === 'task') },
+          ...repositories.map((one) => ({ key: `in:${one.name}`, label: one.name, repository: one, places: byRepository(one) })),
+          { key: 'pulls', label: t.pulls, places: loose.filter((place) => place.kind === 'pull') },
+          { key: 'branches', label: t.branches, places: [...loose.filter((place) => place.kind === 'branch'), ...made] },
+        ]
+      : [
+          { key: 'main', label: null, places: known.filter((place) => place.kind === 'main') },
+          { key: 'tasks', label: t.tasks, places: known.filter((place) => place.kind === 'task') },
+          { key: 'pulls', label: t.pulls, places: [...known, ...fresh].filter((place) => place.kind === 'pull') },
+          { key: 'branches', label: t.branches, places: [...[...known, ...fresh].filter((place) => place.kind === 'branch'), ...made] },
+        ]
+  ).filter((group) => group.places.length > 0)
   const rows = groups.flatMap((group) => group.places)
   const at = Math.min(active, Math.max(rows.length - 1, 0))
   const optionId = (index: number) => `${ids}-${index}`
@@ -313,8 +385,16 @@ function Places({
     event.preventDefault()
   }
 
-  const row = (place: RunPlace, index: number) => {
+  // Where Run runs: the place itself, or, of several repositories, the branch each one's Run copies now.
+  const isCurrent = (place: RunPlace) =>
+    place.key === current.key ||
+    (current.kind === 'main' &&
+      place.choice?.kind === 'branch' &&
+      repositories?.some((one) => one.name === place.choice?.repository && one.branch === place.choice.branch) === true)
+
+  const row = (place: RunPlace, index: number, grouped: boolean) => {
     const choice = place.choice
+    const repository = repositories?.find((one) => one.name === choice?.repository)
     // Quieter, under a pull request's title: its branch, its author, a draft or a fork's; and the repository, of several.
     const meta =
       choice === undefined
@@ -329,8 +409,15 @@ function Places({
                 ]
               : []),
             { text: madeOf(place) === null || createFrom === undefined ? undefined : t.from(createFrom) },
-            { text: choice.repository },
+            { text: grouped && madeOf(place) === null ? undefined : choice.repository },
           ].filter((part): part is { text: string; mono?: boolean } => part.text !== undefined && part.text !== '')
+    // Of several repositories, what each runs: the first row says them all, the default branch says so.
+    const parts =
+      place.kind === 'main' && place.several === true && repositories !== undefined
+        ? repositories.map((one) => ({ text: `${one.name} ${one.branch}` }))
+        : repository !== undefined && choice?.kind === 'branch' && choice.branch === repository.defaultBranch
+          ? [{ text: t.isDefault }, ...meta]
+          : meta
     return (
       // A press picks it; focus stays in the field, which owns the keys.
       <div
@@ -345,7 +432,7 @@ function Places({
         }}
         onClick={() => onPick(place)}
       >
-        <span className={s.check}>{place.key === current.key && <Icon name="check" size={12} />}</span>
+        <span className={s.check}>{isCurrent(place) && <Icon name="check" size={12} />}</span>
         <Icon name={madeOf(place) === null ? glyphOf(place.kind) : 'plus'} size={13} className={s.glyph} />
         <span className={s.main}>
           <span className={s.head}>
@@ -359,13 +446,15 @@ function Places({
                 {t.create} <span className={s.mono}>{place.label}</span>
               </span>
             ) : (
-              <span className={cx(s.title, (place.kind === 'main' || place.kind === 'branch') && s.mono)}>{place.label}</span>
+              <span className={cx(s.title, (place.kind === 'main' || place.kind === 'branch') && place.several !== true && s.mono)}>
+                {place.label}
+              </span>
             )}
           </span>
-          {meta.length > 0 && (
+          {parts.length > 0 && (
             <span className={s.meta}>
-              {meta.map((part, n) => (
-                <span key={part.text} className={cx(part.mono === true && s.mono)}>
+              {parts.map((part, n) => (
+                <span key={part.text} className={cx('mono' in part && part.mono === true && s.mono)}>
                   {n > 0 && ' · '}
                   {part.text}
                 </span>
@@ -411,17 +500,50 @@ function Places({
       <span aria-live="polite">
         {typed && <VisuallyHidden>{rows.length === 0 ? t.none(words.trim()) : t.count(rows.length)}</VisuallyHidden>}
       </span>
+      {hosts.map((host) => (
+        <div key={host} className={s.host}>
+          <Icon name="plug" size={13} className={s.glyph} />
+          <span className={s.hostWords}>
+            <span className={s.hostName} title={host}>
+              {host}
+            </span>
+            <span className={s.hostWhat}>{t.needsConnection}</span>
+          </span>
+          {onConnect !== undefined && (
+            <Button size="small" aria-label={t.connectHost(host)} onClick={() => onConnect(host)}>
+              {t.connect}
+            </Button>
+          )}
+        </div>
+      ))}
       <div className={s.results}>
         {rows.length > 0 && (
           <div ref={list} id={`${ids}-list`} role="listbox" aria-label={t.find}>
             {groups.map((group) => (
-              <div key={group.label ?? 'main'} role="group" {...(group.label === null ? {} : { 'aria-label': group.label })}>
-                {group.label !== null && (
-                  <div className={s.label} aria-hidden="true">
-                    {group.label}
+              <div
+                key={group.key}
+                role="group"
+                className={cx(group.repository !== undefined && s.repository)}
+                {...(group.label === null ? {} : { 'aria-label': group.label })}
+              >
+                {group.repository !== undefined ? (
+                  <div className={s.repositoryHead} aria-hidden="true">
+                    <span className={s.repositoryName}>{group.repository.name}</span>
+                    <span className={s.repositoryDefault}>
+                      {t.defaultIs} <span className={s.mono}>{group.repository.defaultBranch}</span>
+                    </span>
+                    {group.repository.branch !== group.repository.defaultBranch && (
+                      <span className={cx(s.repositoryNow, s.mono)}>{group.repository.branch}</span>
+                    )}
                   </div>
+                ) : (
+                  group.label !== null && (
+                    <div className={s.label} aria-hidden="true">
+                      {group.label}
+                    </div>
+                  )
                 )}
-                {group.places.map((place) => row(place, index++))}
+                {group.places.map((place) => row(place, index++, group.repository !== undefined))}
               </div>
             ))}
           </div>

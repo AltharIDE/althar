@@ -574,6 +574,7 @@ export function ProjectView({
                     .filter((task) => task.settledAt === null && task.branch !== null && task.reviewing == null)
                     .map((task) => ({ id: task.taskId, title: task.title })) ?? null
                 }
+                {...(ways === undefined ? {} : { onConnect: ways.connections })}
                 runnables={coordinator.runnables}
                 launches={coordinator.launches}
                 now={now}
