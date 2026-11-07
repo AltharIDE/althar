@@ -1,6 +1,6 @@
 # Desktop Application and Local Runtime
 
-[ADR-101](../decisions/101-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
+[ADR-103](../decisions/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
 proposes remote project homes and worker pools alongside this local topology.
 Its persistent headless service is a proposed exception to the no-service
 deployment below; the local utility process stays. No remote host is built yet.

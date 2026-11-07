@@ -2,7 +2,7 @@
 
 - **Status:** Proposed
 - **Date:** 2026-10-19
-- **Proposed amendment:** [ADR-101](101-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
+- **Proposed amendment:** [ADR-103](103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
   keeps the local runtime and one writer per profile. It makes the headless
   host persistent, allows local, self-hosted or managed project homes before
   multiplayer, adds SSH beside a relay, defines worker pools and leases,

@@ -50,6 +50,9 @@ import { codeRootOf } from './code'
 import { NotFound, ProjectRefused, RetryRefused } from './errors'
 import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
+import { modelNamer } from './coordinatorNews'
+import { teamChanges, teamLine } from './teamWords'
+import { addItem } from './threads'
 import { type ConnectionInfo, Connections } from './Connections'
 import { coAuthorLine, coAuthorOn, setCoAuthor } from './credit'
 import { plansAndReviewsOf, newProjectDefaultsOf, setPlansAndReviews, setNewProjectDefaults } from './plansAndReviews'
@@ -98,6 +101,7 @@ import { applyRules } from './rulesChange'
 import { UsageData } from './UsageData'
 import { Queries } from './Queries'
 import { Busy } from './Busy'
+import { clearView, showEarlier, undoClearView } from './chatView'
 import { timestamp } from './records'
 import { Setups } from './Setups'
 import * as Runtime from './Runtime'
@@ -661,6 +665,7 @@ export const handlers = Api.toLayer(
                   _tag: 'Streaming',
                   threadId: event.threadId,
                   itemId: event.itemId,
+                  sequence: event.sequence,
                   kind: event.kind,
                   agentId: event.agentId,
                   text: event.text,
@@ -1122,6 +1127,42 @@ export const handlers = Api.toLayer(
             Effect.flatMap(envelope('thread.compact', { threadId }, commandId), (made) => sessions.compact({ envelope: made, threadId })),
           ),
         ),
+      ClearView: ({ commandId, threadId }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('thread.clear_view', { threadId }, commandId), (made) =>
+              Effect.provideContext(clearView({ envelope: made, threadId }), store),
+            ),
+          ),
+        ),
+      ShowEarlier: ({ commandId, threadId, open }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('thread.show_earlier', { threadId, open }, commandId), (made) =>
+              Effect.provideContext(showEarlier({ envelope: made, threadId, open }), store),
+            ),
+          ),
+        ),
+      UndoClearView: ({ commandId, threadId }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('thread.undo_clear_view', { threadId }, commandId), (made) =>
+              Effect.provideContext(undoClearView({ envelope: made, threadId }), store),
+            ),
+          ),
+        ),
+      ForgetConversation: ({ commandId, threadId }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('thread.forget_conversation', { threadId }, commandId), (made) =>
+              sessions.forget({ envelope: made, threadId }),
+            ),
+          ),
+        ),
       // Stopped by the person, a conflict its lead was resolving is theirs (ADR-030): the lead isn't started again for it.
       StopSession: ({ commandId, threadId }) =>
         once(commandId, api(Effect.andThen(sessions.stop(threadId), pullRequests.leadStopped({ threadId })))),
@@ -1289,6 +1330,29 @@ export const handlers = Api.toLayer(
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
       ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
         once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn, toward))),
+      ChangeTeam: ({ commandId, taskId, steps }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const changed = yield* runs.changeTeam({ taskId, steps, actorId: instance.personId })
+              const named = yield* modelNamer.pipe(Effect.provideService(Agents, agents), Effect.provideService(Models, models))
+              const [thread] = yield* sql<{ id: string; projectId: ProjectId }>`
+                SELECT id, project_id FROM threads WHERE task_id = ${taskId} AND kind = 'task'`
+              if (thread === undefined) return
+              // Each change, said in the task's thread as the person made it.
+              for (const line of teamChanges(changed, named))
+                yield* Effect.provideContext(
+                  addItem({ projectId: thread.projectId, threadId: thread.id }, 'notice', {
+                    source: 'runtime',
+                    severity: 'info',
+                    title: `You ${teamLine(line)}`,
+                  }),
+                  folderStore,
+                )
+            }),
+          ),
+        ),
       ChangeIssueDraft: ({ commandId, draftId, title, body, labels, priority }) =>
         once(
           commandId,

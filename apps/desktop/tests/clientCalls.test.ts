@@ -114,6 +114,12 @@ describe('what the client sends', () => {
     })
   })
 
+  it('changes the team of a task that has begun', async () => {
+    const { client, heard } = await standIn()
+    const steps: ReadonlyArray<PlanStep> = [{ key: 'implement', agentId: 'codex', model: null, skipped: false }]
+    expect((await sent(heard, client.changeTeam('task_1', steps))).payload).toEqual({ taskId: 'task_1', steps })
+  })
+
   it('removes an account, anyway only where the person said so', async () => {
     const { client, heard } = await standIn()
     expect((await sent(heard, client.removeAccount('acc_1'))).payload).toEqual({ accountId: 'acc_1' })

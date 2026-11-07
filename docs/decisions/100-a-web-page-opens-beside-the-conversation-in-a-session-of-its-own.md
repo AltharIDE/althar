@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-07
-- **Proposed amendment:** [ADR-101](101-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
+- **Proposed amendment:** [ADR-103](103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
   forwards remote runs into the client-side page and sends comments back
   with their logical run and snapshot. Page isolation stays; this does not
   share the worker's browser session.

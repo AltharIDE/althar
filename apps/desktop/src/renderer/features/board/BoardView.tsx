@@ -799,7 +799,8 @@ export function BoardView({
   // A plan that hasn't begun starts, or changes who does it, from its row; one starting offers Start no more until it has.
   const teamOf = (work: BoardTask) => {
     const change = team === undefined ? null : teamChangeOf(work)
-    if (team === undefined || change === null || work.plan === null) return {}
+    // A task that has begun changes its team from its own menu, not from its row.
+    if (team === undefined || change === null || change === 'begun' || work.plan === null) return {}
     const planId = work.plan.id
     const start =
       change === 'starts' && !starting.has(planId)

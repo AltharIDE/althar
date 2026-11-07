@@ -620,7 +620,7 @@ principal for a bounded purpose.
 
 ### Vendor CLI and subscription login policy
 
-[ADR-101](../decisions/101-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
+[ADR-103](../decisions/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
 proposes replacing rules 5–8's blanket device/remote split with verified
 provider support for sign-in on a personal host, separately from managed
 cloud support. It keeps provider-owned login and forbids copying vendor

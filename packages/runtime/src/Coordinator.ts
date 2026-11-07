@@ -5,7 +5,7 @@ import { type CommandEnvelope, type ProjectId, type WorksIn } from '@althar/doma
 import type { Commands, Ledger } from '@althar/persistence-sqlite'
 import { AUTOMATION_DEFAULTS, type AutomationDefinition, knownModelName, Schedule, scheduleInLine } from '@althar/contracts'
 import { Priority, StatusCategory } from '@althar/connectors'
-import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema } from 'effect'
+import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema, Semaphore, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { thisDevice } from './device'
@@ -14,7 +14,10 @@ import { Connections } from './Connections'
 import { touchCard } from './cards'
 import { Changes } from './Changes'
 import { endWords, modelNamer, teamOf, withEffort } from './coordinatorNews'
-import { armDraftDeadlines, surfaceDraftAt } from './draftDeadlines'
+import { words } from './words'
+import { teamChanges, teamLine } from './teamWords'
+import { armDraftDeadlines, stillDraft, surfaceDraftAt } from './draftDeadlines'
+import { Live, type LiveEvent } from './Live'
 import { suggestedCoordinator } from './coordinatorChoice'
 import { Accounts } from './Accounts'
 import { AutomationRefused, Automations } from './Automations'
@@ -110,6 +113,7 @@ export interface Suggested {
 type Store =
   | SqlClient.SqlClient
   | Instance
+  | Live
   | Agents
   | SignIns
   | Sessions
@@ -286,13 +290,26 @@ const DiffAsked = Schema.Struct({
 const Noted = Schema.Struct({ note: Schema.String })
 const Dropped = Schema.Struct({ id: Schema.String })
 const Passed = Schema.Struct({ task: Schema.String, message: Schema.String, now: Schema.optional(Schema.Boolean) })
-const Relead = Schema.Struct({ task: Schema.String, lead: StepPick, message: Schema.optional(Schema.String) })
+const Relead = Schema.Struct({
+  task: Schema.String,
+  lead: Schema.optional(StepPick),
+  /* Its reviewer: another model, or null for none. Left out, it stays as it is. */
+  review: Schema.optional(Schema.NullOr(StepPick)),
+  message: Schema.optional(Schema.String),
+})
 const OnTask = Schema.Struct({ task: Schema.String })
 const PartOf = Schema.Struct({ task: Schema.String, part_of: Schema.Boolean })
 
-const read = <A>(schema: Schema.Codec<A, unknown>, input: unknown) =>
+/** What propose_plan takes, said when its input can't be read: lead and review are objects, never a name alone. */
+const PLAN_SHAPE =
+  '{ "task": "<its slug>", "lead": { "model": "<a model as list_models writes it>", "effort": "<optional>", "reason": "<optional>" }, "review": { "model": "<…>" } }, with review left out, or null for none. lead and review are objects, not strings.'
+
+const read = <A>(schema: Schema.Codec<A, unknown>, input: unknown, shape?: string) =>
   Schema.decodeUnknownEffect(schema)(input).pipe(
-    Effect.mapError((error) => new ToolRefused({ message: `Althar couldn't read that: ${error.message}` })),
+    Effect.mapError(
+      (error) =>
+        new ToolRefused({ message: `Althar couldn't read that: ${error.message}${shape === undefined ? '' : ` It takes ${shape}`}` }),
+    ),
   )
 
 export class Coordinator extends Context.Service<
@@ -344,6 +361,7 @@ export class Coordinator extends Context.Service<
       )
       const agents = yield* Agents
       const sessions = yield* Sessions
+      const live = yield* Live
       const projects = yield* Projects
       const plans = yield* Plans
       const busy = yield* Busy
@@ -508,11 +526,17 @@ export class Coordinator extends Context.Service<
           return [yield* projectOverview(access.projectId), notesSection(yield* notesOf(access.projectId))].join('\n\n')
         })
 
+      /** How a draft that has no plan reads: the coordinator calls propose_plan, or says it didn't plan. */
+      const NO_PLAN_YET = 'drafted, no plan yet (call propose_plan)'
+
       /**
        * Where a task stands, in a word or two, as list_tasks says it: planned, ready, finished once its pull requests merged
        * (ADR-034), or its state.
        */
-      const standingOf = (task: { readonly state: string; readonly run: string | null }, seen: PullRequestFacts | undefined) => {
+      const standingOf = (
+        task: { readonly state: string; readonly run: string | null; readonly planned: boolean },
+        seen: PullRequestFacts | undefined,
+      ) => {
         // A done task was settled as merged, so no repository of it is left out.
         const found = task.state === 'done' && seen !== undefined ? { ...seen, unmerged: 0 } : seen
         // Whose pull requests are all merged (or closed, as far as Althar can tell) is finished, whatever its last run said; not
@@ -523,8 +547,17 @@ export class Coordinator extends Context.Service<
             : (task.state === 'open' || task.state === 'done') && found !== undefined
               ? finishedBy(found)
               : null
+        // Only a draft with a plan proposed (or accepted) is planned: a bare one is no plan, whatever its countdown might say.
         const state =
-          task.state === 'draft' ? 'planned' : finished !== null ? 'finished, merged' : task.run === 'succeeded' ? 'ready' : task.state
+          task.state === 'draft'
+            ? task.planned
+              ? 'planned'
+              : NO_PLAN_YET
+            : finished !== null
+              ? 'finished, merged'
+              : task.run === 'succeeded'
+                ? 'ready'
+                : task.state
         return { found, state }
       }
 
@@ -587,8 +620,10 @@ export class Coordinator extends Context.Service<
             lead: string | null
             unbranched: number
             toward: string | null
+            planned: number
           }>`
             SELECT k.id, k.slug, k.title, k.state,
+              EXISTS (SELECT 1 FROM task_plans p WHERE p.task_id = k.id AND p.state IN ('proposed', 'accepted')) AS planned,
               (SELECT group_concat(DISTINCT w.toward) FROM workspaces w WHERE w.task_id = k.id AND w.toward IS NOT NULL) AS toward,
               (SELECT r.state FROM runs r WHERE r.task_id = k.id ORDER BY r.created_at DESC LIMIT 1) AS run,
               EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = k.id AND w.access = 'write' AND w.branched_at IS NULL) AS unbranched,
@@ -603,7 +638,7 @@ export class Coordinator extends Context.Service<
           )
           return tasks
             .map((task, at) => {
-              const { found, state } = standingOf(task, facts[at])
+              const { found, state } = standingOf({ ...task, planned: task.planned === 1 }, facts[at])
               // A plain task that hasn't changed the repository has no branch, and nothing to ship.
               const words =
                 task.unbranched === 1 ? 'no branch: it has changed nothing in the repository' : found === undefined ? '' : listWords(found)
@@ -650,8 +685,14 @@ export class Coordinator extends Context.Service<
           const found = task.state === 'done' && seen !== undefined ? { ...seen, unmerged: 0 } : seen
           // What it built, as its lead last said it: what to tell the person it delivered, without reading every round.
           const { built, unverified } = yield* taskShown(task.threadId)
+          // A draft with no plan proposed has none to read, and nothing starts it: said plainly, never as "planned".
+          const [proposed] = yield* sql<{ id: string }>`
+            SELECT id FROM task_plans WHERE task_id = ${task.id} AND state IN ('proposed', 'accepted') LIMIT 1`
           return [
             `${task.slug}: ${task.title}`,
+            ...(task.state === 'draft' && proposed === undefined && access.role === 'coordinator'
+              ? [`Where it stands: ${NO_PLAN_YET}. It has no plan, so nothing starts it.`]
+              : []),
             ...(access.role === 'coordinator' ? [] : [yield* leadsRead(access, task, found)]),
             task.description === '' ? '' : task.description,
             built === null ? '' : `What it built, as its lead says it now stands:\n${built}`,
@@ -693,7 +734,7 @@ export class Coordinator extends Context.Service<
           const named = withEffort(yield* modelNamer)
           return [
             task.id === access.taskId ? 'This is your own task.' : '',
-            `Where it stands: ${standingOf({ state: task.state, run: run?.state ?? null }, seen).state}.`,
+            `Where it stands: ${standingOf({ state: task.state, run: run?.state ?? null, planned: plan !== undefined }, seen).state}.`,
             parameters === null || Option.isNone(parameters)
               ? ''
               : `Its plan: ${teamOf(parameters.value, named)}; ${endWords(parameters.value.end)}.`,
@@ -955,10 +996,43 @@ export class Coordinator extends Context.Service<
           return { created, issue }
         })
 
+      /** The drafts the coordinator made in its turn now, by thread: told at its end if none has a plan (`unplannedNews`). */
+      const draftedThisTurn = new Map<string, Map<string, string>>()
+
+      /**
+       * A coordinator's turn ended: if a draft it made in it still has no plan, it is told so, once, as news. The draft's
+       * own tool reply said to propose its plan, and a failed propose_plan, or one never made, looks the same to it as
+       * one that worked (list_tasks said "planned" once). The person's stopping the turn, or a failed one, tells it nothing.
+       */
+      const unplannedNews = (event: LiveEvent) =>
+        Effect.gen(function* () {
+          if (event._tag !== 'TurnEnded') return
+          const made = draftedThisTurn.get(event.threadId)
+          if (made === undefined) return
+          draftedThisTurn.delete(event.threadId)
+          if (event.state !== 'completed') return
+          const bare: Array<string> = []
+          for (const [taskId, slug] of made) if (yield* stillDraft(taskId)) bare.push(slug)
+          if (bare.length === 0) return
+          const body = `Althar's news (not the person's word): ${bare.join(', ')} ${bare.length === 1 ? 'is a draft that has' : 'are drafts that have'} no plan, so ${bare.length === 1 ? 'it hasn’t' : 'they haven’t'} started and ${bare.length === 1 ? 'it shows' : 'they show'} to the person as stopped. Your propose_plan did not go through. Call propose_plan for ${bare.length === 1 ? 'it' : 'each'} now, or tell the person that planning failed. Don't say ${bare.length === 1 ? 'it is' : 'they are'} planned.`
+          yield* say({
+            envelope: yield* envelope('coordinator.news', {}, undefined, instance.systemId),
+            threadId: event.threadId,
+            body,
+            disposition: 'after_current',
+            sender: { kind: 'internal' },
+            origin: 'news',
+            quiet: true,
+          })
+        }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not tell the coordinator its draft has no plan', cause)))
+      yield* Effect.forkScoped(Stream.runForEach(yield* live.subscribe, (event) => provide(unplannedNews(event))))
+
       const draft = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const { pull_request: pullRequest, ...drafted } = yield* read(DraftedTask, input)
           const { created, issue } = yield* drafting(access, drafted)
+          if (access.role === 'coordinator')
+            draftedThisTurn.set(access.threadId, (draftedThisTurn.get(access.threadId) ?? new Map()).set(created.taskId, created.slug))
           // Its plan comes in this turn. If it never does, every open board is told when its moment ends, so the draft
           // shows in Needs you then: a board reads again only when the feed says something changed.
           yield* Effect.forkIn(
@@ -1374,10 +1448,40 @@ export class Coordinator extends Context.Service<
           return { agentId, model: pick.model ?? null, ...(effort === null ? {} : { effort }) }
         })
 
+      /**
+       * A task is planned one call at a time, from looking for the plan this call already made to making one: a call repeated
+       * while its first is still being handled (the connection dropped, the agent asked again) waits, then finds that plan.
+       */
+      const planning = new Map<string, Semaphore.Semaphore>()
       const propose = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
-          const proposed = yield* read(Proposed, input)
+          const { task: slug } = yield* read(Proposed, input, PLAN_SHAPE)
+          const task = yield* taskOf(access, slug)
+          const lock = planning.get(task.id) ?? Semaphore.makeUnsafe(1)
+          planning.set(task.id, lock)
+          return yield* lock.withPermits(1)(proposeLocked(access, input))
+        })
+
+      const proposeLocked = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const proposed = yield* read(Proposed, input, PLAN_SHAPE)
           const task = yield* taskOf(access, proposed.task)
+          // The same call again, as when its answer was lost to a closed connection: the plan it made stands, whatever became of it
+          // since (held, changed by the person, started), and nothing is proposed twice. A different call is a new plan, as ever.
+          const proposal = createHash('sha256')
+            .update(JSON.stringify([task.id, proposed]))
+            .digest('hex')
+          {
+            const sql = yield* SqlClient.SqlClient
+            const [made] = yield* sql<{ state: string }>`
+              SELECT state FROM task_plans
+              WHERE task_id = ${task.id} AND state IN ('proposed', 'accepted') AND json_extract(parameters, '$.proposal') = ${proposal}
+              LIMIT 1`
+            if (made !== undefined)
+              return made.state === 'proposed'
+                ? `Planned ${task.slug}: this plan is already proposed, so nothing changed. It starts when its countdown ends unless the person holds or changes it; they see it as a card.`
+                : `Planned ${task.slug}: this plan went through and ${task.slug} has started. Nothing changed.`
+          }
           if (task.state !== 'draft')
             return yield* new ToolRefused({ message: `${task.slug} has started already; message its lead instead.` })
           // A lead plans the tasks it drafted; the coordinator any.
@@ -1418,6 +1522,7 @@ export class Coordinator extends Context.Service<
             actorId: instance.coordinatorId,
             end: yield* changes.endFor(access.projectId, task.id),
             worksIn,
+            proposal,
             ...(proposed.works_in_why === undefined ? {} : { worksInWhy: proposed.works_in_why }),
           })
           const where = yield* localLine(access.projectId, task.id, worksIn)
@@ -1435,12 +1540,14 @@ export class Coordinator extends Context.Service<
         task: { readonly id: string; readonly title: string; readonly threadId: string },
         what: string,
         here: string,
+        /** When it takes effect, where that isn't at once: said after why, in both threads. */
+        note?: string,
       ) =>
         Effect.gen(function* () {
           const own = access.role === 'lead' && task.id === access.taskId
           // None of these needs the person's word, so none quotes them: it says why, where the call did (ADR-086).
           const why = typeof input === 'object' && input !== null && 'why' in input && typeof input.why === 'string' ? input.why.trim() : ''
-          const as = why === '' ? '' : `: ${why.replace(/\.$/, '')}`
+          const as = `${why === '' ? '' : `: ${why.replace(/\.$/, '')}`}${note === undefined ? '' : `. ${note}`}`
           const by = own
             ? 'Its lead'
             : access.role === 'lead'
@@ -1460,9 +1567,10 @@ export class Coordinator extends Context.Service<
         })
 
       /**
-       * Puts a task's lead on another model, effort or agent, as the task's model picker and Hand over do: a session of the
-       * new agent, briefed with the thread so far, with what you say as its first turn. A step held for an agent's usage
-       * limit goes to it at once, as the held card's Hand over does.
+       * Puts a task's lead and reviewer on other models, efforts or agents, as the task's team dialog does: from the lead's next
+       * turn, never in the one it is in, by the same handover as its model picker, which gives the new agent the thread so far;
+       * the reviewer until its review round starts, and from the next round during one. The lead's own step, held for an agent's usage limit, goes
+       * to the lead named at once, as the held card's Hand over does.
        */
       const changeLead = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
@@ -1470,47 +1578,101 @@ export class Coordinator extends Context.Service<
           const task = yield* taskOf(access, asked.task)
           if (task.id === access.taskId)
             return yield* new ToolRefused({ message: `${task.slug} is your own task: the person changes who leads it.` })
-          const lead = yield* stepOf(access.projectId, asked.lead)
-          const named = `${lead.agentId}${lead.model === null ? '' : ` on ${lead.model}`}`
+          if (asked.lead === undefined && asked.review === undefined)
+            return yield* new ToolRefused({ message: 'Name the lead, the review, or both: what should change on the task.' })
+          const lead = asked.lead === undefined ? undefined : yield* stepOf(access.projectId, asked.lead)
+          const reviewer = asked.review == null ? asked.review : yield* stepOf(access.projectId, asked.review, 'the review')
+          const named = yield* modelNamer
+          const said: Array<string> = []
           const sql = yield* SqlClient.SqlClient
+          // Only the lead's own step held for a usage limit goes to the lead named at once; a held review is the reviewer's, and the lead
+          // named for it changes from its next turn, as for any task at work.
           const [held] = yield* sql<{ one: number }>`
             SELECT 1 AS one FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
-            JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.id} AND a.state = 'held' AND a.hold_reason = 'usage_limit' LIMIT 1`
-          if (held !== undefined) {
-            const answer = { kind: 'retry' as const, agentId: lead.agentId, ...(lead.model === null ? {} : { model: lead.model }) }
+            JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.id} AND a.state = 'held' AND a.hold_reason = 'usage_limit'
+            AND n.node_key <> 'review' LIMIT 1`
+          if (lead !== undefined && held !== undefined) {
+            const answer = {
+              kind: 'retry' as const,
+              agentId: lead.agentId,
+              ...(lead.model === null ? {} : { model: lead.model }),
+              ...(lead.effort == null ? {} : { effort: lead.effort }),
+            }
             yield* (yield* Runs).handOverHeld({
               envelope: yield* envelope('task.hand_over_held', { taskId: task.id, answer }, undefined, instance.coordinatorId),
               taskId: task.id,
               answer,
             })
-            yield* saidOn(access, input, task, `Handed “${task.title}” to ${named}`, `handed this task’s held step to ${named}`)
-            return `${task.slug}'s step, held for a usage limit, goes to ${named} now. Both threads have a line saying so.`
-          }
-          const body = asked.message?.trim()
-          yield* sessions
-            .switchAgent({
-              threadId: task.threadId,
-              agentId: lead.agentId,
-              ...(lead.model === null ? {} : { model: lead.model }),
-              ...(lead.effort === undefined ? {} : { effort: lead.effort }),
-              ...(body === undefined || body === ''
-                ? {}
-                : {
-                    message: {
-                      envelope: yield* envelope('thread.send', { threadId: task.threadId, body }, undefined, instance.coordinatorId),
-                      body: passedOn(body, yield* ownTitle(access)),
-                    },
-                  }),
-            })
-            .pipe(
-              Effect.mapError((error) =>
-                error instanceof ToolRefused
-                  ? error
-                  : new ToolRefused({ message: `Althar couldn't hand ${task.slug} to ${named}: ${error._tag}. Tell the person.` }),
-              ),
+            yield* saidOn(
+              access,
+              input,
+              task,
+              `Handed “${task.title}” to ${named({ key: 'implement', ...lead, skipped: false })}`,
+              `handed this task’s held step to ${named({ key: 'implement', ...lead, skipped: false })}`,
             )
-          yield* saidOn(access, input, task, `Put ${named} on “${task.title}”`, `put ${named} on this task`)
-          return `${task.slug}'s lead is ${named} now, briefed with its thread so far. Both threads have a line saying so.`
+            said.push(`${task.slug}'s step, held for a usage limit, goes to ${named({ key: 'implement', ...lead, skipped: false })} now.`)
+          }
+          if ((lead !== undefined && held === undefined) || asked.review !== undefined) {
+            const [plan] = yield* sql<{ state: string; parameters: string }>`
+              SELECT state, parameters FROM task_plans WHERE task_id = ${task.id} AND state IN ('proposed', 'accepted')
+              ORDER BY proposed_at DESC LIMIT 1`
+            if (plan === undefined || plan.state === 'proposed')
+              return yield* new ToolRefused({ message: `${task.slug} hasn't started: change its plan with propose_plan.` })
+            const before = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(plan.parameters)
+            const rest = before.steps.filter((step) => step.key !== 'implement' && step.key !== 'review')
+            const ownLead = before.steps.find((step) => step.key === 'implement')
+            const ownReview = before.steps.find((step) => step.key === 'review')
+            const steps: Array<PlanStep> = [
+              ...rest,
+              lead !== undefined && held === undefined ? { key: 'implement' as const, ...lead, skipped: false } : (ownLead ?? []),
+              ...(asked.review === undefined
+                ? ownReview === undefined
+                  ? []
+                  : [ownReview]
+                : reviewer == null
+                  ? ownReview === undefined
+                    ? []
+                    : [{ ...ownReview, skipped: true }]
+                  : [{ key: 'review' as const, ...reviewer, skipped: false }]),
+            ].flat()
+            const changed = yield* (yield* Runs)
+              .changeTeam({ taskId: task.id, steps, actorId: instance.coordinatorId })
+              .pipe(
+                Effect.catch((error) =>
+                  error instanceof TaskRefused
+                    ? Effect.fail(new ToolRefused({ message: `${task.slug}: ${words(error, (id) => id).message}` }))
+                    : error instanceof ReviewRefused
+                      ? Effect.fail(new ToolRefused({ message: `${task.slug}: ${error.message}` }))
+                      : Effect.fail(error),
+                ),
+              )
+            for (const line of teamChanges(changed, named)) {
+              yield* saidOn(
+                access,
+                input,
+                task,
+                `${line.verb === 'changed' ? 'Changed' : 'Removed'} ${line.thing} on “${task.title}”`,
+                `${line.verb} ${line.thing}`,
+                line.note,
+              )
+              const did = teamLine(line)
+              said.push(`${task.slug}: ${did}${did.endsWith('.') ? '' : '.'}`)
+            }
+            if (changed.lead === undefined && changed.review === undefined && held === undefined)
+              said.push(`Nothing changed: ${task.slug} has that team already.`)
+          }
+          // What the new lead is told first goes to the thread after the change, so the lead that takes over reads it.
+          const body = asked.message?.trim()
+          if (body !== undefined && body !== '')
+            yield* sessions
+              .send({
+                envelope: yield* envelope('thread.send', { threadId: task.threadId, body }, undefined, instance.coordinatorId),
+                threadId: task.threadId,
+                body: passedOn(body, yield* ownTitle(access)),
+                disposition: 'after_current',
+              })
+              .pipe(Effect.mapError(() => new ToolRefused({ message: `Althar couldn't pass that on to ${task.slug}'s lead.` })))
+          return `${said.join(' ')} Both threads have a line saying so.`
         })
 
       /** Tries a task lead's last turn again where it failed, as its Try again does: what was said in it goes again. */
@@ -2469,7 +2631,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'change_lead',
-          "Puts another model, effort or agent on a task's lead, as the task's model picker and Hand over do: a new session of that agent, briefed with the thread so far, and message, where you give one, as its first turn. Name the model as list_models writes it. A step held for an agent's usage limit goes to it at once, as the held card's Hand over does. It acts at once, with a line in your thread and the task's.",
+          "Changes who leads or reviews a task, as its Change the team dialog does, at any time before it merges. The lead changes from its next turn, never in the one it is in: another model, effort or agent takes over as the task's model picker and Hand over do, briefed with the thread so far, and message, where you give one, is said to it first. The reviewer changes until its review round starts, and from the next round during one; null for review removes it, and it can't change once the review is done. Name models as list_models writes them. The lead's own step, held for an agent's usage limit, goes to the lead named at once, as the held card's Hand over does. It acts at once, with a line in your thread and the task's.",
           {
             type: 'object',
             properties: {
@@ -2479,13 +2641,19 @@ export class Coordinator extends Context.Service<
                 properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort },
                 required: ['model'],
               },
+              review: {
+                type: ['object', 'null'],
+                description: "Its reviewer's model, or null for no review. Left out, the review stays as it is.",
+                properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort },
+                required: ['model'],
+              },
               message: { type: 'string', description: 'What the new lead is told first, after its brief.' },
               why: {
                 type: 'string',
                 description: 'Why, in a few plain words, said in both threads: "the person asked", or what is going wrong.',
               },
             },
-            required: ['task', 'lead'],
+            required: ['task'],
           },
           changeLead,
         ),

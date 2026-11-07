@@ -375,7 +375,7 @@ CREATE TABLE threads (
   execution_id TEXT,
   node_key TEXT,
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), waits_for_place TEXT CHECK (waits_for_place GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), waits_for_place TEXT CHECK (waits_for_place GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), view_from INTEGER CHECK (view_from >= 1), earlier_shown INTEGER NOT NULL DEFAULT 0 CHECK (earlier_shown IN (0, 1)),
   CHECK (
     (kind = 'coordinator' AND owner_actor_id IS NOT NULL AND task_id IS NULL AND execution_id IS NULL AND node_key IS NULL)
     OR (kind = 'task' AND owner_actor_id IS NULL AND task_id IS NOT NULL AND execution_id IS NULL AND node_key IS NULL)
@@ -1448,3 +1448,5 @@ CREATE TABLE setting_changes (
   ) STRICT;
 
 CREATE INDEX setting_changes_by_project ON setting_changes(project_id, state, created_at);
+
+CREATE INDEX setting_changes_by_item ON setting_changes(item_id) WHERE item_id IS NOT NULL;

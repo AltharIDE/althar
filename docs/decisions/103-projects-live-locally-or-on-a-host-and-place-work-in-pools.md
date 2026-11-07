@@ -1,4 +1,4 @@
-# ADR-101: A project lives locally or on a host, and places its work across its pools
+# ADR-103: A project lives locally or on a host, and places its work across its pools
 
 - **Status:** Proposed
 - **Date:** 2026-11-07

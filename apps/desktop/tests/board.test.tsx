@@ -1233,6 +1233,34 @@ describe('the board', () => {
     expect(startSession).not.toHaveBeenCalled()
   })
 
+  it('asks the coordinator to plan a draft that has no plan, rather than refusing Carry on for want of a lead', async () => {
+    const send = vi.fn(async () => {})
+    const startSession = vi.fn(async () => 's1')
+    const getCoordinator = vi.fn(async () => ({ threadId: 'coordinator-thread' }) as never)
+    const { client } = fakeClient({
+      send,
+      startSession,
+      getCoordinator,
+      getBoard: vi.fn(async () => board()),
+      getThread: vi.fn(async () =>
+        snapshot({ session: null, task: { ...snapshot().task, id: 't4', state: 'draft', planId: null, lead: null } }),
+      ),
+    })
+    withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
+    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
+    await userEvent.click(within(dock).getByRole('button', { name: 'Ask for changes' }))
+    await userEvent.type(within(dock).getByRole('textbox'), 'Please rename it.')
+    await userEvent.click(within(dock).getByRole('button', { name: 'Send to the lead' }))
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
+    expect(send).toHaveBeenCalledWith({
+      threadId: 'coordinator-thread',
+      body: expect.stringContaining('it is a draft with no plan. Call propose_plan for it'),
+      disposition: 'after_current',
+    })
+    expect(screen.queryByText('No lead to start. Pick an agent for it first.')).toBeNull()
+    expect(startSession).not.toHaveBeenCalled()
+  })
+
   it('shows the queued note status when the lead fails before a session exists', async () => {
     const send = vi.fn(async () => {})
     const startSession = vi.fn(async () => {

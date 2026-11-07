@@ -2,7 +2,7 @@
 
 - **Status:** Accepted; amends [ADR-006](006-worktree-per-task.md)
 - **Date:** 2026-11-03
-- **Proposed amendment:** [ADR-101](101-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
+- **Proposed amendment:** [ADR-103](103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
   pins Local to the named computer's checkout, adds host-qualified remote
   worktrees and an explicit local test copy. Checkout ownership and the
   refusal to stash, reset or overwrite the person's changes stay.

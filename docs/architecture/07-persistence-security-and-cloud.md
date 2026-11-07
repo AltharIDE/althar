@@ -394,7 +394,7 @@ Do not market file synchronization of SQLite/artifacts as collaboration.
 
 ## Cloud authority
 
-[ADR-101](../decisions/101-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
+[ADR-103](../decisions/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
 proposes an earlier step: the same runtime and single-writer SQLite profile
 can live on a personal host or a managed single-player home, with leased
 workers. The local deployment stays. Its SSH/relay paths, leases and
