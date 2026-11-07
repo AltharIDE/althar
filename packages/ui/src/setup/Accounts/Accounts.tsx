@@ -97,7 +97,7 @@ export interface AccountsText {
   signedOut: string
   checking: string
   out: (back: string) => string
-  /** When its sign-in ends. */
+  /** When its sign-in ends, at the latest: the date its agent gives. */
   ends: (at: string) => string
   signIn: string
   signInAgain: string
@@ -127,7 +127,7 @@ export const accountsText: AccountsText = {
   signedOut: 'Signed out',
   checking: 'Checking…',
   out: (back) => `until ${back}`,
-  ends: (at) => `sign-in ends ${at}`,
+  ends: (at) => `sign-in ends by ${at}`,
   signIn: 'Sign in',
   signInAgain: 'Sign in again',
   providerSignIn: (provider) => `${provider}: sign in again`,

@@ -1,4 +1,5 @@
 import { assert, describe, it } from '@effect/vitest'
+import { AgentExited, AgentRequestFailed, AgentStartFailed } from '@althar/provider-adapters'
 import { Cause, Duration } from 'effect'
 
 import { CliSignedOut } from '../src/Connections'
@@ -6,7 +7,7 @@ import { CoordinatorUnavailable } from '../src/Coordinator'
 import { AlreadyDelivered, ChangedSinceSeen, ImageRefused, RuleOnAnotherList, RulesChanged } from '../src/errors'
 import { ReviewDraftClosed, ReviewDraftIncomplete } from '../src/Reviews'
 import { StartTimedOut } from '../src/Sessions'
-import { agentSaid, expected, summarize, words } from '../src/words'
+import { agentSaid, expected, signedOutWords, signInEndedWords, signInWords, summarize, unreachableWords, words } from '../src/words'
 import { thisDevice } from '../src/device'
 
 /*
@@ -189,5 +190,62 @@ describe('the words for what went wrong, for the refusals the API’s tests don�
       'Submodule vendor/lib has uncommitted changes, or isn’t at the commit recorded for it.',
     )
     assert.strictEqual(merge('submodule'), 'Submodule the merge stopped has uncommitted changes, or isn’t at the commit recorded for it.')
+  })
+})
+
+describe('why an agent couldn’t start or be reached (DEV-196)', () => {
+  const exited = (stderr: string) => new AgentExited({ code: 1, signal: null, stderr })
+  const refused = (failure: AgentRequestFailed['failure'], message: string) =>
+    new AgentRequestFailed({ method: 'session/new', failure, message })
+
+  it('says it isn’t installed, by its command', () => {
+    assert.strictEqual(
+      summarize(Cause.fail(new AgentStartFailed({ command: 'claude', reason: 'spawn claude ENOENT' }))),
+      `claude isn't installed, or isn't on ${thisDevice()}'s PATH.`,
+    )
+    assert.strictEqual(
+      agentSaid(exited('sh: 1: opencode: command not found')),
+      `The agent isn't installed, or isn't on ${thisDevice()}'s PATH.`,
+    )
+  })
+
+  it('says it isn’t signed in, with the way back in', () => {
+    assert.strictEqual(agentSaid(refused('auth_required', 'Authentication required')), signedOutWords)
+    assert.strictEqual(agentSaid(exited('Not logged in · Please run /login')), signedOutWords)
+  })
+
+  it('says its sign-in ended, which a step’s call offers to sign in again as it does one signed out', () => {
+    assert.strictEqual(agentSaid(refused('auth_required', 'Login expired · Please run /login')), signInEndedWords)
+    assert.strictEqual(
+      agentSaid(
+        refused(
+          'unknown',
+          'Your access token could not be refreshed because your refresh token has expired. Please log out and sign in again.',
+        ),
+      ),
+      signInEndedWords,
+    )
+    assert.strictEqual(agentSaid(exited('Failed to authenticate: OAuth session expired and could not be refreshed')), signInEndedWords)
+    assert.isTrue(signInWords(signInEndedWords))
+    assert.isTrue(signInWords(signedOutWords))
+    assert.isFalse(signInWords('The agent stopped.'))
+  })
+
+  it('says the network is in the way, for a connection that failed, not a server’s own trouble', () => {
+    assert.strictEqual(
+      agentSaid(refused('transient', "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)")),
+      unreachableWords(thisDevice()),
+    )
+    assert.strictEqual(
+      agentSaid(refused('transient', 'API Error: 529 Overloaded. This is a server-side issue, usually temporary — try again in a moment.')),
+      'API Error: 529 Overloaded. This is a server-side issue, usually temporary — try again in a moment.',
+    )
+  })
+
+  it('else says the agent’s own first error line', () => {
+    assert.strictEqual(
+      agentSaid(exited('Loading plugins…\nError: Cannot find module "./auth"\n    at Module._resolveFilename (node:internal)\n')),
+      'The agent stopped: Error: Cannot find module "./auth".',
+    )
   })
 })

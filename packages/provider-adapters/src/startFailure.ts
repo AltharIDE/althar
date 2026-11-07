@@ -15,12 +15,14 @@ const notInstalled =
   /\bspawn \S+ ENOENT\b|\bENOENT\b.{0,40}\bspawn\b|command not found|is not recognized as an internal or external command/i
 
 /**
- * A sign-in that was there and no longer serves: a token past its end that
- * couldn't be renewed, or the agent asking for a sign-in "again". Said before
- * a plain sign-in is looked for, as each also reads as one.
+ * A sign-in that was there and no longer serves: Claude Code's login past
+ * its end or its time limit, or its token revoked; Codex's refresh token
+ * expired, used or revoked; OpenCode's Console or SSO to sign in to again.
+ * Said before a plain sign-in is looked for, as each also reads as one. A
+ * bare "sign in again" isn't one: Claude Code says it with no sign-in at all.
  */
 const ended =
-  /\b(?:o?auth |access |refresh |id )?token (?:has |is )?(?:expired|been revoked|could not be refreshed|was already used)|(?:sign[- ]?in|log[- ]?in|session|credentials?) (?:has |have )?(?:expired|ended)|could not be refreshed|refresh token|(?:log|sign) ?in again|re-?authenticate/i
+  /\b(?:o?auth |access |refresh )?token (?:has |is |was |been )*(?:expired|revoked|already used)|\b(?:login|sign[- ]?in|session) (?:has )?(?:expired|ended)|reached its time limit|could not be refreshed|\bsign in with [\w ]{1,20} again\b|\breconnect [\w ]{1,40} to continue|re-?authenticate/i
 
 /** No sign-in at all, in the words agents say it. */
 const signedOut =
@@ -31,7 +33,7 @@ const signedOut =
  * that dropped mid-way isn't: the agent reached its servers, and its own words say what happened.
  */
 const unreachable =
-  /\bENOTFOUND\b|\bEAI_AGAIN\b|\bECONNREFUSED\b|\bETIMEDOUT\b|\bENETUNREACH\b|\bEHOSTUNREACH\b|getaddrinfo|can'?t reach|cannot connect|unable to connect|could not connect|failed to connect|error sending request|dns error|waiting for network|network (?:is )?unreachable|connection refused/i
+  /\bENOTFOUND\b|\bEAI_AGAIN\b|\bECONNREFUSED\b|\bETIMEDOUT\b|\bENETUNREACH\b|\bEHOSTUNREACH\b|getaddrinfo|(?:can'?t|could not|cannot|unable to) reach|cannot connect|unable to connect|could not connect|failed to connect|error sending request|dns error|waiting for network|network (?:is )?unreachable|no internet route|connection refused/i
 
 /**
  * Which of the classes `said` is, or undefined where it is none of them.

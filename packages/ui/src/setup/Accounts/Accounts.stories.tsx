@@ -122,8 +122,8 @@ export const SignInEnds: Story = {
   },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('sign-in ends 12 Dec 14:00')).toBeInTheDocument()
-    await expect(c.getByText('sign-in ends Mon 09:30')).toBeInTheDocument()
+    await expect(c.getByText('sign-in ends by 12 Dec 14:00')).toBeInTheDocument()
+    await expect(c.getByText('sign-in ends by Mon 09:30')).toBeInTheDocument()
     await expect(c.getByText('Claude Max')).toBeInTheDocument()
     // A key says no end: it has none.
     await expect(c.getAllByText(/sign-in ends/)).toHaveLength(2)

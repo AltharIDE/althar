@@ -9,8 +9,14 @@ import { Duration } from 'effect'
  * renews or holds a sign-in.
  */
 
-/** How long before a sign-in ends the warning is raised: long enough to sign in again before a night's unattended work. */
-export const WARN_WITHIN = Duration.days(3)
+/**
+ * How long before the end an agent says the warning is raised: three days to
+ * sign in again, before a night's unattended work stops, counted from the
+ * earliest the sign-in can end. Claude Code, the one agent that says (its
+ * `loginExpiresAt`), says the real end can come up to three days before the
+ * date it gives, so six days before that date.
+ */
+export const WARN_WITHIN = Duration.days(6)
 
 /** What Althar keeps of a warning, by account: the end it was about, and whether the person put it aside. */
 export interface Warned {

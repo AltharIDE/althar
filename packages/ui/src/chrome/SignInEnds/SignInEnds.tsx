@@ -14,7 +14,7 @@ import s from './SignInEnds.module.css'
  */
 
 export interface SignInEndsText {
-  /** Whose sign-in ends, and when as the person reads it: Claude Code’s sign-in ends Mon 14:00. */
+  /** Whose sign-in ends, and by when as the person reads it, the latest its agent gives: Claude Code’s sign-in ends by Mon 14:00. */
   ends: (whose: string, when: string) => string
   ended: (whose: string) => string
   signIn: string
@@ -22,8 +22,8 @@ export interface SignInEndsText {
 }
 
 export const signInEndsText: SignInEndsText = {
-  ends: (whose, when) => `${whose}’s sign-in ends ${when}`,
-  ended: (whose) => `${whose}’s sign-in ended`,
+  ends: (whose, when) => `${whose}’s sign-in ends by ${when}`,
+  ended: (whose) => `${whose}’s sign-in has ended`,
   signIn: 'Sign in again',
   dismiss: 'Dismiss',
 }

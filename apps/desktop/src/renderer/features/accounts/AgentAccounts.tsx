@@ -33,8 +33,8 @@ const providersOf = (account: AccountStatus): Pick<AccountEntry, 'providers'> =>
   }
 }
 
-/** How long before a sign-in ends its row says so in the signal's colour, as the runtime's one warning is raised (signInEnding.ts). */
-const SOON_MS = 3 * 24 * 60 * 60 * 1000
+/** How long before a sign-in ends its row says so in the signal's colour: as the runtime raises its one warning (`WARN_WITHIN`). */
+const SOON_MS = 6 * 24 * 60 * 60 * 1000
 
 /** When an account's sign-in ends, where its agent says; none once it has ended, as its row then says it is signed out. */
 const endsOf = (account: AccountStatus, now: Date): Pick<AccountEntry, 'ends'> => {

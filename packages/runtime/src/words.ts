@@ -155,7 +155,7 @@ export const agentSaid = (error: unknown): string | undefined => {
         case 'session_lost':
           return lostWords('The agent')
         default:
-          return sentence(text(error, 'message'))
+          return classed(text(error, 'message'), '') ?? sentence(text(error, 'message'))
       }
     case 'OptionUnavailable':
       return `The agent doesn't offer ${text(error, 'value')}.`

@@ -619,6 +619,24 @@ const claudePaidBy = (output: string): PaidBy | undefined => {
   }
 }
 
+/**
+ * When a claude.ai sign-in ends, from `claude auth status` (2.1.318 and
+ * later): `loginExpiresAt`, an ISO time, the end of the login's refresh chain
+ * as stored at sign-in, which renewing never moves; null for a key, a token
+ * from the environment, Bedrock, Vertex or a gateway, and missing before
+ * 2.1.318. Its own description says the real end can be up to three days
+ * earlier, which the warning allows for (`WARN_WITHIN` in the runtime).
+ */
+const claudeEndsAt = (output: string): string | undefined => {
+  try {
+    const parsed: unknown = JSON.parse(output)
+    const at = typeof parsed === 'object' && parsed !== null && 'loginExpiresAt' in parsed ? parsed.loginExpiresAt : undefined
+    return typeof at === 'string' && !Number.isNaN(Date.parse(at)) ? new Date(Date.parse(at)).toISOString() : undefined
+  } catch {
+    return undefined
+  }
+}
+
 const loggedInField = (output: string): boolean | undefined => {
   try {
     const parsed: unknown = JSON.parse(output)
@@ -966,6 +984,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       status: () => ({ command: 'claude', args: ['auth', 'status'] }),
       read: loggedInField,
       paidBy: claudePaidBy,
+      endsAt: claudeEndsAt,
       login: 'claude auth login',
       inApp: { kind: 'claude-login', ways: ['browser'], run: () => ({ command: 'claude', args: ['auth', 'login', '--claudeai'] }) },
       // Its sign-in is a Keychain item named after the home's path, which deleting the folder would leave behind.

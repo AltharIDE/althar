@@ -24,7 +24,7 @@ export const Ended: Story = { args: { when: undefined } }
 export const SignsInAgain: Story = {
   play: async ({ args, canvasElement }) => {
     const line = within(canvasElement).getByRole('status')
-    await expect(line).toHaveTextContent('Claude Code’s sign-in ends Mon 14:00')
+    await expect(line).toHaveTextContent('Claude Code’s sign-in ends by Mon 14:00')
     await userEvent.click(within(line).getByRole('button', { name: 'Sign in again' }))
     await expect(args.onSignIn).toHaveBeenCalledOnce()
   },
