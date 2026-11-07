@@ -209,7 +209,9 @@ test('a task’s run opens beside its thread, isolated; a comment pointed on it 
   }
   execFileSync('git', ['add', '.'], { cwd: repo, env })
   execFileSync('git', ['commit', '-q', '-m', 'Serve'], { cwd: repo, env })
-  const { electronApp, page } = await launch(home)
+  // Chromium's own camera, there on any machine: without one, as on CI's, a page asking for it is told there is none, and
+  // the session's permission handler, which the camera's step below is about, is never asked.
+  const { electronApp, page } = await launch(home, {}, { switches: ['--use-fake-device-for-media-stream'] })
   try {
     // Nothing goes to the person's real browser: what would is kept to look at.
     await electronApp.evaluate(({ shell }) => {
