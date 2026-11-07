@@ -1,0 +1,33 @@
+[
+  {
+    "id": "A1",
+    "page": "?d=A&s=mixed&host=off&open=1&pick=engine=fix/redirects",
+    "caption": "A, mixed defaults, host off: the top row is “Default branches”, every repository is named with its branch, and engine’s fix/redirects stands out. The chip says where the pick leaves the rest."
+  },
+  {
+    "id": "B1",
+    "page": "?d=B&s=mixed&host=off&open=1&pick=engine=fix/redirects",
+    "caption": "B, the same pick: one section per repository. Engine shows its default, branches and the picked fix/redirects; frontend stays on main. The summary and the chip say “engine: fix/redirects · 4 on defaults”."
+  },
+  {
+    "id": "C1",
+    "page": "?d=C&s=mixed&host=off&open=1&pick=engine=fix/redirects",
+    "caption": "C, the same pick: the run board. Repositories expand in place on the left, and “Where each run starts” on the right says engine runs fix/redirects on localhost:4100 while the other four keep their defaults."
+  },
+  {
+    "id": "A2",
+    "page": "?d=A&s=same&host=on&open=1&pick=frontend=!18",
+    "caption": "Shared main with GitLab connected: all five defaults agree, and pull requests appear with the repository they belong to. frontend’s !18 is picked; the other four stay on main."
+  },
+  {
+    "id": "S1",
+    "page": "?d=B&s=single&host=off&open=1",
+    "caption": "One repository: the picker falls back to today’s shape — main, tasks, branches — with no repository names, grouping or summary to carry."
+  },
+  {
+    "id": "H1",
+    "page": "?d=A&s=mixed&host=off&open=1&pick=engine=fix/redirects",
+    "click": ["text=Connect GitLab…"],
+    "caption": "The way to connect from the footer: Connect GitLab… opens a dialog for gitlab.fnt.example, its host and a token. Connecting turns the host on and fills the pull requests in."
+  }
+]
