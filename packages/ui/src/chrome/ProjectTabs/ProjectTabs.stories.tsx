@@ -104,11 +104,17 @@ function Window({
         }}
         onNewProject={fn()}
         end={
-          shown ? (
+          notices ? (
+            // As the app's bar holds them (TabsFrame): every line it can show at once, then its settings.
             <>
-              {(offline || notices) && <Offline />}
-              {notices && <UpdateReady version="0.1.1" onRestart={fn()} />}
-              {notices && <SignInEnds whose="Claude Code (work)" when="Mon 14:00" onSignIn={fn()} onDismiss={fn()} />}
+              <Offline />
+              <UpdateReady version="0.1.1" onRestart={fn()} />
+              <SignInEnds whose="Claude Code (work)" when="Mon 14:00" onSignIn={fn()} onDismiss={fn()} />
+              <IconButton icon="gear" label="Settings" size="small" onClick={fn()} />
+            </>
+          ) : shown ? (
+            <>
+              {offline && <Offline />}
               <RoomSwitch value={Room.Talk} onChange={fn()} />
               {shown.yours > 0 && <WorkStatus yours={shown.yours} onYours={fn()} />}
               <ChromeButton icon="plus" label="New task" onClick={fn()} />
