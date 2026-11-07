@@ -96,6 +96,11 @@ export interface RuntimeOptions {
   readonly deviceName: string
   /** How long a proposed plan waits before it starts on its own: 25 seconds unless a test says otherwise. */
   readonly countdown?: Duration.Duration
+  /**
+   * How long a task the coordinator drafted, with no plan yet, stays off the board before it is the person's: five
+   * minutes unless a test says otherwise. Its turn ending without a plan brings it to the person sooner.
+   */
+  readonly drafting?: Duration.Duration
   /** How often a task's pull requests are asked for news while it listens: 30 seconds unless a test says otherwise. */
   readonly listenEvery?: Duration.Duration
   /** How often the merge line is swept, and whether at all (not with an infinite one): 30 seconds unless a test says otherwise (MergeLine.ts). */

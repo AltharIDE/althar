@@ -204,7 +204,8 @@ export const toolKindOf = (kind: string): ToolKind => {
 /**
  * What a tool call does, in a word, before what it does it to: as it runs
  * ("Running"), once done ("Ran"), and otherwise, when it was declined, failed
- * or stopped, the plain verb ("Run"), which the kit marks as such.
+ * or stopped, the plain verb ("Run"), which the kit marks as such. A command
+ * that failed still ran: it says so, and the kit's red cross says how it went.
  */
 export const verbs: Readonly<Record<ToolKind, { readonly plain: string; readonly running: string; readonly done: string }>> = {
   [ToolKind.Read]: { plain: 'Read', running: 'Reading', done: 'Read' },
@@ -229,7 +230,8 @@ export const verbs: Readonly<Record<ToolKind, { readonly plain: string; readonly
 /** The verb for a tool call as it stands. */
 export const verbFor = (toolKind: ToolKind, state: ToolState): string => {
   const verb = verbs[toolKind]
-  return state === ToolState.Running ? verb.running : state === ToolState.Done ? verb.done : verb.plain
+  const ran = state === ToolState.Done || (state === ToolState.Failed && toolKind === ToolKind.Run)
+  return state === ToolState.Running ? verb.running : ran ? verb.done : verb.plain
 }
 
 /** A tool call's status, as the kit's. One declined says so; one left running when its turn has ended was stopped with it. */

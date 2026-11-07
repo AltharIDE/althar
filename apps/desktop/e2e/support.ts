@@ -108,7 +108,11 @@ const DESKTOP_NAMES = [
   'NIRI_SOCKET',
 ]
 
-export const launch = async (home: string, env: Record<string, string> = {}, { scheme }: { readonly scheme?: 'system' } = {}) => {
+export const launch = async (
+  home: string,
+  env: Record<string, string> = {},
+  { scheme, switches = [] }: { readonly scheme?: 'system'; readonly switches?: ReadonlyArray<string> } = {},
+) => {
   // Run from inside an Electron app, as a lead in Althar is, the shell says to run Electron as Node; the app must run as itself.
   // And from inside an agent's sandbox, git is configured for the agent (its proxy, its safe folders): the app's git is its own.
   // Windows names it Path, and a second spelling beside it would leave which one the app reads to chance.
@@ -123,7 +127,8 @@ export const launch = async (home: string, env: Record<string, string> = {}, { s
   const electronApp = await electron.launch({
     timeout: budget.medium,
     // Chromium refuses to run as root with its sandbox, as in a container: there, without it.
-    args: [app, ...(process.getuid?.() === 0 ? ['--no-sandbox'] : [])],
+    // And Chromium's switches a spec asks for, as for a camera where the machine has none.
+    args: [app, ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []), ...switches],
     ...(scheme === 'system' ? { colorScheme: null } : {}),
     env: {
       ...inherited,

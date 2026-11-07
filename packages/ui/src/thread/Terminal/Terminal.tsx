@@ -1,7 +1,7 @@
 import { useContext, useState, type ReactNode } from 'react'
 
+import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
-import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
 import { ExitShown } from './exitShown'
 import s from './Terminal.module.css'
@@ -43,9 +43,34 @@ const ANSI = /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(\u0007|\u001b\\
 /** A line without its terminal escape codes. */
 export const plainTerminalLine = (line: string) => line.replace(ANSI, '')
 
+const indentOf = (line: string) => /^[ \t]*/.exec(line)?.[0].length ?? 0
+
+/* the command's last step pipes into wc with only flags, so it ends by printing a lone, padded count */
+const ENDS_IN_WC = /\|\s*wc(\s+-[a-zA-Z]+)*\s*$/
+const endsInWc = (command: string) => ENDS_IN_WC.test(command.split(/;|&&|\|\||\n/).findLast((p) => p.trim() !== '') ?? '')
+
+/**
+ * Lines as a reading column shows them: the indent they all share taken off.
+ * Where the command that printed them ends by piping into wc, the padding wc
+ * sets its count in ("      95") comes off the last line too, so it doesn't
+ * read as a stray, oddly placed number. Nothing else is judged by its shape:
+ * an indented number in YAML, a tree or a log keeps its place.
+ */
+export const tidyTerminalLines = (lines: readonly string[], command?: string): string[] => {
+  const filled = lines.filter((l) => l.trim() !== '')
+  const shared = filled.length === 0 ? 0 : Math.min(...filled.map(indentOf))
+  const out = lines.map((l) => l.slice(Math.min(shared, indentOf(l))))
+  if (command === undefined || !endsInWc(command)) return out
+  const last = out.findLastIndex((l) => l.trim() !== '')
+  if (last >= 0 && /^\s*\d+(\s+\d+)*\s*$/.test(out[last] ?? '')) out[last] = (out[last] ?? '').trim()
+  return out
+}
+
 export interface TerminalProps {
   /** The command that ran, as its first line. Leave it out where something above already shows it, like a Tool's row. */
   command?: string
+  /** The command that printed this, where it isn't shown here: read only to lay its output out, as a count wc pads. */
+  printedBy?: string
   /** What it printed, line by line: the end of the output, which is where a run says how it went. */
   lines: string[]
   /** What it printed before those, held back until asked for. */
@@ -67,12 +92,16 @@ export interface TerminalProps {
 }
 
 /**
- * What a command printed: its end first, with what came before one click
- * away. While it runs, the line being written ends in a cursor; one that
- * ended having printed nothing says so.
+ * What a command printed, as a quiet block in the reading column: its end
+ * first, with what came before behind a control over the block, not among its
+ * lines. Each line wraps under its own start. While it runs, the line being
+ * written ends in a cursor; one that ended having printed nothing says so.
+ * Success says nothing more; a failure's exit code ends the block, unless
+ * its host shows it already.
  */
 export function Terminal({
   command,
+  printedBy = command,
   lines,
   earlier = [],
   omitted = 0,
@@ -88,17 +117,25 @@ export function Terminal({
   const [open, setOpen] = useState(false)
   const said = useContext(ExitShown)
   const code = said ? undefined : exit
-  const line = (raw: string, key: string) => {
-    const l = plainTerminalLine(raw)
-    return (
-      <Line key={key} className={isError(l) ? s.err : undefined}>
-        {l}
-      </Line>
-    )
-  }
+  /* the line being written takes the same indent off as those before it, so it doesn't step out of line */
+  const plain = tidyTerminalLines([...earlier, ...lines, ...(live === undefined ? [] : [live])].map(plainTerminalLine), printedBy)
+  const before = plain.slice(0, earlier.length)
+  const last = plain.slice(earlier.length, earlier.length + lines.length)
+  const writing = live === undefined ? undefined : plain.at(-1)
+  const line = (l: string, key: string) => (
+    <Line key={key} className={isError(l) ? s.err : undefined}>
+      {l}
+    </Line>
+  )
   const quiet = lines.length === 0 && earlier.length === 0 && live === undefined && !loading && error === undefined && failure === undefined
   return (
     <div className={s.term} aria-busy={loading || live !== undefined || undefined}>
+      {earlier.length > 0 && (
+        <button type="button" className={s.earlier} aria-expanded={open} onClick={() => setOpen(!open)}>
+          <Icon name="chevronU" size={10} className={s.chevron} />
+          {open ? t.hideEarlier : t.showEarlier(earlier.length)}
+        </button>
+      )}
       <pre className={s.out}>
         {command && (
           <Line className={s.command}>
@@ -109,18 +146,11 @@ export function Terminal({
           </Line>
         )}
         {omitted > 0 && <Line className={s.said}>{t.omitted(omitted)}</Line>}
-        {earlier.length > 0 && (
-          <Line className={s.earlier}>
-            <LinkButton aria-expanded={open} onClick={() => setOpen(!open)}>
-              {open ? t.hideEarlier : t.showEarlier(earlier.length)}
-            </LinkButton>
-          </Line>
-        )}
-        {open && earlier.map((l, i) => line(l, `e${i}`))}
-        {lines.map((l, i) => line(l, `l${i}`))}
+        {open && before.map((l, i) => line(l, `e${i}`))}
+        {last.map((l, i) => line(l, `l${i}`))}
         {live !== undefined && (
-          <span className={s.live}>
-            {plainTerminalLine(live)}
+          <span className={cx(s.line, s.live)}>
+            {writing}
             <i className={s.cursor} aria-hidden="true" />
           </span>
         )}
@@ -134,18 +164,14 @@ export function Terminal({
         {error !== undefined && <Line className={s.said}>{error}</Line>}
         {failure !== undefined && <Line className={s.err}>{failure}</Line>}
         {quiet && <Line className={s.said}>{t.empty}</Line>}
+        {code !== undefined && code !== 0 && <Line className={s.exit}>{t.exit(code)}</Line>}
       </pre>
-      {code !== undefined && (
-        <div className={s.foot}>
-          <span className={cx(s.exit, code !== 0 && s.bad)}>{t.exit(code)}</span>
-        </div>
-      )}
     </div>
   )
 }
 
 const Line = ({ children, className }: { children: ReactNode; className?: string }) => (
-  <span className={className}>
+  <span className={cx(s.line, className)}>
     {children}
     {'\n'}
   </span>
