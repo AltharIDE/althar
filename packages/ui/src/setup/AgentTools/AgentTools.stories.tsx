@@ -75,7 +75,7 @@ const OFF: ToolSyncModel = {
 const WEEK: ToolSyncModel = {
   on: true,
   settle: [
-    { kind: 'unreadable', agent: 'opencode', file: '~/.config/opencode/opencode.json', problem: 'It isn’t JSON Althar can read.' },
+    { kind: 'unreadable', agent: 'opencode', file: '~/.config/opencode/opencode.json', problem: 'it isn’t JSON Althar can read' },
     { kind: 'signIn', name: 'linear', agents: ['codex', 'opencode'] },
   ],
   since: [

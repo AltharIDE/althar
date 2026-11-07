@@ -603,6 +603,100 @@ repository, gets what a task's lead gets: a worktree at its head with the
 project's setup replayed, its code run in the sandbox, skills, MCP servers,
 the network, screenshots, and a draft that carries pictures.
 
+## As built: the capable-agents UX (the #640 prototype's directions)
+
+The person picked the directions in the prototype of 6–7 November (#640);
+this is how they were built, and where the build went another way than
+this ADR or the prototype's README.
+
+- **Allow everything is on.** A new project's first rules have it, and an
+  existing project whose rules never said gets one revision with it on, the
+  first time they are read (`Policies.ts`): an explicit off, the person's
+  own, stays off. Their Never, Ask me and command rules stay as they were.
+- **What asks, in the project's Rules (direction A).** While everything is
+  allowed, Rules lead with the kinds that still ask: lost work and history
+  (the default branch, force pushes, every branch or tags, other branches'
+  deletion), publishing and merging (`deploy`), speaking for the person (a
+  new rule kind, `speak`), each Asks you or Never, and secrets, Never and not
+  to be changed, as above; then the person's own Never and Ask me commands.
+  *Another way than the README:* the mode and the switch don't go. "Ask about
+  more" turns allowing everything off and gives back the sentences, from
+  Never to the rest, where the switch turns it on again: a project the person
+  had asking about more keeps doing so, and its rules read as before. Deleting
+  what is outside the task stays asking, but isn't made Never with its kind:
+  its rule kind is all writing outside the worktree, which goes ahead.
+- **The person's Ask me holds with everything allowed** (the flow chart
+  above), which the rules hadn't done.
+- **MCP calls are read** (`mcpActs.ts`, `irreversible.ts`): by the server
+  and tool Claude Code's bridge names (`_meta.claudeCode`, or the
+  `mcp__server__tool` and `mcp.server.tool` names), then by what the tool's
+  name says and, for a general `graphql` or `api` tool, its mutation or
+  method. A merge or a release is publishing, a post, review or message
+  speaking for the person, a deletion of a branch, tag or file or a push to
+  the default branch lost history; each asks, with everything allowed too.
+  Every MCP post asks, the task's own pull request's included, as Althar
+  can't yet tell from a server's call whose pull request it is; Althar's own
+  tools still go on the person's word. The MCP spec's tool annotations
+  aren't read: no agent's bridge passes them on yet.
+- **The ask card** says Can't be undone, the action on its button, what
+  can't be taken back in one line, the words it would post, and the server
+  and tool or the command; Not now or the action, with no always. The
+  permission request carries it (`AttentionRequest.irreversible`).
+- **Each MCP call names its server** in its row; one that acted on the
+  outside world stands out under the round's work as a card: the server,
+  what it did, the words it posted, Open where its result says where to see
+  it (`ToolCallItem.mcp`). Its input and result aren't kept, as before; the
+  words it posted are, cut at 600 characters.
+- **The person's servers load in every role** (above, "MCP servers"): each
+  session is given the servers found in Claude Code's, Codex's or
+  OpenCode's own settings, whichever found it, that are on there and ticked
+  for its role in Settings › MCP servers, for every project or one, beside
+  Althar's own; Codex and OpenCode still have their own switched off by name
+  and Claude Code still takes only what it is given, so a session gets
+  exactly those, whichever agent runs it. A repository's `.mcp.json` is
+  listed nowhere yet and loads nowhere, as its trust is the agent's own.
+  The runtime reads the person's agents only where the desktop app gives it
+  their home (`agentConfigs`): a test's runtime reads none.
+- **One switch keeps the person's agents' servers the same** (`mcpSync.ts`),
+  with the dialog before it starts (direction A), To settle, Since, a chip
+  per server per file that takes it back out, a server's menu that keeps it
+  out of one agent, and Leave them in or Take them out when turned off. It
+  writes through `claude mcp add-json --scope user` and `codex mcp add`;
+  OpenCode has no such command, so its JSON is edited in place with its
+  comments kept. A copy of each file is kept before Althar first writes to
+  it, and a record of what it added: taking back removes only that, and only
+  while it is still as Althar wrote it. It reads the three files each time
+  Settings asks rather than watching them. A token goes across as its
+  variable's name; one written out in a file isn't copied, nor a Codex
+  command's variable by name (Codex's `--env` takes values), nor an SSE
+  server to Codex: each is said under To settle. Sign-ins open each agent's
+  own `mcp login` in a terminal; whether an agent is signed in to a server
+  isn't read, so a server Althar copied that signs in on its own shows
+  Sign in until pressed.
+- **Skills get their own switch** (`skillSync.ts`): it links each skill
+  into Claude Code's and Codex's folders (OpenCode reads both), never moves
+  or copies one, and takes out only its own links. One name with two
+  versions waits under To settle; picking one replaces only a link of the
+  person's, never a folder of theirs. *Another way than the README:* the
+  skills table has no role columns, as a skill loads by each agent's own
+  folders and Althar can't yet hold one back by role.
+- **A task's parts (direction C)** sit just before the faces: the worktree
+  (with the files it changed, which the files button was), its pull
+  requests (Merge from the row where it waits; a failing check's names and
+  Ask the lead to fix it), a review draft (Post it from the row), its issue,
+  what runs (Open, Stop) and its screenshots. Add opens a pull request or
+  attaches one; a worktree (a chat made a change, as make-it-a-change was
+  asked of the lead), a review, an issue and a page are asked of the lead in
+  the person's words. *Not built:* Access as a part, as with everything
+  allowed there is nothing to give a task but what can't be undone, which
+  the card asks for each time; Run a check again, and taking an issue off a
+  task, which have no command yet.
+- **The Situations and the fast lane** are three tasks of their own, started
+  from this one: the board (while you were away, the coordinator off), the
+  thread (a Never rule met, an ask that waits, a lead-started task that
+  stops, two tasks on the same files, a server that fails), and the fast lane
+  with Auto's lighter model.
+
 ## What each ADR it supersedes loses
 
 | ADR | What goes | What holds |

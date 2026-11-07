@@ -178,7 +178,7 @@ export const agentServers = (agent: SyncedAgent, home: ServerHome): AgentServers
         file,
         path,
         servers: [],
-        problem: line === undefined ? 'It isn’t TOML Althar can read.' : `It has a mistake on line ${line}.`,
+        problem: line === undefined ? 'it isn’t TOML Althar can read' : `it has a mistake on line ${line}`,
       }
     }
   }
@@ -192,7 +192,7 @@ export const agentServers = (agent: SyncedAgent, home: ServerHome): AgentServers
             return undefined
           }
         })()
-  if (config === undefined) return { agent, file, path, servers: [], problem: 'It isn’t JSON Althar can read.' }
+  if (config === undefined) return { agent, file, path, servers: [], problem: 'it isn’t JSON Althar can read' }
   return { agent, file, path, servers: agent === 'claude' ? claudeServersIn(config) : openCodeServersIn(config) }
 }
 

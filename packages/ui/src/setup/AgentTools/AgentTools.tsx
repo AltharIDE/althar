@@ -153,7 +153,7 @@ export const agentToolsText = {
     server: (name: string, ways: string) => `${name} runs ${ways}, so it isn’t copied until you pick one.`,
     skill: (name: string, agents: string) => `${name} is in ${agents}, but they differ.`,
   },
-  unreadable: (agent: string, problem: string) => `${agent}’s settings can’t be read: ${problem} Nothing is written there until they can.`,
+  unreadable: (agent: string, problem: string) => `${agent}’s settings can’t be read: ${problem}. Nothing is written there until they can.`,
   cant: {
     sse: (name: string, agent: string) => `${name} runs over SSE, which ${agent} doesn’t take.`,
     secret: (name: string, agent: string) =>
