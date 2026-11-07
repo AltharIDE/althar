@@ -30,8 +30,8 @@ import { POOL, ToolRefused, ToolServer, type Tool, type ToolAccess } from './Too
  * applies where the task stands is decided once (`actionsOf`).
  *
  * Leads and the coordinator share these tools (ADR-097). A move acts at
- * once, in any turn, with a line in the caller's thread and in the task's,
- * quoting the person where their message is in the turn. What can't be
+ * once, in any turn, with a line in the caller's thread and in the task's
+ * saying who made it, and why where the call says. What can't be
  * undone, accepting (merging here) and pushing a default branch, still acts
  * only on the person's own message in the turn (ADR-081, "The person's
  * word"); in another turn it is refused, and the person presses it
@@ -478,6 +478,12 @@ export class TaskActions extends Context.Service<
           }
         })
 
+      /** Why a move was made, where it didn't act on the person's word: after the line, as the agent said it. */
+      const nonEmpty = (why: string | undefined): why is string => why !== undefined && why.trim() !== ''
+      const becauseOf = (why: string | undefined) => (nonEmpty(why) ? `: ${why.trim().replace(/\.$/, '')}` : '')
+      const whyOf = (input: unknown) =>
+        typeof input === 'object' && input !== null && 'why' in input && typeof input.why === 'string' ? input.why : undefined
+
       /** A line in a thread, as Althar says what happened. */
       const line = (projectId: ProjectId, threadId: string, title: string) =>
         addItem({ projectId, threadId }, 'notice', { source: 'runtime', severity: 'info', title })
@@ -548,8 +554,8 @@ export class TaskActions extends Context.Service<
 
       /**
        * A move asked of the coordinator or a lead: done at once, in any turn, with a line in the caller's thread and in the
-       * task's (ADR-097), quoting the person where their message is in the turn. What can't be undone (`word`) acts only on
-       * the person's own message in this turn, which the call names; in another turn nothing happens, and it says so.
+       * task's (ADR-097), saying who made it and why. What can't be undone (`word`) acts only on the person's own message in
+       * this turn, which the call names, and its lines quote it; in another turn nothing happens, and it says so.
        */
       const act = (
         access: ToolAccess,
@@ -559,6 +565,8 @@ export class TaskActions extends Context.Service<
           readonly message?: string | undefined
           readonly args?: MoveArgs
           readonly word?: true
+          /** Why the coordinator or lead did it, said in both threads where it didn't act on the person's word. */
+          readonly why?: string | undefined
         } = {},
       ) =>
         Effect.gen(function* () {
@@ -576,7 +584,8 @@ export class TaskActions extends Context.Service<
             return yield* new ToolRefused({
               message: `This can't be undone, so it acts only on the person's own message in this turn, from the window or a paired device: nothing changed. Tell the person; they can do it from ${task.slug}'s card themselves, or ask you in a message.`,
             })
-          const words = word?.words ?? (yield* personsWords(access))
+          // Only what acts on the person's word quotes them; any other move says who did it, and why (ADR-086).
+          const words = word?.words
           // A lead discarding its own task: as its turn ends, as its agents stop then, so its word on it reaches the person.
           if (own && move === 'discard') {
             const standing = yield* standingOf(task.id)
@@ -596,7 +605,7 @@ export class TaskActions extends Context.Service<
           }
           const outcome = yield* perform(task, move, actorOf(access), { ...args, stands: word?.stands })
           if (!outcome.done) return `Nothing changed: ${outcome.said}`
-          const as = words === undefined ? '' : `, as you asked: ${quoted(words)}`
+          const as = words === undefined ? becauseOf(asked.why) : `, as you asked: ${quoted(words)}`
           if (access.threadId !== task.threadId) yield* line(task.projectId, access.threadId, `${DID[move](`“${task.title}”`)}${as}`)
           yield* line(task.projectId, task.threadId, `${own ? 'Its lead' : yield* whoOf(access)} ${DID_HERE[move]}${as}`)
           yield* fact({
@@ -605,7 +614,12 @@ export class TaskActions extends Context.Service<
             aggregateId: task.id,
             revision: (yield* sql<{ revision: number }>`SELECT revision FROM tasks WHERE id = ${task.id}`)[0]?.revision ?? 1,
             type: words === undefined ? 'task.moved' : 'task.moved_on_word',
-            payload: { move, ...(words === undefined ? {} : { words }), by: access.role },
+            payload: {
+              move,
+              ...(words === undefined ? {} : { words }),
+              ...(nonEmpty(asked.why) ? { why: asked.why } : {}),
+              by: access.role,
+            },
             actorId: actorOf(access),
           })
           return `${outcome.said} ${access.threadId === task.threadId ? 'Its thread has a line saying so' : 'Both threads have a line saying so'}; say it in a sentence.`
@@ -676,6 +690,10 @@ export class TaskActions extends Context.Service<
       })
       const task = { type: 'string', description: "The task's slug, as list_tasks shows it." }
       const message = { type: 'string', description: "The person's message in this turn that asks it, by its id from read_turn." }
+      const why = {
+        type: 'string',
+        description: 'Why, in a few plain words, said after the line in both threads: "the person asked", or what is going wrong.',
+      }
 
       const Accepting = Schema.Struct({
         task: Schema.String,
@@ -752,7 +770,8 @@ export class TaskActions extends Context.Service<
           const { info } = call
           const cant = (why: string) => new ToolRefused({ message: `${task.slug}’s stuck step is its ${info.step}: ${why}` })
           // As the card's buttons, at once: none of them can't be undone (ADR-097).
-          const on = (move: TaskMove, answer: StuckAnswer) => act(access, task, move, { args: { attentionId: call.id, answer } })
+          const on = (move: TaskMove, answer: StuckAnswer) =>
+            act(access, task, move, { args: { attentionId: call.id, answer }, why: asked.why })
           switch (asked.answer) {
             case 'as_is':
             case 'skip_review':
@@ -807,11 +826,10 @@ export class TaskActions extends Context.Service<
       const Following = Schema.Struct({ task: Schema.optional(Schema.String), pull_request: Schema.String })
 
       /** A button's work on a task, said in both threads as a move is: what it did, from the call's own words. */
-      const did = (access: ToolAccess, task: Task, what: string, here: string) =>
+      const did = (access: ToolAccess, input: unknown, task: Task, what: string, here: string) =>
         Effect.gen(function* () {
           const own = access.role === 'lead' && task.id === access.taskId
-          const words = yield* personsWords(access)
-          const as = words === undefined ? '' : `, as you asked: ${quoted(words)}`
+          const as = becauseOf(whyOf(input))
           if (access.threadId !== task.threadId) yield* line(task.projectId, access.threadId, `${what}${as}`)
           yield* line(task.projectId, task.threadId, `${own ? 'Its lead' : yield* whoOf(access)} ${here}${as}`)
         })
@@ -841,7 +859,7 @@ export class TaskActions extends Context.Service<
           if (!commit.test(asked.head))
             return yield* new ToolRefused({ message: `head is a commit's hash, as read_task shows ${task.slug}'s branch at.` })
           const { change } = yield* plainly(changes.push(task.id, asked.head, asked.pull_request), task.slug)
-          yield* did(access, task, `Pushed “${task.title}” to its pull request`, 'pushed its commits to its pull request')
+          yield* did(access, input, task, `Pushed “${task.title}” to its pull request`, 'pushed its commits to its pull request')
           return `Pushed ${task.slug}'s branch up to ${asked.head.slice(0, 7)} to ${change.url ?? 'its pull request'}: a plain push, nothing forced. Both threads have a line saying so.`
         })
 
@@ -851,7 +869,7 @@ export class TaskActions extends Context.Service<
           const task = yield* named(access, asked.task)
           const said = yield* envelope('task.skip_review', { taskId: task.id }, undefined, actorOf(access))
           yield* plainly(runs.skipReview({ envelope: said, taskId: task.id }), task.slug)
-          yield* did(access, task, `Skipped the review of “${task.title}”`, 'skipped this task’s review')
+          yield* did(access, input, task, `Skipped the review of “${task.title}”`, 'skipped this task’s review')
           return `Skipped ${task.slug}'s review: it is ready once its lead is done, with no review. Both threads have a line saying so.`
         })
 
@@ -860,7 +878,7 @@ export class TaskActions extends Context.Service<
           const asked = yield* read(Named, input)
           const task = yield* named(access, asked.task)
           yield* plainly(runs.publish(task.id), task.slug)
-          yield* did(access, task, `Opened a pull request for “${task.title}”`, 'opened a pull request for this task')
+          yield* did(access, input, task, `Opened a pull request for “${task.title}”`, 'opened a pull request for this task')
           return `Althar opens ${task.slug}'s pull request now, as its card's button does: read_task shows it once it is up. Both threads have a line saying so.`
         })
 
@@ -874,7 +892,7 @@ export class TaskActions extends Context.Service<
             here.flatMap((repository) => (repository.head === null ? [] : [{ repository: repository.slug, head: repository.head }]))
           const pushed = yield* plainly(changes.pushBranch(task.id, heads), task.slug)
           if (pushed.length === 0) return `Nothing changed: ${task.slug} has no branch here with a remote to push to.`
-          yield* did(access, task, `Pushed the branch of “${task.title}”`, 'pushed this task’s branch')
+          yield* did(access, input, task, `Pushed the branch of “${task.title}”`, 'pushed this task’s branch')
           return `Pushed ${pushed.map((one) => `${one.branch} to ${one.remote}`).join(' and ')}, for ${task.slug}: a plain push, nothing forced.`
         })
 
@@ -895,12 +913,18 @@ export class TaskActions extends Context.Service<
               task.slug,
             )
             const how = asked.automatically === null ? 'as its project says' : asked.automatically ? 'automatically' : 'only when asked'
-            yield* did(access, task, `“${task.title}” resolves conflicts ${how} now`, `set this task to resolve conflicts ${how}`)
+            yield* did(access, input, task, `“${task.title}” resolves conflicts ${how} now`, `set this task to resolve conflicts ${how}`)
             said.push(`${task.slug} resolves conflicts ${how} now.`)
           }
           if (asked.now === true || asked.automatically === undefined) {
             yield* changes.resolveNow({ taskId: task.id }, true)
-            yield* did(access, task, `Asked “${task.title}” to resolve its conflicts`, 'asked this task’s lead to resolve its conflicts')
+            yield* did(
+              access,
+              input,
+              task,
+              `Asked “${task.title}” to resolve its conflicts`,
+              'asked this task’s lead to resolve its conflicts',
+            )
             said.push(`${task.slug}'s lead is asked to resolve its conflict with the branch it goes into, where it has one.`)
           }
           return `${said.join(' ')} Both threads have a line saying so.`
@@ -911,7 +935,7 @@ export class TaskActions extends Context.Service<
           const asked = yield* read(Named, input)
           const task = yield* named(access, asked.task)
           if (!(yield* busy.move(task.id, 0))) return `Nothing changed: ${task.slug} isn't waiting for a place among the agents at work.`
-          yield* did(access, task, `Moved “${task.title}” to the front of the line`, 'moved this task to the front of the line')
+          yield* did(access, input, task, `Moved “${task.title}” to the front of the line`, 'moved this task to the front of the line')
           return `${task.slug} is first in line now: it starts when the next agent's place frees.`
         })
 
@@ -920,7 +944,13 @@ export class TaskActions extends Context.Service<
           const asked = yield* read(Following, input)
           const task = yield* named(access, asked.task)
           yield* plainly(changes.stopListening(task.id, asked.pull_request), task.slug)
-          yield* did(access, task, `“${task.title}” no longer follows ${asked.pull_request}`, `stopped following ${asked.pull_request}`)
+          yield* did(
+            access,
+            input,
+            task,
+            `“${task.title}” no longer follows ${asked.pull_request}`,
+            `stopped following ${asked.pull_request}`,
+          )
           return `${task.slug} no longer follows ${asked.pull_request}: its reviews, comments and checks aren't heard any more. attach_pull_request follows it again.`
         })
 
@@ -933,21 +963,23 @@ export class TaskActions extends Context.Service<
         tool(
           'stop_task',
           'Stops a task, as its Stop does: its step is cut short and its agents stop, its work kept. With turn, only its lead’s current turn ends, and it waits for the next message. restart_task carries a stopped task on. It acts at once, with a line in your thread and the task’s; do it when the person asks, or when a task is plainly going wrong and say why. A lead can’t stop its own task: it ends its turn.',
-          { type: 'object', properties: { task, turn: { type: 'boolean' } }, required: ['task'] },
+          { type: 'object', properties: { task, turn: { type: 'boolean' }, why }, required: ['task'] },
           (access, input) =>
-            Effect.flatMap(read(Stopping, input), (asked) => act(access, asked.task, asked.turn === true ? 'stop_turn' : 'stop')),
+            Effect.flatMap(read(Stopping, input), (asked) =>
+              act(access, asked.task, asked.turn === true ? 'stop_turn' : 'stop', { why: asked.why }),
+            ),
         ),
         tool(
           'hold_task',
           'Holds a task’s plan that is counting down to start: it waits until it is started (restart_task). For a task already at work, stop it instead. It acts at once, with a line in your thread and the task’s.',
-          { type: 'object', properties: { task }, required: ['task'] },
-          (access, input) => Effect.flatMap(read(Asked, input), (asked) => act(access, asked.task, 'hold')),
+          { type: 'object', properties: { task, why }, required: ['task'] },
+          (access, input) => Effect.flatMap(read(Asked, input), (asked) => act(access, asked.task, 'hold', { why: asked.why })),
         ),
         tool(
           'restart_task',
           'Restarts a task, as its Start now, Resume and Reopen do: a held one starts, a stopped one carries on from its step with its last lead, and a discarded one opens again on its worktree and branch. It acts at once, with a line in your thread and the task’s.',
-          { type: 'object', properties: { task }, required: ['task'] },
-          (access, input) => Effect.flatMap(read(Asked, input), (asked) => act(access, asked.task, 'restart')),
+          { type: 'object', properties: { task, why }, required: ['task'] },
+          (access, input) => Effect.flatMap(read(Asked, input), (asked) => act(access, asked.task, 'restart', { why: asked.why })),
         ),
         {
           ...tool(
@@ -955,7 +987,7 @@ export class TaskActions extends Context.Service<
             'Settles a task when the person says it is done, to keep it for later, or to discard it, as its menu does. done and keep are for a task that isn’t a change (a quick task, or a review once its review was posted); a change is done when its pull request merges. discard settles any task as it stands (its menu’s Abandon): its worktree and branch stay, and restart_task opens it again; a lead discarding its own task does so as its turn ends. It acts at once, with a line in your thread and the task’s. A task’s lead may leave task out for its own. One call for each task.',
             {
               type: 'object',
-              properties: { task: optionalTask, how: { type: 'string', enum: ['done', 'keep', 'discard'] } },
+              properties: { task: optionalTask, how: { type: 'string', enum: ['done', 'keep', 'discard'] }, why },
               required: ['how'],
             },
             (access, input) =>
@@ -967,7 +999,7 @@ export class TaskActions extends Context.Service<
                   const own = yield* taskOf(access.projectId, access.taskId ?? '')
                   if (own.reviews === 1) return yield* new ToolRefused({ message: 'A review’s lead settles only its own review.' })
                 }
-                return yield* act(access, target, asked.how)
+                return yield* act(access, target, asked.how, { why: asked.why })
               }),
           ),
           // A review's lead keeps or discards its review as the person says, as any task's that isn't a change.
@@ -976,7 +1008,7 @@ export class TaskActions extends Context.Service<
         tool(
           'skip_review',
           'Skips the review of a task’s work under way, as its menu’s Skip the review does: it is ready once its lead is done, with no review. For a task the person wants without its review; a stuck review is answered with answer_stuck_step. It acts at once, with a line in your thread and the task’s.',
-          { type: 'object', properties: { task: optionalTask } },
+          { type: 'object', properties: { task: optionalTask, why } },
           skipReview,
         ),
         tool(
@@ -986,6 +1018,7 @@ export class TaskActions extends Context.Service<
             type: 'object',
             properties: {
               task: optionalTask,
+              why,
               head: { type: 'string', description: 'The commit its branch is at, as you read it.' },
               pull_request: { type: 'string', description: 'Its pull request’s link, in a task of several.' },
             },
@@ -996,7 +1029,7 @@ export class TaskActions extends Context.Service<
         tool(
           'open_task_pull_request',
           'Opens the pull request of a task whose work ended on its branch, or a new one for its commits after its last pull request merged, as its Change card’s button does: Althar opens it as it opens every task’s, by the project’s naming, as a draft unless its plan said ready. Not for a branch of the repository’s own: open_pull_request does that, on the person’s word. It acts at once, with a line in your thread and the task’s.',
-          { type: 'object', properties: { task: optionalTask } },
+          { type: 'object', properties: { task: optionalTask, why } },
           publishTask,
         ),
         tool(
@@ -1006,6 +1039,7 @@ export class TaskActions extends Context.Service<
             type: 'object',
             properties: {
               task: optionalTask,
+              why,
               heads: {
                 type: 'array',
                 items: {
@@ -1025,6 +1059,7 @@ export class TaskActions extends Context.Service<
             type: 'object',
             properties: {
               task: optionalTask,
+              why,
               now: { type: 'boolean' },
               automatically: { type: ['boolean', 'null'] },
             },
@@ -1034,13 +1069,13 @@ export class TaskActions extends Context.Service<
         tool(
           'move_to_front',
           'Moves a task that waits for a place among the agents at work to the front of the line, as its card’s Move to front does: it starts when the next place frees.',
-          { type: 'object', properties: { task: optionalTask } },
+          { type: 'object', properties: { task: optionalTask, why } },
           moveToFront,
         ),
         tool(
           'stop_following',
           'Stops a task following one of its pull requests, by its link, as its card does: its reviews, comments and checks aren’t heard any more. attach_pull_request follows it again.',
-          { type: 'object', properties: { task: optionalTask, pull_request: { type: 'string' } }, required: ['pull_request'] },
+          { type: 'object', properties: { task: optionalTask, pull_request: { type: 'string' }, why }, required: ['pull_request'] },
           stopFollowing,
         ),
         tool(
@@ -1050,6 +1085,7 @@ export class TaskActions extends Context.Service<
             type: 'object',
             properties: {
               task,
+              why,
               answer: { type: 'string', enum: ['as_is', 'skip_review', 'again', 'hand_on'] },
               agent: { type: 'string', description: 'For hand_on: the agent it goes to.' },
               model: { type: 'string', description: 'For hand_on: its model.' },

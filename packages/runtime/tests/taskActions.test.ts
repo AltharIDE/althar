@@ -119,10 +119,14 @@ describe('stop_task', () => {
       const task = yield* started(c.projectId, 'Review the importer', 'Work on it. [lead:wait]')
       yield* until(standing(task.taskId), (row) => row?.run === 'running')
       yield* c.turn('Stop the review task')
-      assert.match(yield* callTool(c.access, 'stop_task', { task: task.slug }), /^Stopped .*: its step is cut short/)
+      assert.match(
+        yield* callTool(c.access, 'stop_task', { task: task.slug, why: 'the person asked.' }),
+        /^Stopped .*: its step is cut short/,
+      )
       assert.strictEqual((yield* standing(task.taskId))?.run, 'suspended')
-      assert.include(yield* titles(c.threadId), 'Stopped “Review the importer”, as you asked: “Stop the review task”')
-      assert.include(yield* titles(task.threadId), 'The coordinator stopped this task, as you asked: “Stop the review task”')
+      // A move that needn't the person's word says who made it and why, not their message (ADR-086).
+      assert.include(yield* titles(c.threadId), 'Stopped “Review the importer”: the person asked')
+      assert.include(yield* titles(task.threadId), 'The coordinator stopped this task: the person asked')
       assert.lengthOf(yield* asks(c.threadId), 0)
       // Stopped already, a second word changes nothing, and says so.
       assert.match(yield* callTool(c.access, 'stop_task', { task: task.slug }), /^Nothing changed: .* isn’t running/)
@@ -171,7 +175,8 @@ describe('stop_task', () => {
       yield* c.turn('Interrupt the long look')
       assert.match(yield* callTool(c.access, 'stop_task', { task: task.slug, turn: true }), /^Stopped the lead’s turn on/)
       yield* until(turns(task.threadId), (rows) => rows.at(-1)?.state !== 'delivered')
-      assert.include(yield* titles(task.threadId), 'The coordinator stopped its lead’s turn, as you asked: “Interrupt the long look”')
+      assert.include(yield* titles(task.threadId), 'The coordinator stopped its lead’s turn')
+      assert.notInclude((yield* titles(task.threadId)).join('\n'), 'Interrupt the long look')
     }).pipe(Effect.provide(runtime())),
   )
 })
@@ -225,7 +230,7 @@ describe('hold_task and restart_task', () => {
       yield* c.turn('carry on with it')
       assert.match(yield* callTool(c.access, 'restart_task', { task: task.slug }), /carries on from the step it was on/)
       assert.strictEqual((yield* standing(task.taskId))?.run, 'running')
-      assert.include(yield* titles(c.threadId), 'Restarted “Retry checkout”, as you asked: “carry on with it”')
+      assert.include(yield* titles(c.threadId), 'Restarted “Retry checkout”')
 
       yield* c.turn('discard it after all')
       assert.match(yield* callTool(c.access, 'settle_task', { task: task.slug, how: 'discard' }), /its worktree and branch stay/)
@@ -276,7 +281,7 @@ describe('settle_task', () => {
       assert.match(yield* callTool(c.access, 'settle_task', { task: one.slug, how: 'keep' }), /is settled already/)
       assert.match(yield* callTool(c.access, 'restart_task', { task: one.slug }), /is settled\. Writing to its lead opens it again/)
       assert.match(yield* callTool(c.access, 'stop_task', { task: one.slug, turn: true }), /lead isn’t in a turn/)
-      assert.include(yield* titles(one.threadId), 'The coordinator marked this task done, as you asked: “that is done, settle it”')
+      assert.include(yield* titles(one.threadId), 'The coordinator marked this task done')
 
       const change = yield* started(c.projectId, 'Change the API', 'Work on it. [lead:wait]')
       assert.match(

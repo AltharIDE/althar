@@ -1410,14 +1410,16 @@ export class Coordinator extends Context.Service<
       /** A line in the caller's thread and the task's, as the moves say what they did. */
       const saidOn = (
         access: ToolAccess,
+        input: unknown,
         task: { readonly id: string; readonly title: string; readonly threadId: string },
         what: string,
         here: string,
       ) =>
         Effect.gen(function* () {
           const own = access.role === 'lead' && task.id === access.taskId
-          const words = yield* personsWords(access)
-          const as = words === undefined ? '' : `, as you asked: ${quoted(words)}`
+          // None of these needs the person's word, so none quotes them: it says why, where the call did (ADR-086).
+          const why = typeof input === 'object' && input !== null && 'why' in input && typeof input.why === 'string' ? input.why.trim() : ''
+          const as = why === '' ? '' : `: ${why.replace(/\.$/, '')}`
           const by = own
             ? 'Its lead'
             : access.role === 'lead'
@@ -1460,7 +1462,7 @@ export class Coordinator extends Context.Service<
               taskId: task.id,
               answer,
             })
-            yield* saidOn(access, task, `Handed “${task.title}” to ${named}`, `handed this task’s held step to ${named}`)
+            yield* saidOn(access, input, task, `Handed “${task.title}” to ${named}`, `handed this task’s held step to ${named}`)
             return `${task.slug}'s step, held for a usage limit, goes to ${named} now. Both threads have a line saying so.`
           }
           const body = asked.message?.trim()
@@ -1486,7 +1488,7 @@ export class Coordinator extends Context.Service<
                   : new ToolRefused({ message: `Althar couldn't hand ${task.slug} to ${named}: ${error._tag}. Tell the person.` }),
               ),
             )
-          yield* saidOn(access, task, `Put ${named} on “${task.title}”`, `put ${named} on this task`)
+          yield* saidOn(access, input, task, `Put ${named} on “${task.title}”`, `put ${named} on this task`)
           return `${task.slug}'s lead is ${named} now, briefed with its thread so far. Both threads have a line saying so.`
         })
 
@@ -1498,7 +1500,7 @@ export class Coordinator extends Context.Service<
             .tryAgain(task.threadId)
             .pipe(Effect.mapError((error) => new ToolRefused({ message: `Althar couldn't try ${task.slug} again: ${error._tag}.` })))
           if (!again) return `Nothing changed: ${task.slug}'s lead's last turn didn't fail.`
-          yield* saidOn(access, task, `Tried “${task.title}” again`, 'tried its lead’s last turn again')
+          yield* saidOn(access, input, task, `Tried “${task.title}” again`, 'tried its lead’s last turn again')
           return `${task.slug}'s lead's last turn goes again. Both threads have a line saying so.`
         })
 
@@ -1512,7 +1514,7 @@ export class Coordinator extends Context.Service<
               threadId: task.threadId,
             })
             .pipe(Effect.mapError(() => new ToolRefused({ message: `No agent is on ${task.slug} to compact.` })))
-          yield* saidOn(access, task, `Compacted the context of “${task.title}”`, 'had its lead compact its context')
+          yield* saidOn(access, input, task, `Compacted the context of “${task.title}”`, 'had its lead compact its context')
           return `${task.slug}'s lead compacts its context after what it was told before.`
         })
 
@@ -1523,7 +1525,7 @@ export class Coordinator extends Context.Service<
           const task = yield* taskOf(access, asked.task)
           yield* issues.setPart(task.id, asked.part_of)
           const how = asked.part_of ? 'does only part of its issue' : 'does all of its issue'
-          yield* saidOn(access, task, `“${task.title}” ${how} now`, `set this task as one that ${how}`)
+          yield* saidOn(access, input, task, `“${task.title}” ${how} now`, `set this task as one that ${how}`)
           return `${task.slug} ${how} now: ${asked.part_of ? 'as its pull request merges, Althar comments on the issue and leaves it open' : 'its pull request merging closes the issue'}.`
         })
 
@@ -2455,6 +2457,10 @@ export class Coordinator extends Context.Service<
                 required: ['model'],
               },
               message: { type: 'string', description: 'What the new lead is told first, after its brief.' },
+              why: {
+                type: 'string',
+                description: 'Why, in a few plain words, said in both threads: "the person asked", or what is going wrong.',
+              },
             },
             required: ['task', 'lead'],
           },
@@ -2463,13 +2469,33 @@ export class Coordinator extends Context.Service<
         tool(
           'try_again',
           "Tries a task lead's last turn again where it failed, as the task's Try again does: what was said in it goes again, to the agent on the task, started again where it went. Nothing where its last turn didn't fail.",
-          { type: 'object', properties: { task: { type: 'string' } }, required: ['task'] },
+          {
+            type: 'object',
+            properties: {
+              task: { type: 'string' },
+              why: {
+                type: 'string',
+                description: 'Why, in a few plain words, said in both threads: "the person asked", or what is going wrong.',
+              },
+            },
+            required: ['task'],
+          },
           tryAgain,
         ),
         tool(
           'compact_lead',
           "Has a task's lead compact its context, as the task's Compact does: a turn of its own, after what it was told before, so a long thread goes on with room. For a lead whose context is filling up.",
-          { type: 'object', properties: { task: { type: 'string' } }, required: ['task'] },
+          {
+            type: 'object',
+            properties: {
+              task: { type: 'string' },
+              why: {
+                type: 'string',
+                description: 'Why, in a few plain words, said in both threads: "the person asked", or what is going wrong.',
+              },
+            },
+            required: ['task'],
+          },
           compactLead,
         ),
         tool(
@@ -2477,7 +2503,14 @@ export class Coordinator extends Context.Service<
           "Sets whether a task does only part of the issue it came from, as its issue's switch does: part_of true, and as its pull request merges Althar comments on the issue with what landed and leaves it open; false, and merging closes it.",
           {
             type: 'object',
-            properties: { task: { type: 'string' }, part_of: { type: 'boolean' } },
+            properties: {
+              task: { type: 'string' },
+              part_of: { type: 'boolean' },
+              why: {
+                type: 'string',
+                description: 'Why, in a few plain words, said in both threads: "the person asked", or what is going wrong.',
+              },
+            },
             required: ['task', 'part_of'],
           },
           setPartOf,
