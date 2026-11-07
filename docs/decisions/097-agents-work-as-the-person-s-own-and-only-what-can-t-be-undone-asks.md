@@ -5,7 +5,7 @@
 - **Date:** 2026-11-06
 - **Supersedes, in part:**
   [ADR-004](004-coordinator-is-an-agent-session.md) (the coordinator is
-  optional; read-only is tidiness),
+  always on, and tasks can also start without it; read-only is tidiness),
   [ADR-011](011-own-connectors-for-hosts-and-trackers.md) (agents without the
   person's sign-in; tools only on the task's repository),
   [ADR-013](013-project-rules.md) (what asks by default; revisions as the
@@ -122,8 +122,8 @@
      of tools. Each change is said in a line and can be undone; one that
      loosens what asks needs the person's own message in that turn
      ([Settings](#settings)).
-  6. **The coordinator is optional**
-     ([The coordinator](#the-coordinator-is-optional)).
+  6. **The coordinator is always on, and tasks can also start without it**
+     ([Tasks can start without the coordinator](#tasks-can-start-without-the-coordinator)).
   7. **What stays** is a short list, each line for a reason no tool takes
      away ([What stays](#what-stays-and-why)).
   8. **Two questions the person hasn't settled** take the plan's
@@ -422,6 +422,14 @@ and the same skills. Two things differ, and neither is a matter of safety:
 **Leads may start new tasks:** `draft_task`, `start_task`,
 `review_pull_request` and `propose_plan` for what they drafted. A task a
 lead started says so in its thread, and is the project's like any other.
+It records the lead's task as its parent (`tasks.parent_task_id`): its card
+says "Started by" that task, and the lead's thread has a line linking to
+it. What a lead starts waits the plan's countdown, its quick tasks too, so
+the person can hold it, and a lead starts at most three tasks in a turn
+and ten from its task in all (`LEAD_STARTS`). A lead turns its own task
+into another kind this way: a prototype's real build, or a review's fix, is
+a task of its own, started from it; `make_it_a_change` still turns a quick
+task into a change in place.
 
 **The coordinator directs leads.** It tells a lead what to do next
 (`message_lead`), tells one to push or pushes its task as the Push button
@@ -551,14 +559,73 @@ flowchart LR
 - **Answering a permission request or a question** stays theirs alone
   (ADR-019).
 
-## The coordinator is optional
+## Situations: what Althar says in a thread of the work around it
 
-A task can start without it: from the board, from the composer, or from a
-lead. The coordinator stays the place for triage, routing, launching a batch
-of tasks from the tracker, and merging. A project whose person never talks
-to it runs no coordinator session. How a task started without it gets its
-plan and models fast is phase 2's, beside the work on making small changes
-finish in minutes.
+Five things happen to a task that its lead, working alone, cannot see or say.
+Each is a line in the task's thread, where it happens, in Althar's own voice
+(the kit's `AltharLine`, in its warning tone where the person may need to act),
+and each has what the runtime needs. They went from the #640 prototype with
+these changes to its sketches:
+
+- **A Never rule an agent meets.** The call stands declined, and under it:
+  "Refused by your rule `rm -rf ~/Library`. The lead was told so. Rules". The
+  same words, "Refused by your rule `rm -rf ~/Library`.", are the tool's result
+  to the lead (`refusedWords`, Permissions.ts). Nothing asks and nothing waits:
+  Never is the person's answer given ahead. A kind the project never allows
+  reads "Refused by your rule against force pushes."
+- **An ask that waits while the person is away.** The request records where it
+  reached the person besides the window (`attention_request.reached`: the
+  device and when) and its card says how long it has waited: "Waiting 40 min ·
+  sent to your iPhone at 13:20". *Different from the prototype:* nothing in
+  Althar sends to a device yet, so the record is what a channel calls
+  (`Permissions.reached`) and the line shows only where it was. Once a request
+  that reached a device has waited three minutes, its lead is let go on without
+  it (`Permissions.setAside`, Situations.ts): the call is refused with a word
+  saying the person is away, the request stays open for the person and is out
+  of the session's way, and the lead is told when it is answered. An allowed
+  call goes through once, the next time the lead makes the same call, short of
+  what is never allowed. The kept call is the person's to answer, not a
+  suspended one: an agent's permission request cannot outlive its turn, so the
+  lead repeats it.
+  The request belongs to the person, not the session: it stays open when the
+  lead's session ends, and is answered all the same. It does not survive
+  Althar restarting, whose agent processes end with it; those are withdrawn
+  when it starts. Answered after the lead's session has ended, a request of a
+  task still open starts its lead again, in its place among the agents at work,
+  to read the answer (`Runs.answered`, as for a question); a stopped or settled
+  task's lead is left, the answer queued.
+- **A task a lead started that stops reaching its parent.** Settled without a
+  change, failed, or stopped by the person (stopped by anyone else says
+  nothing): once, a line in the parent's thread in its warning tone, "<child>
+  stopped without a change: <why>. Its report" (or "stopped by you"), and
+  news that wakes the parent's lead, started again if it had stopped, as
+  `message_lead` does (`task.parent_told` keeps that it was said). The why is
+  the first sentence of the child's last report.
+- **Two tasks changing the same files.** Overlaps.ts already told both leads
+  once; it now also puts "<other task> changes `TaskView.tsx` too. Both leads
+  were told." in each thread. Nothing on the board.
+- **A server that fails mid-task.** claude-agent-acp reports a server that
+  failed to start or needs signing in in a notice's `_meta.claudeCode`
+  (`kind: "mcpServerStatus"`); a call to that server that then fails keeps
+  which server and how (`server` on the tool call; the server is remembered from the
+  event that named the call, since the update that fails carries only its status), and the thread says so
+  under the call: "Claude Code isn't signed in to Linear, so this didn't go
+  through. Sign in". *Different from the prototype:* the call isn't turned to
+  done by signing in (the lead goes on, and Althar can't repeat its call), and
+  the line doesn't say what the call would have done: Althar knows its title,
+  not its effect. Sign in opens the agent's sign-in in Settings until the MCP
+  servers' own page can take it.
+
+## Tasks can start without the coordinator
+
+The coordinator is always there. There is no switch, setting or mode to turn
+it off, in any project. A task can also start without going through it: from
+the board, from the composer, or from a lead. The coordinator stays the place
+for triage, routing, launching a batch of tasks from the tracker, and merging,
+and it directs the leads. Its session starts when the person talks to it, or
+when news it acts on wakes it; that is not a setting and doesn't turn it off.
+How a task started without it gets its plan and models fast is phase 2's,
+beside the work on making small changes finish in minutes.
 
 ## What stays, and why
 

@@ -3,6 +3,7 @@ import { cleanup, configure } from '@testing-library/react'
 import { afterEach, beforeEach } from 'vitest'
 
 import { forgetFolds } from '../src/renderer/features/board/folds'
+import { forgetPages } from '../src/renderer/features/browser/pages'
 import { forgetHiddenCards } from '../src/renderer/features/project/FirstConnectionsView'
 import { welcome } from '../src/renderer/features/start/welcome'
 import { forgetChosenFaces } from '../src/renderer/features/task/chosenFaces'
@@ -51,7 +52,7 @@ if (typeof window !== 'undefined') {
   afterEach(() => {
     cleanup()
     // What a view keeps in storage, like the person's pinned models, starts empty in each test, as do the drafts and dictation the window
-    // keeps by thread, the lanes and project cards it keeps where storage wouldn't take them, and a welcome left on show.
+    // keeps by thread, the lanes and project cards it keeps where storage wouldn't take them, the pages it shows, and a welcome left on show.
     window.localStorage.clear()
     forgetChosenFaces()
     forgetFolds()
@@ -59,6 +60,7 @@ if (typeof window !== 'undefined') {
     forgetSessions()
     forgetHiddenCards()
     forgetUsageOpen()
+    forgetPages()
     welcome.end()
   })
 }

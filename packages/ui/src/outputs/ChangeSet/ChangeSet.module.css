@@ -188,6 +188,20 @@ span.you {
   font-weight: 550;
   color: var(--t-1);
 }
+/* its review names every reviewer: it wraps rather than cutting the last off, its mark on the first line */
+.line.review {
+  align-items: flex-start;
+}
+.review > .mark {
+  margin-top: 3px;
+}
+.reviewSaid {
+  overflow: visible;
+  line-height: 1.5;
+  white-space: normal;
+  text-overflow: clip;
+  text-wrap: pretty;
+}
 .list {
   padding: 4px 0 6px;
 }

@@ -1,5 +1,6 @@
 import { isStartupStage, type StartupStage } from '../startup'
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { homedir, hostname, userInfo } from 'node:os'
 import { join } from 'node:path'
@@ -12,6 +13,7 @@ import { FIRST_SCHEME_WAIT, firstScheme, followDesktopScheme, type Scheme, theme
 import { CHROME_ARG, decideChrome, type DesktopChrome, parseHexAccent } from './desktop'
 import { chromeOf, FIRST_CHROME_WAIT, type FollowedChrome, followDesktopChrome, systemSources } from './desktopChrome'
 import { keepingAwake } from './awake'
+import { bringForward as raiseWindow, focusedLast, openFromEdge } from './bringForward'
 import { attachedOf, clipboardPaths, pastedOf, rawFormat } from './attachments'
 import { tokenIn } from './clipboard'
 import { childKind, type CrashReports, crashReports, goneBadly, type HiddenNames, namesLearned, newDumps } from './crashReports'
@@ -41,6 +43,10 @@ import { checkNow, startUpdates } from './updater'
 import type { UpdateGlance, Updates } from './updates'
 import { installOf, usageData } from './usageData'
 import { masker } from '../logs/mask'
+import { outsideOf } from './browser/addresses'
+import { browserAgent } from './browser/devices'
+import { handlePages } from './browser/ipc'
+import { ownersOnDisk, partitionsIn, type Pages, startPages } from './browser/pages'
 // Where each editor is, from the runtime's list of them, so its icon can be drawn here.
 import { bundleOf } from '../runtime/editors'
 
@@ -65,6 +71,7 @@ import {
   systemPreferences,
   type UtilityProcess,
   utilityProcess,
+  type WebContents,
 } from 'electron'
 
 import { appMenu, PAGE, windowOptions } from './windowOptions'
@@ -98,6 +105,8 @@ import { skillsCatalog } from './skillsCatalog'
  * (awake.ts), and which notifications show, with a sound or not, and the
  * Dock's count (notify.ts).
  * Dictation's microphone, model and speech process are in dictation.ts.
+ * The pages beside a conversation are in browser/ (ADR-100): each in its
+ * owner's own session, with none of Althar's bridge.
  * A packaged app updates itself (updater.ts): it never restarts into an
  * update while work runs, and only when the person asks, or as they quit.
  * Anonymous usage data goes from here alone (usageData.ts): what the runtime
@@ -270,6 +279,8 @@ interface RuntimeMessage {
   readonly crash?: unknown
   /** A screenshot an agent asked for (screenshots.ts). */
   readonly shot?: Shot
+  /** Tasks over and projects removed (settled.ts), whose pages' cookies may go. */
+  readonly owners?: unknown
   readonly event?: {
     readonly _tag?: string
     readonly kind?: unknown
@@ -427,7 +438,9 @@ process.on('unhandledRejection', (reason) => reportCrash((sender) => sender.thro
 // The window's own, as it sends them for the log (renderer/shared/windowErrors.ts).
 ipcMain.on('althar:window-error', (_event, report: unknown) => reportCrash((sender) => sender.fromWindow(report)))
 // A window's page, or a process of Althar's, that crashed or failed; nothing Althar stopped itself, nor anything as it quits.
-app.on('render-process-gone', (_event, _contents, details) => {
+app.on('render-process-gone', (_event, contents, details) => {
+  // A page beside a conversation is the web's, not Althar's: its line under its bar says it stopped.
+  if (pages?.has(contents) === true) return
   if (goneBadly(details.reason) && !quitting) reportCrash((sender) => sender.gone('window', details))
 })
 app.on('child-process-gone', (_event, details) => {
@@ -438,20 +451,26 @@ app.on('child-process-gone', (_event, details) => {
 const windows = new Set<BrowserWindow>()
 let edge: Edge | undefined
 
+/* The pages beside the conversations (browser/pages.ts), once the app is ready. */
+let pages: Pages | undefined
+/** Whether web contents are one of Althar's own windows: only they reach its bridge's calls. */
+const mine = (contents: WebContents) => [...windows].some((window) => !window.isDestroyed() && window.webContents === contents)
+
+/* What the runtime is asked of which tasks and projects are over, by request. */
+const settling = new Map<string, (owners: ReadonlyArray<string>) => void>()
+const askSettled = (owners: ReadonlyArray<string>) =>
+  new Promise<ReadonlyArray<string>>((resolve) => {
+    if (runtime === undefined || owners.length === 0) return resolve([])
+    const requestId = randomUUID()
+    settling.set(requestId, resolve)
+    runtime.postMessage({ type: 'settled-among', requestId, owners })
+  })
+const ownersIn = (said: unknown): ReadonlyArray<string> =>
+  Array.isArray(said) ? said.filter((one): one is string => typeof one === 'string') : []
+
 /** Brings Althar's window forward, a window there is or a new one, from wherever the person is. */
 const bringForward = () => {
-  const existing = [...windows][0]
-  const window = existing ?? openWindow()
-  if (window.isMinimized()) window.restore()
-  if (quiet) {
-    window.showInactive()
-    return { window, fresh: existing === undefined }
-  }
-  // Asked from the edge, Althar isn't the active app: it becomes it.
-  app.focus({ steal: true })
-  window.show()
-  window.focus()
-  return { window, fresh: existing === undefined }
+  return raiseWindow(windows, openWindow, () => app.focus({ steal: true }), quiet)
 }
 
 /** Opens the window on a thread, as a notification or the edge asks. */
@@ -576,6 +595,17 @@ const startRuntime = () => {
       startupStage = 'screen'
       for (const window of windows) if (!window.isDestroyed()) window.webContents.send('althar:startup-stage', startupStage)
       startupMark('runtime-ready')
+      // What pages kept for tasks that were settled while Althar wasn't running goes now, where the person keeps it only that long.
+      void ownersOnDisk(partitionsIn(app.getPath('userData')))
+        .then((owners) => askSettled(owners.map((owner) => owner.id)))
+        .then((settled) => pages?.moment('settled', settled))
+        .catch(() => undefined)
+      return
+    }
+    if (message.type === 'settled') return void pages?.moment('settled', ownersIn(message.owners)).catch(() => undefined)
+    if (message.type === 'settled-among') {
+      if (message.requestId !== undefined) settling.get(message.requestId)?.(ownersIn(message.value))
+      if (message.requestId !== undefined) settling.delete(message.requestId)
       return
     }
     if (message.type === 'seal' || message.type === 'open') return seal(child, message)
@@ -614,6 +644,10 @@ const startRuntime = () => {
     for (const [requestId, settle] of granting) {
       settle(null)
       granting.delete(requestId)
+    }
+    for (const [requestId, settle] of settling) {
+      settle([])
+      settling.delete(requestId)
     }
     // A crash is survivable: reconciliation makes a restart safe, and each window reconnects when it reloads.
     const after = afterExit({ quitting, stopped: storeFailure !== undefined, retrying, restarts, now: Date.now() })
@@ -776,16 +810,21 @@ const openWindow = () => {
     window.setIgnoreMouseEvents(true)
   }
   windows.add(window)
+  window.on('focus', () => focusedLast(windows, window))
   keepingOn = false
   // The window's own buttons say maximize or restore by what the window is (windowOptions.ts).
   window.on('maximize', () => window.webContents.send('althar:maximized', true))
   window.on('unmaximize', () => window.webContents.send('althar:maximized', false))
   window.on('closed', () => {
     windows.delete(window)
+    // The pages it showed stay, hidden, for a window opened after to show again.
+    pages?.hideIn(window)
     // Off a Mac, closing Althar's last window quits, as it did before the edge kept pages of its own open, unless the person chose to keep working in the background.
     if (windows.size === 0 && process.platform !== 'darwin' && !keepingOn) quitWhenNoneLeft()
   })
   window.webContents.on('did-finish-load', () => connect(window))
+  // A document of the window's gone, as it reloads when the runtime restarts, takes with it what said where its pages show: they hide until the new one says.
+  window.webContents.on('did-navigate', () => pages?.hideIn(window))
   window.once('ready-to-show', () => (quiet ? window.showInactive() : window.show()))
   // The window shows Althar and nothing else: links open in the browser, and the window never goes anywhere.
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -988,9 +1027,13 @@ ipcMain.on('althar:edge-size', (event, height: unknown) => {
   if (window !== null && typeof height === 'number') edge?.sized(window, height)
 })
 ipcMain.on('althar:edge-open', (_event, threadId: unknown) => {
-  edge?.settle()
-  if (typeof threadId === 'string' && threadId !== '') openThread(threadId)
-  else bringForward()
+  openFromEdge(
+    () => {
+      if (typeof threadId === 'string' && threadId !== '') openThread(threadId)
+      else bringForward()
+    },
+    () => edge?.settle(),
+  )
 })
 
 void ready.then(() => {
@@ -1000,12 +1043,37 @@ void ready.then(() => {
   dictation = startDictation({
     script: join(here, '../speech/speech.js'),
     models: () => join(locations().profile, 'speech'),
-    mine: (contents) => [...windows].some((window) => !window.isDestroyed() && window.webContents === contents),
+    mine,
     fakeModel: fakeSpeech,
     fakeMicrophone,
   })
   // The pictures agents handed back, from the artifact store the runtime keeps in the profile, by digest.
   protocol.handle(PICTURE_SCHEME, servePicture(join(locations().profile, 'artifacts'), resize))
+  // The pages beside the conversations, each in its own session (ADR-100); what a quit cut short of clearing goes first.
+  const overlay = readFileSync(join(here, '../overlay/overlay.js'), 'utf8')
+  pages = startPages({
+    overlay: () => overlay,
+    keep: () => preferences.browserCookies,
+    partitions: partitionsIn(app.getPath('userData')),
+    // A page's own address goes out as it is, plain http: on another host too, where a link from the window's own page wouldn't.
+    outside: (address) => {
+      const out = outsideOf(address)
+      if (out !== null) void shell.openExternal(out)
+    },
+    tell: (state) => {
+      for (const window of windows) if (!window.isDestroyed()) window.webContents.send('althar:page', state)
+    },
+    pressed: (owner, key) => {
+      for (const window of windows) if (!window.isDestroyed()) window.webContents.send('althar:page-key', owner, key)
+    },
+    closed: (owner) => {
+      for (const window of windows) if (!window.isDestroyed()) window.webContents.send('althar:page-closed', owner)
+    },
+    chrome: process.versions.chrome,
+    agent: browserAgent(app.userAgentFallback),
+  })
+  handlePages(pages, mine)
+  void preferencesRead.then(() => pages?.moment('started')).catch(() => undefined)
   void showChosenIcon()
   // Plugged in or on battery changes whether the Mac is held awake.
   powerMonitor.on('on-battery', awake.powerChanged)
@@ -1069,7 +1137,7 @@ void ready.then(() => {
     installId: () => install.then((kept) => kept.id),
     logs: logs.dir,
     askRuntime: (threadId) => facts.ask(runtime, threadId),
-    mine: (contents) => [...windows].some((window) => !window.isDestroyed() && window.webContents === contents),
+    mine,
     address: process.env.ALTHAR_REPORT_URL ?? __ALTHAR_REPORT_URL__,
     email: process.env.ALTHAR_REPORT_EMAIL ?? __ALTHAR_REPORT_EMAIL__,
   })
@@ -1210,6 +1278,8 @@ app.on('before-quit', (event) => {
   event.preventDefault()
   quitting = true
   dictation?.stop()
+  // Pages whose cookies are kept only until Althar quits clear them as it goes, a few seconds at most.
+  const cleared = Promise.race([pages?.moment('quit'), new Promise((resolve) => setTimeout(resolve, 4_000))]).catch(() => undefined)
   const child = runtime
   const timer = setTimeout(() => {
     child.kill()
@@ -1218,7 +1288,7 @@ app.on('before-quit', (event) => {
   child.once('exit', () => {
     clearTimeout(timer)
     // Usage data and crash reports on their way get a moment to go.
-    void sendersStopped().finally(() => app.exit(0))
+    void Promise.all([sendersStopped(), cleared]).finally(() => app.exit(0))
   })
   child.postMessage({ type: 'shutdown' })
 })

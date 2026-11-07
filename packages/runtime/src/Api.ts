@@ -47,9 +47,12 @@ import {
   uninstall,
 } from '@althar/skills'
 import { codeRootOf } from './code'
-import { NotFound, ProjectRefused } from './errors'
+import { NotFound, ProjectRefused, RetryRefused } from './errors'
 import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
+import { modelNamer } from './coordinatorNews'
+import { teamChanges, teamLine } from './teamWords'
+import { addItem } from './threads'
 import { type ConnectionInfo, Connections } from './Connections'
 import { coAuthorLine, coAuthorOn, setCoAuthor } from './credit'
 import { plansAndReviewsOf, newProjectDefaultsOf, setPlansAndReviews, setNewProjectDefaults } from './plansAndReviews'
@@ -94,9 +97,11 @@ import { Questions } from './Questions'
 import { type ProjectRepository, Projects } from './Projects'
 import { Nudges } from './Nudges'
 import { projectTracker } from './projectTracker'
+import { applyRules } from './rulesChange'
 import { UsageData } from './UsageData'
 import { Queries } from './Queries'
 import { Busy } from './Busy'
+import { clearView, showEarlier, undoClearView } from './chatView'
 import { timestamp } from './records'
 import { Setups } from './Setups'
 import * as Runtime from './Runtime'
@@ -104,6 +109,7 @@ import { withEdits, workedOutReach } from './sandboxReach'
 import { afterOpen, startup } from './startup'
 import { tallyOf } from './tally'
 import { Coordinator } from './Coordinator'
+import { SettingsTools } from './SettingsTools'
 import { TaskActions } from './TaskActions'
 import { IssueChanges } from './IssueChanges'
 import { IssueDrafts } from './IssueDrafts'
@@ -258,6 +264,7 @@ export const handlers = Api.toLayer(
     const busy = yield* Busy
     const automations = yield* Automations
     const taskActions = yield* TaskActions
+    const settingsTools = yield* SettingsTools
     /** Where the change feed stands, read before what a snapshot shows, so a client watching from it misses nothing. */
     const cursorNow = Effect.map(
       sql<{ cursor: number }>`SELECT coalesce(max(cursor), 0) AS cursor FROM change_log`,
@@ -658,6 +665,7 @@ export const handlers = Api.toLayer(
                   _tag: 'Streaming',
                   threadId: event.threadId,
                   itemId: event.itemId,
+                  sequence: event.sequence,
                   kind: event.kind,
                   agentId: event.agentId,
                   text: event.text,
@@ -1094,18 +1102,65 @@ export const handlers = Api.toLayer(
       DeleteAutomation: ({ commandId, automationId }) => once(commandId, api(automations.remove(automationId, instance.personId))),
       AnswerTaskAsk: ({ commandId, itemId, yes }) => once(commandId, api(taskActions.answer(itemId, yes, instance.personId))),
       UndoAutomationChange: ({ commandId, itemId }) => once(commandId, api(automations.undo(itemId, instance.personId))),
+      AnswerSettingChange: ({ commandId, itemId, yes }) => once(commandId, api(settingsTools.answer(itemId, yes))),
+      UndoSettingChange: ({ commandId, itemId }) => once(commandId, api(settingsTools.undo(itemId))),
+      GetSettingChanges: ({ projectId }) => api(settingsTools.changed(projectId)),
       SetAutomationPostsReviews: ({ commandId, automationId, on }) =>
         once(commandId, api(automations.setPostsReviews(automationId, on, instance.personId))),
       SetAutomationsPaused: ({ commandId, paused }) => once(commandId, api(automations.setAllPaused(paused))),
       // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
       Interrupt: ({ commandId, threadId }) =>
         once(commandId, api(Effect.andThen(pullRequests.leadStopped({ threadId }, 'interrupted'), sessions.interrupt(threadId)))),
-      TryAgain: ({ commandId, threadId }) => once(commandId, api(Effect.asVoid(sessions.tryAgain(threadId)))),
+      TryAgain: ({ commandId, threadId }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              if (!(yield* sessions.tryAgain(threadId))) return yield* new RetryRefused()
+            }),
+          ),
+        ),
       CompactContext: ({ commandId, threadId }) =>
         once(
           commandId,
           api(
             Effect.flatMap(envelope('thread.compact', { threadId }, commandId), (made) => sessions.compact({ envelope: made, threadId })),
+          ),
+        ),
+      ClearView: ({ commandId, threadId }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('thread.clear_view', { threadId }, commandId), (made) =>
+              Effect.provideContext(clearView({ envelope: made, threadId }), store),
+            ),
+          ),
+        ),
+      ShowEarlier: ({ commandId, threadId, open }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('thread.show_earlier', { threadId, open }, commandId), (made) =>
+              Effect.provideContext(showEarlier({ envelope: made, threadId, open }), store),
+            ),
+          ),
+        ),
+      UndoClearView: ({ commandId, threadId }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('thread.undo_clear_view', { threadId }, commandId), (made) =>
+              Effect.provideContext(undoClearView({ envelope: made, threadId }), store),
+            ),
+          ),
+        ),
+      ForgetConversation: ({ commandId, threadId }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('thread.forget_conversation', { threadId }, commandId), (made) =>
+              sessions.forget({ envelope: made, threadId }),
+            ),
           ),
         ),
       // Stopped by the person, a conflict its lead was resolving is theirs (ADR-030): the lead isn't started again for it.
@@ -1275,6 +1330,29 @@ export const handlers = Api.toLayer(
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
       ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
         once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn, toward))),
+      ChangeTeam: ({ commandId, taskId, steps }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const changed = yield* runs.changeTeam({ taskId, steps, actorId: instance.personId })
+              const named = yield* modelNamer.pipe(Effect.provideService(Agents, agents), Effect.provideService(Models, models))
+              const [thread] = yield* sql<{ id: string; projectId: ProjectId }>`
+                SELECT id, project_id FROM threads WHERE task_id = ${taskId} AND kind = 'task'`
+              if (thread === undefined) return
+              // Each change, said in the task's thread as the person made it.
+              for (const line of teamChanges(changed, named))
+                yield* Effect.provideContext(
+                  addItem({ projectId: thread.projectId, threadId: thread.id }, 'notice', {
+                    source: 'runtime',
+                    severity: 'info',
+                    title: `You ${teamLine(line)}`,
+                  }),
+                  folderStore,
+                )
+            }),
+          ),
+        ),
       ChangeIssueDraft: ({ commandId, draftId, title, body, labels, priority }) =>
         once(
           commandId,
@@ -1605,34 +1683,17 @@ export const handlers = Api.toLayer(
             return [...(yield* vocabulary(project.name, repositories))]
           }),
         ),
-      SetProjectRules: ({ commandId, projectId, rotateAccounts, onlyAccounts, expectedRevision, ...change }) =>
+      SetProjectRules: ({ commandId, projectId, expectedRevision, ...sent }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
-              const was = (yield* policies.current(projectId as ProjectId)).rules
-              const now = accountsOf(was)
-              const accounts =
-                rotateAccounts === undefined && onlyAccounts === undefined
-                  ? {}
-                  : {
-                      accounts: {
-                        rotate: rotateAccounts ?? now.rotate,
-                        ...((onlyAccounts === undefined ? now.only : onlyAccounts) == null
-                          ? {}
-                          : { only: (onlyAccounts === undefined ? now.only : onlyAccounts) ?? {} }),
-                      },
-                    }
-              yield* policies.set(projectId, { ...change, ...accounts }, instance.personId, expectedRevision)
-              // A call still waiting that the rules no longer keep for the person is answered by them.
-              yield* permissions.reconsider(projectId)
-              const kept = yield* policies.current(projectId as ProjectId)
-              // Its leads newly resolving conflicts, what conflicts already is resolved now, not at the next (ADR-030).
-              if (!resolvesConflicts(was) && resolvesConflicts(kept.rules)) yield* pullRequests.resolveNow({ projectId })
-              // Its leads' commits newly pushing on their own, what each open task's lead left waiting goes up now (ADR-072).
-              if (!pushesCommits(was) && pushesCommits(kept.rules)) yield* pullRequests.pushNow({ projectId })
-              // Its screenshots newly posting on their own, each open pull request gets them now, not when they next change (ADR-077).
-              if (!postsScreenshots(was) && postsScreenshots(kept.rules)) yield* screenshots.syncNow({ projectId })
+              const kept = yield* applyRules(projectId, sent, instance.personId, expectedRevision).pipe(
+                Effect.provideService(Policies, policies),
+                Effect.provideService(Permissions, permissions),
+                Effect.provideService(Changes, pullRequests),
+                Effect.provideService(PullRequestScreenshots, screenshots),
+              )
               return yield* rulesView(projectId, kept)
             }),
           ),

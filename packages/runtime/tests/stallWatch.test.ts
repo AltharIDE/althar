@@ -89,7 +89,7 @@ describe('a turn that stalls', () => {
     const { watch, looks } = watching()
     watch.observe(started('u1'), 0)
     watch.observe(said, 500)
-    watch.observe({ _tag: 'Streaming', threadId: T, itemId: 'i', kind: 'agent_message', agentId: 'codex', text: 'W' }, 1_100)
+    watch.observe({ _tag: 'Streaming', threadId: T, itemId: 'i', sequence: 1, kind: 'agent_message', agentId: 'codex', text: 'W' }, 1_100)
     assert.deepStrictEqual(looks(0, 1_590), [])
     // A build: a tenth of a CPU at every look, while the command runs.
     watch.observe(command('build', 'npm run build'), 1_600)

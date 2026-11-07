@@ -1,43 +1,117 @@
-.row {
+.worked {
+  display: block;
+}
+/* one quiet header, how long it worked, a hairline under it */
+.head {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 5px;
   width: 100%;
-  height: 30px;
+  min-height: 30px;
+  padding: 2px 0 7px;
+  border-bottom: 1px solid var(--line-2);
   font-size: 12.5px;
-  color: var(--t-2);
+  color: var(--t-3);
+  text-align: left;
+  transition: color var(--fast) var(--ease);
 }
 .took {
   flex: none;
-  font-weight: 550;
+  font-variant-numeric: tabular-nums;
 }
-.summary {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--t-3);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.rule {
-  flex: 1;
-  height: 1px;
-  background: var(--line-2);
-}
-.row:hover .took {
+button.head:hover,
+.worked[data-state='open'] > .head {
   color: var(--t-1);
 }
-.row:hover .rule {
-  background: var(--line-3);
+.chevron {
+  flex: none;
+  color: var(--t-4);
+  transition:
+    transform var(--fold) var(--ease-fold),
+    opacity var(--fast) var(--ease);
 }
-.body {
+.worked[data-state='open'] > .head .chevron {
+  transform: rotate(90deg);
+}
+/* at work, it opens all the same, but says so only to the pointer or the keyboard */
+.worked[data-live]:not([data-state='open']) > .head .chevron {
+  opacity: 0;
+}
+.worked[data-live] > .head:is(:hover, :focus-visible) .chevron {
+  opacity: 1;
+}
+
+/* opened: every step in order, under the header, in the same column */
+.trail {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 6px 0 4px 12px;
-  margin-left: 5px;
+  margin: 10px 0 2px 5px;
+  padding: 2px 0 2px 12px;
   box-shadow: -1px 0 0 var(--line-2);
 }
-.body > * + * {
+.trail > * + * {
   margin-top: 4px;
+}
+
+/* at work: what it said on the way, then what it is doing now, a breath apart as the answer will be */
+.live {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 12px;
+}
+.now {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 20px;
+  color: var(--t-3);
+}
+.icon {
+  flex: none;
+  color: var(--t-4);
+}
+.doing {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: linear-gradient(90deg, var(--t-3) 0%, var(--t-3) 40%, var(--t-1) 50%, var(--t-3) 60%, var(--t-3) 100%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation:
+    step var(--enter) var(--ease-out),
+    shimmer 2.2s linear infinite;
+}
+@keyframes step {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes shimmer {
+  from {
+    background-position: 125% 0;
+  }
+  to {
+    background-position: -125% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .head,
+  .chevron {
+    transition: none;
+  }
+  .doing {
+    animation: none;
+    color: var(--t-3);
+    background: none;
+  }
 }

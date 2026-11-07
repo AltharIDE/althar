@@ -43,6 +43,27 @@ describe('the thread recorder, at its edges', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('keeps whether a message is the agent’s answer, where it says, through every write of it', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const writer = recorder(where)
+      const events: ReadonlyArray<SessionEvent> = [
+        { _tag: 'AgentMessage', text: 'Checking the board.', messageId: 'a', answer: false },
+        { _tag: 'AgentMessage', text: 'Two tasks ', messageId: 'b', answer: true },
+        { _tag: 'AgentMessage', text: 'are running.', messageId: 'b', answer: true },
+        { _tag: 'AgentMessage', text: 'Said by Claude Code.', messageId: 'c' },
+      ]
+      for (const event of events) yield* writer.record(event)
+      yield* writer.flush
+      const said = (yield* items(where.threadId)).slice(where.before).map((item) => item.content)
+      assert.deepStrictEqual(said, [
+        { text: 'Checking the board.', answer: false },
+        { text: 'Two tasks are running.', answer: true },
+        { text: 'Said by Claude Code.' },
+      ])
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('keeps why a command failed from its own words, as OpenCode says it, where what came back says nothing', () =>
     Effect.gen(function* () {
       const where = yield* place
@@ -65,6 +86,39 @@ describe('the thread recorder, at its edges', () => {
       const tool = (yield* items(where.threadId)).find((item) => item.content.title === 'Lint')
       assert.strictEqual(tool?.content.status, 'failed')
       assert.deepStrictEqual(tool?.content.diagnostic, { text: 'npm ERR! Missing script: "lint"', truncated: false, redacted: false })
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('says under a call to a server that was down which server and how, only once it failed', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const writer = recorder({ ...where, lead: 'Claude Code', leadId: 'claude-code' })
+      const events: ReadonlyArray<SessionEvent> = [
+        {
+          _tag: 'Notice',
+          severity: 'info',
+          title: 'MCP server "linear" needs authentication',
+          server: { name: 'linear', status: 'needs-auth' },
+        },
+        { _tag: 'ToolCall', toolCallId: 'c1', title: 'mcp__linear__save_issue', kind: 'other', status: 'in_progress', server: 'linear' },
+        // What the agent sends when a call fails is its id and status alone: the server is the one the call was made to.
+        { _tag: 'ToolCallUpdate', toolCallId: 'c1', status: 'failed' },
+        // Named by its _meta rather than its title, and failed by a status alone.
+        { _tag: 'ToolCall', toolCallId: 'c3', title: 'Move DEV-188 to In Review', kind: 'other', status: 'in_progress', server: 'linear' },
+        { _tag: 'ToolCallUpdate', toolCallId: 'c3', status: 'failed' },
+        // A call to a server that is up says nothing, though it fails.
+        { _tag: 'ToolCall', toolCallId: 'c2', title: 'mcp__github__get_pr', kind: 'other', status: 'failed', server: 'github' },
+      ]
+      for (const event of events) yield* writer.record(event)
+      yield* writer.flush
+      const calls = (yield* items(where.threadId))
+        .slice(where.before)
+        .flatMap((item) => (item.kind === 'tool_call' ? [[item.content.title, item.content.server ?? null]] : []))
+      assert.deepStrictEqual(calls, [
+        ['mcp__linear__save_issue', { name: 'linear', down: 'needs-auth', agentId: 'claude-code' }],
+        ['Move DEV-188 to In Review', { name: 'linear', down: 'needs-auth', agentId: 'claude-code' }],
+        ['mcp__github__get_pr', null],
+      ])
     }).pipe(Effect.provide(runtime())),
   )
 })

@@ -68,6 +68,8 @@ export interface PermissionRequest {
    * under the answers.
    */
   held?: ReactNode
+  /** For a call that waits while the person is away: how long, and where else it reached them. */
+  waited?: ReactNode
   /** The model asking. */
   agent?: ModelInfo
   /** The step it is on. */
@@ -250,6 +252,7 @@ function Card({
   cmd,
   why,
   held,
+  waited,
   agent,
   step,
   prefix,
@@ -436,6 +439,12 @@ function Card({
             </div>
           ))}
         </fieldset>
+        {waited && (
+          <p className={s.waited}>
+            <Icon name="clock" size={12} />
+            <span>{waited}</span>
+          </p>
+        )}
         {held && <p className={s.why}>{held}</p>}
         <AskFoot>
           <Button type="submit" variant="signal" kbd="↵">

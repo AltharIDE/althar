@@ -4,25 +4,28 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 
 import { type ProjectTab, Room } from '@althar/ui'
 
+import { useMerging } from '../../data/merges'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { kitInk } from '../../shared/inks'
+import { yoursByProject } from '../board/lanes'
 import { draftActions, draftsOf, inkOf } from '../newProject/draft'
 import { FIRST_SECTION, type Section } from '../settings/sections'
 import { useWelcoming } from '../start/welcome'
 import { arrived, closed, moved, settingsClosed, settingsOn, tabsStoreOf } from './store'
-import { afterClosing, firstOpen, type Place, tabOf, whereOf, yoursIn } from './tabs'
+import { afterClosing, firstOpen, type Place, tabOf, whereOf } from './tabs'
 import { useWarmHome, useWarmTabs } from './warm'
 
 /*
  * The window's tabs: one for each project the person keeps open, with where
  * in each they last were, so pressing a tab goes back there. Going into a
  * project, from anywhere, gives it a tab. Every project's tab says whether
- * a task is under way there and what waits on the person, as the window's
- * projects are read: again whenever a project, a task, a run, a session or a
- * call changes. A project being made has a tab of its own, at the end, as a
- * browser's new tab; made, it becomes the project's tab, which has the
- * project's id already. Althar's settings have a tab too, beside the home's,
+ * a task is under way there, from the projects, and what waits on the person
+ * there, as that project's board counts it, from the home: again whenever a
+ * project, a task, a run, a session or a call changes. A project being made
+ * has a tab of its own, at the end, as a browser's new tab; made, it becomes
+ * the project's tab, which has the project's id already. Althar's settings
+ * have a tab too, beside the home's,
  * from going into them until it is closed, which goes back to the section
  * it was on.
  */
@@ -76,10 +79,16 @@ export const useTabs = (): TabsModel => {
   const draft = useSyncExternalStore(drafts.subscribe, drafts.get)
   // Unread, or not read this time, the tabs keep what they last showed.
   const projects = useQuery(reads(client).projects()).data?.projects ?? null
+  // What waits on the person in each project, as its board counts it: the home has the same cards, with the phase each is in now,
+  // so a dot never lights for work the board puts in Running (a change whose checks run), or for a task kept for later.
+  const home = useQuery({ ...reads(client).home(), enabled: projects !== null && projects.length > 0 }).data ?? null
+  const { merging } = useMerging(home?.tasks ?? null)
+  const yours = useMemo(() => (home === null ? new Map<string, number>() : yoursByProject(home, merging)), [home, merging])
+  const yoursInProject = (projectId: string) => yours.get(projectId) ?? 0
 
   const where = whereOf(pathname)
   const known =
-    where.kind === 'home' || where.kind === 'new' || where.kind === 'settings'
+    where.kind === 'home' || where.kind === 'new' || where.kind === 'settings' || where.kind === 'page'
       ? null
       : where.kind === 'project'
         ? where.projectId
@@ -133,7 +142,7 @@ export const useTabs = (): TabsModel => {
   const open = (kept?.open ?? []).filter((id) => projects === null || byId.has(id))
   const tabs = open.flatMap((id) => {
     const project = byId.get(id)
-    return project === undefined ? [] : [tabOf(project)]
+    return project === undefined ? [] : [tabOf(project, yoursInProject(project.id))]
   })
   const places = kept?.places ?? {}
   // Every open tab's place stays in the window's cache, read ahead, so going to one never waits on the runtime.
@@ -171,9 +180,9 @@ export const useTabs = (): TabsModel => {
 
   return {
     tabs: making === null ? tabs : [...tabs, making],
-    others: (projects ?? []).filter((project) => !open.includes(project.id)).map(tabOf),
+    others: (projects ?? []).filter((project) => !open.includes(project.id)).map((project) => tabOf(project, yoursInProject(project.id))),
     current: onNew ? (draft?.id ?? null) : current,
-    yours: (projects ?? []).reduce((sum, project) => sum + yoursIn(project), 0),
+    yours: (projects ?? []).reduce((sum, project) => sum + yoursInProject(project.id), 0),
     // No project yet, or the welcome still on show over the one made on its way: the window is all page, with no tabs.
     none: (projects !== null && projects.length === 0) || welcoming,
     settings: { open: onSettings || kept?.settings !== undefined, current: onSettings },

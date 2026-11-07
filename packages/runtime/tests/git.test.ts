@@ -16,6 +16,7 @@ import {
   git,
   gitIn,
   gitOutcome,
+  hostNameOf,
   indexStamp,
   isReadCopy,
   remoteOf,
@@ -101,6 +102,21 @@ const run = (cwd: string, ...args: Array<string>) =>
   execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@althar.test', ...args], { cwd })
     .toString()
     .trim()
+
+describe('the host a remote names', () => {
+  it('reads it from the forms git takes, and from none that names none', () => {
+    for (const [url, host] of [
+      ['https://gitlab.fnt.example/fnt/engine.git', 'gitlab.fnt.example'],
+      ['https://user:token@GitLab.FNT.example:8443/fnt/engine.git', 'gitlab.fnt.example'],
+      ['ssh://git@gitlab.fnt.example:2222/fnt/engine.git', 'gitlab.fnt.example'],
+      ['git@gitlab.fnt.example:fnt/engine.git', 'gitlab.fnt.example'],
+      ['gitlab.fnt.example:fnt/engine.git', 'gitlab.fnt.example'],
+    ] as const)
+      expect(hostNameOf(url), url).toBe(host)
+    for (const url of ['/Users/me/code/engine', '../engine', 'file:///Users/me/engine.git', '', 'engine', 'C:\\code\\engine'])
+      expect(hostNameOf(url), url).toBeNull()
+  })
+})
 
 describe('a repository’s default branch', () => {
   effect.live('is what origin says, as git last saw it or by asking it', () =>

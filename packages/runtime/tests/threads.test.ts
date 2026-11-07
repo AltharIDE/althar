@@ -14,7 +14,7 @@ import { change } from '../src/records'
 import { Live } from '../src/Live'
 import { Sessions } from '../src/Sessions'
 import { Ledger } from '@althar/persistence-sqlite'
-import { addItem, betweenTurns, recorder, transcript } from '../src/threads'
+import { addItem, betweenTurns, keepAltharCall, recorder, transcript } from '../src/threads'
 import { items, repository, runtime, task, turns, until } from './support'
 
 /** A thread with a session on it, for the recorder to write into. */
@@ -26,6 +26,54 @@ const place = Effect.gen(function* () {
   yield* until(turns(created.threadId), (rows) => rows[0]?.state === 'completed')
   const before = (yield* items(created.threadId)).length
   return { projectId: project.projectId as ProjectId, threadId: created.threadId, sessionId, before }
+})
+
+describe('an Althar tool called inside an agent’s code tool', () => {
+  it.live('is kept on the bare `execute` item: the tool, what it was given, shortened, and its error', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const record = recorder(where)
+      yield* record.record({ _tag: 'ToolCall', toolCallId: 'code', title: 'execute', kind: 'execute', status: 'in_progress', rawInput: {} })
+      yield* record.record({
+        _tag: 'ToolCall',
+        toolCallId: 'ran',
+        title: 'Run ls',
+        kind: 'execute',
+        status: 'in_progress',
+        rawInput: { command: 'ls' },
+      })
+      yield* record.flush
+      const place3 = { projectId: where.projectId, threadId: where.threadId, sessionId: where.sessionId }
+      yield* keepAltharCall(place3, {
+        tool: 'propose_plan',
+        input: { task: 'add-a-retry', lead: 'codex' },
+        error: 'lead must be an object',
+      })
+      yield* keepAltharCall(place3, { tool: 'propose_plan', input: { task: 'x', lead: { agent: 'codex' }, note: 'y'.repeat(900) } })
+      const kept = (yield* items(where.threadId)).filter((item) => item.kind === 'tool_call')
+      const code = kept.find((item) => item.content.title === 'execute')
+      assert.deepStrictEqual(
+        (code?.content.althar as ReadonlyArray<{ tool: string; error?: string }>).map((call) => [call.tool, call.error]),
+        [
+          ['propose_plan', 'lead must be an object'],
+          ['propose_plan', undefined],
+        ],
+      )
+      assert.deepStrictEqual((code?.content.althar as ReadonlyArray<{ input: Record<string, string> }>)[0]?.input, {
+        task: 'add-a-retry',
+        lead: 'codex',
+      })
+      assert.isBelow(((code?.content.althar as ReadonlyArray<{ input: Record<string, string> }>)[1]?.input.note ?? '').length, 400)
+      // A call that says its command is no code tool's: nothing is kept on it.
+      assert.isUndefined(kept.find((item) => item.content.title === 'Run ls')?.content.althar)
+      // A call that ended takes nothing more.
+      yield* record.record({ _tag: 'ToolCallUpdate', toolCallId: 'code', status: 'completed' })
+      yield* record.flush
+      yield* keepAltharCall(place3, { tool: 'list_tasks', input: {} })
+      const after = (yield* items(where.threadId)).find((item) => item.content.title === 'execute')
+      assert.lengthOf(after?.content.althar as ReadonlyArray<unknown>, 2)
+    }).pipe(Effect.provide(runtime())),
+  )
 })
 
 describe('the thread recorder', () => {

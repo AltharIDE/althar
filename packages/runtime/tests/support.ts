@@ -288,6 +288,8 @@ export const runtime = (
     readonly agents?: Layer.Layer<Agents>
     /** A plan's countdown; null leaves it to the person's setting (plansAndReviews.ts). */
     readonly countdown?: Duration.Duration | null
+    /** How long a drafted task waits for its plan before it is the person's: five minutes unless a test says. */
+    readonly drafting?: Duration.Duration
     readonly connectors?: Layer.Layer<Connectors>
     readonly listenEvery?: Duration.Duration
     /** How often the merge line is swept by itself; never, with an infinite one, where a test sweeps it. */
@@ -358,6 +360,7 @@ export const runtime = (
     deviceName: 'Test Mac',
     agents: more.agents ?? fakeAgents(options, more.signedOut, more.each, more.perUse, more.oneAccount, more.unsure),
     ...(more.countdown === null ? {} : { countdown: more.countdown ?? Duration.millis(300) }),
+    ...(more.drafting === undefined ? {} : { drafting: more.drafting }),
     secrets: Secrets.memory(more.keychain),
     connectors: more.connectors ?? fakeConnectors({}),
     ...(more.listenEvery === undefined ? {} : { listenEvery: more.listenEvery }),

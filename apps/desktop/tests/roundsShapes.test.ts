@@ -71,7 +71,7 @@ describe('a task’s rounds', () => {
 
   it('reads streamed text the store holds already from the store, not from when it streamed', () => {
     const said = when(items.says('Done.'), 5)
-    const streaming = new Map([[said.id, { kind: 'agent_message' as const, agentId: 'claude-code', text: 'Do', at: at(1) }]])
+    const streaming = new Map([[said.id, { kind: 'agent_message' as const, agentId: 'claude-code', text: 'Do', sequence: 1, at: at(1) }]])
     const [round] = rounds(
       roundsOf(
         { items: [items.you('Go'), when(items.tool({}), 0), said], turnRunning: false, worktree: '/w/meridian' },
@@ -81,6 +81,66 @@ describe('a task’s rounds', () => {
       ),
     )
     expect(round?.work?.took).toBe('5m 0s')
+  })
+})
+
+describe('reviews, and the lead settling them', () => {
+  const findings = [{ severity: 'major' as const, file: null, line: null, claim: 'The retry never stops.' }]
+  const review = (round: number, minutes: number) =>
+    when(items.step({ step: 'review', round, verdict: 'changes_requested', agentId: 'codex', findings }), minutes)
+  const settle = (round: number, minutes: number, words: string) => [
+    when(items.tool({ title: 'Edit retry.ts', toolKind: 'edit' }), minutes),
+    when(items.step({ step: 'settle', round, summary: words }), minutes + 1),
+    when(items.says(words), minutes + 1),
+  ]
+  const thread = [
+    items.you('Add a retry'),
+    when(items.tool({}), 1),
+    when(items.step({ step: 'implement', summary: 'Added it.' }), 2),
+    when(items.says('Added it.'), 2),
+    review(0, 5),
+    ...settle(0, 6, 'Capped it.'),
+    review(1, 10),
+    ...settle(1, 11, 'Named it better.'),
+  ]
+
+  it('folds the round that settled a review into the review’s line once a later round handed over, and keeps the latest open', () => {
+    const blocks = read(thread)
+    expect(blocks.map((block) => block.kind)).toEqual(['you', 'round', 'verdict', 'verdict', 'round'])
+    const [first, second] = blocks.filter((block) => block.kind === 'verdict')
+    expect(first).toMatchObject({ settle: { kind: 'round', result: { text: 'Capped it.' } } })
+    expect(second).toMatchObject({ settle: null })
+    expect(rounds(blocks).at(-1)).toMatchObject({ result: { text: 'Named it better.' } })
+  })
+
+  it('folds a settling round its session said what it could see before, keeping that line after the review’s', () => {
+    const seen = when(
+      items.notice(
+        {
+          source: 'runtime',
+          title: 'Codex could see a skill',
+          role: 'skills',
+          skills: [{ name: 'mine', path: '/h/mine/SKILL.md', from: 'person' }],
+        },
+        null,
+      ),
+      6,
+    )
+    const blocks = read([...thread.slice(0, 5), seen, ...thread.slice(5)])
+    expect(blocks.map((block) => block.kind)).toEqual(['you', 'round', 'verdict', 'skills', 'verdict', 'round'])
+    expect(blocks[2]).toMatchObject({ settle: { kind: 'round', result: { text: 'Capped it.' } } })
+  })
+
+  it('leaves a review with no round settling it after it, or one still at work, as it is', () => {
+    expect(read(thread.slice(0, 5)).filter((block) => block.kind === 'verdict')).toMatchObject([{ settle: null }])
+    // The lead still settling the second review: the first's settling folds, the round at work stands open.
+    const working = [...thread.slice(0, 10), when(items.tool({ status: 'in_progress' }), 11)]
+    const blocks = read(working, true)
+    expect(blocks.filter((block) => block.kind === 'verdict').map((block) => block.kind === 'verdict' && block.settle !== null)).toEqual([
+      false,
+      false,
+    ])
+    expect(rounds(blocks).at(-1)).toMatchObject({ live: true })
   })
 })
 

@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
+import { CODEX, GEMINI_PRO, OPUS } from '../../fixtures/models'
 import {
   CHANGE_BRANCH,
   CHANGE_DRAFT,
@@ -15,7 +16,7 @@ import {
   PR_416,
 } from '../../fixtures/outputs'
 import { States, statesParameters } from '../../storybook/States'
-import { ChangeState } from '../../foundations/vocabulary'
+import { ChangeState, CheckState } from '../../foundations/vocabulary'
 import { Button } from '../../primitives/Button/Button'
 import { ChangeSet, foldersOf, groupsOf } from './ChangeSet'
 
@@ -50,6 +51,27 @@ type Story = StoryObj<typeof meta>
 export const Ready: Story = {}
 /** Alone on the page: the button beside what it acts on, at its own width. */
 export const ReadyAlone: Story = { parameters: { width: ALONE } }
+/** Two reviewers, as a list: GPT-5.2 Codex and Claude Opus 5, each mark beside its own name. */
+export const TwoReviewers: Story = {
+  args: { ...CHANGE_READY, review: { state: CheckState.Passed, by: [CODEX, OPUS] } },
+  play: async ({ canvasElement }) => {
+    const said = within(canvasElement).getByText(/^Reviewed by/)
+    await expect(said).toHaveTextContent('Reviewed by GPT-5.2 Codex and Claude Opus 5')
+  },
+}
+/** Three reviewers: A, B and C, said as a list rather than run together. */
+export const ThreeReviewers: Story = {
+  args: { ...CHANGE_READY, review: { state: CheckState.Passed, by: [CODEX, OPUS, GEMINI_PRO] } },
+  play: async ({ canvasElement }) => {
+    const said = within(canvasElement).getByText(/^Reviewed by/)
+    await expect(said).toHaveTextContent('Reviewed by GPT-5.2 Codex, Claude Opus 5 and Gemini 3 Pro')
+  },
+}
+/** Three reviewers in a narrow column: the list wraps, and no mark parts from its name. */
+export const NarrowReviewers: Story = {
+  parameters: { width: 240 },
+  args: { ...CHANGE_READY, review: { state: CheckState.Passed, by: [CODEX, OPUS, GEMINI_PRO] } },
+}
 /** A draft: its checks still running, said in a line. */
 export const Draft: Story = { args: { ...CHANGE_DRAFT, actions: <Button>Mark ready for review</Button> } }
 /** Just opened: its checks haven't started, and it says so rather than counting none. */

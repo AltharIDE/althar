@@ -1,0 +1,24 @@
+/* A page in a tab of its own: the page under the window's bar, its comments at its foot. */
+.tab {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+}
+.page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.page > * {
+  flex: 1;
+}
+.comments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--line);
+  list-style: none;
+}
