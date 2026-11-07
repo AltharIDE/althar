@@ -5,7 +5,7 @@
 - **Date:** 2026-11-06
 - **Supersedes, in part:**
   [ADR-004](004-coordinator-is-an-agent-session.md) (the coordinator is
-  optional; read-only is tidiness),
+  always on, and tasks can also start without it; read-only is tidiness),
   [ADR-011](011-own-connectors-for-hosts-and-trackers.md) (agents without the
   person's sign-in; tools only on the task's repository),
   [ADR-013](013-project-rules.md) (what asks by default; revisions as the
@@ -122,8 +122,8 @@
      of tools. Each change is said in a line and can be undone; one that
      loosens what asks needs the person's own message in that turn
      ([Settings](#settings)).
-  6. **The coordinator is optional**
-     ([The coordinator](#the-coordinator-is-optional)).
+  6. **The coordinator is always on, and tasks can also start without it**
+     ([Tasks can start without the coordinator](#tasks-can-start-without-the-coordinator)).
   7. **What stays** is a short list, each line for a reason no tool takes
      away ([What stays](#what-stays-and-why)).
   8. **Two questions the person hasn't settled** take the plan's
@@ -616,14 +616,16 @@ these changes to its sketches:
   not its effect. Sign in opens the agent's sign-in in Settings until the MCP
   servers' own page can take it.
 
-## The coordinator is optional
+## Tasks can start without the coordinator
 
-A task can start without it: from the board, from the composer, or from a
-lead. The coordinator stays the place for triage, routing, launching a batch
-of tasks from the tracker, and merging. A project whose person never talks
-to it runs no coordinator session. How a task started without it gets its
-plan and models fast is phase 2's, beside the work on making small changes
-finish in minutes.
+The coordinator is always there. There is no switch, setting or mode to turn
+it off, in any project. A task can also start without going through it: from
+the board, from the composer, or from a lead. The coordinator stays the place
+for triage, routing, launching a batch of tasks from the tracker, and merging,
+and it directs the leads. Its session starts when the person talks to it, or
+when news it acts on wakes it; that is not a setting and doesn't turn it off.
+How a task started without it gets its plan and models fast is phase 2's,
+beside the work on making small changes finish in minutes.
 
 ## What stays, and why
 
