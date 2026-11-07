@@ -110,6 +110,7 @@ import { TaskActions } from './TaskActions'
 import { IssueChanges } from './IssueChanges'
 import { IssueDrafts } from './IssueDrafts'
 import { postTeamReviews, Reviews, setPostTeamReviews } from './Reviews'
+import { FastLane } from './fastLane'
 import { Plans } from './Plans'
 import { Runs } from './Runs'
 import { findTasks } from './Search'
@@ -228,6 +229,7 @@ export const handlers = Api.toLayer(
     const issueDrafts = yield* IssueDrafts
     const issueChanges = yield* IssueChanges
     const reviews = yield* Reviews
+    const fastLane = yield* FastLane
     const runs = yield* Runs
     const tasks = yield* Tasks
     const coordinator = yield* Coordinator
@@ -1096,6 +1098,9 @@ export const handlers = Api.toLayer(
         once(commandId, api(automations.runNow(automationId, instance.personId, itemId))),
       DeleteAutomation: ({ commandId, automationId }) => once(commandId, api(automations.remove(automationId, instance.personId))),
       AnswerTaskAsk: ({ commandId, itemId, yes }) => once(commandId, api(taskActions.answer(itemId, yes, instance.personId))),
+      MakeItAFullTask: ({ commandId, itemId }) => once(commandId, api(fastLane.makeFullTask(itemId))),
+      KeepTheModel: ({ commandId, itemId }) => once(commandId, api(fastLane.keepTheModel(itemId))),
+      UndoTheModelMove: ({ commandId, itemId }) => once(commandId, api(fastLane.undoTheModelMove(itemId))),
       UndoAutomationChange: ({ commandId, itemId }) => once(commandId, api(automations.undo(itemId, instance.personId))),
       AnswerSettingChange: ({ commandId, itemId, yes }) => once(commandId, api(settingsTools.answer(itemId, yes))),
       UndoSettingChange: ({ commandId, itemId }) => once(commandId, api(settingsTools.undo(itemId))),

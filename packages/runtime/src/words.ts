@@ -338,6 +338,7 @@ export const words = (
       case 'LaunchRefused':
       case 'AttachRefused':
       case 'ReviewRefused':
+      case 'FastLaneRefused':
       case 'ScreenshotsRefused':
         return text(error, 'message')
       case 'AutomationRefused':

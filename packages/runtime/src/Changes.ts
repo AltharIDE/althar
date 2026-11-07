@@ -136,6 +136,7 @@ import { change, fact, timestamp } from './records'
 import { retitleTask, TITLE_LENGTH } from './taskTitle'
 import { indexTask } from './Search'
 import { IssueChanges } from './IssueChanges'
+import { FastLane } from './fastLane'
 import { Policies, pushesCommits, resolvesConflictsFor, ruleSetOf } from './Policies'
 import { guardPush } from './repositoryGuard'
 import { pushDetailOf, pushFailureOf } from './pushFailure'
@@ -527,6 +528,7 @@ type Store =
   | Live
   | Busy
   | IssueChanges
+  | FastLane
   | LeftBehind
   | Models
 
@@ -927,6 +929,7 @@ export class Changes extends Context.Service<
       const live = yield* Live
       const scope = yield* Scope.Scope
       const issueChanges = yield* IssueChanges
+      const fastLane = yield* FastLane
       /** Offers to move a task's issue along with its pull request, in the background: nothing it meets holds the pull request up. */
       const follow = (taskId: string, event: 'opened' | 'merged', change: Parameters<typeof nameOf>[0] & { readonly url: string }) =>
         Effect.asVoid(Effect.forkIn(issueChanges.followPullRequest(taskId, event, { key: nameOf(change), url: change.url }), scope))
@@ -2624,7 +2627,12 @@ export class Changes extends Context.Service<
           if (after.state !== before.state && settled)
             yield* arrive(link, { kind: after.state, from: null, where: nameOf(before), url: before.url })
           if (settled) for (const asked of yield* askedOf(link.taskId, before.url)) yield* settleAsked(asked, 'closed')
-          if (after.state === 'merged' && before.state !== 'merged') yield* Effect.andThen(follow(link.taskId, 'merged', before), baseMoved)
+          if (after.state === 'merged' && before.state !== 'merged')
+            yield* Effect.andThen(
+              Effect.andThen(follow(link.taskId, 'merged', before), baseMoved),
+              // The fast lane's review reads the change now that it merged (README section 6).
+              Effect.forkIn(fastLane.reviewMerged(link.taskId), scope).pipe(Effect.asVoid),
+            )
           if (after.state === 'merged') yield* settleIfDone(link.taskId)
           if (settled) yield* forgetUnsent(link.taskId)
           return after
@@ -4271,7 +4279,12 @@ export class Changes extends Context.Service<
           })
           // Merged or closed, it takes no more pushes: what the lead asked to push to it is closed.
           if (settled) for (const asked of yield* askedOf(link.taskId, before.url)) yield* settleAsked(asked, 'closed')
-          if (after.state === 'merged' && before.state !== 'merged') yield* Effect.andThen(follow(link.taskId, 'merged', before), baseMoved)
+          if (after.state === 'merged' && before.state !== 'merged')
+            yield* Effect.andThen(
+              Effect.andThen(follow(link.taskId, 'merged', before), baseMoved),
+              // The fast lane's review reads the change now that it merged (README section 6).
+              Effect.forkIn(fastLane.reviewMerged(link.taskId), scope).pipe(Effect.asVoid),
+            )
           if (after.state === 'merged') yield* settleIfDone(link.taskId)
           // Checks on what Althar pushed to resolve a conflict are the round's; what fails there isn't told the lead twice.
           const theRounds = yield* checked(link, before.url, now, host, repository, ran).pipe(

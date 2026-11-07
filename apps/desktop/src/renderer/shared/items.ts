@@ -123,6 +123,9 @@ export const settled = (item: ThreadItem): boolean => {
     case 'step_result':
     case 'arrival':
     case 'pictures':
+    // A small change's card and Auto's line are read from the task or kept current; neither waits open.
+    case 'small_change':
+    case 'model_move':
       return true
   }
 }

@@ -288,6 +288,13 @@ export class Reviews extends Context.Service<
       readonly occurrence?: string
       /** Its lead waits for the task's plan, which the person can hold or change, to start it (`lead`); else it starts at once. */
       readonly planned?: boolean
+      /**
+       * Reviews a pull request that merged already (the fast lane, README
+       * section 6): the change is read after the fact, from the head it
+       * merged, and what it finds is posted as any review's is. Refused for
+       * one closed without merging, which has nothing to read.
+       */
+      readonly afterMerge?: boolean
     }): Effect.Effect<Started, unknown>
     /**
      * Starts a review task's lead, once its plan starts: told to review the
@@ -405,7 +412,8 @@ export class Reviews extends Context.Service<
             const repository = yield* host.repository(place.path).pipe(Effect.mapError(hostWords))
             const pull = yield* host.changeToReview(repository, place.number).pipe(Effect.mapError(hostWords))
             const name = `${host.words.noun} ${host.words.prefix}${pull.number}`
-            if (pull.state !== 'open') return yield* refused(`That ${name} is ${pull.state}, so there’s nothing to review.`)
+            if (pull.state !== 'open' && !(input.afterMerge === true && pull.state === 'merged'))
+              return yield* refused(`That ${name} is ${pull.state}, so there’s nothing to review.`)
             const outside = fromOutside(pull)
             const author = pull.author?.login ?? 'ghost'
             // One already reviewing it, still open, is the one: asked twice, nothing starts twice.

@@ -45,6 +45,7 @@ import { makeKeyedLock } from './keyedLock'
 import { type CheckoutConsent, type CheckoutSeen, checkoutsHeld, giveBackSpot, place, settledHolding, type Spot } from './local'
 import { quickIn } from './kinds'
 import { capitalized, Limits, lowWords, NEARLY_OUT, type Out, outStep, outWords, type Room, whenWords } from './Limits'
+import { AutoModels } from './modelMoves'
 import { Live, type LiveEvent } from './Live'
 import { roundsNow, roundsOutNow } from './plansAndReviews'
 import { unreviewedLine } from './pullRequestReview'
@@ -176,6 +177,13 @@ export const PlanParameters = Schema.Struct({
    * (make_it_a_change), which the person asked to end in a pull request.
    */
   publishes: Schema.optional(Schema.Boolean),
+  /**
+   * The fast lane (README section 6): reviewed after it merges, not before.
+   * Its one step implements, its review step names who reads it once it
+   * merged and is skipped so nothing waits on it, and its card in the thread
+   * says what it skipped. Absent from every other plan.
+   */
+  reviewAfterMerge: Schema.optional(Schema.Boolean),
   /**
    * A review of someone else's pull request (`review_pull_request`): its one
    * step is the review's lead, which reads a read-only copy, so only an
@@ -355,6 +363,7 @@ type Store =
   | Issues
   | Limits
   | Policies
+  | AutoModels
   | Agents
   | RuntimeConfig
   | Busy
@@ -683,6 +692,7 @@ export class Runs extends Context.Service<
       const changes = yield* Changes
       const issues = yield* Issues
       const limits = yield* Limits
+      const autoModels = yield* AutoModels
       const policies = yield* Policies
       const busy = yield* Busy
       const connectivity = yield* Connectivity
@@ -2457,10 +2467,12 @@ export class Runs extends Context.Service<
           const chosen = instead?.model ?? (planned ? (implement?.model ?? null) : (model ?? null))
           const thinks = planned ? (implement?.effort ?? null) : (effort ?? null)
           const chosenAccount = accountId ?? instead?.accountId
+          // Nearly out, the lead's next step moves to a lighter model of its agent, and the thread says why (README 7).
+          const auto = planned ? yield* lighterModel(run, wanted, chosen) : undefined
           return yield* sessions.start({
             threadId: run.threadId,
-            agentId: instead?.agentId ?? wanted,
-            ...(chosen === null ? {} : { model: chosen }),
+            agentId: instead?.agentId ?? auto?.agentId ?? wanted,
+            ...((auto?.model ?? chosen) === null ? {} : { model: (auto?.model ?? chosen) as string }),
             ...(thinks === null ? {} : { effort: thinks }),
             ...(chosenAccount === undefined ? {} : { accountId: chosenAccount }),
           })
@@ -2480,6 +2492,18 @@ export class Runs extends Context.Service<
       /** Says in the task's thread what a usage limit did; the home reads it as the loop's doing. */
       const sayOut = (threadId: string, projectId: ProjectId, title: string) =>
         addItem({ projectId, threadId }, 'notice', { source: 'runtime', severity: 'warning', title, about: 'limit' })
+
+      /**
+       * Auto's lighter model (README section 7): where the plan is nearly out,
+       * the lead's next step moves to a lighter model of the same agent, and
+       * the thread says why. The person's keep for this task holds.
+       */
+      const lighterModel = (run: RunRow, agentId: string, model: string | null) =>
+        model === null
+          ? Effect.succeed(undefined)
+          : autoModels
+              .lighter({ taskId: run.taskId, projectId: run.projectId, threadId: run.threadId, agentId, model })
+              .pipe(Effect.catchCause(() => Effect.succeed(undefined)))
 
       /**
        * A planned agent that is out of usage, or nearly out (Limits), where the

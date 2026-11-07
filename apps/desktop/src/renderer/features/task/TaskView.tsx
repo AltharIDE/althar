@@ -81,6 +81,8 @@ import { usePostTeamReviews } from '../settings/usePostTeamReviews'
 import { HeldLimit } from './LimitCall'
 import { StuckCall } from './StuckCall'
 import { TaskThread } from './TaskThread'
+import { SmallChangeOf } from './SmallChangeOf'
+import { ModelMoveOf } from './ModelMoveOf'
 import { latestReport, reviewsIn, useReviewOutcomes } from './reviewOutcomes'
 import { ConnectPanel } from '../connections/ConnectPanel'
 import { serviceOfProduct } from '../connections/ways'
@@ -1267,6 +1269,19 @@ export function TaskView({
                         }}
                       />
                     )}
+                    // A small change's card: Merge as the header's, and Make it a full task (README section 6).
+                    smallChange={(card, itemId) => (
+                      <SmallChangeOf
+                        card={card}
+                        itemId={itemId}
+                        named={named}
+                        busy={model.pending}
+                        onMerge={(change) => void model.accept([change])}
+                        {...(onOpenTask === undefined ? {} : { onOpen: onOpenTask })}
+                      />
+                    )}
+                    // Auto's line on moving the lead to a lighter model, with Keep and Undo (README section 7).
+                    modelMove={(move, itemId) => <ModelMoveOf move={move} itemId={itemId} named={named} />}
                     // A push the lead asked for is pushed as the outputs push: up to the head it shows.
                     push={(request, at) => (
                       <PushRequestOf

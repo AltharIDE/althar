@@ -60,6 +60,7 @@ import { dropNote, keepNote, NOTE_LENGTH, NoteRefused, NOTES_KEPT, notesOf, sayN
 import { envelope } from './envelope'
 import { fact } from './records'
 import { PlanParameters, type PlanStep, Runs, type StuckInfo } from './Runs'
+import { smallChangeSteps } from './smallChange'
 import { type Disposition, passedOn, Sessions } from './Sessions'
 import { blockedModelsOf } from './preferences'
 import type { InputFile } from './sentFiles'
@@ -210,6 +211,8 @@ const Proposed = Schema.Struct({
   task: Schema.String,
   lead: Schema.Struct({ ...StepPick.fields, reason: Schema.optional(Schema.String) }),
   review: Schema.optional(Schema.NullOr(StepPick)),
+  /* The fast lane: one step, no countdown, and its review after it merges instead of before. */
+  small_change: Schema.optional(Schema.Boolean),
   ...Where,
 })
 /* A mini task: what to do, and the one model that does it. */
@@ -1393,6 +1396,15 @@ export class Coordinator extends Context.Service<
           const steps: Array<PlanStep> = [{ key: 'implement', ...(yield* stepOf(access.projectId, proposed.lead)), skipped: false }]
           if (proposed.review !== null && proposed.review !== undefined)
             steps.push({ key: 'review', ...(yield* stepOf(access.projectId, proposed.review)), skipped: false })
+          // The fast lane: one step, its review named and skipped so nothing waits on it, and no countdown. It is reviewed
+          // after it merges, and the card in its thread says what it skipped (README section 6).
+          const small = proposed.small_change === true
+          const smallSteps = small
+            ? smallChangeSteps({
+                lead: steps[0] as PlanStep,
+                review: proposed.review === null || proposed.review === undefined ? null : (steps[1] as PlanStep),
+              })
+            : undefined
           // What it works toward, as said now; as it was drafted without it (ADR-093).
           if (proposed.toward !== undefined)
             yield* setToward(task.id, proposed.toward.trim() === '' ? null : proposed.toward).pipe(
@@ -1413,16 +1425,19 @@ export class Coordinator extends Context.Service<
           yield* plans.propose({
             projectId: access.projectId as ProjectId,
             taskId: task.id,
-            steps,
+            steps: smallSteps ?? steps,
             reason: proposed.lead.reason ?? null,
             actorId: instance.coordinatorId,
             end: yield* changes.endFor(access.projectId, task.id),
             worksIn,
             ...(proposed.works_in_why === undefined ? {} : { worksInWhy: proposed.works_in_why }),
+            ...(small ? { reviewAfterMerge: true, startsIn: Duration.zero } : {}),
           })
           const where = yield* localLine(access.projectId, task.id, worksIn)
           if (held !== undefined)
             return `Changed ${task.slug}'s plan.${where} It stays held until the person starts it; they see it as a card, so there's no need to describe the plan again.`
+          if (small)
+            return `Planned ${task.slug} as a small change: ${where} It starts at once, on ${smallSteps?.[0]?.model ?? 'its lightest model'}, with no plan to read and one step. It is reviewed after it merges; the card in its thread says what it skipped, so there's no need to repeat it.`
           return `Planned ${task.slug}.${where} It starts in 25 seconds unless the person holds or changes it; they see it as a card, so there's no need to describe the plan again.`
         })
 
@@ -2257,7 +2272,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'propose_plan',
-          "Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. A change of a few lines is planned small: no review, and its lead at low effort (minimal where that is the lowest it lists), so it starts at once in a place kept for small tasks, however many long ones are at work. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. It starts on its own after 25 seconds unless the person holds or changes it. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it. A task's lead plans only the tasks it drafted.",
+          "Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. A change of a few lines is planned small: pass small_change, keep the review (it runs after the merge), and put its lead on a light, quick model (Sonnet, at low effort where that is the lowest it lists). It then has one step and no countdown: it starts at once in a place kept for small tasks, however many long ones are at work, and its card in the thread says what it skipped. Without small_change it starts on its own after 25 seconds unless the person holds or changes it. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it. A task's lead plans only the tasks it drafted.",
           {
             type: 'object',
             properties: {
@@ -2266,6 +2281,11 @@ export class Coordinator extends Context.Service<
                 type: 'object',
                 properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort, reason: { type: 'string' } },
                 required: ['model'],
+              },
+              small_change: {
+                type: 'boolean',
+                description:
+                  'For a change of a few lines, such as a one-line fix: one step, no countdown, and a review after it merges instead of before. Its review names who reads it once it merged. Say what it skips in a sentence.',
               },
               review: {
                 type: ['object', 'null'],
