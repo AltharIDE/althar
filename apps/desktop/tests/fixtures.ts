@@ -41,7 +41,7 @@ import { vi } from 'vitest'
 import { type AppPreferences, DEFAULT_PREFERENCES } from '../src/main/appPreferences'
 import type { Client, ProjectRulesChange } from '../src/renderer/data/client'
 import { withChange } from '../src/renderer/features/rules/useRules'
-import type { Host } from '../src/renderer/data/services'
+import type { Host, PagesHost } from '../src/renderer/data/services'
 
 /* What the runtime would say, as plain values, and a client that says it. */
 
@@ -688,6 +688,27 @@ export const items = {
       ...content,
     },
   }),
+  /** An agent's change to a setting: made, with Undo, unless said otherwise. */
+  setting: (content: Partial<Extract<ThreadItem, { kind: 'setting' }>['content']> = {}, id?: string): ThreadItem => ({
+    ...next(),
+    ...(id === undefined ? {} : { id }),
+    agentId: null,
+    kind: 'setting',
+    content: {
+      changeId: 'change1',
+      section: 'althar/plans-and-reviews',
+      title: 'Plans and reviews',
+      project: null,
+      moves: [{ key: 'rounds', label: 'Review rounds', before: '3', after: '5' }],
+      by: { kind: 'coordinator', taskId: null, title: null },
+      loosens: false,
+      words: null,
+      why: null,
+      state: 'done',
+      said: null,
+      ...content,
+    },
+  }),
 }
 
 /** What an automation is: the morning review, of each new pull request, every weekday at 9:00, led by Claude Code. */
@@ -1122,6 +1143,9 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     answerTaskAsk: vi.fn(async () => {}),
     deleteAutomation: vi.fn(async () => {}),
     undoAutomationChange: vi.fn(async () => {}),
+    answerSettingChange: vi.fn(async () => {}),
+    undoSettingChange: vi.fn(async () => {}),
+    getSettingChanges: vi.fn(async () => []),
     setAutomationPostsReviews: vi.fn(async () => {}),
     setAutomationsPaused: vi.fn(async () => {}),
     listSkills: vi.fn(async () => ({ enabled: true, catalogRevision: 'fixture-1', skills: [installedSkill] })),
@@ -1300,6 +1324,30 @@ const keptPreferences = (): Pick<Host, 'preferences' | 'setPreference'> => {
     }),
   }
 }
+
+/** The main process's pages beside the conversations, doing nothing: a test sets what it looks at. */
+export const fakePagesHost = (overrides: Partial<PagesHost> = {}): PagesHost => ({
+  open: vi.fn(async () => null),
+  states: vi.fn(async () => []),
+  show: vi.fn(),
+  move: vi.fn(async () => {}),
+  viewport: vi.fn(async () => {}),
+  point: vi.fn(async () => null),
+  stopPointing: vi.fn(async () => {}),
+  pins: vi.fn(async () => {}),
+  find: vi.fn(async () => null),
+  still: vi.fn(async () => null),
+  cover: vi.fn(async () => {}),
+  outside: vi.fn(async () => {}),
+  dismiss: vi.fn(async () => {}),
+  close: vi.fn(async () => {}),
+  clear: vi.fn(async () => {}),
+  clearAll: vi.fn(async () => {}),
+  onState: () => () => {},
+  onKey: () => () => {},
+  onClosed: () => () => {},
+  ...overrides,
+})
 
 export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   ...keptPreferences(),

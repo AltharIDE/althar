@@ -51,11 +51,11 @@ export const taskEndText: Record<TaskEnd, ChoiceWords & { short: string }> = {
 
 export const limitPolicyText: Record<LimitPolicy, ChoiceWords> = {
   [LimitPolicy.Move]: {
-    title: 'Move the work to the next agent free',
-    note: 'Back after the reset, if still running',
+    title: 'Move to the strongest model with usage left',
+    note: 'Keeps the step until it ends',
   },
   [LimitPolicy.Wait]: { title: 'Wait for the reset', note: 'Resumes on its own' },
-  [LimitPolicy.Ask]: { title: 'Ask me', note: 'With the agents that are free' },
+  [LimitPolicy.Ask]: { title: 'Ask me', note: 'With the models that have usage left' },
 }
 
 /** A repository's role, as a choice names it. */

@@ -400,7 +400,9 @@ describe('a task’s lead that is signed out', () => {
   })
   const show = (overrides: Partial<ThreadSnapshot> = {}) => {
     const onSignIn = vi.fn()
-    const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [items.you('Go'), signedOut], ...overrides })) })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => snapshot({ retryable: true, items: [items.you('Go'), signedOut], ...overrides })),
+    })
     withServices(<Task onSignIn={onSignIn} />, client)
     return { client, onSignIn }
   }
@@ -607,7 +609,8 @@ describe('a task’s thread in rounds, on its screen', () => {
     )
     const names = (await screen.findAllByRole('article')).map((one) => one.getAttribute('aria-label'))
     expect(names).toContain('Claude Opus')
-    expect(names).toContain('Claude Sonnet')
+    // The review, a line of its own, on its own model.
+    expect(screen.getByRole('button', { name: /Review.*Claude Sonnet.*Passed/ })).toBeTruthy()
   })
 
   it('shows the lead thinking under its name before its first word, with the round before it as it was', async () => {

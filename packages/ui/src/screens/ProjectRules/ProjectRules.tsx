@@ -395,9 +395,9 @@ export const projectRulesText: ProjectRulesText = {
     label: 'When an account runs out',
     limit: {
       [LimitPolicy.Move]: {
-        word: 'moves to the next agent free',
-        title: 'Move the work to the next agent free',
-        note: 'In the order of your agents; with none free, it waits for the reset',
+        word: 'moves to the strongest model with usage left',
+        title: 'Move to the strongest model with usage left',
+        note: 'On any of your plans; with none left, it waits for the reset',
       },
       [LimitPolicy.Wait]: {
         word: 'waits for the reset',
@@ -406,9 +406,9 @@ export const projectRulesText: ProjectRulesText = {
       },
       [LimitPolicy.Ask]: {
         word: 'waits for you',
-        after: ' to move it to a model that’s free, or to wait for the reset',
+        after: ' to move it to a model with usage left, or to wait for the reset',
         title: 'Ask me',
-        note: 'Move it to a free model, or wait for the reset',
+        note: 'Move it to a model with usage left, or wait for the reset',
       },
     },
   },

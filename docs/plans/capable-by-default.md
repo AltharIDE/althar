@@ -259,8 +259,36 @@ lasted of it).
     loosening; undoing a tightening waits for the person; a lead's change
     shows in Settings at once.
 - **The reviewer of a task's change** runs tests and builds in its copy
-  (ADR-071's review steps).
+  (ADR-071's review steps). *Moved to phase 4* when phase 2 was built: its
+  copy becomes a worktree it can install in, as a team pull request's
+  review's does, and both are one change to how a review's copy is made.
 - **Helpers** (ADR-087, when built) get their lead's MCP servers and skills.
+
+**As built.** One tool set: each tool is defined once and served to both
+roles (`ToolServer.serve(POOL, …)`); the coordinator has every tool but a
+lead's own task's (`finish_step`, its pull request's push and checks,
+`record_setup`, `draft_review`, `make_it_a_change`), and a task's reviewer
+reads the project's tasks only. `runtime/src/windowActions.ts` lists every
+action of the window's task model with its tool, or why it has none (the
+person's own, the window's, or a lead's on its own task); the desktop app's
+test checks the list against the model, the runtime's that both roles have
+each tool. New tools for buttons that had none: `skip_review`, `push_task`,
+`open_task_pull_request`, `push_task_branch`, `resolve_conflicts`,
+`move_to_front`, `stop_following`, `change_lead`, `try_again`,
+`compact_lead`, `set_part_of_issue`. A stuck step's answers act at once
+too; the `task_ask` card is no longer made (old ones still read and
+answer). Lineage, caps and countdown are as ADR-097 now says. Still open:
+the coordinator's sandbox reaching a lead's hosts and its reader rules
+where no sandbox holds (its install runs outside its sandbox, through
+`install_dependencies`, so a test run inside needs no network); a task's
+reviewer running tests and builds, which phase 4 now lists with the review
+steps; the per-task Allow everything switch, which stays the person's
+(it loosens what asks); the settings the window keeps on this computer
+(Notifications, Appearance, Editor, Browser, About's usage data and crash reports,
+and This Mac's keep-awake, load and login switches), which `read_settings`
+names as the person's. `SettingsTools.SCREEN_CHANGES` names every change a
+Settings screen makes with the setting or tool agents use for it, or why it
+stays the person's; a test reads the screens' calls against it.
 
 ### 3. Host tools
 
@@ -306,6 +334,11 @@ lasted of it).
 
 ### 4. Reviews that run things
 
+- **A task's own review step** (ADR-071), moved here from phase 2: its
+  reviewer gets a copy it can install in, with the project's setup
+  replayed, and `install_dependencies` and `run_project`, to run the task's
+  tests and build before it reports. Its findings stay read-only: it still
+  changes nothing in the task's worktree.
 - **A pull request by the repository's own people** (its author a member or
   collaborator, its branch in the repository) gets what a task's lead gets:
   a real worktree at its head, with the project's setup replayed; its code

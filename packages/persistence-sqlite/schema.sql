@@ -20,7 +20,7 @@
 -- node_attempt_state: ready, admitted, running, waiting_attention, verifying, succeeded, failed, cancelling, cancelled, uncertain, reconciling, held, superseded
 -- hold_reason: usage_limit, agent_unavailable, machine_busy, checkout
 -- thread_kind: coordinator, task, step
--- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival, question, run, issue_draft, setup, push_request, review_draft, issue_changes, automation, pictures, task_ask
+-- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival, question, run, issue_draft, setup, push_request, review_draft, issue_changes, automation, pictures, task_ask, setting
 -- input_disposition: after_current, interrupt_and_continue, supersede_pending, cancel_run
 -- user_input_state: queued, delivered, superseded, withdrawn
 -- turn_delivery_state: pending, delivered, completed, interrupted, interruption_uncertain, failed
@@ -43,7 +43,7 @@
 -- pull_request_state: none, draft, ready, merged, closed
 -- work_item_state: pending, claimed, done, failed, uncertain
 -- mutation_state: intended, confirmed, failed, uncertain
--- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item, connection, external_link, policy, agent_account, issue_draft, conflict_resolution, project_note, review_draft, issue_change, automation, automation_occurrence, errand, followed_pull, skill
+-- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item, connection, external_link, policy, agent_account, issue_draft, conflict_resolution, project_note, review_draft, issue_change, automation, automation_occurrence, errand, followed_pull, skill, setting
 -- connection_product: github, gitlab, bitbucket_cloud, bitbucket_dc, linear, jira_cloud, jira_dc, trello
 -- connection_auth: device_flow, pkce, token
 -- connection_state: ready, reauth_required, removed
@@ -190,7 +190,7 @@ CREATE TABLE tasks (
   created_by_actor_id TEXT NOT NULL REFERENCES actors (id),
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   settled_at TEXT CHECK (settled_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), request TEXT, resolve_conflicts INTEGER CHECK (resolve_conflicts IN (0, 1)), seen_at TEXT CHECK (seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), allow_everything INTEGER NOT NULL DEFAULT 0 CHECK (allow_everything IN (0, 1)), line_at TEXT CHECK (line_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), kept_at TEXT CHECK (kept_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), opened_at TEXT CHECK (opened_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), request TEXT, resolve_conflicts INTEGER CHECK (resolve_conflicts IN (0, 1)), seen_at TEXT CHECK (seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), allow_everything INTEGER NOT NULL DEFAULT 0 CHECK (allow_everything IN (0, 1)), line_at TEXT CHECK (line_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), kept_at TEXT CHECK (kept_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), opened_at TEXT CHECK (opened_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), parent_task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
   UNIQUE (project_id, slug),
   UNIQUE (id, project_id)
 ) STRICT;
@@ -1423,3 +1423,28 @@ CREATE TABLE followed_pulls (
   ) STRICT;
 
 CREATE INDEX followed_pulls_open ON followed_pulls(project_id, state);
+
+CREATE INDEX tasks_parent ON tasks(parent_task_id) WHERE parent_task_id IS NOT NULL;
+
+CREATE TABLE setting_changes (
+    id TEXT PRIMARY KEY NOT NULL,
+    -- Null for Althar's own settings.
+    project_id TEXT REFERENCES projects(id),
+    section TEXT NOT NULL,
+    -- What the change sets, in the shape change_settings takes it, and each setting's value before and after.
+    change TEXT NOT NULL,
+    before TEXT NOT NULL,
+    after TEXT NOT NULL,
+    by_kind TEXT NOT NULL CHECK (by_kind IN ('coordinator', 'lead')),
+    by_task_id TEXT REFERENCES tasks(id),
+    thread_id TEXT NOT NULL REFERENCES threads(id),
+    item_id TEXT,
+    words TEXT,
+    loosens INTEGER NOT NULL DEFAULT 0 CHECK (loosens IN (0, 1)),
+    state TEXT NOT NULL CHECK (state IN ('asked', 'done', 'undone', 'declined', 'moot')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1)
+  ) STRICT;
+
+CREATE INDEX setting_changes_by_project ON setting_changes(project_id, state, created_at);
