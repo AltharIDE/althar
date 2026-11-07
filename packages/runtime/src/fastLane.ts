@@ -310,12 +310,29 @@ export class FastLane extends Context.Service<
           threadId === undefined ? Effect.void : clearPending(threadId),
         ).pipe(Effect.asVoid)
 
-      /** Every task whose review after a merge is still owed: its line stays until it starts. */
+      /**
+       * Every task whose review after a merge is still owed: its line stays
+       * until it starts. Also every merged small change with no review and
+       * no row, which a stop between the merge's snapshot and its row leaves:
+       * the merge is read again and the review is owed from there.
+       */
       const retryPending = Effect.gen(function* () {
         const waiting = yield* sql<{ taskId: string }>`
-          SELECT r.task_id AS taskId FROM reviews_after_merge r
-          JOIN tasks k ON k.id = r.task_id
-          WHERE k.state <> 'abandoned' AND k.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)`
+          SELECT DISTINCT waiting.taskId FROM (
+            SELECT r.task_id AS taskId FROM reviews_after_merge r
+            JOIN tasks k ON k.id = r.task_id
+            WHERE k.state <> 'abandoned' AND k.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)
+            UNION
+            SELECT x.task_id AS taskId FROM external_links x
+            JOIN tasks k ON k.id = x.task_id
+            WHERE x.kind = 'change' AND json_extract(x.snapshot, '$.state') = 'merged'
+              AND k.state <> 'abandoned' AND k.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)
+              AND EXISTS (
+                SELECT 1 FROM task_plans p WHERE p.task_id = x.task_id
+                  AND json_extract(p.parameters, '$.reviewAfterMerge') = 1
+              )
+              AND NOT EXISTS (SELECT 1 FROM external_links rv WHERE rv.kind = 'review' AND rv.url = x.url)
+          ) waiting`
         for (const one of waiting)
           yield* reviewMerged(one.taskId).pipe(
             Effect.catchCause((cause) => Effect.logWarning('Could not try a review after a merge again', cause)),

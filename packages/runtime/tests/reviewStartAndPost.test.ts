@@ -55,6 +55,7 @@ const pullRequest = (at: { readonly working: string; readonly bare: string }, gi
  */
 const mergedPullRequest = (at: { readonly working: string; readonly bare: string }, github: FakeService) => {
   git(at.working, 'checkout', '-q', '--detach', 'main')
+  const base = git(at.working, 'rev-parse', 'HEAD')
   writeFileSync(join(at.working, 'send.ts'), 'export const sendBack = () => 1\n')
   git(at.working, 'add', '.')
   git(at.working, 'commit', '-q', '-m', 'Send back')
@@ -64,12 +65,42 @@ const mergedPullRequest = (at: { readonly working: string; readonly bare: string
   git(at.working, 'commit', '-q', '-am', 'Later')
   const before = git(at.working, 'rev-parse', 'HEAD')
   git(at.working, 'merge', '-q', '--no-ff', head, '-m', 'Merge send back')
+  const merged = git(at.working, 'rev-parse', 'HEAD')
   git(at.working, 'push', '-q', at.bare, `${head}:refs/pull/1/head`, 'main:refs/heads/main')
   const pull = github.addPullRequest({
     path: ['meridian', 'api'],
     title: 'Send back',
     author: 'ninemate',
     headSha: head,
+    state: 'merged',
+  })
+  return { pull, head, base, before, merged }
+}
+
+/**
+ * A pull request main only moved up to (a fast-forward), with another
+ * commit on main after it: no merge commit, so the host's base is where its
+ * change starts.
+ */
+const fastForwardedPullRequest = (at: { readonly working: string; readonly bare: string }, github: FakeService) => {
+  git(at.working, 'checkout', '-q', '--detach', 'main')
+  writeFileSync(join(at.working, 'send.ts'), 'export const sendBack = () => 1\n')
+  git(at.working, 'add', '.')
+  git(at.working, 'commit', '-q', '-m', 'Send back')
+  const head = git(at.working, 'rev-parse', 'HEAD')
+  const before = git(at.working, 'rev-parse', 'main')
+  git(at.working, 'checkout', '-q', 'main')
+  git(at.working, 'merge', '-q', '--ff-only', head)
+  writeFileSync(join(at.working, 'later.ts'), 'export const later = 1\n')
+  git(at.working, 'add', '.')
+  git(at.working, 'commit', '-q', '-m', 'Later')
+  git(at.working, 'push', '-q', at.bare, `${head}:refs/pull/1/head`, 'main:refs/heads/main')
+  const pull = github.addPullRequest({
+    path: ['meridian', 'api'],
+    title: 'Send back',
+    author: 'ninemate',
+    headSha: head,
+    baseSha: before,
     state: 'merged',
   })
   return { pull, head, before }
@@ -231,11 +262,11 @@ describe('a review, at its edges', () => {
     }).pipe(Effect.provide(withQueries(github)))
   })
 
-  it.live('reads a merged change from where its merge met its target, not from its head', () => {
+  it.live('reads a merged change as it landed, not main’s own changes as reverted', () => {
     const at = hosted()
     const github = makeFakeService({ pushUrl: () => at.bare })
     github.addRepository(['meridian', 'api'])
-    const { pull, head, before } = mergedPullRequest(at, github)
+    const { pull, head, base } = mergedPullRequest(at, github)
     return Effect.gen(function* () {
       const { projectId } = yield* opened(at.working)
       const started = yield* (yield* Reviews).start({
@@ -249,11 +280,39 @@ describe('a review, at its edges', () => {
       const [reviewed] = yield* sql<{ head: string; baseCommit: string }>`
         SELECT json_extract(snapshot, '$.head') AS head, json_extract(snapshot, '$.baseCommit') AS baseCommit
         FROM external_links WHERE task_id = ${started.taskId} AND kind = 'review'`
-      // Its head is in main's history now: the change starts at the first parent of the merge that brought it in.
+      // Its head against where it met main before the merge: main's own later work is not part of the change.
+      assert.deepStrictEqual([reviewed?.head, reviewed?.baseCommit], [head, base])
+      const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${started.taskId}`
+      assert.strictEqual(git(workspace?.path ?? '', 'rev-parse', 'HEAD'), head)
+      // Only what the pull request brought: main's own README change before the merge is not a reversion.
+      assert.deepStrictEqual(git(workspace?.path ?? '', 'diff', '--name-only', base).split('\n'), ['send.ts'])
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('reads a fast-forwarded change from the host’s base before the merge', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull, head, before } = fastForwardedPullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId } = yield* opened(at.working)
+      const started = yield* (yield* Reviews).start({
+        envelope: yield* Runtime.envelope('review.start', {}),
+        projectId,
+        pullRequest: '#1',
+        lead: { agentId: 'claude-code', model: null },
+        afterMerge: true,
+      })
+      const sql = yield* SqlClient.SqlClient
+      const [reviewed] = yield* sql<{ head: string; baseCommit: string }>`
+        SELECT json_extract(snapshot, '$.head') AS head, json_extract(snapshot, '$.baseCommit') AS baseCommit
+        FROM external_links WHERE task_id = ${started.taskId} AND kind = 'review'`
+      // No merge commit: its head is read from the host's base before the fast-forward.
       assert.deepStrictEqual([reviewed?.head, reviewed?.baseCommit], [head, before])
       const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${started.taskId}`
       assert.strictEqual(git(workspace?.path ?? '', 'rev-parse', 'HEAD'), head)
-      assert.include(git(workspace?.path ?? '', 'diff', '--name-only', before), 'send.ts')
+      // The commit main made after it is not part of the change.
+      assert.deepStrictEqual(git(workspace?.path ?? '', 'diff', '--name-only', before).split('\n'), ['send.ts'])
     }).pipe(Effect.provide(withQueries(github)))
   })
 })
@@ -343,6 +402,80 @@ describe('the review after a merge', () => {
         SELECT count(*) AS n FROM thread_items WHERE thread_id = ${created.threadId} AND kind = 'notice'
           AND json_extract(content, '$.reviewAfterMerge') = 1`
       assert.strictEqual(said?.n, 0)
+      const [done] = yield* sql<{ one: number }>`
+        SELECT 1 AS one FROM reviews_after_merge WHERE task_id = ${created.taskId}`
+      assert.isUndefined(done)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('recovers a merged small change whose launch stopped before its review was owed', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull, head } = mergedPullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId } = yield* opened(at.working)
+      const projects = yield* Projects
+      const plans = yield* Plans
+      const fastLane = yield* FastLane
+      const sql = yield* SqlClient.SqlClient
+      const actor = (yield* Instance).personId
+      const created = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId,
+        title: 'The Run menu says Strat',
+        draft: true,
+      })
+      yield* plans.propose({
+        projectId,
+        taskId: created.taskId,
+        steps: smallChangeSteps({
+          lead: { agentId: 'claude-code', model: null },
+          review: { agentId: 'claude-code', model: null },
+        }),
+        reason: null,
+        actorId: actor,
+        reviewAfterMerge: true,
+        startsIn: Duration.hours(1),
+      })
+      const when = '2026-11-06T14:03:00.000Z'
+      // The merged snapshot is saved and the launch stopped there: no row, no line, no review.
+      yield* sql`
+        INSERT INTO external_links ${sql.insert({
+          id: yield* newId(Ids.externalLink),
+          projectId,
+          taskId: created.taskId,
+          product: 'github',
+          kind: 'change',
+          externalId: String(pull.number),
+          ref: `meridian/api#${pull.number}`,
+          key: `${pull.number}`,
+          url: `${HOST}/meridian/api/pull/${pull.number}`,
+          snapshot: JSON.stringify({
+            number: pull.number,
+            title: pull.title,
+            url: pull.url,
+            state: 'merged',
+            draft: false,
+            headSha: head,
+            additions: 1,
+            deletions: 0,
+            changedFiles: 1,
+            repository: ['meridian', 'api'],
+            words: { noun: 'pull request', short: 'PR', prefix: '#' },
+          }),
+          listening: 0,
+          createdAt: when,
+          updatedAt: when,
+        })}`
+      const [owed] = yield* sql<{ n: number }>`
+        SELECT count(*) AS n FROM reviews_after_merge WHERE task_id = ${created.taskId}`
+      assert.strictEqual(owed?.n, 0)
+      // The merge is read again, and the review is owed from there.
+      yield* fastLane.retryPendingReviews()
+      const [made] = yield* sql<{ n: number }>`
+        SELECT count(*) AS n FROM external_links WHERE kind = 'review' AND url = ${pull.url}`
+      assert.strictEqual(made?.n, 1)
       const [done] = yield* sql<{ one: number }>`
         SELECT 1 AS one FROM reviews_after_merge WHERE task_id = ${created.taskId}`
       assert.isUndefined(done)
