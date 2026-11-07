@@ -2,7 +2,7 @@ import type { Picked } from '../main/browser/picked'
 import { describe } from './describe'
 
 /*
- * Point and comment, in a page beside the conversation (ADR-099). The main
+ * Point and comment, in a page beside the conversation (ADR-100). The main
  * process runs this in an isolated world of the page (pages.ts), never in
  * the page's own: it shares the page's elements but none of its scripts, so
  * the page can't call it, change what it does or read what it holds, and it

@@ -310,7 +310,7 @@ const program = Effect.gen(function* () {
   yield* Effect.forkScoped(
     Stream.runForEach(Context.get(context, UsageData).events, (usage) => Effect.sync(() => parent.postMessage({ type: 'usage', usage }))),
   )
-  // Tasks over and projects removed, for the main process to clear what their pages kept, where the person keeps it that long (ADR-099).
+  // Tasks over and projects removed, for the main process to clear what their pages kept, where the person keeps it that long (ADR-100).
   yield* Effect.forkScoped(
     Stream.runForEach(settling, (owners) => Effect.sync(() => parent.postMessage({ type: 'settled', owners }))).pipe(
       Effect.provideContext(context),

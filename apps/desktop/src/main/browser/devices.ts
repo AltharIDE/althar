@@ -1,5 +1,5 @@
 /*
- * The sizes a page beside the conversation can be drawn at (ADR-099): the
+ * The sizes a page beside the conversation can be drawn at (ADR-100): the
  * panel's own, the default, or a device's, laid out at the device's size and
  * drawn whole, scaled to fit the panel. A tablet and a phone are also touch
  * screens with a mobile browser's user agent. Pure, so the window and the

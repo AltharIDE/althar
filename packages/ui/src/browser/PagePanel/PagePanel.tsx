@@ -14,7 +14,7 @@ import s from './PagePanel.module.css'
 
 /*
  * A web page beside the conversation, on its workbench, or in a tab of its
- * own (ADR-099). Its head is the browser's bar: back, forward and reload,
+ * own (ADR-100). Its head is the browser's bar: back, forward and reload,
  * the address in the page's own session, then the size the page is laid
  * out at, Comment, Open in your browser, Open as a tab (or back beside the
  * conversation), and Close. Under it, one quiet line where something was

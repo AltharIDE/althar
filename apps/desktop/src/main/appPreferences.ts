@@ -90,7 +90,7 @@ export const PREFERENCES = {
   accent,
   /** Althar opens at login, in the background, with no window, so automations run after a restart (loginItem.ts). */
   openAtLogin: onOff(false),
-  /** Where a link in a thread opens: beside the conversation, or in the person's browser (browser/, ADR-099). */
+  /** Where a link in a thread opens: beside the conversation, or in the person's browser (browser/, ADR-100). */
   browserLinks: links,
   /** How long pages beside a conversation keep cookies and storage; the main process clears them at that moment (browser/cookies.ts). */
   browserCookies: cookies,

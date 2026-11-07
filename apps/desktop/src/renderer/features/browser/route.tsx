@@ -9,7 +9,7 @@ import { PageView } from './PageView'
 import s from './PageTab.module.css'
 
 /*
- * A page in a tab of its own, after the projects' (ADR-099): docked there
+ * A page in a tab of its own, after the projects' (ADR-100): docked there
  * from beside its conversation, with its history and its session, and back
  * beside it when the person says. Its comments still go to the
  * conversation it came from: they wait in that conversation's composer, and

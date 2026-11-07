@@ -9,7 +9,7 @@ import { repository } from '../tests/repository'
 import { launch, openFirstProject, say, shown, startTask, still, toConversation } from './support'
 
 /*
- * The browser beside the conversation (ADR-099), in a real window: a task's
+ * The browser beside the conversation (ADR-100), in a real window: a task's
  * run opens beside its thread, in a page that can reach nothing of Althar's;
  * a comment pointed on it goes in the composer, with its card, and reaches
  * the lead with its selector, text, address, size and crop; Viewport lays

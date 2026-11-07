@@ -23,7 +23,7 @@ export type Where =
   | { readonly kind: 'settings'; readonly section: Section }
   | { readonly kind: 'project'; readonly projectId: string; readonly place: Place }
   | { readonly kind: 'thread'; readonly threadId: string }
-  /** A page in a tab of its own, by its owner (ADR-099). */
+  /** A page in a tab of its own, by its owner (ADR-100). */
   | { readonly kind: 'page'; readonly owner: string }
 
 /** What a window keeps between launches: its projects' tabs in order, where in each it was, the view each was last on, and the settings' tab. */

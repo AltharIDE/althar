@@ -6,7 +6,7 @@ import type { Pages } from './pages'
 
 /*
  * How Althar's own windows reach the pages beside their conversations
- * (ADR-099): every call checked to come from one of Althar's windows, never
+ * (ADR-100): every call checked to come from one of Althar's windows, never
  * a page, and every argument checked for what it should be, as anything
  * crossing a process is. A page itself has no preload, so it has no way to
  * send anything here at all; the check holds even so.

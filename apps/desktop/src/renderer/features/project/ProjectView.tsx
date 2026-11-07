@@ -241,7 +241,7 @@ export function ProjectView({
   const about = model.project?.id ?? model.coordinator?.project.id ?? null
   const draftOf = draftKey.coordinator(about ?? '')
   const [draft, setDraft] = useDraft(draftOf)
-  // A page beside the coordinator's conversation (ADR-099): the project goes to its conversation, the board stepping aside for it.
+  // A page beside the coordinator's conversation (ADR-100): the project goes to its conversation, the board stepping aside for it.
   const showTalk = useCallback(() => setRoom(Room.Talk), [])
   const opener = useOpener(about, showTalk)
   const navigate = useNavigate()

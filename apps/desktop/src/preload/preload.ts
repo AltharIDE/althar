@@ -22,7 +22,7 @@ import type { PageKey, PageState } from '../main/browser/page'
  * store, with where its copy is as the person knows the place, which main
  * shows in the file manager when asked. Quit with work under way, asking what to do. Whether DO_NOT_TRACK is set, which
  * keeps usage data off. And reporting a problem, and the page's own errors,
- * for the log. And the pages beside the conversations (ADR-099): opening,
+ * for the log. And the pages beside the conversations (ADR-100): opening,
  * placing and pointing at one, as main holds it, and how each stands. The page never sees or sends a path. It gets no Node, no
  * file system, no shell.
  */
@@ -228,7 +228,7 @@ contextBridge.exposeInMainWorld('althar', {
     },
     answer: (answer: string): void => ipcRenderer.send('althar:quit-answer', answer),
   },
-  // The pages beside the conversations: each by its owner, a task's id or a project's (ADR-099).
+  // The pages beside the conversations: each by its owner, a task's id or a project's (ADR-100).
   pages: {
     open: (owner: string, address: string): Promise<unknown> => ipcRenderer.invoke('althar:page-open', owner, address),
     state: (owner: string): Promise<unknown> => ipcRenderer.invoke('althar:page-state', owner),

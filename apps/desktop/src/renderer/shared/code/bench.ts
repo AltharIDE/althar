@@ -11,7 +11,7 @@ import { useEffect, useState } from 'react'
 export const BENCH = { key: 'althar.bench', min: 360, talk: 420 } as const
 
 /**
- * A web page beside the conversation has a width of its own (ADR-099): it
+ * A web page beside the conversation has a width of its own (ADR-100): it
  * starts at half the window, a page being wider than a document, and leaves
  * the conversation a little more.
  */

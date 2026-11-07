@@ -9,7 +9,7 @@ import type { Picture, SentImage } from '@althar/contracts'
 import { pictureOf, type ReadImage, readImage, remember, type Shrink, sentOf, shrinkInWindow } from './images'
 
 /*
- * Comments gathered for a conversation's agent (ADR-099): what the person
+ * Comments gathered for a conversation's agent (ADR-100): what the person
  * says about something beside the conversation, made where it is and
  * waiting in the composer, to go with what they write next. Today a spot on
  * a page beside the conversation, pointed at, with a crop of it; a line of

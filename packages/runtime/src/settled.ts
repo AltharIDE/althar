@@ -6,7 +6,7 @@ import { SqlClient } from 'effect/sql'
  * Tasks that are over and projects that were removed, for what the app
  * keeps beside them that goes with them: the pages beside a task's
  * conversation keep their cookies until its task is done, where the person
- * keeps them so (ADR-099). Read from the store: a task done or abandoned, a
+ * keeps them so (ADR-100). Read from the store: a task done or abandoned, a
  * project removed, or either no longer there at all.
  */
 

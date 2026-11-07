@@ -19,7 +19,7 @@ import type { PageKey, PageLine, PageMove, PagePin, PageState, Pointed } from '.
 import { cropOf, type Picked, pickedOf, scaled } from './picked'
 
 /*
- * The pages beside the conversations (ADR-099), as the main process holds
+ * The pages beside the conversations (ADR-100), as the main process holds
  * them: each a WebContentsView laid over the window where the window keeps
  * its place, in its owner's own session, with no preload, sandboxed and
  * context-isolated, so nothing in it reaches Althar's bridge, the runtime or

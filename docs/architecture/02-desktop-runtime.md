@@ -94,7 +94,7 @@ flowchart LR
 | Runtime | Commands, queries, policy, workflow scheduling, persistence, process supervision | Provider model loop or window state |
 | Provider child | Provider-native conversation, model/tool loop, provider context | Althar project or workflow truth |
 | Speech process | Dictation's speech model: bringing it down, and turning speech into text on this machine (ADR-017) | Anything but speech; it starts when someone dictates and stops when idle |
-| Page beside a conversation | A web page the person looks at with a lead: a task's run, a link from its thread (ADR-099) | Althar's bridge, the runtime's port, any of Althar's sessions, cookies or credentials, file or other schemes, web permissions |
+| Page beside a conversation | A web page the person looks at with a lead: a task's run, a link from its thread (ADR-100) | Althar's bridge, the runtime's port, any of Althar's sessions, cookies or credentials, file or other schemes, web permissions |
 | SQLite | Canonical local structured state | Large blobs or live process streams |
 | Artifact store | Content-addressed immutable bytes | Mutable domain authority |
 
@@ -233,7 +233,7 @@ said leaves the machine (ADR-017).
 ### A page beside the conversation
 
 A task's run, and a link in its thread, open on the conversation's
-workbench, beside the thread and its composer (ADR-099). The page is not
+workbench, beside the thread and its composer (ADR-100). The page is not
 part of the window's page. It is a `WebContentsView` the main process lays
 over the window, at the place the window measures and sends each frame. It
 runs in the task's own persistent partition (`persist:task-<id>`; beside

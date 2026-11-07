@@ -8,7 +8,7 @@ import { Popover } from '../src/primitives/Popover/Popover'
 import { SidePanel } from '../src/primitives/SidePanel/SidePanel'
 
 /*
- * The page beside the conversation (ADR-099): its bar's address is typed
+ * The page beside the conversation (ADR-100): its bar's address is typed
  * over whole, Escape inside what the bar opened closes only that, and
  * Escape in the panel itself closes the panel.
  */

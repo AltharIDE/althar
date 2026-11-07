@@ -4,7 +4,7 @@ import type { Asked } from './guards'
 import type { Box, Picked } from './picked'
 
 /*
- * A page beside a conversation as the window sees it (ADR-099): what the
+ * A page beside a conversation as the window sees it (ADR-100): what the
  * main process tells it of the page, and what pointing at it hands back.
  * Node-free, so the window and the preload share it.
  */

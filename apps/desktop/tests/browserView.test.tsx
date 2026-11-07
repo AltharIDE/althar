@@ -16,7 +16,7 @@ import { fakeClient, fakeHost } from './fixtures'
 import { servicesFor } from './render'
 
 /*
- * A page beside a conversation, as the window shows it (ADR-099): the bar
+ * A page beside a conversation, as the window shows it (ADR-100): the bar
  * drives the page in the main process, the page is laid where the panel
  * keeps its place and steps aside for what opens over it, a comment pointed
  * at it is written over a picture of it and waits in the conversation's

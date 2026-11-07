@@ -7,7 +7,7 @@ import type { RunContent } from './thread'
 
 /*
  * A run of the project Althar started, in the thread it was asked for in
- * (ADR-023): where it answers opens beside the conversation (ADR-099); Stop while it
+ * (ADR-023): where it answers opens beside the conversation (ADR-100); Stop while it
  * runs, Run again once it ended. The card follows the run as the runtime
  * changes it, and stays once the run is gone.
  */

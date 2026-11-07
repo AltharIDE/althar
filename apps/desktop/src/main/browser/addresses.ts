@@ -1,5 +1,5 @@
 /*
- * What the browser beside a conversation may load (ADR-099). Only web pages,
+ * What the browser beside a conversation may load (ADR-100). Only web pages,
  * `http:` and `https:`: a typed address, a link, a redirect, a frame or a
  * pop-up that would go anywhere else is refused, and the page stays where it
  * was. Sign-in pages of the services Althar connects to (Claude, GitHub,

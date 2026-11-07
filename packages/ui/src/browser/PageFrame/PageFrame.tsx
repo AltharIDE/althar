@@ -7,7 +7,7 @@ import { Button } from '../../primitives/Button/Button'
 import s from './PageFrame.module.css'
 
 /*
- * Where a web page beside the conversation is drawn (ADR-099). The page
+ * Where a web page beside the conversation is drawn (ADR-100). The page
  * itself is the host's: a native view it lays over the window at the place
  * this measures, so nothing of the window's can draw over it. At a device's
  * size the page sits in a well, drawn whole and smaller where the panel is

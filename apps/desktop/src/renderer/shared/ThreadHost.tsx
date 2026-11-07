@@ -29,7 +29,7 @@ import { type CodeOpen, useCodeHost } from './code/CodeHost'
  * document is read again as the agent edits it (DocumentPanel). Opening
  * another from the thread replaces what is there; a file opened from inside
  * the document goes on top of it, with Back. Escape or Close gives focus
- * back to what opened it. Where the conversation has pages (ADR-099), its
+ * back to what opened it. Where the conversation has pages (ADR-100), its
  * page goes there too, in place of a document, as wide as half the window
  * to start; a link in a message opens there, or in the person's browser,
  * as the person keeps links.

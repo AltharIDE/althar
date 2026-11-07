@@ -9,7 +9,7 @@ import { allowed, askedOf, blockedFile, downloadOffered, navigation, popUp } fro
 import { pinsOf, rectOf } from '../src/main/browser/ipc'
 import { cropOf, pickedOf, scaled } from '../src/main/browser/picked'
 
-/* The rules a page beside the conversation follows (ADR-099), each on its own. */
+/* The rules a page beside the conversation follows (ADR-100), each on its own. */
 
 const TASK = `task_${'a1'.repeat(16)}`
 const PROJECT = `proj_${'b2'.repeat(16)}`

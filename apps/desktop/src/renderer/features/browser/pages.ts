@@ -4,7 +4,7 @@ import type { PageState } from '../../../main/browser/page'
 import type { PagesHost } from '../../data/services'
 
 /*
- * The pages beside the conversations, as this window shows them (ADR-099):
+ * The pages beside the conversations, as this window shows them (ADR-100):
  * where each owner's page is (beside its conversation, or in a tab of its
  * own), and how each stands, as the main process last said. The page itself
  * is main's, and outlives where it shows: hidden from beside a conversation

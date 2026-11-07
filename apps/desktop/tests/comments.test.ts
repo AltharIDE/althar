@@ -19,7 +19,7 @@ import {
 import type { ReadImage } from '../src/renderer/shared/images'
 
 /*
- * Comments gathered for a conversation's agent (ADR-099): kept by the
+ * Comments gathered for a conversation's agent (ADR-100): kept by the
  * thread's draft, numbered by their place, and sent after the person's
  * words, each with what it is on, the page and its size, and its crop.
  */

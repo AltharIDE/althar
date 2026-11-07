@@ -14,7 +14,7 @@ import { useCovered } from './cover'
 import { pages, usePage, type Where } from './pages'
 
 /*
- * A page beside a conversation, or in a tab of its own (ADR-099): the kit's
+ * A page beside a conversation, or in a tab of its own (ADR-100): the kit's
  * PagePanel over the page the main process lays where this keeps its place.
  * The place is measured as it moves and is dragged, and sent each frame;
  * while one of the window's own menus or dialogs is over it, or a comment is

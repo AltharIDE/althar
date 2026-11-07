@@ -711,7 +711,7 @@ function EditorSection() {
 /* ---- the browser ------------------------------------------------------------------ */
 
 /**
- * The pages beside conversations (ADR-099): where a thread's links open, how
+ * The pages beside conversations (ADR-100): where a thread's links open, how
  * long pages keep cookies, and clearing what every page kept, at once.
  */
 function BrowserSection() {

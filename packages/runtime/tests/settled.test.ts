@@ -11,7 +11,7 @@ import { repository, runtime, until } from './support'
 /*
  * Tasks over and projects removed, for the app to clear what the pages
  * beside their conversations kept, where the person keeps cookies only
- * that long (ADR-099).
+ * that long (ADR-100).
  */
 
 const made = Effect.gen(function* () {

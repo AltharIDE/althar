@@ -252,7 +252,7 @@ export interface Host {
   readonly quit?: QuitHost
   /** Keeps an error the page didn't handle in main's log. */
   readonly logError?: (error: WindowError) => void
-  /** The pages beside the conversations (ADR-099); absent where a page can't have them, as the edge's. */
+  /** The pages beside the conversations (ADR-100); absent where a page can't have them, as the edge's. */
   readonly pages?: PagesHost
 }
 

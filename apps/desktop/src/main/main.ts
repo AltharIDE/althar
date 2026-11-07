@@ -103,7 +103,7 @@ import { skillsCatalog } from './skillsCatalog'
  * (awake.ts), and which notifications show, with a sound or not, and the
  * Dock's count (notify.ts).
  * Dictation's microphone, model and speech process are in dictation.ts.
- * The pages beside a conversation are in browser/ (ADR-099): each in its
+ * The pages beside a conversation are in browser/ (ADR-100): each in its
  * owner's own session, with none of Althar's bridge.
  * A packaged app updates itself (updater.ts): it never restarts into an
  * update while work runs, and only when the person asks, or as they quit.
@@ -1049,7 +1049,7 @@ void ready.then(() => {
   })
   // The pictures agents handed back, from the artifact store the runtime keeps in the profile, by digest.
   protocol.handle(PICTURE_SCHEME, servePicture(join(locations().profile, 'artifacts'), resize))
-  // The pages beside the conversations, each in its own session (ADR-099); what a quit cut short of clearing goes first.
+  // The pages beside the conversations, each in its own session (ADR-100); what a quit cut short of clearing goes first.
   const overlay = readFileSync(join(here, '../overlay/overlay.js'), 'utf8')
   pages = startPages({
     overlay: () => overlay,

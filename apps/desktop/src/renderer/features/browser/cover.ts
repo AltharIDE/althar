@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 
 /*
  * Whether something of the window's own is over the page beside the
- * conversation (ADR-099). The page is a native view laid over the window,
+ * conversation (ADR-100). The page is a native view laid over the window,
  * so the window's menus, popovers, cards and dialogs would open under it:
  * while one is over the page's place, the window shows a picture of the
  * page there instead, and the view steps aside. Everything that opens over

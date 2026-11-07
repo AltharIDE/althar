@@ -2,7 +2,7 @@ import { type FrameKind, type Refusal, refusalOf, type SignInService, signInOf }
 
 /*
  * What a page beside the conversation may do, decided before Electron acts
- * (ADR-099): where a navigation, a redirect or a pop-up goes, which web
+ * (ADR-100): where a navigation, a redirect or a pop-up goes, which web
  * permissions it gets (none, but writing what the person copies), and what
  * becomes of a download. Pure, so each rule is tested on its own; pages.ts
  * hangs them on the page's session and contents.

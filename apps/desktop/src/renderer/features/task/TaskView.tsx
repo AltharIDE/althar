@@ -428,7 +428,7 @@ export function TaskView({
   const named = useModelNames()
   const editors = useEditors(model.snapshot?.task.id ?? '')
   const editor = editors.main
-  // A page beside the conversation (ADR-099): the task's run and the thread's links open there, and the conversation comes to the front for it.
+  // A page beside the conversation (ADR-100): the task's run and the thread's links open there, and the conversation comes to the front for it.
   const showTalk = useCallback(() => setFace('talk'), [setFace])
   const opener = useOpener(taskId ?? null, showTalk)
   const navigate = useNavigate()

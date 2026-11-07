@@ -1,4 +1,4 @@
-# ADR-099: A web page opens beside the conversation, in a session of its own, and a comment pointed on it goes to the lead with what the person writes
+# ADR-100: A web page opens beside the conversation, in a session of its own, and a comment pointed on it goes to the lead with what the person writes
 
 - **Status:** Accepted
 - **Date:** 2026-11-07

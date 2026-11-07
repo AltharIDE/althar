@@ -5,7 +5,7 @@ import s from './Comments.module.css'
 
 /*
  * Comments the person made on something beside the conversation, waiting
- * in the composer to go with what they write (ADR-099): today a spot on a
+ * in the composer to go with what they write (ADR-100): today a spot on a
  * page, pointed at; a line of the diff can be one too (DEV-175). Each is a
  * chip among the person's own attachments, with a picture of the spot small,
  * its number and what they said; pointed at, its card says the rest, as the

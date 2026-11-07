@@ -54,7 +54,7 @@ export interface ProjectTab {
   fixed?: boolean
 }
 
-/** A web page in a tab of its own, after the projects' (ADR-099). */
+/** A web page in a tab of its own, after the projects' (ADR-100). */
 export interface PageTab {
   /** Whose page it is: the task or project it came from. */
   id: string

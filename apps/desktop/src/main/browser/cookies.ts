@@ -1,6 +1,6 @@
 /*
  * Each conversation's pages keep their cookies and storage in a session of
- * their own (ADR-099): a task's in `persist:task-<id>`, a project's
+ * their own (ADR-100): a task's in `persist:task-<id>`, a project's
  * coordinator's in `persist:project-<id>`, apart from Althar's, the
  * person's browser's and each other's. How long they keep them is the
  * person's choice (Settings › Browser); what is kept goes at the moment that

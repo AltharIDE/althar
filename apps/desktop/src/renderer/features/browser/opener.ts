@@ -5,7 +5,7 @@ import { usePreferences } from '../../shared/usePreferences'
 import { pages } from './pages'
 
 /*
- * Where a web address from a conversation opens (ADR-099): a run's address
+ * Where a web address from a conversation opens (ADR-100): a run's address
  * always beside the conversation it belongs to, a link in the thread beside
  * it too, or in the person's browser where they keep links there
  * (Settings › Browser). What isn't in a conversation opens in the person's
