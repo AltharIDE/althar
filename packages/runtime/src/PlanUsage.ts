@@ -162,6 +162,8 @@ export class PlanUsage extends Context.Service<
     readonly heard: (accountId: string, agentId: string, windows: ReadonlyArray<UsageWindow>) => Effect.Effect<void, never>
     /** Puts aside the warning that the account's sign-in ends at `endsAt`, for good: only another sign-in raises one again. */
     readonly dismiss: (accountId: string, endsAt: string) => Effect.Effect<void, Failure>
+    /** Tells the view again at once, as an account signed in again: a warning its old sign-in raised goes from the window's bar with it. */
+    readonly retell: Effect.Effect<void>
     /**
      * How the account is paid for and its plan's name, as last read, without asking again: null where nothing was read of it
      * yet. For an agent whose providers each have a sign-in (OpenCode), how each listed is paid too, as its listing was last
@@ -671,6 +673,7 @@ export class PlanUsage extends Context.Service<
           )
 
         return PlanUsage.of({
+          retell: told,
           dismiss: (accountId, endsAt) =>
             Effect.gen(function* () {
               const value = JSON.stringify({ endsAt, dismissed: true } satisfies Warned)

@@ -129,7 +129,7 @@ export const agentSaid = (error: unknown): string | undefined => {
       // The person's own command, where the sandbox cannot reach the device: say what to put right, never "isn't installed".
       if (command === 'flatpak-spawn' || /flatpak|org\.freedesktop\.Flatpak/i.test(reason)) return hostDenied
       if (/ENOENT/.test(reason)) return `${command} isn't installed, or isn't on ${thisDevice()}'s PATH.`
-      return classed(reason, command) ?? sentence(`${command} wouldn't start: ${reason}`)
+      return classed(reason, command) ?? sentence(`${command} wouldn't start: ${firstErrorLine(reason)}`)
     }
     case 'AgentExited': {
       const stderr = text(error, 'stderr')
@@ -145,7 +145,7 @@ export const agentSaid = (error: unknown): string | undefined => {
           return classed(text(error, 'message'), '', true) ?? signedOutWords
         // A connection that failed, said as what to look at; a server's own trouble stays in its words.
         case 'transient':
-          return classed(text(error, 'message'), '') ?? sentence(text(error, 'message'))
+          return classed(text(error, 'message'), '') ?? sentence(firstErrorLine(text(error, 'message')))
         case 'usage_limit': {
           const until = text(error, 'resetsAt')
           return until === '' ? "The agent's usage limit is reached." : `The agent's usage limit is reached until ${until}.`
@@ -155,7 +155,7 @@ export const agentSaid = (error: unknown): string | undefined => {
         case 'session_lost':
           return lostWords('The agent')
         default:
-          return classed(text(error, 'message'), '') ?? sentence(text(error, 'message'))
+          return classed(text(error, 'message'), '') ?? sentence(firstErrorLine(text(error, 'message')))
       }
     case 'OptionUnavailable':
       return `The agent doesn't offer ${text(error, 'value')}.`

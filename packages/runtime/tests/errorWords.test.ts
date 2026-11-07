@@ -242,6 +242,23 @@ describe('why an agent couldn’t start or be reached (DEV-196)', () => {
     )
   })
 
+  it('says a refusal’s first error line alone, where it gave several', () => {
+    assert.strictEqual(
+      agentSaid(refused('unknown', 'Loading MCP servers…\nError: invalid config at ~/.codex/config.toml\n  line 4: unknown key "modle"')),
+      'Error: invalid config at ~/.codex/config.toml.',
+    )
+    assert.strictEqual(
+      agentSaid(refused('transient', 'stream disconnected before completion\nerror: 502 Bad Gateway\n<html>…</html>')),
+      'error: 502 Bad Gateway.',
+    )
+    assert.strictEqual(
+      summarize(
+        Cause.fail(new AgentStartFailed({ command: 'codex', reason: 'spawn codex EACCES\n    at ChildProcess._handle (node:internal)' })),
+      ),
+      "codex wouldn't start: spawn codex EACCES.",
+    )
+  })
+
   it('else says the agent’s own first error line', () => {
     assert.strictEqual(
       agentSaid(exited('Loading plugins…\nError: Cannot find module "./auth"\n    at Module._resolveFilename (node:internal)\n')),

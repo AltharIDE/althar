@@ -25,19 +25,28 @@ describe('reading sign-in status', () => {
 
   it('reads when a sign-in ends, only where its agent says: Claude Code 2.1.318 and later', () => {
     const claude = agents['claude-code'].signIn.endsAt
-    // `claude auth status` as 2.1.319 builds it, in its key order, for a claude.ai sign-in and for one signed out.
-    const signedIn = JSON.stringify({
-      loggedIn: true,
-      authMethod: 'claude.ai',
-      apiProvider: 'firstParty',
-      analyticsDisabled: false,
-      projectsDirectory: '/home/u/.claude/projects',
-      configDirectory: '/home/u/.claude',
-      loginExpiresAt: '2026-12-01T09:14:03.000Z',
-      email: 'you@meridian.dev',
-      subscriptionType: 'max',
-      storedClaudeAiLogin: true,
-    })
+    // `claude auth status` as 2.1.319's bundle builds it (its `cli_auth_status` handler), field for field and in its order, for
+    // a claude.ai sign-in on Max 5x, printed as two-space JSON: `loginExpiresAt` is its stored login's end as `toISOString()`
+    // gives it, or null where it keeps none. No real end date is printed here: this computer's Claude Code is older than 2.1.318.
+    const signedIn = JSON.stringify(
+      {
+        loggedIn: true,
+        authMethod: 'claude.ai',
+        apiProvider: 'firstParty',
+        analyticsDisabled: false,
+        projectsDirectory: '/home/u/.claude/projects',
+        configDirectory: '/home/u/.claude',
+        loginExpiresAt: '2026-12-01T09:14:03.000Z',
+        email: 'you@meridian.dev',
+        orgId: '0f6c2a51-8d3e-4b7a-9c14-5e2d7f80a3b9',
+        orgName: 'you@meridian.dev’s Organization',
+        subscriptionType: 'max',
+        storedClaudeAiLogin: true,
+        planTier: 'max_5x',
+      },
+      null,
+      2,
+    )
     assert.strictEqual(claude?.(signedIn), '2026-12-01T09:14:03.000Z')
     assert.isUndefined(claude?.('{"loggedIn": false, "authMethod": "none", "loginExpiresAt": null}'))
     // A key, and Claude Code before 2.1.318, say none; nor does output that isn't its JSON.
