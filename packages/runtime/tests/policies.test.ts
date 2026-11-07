@@ -142,12 +142,13 @@ describe('a project’s rules, as kept', () => {
         source: 'person',
         permissions: 'ask',
         alwaysAsk: [...RULES],
+        allowEverything: true,
         never: ['deploy'],
         commands: [{ pattern: 'terraform *', decision: 'ask' }],
         end: 'ready',
       })
       // The same again makes no revision; clearing the ending does.
-      yield* policies.set(projectId, { permissions: 'ask', allowEverything: false }, instance.personId)
+      yield* policies.set(projectId, { permissions: 'ask' }, instance.personId)
       const cleared = yield* policies.set(projectId, { end: null }, instance.personId)
       assert.isUndefined(cleared.end)
       assert.deepStrictEqual((yield* policies.current(projectId)).rules, cleared)
