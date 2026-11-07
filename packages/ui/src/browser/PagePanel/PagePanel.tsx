@@ -153,8 +153,18 @@ export function PagePanel<V extends string>({
 }: PagePanelProps<V>) {
   const t = { ...pagePanelText, ...text }
   const [editing, setEditing] = useState(false)
-  // What is typed, while the field is being edited; at rest it shows the page's address, and takes it again as it is focused.
-  const [typed, setTyped] = useState(full)
+  /*
+   * What the person typed and hasn't sent or put back, null where nothing
+   * is. Focus going and coming back, as another window or a menu closing
+   * takes it, keeps it; the page going elsewhere while the field is at rest
+   * takes it. At rest the field shows the page's address.
+   */
+  const [typed, setTyped] = useState<string | null>(null)
+  const [typedOn, setTypedOn] = useState(full)
+  if (typedOn !== full) {
+    setTypedOn(full)
+    if (!editing) setTyped(null)
+  }
   const chosen = viewports.find((one) => one.value === viewport)
   const fits = viewports[0]?.value === viewport
   const head = (
@@ -172,8 +182,9 @@ export function PagePanel<V extends string>({
         className={cx(s.address, editing && s.editing)}
         onSubmit={(event) => {
           event.preventDefault()
-          const value = typed.trim()
+          const value = (typed ?? full).trim()
           if (value !== '') onNavigate(value)
+          setTyped(null)
           setEditing(false)
           event.currentTarget.querySelector('input')?.blur()
         }}
@@ -203,7 +214,7 @@ export function PagePanel<V extends string>({
         <input
           ref={addressRef}
           className={s.field}
-          value={editing ? typed : address}
+          value={editing ? (typed ?? full) : address}
           spellCheck={false}
           autoCapitalize="off"
           autoCorrect="off"
@@ -212,19 +223,18 @@ export function PagePanel<V extends string>({
           // Its own Escape: it puts the address back and leaves, without closing the panel.
           data-own-escape=""
           onFocus={(event) => {
-            // The full address, selected, before anything typed lands: typed at once, it replaces the address rather than joining it.
             const input = event.currentTarget
-            flushSync(() => {
-              setEditing(true)
-              setTyped(full)
-            })
-            input.select()
+            flushSync(() => setEditing(true))
+            // What was typed before goes on from its end. Else the full address, selected before anything typed lands:
+            // typed at once, it replaces the address rather than joining it.
+            if (typed === null) input.select()
+            else input.setSelectionRange(input.value.length, input.value.length)
           }}
           onBlur={() => setEditing(false)}
           onKeyDown={(event) => {
             if (event.key !== 'Escape') return
             event.preventDefault()
-            setTyped(full)
+            setTyped(null)
             setEditing(false)
             event.currentTarget.blur()
           }}

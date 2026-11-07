@@ -64,6 +64,16 @@ const inPage = <T>(electronApp: ElectronApplication, code: string) =>
     return (await (view as Electron.WebContentsView).webContents.executeJavaScript(script, true)) as unknown
   }, code) as Promise<T>
 
+/** Waits for the page beside the conversation to have loaded afresh after what is done: a mark left on its document goes with it. */
+const pageReloading = async (electronApp: ElectronApplication, act: () => Promise<unknown>) => {
+  await inPage(electronApp, 'window.beforeReload = true')
+  await act()
+  // Asked mid-reload, the page may have no document to answer from: still reloading.
+  await expect
+    .poll(() => inPage<string>(electronApp, "'beforeReload' in window ? 'before' : document.readyState").catch(() => 'reloading'))
+    .toBe('complete')
+}
+
 /** Presses on an element of the page, as the person's pointer does: moved over it, then pressed. */
 const pressInPage = async (electronApp: ElectronApplication, selector: string) => {
   const box = await inPage<{ x: number; y: number }>(
@@ -295,8 +305,9 @@ test('a task’s run opens beside its thread, isolated; a comment pointed on it 
     await expect(page.getByRole('button', { name: /^Comment 1/ })).toHaveCount(0)
 
     // Viewport: a phone's size, laid out as one, with touch and a mobile browser's agent, drawn whole beside the thread.
+    // A site reads the agent as it serves the page, so the page loads afresh as one.
     await panel.getByRole('button', { name: 'Viewport' }).click()
-    await page.getByRole('menuitemradio', { name: /Phone/ }).click()
+    await pageReloading(electronApp, () => page.getByRole('menuitemradio', { name: /Phone/ }).click())
     await expect(panel.getByRole('button', { name: 'Viewport: Phone' })).toBeVisible()
     await expect
       .poll(() =>
@@ -309,12 +320,11 @@ test('a task’s run opens beside its thread, isolated; a comment pointed on it 
     await still(page)
     await shoot(page, electronApp, 'test-results/browser-phone.png')
     // Back to the panel's own size: a computer's agent again, the page loaded afresh for it.
-    const phoneLoad = await inPage<number>(electronApp, 'performance.timeOrigin')
     await panel.getByRole('button', { name: 'Viewport: Phone' }).click()
-    await page.getByRole('menuitemradio', { name: /Fit the panel/ }).click()
-    await expect.poll(() => inPage(electronApp, 'navigator.maxTouchPoints')).toBe(0)
-    await expect.poll(() => inPage<number>(electronApp, 'performance.timeOrigin')).not.toBe(phoneLoad)
-    await expect.poll(() => inPage(electronApp, 'document.readyState')).toBe('complete')
+    await pageReloading(electronApp, () => page.getByRole('menuitemradio', { name: /Fit the panel/ }).click())
+    expect(await inPage(electronApp, 'navigator.maxTouchPoints')).toBe(0)
+    // The menu gives focus back to its button once it has gone, as the person sees it go before typing elsewhere.
+    await expect(panel.getByRole('button', { name: 'Viewport' })).toBeFocused()
 
     // Refused: a file and a script typed in the address, a file and another app's link on the page, a pop-up of data. The page stays.
     const field = panel.getByRole('textbox', { name: 'Address' })

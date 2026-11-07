@@ -37,8 +37,8 @@ const panel = (overrides: Partial<Parameters<typeof PagePanel<'fit' | 'phone'>>[
     children: <PageFrame />,
     ...overrides,
   }
-  render(<PagePanel<'fit' | 'phone'> {...props} />)
-  return props
+  const { rerender } = render(<PagePanel<'fit' | 'phone'> {...props} />)
+  return { ...props, rerender: (changed: Partial<typeof props>) => rerender(<PagePanel<'fit' | 'phone'> {...props} {...changed} />) }
 }
 
 describe('the page’s bar', () => {
@@ -52,6 +52,40 @@ describe('the page’s bar', () => {
     expect((field as HTMLInputElement).selectionEnd).toBe('http://localhost:5173/refunds'.length)
     await userEvent.keyboard('file:///etc/hosts{Enter}')
     expect(onNavigate).toHaveBeenCalledWith('file:///etc/hosts')
+  })
+
+  it('keeps what was typed as focus leaves and comes back, until it is sent, put back, or the page goes elsewhere meanwhile', async () => {
+    const props = panel()
+    const field = screen.getByRole<HTMLInputElement>('textbox', { name: 'Address' })
+    // Focus goes as another window or a menu closing takes it, and comes back: what was typed is there, typed on from its end.
+    await userEvent.click(field)
+    await userEvent.keyboard('file:///etc')
+    act(() => field.blur())
+    expect(field).toHaveValue('localhost:5173/refunds')
+    act(() => field.focus())
+    expect(field).toHaveValue('file:///etc')
+    expect([field.selectionStart, field.selectionEnd]).toEqual([11, 11])
+    await userEvent.keyboard('/hosts{Enter}')
+    expect(props.onNavigate).toHaveBeenCalledWith('file:///etc/hosts')
+    // Sent, it is gone: focused again, the field has the page's address, whole.
+    act(() => field.focus())
+    expect(field).toHaveValue('http://localhost:5173/refunds')
+    expect([field.selectionStart, field.selectionEnd]).toEqual([0, 'http://localhost:5173/refunds'.length])
+    // Put back with Escape, it is gone too.
+    await userEvent.keyboard('althar.ai{Escape}')
+    act(() => field.focus())
+    expect(field).toHaveValue('http://localhost:5173/refunds')
+    // The page going elsewhere as the field has focus keeps it; going elsewhere as it hasn't takes it.
+    await userEvent.keyboard('example.com')
+    props.rerender({ address: 'localhost:5173/orders', full: 'http://localhost:5173/orders' })
+    expect(field).toHaveValue('example.com')
+    act(() => field.blur())
+    act(() => field.focus())
+    expect(field).toHaveValue('example.com')
+    act(() => field.blur())
+    props.rerender({ address: 'localhost:5173/receipts', full: 'http://localhost:5173/receipts' })
+    act(() => field.focus())
+    expect(field).toHaveValue('http://localhost:5173/receipts')
   })
 
   it('puts the address back on Escape, without closing the panel', async () => {
