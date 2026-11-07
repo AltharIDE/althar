@@ -19,8 +19,12 @@ import { items, runtime, task, turns, until } from './support'
  * servers its session was given.
  */
 
-const home = homeWith({ codex: { mcp_servers: { context7: { command: 'npx', args: ['-y', '@upstash/context7-mcp'] } } } })
-const agentConfigs = { homeDir: home, folder: mkdtempSync(join(tmpdir(), 'althar-agent-sync-')), env: {} }
+/** A home of the test's own, each time it runs, with one server in Codex's settings. */
+const agentConfigs = () => ({
+  homeDir: homeWith({ codex: { mcp_servers: { context7: { command: 'npx', args: ['-y', '@upstash/context7-mcp'] } } } }),
+  folder: mkdtempSync(join(tmpdir(), 'althar-agent-sync-')),
+  env: {},
+})
 
 const servers = (role: 'given' | 'taken off') =>
   Effect.gen(function* () {
@@ -43,12 +47,12 @@ describe('the person’s MCP servers in a lead’s session', () => {
   it.live('are given beside Althar’s own', () =>
     Effect.gen(function* () {
       assert.strictEqual(yield* servers('given'), '2')
-    }).pipe(Effect.provide(runtime(':memory:', {}, { agentConfigs }))),
+    }).pipe(Effect.provide(runtime(':memory:', {}, { agentConfigs: agentConfigs() }))),
   )
 
   it.live('are not given where the person took leads off one', () =>
     Effect.gen(function* () {
       assert.strictEqual(yield* servers('taken off'), '1')
-    }).pipe(Effect.provide(runtime(':memory:', {}, { agentConfigs }))),
+    }).pipe(Effect.provide(runtime(':memory:', {}, { agentConfigs: agentConfigs() }))),
   )
 })
