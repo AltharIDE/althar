@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 
 import type { PlanUsage, UsageWindow } from '@althar/contracts'
 import type { ModelInfo, ModelRoom } from '@althar/ui'
@@ -23,7 +23,8 @@ const kept = (): WindowMemory => {
 
 const keep = (memory: WindowMemory) => {
   try {
-    window.localStorage.setItem(REMEMBERED, JSON.stringify([...memory]))
+    const value = JSON.stringify([...memory])
+    if (window.localStorage.getItem(REMEMBERED) !== value) window.localStorage.setItem(REMEMBERED, value)
   } catch {
     // Not kept: the next run knows only what it reads.
   }
@@ -43,11 +44,15 @@ export const usePlan = () => {
   // The windows last read, for an account the runtime later sends none of because every one has reset.
   const memory = useRef<WindowMemory | null>(null)
   memory.current ??= kept()
-  return useMemo(() => {
-    remember((memory.current ??= kept()), usage)
-    keep(memory.current)
-    return planOf(usage, new Date(now), memory.current)
+  // Taken up as each reading arrives (idempotent, so safe to repeat); only saved, a side effect, in the effect below.
+  const plan = useMemo(() => {
+    remember(memory.current ?? new Map(), usage, new Date(now))
+    return planOf(usage, new Date(now), memory.current ?? undefined)
   }, [usage, now])
+  useEffect(() => {
+    if (memory.current !== null) keep(memory.current)
+  }, [usage])
+  return plan
 }
 
 /** Each model's room for a picker, in the project where given: what `roomOf` says of it. */

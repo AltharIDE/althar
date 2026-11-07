@@ -426,6 +426,20 @@ describe('what the window says of a plan', () => {
     ])
   })
 
+  it('forgets an account the runtime no longer lists, and a window reset for longer than any window lasts', () => {
+    const memory: WindowMemory = new Map()
+    remember(memory, planUsage([claudeBoth]), NOW)
+    expect(memory.size).toBe(1)
+    // A fortnight on, with nothing read of it: its old windows are not shown as unread forever.
+    const later = new Date('2026-11-01T00:00:00.000Z')
+    remember(memory, planUsage([{ ...claudeBoth, windows: [], resetSince: true }]), later)
+    expect(memory.size).toBe(0)
+    // An account that is gone takes its windows with it.
+    remember(memory, planUsage([claudeBoth]), NOW)
+    remember(memory, planUsage([{ ...claudeBoth, accountId: 'other' }]), NOW)
+    expect([...memory.keys()]).toEqual(['other'])
+  })
+
   it('leaves out a window whose reset has passed, as unknown, and a model’s room with it', () => {
     const rooms: ReadonlyArray<ModelRoom> = [
       {

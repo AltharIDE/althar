@@ -106,15 +106,27 @@ const keyOf = (window: Pick<UsageWindow, 'kind' | 'label'>) => `${window.kind}:$
  */
 export type WindowMemory = Map<string, ReadonlyArray<UsageWindow>>
 
-/** Keeps each window as it is read, those the runtime leaves out after (a reset) as last read; an account sent with none keeps all of its. */
-export const remember = (memory: WindowMemory, usage: PlanUsage | null): void => {
-  for (const account of usage?.accounts ?? []) {
-    if (account.windows.length === 0) continue
+/** The longest a window lasts, plus a day: one reset longer ago than this was dropped by the provider, not left unread. */
+const FORGET = 8 * 24 * 60 * 60 * 1000
+
+/**
+ * Keeps each window as it is read, those the runtime leaves out after (a reset) as last read; an account sent with none keeps all
+ * of its. Forgets an account the runtime no longer lists, and a window reset for longer than any window lasts.
+ */
+export const remember = (memory: WindowMemory, usage: PlanUsage | null, now: Date = new Date()): void => {
+  if (usage === null) return
+  const listed = new Set(usage.accounts.map((account) => account.accountId))
+  for (const id of [...memory.keys()]) if (!listed.has(id)) memory.delete(id)
+  const stale = (window: UsageWindow) => window.resetsAt !== null && now.getTime() - Date.parse(window.resetsAt) > FORGET
+  for (const account of usage.accounts) {
+    const last = (memory.get(account.accountId) ?? []).filter((window) => !stale(window))
+    if (account.windows.length === 0) {
+      if (last.length > 0) memory.set(account.accountId, last)
+      else memory.delete(account.accountId)
+      continue
+    }
     const read = new Set(account.windows.map(keyOf))
-    memory.set(account.accountId, [
-      ...account.windows,
-      ...(memory.get(account.accountId) ?? []).filter((window) => !read.has(keyOf(window))),
-    ])
+    memory.set(account.accountId, [...account.windows, ...last.filter((window) => !read.has(keyOf(window)))])
   }
 }
 
