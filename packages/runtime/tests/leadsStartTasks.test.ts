@@ -67,8 +67,8 @@ const prototype = Effect.gen(function* () {
 const taskTitled = (projectId: string, title: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const [task] = yield* sql<{ id: string; slug: string; parentTaskId: string | null; state: string; counting: number }>`
-      SELECT k.id, k.slug, k.parent_task_id, k.state,
+    const [task] = yield* sql<{ id: string; slug: string; threadId: string; parentTaskId: string | null; state: string; counting: number }>`
+      SELECT k.id, k.slug, (SELECT t.id FROM threads t WHERE t.task_id = k.id) AS thread_id, k.parent_task_id, k.state,
         EXISTS (SELECT 1 FROM task_plans p WHERE p.task_id = k.id AND p.state = 'proposed' AND p.starts_at IS NOT NULL) AS counting
       FROM tasks k WHERE k.project_id = ${projectId} AND k.title = ${title}`
     return task
@@ -92,6 +92,14 @@ describe('a lead starting tasks', () => {
       )
       assert.lengthOf(lines, 1)
       assert.deepInclude(lines[0]?.content['task'] as object, { taskId: child?.id, slug: child?.slug })
+      // And the window reads it with the task, which its title links to.
+      const line = yield* Effect.orDie((yield* Queries).thread(p.task.threadId))
+      const shown = line.items.find((item) => item.kind === 'notice' && item.content.title.startsWith('Started “Built-in browser'))
+      assert.deepInclude(shown?.kind === 'notice' ? shown.content.task : undefined, {
+        taskId: child?.id ?? '',
+        threadId: child?.threadId ?? '',
+        title: 'Built-in browser beside the conversation',
+      })
 
       // Its plan, as the coordinator's, waits the countdown: the person can hold it.
       assert.match(

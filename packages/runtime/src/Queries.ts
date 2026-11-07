@@ -19,6 +19,7 @@ import {
   IssueChangesCard,
   IssueDraftCard,
   ReviewDraftCard,
+  SettingChangeCard,
   type IssueSummary,
   type HeldForConnection,
   type HeldForLimit,
@@ -472,6 +473,11 @@ const decodeReviewDraft = Schema.decodeUnknownOption(ReviewDraftCard)
 const decodeAutomation = Schema.decodeUnknownOption(AutomationCard)
 const decodePushRequest = Schema.decodeUnknownOption(PushRequestItem.fields.content)
 const decodeTaskAsk = Schema.decodeUnknownOption(TaskAskItem.fields.content)
+const decodeSettingChange = Schema.decodeUnknownOption(SettingChangeCard)
+/** The task a notice is about, which the thread links to: one its lead started (ADR-097). */
+const decodeNoticeTask = Schema.decodeUnknownOption(
+  Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String }),
+)
 const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
 
 const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'] as const
@@ -587,6 +593,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           ...(role === 'aside' || role === 'relayed' || role === 'folder' || role === 'skills' ? { role } : {}),
           ...(role === 'skills' ? { skills: skillsSeenOf(field(content, 'skills')) } : {}),
           ...(failure === undefined || failure === '' ? {} : { failure }),
+          ...Option.match(decodeNoticeTask(field(content, 'task')), { onNone: () => ({}), onSome: (task) => ({ task }) }),
         },
       }
     }
@@ -744,6 +751,12 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       return Option.match(decodeTaskAsk(content), {
         onNone: () => undefined,
         onSome: (asked): ThreadItem => ({ ...base, kind: 'task_ask', content: asked }),
+      })
+    // A setting changed, or a change that loosens what asks waiting on the person's card (SettingsTools.ts).
+    case 'setting':
+      return Option.match(decodeSettingChange(content), {
+        onNone: () => undefined,
+        onSome: (card): ThreadItem => ({ ...base, kind: 'setting', content: card }),
       })
     case 'setup': {
       const ended = field(content, 'ended')

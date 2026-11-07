@@ -4,19 +4,20 @@ import { join } from 'node:path'
 import { Ids, newId, type ProjectId } from '@althar/domain'
 import { PROJECT_SETTINGS_SECTIONS, SETTINGS_SECTIONS, type SettingChangeCard } from '@althar/contracts'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
 import { plansAndReviewsOf } from '../src/plansAndReviews'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
+import { Queries } from '../src/Queries'
 import { timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { SettingsTools } from '../src/SettingsTools'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, items, listTools, repository, runtime } from './support'
+import { callTool, listTools, repository, runtime } from './support'
 
 /*
  * The coordinator and leads read and change settings as the person can on
@@ -75,18 +76,22 @@ const opened = Effect.gen(function* () {
   return { projectId, coordinator, lead, turn }
 })
 
-/** The setting lines and cards in a thread, oldest first, with their items' ids. */
-const lines = (threadId: string) =>
-  Effect.map(items(threadId), (rows) =>
-    rows.filter((row) => row.kind === 'setting').map((row) => ({ ...(row.content as unknown as SettingChangeCard), id: '' })),
-  )
-const lineIds = (threadId: string) =>
+/** The setting lines and cards in a thread, oldest first, as the window reads each (Queries.item), with their items' ids. */
+const shown = (threadId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    return (yield* sql<{
-      id: string
-    }>`SELECT id FROM thread_items WHERE thread_id = ${threadId} AND kind = 'setting' ORDER BY sequence`).map((row) => row.id)
+    const queries = yield* Queries
+    const ids = yield* sql<{ id: string }>`SELECT id FROM thread_items WHERE thread_id = ${threadId} AND kind = 'setting' ORDER BY sequence`
+    return yield* Effect.forEach(ids, ({ id }) =>
+      Effect.map(queries.item(threadId, id), (item) => {
+        assert.strictEqual(item.kind, 'setting', 'the window reads a setting line as one')
+        return { id, card: item.content as SettingChangeCard }
+      }),
+    )
   })
+const lines = (threadId: string) => Effect.map(shown(threadId), (all): ReadonlyArray<SettingChangeCard> => all.map((one) => one.card))
+const lineIds = (threadId: string) => Effect.map(shown(threadId), (all) => all.map((one) => one.id))
+const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime()))
 const rulesNow = (projectId: ProjectId) =>
   Effect.gen(function* () {
     return (yield* (yield* Policies).current(projectId)).rules
@@ -98,7 +103,7 @@ describe('settings, for the coordinator and leads', () => {
       const { coordinator, lead } = yield* opened
       for (const access of [coordinator, lead]) assert.includeMembers(yield* listTools(access), ['read_settings', 'change_settings'])
       assert.notInclude(yield* listTools({ ...lead, role: 'reviewer' }), 'change_settings')
-    }).pipe(Effect.provide(runtime())),
+    }).pipe(Effect.provide(withQueries())),
   )
 
   it.live('read_settings covers every section the Settings screens list', () =>
@@ -119,7 +124,7 @@ describe('settings, for the coordinator and leads', () => {
       const rules = yield* callTool(coordinator, 'read_settings', { section: 'project/rules' })
       assert.match(rules, /never \(Never\): \[/)
       assert.match(rules, /Loosens what asks when a kind taken out/)
-    }).pipe(Effect.provide(runtime())),
+    }).pipe(Effect.provide(withQueries())),
   )
 
   it.live('a tightening and a plain change go at once, each with its line', () =>
@@ -144,7 +149,7 @@ describe('settings, for the coordinator and leads', () => {
       assert.strictEqual(said[0]?.by.kind, 'lead')
       assert.strictEqual(said[0]?.by.title, 'Settings page')
       assert.strictEqual((yield* lines(coordinator.threadId))[0]?.moves[0]?.after, '5')
-    }).pipe(Effect.provide(runtime())),
+    }).pipe(Effect.provide(withQueries())),
   )
 
   it.live('a loosening without the person’s words is a card, which their press makes; with them it goes, quoting them', () =>
@@ -174,7 +179,7 @@ describe('settings, for the coordinator and leads', () => {
       assert.strictEqual(line?.state, 'done')
       assert.isTrue(line?.loosens)
       assert.strictEqual(line?.words, 'Turn on posting the team’s reviews without asking')
-    }).pipe(Effect.provide(runtime())),
+    }).pipe(Effect.provide(withQueries())),
   )
 
   it.live('a change that tightens one rule and loosens another is a loosening', () =>
@@ -194,7 +199,7 @@ describe('settings, for the coordinator and leads', () => {
       assert.match(said, new RegExp(`the rule ${out}`))
       assert.notMatch(said, new RegExp(`the rule ${up}\\b`))
       assert.deepStrictEqual(yield* rulesNow(projectId), now)
-    }).pipe(Effect.provide(runtime())),
+    }).pipe(Effect.provide(withQueries())),
   )
 
   it.live('undoing a tightening waits for the person; their Undo puts it back at once', () =>
@@ -228,7 +233,7 @@ describe('settings, for the coordinator and leads', () => {
       // The card asking the same is overtaken: pressed now, it does nothing.
       yield* (yield* SettingsTools).answer(ids[3] ?? '', true)
       assert.strictEqual((yield* lines(lead.threadId))[3]?.state, 'moot')
-    }).pipe(Effect.provide(runtime())),
+    }).pipe(Effect.provide(withQueries())),
   )
 
   it.live('a lead’s change shows in Settings at once, with who made it, until someone changes it again', () =>
@@ -255,7 +260,7 @@ describe('settings, for the coordinator and leads', () => {
       // Each change is in the record, as the agents' own.
       const [recorded] = yield* sql<{ count: number }>`SELECT count(*) AS count FROM record_events WHERE aggregate_type = 'setting'`
       assert.isAbove(recorded?.count ?? 0, 0)
-    }).pipe(Effect.provide(runtime())),
+    }).pipe(Effect.provide(withQueries())),
   )
 
   it.live('what stays the person’s is refused, with why', () =>
@@ -271,6 +276,6 @@ describe('settings, for the coordinator and leads', () => {
         /has no setting secrets/,
       )
       assert.match(yield* callTool(lead, 'change_settings', { section: 'project/nowhere', change: {} }), /There is no section/)
-    }).pipe(Effect.provide(runtime())),
+    }).pipe(Effect.provide(withQueries())),
   )
 })
