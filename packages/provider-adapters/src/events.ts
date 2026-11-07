@@ -7,6 +7,7 @@ import type { BackgroundEvent } from './background'
 import type { Classified } from './failures'
 import { type SeenSkill, skillLoadedBy, skillsAmong } from './skills'
 import { claudeRateLimitWindows, record, type UsageWindow } from './usage'
+import { type McpCall, mcpCallOf } from './mcpCalls'
 
 /*
  * What an agent's updates become inside Althar. The runtime turns these
@@ -114,6 +115,8 @@ export type SessionEvent =
       readonly terminal?: TerminalReport
       /** The skill it loads, where it says. */
       readonly skill?: string
+      /** The person's MCP server and tool it calls, where it is a call to one. */
+      readonly mcp?: McpCall
     }
   | {
       readonly _tag: 'ToolCallUpdate'
@@ -128,6 +131,7 @@ export type SessionEvent =
       readonly content?: ReadonlyArray<ToolContent>
       readonly terminal?: TerminalReport
       readonly skill?: string
+      readonly mcp?: McpCall
     }
   /** The skills it could see, as it says, whole each time (`skills.ts`). */
   | { readonly _tag: 'SkillsSeen'; readonly skills: ReadonlyArray<SeenSkill> }
@@ -361,6 +365,7 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         ...defined('content', toolContentOf(update.content)),
         ...defined('terminal', terminalOf(update._meta)),
         ...defined('skill', skillLoadedBy(update)),
+        ...defined('mcp', mcpCallOf(update.title, update._meta)),
       }
     case 'tool_call_update':
       return {
@@ -374,6 +379,7 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         ...defined('content', toolContentOf(update.content)),
         ...defined('terminal', terminalOf(update._meta)),
         ...defined('skill', skillLoadedBy(update)),
+        ...defined('mcp', mcpCallOf(update.title ?? '', update._meta)),
       }
     case 'plan':
       return { _tag: 'Plan', entries: update.entries.map((entry) => ({ content: entry.content, status: entry.status })) }

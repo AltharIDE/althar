@@ -686,7 +686,7 @@ export const FolderReading = Schema.Struct({
 export type FolderReading = typeof FolderReading.Type
 
 /** The kinds of request a project's rules can have ask the person, or refuse (ADR-013). */
-export const RuleKind = Schema.Literals(['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'])
+export const RuleKind = Schema.Literals(['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside', 'speak'])
 export type RuleKind = typeof RuleKind.Type
 
 /**
@@ -1431,6 +1431,22 @@ export const ToolCallItem = Schema.Struct({
     allowedBy: Schema.optional(AllowedBy),
     /** The skills it loads, by the agent's own word (`reported`), or a read of their `SKILL.md`, where the agent has no such word. */
     skill: Schema.optional(Schema.Struct({ names: Schema.Array(Schema.String), reported: Schema.Boolean })),
+    /**
+     * A call to one of the person's MCP servers (ADR-097): the server and its
+     * tool, whether it acts on the outside world or only reads, what it did in
+     * a few words, the words it posted, and where to see what it did, read
+     * from its result.
+     */
+    mcp: Schema.optional(
+      Schema.Struct({
+        server: Schema.String,
+        tool: Schema.String,
+        acts: Schema.Boolean,
+        did: Schema.String,
+        words: Schema.optional(Schema.String),
+        link: Schema.optional(Schema.String),
+      }),
+    ),
     ...handedFields,
     output: Schema.NullOr(CommandOutput),
     exit: Schema.NullOr(Schema.Number),
@@ -2657,6 +2673,35 @@ export const StuckStep = Schema.Struct({
 })
 export type StuckStep = typeof StuckStep.Type
 
+/**
+ * The kinds of what can't be undone, as a project's Rules list them
+ * (ADR-097): lost work and history, publishing and merging, speaking for
+ * the person, and secrets.
+ */
+export const IrreversibleKind = Schema.Literals(['history', 'publish', 'speak', 'secrets'])
+export type IrreversibleKind = typeof IrreversibleKind.Type
+
+/** Where a call that can't be undone goes: one of the person's MCP servers and its tool, or a command. */
+export const IrreversibleThrough = Schema.Union([
+  Schema.Struct({ server: Schema.String, tool: Schema.String }),
+  Schema.Struct({ command: Schema.String }),
+])
+
+/** What a permission that can't be undone says on its card: the kind, the action, what can't be taken back, what it would post. */
+export const Irreversible = Schema.Struct({
+  kind: IrreversibleKind,
+  /** The action, as its button says it: Merge #635. */
+  verb: Schema.String,
+  /** What it did, once allowed: Merged #635. */
+  done: Schema.String,
+  /** What can't be taken back, in one line. */
+  stays: Schema.String,
+  /** The words it would post, for one that speaks for the person. */
+  words: Schema.optional(Schema.String),
+  through: IrreversibleThrough,
+})
+export type Irreversible = typeof Irreversible.Type
+
 /** A call waiting on the person: a permission the rules keep for them, a step that needs them, or an agent's question. */
 export const AttentionRequest = Schema.Struct({
   id: Schema.String,
@@ -2670,6 +2715,8 @@ export const AttentionRequest = Schema.Struct({
   label: Schema.optional(Schema.String),
   /** For a permission: a kind or a command the project always asks about keeps it, so no "always allow" can answer it. */
   held: Schema.optional(Schema.Boolean),
+  /** For a permission the rules read as what can't be undone: what its card says (ADR-097). */
+  irreversible: Schema.optional(Irreversible),
   /** For a step that needs the person: which, and why. */
   stuck: Schema.NullOr(StuckStep),
   /** For a Local task's checkout: what Althar asks before it takes it (ADR-091). */

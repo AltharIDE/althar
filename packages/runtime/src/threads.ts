@@ -33,6 +33,48 @@ import { changeLinesWords } from './issueChangeWords'
 import { change, timestamp } from './records'
 import { commandIn, essentials } from './rules'
 import { indexThread } from './Search'
+import { mcpActOf } from './mcpActs'
+
+/** How long the words an MCP call posted are kept on its item: what it said, at a glance. */
+const WORDS_KEPT = 600
+
+/**
+ * What a call to one of the person's MCP servers did, kept on its item
+ * (ADR-097): its server and tool, whether it acts, in a few words, the words
+ * it posted and where to see it, read from its result. Its input and result
+ * themselves aren't kept (docs/architecture/07).
+ */
+const mcpKept = (
+  event: Extract<SessionEvent, { _tag: 'ToolCall' | 'ToolCallUpdate' }>,
+  stored: Readonly<Record<string, unknown>> | undefined,
+): { readonly mcp?: Readonly<Record<string, unknown>> } => {
+  const had = typeof stored?.mcp === 'object' && stored.mcp !== null ? (stored.mcp as Readonly<Record<string, unknown>>) : undefined
+  const call =
+    event.mcp ?? (typeof had?.server === 'string' && typeof had.tool === 'string' ? { server: had.server, tool: had.tool } : undefined)
+  if (call === undefined) return {}
+  const act = event.rawInput === undefined ? undefined : mcpActOf(call, event.rawInput)
+  const link = event.rawOutput === undefined ? undefined : linkIn(event.rawOutput)
+  return {
+    mcp: {
+      ...had,
+      server: call.server,
+      tool: call.tool,
+      ...(act === undefined
+        ? had?.acts === undefined
+          ? { acts: false, did: call.tool }
+          : {}
+        : { acts: act.acts, did: act.done, ...(act.words === undefined ? {} : { words: act.words.slice(0, WORDS_KEPT) }) }),
+      ...(link === undefined ? {} : { link }),
+    },
+  }
+}
+
+/** Where to see what an MCP call did: the first web address its result names, a review's or a comment's. */
+const linkIn = (output: unknown): string | undefined => {
+  const text = typeof output === 'string' ? output : (JSON.stringify(output) ?? '')
+  const found = /https:\/\/[^\s"'<>)\\]+/.exec(text)
+  return found === null ? undefined : found[0]
+}
 
 /*
  * The thread's items: what the person reads (docs/architecture/01). An
@@ -468,6 +510,7 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
           const marked = {
             ...(cut.length === 0 ? content : { ...content, cut }),
             ...(event.skill === undefined ? {} : { skill: { names: [event.skill], reported: true } }),
+            ...mcpKept(event, existing?.content),
           }
           // Only what it read of the skills its agent listed: an agent that says what it loads has said so.
           const read = (stored: Readonly<Record<string, unknown>>) =>

@@ -49,6 +49,7 @@ import {
   tallyKindOf,
   type Verdict,
 } from './rules'
+import { irreversibleOf } from './irreversible'
 import { passGuard } from './pushGuard'
 import { type Reach, withEdits, workedOutReach } from './sandboxReach'
 import { addItem } from './threads'
@@ -692,6 +693,8 @@ export class Permissions extends Context.Service<
                     paths: pathsOf(request),
                     reason: verdict.reason,
                     held: verdict.held,
+                    // What its card says, where the rules read it as what can't be undone (ADR-097).
+                    irreversible: irreversibleOf(request, ruleContext),
                     always: alwaysPayload(always),
                     // What it is counted as (ADR-071), beside the kind of tool call it is.
                     counted: kind,

@@ -2,7 +2,9 @@ import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'n
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, posix, resolve, win32 } from 'node:path'
 
-import { type PermissionRequest, SECRET_PLACES } from '@althar/provider-adapters'
+import { type McpCall, type PermissionRequest, SECRET_PLACES } from '@althar/provider-adapters'
+
+import { mcpActOf } from './mcpActs'
 
 /*
  * The rules for agents' requests (ADR-013). What no project can change:
@@ -47,7 +49,7 @@ export type Verdict =
  * what a request does, it asks whatever the project says, short of
  * allowing everything.
  */
-export const RULES = ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'] as const
+export const RULES = ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside', 'speak'] as const
 export type RuleId = (typeof RULES)[number]
 
 /** What each kind is, in the words a refusal says it. */
@@ -58,6 +60,7 @@ const RULE_WORDS: Readonly<Record<RuleId, string>> = {
   'delete-branch': "deleting branches that aren't the task's",
   deploy: 'deploying and publishing',
   outside: "writing outside the task's worktree",
+  speak: 'posting for you on a pull request, an issue or another service',
 }
 
 /**
@@ -3257,6 +3260,8 @@ export const readsWeb = (command: string): boolean => {
 
 /** What the rules keep for the person in a request, whatever the project says of it: every kind it is, and why. */
 const keptOf = (request: PermissionRequest, context: RuleContext): ReadonlyArray<Kept> => {
+  // A call to one of the person's MCP servers is read by its tool and arguments, not as a command (ADR-097).
+  if (request.mcp !== undefined) return mcpKept(request.mcp, request.rawInput)
   if (request.kind === 'execute' || request.kind === 'other') {
     // A network request names a host: none of the command kinds (a deploy, a push) are what it does.
     if (networkHostOf(request) !== undefined) return []
@@ -3293,6 +3298,28 @@ const keptOf = (request: PermissionRequest, context: RuleContext): ReadonlyArray
   return secrets
 }
 
+/** What of an MCP call the rules keep for the person: one of the kinds that can't be undone, by what its tool does. */
+const mcpKept = (call: McpCall, input: unknown): ReadonlyArray<Kept> => {
+  const act = mcpActOf(call, input)
+  if (act.kind === undefined) return []
+  const rule: RuleId =
+    act.kind === 'publish' ? 'deploy' : act.kind === 'speak' ? 'speak' : call.tool.includes('force') ? 'force-push' : 'delete-branch'
+  return [kept(`${act.verb} through ${call.server} always asks: it can't be undone.`, rule, 'irreversible')]
+}
+
+/**
+ * What can't be undone in a request, as the rules read it: the kind it is
+ * and why it asks, for the card that says so (`irreversible.ts`); undefined
+ * where nothing in it is that, or only what the rules can't tell.
+ */
+export const lastingKept = (
+  request: PermissionRequest,
+  context: RuleContext,
+): { readonly rule: RuleId; readonly reason: string } | undefined => {
+  const found = keptOf(request, context).find((each) => each.irreversible === true && each.rule !== 'unclear' && each.blind !== true)
+  return found === undefined || found.rule === 'unclear' ? undefined : { rule: found.rule, reason: found.reason }
+}
+
 /** Why what can't be undone asks with everything allowed, in the card's one line. */
 const evenAllowed = (reason: string) => reason.replace(/ always asks/, ' asks even with everything allowed')
 
@@ -3306,7 +3333,7 @@ const evenAllowed = (reason: string) => reason.replace(/ always asks/, ' asks ev
 const lastingOf = (request: PermissionRequest, context: RuleContext): Kept | undefined => {
   const lasting = (kinds: ReadonlyArray<Kept>) =>
     kinds.find((each) => each.irreversible === true && each.rule !== 'unclear' && each.blind !== true)
-  if (request.kind !== 'execute' && request.kind !== 'other') return lasting(keptOf(request, context))
+  if (request.mcp !== undefined || (request.kind !== 'execute' && request.kind !== 'other')) return lasting(keptOf(request, context))
   // A host is no command, so none of what a command could do that can't be undone.
   if (networkHostOf(request) !== undefined) return undefined
   return lasting(commandKinds(withoutQuotedHeredocs(commandOf(request), takesScript), context))
@@ -3391,7 +3418,10 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
     // What can't be undone from the task still asks, where the rules read it as that: allowing everything is for what the person
     // could take back if it went wrong, and trusts the agent with what the rules can't read.
     const lasting = lastingOf(request, context)
-    return lasting === undefined ? ALLOW : ask(evenAllowed(lasting.reason), false)
+    if (lasting !== undefined) return ask(evenAllowed(lasting.reason), false)
+    // The person's own Ask me holds with everything allowed too: it is their answer given ahead (ADR-097).
+    if (named?.decision === 'ask') return ask(`The project's rules ask before \`${named.pattern.trim()}\`.`, true)
+    return ALLOW
   }
   const asked = found.find((each) => each.rule === 'unclear' || project.ask.includes(each.rule))
   // What always asks waits for the person, whatever the allow rules say.

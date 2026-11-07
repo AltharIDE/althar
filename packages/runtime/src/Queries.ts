@@ -9,6 +9,7 @@ import {
   AttachedFile,
   AttentionRequest,
   AutomationCard,
+  Irreversible,
   type BoardSnapshot,
   type ChangeSummary,
   CheckLogShown,
@@ -209,6 +210,25 @@ export const text = (value: unknown, key: string): string => {
 }
 
 /** A tool call's skills, as `threads.ts` keeps them. */
+/** What a call to one of the person's MCP servers did, as its item keeps it (ADR-097); nothing for any other call. */
+const mcpOf = (kept: unknown) => {
+  const server = text(kept, 'server')
+  const tool = text(kept, 'tool')
+  if (server === '' || tool === '') return {}
+  const words = text(kept, 'words')
+  const link = text(kept, 'link')
+  return {
+    mcp: {
+      server,
+      tool,
+      acts: field(kept, 'acts') === true,
+      did: text(kept, 'did') || tool,
+      ...(words === '' ? {} : { words }),
+      ...(link.startsWith('https://') ? { link } : {}),
+    },
+  }
+}
+
 const skillOf = (skill: unknown) => {
   const names = field(skill, 'names')
   return Array.isArray(names) && names.length > 0
@@ -395,6 +415,11 @@ const callOf = (request: {
     ...(command === null ? {} : { label: shortCommand(command) }),
     // A permission the rules keep for the person whatever they let through: no "always allow" can answer it.
     ...(request.kind === 'permission' && field(payload, 'held') === true ? { held: true } : {}),
+    // What a permission that can't be undone says on its card (ADR-097).
+    ...Option.match(
+      request.kind === 'permission' ? Schema.decodeUnknownOption(Irreversible)(field(payload, 'irreversible')) : Option.none(),
+      { onNone: () => ({}), onSome: (irreversible) => ({ irreversible }) },
+    ),
     stuck: request.kind === 'stuck' ? stuckOf(payload) : null,
     // What Althar asks before a Local task takes a checkout (ADR-091).
     ...Option.match(request.kind === 'checkout' ? Schema.decodeUnknownOption(CheckoutAsk)(payload) : Option.none(), {
@@ -550,6 +575,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           ...(row.asks === 1 ? { asks: true } : {}),
           ...(allowedBy === undefined ? {} : { allowedBy }),
           ...skillOf(field(content, 'skill')),
+          ...mcpOf(field(content, 'mcp')),
           pictures: picturesOf(field(content, 'pictures')),
           files: filesOf(field(content, 'files')),
           output: outputOf(field(content, 'output')),
