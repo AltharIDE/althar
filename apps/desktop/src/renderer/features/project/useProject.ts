@@ -73,6 +73,14 @@ export interface ProjectModel {
   readonly tryAgain: () => Promise<void>
   /** Has the coordinator compact its context, after what it was told before. */
   readonly compact: () => Promise<void>
+  /** Clears the thread's view: it starts here, with what is still open carried in. The coordinator keeps the conversation. */
+  readonly clearView: () => Promise<void>
+  /** Reads the conversation before a cleared view in the thread's place, or goes back to now. */
+  readonly showEarlier: (open: boolean) => Promise<void>
+  /** Takes back a cleared view: the whole thread shows again. */
+  readonly undoClearView: () => Promise<void>
+  /** Ends the coordinator's session and deletes its conversation. It can't be undone. */
+  readonly forgetConversation: () => Promise<void>
   /** Runs one of the project's runnables with no agent, its default without one: a task's worktree, or with none its default branch. Its card goes in the coordinator's thread. */
   readonly runProject: (taskId?: string | null, runnableId?: string | null, ref?: RunRef) => Promise<void>
   /** Runs one on a branch or a pull request, fetched by Althar, in a copy of its own, its card in the coordinator's thread; what went wrong is thrown, for its line to say. */
@@ -207,6 +215,12 @@ export const useProject = (projectId: string): ProjectModel => {
     [client, cache, projectId, newest, readItems, fail],
   )
 
+  /** The thread read whole again, as a clear or a forgotten conversation rewrote it: what is held of it before is not kept. */
+  const readWhole = useCallback(
+    () => cache.invalidateQueries({ queryKey: keys.coordinator(projectId), exact: true, refetchType: 'active' }),
+    [cache, projectId],
+  )
+
   /** Reads what the gathered changes touched. */
   const readChanged = useCallback(() => {
     timer.current = undefined
@@ -238,6 +252,11 @@ export const useProject = (projectId: string): ProjectModel => {
             ? current
             : { ...current, session: { ...current.session, context: { used: event.used, size: event.size } } },
         )
+      return
+    }
+    // Another window cleared the view or forgot the conversation: the thread is not the one held.
+    if (event.threadId === threadId && event.aggregateType === 'thread') {
+      void readWhole()
       return
     }
     if (event.threadId === threadId) {
@@ -308,6 +327,14 @@ export const useProject = (projectId: string): ProjectModel => {
     },
     [readHead, fail],
   )
+
+  /** An action that rewrites the thread: done, the thread is read whole again. */
+  const rewrite = (action: (threadId: string) => Promise<void>) =>
+    act(async () => {
+      if (threadId === null) return
+      await action(threadId)
+      await readWhole()
+    })
 
   const send = (body: string, disposition: 'after_current' | 'interrupt_and_continue', images?: Outgoing) =>
     threadId === null ? Promise.resolve() : client.send({ threadId, body, disposition, ...sentWith(images) })
@@ -390,6 +417,10 @@ export const useProject = (projectId: string): ProjectModel => {
     interrupt: () => act(async () => (threadId === null ? undefined : client.interrupt(threadId))),
     tryAgain: () => act(async () => (threadId === null ? undefined : client.tryAgain(threadId))),
     compact: () => act(async () => (threadId === null ? undefined : client.compact(threadId))),
+    clearView: () => rewrite((id) => client.clearView(id)),
+    showEarlier: (open) => rewrite((id) => client.showEarlier(id, open)),
+    undoClearView: () => rewrite((id) => client.undoClearView(id)),
+    forgetConversation: () => rewrite((id) => client.forgetConversation(id)),
     runProject: (taskId = null, runnableId = null, ref) =>
       act(() =>
         ref === undefined

@@ -39,6 +39,17 @@ export const NearlyFull: Story = {
 /** Without a model, the numbers stand alone. */
 export const NoModel: Story = { args: { model: undefined, used: 40, defaultOpen: true } }
 
+/** The foot also holds Clear chat…, before Compact: it asks what to clear, so pressing it clears nothing by itself. */
+export const WithClear: Story = {
+  args: { used: 122, defaultOpen: true, onCompact: fn(), onClear: fn() },
+  play: async ({ args }) => {
+    const panel = await within(document.body).findByRole('dialog', { name: 'Context' })
+    await userEvent.click(within(panel).getByRole('button', { name: 'Clear chat…' }))
+    await expect(args.onClear).toHaveBeenCalledOnce()
+    await expect(args.onCompact).not.toHaveBeenCalled()
+  },
+}
+
 /** Pointed at, the detail opens with Compact under the numbers, which has the agent sum up what it holds; focus stays where it was. */
 export const WithCompact: Story = {
   args: { used: 372, onCompact: fn() },

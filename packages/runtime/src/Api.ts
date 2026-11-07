@@ -98,6 +98,7 @@ import { applyRules } from './rulesChange'
 import { UsageData } from './UsageData'
 import { Queries } from './Queries'
 import { Busy } from './Busy'
+import { clearView, showEarlier, undoClearView } from './chatView'
 import { timestamp } from './records'
 import { Setups } from './Setups'
 import * as Runtime from './Runtime'
@@ -1120,6 +1121,42 @@ export const handlers = Api.toLayer(
           commandId,
           api(
             Effect.flatMap(envelope('thread.compact', { threadId }, commandId), (made) => sessions.compact({ envelope: made, threadId })),
+          ),
+        ),
+      ClearView: ({ commandId, threadId }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('thread.clear_view', { threadId }, commandId), (made) =>
+              Effect.provideContext(clearView({ envelope: made, threadId }), store),
+            ),
+          ),
+        ),
+      ShowEarlier: ({ commandId, threadId, open }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('thread.show_earlier', { threadId, open }, commandId), (made) =>
+              Effect.provideContext(showEarlier({ envelope: made, threadId, open }), store),
+            ),
+          ),
+        ),
+      UndoClearView: ({ commandId, threadId }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('thread.undo_clear_view', { threadId }, commandId), (made) =>
+              Effect.provideContext(undoClearView({ envelope: made, threadId }), store),
+            ),
+          ),
+        ),
+      ForgetConversation: ({ commandId, threadId }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('thread.forget_conversation', { threadId }, commandId), (made) =>
+              sessions.forget({ envelope: made, threadId }),
+            ),
           ),
         ),
       // Stopped by the person, a conflict its lead was resolving is theirs (ADR-030): the lead isn't started again for it.
