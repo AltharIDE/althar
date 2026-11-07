@@ -51,4 +51,11 @@ describe('a folder for task folders', () => {
     const linked: Disk = { ...disk(['/link']), real: (path) => (path === '/link' ? join(profile, 'x') : path) }
     expect(refusalOf('/link', profile, linked)).toBe(refusals.profile)
   })
+
+  it('must not be inside a toolchain folder the coordinator may read', () => {
+    const inside = '/home/ada/.bun/tasks'
+    expect(refusalOf(inside, profile, disk([inside]), '/home/ada')).toBe(refusals.toolchain)
+    expect(refusalOf('/home/ada/.bun', profile, disk(['/home/ada/.bun']), '/home/ada')).toBe(refusals.toolchain)
+    expect(refusalOf('/home/ada/tasks', profile, disk(['/home/ada/tasks']), '/home/ada')).toBeNull()
+  })
 })

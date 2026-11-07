@@ -1,5 +1,8 @@
 import { accessSync, constants, existsSync, realpathSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative } from 'node:path'
+
+import { TOOLCHAINS } from '@althar/runtime/locations'
 
 /*
  * Whether a folder the person chose can hold task folders: it must exist and
@@ -48,6 +51,7 @@ export const refusals = {
   missing: 'That folder doesn’t exist.',
   readOnly: 'Althar can’t write to that folder.',
   repository: 'That folder is inside a repository; choose one outside any checkout.',
+  toolchain: 'That folder is inside a toolchain’s folder (such as ~/.bun); choose another.',
   profile: 'That folder is inside Althar’s own data; choose another.',
 }
 
@@ -57,12 +61,14 @@ const inside = (folder: string, parent: string) => {
 }
 
 /** Why `folder` can't hold task folders, in a line; null where it can. */
-export const refusalOf = (folder: string, profile: string, disk: Disk = onDisk): string | null => {
+export const refusalOf = (folder: string, profile: string, disk: Disk = onDisk, home: string = homedir()): string | null => {
   if (!isAbsolute(folder)) return refusals.relative
   if (!disk.isDirectory(folder)) return refusals.missing
   if (!disk.writable(folder)) return refusals.readOnly
   const real = disk.real(folder)
   if (inside(real, disk.real(profile))) return refusals.profile
+  // The coordinator may read the toolchains in home, and a task folder there would be read with them.
+  if (TOOLCHAINS.some((toolchain) => inside(real, disk.real(join(home, toolchain))))) return refusals.toolchain
   // A checkout has a .git (a folder, or a file in a worktree) in it or above it.
   for (let at = real; ; at = dirname(at)) {
     if (disk.exists(join(at, '.git'))) return refusals.repository

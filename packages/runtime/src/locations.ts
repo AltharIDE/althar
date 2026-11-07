@@ -41,3 +41,20 @@ export const databaseIn = (profile: string, exists: Exists = existsSync) =>
 
 /** Where the store copies itself before an update migrates it: the newest three copies. */
 export const backupsIn = (profile: string) => join(profile, 'backups')
+
+/** The folders under home a coordinator's sandboxed command may read (ADR-058): toolchains, never a folder that holds a key. A task folder can't be inside one. */
+export const TOOLCHAINS = [
+  '.bun',
+  '.nvm',
+  '.volta',
+  '.fnm',
+  '.local/share/fnm',
+  '.local/share/mise',
+  '.asdf',
+  '.deno',
+  '.cargo/bin',
+  '.rustup',
+  '.pyenv',
+  '.local/bin',
+  '.gitconfig',
+]

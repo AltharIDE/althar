@@ -10,6 +10,7 @@ import { RuntimeConfig } from './Config'
 import { GitFailed, NotFound } from './errors'
 import { commitOf, git, gitWithin } from './git'
 import { Instance } from './Instance'
+import { TOOLCHAINS } from './locations'
 import { startOf } from './Projects'
 
 /*
@@ -61,21 +62,7 @@ export interface CoordinatorFolder {
  * Python's, and git's config file. Never a folder that holds a key: only
  * `~/.cargo/bin` of `~/.cargo`, whose credentials are beside it.
  */
-export const TOOLCHAINS = [
-  '.bun',
-  '.nvm',
-  '.volta',
-  '.fnm',
-  '.local/share/fnm',
-  '.local/share/mise',
-  '.asdf',
-  '.deno',
-  '.cargo/bin',
-  '.rustup',
-  '.pyenv',
-  '.local/bin',
-  '.gitconfig',
-]
+export { TOOLCHAINS }
 
 /**
  * Git's files in its config folder a command may read, named one by one:
