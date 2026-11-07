@@ -98,11 +98,6 @@ test('the coordinator answers a task permission, leaves always-ask items to the 
 
     await say(page, 'run npm test')
     await expect(page.getByText('chosen=allow_once')).toBeVisible()
-    // The coordinator's answer is a line of the round's work, folded once it's done (#676): opened to read it.
-    await page
-      .getByRole('button', { name: /^Worked/ })
-      .last()
-      .click()
     await expect(
       page.getByText('Allowed Run npm test By the coordinator: This action is needed for the task.', { exact: true }),
     ).toBeVisible()
