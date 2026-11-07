@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { join } from 'node:path'
 
 import { ConnectorFailed } from '@althar/connectors'
 import {
@@ -3719,12 +3720,18 @@ export class Runs extends Context.Service<
             access.role === 'coordinator'
               ? yield* Effect.gen(function* () {
                   const [project] = yield* sql<{ slug: string }>`SELECT slug FROM projects WHERE id = ${access.projectId}`
-                  return project === undefined ? [] : [coordinatorFolderAt((yield* RuntimeConfig).worktreeRoot, project.slug)]
+                  if (project === undefined) return []
+                  const folder = coordinatorFolderAt((yield* RuntimeConfig).worktreeRoot, project.slug)
+                  // Each copy first, as the coordinator works in one and names a picture from there, then the folder itself.
+                  const copies = yield* sql<{ slug: string }>`
+                    SELECT slug FROM repository_bindings WHERE project_id = ${access.projectId} AND detached_at IS NULL
+                    ORDER BY created_at, rowid`
+                  return [...copies.map((copy) => join(folder, copy.slug)), folder]
                 })
               : access.taskId === null
                 ? yield* new ToolRefused({ message: 'This tool is for a task’s lead or the coordinator.' })
                 : (yield* worktreesOf(access.taskId)).map((worktree) => worktree.path)
-          const shown = yield* readShown(given, folders)
+          const shown = yield* readShown(given, folders, access.role === 'coordinator' ? 'your copies of the project' : undefined)
           const itemId = yield* newId(Ids.threadItem)
           const pictures = yield* keepShown({ projectId: access.projectId as ProjectId, itemId, folders: [] }, shown)
           const [session] = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE id = ${access.sessionId}`

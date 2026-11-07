@@ -88,15 +88,22 @@ const refuse = (message: string) => new ToolRefused({ message })
 
 const PICTURE_NAME = /\.(png|jpe?g|gif|webp)$/i
 
-/** Reads the picture a piece of evidence names, from inside the task's worktrees, or refuses it with what to do. */
-const findPicture = (path: string, worktrees: ReadonlyArray<string>) =>
+/**
+ * Reads the picture a piece of evidence names, from inside the task's worktrees (or the coordinator's copies), or refuses
+ * it with what to do. A relative path is of whichever folder holds it, in order: a task of several repositories, or the
+ * coordinator in any of its copies, names it as it sees it.
+ */
+const findPicture = (path: string, worktrees: ReadonlyArray<string>, where = 'the task’s worktree') =>
   Effect.gen(function* () {
     const [first] = worktrees
-    if (first === undefined) return yield* refuse('Althar keeps a screenshot only from the task’s worktree, and this has none.')
-    const named = isAbsolute(path) ? path : resolve(first, path)
-    const real = yield* inside(named, worktrees)
-    if (real === null)
-      return yield* refuse(`Althar couldn’t find ${path} in the task’s worktree. Save the picture there, and name it from the worktree.`)
+    if (first === undefined) return yield* refuse(`Althar keeps a picture only from ${where}, and this has none.`)
+    const candidates = isAbsolute(path) ? [path] : worktrees.map((folder) => resolve(folder, path))
+    const held = yield* Effect.promise(async () => {
+      for (const one of candidates) if ((await stat(one).catch(() => null)) !== null) return one
+      return candidates[0] ?? path
+    })
+    const real = yield* inside(held, worktrees)
+    if (real === null) return yield* refuse(`Althar couldn’t find ${path} in ${where}. Save the picture there, and name it from there.`)
     if (!PICTURE_NAME.test(real))
       return yield* refuse(
         `${path} isn’t a picture Althar shows: a PNG, JPEG, GIF or WebP. A recording is kept as a GIF; otherwise describe it in a note.`,
@@ -177,7 +184,7 @@ const NAMED_TYPE: ReadonlyArray<readonly [RegExp, string]> = [
 const megabytes = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 
 /** Reads the pictures a lead shows, in order, refusing the whole show with why where one can't be shown. */
-export const readShown = (given: ReadonlyArray<PictureGiven>, worktrees: ReadonlyArray<string>) =>
+export const readShown = (given: ReadonlyArray<PictureGiven>, worktrees: ReadonlyArray<string>, where?: string) =>
   Effect.gen(function* () {
     if (given.length === 0) return yield* refuse('Name the pictures to show, each with its path in the worktree and a caption.')
     if (given.length > SHOWN_MOST)
@@ -190,7 +197,7 @@ export const readShown = (given: ReadonlyArray<PictureGiven>, worktrees: Readonl
       if (piece.caption.trim() === '') return yield* refuse(`${which} needs a caption: a line on what it shows.`)
       if (piece.path.trim() === '') return yield* refuse(`${which} needs its path in the worktree, in \`path\`.`)
       const path = piece.path.trim()
-      const found = yield* findPicture(path, worktrees)
+      const found = yield* findPicture(path, worktrees, where)
       if (found.bytes === null)
         return yield* refuse(
           `${path} is ${megabytes(found.size)}; Althar shows pictures up to ${PICTURE_KEPT / (1024 * 1024)} MB. Take it smaller, or of only the part that matters.`,
