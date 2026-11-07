@@ -41,15 +41,17 @@ Seen on the board, in the ADR's thread (its lead split the Codex network change 
 
 | Direction | On the board | In the parent's thread | The coordinator | A turn the person didn't start |
 | --- | --- | --- | --- | --- |
-| A · A line of lineage | The child's card: "From ADR: agents work…" at its foot, opening the parent | Its card, under way at once, with Stop | One line per act: "Coordinator  Pushed 4 commits, on your word." | A card: Start *Reviewers… run its tests*? Not now / Start it |
+| A · A line of lineage | The child's card: "From ADR: agents work…" at its foot, opening the parent | Its card, under way at once, with Stop (built: the plan's countdown, with Hold) | One line per act: "Coordinator  Pushed 4 commits, on your word." | A card: Start *Reviewers… run its tests*? Not now / Start it |
 | B · Under its parent | The child's card under its parent's, a line joining them; the parent's foot says "Started 1 task" | Its plan card, counting down two minutes, with Hold | A turn of its own, named Coordinator, what it said and its acts as rows | The same card |
 | Today | Leads can't start tasks | | The coordinator relays to the lead (From the coordinator); it doesn't act in the thread | |
 
 **Recommendation: A, with one rule for the countdown.** A lead's start goes ahead at once when the person's own turn led to it (their words covered the work, as they did for the ADR), and becomes a card when news woke the lead (dana's comment): the same line the rules draw for what can't be undone, by who started the turn. Under-its-parent breaks as soon as parent and child are in different lanes (the parent ready, the child running), which is most of the time. The coordinator's acts as single lines keep a task's thread the lead's; its longer words to the lead stay in today's From the coordinator bubble.
 
+**As built (#663, ADR-097): A, but the countdown went the other way.** The card's "Started by" line, the line in the parent's thread and the coordinator's acts as lines are A. Every task a lead starts waits the plan's countdown, its quick tasks too, so the person can hold it, whoever's turn it came from; a lead starts at most 3 tasks in a turn and 10 from its task (`LEAD_STARTS`). The sketch of a lead starting 4 (6) still starts them at once; under what was built it would show the countdown, and only 3 of them.
+
 What the runtime needs:
 - **`start_task` for leads**, the coordinator's own tool set (the 6 Nov note). Its task records `parent` (task id) and `startedBy` (person, lead with its task and turn, coordinator, automation); `BoardTask` and `TaskCard` carry `parent: { taskId, title }` for the card's line.
-- **Who started a turn**: the person's message, or news (a comment, checks, a review). A lead's `start_task` in a news turn is a `task_ask` with a new move, `start`, holding the plan it would start; in the person's turn it starts. The same field decides asked-for tools (ADR-081).
+- **Who started a turn**: the person's message, or news (a comment, checks, a review). This README proposed that a lead's `start_task` in a news turn be a `task_ask` holding the plan, and start at once in the person's turn; as built, both wait the plan's countdown instead. The same field decides asked-for tools (ADR-081).
 - **The coordinator's acts in a task's thread**: a notice role (`coordinator`) with what it did and, where it acted on the person's word, the message id that said so. Today it can push, stop, hold and settle; its acts aren't written into the task's thread.
 
 ## 2 · What asks
@@ -144,14 +146,14 @@ The coordinator, and leads too, tune the project's settings with Althar's own to
 | A · A line each | A line per change under its words: the row's name, from → to, Undo | The changed row says "Changed by the coordinator, 8 min ago · Undo"; who opens the thread it was changed from |
 | Today | Only the person changes settings | No note |
 
-A change that **loosens what asks** (here: let leads merge their own once checks pass and the review is clean) is a card that waits for the person, "Loosens what asks", with Keep asking and the action on its button. It waits even when the person asked for it in words: a single irreversible act asked for in the thread goes ahead, but a rule outlasts the turn. Once allowed, Rules says what goes ahead now under its kind, with who changed it, "on your word", and Undo.
+A change that **loosens what asks** (here: let leads merge their own once checks pass and the review is clean) is a card that waits for the person, "Loosens what asks", with Keep asking and the action on its button. The prototype had it wait even when the person asked for it in words, since a rule outlasts the turn. **As built (#663, ADR-097) it goes on the person's own message in that turn** (`change_settings` names the words, Althar checks they're the person's, and the line quotes them), and is a card only in any other turn. The coordinator's thread on the page still draws the card for a change asked for in words; under what was built that change goes ahead as a line. Once allowed, Rules says what goes ahead now under its kind, with who changed it, "on your word", and Undo.
 
 **Chosen: A** (a line each). One card for a turn's changes was the other direction, now off the strip; it may still earn its place when a turn changes three rows or more. Keep the note in Settings: it's where the person finds a change they didn't watch happen. With What asks in Settings (2 · B), letting leads merge their own in althar is one of althar's exceptions.
 
 What the runtime needs:
 - **Settings tools** for leads and the coordinator, one per setting the window changes, writing through the same commands the window uses.
 - **A change record per setting**: who (person, coordinator, a lead with its task), when, the value before, and the turn and message it came from. Settings reads the latest per row; Undo writes the value before back, as a change by the person.
-- **Loosening is a kind**: a change to rules, or to switches that decide what asks (merging, posting as the person, secrets), is a `task_ask` holding the change, whoever's turn it came from; tightening goes ahead.
+- **Loosening is a kind**: a change to rules, or to switches that decide what asks (merging, posting as the person, secrets). As built, it goes on the person's own message in the turn and is a card in any other; tightening goes at once.
 - Today's notice for a setup a lead re-recorded becomes one of these lines.
 
 ## 5 · A task's parts
