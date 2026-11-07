@@ -75,7 +75,7 @@ import { envelope } from './envelope'
 import { evidencePaths, taskShown } from './evidence'
 import { AttachRefused, CantMerge, ChangedSinceSeen, GitFailed, NoChangeToOpen, NotFound, OutwardUncertain, PushRefused } from './errors'
 import { conventionsAt, ruleOf, titleFor } from './conventions'
-import { baseBranch, forkOf, workRemotes } from './forks'
+import { baseBranch, forkOf, fromParent, tellOf, workRemotes } from './forks'
 import { makeKeyedLock } from './keyedLock'
 import {
   branchExists,
@@ -1376,11 +1376,11 @@ export class Changes extends Context.Service<
           // A fork's branch goes to the fork, whatever else its clone's remotes name, unless the project sends it to the repository
           // it was forked from; its pull request, where the project says.
           const named = yield* namedRemotes(task.path).pipe(Effect.orElseSucceed(() => []))
-          const fork = forkOf(named)
+          const told = forkOf(named)
           const remotes =
-            fork === null
+            told === null
               ? workRemotes(named, Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String)))(task.remotes))
-              : [fork.fork.url]
+              : [told.fork.url]
           // A connection there that needs signing in again, made with gh's or glab's sign-in, takes the tool's again where it can:
           // publishing, and trying again after it couldn't, need no more of the person than that.
           const found = yield* connections.hostOf(remotes, { fromCli: true })
@@ -1397,6 +1397,10 @@ export class Changes extends Context.Service<
           }
           const { host } = found
           const forked = yield* host.repository(found.path)
+          // What the host says of it now, whether it is a fork and of what, is kept, and goes for where its work goes from now.
+          const origin = named.find((remote) => remote.name === 'origin')
+          if (origin !== undefined) tellOf(origin.url, forked, yield* Clock.currentTimeMillis)
+          const fork = forkOf(named)
           const upstream =
             fork !== null && (task.changeTarget === 'upstream' || task.changeTarget === 'upstream_branch')
               ? yield* host.repository(fork.upstream.path)
@@ -1425,12 +1429,14 @@ export class Changes extends Context.Service<
           const target =
             task.toward ??
             (fork === null || !samePath(repository.path, fork.upstream.path)
-              ? baseBranch(task.baseRef ?? '', task.baseRef != null && (yield* branchExists(task.path, task.baseRef))) ||
+              ? baseBranch(
+                  task.baseRef ?? '',
+                  task.baseRef != null && (yield* branchExists(task.path, task.baseRef)),
+                  named.map((remote) => remote.name),
+                ) ||
                 task.defaultBase ||
                 repository.defaultBranch
-              : task.baseRef?.startsWith('upstream/') === true
-                ? task.baseRef.slice('upstream/'.length)
-                : repository.defaultBranch)
+              : (fromParent(task.baseRef ?? null, fork) ?? repository.defaultBranch))
           // Never onto a default branch, wherever the branch goes (ADR-071): a task's branch is its own.
           if (task.branch === own.defaultBranch || (from === undefined && task.branch === target))
             return yield* new PushRefused({ taskId: input.taskId, why: 'protected', remote: `${own.path.join('/')}/${task.branch}` })
@@ -5451,13 +5457,16 @@ export class Changes extends Context.Service<
           // Without its folder here, nothing can be merged: the card says why nothing happens.
           if (workspace === undefined)
             return yield* Effect.as(couldnt(`Its folder isn’t on this computer, so Althar can’t merge ${now.target} into it here.`), false)
-          // Into the repository a fork came from, its branch is upstream's; otherwise origin's, as `git fetch` names them.
+          // Into the repository a fork came from, its branch is that remote's, by whatever name the clone has it; otherwise origin's,
+          // as `git fetch` names them.
           const fork = yield* namedRemotes(workspace.path).pipe(
             Effect.map(forkOf),
             Effect.orElseSucceed(() => null),
           )
           const remote =
-            fork !== null && repository.path.join('/').toLowerCase() === fork.upstream.path.join('/').toLowerCase() ? 'upstream' : 'origin'
+            fork !== null && repository.path.join('/').toLowerCase() === fork.upstream.path.join('/').toLowerCase()
+              ? (fork.upstream.remote ?? 'origin')
+              : 'origin'
           const ref = `${remote}/${now.target}`
           const target = yield* baseOf(workspace, host, repository, now.target, ref, how.fresh || says)
           const from = yield* commitOf(workspace.path, 'HEAD').pipe(Effect.orElseSucceed(() => null))

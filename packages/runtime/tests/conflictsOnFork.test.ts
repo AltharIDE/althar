@@ -2,8 +2,10 @@ import { execFileSync } from 'node:child_process'
 
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
+import { afterEach } from 'vitest'
 import { Effect } from 'effect'
 
+import { forgetTold, tell } from '../src/forks'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { HOST, hosted, until } from './support'
@@ -17,9 +19,15 @@ import { PASSED, ask, asked, cards, conflictsIn, connect, moveHostMainOn, rounds
  */
 
 describe('a conflict on a pull request from a fork into the repository it came from', () => {
-  it.live('is resolved from upstream’s default branch, and the merge pushed to the fork', () => {
+  afterEach(() => forgetTold())
+
+  /**
+   * The fork's clone has the repository it came from as `parent`; `told`, its host said so as the project's repositories were
+   * read, which a remote named anything but `upstream` needs.
+   */
+  const resolved = (parent: string, told: boolean) => {
     const { working, bare } = hosted(['you', 'api'])
-    execFileSync('git', ['remote', 'add', 'upstream', `${HOST}/meridian/api.git`], { cwd: working })
+    execFileSync('git', ['remote', 'add', parent, `${HOST}/meridian/api.git`], { cwd: working })
     const tip = () => {
       try {
         return execFileSync('git', ['rev-parse', 'althar/add-a-retry'], { cwd: bare }).toString().trim()
@@ -36,6 +44,10 @@ describe('a conflict on a pull request from a fork into the repository it came f
     })
     github.addRepository(['you', 'api'])
     github.addRepository(['meridian', 'api'])
+    if (told) {
+      github.forkFrom(['you', 'api'], ['meridian', 'api'])
+      tell(`${HOST}/you/api.git`, { path: ['meridian', 'api'] }, Date.now())
+    }
     return Effect.gen(function* () {
       yield* connect
       const projects = yield* Projects
@@ -54,10 +66,16 @@ describe('a conflict on a pull request from a fork into the repository it came f
       moveHostMainOn(working, bare)
       yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and pushed the merge to PR #1.')
       const [note] = yield* asked(threadId)
-      assert.include(note, 'merge upstream/main into it')
+      assert.include(note, `merge ${parent}/main into it`)
       assert.strictEqual(execFileSync('git', ['merge-base', '--is-ancestor', 'main', 'althar/add-a-retry'], { cwd: bare }).toString(), '')
       const [round] = yield* rounds(ready?.taskId ?? '')
       assert.strictEqual(round?.url, 'https://github.com/meridian/api/pull/1')
     }).pipe(Effect.provide(runtimeWith({ github })))
-  })
+  }
+
+  it.live('is resolved from upstream’s default branch, and the merge pushed to the fork', () => resolved('upstream', false))
+
+  it.live('is resolved from the default branch of the remote its host says it came from, whatever it is called', () =>
+    resolved('base', true),
+  )
 })

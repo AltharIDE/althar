@@ -621,6 +621,13 @@ export const fetchBranch = (cwd: string, branch: string, remote = 'origin') =>
     Effect.orElseSucceed(() => false),
   )
 
+/** Fetches every branch of a remote, quietly: false where it couldn't be reached. */
+export const fetchRemote = (cwd: string, remote: string) =>
+  gitWithin(60_000, cwd, 'fetch', '--quiet', '--no-tags', remote).pipe(
+    Effect.as(true),
+    Effect.orElseSucceed(() => false),
+  )
+
 /**
  * A remote URL without the credentials it may carry: `https://user:token@host/…`
  * becomes `https://host/…`. The record never holds a secret (docs/architecture/07).
@@ -641,15 +648,17 @@ export const remoteUrls = (cwd: string) =>
 
 /**
  * The remote a task's branch goes to with the person's own git. A fork's go to
- * the fork, or upstream where the person chose that, whichever its default
- * branch follows: a fork's usually follows upstream, as that is where it comes
- * from. Any other's goes where its work goes.
+ * the fork, or the repository it was forked from, by whatever name the clone
+ * has it, where the person chose that, whichever its default branch follows:
+ * a fork's usually follows its parent, as that is where it comes from. Any
+ * other's goes where its work goes.
  */
 export const branchRemoteIn = (cwd: string, base: string, target: ChangeTarget | null) =>
   Effect.gen(function* () {
     const remotes = yield* namedRemotes(cwd).pipe(Effect.orElseSucceed(() => []))
-    if (forkOf(remotes) === null) return yield* remoteOf(cwd, base)
-    return target === 'upstream_branch' ? 'upstream' : 'origin'
+    const fork = forkOf(remotes)
+    if (fork === null) return yield* remoteOf(cwd, base)
+    return target === 'upstream_branch' ? (fork.upstream.remote ?? fork.fork.remote) : fork.fork.remote
   })
 
 /** Each remote by name, with its fetch URL (or the URLs it pushes to) without credentials, in the order git lists them. */
