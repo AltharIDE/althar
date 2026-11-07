@@ -106,6 +106,30 @@ describe('changing the team of a task that has begun', () => {
     expect(plain.getByRole('button', { name: /^Implement:/ })).toBeTruthy()
   })
 
+  it('offers adding a review to a plan made with no review step at all, and saves it as one', async () => {
+    const none = (kind: BoardTask['kind']) => ({
+      kind,
+      plan: { ...card().plan!, steps: card().plan!.steps.filter((step) => step.key !== 'review') },
+    })
+    const { client } = fakeClient()
+    const dialog = opened(none('change'), client)
+    await userEvent.click(dialog.getByRole('button', { name: 'Add a review' }))
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(client.changeTeam).toHaveBeenCalledWith('r', [
+        { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
+        { key: 'review', agentId: 'codex', model: null, skipped: false },
+      ]),
+    )
+    cleanup()
+    // A plain task has no review to add, and a change whose review is done can't take one.
+    const plain = opened(none('plain'))
+    expect(plain.queryByRole('button', { name: 'Add a review' })).toBeNull()
+    cleanup()
+    const done = opened({ ...none('change'), reviewerChange: 'never' })
+    expect(done.queryByRole('button', { name: 'Add a review' })).toBeNull()
+  })
+
   it('refuses a merged task with a short reason, and cannot be saved', () => {
     const dialog = opened({ phase: 'ready', change: change({ state: 'merged' }) })
     expect(dialog.getByRole('alert').textContent).toBe('It’s merged, so its team stays.')

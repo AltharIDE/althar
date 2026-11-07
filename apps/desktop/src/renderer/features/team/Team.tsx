@@ -179,7 +179,27 @@ export function ChangeTeam({
   const begun = teamChangeOf(first) === 'begun'
   const merged = begun && now.change?.state === 'merged'
   const gone = how === null || merged
-  const steps = withEdits(plan.steps, edits)
+  // A plan made with no review has no review step: a change that can still have one shows it, off, for the person to add.
+  const lead = plan.steps.find((step) => step.key === 'implement')
+  const addable =
+    begun &&
+    now.kind === 'change' &&
+    now.reviewing == null &&
+    now.reviewerChange !== 'never' &&
+    !plan.steps.some((step) => step.key === 'review')
+  const given: ReadonlyArray<PlanStep> =
+    addable && lead !== undefined
+      ? [
+          ...plan.steps,
+          {
+            key: 'review',
+            agentId: (plan.agents ?? agents.map((one) => one.id)).find((id) => id !== lead.agentId) ?? lead.agentId,
+            model: null,
+            skipped: true,
+          },
+        ]
+      : plan.steps
+  const steps = withEdits(given, edits)
   const ending = end === undefined ? plan.end : end
   // Only the agents the plan allows: a review's lead only reads, so an agent that can't be held to that isn't offered.
   const allowed = plan.agents

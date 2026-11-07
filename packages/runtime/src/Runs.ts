@@ -33,6 +33,7 @@ import { Busy, type Order } from './Busy'
 import type { Artifacts } from './Artifacts'
 import { touchCard } from './cards'
 import { Agents, RuntimeConfig } from './Config'
+import { ReviewRefused } from './Reviews'
 import { Changes, type Published } from './Changes'
 import { Connectivity } from './Connectivity'
 import { NotConnected } from './Connections'
@@ -568,7 +569,8 @@ export const planWaits = (taskId: string) =>
 
 /**
  * Where a task's reviewer stands to change: `now`, before its review round starts or between rounds; `next_round`, in a round
- * under way, which the change waits for; `never`, once its review is done (its run over).
+ * under way, which the change waits for; `never`, once its review is done: its run over, or its review passed or went on to the
+ * run's ending, though that still publishes or waits.
  */
 export const reviewerChange = (taskId: string) =>
   Effect.gen(function* () {
@@ -580,6 +582,14 @@ export const reviewerChange = (taskId: string) =>
     if (latest === undefined) return 'now' as const
     // Its run over, its review is done, or was never to come.
     if (latest.state !== 'running' && latest.state !== 'suspended') return 'never' as const
+    // Its review passed, or its run went on to its ending without another round: done, though the run still publishes or waits.
+    const [finished] = yield* sql<{ one: number }>`
+      SELECT 1 AS one FROM nodes n WHERE n.execution_id = ${latest.executionId} AND n.node_key = 'publish'
+      UNION ALL
+      SELECT 1 AS one FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+      WHERE n.execution_id = ${latest.executionId} AND n.node_key = 'review' AND a.state = 'succeeded'
+        AND (json_extract(a.output, '$.verdict') = 'pass' OR json_extract(a.output, '$.findings') = 0) LIMIT 1`
+    if (finished !== undefined) return 'never' as const
     const [under] = yield* sql<{ one: number }>`
       SELECT 1 AS one FROM node_attempts a JOIN nodes n ON n.id = a.node_id
       WHERE n.execution_id = ${latest.executionId} AND n.node_key = 'review'
@@ -5621,6 +5631,22 @@ export class Runs extends Context.Service<
           const wantedReview = input.steps.find((step) => step.key === 'review')
           const alike = (a: PlanStep, b: PlanStep) =>
             a.agentId === b.agentId && (a.model ?? null) === (b.model ?? null) && (a.effort ?? null) === (b.effort ?? null)
+          // A review's lead only reads: an agent that can't be held to that can't take either step, whoever asks (Reviews.canLead).
+          if (before.reads === true)
+            for (const step of input.steps) {
+              if (step.skipped) continue
+              const held = agentsHere.list.find((entry) => entry.definition.id === step.agentId)
+              if (held?.definition.reviewing?.outside === true) continue
+              const names = agentsHere.list
+                .filter((entry) => entry.definition.reviewing?.outside === true)
+                .map((entry) => entry.definition.name)
+              return yield* new ReviewRefused({
+                message:
+                  held === undefined
+                    ? 'Althar has no such agent.'
+                    : `${held.definition.name} can't be held to reading only: it runs commands its sandbox contains without asking, so it could run this pull request's code. Review it with ${names.join(' or ')}.`,
+              })
+            }
           const leadChanges = wantedLead !== undefined && !alike(lead, wantedLead)
           const reviewed = review !== undefined && !review.skipped
           const reviews = wantedReview !== undefined && !wantedReview.skipped

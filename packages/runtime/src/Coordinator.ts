@@ -1536,7 +1536,9 @@ export class Coordinator extends Context.Service<
                 Effect.catch((error) =>
                   error instanceof TaskRefused
                     ? Effect.fail(new ToolRefused({ message: `${task.slug}: ${words(error, (id) => id).message}` }))
-                    : Effect.fail(error),
+                    : error instanceof ReviewRefused
+                      ? Effect.fail(new ToolRefused({ message: `${task.slug}: ${error.message}` }))
+                      : Effect.fail(error),
                 ),
               )
             for (const line of teamChanges(changed, named)) {

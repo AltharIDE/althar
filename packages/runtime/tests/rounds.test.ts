@@ -1468,6 +1468,107 @@ describe('changing the team of a task that has begun', () => {
     },
   )
 
+  /** The plan as the coordinator's propose_plan makes it with no review: no review step in it, nor in the run it started. */
+  const withoutReview = (taskId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const bare = (text: string) => {
+        const parameters = JSON.parse(text) as { steps: Array<{ key: string }> }
+        return JSON.stringify({ ...parameters, steps: parameters.steps.filter((one) => one.key !== 'review') })
+      }
+      for (const row of yield* sql<{ id: string; parameters: string }>`SELECT id, parameters FROM task_plans WHERE task_id = ${taskId}`)
+        yield* sql`UPDATE task_plans SET parameters = ${bare(row.parameters)} WHERE id = ${row.id}`
+      for (const row of yield* sql<{ id: string; parameters: string }>`SELECT id, parameters FROM runs WHERE task_id = ${taskId}`)
+        yield* sql`UPDATE runs SET parameters = ${bare(row.parameters)} WHERE id = ${row.id}`
+    })
+
+  it.live('adds a reviewer to a plan made with no review step, and the review round then runs', () => {
+    const { working, github } = onGitHub()
+    const slow = holds()
+    return Effect.gen(function* () {
+      const task = yield* start(working, '[lead:slowly] [lead:finish] [lead:edit] [review:pass]')
+      yield* withoutReview(task.taskId)
+      assert.deepStrictEqual(
+        (yield* planOf(task.taskId)).steps.map((one) => one.key),
+        ['implement'],
+      )
+      const added = yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'claude-code', 'large')])
+      assert.deepStrictEqual([added.review?.step?.agentId, added.review?.was, added.review?.when], ['claude-code', null, 'now'])
+      assert.deepStrictEqual(
+        (yield* planOf(task.taskId)).steps.map((one) => [one.key, one.agentId, one.skipped]),
+        [
+          ['implement', 'claude-code', false],
+          ['review', 'claude-code', false],
+        ],
+      )
+      slow.open('[lead:slowly]')
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+      const reviewed = (yield* results(task.threadId)).find((result) => result.step === 'review')
+      assert.deepStrictEqual([reviewed?.agentId, reviewed?.verdict], ['claude-code', 'pass'])
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
+  })
+
+  it.live('keeps the reviewer once its review passed, though the run still publishes; the lead still changes', () => {
+    const { working, github } = onGitHub()
+    const slow = holds()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* start(working, '[lead:slowly] [lead:finish] [lead:edit] [review:pass]')
+      // Its review passed and its run went on to publish, which is under way: the run is still running.
+      yield* sql`
+        INSERT INTO nodes (id, project_id, execution_id, node_key, iteration, type, added_in_revision, state, created_at)
+        SELECT 'node_' || lower(hex(randomblob(16))), project_id, execution_id, 'publish', 0, 'integration', 1, state, created_at
+        FROM nodes WHERE node_key = 'implement' AND execution_id IN (SELECT e.id FROM workflow_executions e JOIN runs r ON r.id = e.run_id
+          WHERE r.task_id = ${task.taskId})`
+      assert.strictEqual((yield* cards(task.projectId))[0]?.reviewerChange, 'never')
+      const refused = yield* Effect.flip(
+        changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'claude-code', 'large')]),
+      )
+      assert.strictEqual((refused as { why?: string }).why, 'review_done')
+      assert.strictEqual(
+        (yield* changeTeam(task.taskId, [step('implement', 'codex'), step('review', 'codex')])).lead?.step.agentId,
+        'codex',
+      )
+      slow.open('[lead:slowly]')
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
+  })
+
+  it.live('refuses an agent that cannot be held to reading only on a review’s team, whoever asks, and changes nothing', () => {
+    const { working, github } = onGitHub()
+    const slow = holds()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* start(working, '[lead:slowly] [lead:finish] [lead:edit] [review:pass]')
+      // A review's plan: its lead only reads.
+      for (const row of yield* sql<{
+        id: string
+        parameters: string
+      }>`SELECT id, parameters FROM task_plans WHERE task_id = ${task.taskId}`)
+        yield* sql`UPDATE task_plans SET parameters = ${JSON.stringify({ ...JSON.parse(row.parameters), reads: true })} WHERE id = ${row.id}`
+      const before = yield* planOf(task.taskId)
+      const refused = yield* Effect.flip(changeTeam(task.taskId, [step('implement', 'codex'), step('review', 'claude-code')]))
+      assert.strictEqual((refused as { _tag?: string })._tag, 'ReviewRefused')
+      assert.match((refused as { message?: string }).message ?? '', /^Fake codex can't be held to reading only/)
+      assert.deepStrictEqual(yield* planOf(task.taskId), before)
+      // The coordinator's tool goes through the same path.
+      const [row] = yield* sql<{ slug: string }>`SELECT slug FROM tasks WHERE id = ${task.taskId}`
+      const coordinatorThread = yield* (yield* Coordinator).thread(task.projectId)
+      const access: ToolAccess = {
+        role: 'coordinator',
+        projectId: task.projectId,
+        threadId: coordinatorThread,
+        sessionId: 'none',
+        taskId: null,
+      }
+      assert.match(
+        yield* callTool(access, 'change_lead', { task: row?.slug ?? '', lead: { agent: 'codex' } }),
+        /can't be held to reading only/,
+      )
+      assert.deepStrictEqual(yield* planOf(task.taskId), before)
+      slow.open('[lead:slowly]')
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
+  })
+
   it.live('refuses a merged task, with the reason, and a removed review that was never to come', () => {
     const { working, bare, github } = onGitHub()
     return Effect.gen(function* () {
