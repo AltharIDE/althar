@@ -288,11 +288,16 @@ export const infoOf = (catalog: Catalog, choice: { readonly agentId: string; rea
   const offered = catalog.agents.get(choice.agentId)
   const asked = choice.model ?? offered?.model ?? null
   const model = offered === undefined ? asked : (standsFor(offered.models, asked) ?? asked)
+  const agentName = catalog.runtimes.find((runtime) => runtime.id === choice.agentId)?.name ?? choice.agentId
   const found =
     model === null ? catalog.models.find((info) => info.id === keyOf(choice.agentId, null)) : offeredIn(catalog, choice.agentId, model)
-  if (found !== undefined) return found
+  if (found !== undefined) {
+    // The stored id's provider is the route this choice goes by, even where the listed name leaves it out.
+    const provider = model === null ? null : providerIn(model)
+    const via = viaOf(routeOf(agentName, provider))
+    return provider === null || found.via === via ? found : { ...found, via }
+  }
   // A model the agent no longer lists, or an agent this picker doesn't offer: its name as people read it, or the agent's own.
-  const agentName = catalog.runtimes.find((runtime) => runtime.id === choice.agentId)?.name ?? choice.agentId
   const name = model === null ? agentName : readableModelName(model)
   const mark = makerOf(choice.agentId, name)
   return {

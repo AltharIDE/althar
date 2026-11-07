@@ -221,13 +221,19 @@ describe('the models every agent offers', () => {
       name: 'DeepSeek V4.1 Flash',
       short: 'DeepSeek V4.1 Flash',
       mark: Brand.DeepSeek,
+      // The listed name leaves the provider out; the stored id still says the route.
+      via: 'via OpenCode Go',
     })
     // Listed with the provider before its id, while it was stored without.
     const prefixed = catalogOf(
       [...models, { ...offered, models: [plain('opencode-go/deepseek-v4.1-flash', 'opencode-go/DeepSeek V4.1 Flash')] }],
       agents,
     )
-    expect(infoOf(prefixed, { agentId: 'opencode', model: 'deepseek-v4.1-flash' })).toMatchObject({ name: 'DeepSeek V4.1 Flash' })
+    expect(infoOf(prefixed, { agentId: 'opencode', model: 'deepseek-v4.1-flash' })).toMatchObject({
+      name: 'DeepSeek V4.1 Flash',
+      // Listed with the provider, stored without: the listing's route is kept.
+      via: 'via OpenCode Go',
+    })
     // Before the agent has said what it offers: people's words, never the raw slug.
     const probing = catalogOf([...models, { ...offered, models: [] }], agents)
     expect(infoOf(probing, { agentId: 'opencode', model: 'opencode-go/deepseek-v4.1-flash' })).toMatchObject({
@@ -469,21 +475,14 @@ describe('naming a model on a screen', () => {
     // Before OpenCode has reported its models: the id in people's words, the route on hover.
     await waitFor(() => expect(shown?.textContent).toBe('DeepSeek V4.1 Flash|via OpenCode Go'))
     expect(withAccount?.textContent).toBe('DeepSeek V4.1 Flash|via OpenCode Go · work')
-    // Once it lists the model, the name stays and the route stays on hover.
+    // Once it lists the model by its bare id, with a name that leaves the provider out,
+    // the stored id still gives the route: the name stays and the hover keeps OpenCode Go.
     await act(async () =>
       answer([
         ...models,
         {
           ...models[2]!,
-          models: [
-            {
-              id: 'opencode-go/deepseek-v4.1-flash',
-              name: 'opencode-go/DeepSeek V4.1 Flash',
-              description: null,
-              efforts: [],
-              effort: null,
-            },
-          ],
+          models: [{ id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', description: null, efforts: [], effort: null }],
         },
       ]),
     )
