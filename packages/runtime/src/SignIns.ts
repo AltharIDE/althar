@@ -1,10 +1,18 @@
 import { afterOpen } from './startup'
-import { adapterNode, planPairOf, type SignInCheck, signInCheck, type SignInStatus } from '@althar/provider-adapters'
+import {
+  adapterNode,
+  agentVersion,
+  planPairOf,
+  type SignInCheck,
+  signInCheck,
+  type SignInStatus,
+  unsupportedAt,
+} from '@althar/provider-adapters'
 import { Clock, Context, Duration, Effect, Layer, PubSub, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
-import { Agents } from './Config'
+import { type AgentEntry, Agents } from './Config'
 
 /*
  * Whether each account is signed in, and how that is paid for, from its
@@ -17,11 +25,16 @@ import { Agents } from './Config'
  * unless someone asks again. An agent is signed in when any of its accounts
  * is. As checks come in, it says when an agent is signed in, for usage data
  * (UsageData.ts): found so the first time this launch, or an account signed
- * in that was signed out.
+ * in that was signed out. Its version is asked of its copy before any status
+ * command, once for all the checks of one refresh, and Settings reads that
+ * same answer (`version`), so the two say the same.
  */
 
 /** How long an account's sign-in is taken as it was last checked. */
 const TTL = Duration.minutes(1)
+
+/** How long one reading of an agent's version serves the checks that start meanwhile: one refresh's. */
+const ROUND = Duration.seconds(5)
 
 const UNKNOWN: SignInCheck = { status: 'unknown', paidBy: 'unknown' }
 
@@ -58,6 +71,8 @@ export class SignIns extends Context.Service<
     of(agentId: string, recheck?: boolean): Effect.Effect<SignInStatus>
     /** An account's sign-in, and how it is paid for. */
     account(account: Account, recheck?: boolean): Effect.Effect<SignInCheck>
+    /** The agent's version as its copy says it, read again if older than a minute, or now with `recheck`; null where it doesn't say. */
+    version(agentId: string, recheck?: boolean): Effect.Effect<string | null>
     /**
      * For an agent whose providers each have a sign-in (OpenCode): the ones its listing has as signed in, and any whose last turn
      * was refused, when. A refusal is let go when a later turn on the provider went through, or its sign-in changed since.
@@ -83,6 +98,17 @@ export class SignIns extends Context.Service<
       /* Agents found signed in this launch, and what is said as they are. */
       const found = new Set<string>()
       const arrived = yield* PubSub.unbounded<SignedIn>()
+      /* Each agent's last reading of its version, from when it began: those that start while it runs share it. */
+      const versions = new Map<string, { readonly at: number; readonly read: Promise<string | null> }>()
+      const versionOf = (entry: AgentEntry, within: Duration.Duration) =>
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis
+          const last = versions.get(entry.definition.id)
+          if (last !== undefined && now - last.at < Duration.toMillis(within)) return yield* Effect.promise(() => last.read)
+          const read = Effect.runPromise(agentVersion(entry.definition, adapterNode()))
+          versions.set(entry.definition.id, { at: now, read })
+          return yield* Effect.promise(() => read)
+        })
       /** Paid by a plan where its status can't say, its plan is told by its sign-in, and a usage read found it and read the plan. */
       const paid = (of: Account, check: SignInCheck) =>
         Effect.gen(function* () {
@@ -100,6 +126,16 @@ export class SignIns extends Context.Service<
             return yield* paid(of, last.check)
           const entry = agents.list.find((candidate) => candidate.definition.id === of.agentId)
           if (entry === undefined) return UNKNOWN
+          // An agent at a version no session starts on isn't asked either: OpenCode 2's status goes through a service the
+          // whole user shares, which answers for whichever account started it and keeps running after.
+          // Asked now, as the person may have changed it, but once for the accounts checked together.
+          if (
+            entry.definition.supported !== undefined &&
+            unsupportedAt(entry.definition, yield* afterOpen(versionOf(entry, ROUND))) !== null
+          ) {
+            known.set(of.id, { check: UNKNOWN, at: yield* Clock.currentTimeMillis })
+            return UNKNOWN
+          }
           yield* accounts.prepare(of)
           const checked = yield* afterOpen(signInCheck(entry.definition, adapterNode(), accounts.env(of)))
           // As it stands now, not as it stood when this check began: another may have finished meanwhile and said it.
@@ -183,6 +219,10 @@ export class SignIns extends Context.Service<
       return SignIns.of({
         of: (agentId, recheck = false) => Effect.map(checks(agentId, recheck), (all) => anyOf(all.map((check) => check.status))),
         account,
+        version: (agentId, recheck = false) => {
+          const entry = agents.list.find((candidate) => candidate.definition.id === agentId)
+          return entry === undefined ? Effect.succeed(null) : versionOf(entry, recheck ? Duration.zero : TTL)
+        },
         providers,
         signedIn: Stream.fromPubSub(arrived),
       })

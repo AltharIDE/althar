@@ -41,19 +41,18 @@ export const signInCheck = (
     const unknown: SignInCheck = { status: 'unknown', paidBy: 'unknown' }
     const first = agent.signIn.status?.(node)
     if (first === undefined) return resume(Effect.succeed(unknown))
-    const run = (spec: LaunchSpec, again: (() => void) | undefined, tries = ASKED_AGAIN) => {
+    const run = (spec: LaunchSpec, fallback: LaunchSpec | undefined, tries = ASKED_AGAIN) => {
       const env = { ...process.env, ...asNode(spec), ...spec.env, ...home }
       // A command that lives out on the device (a Flatpak's host) is run there, with what this assembled.
       const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env })
       execFile(launched.command, [...launched.args], { timeout: 15_000, env, windowsHide: true }, (error, stdout, stderr) => {
-        if (error !== null && typeof error.code !== 'number') return again === undefined ? resume(Effect.succeed(unknown)) : again()
+        if (error !== null && typeof error.code !== 'number') return resume(Effect.succeed(unknown))
         const exitCode = error === null ? 0 : typeof error.code === 'number' ? error.code : null
         const output = `${stdout}\n${stderr}`
         // Its own server didn't start in time (OpenCode 2's private one, loading the person's plugins): the same, asked again.
-        if (exitCode !== 0 && tries > 0 && agent.notStarted?.(output) === true) return run(spec, again, tries - 1)
+        if (exitCode !== 0 && tries > 0 && agent.notStarted?.(output) === true) return run(spec, fallback, tries - 1)
+        if (fallback !== undefined && agent.signIn.statusRejected?.(output, exitCode) === true) return run(fallback, undefined)
         const signedIn = agent.signIn.read(output, exitCode)
-        // The fallback is for a version that rejects the first's flags: one that answered, even with nothing to read, said what it knows.
-        if (signedIn === undefined && exitCode !== 0 && again !== undefined) return again()
         const providers = agent.signIn.providers?.read(output) ?? []
         resume(
           Effect.succeed({
@@ -64,8 +63,7 @@ export const signInCheck = (
         )
       })
     }
-    const second = agent.signIn.statusFallback?.(node)
-    run(first, second === undefined ? undefined : () => run(second, undefined))
+    run(first, agent.signIn.statusFallback?.(node))
   })
 
 /** Whether the user is signed in to an agent (see `signInCheck`). */

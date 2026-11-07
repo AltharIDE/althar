@@ -262,28 +262,46 @@ describe('an agent’s homes', () => {
 })
 
 describe('signInStatus', () => {
-  it.live('falls back to the plain command where OpenCode 1.x rejects the JSON flags', () =>
-    Effect.gen(function* () {
-      // 1.x exits 1 on --standalone / --format json; its plain `auth list` prints a count.
-      const script =
-        "if (process.argv.includes('json')) { console.error('Unknown argument: standalone'); process.exit(1) } console.log('2 credentials')"
-      const spec = (...extra: string[]) => ({ command: 'bun', args: ['-e', script, ...extra] })
-      const old: AgentDefinition = {
-        ...agents.opencode,
-        signIn: {
-          ...agents.opencode.signIn,
-          status: () => spec('json'),
-          statusFallback: () => spec(),
-        },
-      }
-      assert.strictEqual((yield* signInCheck(old)).status, 'signed_in')
-      // With no fallback the rejected flags would read as "can't tell".
-      const { statusFallback: _dropped, ...withoutFallback } = old.signIn
-      const bare: AgentDefinition = { ...old, signIn: withoutFallback }
-      assert.strictEqual((yield* signInCheck(bare)).status, 'unknown')
-      assert.deepStrictEqual(agents.opencode.signIn.statusFallback?.('node').args, ['auth', 'list'])
-    }),
-  )
+  describe('OpenCode’s two status commands', () => {
+    // What 1.x prints for --standalone / --format json: its help on stderr, exit 1, no line that names the flag (1.18.31, 1.19.5).
+    const rejection = 'opencode auth list\n\nlist providers and credentials\n\nOptions:\n  -h, --help  show help  [boolean]\n'
+    /** OpenCode where the first command does what `first` says, and the plain one finds a sign-in that isn't this account's. */
+    const opencode = (first: string, fallback: string = "console.log('2 credentials')"): AgentDefinition => ({
+      ...agents.opencode,
+      signIn: {
+        ...agents.opencode.signIn,
+        status: () => ({ command: process.execPath, args: ['-e', first] }),
+        statusFallback: () => ({ command: process.execPath, args: ['-e', fallback] }),
+      },
+    })
+
+    it.live('falls back to the plain command where 1.x rejects the flags', () =>
+      Effect.gen(function* () {
+        const rejects = `console.error(${JSON.stringify(rejection)}); process.exit(1)`
+        assert.strictEqual((yield* signInCheck(opencode(rejects))).status, 'signed_in')
+        // With no fallback the rejected flags read as "can't tell".
+        const { statusFallback: _dropped, ...withoutFallback } = opencode(rejects).signIn
+        assert.strictEqual((yield* signInCheck({ ...agents.opencode, signIn: withoutFallback })).status, 'unknown')
+        assert.deepStrictEqual(agents.opencode.signIn.statusFallback?.('node').args, ['auth', 'list'])
+      }),
+    )
+
+    it.live('leaves 2.x’s empty answer at unknown: the plain command would ask the service every account shares', () =>
+      Effect.map(signInCheck(opencode("console.log('[]')")), (check) => assert.strictEqual(check.status, 'unknown')),
+    )
+
+    it.live('falls back only for a rejection: not for another failure, a missing command or unreadable output', () =>
+      Effect.gen(function* () {
+        assert.strictEqual((yield* signInCheck(opencode("console.error('database is locked'); process.exit(1)"))).status, 'unknown')
+        assert.strictEqual((yield* signInCheck(opencode("console.log('something else')"))).status, 'unknown')
+        const missing: AgentDefinition = {
+          ...opencode(''),
+          signIn: { ...opencode('').signIn, status: () => ({ command: '/no/such/opencode', args: [] }) },
+        }
+        assert.strictEqual((yield* signInCheck(missing)).status, 'unknown')
+      }),
+    )
+  })
 
   it.live('asks OpenCode again where its private server didn’t start in time, rather than falling back to another home', () =>
     Effect.gen(function* () {

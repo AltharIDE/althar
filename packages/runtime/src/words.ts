@@ -70,13 +70,12 @@ const sentence = (words: string): string => (/[.!?]$/.test(words) ? words : `${w
  * OpenCode 1.x on a data folder OpenCode 2 has migrated: 2's `workspace_domain`
  * rebuilt the `workspace` table without `project_id`, which 1.x still updates
  * when it opens a repository, so it stops on every start there (anomalyco/opencode#42170).
- * Neither `opencode upgrade` nor 1.x's installer moves to 2 (the installer refuses
- * a 2.x version): OpenCode 2 has an installer of its own, which its docs give for
- * each platform. Seen 2 November 2026, 1.18.31 against 2.2.5.
+ * No session starts on 2.x (`supported`), so the way out is a home of its own,
+ * which another account is. Seen 2 November 2026, 1.18.31 against 2.2.5.
  */
 const olderOpenCode = /no such column: project_id/
 const olderOpenCodeWords =
-  'OpenCode’s own database was moved on by OpenCode 2, and this OpenCode is 1.x, which can’t open it. Install OpenCode 2 (opencode.ai/v2/docs says how), then try again.'
+  'OpenCode’s own database was moved on by OpenCode 2, which Althar doesn’t run yet, and this OpenCode is 1.x, which can’t open it. Add another OpenCode account in Settings: it starts with a database of its own.'
 
 /** An agent that no longer has the session Althar sent to, as its process died: what it said ("Resource not found") stays its detail. */
 export const lostWords = (agent: string) => `${agent} had lost this conversation.`
@@ -631,4 +630,6 @@ const accountRefused = {
   no_name: 'Give the account a name.',
   one: "This agent can't have a second account yet.",
   no_terminal: 'This agent signs in only inside Althar: sign in with the browser.',
+  unsupported:
+    "Althar doesn't sign in to this version of the agent: it could keep the sign-in in another account. Use a version Althar runs, then sign in.",
 } as const satisfies Record<AccountRefused['reason'], string>

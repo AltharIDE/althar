@@ -61,6 +61,7 @@ describe('the models every agent offers', () => {
       signIn: 'signed_in',
       login: 'opencode auth login',
       version: null,
+      unsupported: null,
       ways: [],
       accounts: [],
       addsAccounts: true,

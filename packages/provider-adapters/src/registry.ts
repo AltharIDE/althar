@@ -159,8 +159,10 @@ export interface AgentDefinition {
   readonly signIn: {
     /** Without one (the agent has no status command), Althar can't tell, and the first session says. */
     readonly status?: (node: string) => LaunchSpec
-    /** Run when `status` failed and read nothing (an older version that rejects its flags); read the same way. */
+    /** Run when `statusRejected` says an older version rejected `status`'s flags, and for nothing else; read the same way. */
     readonly statusFallback?: (node: string) => LaunchSpec
+    /** Whether what `status` printed is an older version rejecting its flags. */
+    readonly statusRejected?: (output: string, exitCode: number | null) => boolean
     /** True when signed in, false when not, undefined when the output can't tell. */
     readonly read: (output: string, exitCode: number | null) => boolean | undefined
     /**
@@ -259,6 +261,12 @@ export interface AgentDefinition {
   readonly service?: { readonly name: string; readonly url: string }
   /** What prints its own version, for Settings; without it, none is shown. */
   readonly version?: (node: string) => LaunchSpec
+  /**
+   * The one major version Althar runs it at, where another isn't safe yet:
+   * no session starts on a copy whose `version` says another, and Settings
+   * says `why`; Althar's download takes only releases of this one.
+   */
+  readonly supported?: { readonly major: number; readonly why: string }
   /**
    * The command its launch, sign-in and version run by name, and the copies
    * of it Althar has where the person has none of their own: one that
@@ -493,10 +501,8 @@ export type AgentDownload = GitHubDownload | PinnedDownload
 
 /** An agent's latest release on GitHub, each file with the sha256 GitHub gives it; the command alone is kept. */
 export interface GitHubDownload {
-  /** Its GitHub repository, owner/name: its latest release is what is downloaded. */
+  /** Its GitHub repository, owner/name: its latest release is what is downloaded, of the agent's `supported` major where it has one. */
   readonly repository: string
-  /** Only releases whose tag starts so, such as `v2.`: the newest of them, where its latest release is on another line. */
-  readonly line?: string
   /** The release's file for each `platform-arch`, as Node names them: a zip or a gzipped tar with the command in it. */
   readonly assets: Readonly<Record<string, string>>
   /** About how big the download is, as the person reads it. */
@@ -1160,8 +1166,10 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     signIn: {
       // 2.x prints a table of "stored" rows, no count, and a Console account is a connection like a key (seen 2 November 2026, 2.2.5); `--standalone` keeps the answer to this account's own home.
       status: () => ({ command: 'opencode', args: ['auth', 'list', '--standalone', '--format', 'json'] }),
-      // 1.x rejects --standalone and --format json (exit 1), and prints a count line instead. Run only where the first failed: on 2.x, without `--standalone`, the background service would answer for another home.
+      // 1.x rejects --standalone and --format json, and prints a count line instead. On 2.x this would ask the service every account shares, so only a rejection comes here.
       statusFallback: () => ({ command: 'opencode', args: ['auth', 'list'] }),
+      // Its help on stderr and exit 1, no line that names the flag (seen 3 November 2026, 1.18.31 and 1.19.5).
+      statusRejected: (output, exitCode) => exitCode !== 0 && output.includes('show help'),
       /* OpenCode runs its free models without signing in, so no credentials means "can't tell", not "signed out". */
       read: (output) => {
         const first = output.indexOf('[')
@@ -1226,6 +1234,16 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     },
     /* Seen on 29 September 2026: `once`, `always` and `reject`, for commands and edits alike. */
     version: () => ({ command: 'opencode', args: ['--version'] }),
+    /*
+     * OpenCode 2 ignores how Althar keeps the person's MCP servers out (its
+     * enabled-only `mcp` entries) and `continue_loop_on_deny`, and its
+     * `auth list` reads another account's sign-ins through its background
+     * service; seen with 2.0.29 on 15 October 2026 (docs/plans/opencode-2.md).
+     */
+    supported: {
+      major: 1,
+      why: 'OpenCode 2 isn’t supported yet: Althar can’t yet keep your own MCP servers out of its sessions, and a rejected command would end the whole turn. Use OpenCode 1 with Althar for now, or another agent.',
+    },
     withoutOwnTools: (at) => openCodeWithoutOwnTools(openCodeBaseAt(at))(at),
     /*
      * As OpenCode 1.19.5 and 2.2.5 read them, a skill in each seen in what it
@@ -1269,15 +1287,13 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     },
     /*
      * MIT licensed; its releases are at anomalyco/opencode (sst/opencode before), each file with GitHub's sha256.
-     * Its 2.x is what Althar runs (`--standalone` above), and GitHub's latest is still 1.x, which also can't open a
-     * data folder 2.x has migrated: the newest 2.x it is. Seen 2 November 2026, v2.2.5 beside v1.19.5.
+     * Only of the major it runs at (`supported`): both majors publish there, v2.2.5 beside v1.19.5 on 2 November 2026.
      */
     cli: {
       name: 'opencode',
       guide: 'https://github.com/anomalyco/opencode',
       download: {
         repository: 'anomalyco/opencode',
-        line: 'v2.',
         assets: {
           'darwin-arm64': 'opencode-darwin-arm64.zip',
           'darwin-x64': 'opencode-darwin-x64.zip',

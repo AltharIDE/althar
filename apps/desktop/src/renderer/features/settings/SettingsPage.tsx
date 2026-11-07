@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { type AgentStatus, MOST_AT_ONCE } from '@althar/contracts'
 import {
   AgentInstall,
+  type AgentInstallText,
   AgentsAtOnce,
   BrowserPreferences,
   type AgentTab,
@@ -128,7 +129,7 @@ export function SettingsPage({ start, section, onSection, onTask, signIn }: Sett
   const wanted = start.checkedAt > openedAt ? agents.find((agent) => agent.id === signIn) : undefined
   useEffect(() => {
     if (wanted === undefined) return
-    if (wanted.installed && wanted.problem === null) {
+    if (wanted.installed && wanted.problem === null && wanted.unsupported === null) {
       // The account signed out, else one a provider within it refused (OpenCode Go), else its first.
       const account =
         wanted.accounts.find((one) => one.signIn === 'signed_out') ??
@@ -139,9 +140,9 @@ export function SettingsPage({ start, section, onSection, onTask, signIn }: Sett
     }
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- started once for the agent asked about, as it is read
   }, [wanted?.id])
-  // A section where something waits on the person has a dot: an account to sign in again.
+  // A section where something waits on the person has a dot: an account to sign in again, an agent at a version Althar doesn't run.
   const yours: Partial<Record<Section, boolean>> = {
-    agents: agents.some((agent) => agent.accounts.some((account) => account.signIn === 'signed_out')),
+    agents: agents.some(needsYou),
     'code-hosts': connections.list?.connections.some((connection) => connection.state === 'reauth_required') === true,
   }
   const open = sectionText[section]
@@ -246,7 +247,11 @@ function Failed({ when, children = text.failed }: { when: boolean; children?: st
 
 /* ---- the agents ------------------------------------------------------------------- */
 
-/** An agent as a tab: a dot on one with an account signed out. */
+/** An agent only the person can put right: an account signed out, or a version no session starts on. */
+const needsYou = (agent: AgentStatus): boolean =>
+  agent.unsupported !== null || agent.accounts.some((account) => account.signIn === 'signed_out')
+
+/** An agent as a tab: a dot on one that needs the person. */
 const tabOf = (agent: AgentStatus): AgentTab => {
   const brand = brandOf(agent.id)
   const line = agentLineOf(agent)
@@ -255,7 +260,7 @@ const tabOf = (agent: AgentStatus): AgentTab => {
     name: agent.name,
     ...(brand === undefined ? {} : { brand }),
     ...(line === undefined ? {} : { line }),
-    ...(agent.accounts.some((account) => account.signIn === 'signed_out') ? { yours: true } : {}),
+    ...(needsYou(agent) ? { yours: true } : {}),
     // Not on this computer: its tab quieter, after those that are.
     ...(agent.installed ? {} : { away: true }),
   }
@@ -272,7 +277,7 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
     agents.find((agent) => agent.id === agentId) ??
     agents.find((agent) => agent.id === accounts.signingIn?.agentId) ??
     agents.find((agent) => agent.id === asked) ??
-    agents.find((agent) => agent.accounts.some((account) => account.signIn === 'signed_out')) ??
+    agents.find(needsYou) ??
     agents[0]
   if (chosen === undefined)
     return (
@@ -282,6 +287,25 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
       </>
     )
   const brand = brandOf(chosen.id)
+  /* Downloading it, where Althar can: in place of none, or of its own copy at a version no session starts on. */
+  const install = (words: Partial<AgentInstallText>) => (
+    <AgentInstall
+      name={chosen.name}
+      text={words}
+      {...(brand === undefined ? {} : { brand })}
+      {...(chosen.download === null ? {} : { size: chosen.download.size })}
+      {...(pinnedOf(chosen) === undefined ? {} : { pinned: pinnedOf(chosen) })}
+      state={
+        chosen.download?.installing === true
+          ? { kind: 'installing' }
+          : start.installFailed[chosen.id] === undefined
+            ? { kind: 'idle' }
+            : { kind: 'failed', why: start.installFailed[chosen.id] ?? '' }
+      }
+      onInstall={() => void start.install(chosen.id)}
+      {...(chosen.guide === null ? {} : { onHelp: () => openGuide(start, chosen.id) })}
+    />
+  )
   return (
     <AgentTabs value={chosen.id} onValueChange={setAgentId} className={s.agents}>
       <AgentTabList label={text.agents} agents={agents.map(tabOf)} text={{ away: `not on ${device.this}` }} />
@@ -295,24 +319,15 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
         {chosen.problem !== null ? (
           <AgentProblem why={chosen.problem} model={start} />
         ) : chosen.installed && chosen.download?.installing !== true ? (
-          <AgentAccounts agent={chosen} start={start} signIn={accounts} />
+          <>
+            {/* Why no session starts on the version it has, above its accounts, which still stand. */}
+            <Failed when={chosen.unsupported !== null}>{chosen.unsupported ?? ''}</Failed>
+            {/* Althar's own copy is Althar's to change: the newest release it runs can replace it. */}
+            {chosen.unsupported !== null && chosen.kept && chosen.download !== null && install(text.agentReplace)}
+            <AgentAccounts agent={chosen} start={start} signIn={accounts} />
+          </>
         ) : (
-          <AgentInstall
-            name={chosen.name}
-            text={{ missing: text.agentHere }}
-            {...(brand === undefined ? {} : { brand })}
-            {...(chosen.download === null ? {} : { size: chosen.download.size })}
-            {...(pinnedOf(chosen) === undefined ? {} : { pinned: pinnedOf(chosen) })}
-            state={
-              chosen.download?.installing === true
-                ? { kind: 'installing' }
-                : start.installFailed[chosen.id] === undefined
-                  ? { kind: 'idle' }
-                  : { kind: 'failed', why: start.installFailed[chosen.id] ?? '' }
-            }
-            onInstall={() => void start.install(chosen.id)}
-            {...(chosen.guide === null ? {} : { onHelp: () => openGuide(start, chosen.id) })}
-          />
+          install({ missing: text.agentHere })
         )}
       </AgentTabPanel>
     </AgentTabs>
