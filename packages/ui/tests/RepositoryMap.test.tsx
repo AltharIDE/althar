@@ -111,7 +111,7 @@ describe('the repository a fork forks, among its clone’s remotes', () => {
     MAP_HALYARD.map((one) =>
       one.fork === undefined ? one : { ...one, fork: { ...one.fork, ...(remote === undefined ? {} : { remote }) } },
     )
-  const NO_REMOTE = 'Your clone has no remote for halyard/api, so tasks start from your fork.'
+  const NO_REMOTE = 'Your clone has no remote for halyard/api, so tasks start from your fork, and you can’t push branches there yourself.'
 
   it('names the remote its clone has it as, where that isn’t upstream', () => {
     map({ repositories: forkWith('base') })

@@ -167,7 +167,8 @@ export const repositoryMapText: RepositoryMapText = {
   upstreamBranches: (upstream) => `${upstream}, branches too`,
   noPush: (upstream) => `You can’t push to ${upstream} yet. Its owners can give you access.`,
   upstreamAs: (remote) => `The repository it forks, as ${remote}`,
-  noRemote: (upstream) => `Your clone has no remote for ${upstream}, so tasks start from your fork.`,
+  noRemote: (upstream) =>
+    `Your clone has no remote for ${upstream}, so tasks start from your fork, and you can’t push branches there yourself.`,
   addRemote: 'Add it as a remote',
 }
 

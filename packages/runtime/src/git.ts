@@ -650,15 +650,17 @@ export const remoteUrls = (cwd: string) =>
  * The remote a task's branch goes to with the person's own git. A fork's go to
  * the fork, or the repository it was forked from, by whatever name the clone
  * has it, where the person chose that, whichever its default branch follows:
- * a fork's usually follows its parent, as that is where it comes from. Any
- * other's goes where its work goes.
+ * a fork's usually follows its parent, as that is where it comes from; none
+ * where that repository is among none of the clone's remotes, rather than the
+ * fork the person chose against, until they add it. Any other's goes where its
+ * work goes.
  */
 export const branchRemoteIn = (cwd: string, base: string, target: ChangeTarget | null) =>
   Effect.gen(function* () {
     const remotes = yield* namedRemotes(cwd).pipe(Effect.orElseSucceed(() => []))
     const fork = forkOf(remotes)
     if (fork === null) return yield* remoteOf(cwd, base)
-    return target === 'upstream_branch' ? (fork.upstream.remote ?? fork.fork.remote) : fork.fork.remote
+    return target === 'upstream_branch' ? fork.upstream.remote : fork.fork.remote
   })
 
 /** Each remote by name, with its fetch URL (or the URLs it pushes to) without credentials, in the order git lists them. */

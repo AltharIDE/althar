@@ -145,7 +145,9 @@ export const ForkParentNotARemote: Story = {
   args: { repositories: forkWith({ target: ChangeTarget.Upstream, remote: null }), worktrees: '~/Althar/halyard', onAddRemote: fn() },
   play: async ({ args, canvasElement }) => {
     const map = within(canvasElement)
-    await expect(map.getByText('Your clone has no remote for halyard/api, so tasks start from your fork.')).toBeVisible()
+    await expect(
+      map.getByText('Your clone has no remote for halyard/api, so tasks start from your fork, and you can’t push branches there yourself.'),
+    ).toBeVisible()
     await userEvent.click(map.getByRole('button', { name: 'Add it as a remote' }))
     await expect(args.onAddRemote).toHaveBeenCalledWith('halyard')
   },

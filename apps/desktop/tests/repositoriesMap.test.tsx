@@ -128,7 +128,11 @@ describe('a fork’s branches going upstream', () => {
   it('offers to add the repository it was forked from as a remote where its host says it is one, and adds it', async () => {
     const { client } = fakeClient({ getRepositories: vi.fn(async () => [fork({ remote: null, by: 'host', offer: false })]) })
     withServices(<Settings />, client)
-    expect(await screen.findByText('Your clone has no remote for meridian/web, so tasks start from your fork.')).toBeTruthy()
+    expect(
+      await screen.findByText(
+        'Your clone has no remote for meridian/web, so tasks start from your fork, and you can’t push branches there yourself.',
+      ),
+    ).toBeTruthy()
     vi.mocked(client.getRepositories).mockResolvedValue([fork({ remote: 'upstream', by: 'host', offer: false })])
     await userEvent.click(screen.getByRole('button', { name: 'Add it as a remote' }))
     expect(client.addParentRemote).toHaveBeenCalledWith('p1', web.id)
