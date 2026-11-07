@@ -30,6 +30,19 @@ export const serverOfCall = (title: string, meta?: unknown): string | undefined 
   const claude = record(record(meta)?.['claudeCode'])
   const named = record(claude?.['mcpServer'])?.['name']
   const toolName = typeof claude?.['toolName'] === 'string' ? claude['toolName'] : title
-  const found = typeof named === 'string' && named !== '' ? named : /^mcp__([A-Za-z0-9_-]+?)__[A-Za-z0-9_.-]+$/.exec(toolName)?.[1]
+  const found = typeof named === 'string' && named !== '' ? named : serverInToolName(toolName)
   return found === undefined || /^althar$/i.test(found) ? undefined : found
+}
+
+const SERVER_CHARS = /^[A-Za-z0-9_-]+$/
+const TOOL_CHARS = /^[A-Za-z0-9_.-]+$/
+
+/** `mcp__<server>__<tool>` split at its first `__` after the server's first character, without a pattern that backtracks. */
+const serverInToolName = (name: string): string | undefined => {
+  if (!name.startsWith('mcp__')) return undefined
+  const rest = name.slice('mcp__'.length)
+  const at = rest.indexOf('__', 1)
+  if (at < 0) return undefined
+  const server = rest.slice(0, at)
+  return SERVER_CHARS.test(server) && TOOL_CHARS.test(rest.slice(at + 2)) ? server : undefined
 }

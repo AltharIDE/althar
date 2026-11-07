@@ -31,6 +31,17 @@ describe('an MCP server’s status, as claude-agent-acp reports it', () => {
     expect(serverOfCall('Run ls')).toBeUndefined()
   })
 
+  it('reads a long odd tool name at once, and only one that fits the shape', () => {
+    expect(serverOfCall('mcp__a__b__c')).toBe('a')
+    expect(serverOfCall('mcp__my_server__list.items')).toBe('my_server')
+    expect(serverOfCall('mcp__linear')).toBeUndefined()
+    expect(serverOfCall('mcp__linear__')).toBeUndefined()
+    expect(serverOfCall('mcp__li near__x')).toBeUndefined()
+    const started = Date.now()
+    expect(serverOfCall(`mcp__${'-__'.repeat(50_000)}!`)).toBeUndefined()
+    expect(Date.now() - started).toBeLessThan(500)
+  })
+
   it('puts the server on the tool call events', () => {
     const call = normalize({ sessionUpdate: 'tool_call', toolCallId: 'c1', title: 'mcp__linear__save_issue', kind: 'other' } as never)
     expect(call).toMatchObject({ _tag: 'ToolCall', server: 'linear' })
