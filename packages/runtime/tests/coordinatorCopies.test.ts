@@ -6,7 +6,7 @@ import { join, sep } from 'node:path'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
-import { freshCopy, readsOf } from '../src/coordinatorFolder'
+import { earlierFolders, freshCopy, readsOf } from '../src/coordinatorFolder'
 
 /*
  * The coordinator's copies of the project's repositories (ADR-058): each a
@@ -225,5 +225,17 @@ describe("the coordinator's copies", () => {
     assert.isFalse(allowed.includes(join(home, '.bun')), 'the toolchain folder that holds the task folders is allowed whole')
     assert.isTrue(denied.includes(projectFolder))
     rmSync(home, { recursive: true, force: true })
+  })
+})
+
+describe('the project folders of earlier task roots', () => {
+  it('are the grandparents of the worktrees, once each, and never the project folder now', () => {
+    const now = '/data/tasks/meridian'
+    const worktrees = ['/old/meridian/t1/app', '/old/meridian/t2/app', '/old/meridian/t2/docs', `${now}/t3/app`]
+    assert.deepEqual(earlierFolders(worktrees, now), ['/old/meridian'])
+  })
+
+  it('never name a filesystem or drive root, as a moved checkout’s path would', () => {
+    assert.deepEqual(earlierFolders(['/srv/foo', '/workspace/foo', '/foo'], '/data/tasks/meridian'), [])
   })
 })

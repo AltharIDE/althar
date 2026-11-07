@@ -201,6 +201,8 @@ export interface Host {
   /** Where new tasks' folders go and who decided; absent where the main process keeps none. */
   readonly taskFolder?: () => Promise<TaskFolderState>
   /** Asks the person for another folder for new tasks, checks it and keeps it; why it was refused, or null when they cancel. */
+  /** Goes back to where the platform keeps task folders; the state as it now stands. */
+  readonly useDefaultTaskFolder?: () => Promise<TaskFolderChoice>
   readonly chooseTaskFolder?: () => Promise<TaskFolderChoice>
   /** Changes one, kept and acted on at once; all of them as they now stand. */
   readonly setPreference: <K extends PreferenceKey>(key: K, value: AppPreferences[K]) => Promise<AppPreferences>

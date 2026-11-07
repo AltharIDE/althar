@@ -1,6 +1,6 @@
 import { accessSync, constants, existsSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, isAbsolute, join, relative } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative } from 'node:path'
 
 import { TOOLCHAINS } from '@althar/runtime/locations'
 
@@ -52,6 +52,7 @@ export const refusals = {
   readOnly: 'Althar can’t write to that folder.',
   repository: 'That folder is inside a repository; choose one outside any checkout.',
   toolchain: 'That folder is inside a toolchain’s folder (such as ~/.bun); choose another.',
+  portal: 'That folder comes through the sandbox’s file portal, which task folders can’t use yet; choose one in your home folder.',
   profile: 'That folder is inside Althar’s own data; choose another.',
 }
 
@@ -76,3 +77,11 @@ export const refusalOf = (folder: string, profile: string, disk: Disk = onDisk, 
   }
   return null
 }
+
+/** The folder task folders are made in, for a pick: a folder named Althar is one already, any other gets one of its own. */
+export const taskRootIn = (picked: string): string => (basename(picked) === ROOT_NAME ? picked : join(picked, ROOT_NAME))
+const ROOT_NAME = 'Althar'
+
+/** Why a pick can't be used at all, before the folder of Althar's own is made in it: a portal path, or any refusal of `refusalOf`. */
+export const taskFolderRefusal = (picked: string, profile: string, disk: Disk = onDisk, home: string = homedir()): string | null =>
+  /^\/run\/flatpak\/doc(\/|$)/.test(picked) ? refusals.portal : refusalOf(picked, profile, disk, home)

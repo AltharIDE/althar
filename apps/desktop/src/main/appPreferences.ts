@@ -131,6 +131,8 @@ export const doNotTrack = (env: Readonly<Record<string, string | undefined>>): b
 export interface TaskFolderState {
   readonly folder: string
   readonly from: 'environment' | 'setting' | 'default'
+  /** Why the folder can't be used now (it was chosen, and has gone missing or can't be written), in a line. */
+  readonly problem?: string
 }
 
 /** What choosing a task folder came to: the state as it now stands, a refusal in a line, or nothing where the person cancelled. */

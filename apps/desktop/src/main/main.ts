@@ -1,12 +1,12 @@
 import { isStartupStage, type StartupStage } from '../startup'
 import { randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { homedir, hostname, userInfo } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 import { locations as locationsOf, taskFolder as taskFolderOf } from './locations'
-import { refusalOf } from './taskFolderCheck'
+import { refusalOf, refusals, taskFolderRefusal, taskRootIn } from './taskFolderCheck'
 
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
 import { type AppPreferences, DEFAULT_PREFERENCES, doNotTrack, isPreferenceKey } from './appPreferences'
@@ -1002,14 +1002,32 @@ ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unkn
 })
 
 // Where new tasks' worktrees go, who decided, and the person's choice of another: asked for in a folder dialog, checked, kept, and told to the runtime at once.
+const environmentSets = 'ALTHAR_WORKTREES sets this folder; it can’t be changed here.'
+/** The folder as it stands; where the person's choice has gone missing or can't be written, why, so the row can say so. */
+const taskFolderState = () => {
+  const { folder, from } = taskFolderNow()
+  const problem = from === 'setting' ? refusalOf(folder, locations().profile) : null
+  return problem === null ? { folder, from } : { folder, from, problem }
+}
+/** Keeps the person's choice (null for the platform's default) and tells the runtime: the next task's worktree goes there, those made stay where they are. */
+const keepTaskFolder = async (chosen: string | null) => {
+  const kept = await writeAppPreference(locations().profile, 'worktrees', chosen)
+  preferences = { ...preferences, worktrees: kept }
+  runtime?.postMessage({ type: 'worktrees', root: taskFolderNow().folder })
+  return taskFolderState()
+}
 ipcMain.handle('althar:task-folder', async () => {
   await preferencesRead
-  const { folder, from } = taskFolderNow()
-  return { folder, from }
+  return taskFolderState()
+})
+ipcMain.handle('althar:use-default-task-folder', async () => {
+  await preferencesRead
+  if (taskFolderNow().from === 'environment') return { refused: environmentSets }
+  return keepTaskFolder(null)
 })
 ipcMain.handle('althar:choose-task-folder', async (event) => {
   await preferencesRead
-  if (taskFolderNow().from === 'environment') return { refused: 'ALTHAR_WORKTREES sets this folder; it can’t be changed here.' }
+  if (taskFolderNow().from === 'environment') return { refused: environmentSets }
   const window = BrowserWindow.fromWebContents(event.sender)
   const options = {
     properties: ['openDirectory' as const, 'createDirectory' as const],
@@ -1018,16 +1036,24 @@ ipcMain.handle('althar:choose-task-folder', async (event) => {
     defaultPath: taskFolderNow().folder,
   }
   const result = window === null ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(window, options)
-  const path = result.canceled ? undefined : result.filePaths[0]
-  if (path === undefined) return null
-  const refused = refusalOf(path, locations().profile)
+  const picked = result.canceled ? undefined : result.filePaths[0]
+  if (picked === undefined) return null
+  // Where the platform keeps them is no choice to check: it is the default, kept as none.
+  if (resolve(picked) === resolve(taskFolderOf(process.env, process.platform, homedir(), undefined, null).folder))
+    return keepTaskFolder(null)
+  const refused = taskFolderRefusal(picked, locations().profile)
   if (refused !== null) return { refused }
-  const kept = await writeAppPreference(locations().profile, 'worktrees', path)
-  preferences = { ...preferences, worktrees: kept }
-  // The runtime makes the next task's worktree there; those it made stay where they are.
-  runtime?.postMessage({ type: 'worktrees', root: path })
-  const { folder, from } = taskFolderNow()
-  return { folder, from }
+  // Althar owns what it makes in the folder (it clears runs and keeps the coordinator's copies there), so it makes them in a folder of its own
+  // in the pick, never among the person's own: a pick named Althar is that folder already.
+  const root = taskRootIn(picked)
+  try {
+    mkdirSync(root, { recursive: true })
+  } catch {
+    return { refused: refusals.readOnly }
+  }
+  const refusedRoot = refusalOf(root, locations().profile)
+  if (refusedRoot !== null) return { refused: refusedRoot }
+  return keepTaskFolder(root)
 })
 
 // An editor's icon, as Finder draws it, by its id; null for one not found. Only editors Althar knows are drawn.

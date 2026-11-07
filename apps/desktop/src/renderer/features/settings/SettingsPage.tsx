@@ -431,6 +431,8 @@ function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
             folder={taskFolder.folder}
             from={taskFolder.from}
             onChange={taskFolder.change}
+            onUseDefault={taskFolder.useDefault}
+            {...(taskFolder.problem === undefined ? {} : { problem: taskFolder.problem })}
             busy={taskFolder.busy}
             {...(taskFolder.refusal === null ? {} : { refusal: taskFolder.refusal })}
           />

@@ -65,6 +65,25 @@ export const Refused: Story = {
   },
 }
 
+/** A folder the person chose has gone missing: the row says so, and Use the default goes back. */
+export const Missing: Story = {
+  args: {
+    folder: '/mnt/gone/Althar',
+    from: 'setting',
+    problem: 'That folder is missing; new tasks can’t be made there. Choose another, or use the default.',
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('alert')).toHaveTextContent('missing')
+    await expect(c.getByRole('button', { name: 'Use the default' })).toBeEnabled()
+  },
+  render: (args) => (
+    <SettingList>
+      <TaskFolderLocation {...args} onUseDefault={fn()} />
+    </SettingList>
+  ),
+}
+
 /** The environment sets it: the row says so and Change is off. */
 export const SetByEnvironment: Story = {
   args: { folder: '/srv/althar', from: 'environment' },

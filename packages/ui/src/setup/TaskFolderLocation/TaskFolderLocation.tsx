@@ -18,6 +18,8 @@ export interface TaskFolderLocationText {
   /** What the choice reaches, and what it leaves. */
   note: string
   change: string
+  /** Back to where the platform keeps them; shown once the person has chosen another. */
+  useDefault: string
   /** Under the folder, where the environment sets it. */
   fromEnvironment: string
 }
@@ -26,6 +28,7 @@ export const taskFolderLocationText: TaskFolderLocationText = {
   title: 'Task folders',
   note: 'New tasks’ folders are made here. Folders already made stay where they are.',
   change: 'Change',
+  useDefault: 'Use the default',
   fromEnvironment: 'Set by ALTHAR_WORKTREES in the environment, so it can’t be changed here.',
 }
 
@@ -33,6 +36,10 @@ export interface TaskFolderLocationProps {
   folder: string
   from: TaskFolderFrom
   onChange: () => void
+  /** Goes back to the platform's default; the button shows only where the person chose a folder. */
+  onUseDefault?: () => void
+  /** The chosen folder can't be used now (gone missing, or read-only), in a line. */
+  problem?: string
   /** A choice is open in the picker or being checked. */
   busy?: boolean
   /** Why the last choice was refused, in one line. */
@@ -44,6 +51,8 @@ export function TaskFolderLocation({
   folder,
   from,
   onChange,
+  onUseDefault,
+  problem,
   busy = false,
   refusal,
   text = taskFolderLocationText,
@@ -59,9 +68,9 @@ export function TaskFolderLocation({
         </>
       }
       under={
-        refusal === undefined ? undefined : (
+        refusal === undefined && problem === undefined ? undefined : (
           <p className={s.refusal} role="alert">
-            {refusal}
+            {refusal ?? problem}
           </p>
         )
       }
@@ -74,6 +83,11 @@ export function TaskFolderLocation({
           <Button size="small" onClick={onChange} disabled={fixed || busy} busy={busy} aria-labelledby={ids.labelledBy}>
             {text.change}
           </Button>
+          {from === 'setting' && onUseDefault !== undefined && (
+            <Button size="small" variant="quiet" onClick={onUseDefault} disabled={busy}>
+              {text.useDefault}
+            </Button>
+          )}
         </span>
       )}
     </SettingRow>

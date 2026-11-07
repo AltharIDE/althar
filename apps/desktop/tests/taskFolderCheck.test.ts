@@ -2,7 +2,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { type Disk, refusalOf, refusals } from '../src/main/taskFolderCheck'
+import { type Disk, refusalOf, refusals, taskFolderRefusal, taskRootIn } from '../src/main/taskFolderCheck'
 
 /** A disk of folders by path; `readOnly` ones can't be written, `repositories` have a .git. */
 const disk = (folders: ReadonlyArray<string>, readOnly: ReadonlyArray<string> = [], repositories: ReadonlyArray<string> = []): Disk => ({
@@ -57,5 +57,26 @@ describe('a folder for task folders', () => {
     expect(refusalOf(inside, profile, disk([inside]), '/home/ada')).toBe(refusals.toolchain)
     expect(refusalOf('/home/ada/.bun', profile, disk(['/home/ada/.bun']), '/home/ada')).toBe(refusals.toolchain)
     expect(refusalOf('/home/ada/tasks', profile, disk(['/home/ada/tasks']), '/home/ada')).toBeNull()
+  })
+})
+
+describe('the folder made in a pick', () => {
+  it('is a folder of Althar’s own in the pick, so it never lands among the person’s own folders', () => {
+    expect(taskRootIn('/data/stuff')).toBe(join('/data/stuff', 'Althar'))
+  })
+
+  it('is the pick itself where it is named Althar already', () => {
+    expect(taskRootIn('/data/Althar')).toBe('/data/Althar')
+  })
+})
+
+describe('a pick through the sandbox’s file portal', () => {
+  it('is refused with a line saying why', () => {
+    const path = '/run/flatpak/doc/abc123/tasks'
+    expect(taskFolderRefusal(path, profile, disk([path]), '/home/ada')).toBe(refusals.portal)
+  })
+
+  it('is otherwise checked as any folder', () => {
+    expect(taskFolderRefusal('/data/tasks', profile, disk(['/data/tasks']), '/home/ada')).toBeNull()
   })
 })

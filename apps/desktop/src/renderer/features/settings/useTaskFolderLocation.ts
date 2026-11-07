@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import type { TaskFolderState } from '../../../main/appPreferences'
+import type { TaskFolderChoice, TaskFolderState } from '../../../main/appPreferences'
 import { useServices } from '../../data/services'
 
 /*
@@ -13,6 +13,8 @@ import { useServices } from '../../data/services'
 
 export interface TaskFolderLocationModel extends TaskFolderState {
   readonly change: () => void
+  /** Back to where the platform keeps them. */
+  readonly useDefault: () => void
   readonly busy: boolean
   /** Why the last choice was refused. */
   readonly refusal: string | null
@@ -37,11 +39,11 @@ export const useTaskFolderLocation = (): TaskFolderLocationModel | null => {
     }
   }, [host])
 
-  const change = useCallback(() => {
-    if (host.chooseTaskFolder === undefined) return
+  const ask = useCallback((asking: (() => Promise<TaskFolderChoice>) | undefined) => {
+    if (asking === undefined) return
     setBusy(true)
     setRefusal(null)
-    host.chooseTaskFolder().then(
+    asking().then(
       (choice) => {
         setBusy(false)
         if (choice === null) return
@@ -53,7 +55,9 @@ export const useTaskFolderLocation = (): TaskFolderLocationModel | null => {
         setRefusal(text.failed)
       },
     )
-  }, [host])
+  }, [])
+  const change = useCallback(() => ask(host.chooseTaskFolder), [ask, host])
+  const useDefault = useCallback(() => ask(host.useDefaultTaskFolder), [ask, host])
 
-  return state === null ? null : { ...state, change, busy, refusal }
+  return state === null ? null : { ...state, change, useDefault, busy, refusal }
 }

@@ -277,13 +277,13 @@ export const coordinatorFolder = (projectId: string) =>
       ORDER BY b.created_at, b.rowid`
     const projectFolder = join(config.worktreeRoot, project.slug)
     // Task folders made under another root, before the person moved it (Settings › Task folders), are still there.
-    const earlier = (yield* sql<{ path: string }>`
-      SELECT path FROM workspaces WHERE project_id = ${projectId} AND device_id = ${instance.deviceId} AND access = 'write'`)
-      // A worktree is root/project/task/repository: the project's folder in that root, once.
-      // A task working in the person's own checkout (Local) has no folder of its own here.
-      .filter((workspace) => !bindings.some((binding) => binding.repository === workspace.path))
-      .map((workspace) => dirname(dirname(workspace.path)))
-      .filter((path) => path !== projectFolder && !path.startsWith(projectFolder + sep))
+    const earlier = earlierFolders(
+      (yield* sql<{ path: string }>`
+        SELECT path FROM workspaces WHERE project_id = ${projectId} AND device_id = ${instance.deviceId} AND kind IS NULL`).map(
+        (workspace) => workspace.path,
+      ),
+      projectFolder,
+    )
     const folder = coordinatorFolderAt(config.worktreeRoot, project.slug)
     // Beside the coordinator's folder, never in it: what its commands may write is only that folder.
     const mirrors = join(projectFolder, '.coordinator-mirrors')
@@ -316,3 +316,12 @@ export const coordinatorFolder = (projectId: string) =>
     })
     return { folder, repositories, reads } satisfies CoordinatorFolder
   })
+
+/**
+ * The project's folders in earlier task roots, from the paths of its worktrees (root/project/task/repository). The person's own checkouts
+ * (kind 'checkout') aren't asked for, and a path too shallow to have a root (a filesystem or drive root would deny everything) is skipped.
+ */
+export const earlierFolders = (worktrees: ReadonlyArray<string>, projectFolder: string): ReadonlyArray<string> => {
+  const folders = worktrees.map((path) => dirname(dirname(path))).filter((path) => dirname(path) !== path)
+  return [...new Set(folders)].filter((path) => path !== projectFolder && !path.startsWith(projectFolder + sep))
+}
