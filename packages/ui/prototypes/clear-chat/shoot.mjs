@@ -11,12 +11,8 @@ const out = resolve(repo, '.althar/scratch/clear-chat')
 mkdirSync(out, { recursive: true })
 const only = process.argv.slice(2)
 
-/* ——— What the person does, as clicks. ——— */
 const button = (page, name) => page.getByRole('button', { name }).first().click()
 const exact = (page, name) => page.getByRole('button', { name, exact: true }).first().click()
-const menu = (page, name) => page.getByRole('menuitem', { name }).first().click()
-const more = (page) => button(page, 'More for this project')
-const knows = (page) => button(page, 'What it knows')
 const say = async (page, words) => {
   const field = page.locator('[contenteditable=true], textarea').first()
   await field.click()
@@ -24,167 +20,112 @@ const say = async (page, words) => {
   await field.press('Enter')
   await page.waitForTimeout(2700)
 }
-/** The project's settings, at its notes, as the person opens them: from its views, then down the side. */
-const notes = async (page) => {
-  await page.getByRole('radio', { name: 'Settings' }).click()
-  await page.waitForTimeout(400)
-  await page.getByText('Notes', { exact: true }).first().click()
-  await page.waitForTimeout(400)
+/** The ring's detail, open while the pointer rests on it. */
+const ring = async (page) => {
+  await page.getByRole('button', { name: /Context \d+% used/ }).hover()
+  await page.waitForTimeout(600)
 }
-/** Back at the top of the conversation: the place a clear puts the view. */
-const toTop = (page) =>
-  page.evaluate(() => {
-    const thread = document.querySelector('section[aria-label="Conversation"]')
-    for (let box = thread?.parentElement ?? null; box !== null; box = box.parentElement)
-      if (/(auto|scroll)/.test(getComputedStyle(box).overflowY)) {
-        box.scrollTop = 0
-        break
-      }
+/** The clear, from wherever the direction puts it, and the kind chosen. */
+const clear = async (page, direction, kind) => {
+  if (direction === 'C') await ring(page)
+  await (direction === 'C' ? page.getByRole('button', { name: 'Clear…' }).click() : exact(page, 'Clear'))
+  await page.waitForTimeout(500)
+  if (kind === 'forget') {
+    await page.getByRole('radio', { name: /Forget it too/ }).click()
+    await page.waitForTimeout(200)
+    await page.getByRole('button', { name: 'Clear and forget' }).click()
+  } else {
+    await page.getByRole('button', { name: 'Clear the view' }).click()
+  }
+  await page.waitForTimeout(900)
+}
+/** Off the controls, so no tooltip or open ring stands over what was done. */
+const settle = async (page) => {
+  await page.keyboard.press('Escape')
+  await page.mouse.move(20, 300)
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
   })
+  await page.waitForTimeout(700)
+}
 
 const shots = [
   // The conversation as built.
   { id: '0-today', d: 'Today' },
 
-  // B: the brief is the memory; the thread is disposable.
-  { id: 'b1-knows', d: 'B', go: (page) => knows(page) },
-  { id: 'b2-new', d: 'B', go: (page) => button(page, 'New chat') },
+  // A: the clear in the composer, beside the model, and /clear in the field.
+  { id: 'a1-composer', d: 'A' },
   {
-    id: 'b3-answer',
+    id: 'a2-dialog',
+    d: 'A',
+    settle: false,
+    go: async (page) => {
+      await exact(page, 'Clear')
+      await page.waitForTimeout(500)
+    },
+  },
+  { id: 'a3-cleared', d: 'A', go: (page) => clear(page, 'A', 'view') },
+  { id: 'a4-forgot', d: 'A', go: (page) => clear(page, 'A', 'forget') },
+
+  // B: a conversation bar above the thread, with Clear in it.
+  { id: 'b1-head', d: 'B' },
+  { id: 'b2-cleared', d: 'B', go: (page) => clear(page, 'B', 'view') },
+  {
+    id: 'b3-earlier',
     d: 'B',
     go: async (page) => {
-      await button(page, 'New chat')
+      await clear(page, 'B', 'view')
+      await button(page, 'Show earlier')
+      await page.waitForTimeout(700)
+    },
+  },
+  { id: 'b4-forgot', d: 'B', go: (page) => clear(page, 'B', 'forget') },
+
+  // C: the clear in the context ring's detail, where Compact already is.
+  { id: 'c1-ring', d: 'C', go: (page) => ring(page), settle: false },
+  {
+    id: 'c2-cleared',
+    d: 'C',
+    go: async (page) => {
+      await clear(page, 'C', 'view')
+      await settle(page)
+    },
+  },
+  { id: 'c3-forgot', d: 'C', go: (page) => clear(page, 'C', 'forget') },
+
+  // The one question, and what the coordinator says after each kind.
+  {
+    id: 'd1-forget-dialog',
+    d: 'B',
+    settle: false,
+    go: async (page) => {
+      await exact(page, 'Clear')
+      await page.waitForTimeout(500)
+      await page.getByRole('radio', { name: /Forget it too/ }).click()
+      await page.waitForTimeout(300)
+    },
+  },
+  {
+    id: 'd2-answer',
+    d: 'B',
+    go: async (page) => {
+      await clear(page, 'B', 'view')
       await say(page, 'Where were we?')
     },
   },
   {
-    id: 'b4-earlier',
+    id: 'd3-fresh',
     d: 'B',
     go: async (page) => {
-      await button(page, 'New chat')
-      await page.waitForTimeout(500)
-      await exact(page, 'Read')
-    },
-  },
-  {
-    id: 'b5-one-line',
-    d: 'B',
-    go: async (page) => {
-      await knows(page)
-      await page.getByRole('button', { name: /Forget: You asked me/ }).click()
-    },
-  },
-  {
-    id: 'b6-forget',
-    d: 'B',
-    go: async (page) => {
-      await knows(page)
-      await button(page, 'Forget everything…')
-    },
-  },
-  {
-    id: 'b7-forgotten',
-    d: 'B',
-    go: async (page) => {
-      await knows(page)
-      await button(page, 'Forget everything…')
-      await exact(page, 'Forget it')
-    },
-  },
-
-  // A: a page opens with the coordinator's handover; the pages before stay.
-  { id: 'a1-new', d: 'A', go: (page) => button(page, 'New page') },
-  {
-    id: 'a2-old',
-    d: 'A',
-    go: async (page) => {
-      await button(page, 'New page')
-      await page.waitForTimeout(500)
-      await page.getByRole('button', { name: /Read page 1/ }).click()
-    },
-  },
-  {
-    id: 'a3-answer',
-    d: 'A',
-    go: async (page) => {
-      await button(page, 'New page')
-      await page.waitForTimeout(500)
+      await clear(page, 'B', 'forget')
       await say(page, 'Where were we?')
     },
   },
-  {
-    id: 'a4-forget',
-    d: 'A',
-    go: async (page) => {
-      await more(page)
-      await menu(page, 'Forget everything…')
-    },
-  },
-  {
-    id: 'a5-forgotten',
-    d: 'A',
-    go: async (page) => {
-      await more(page)
-      await menu(page, 'Forget everything…')
-      await exact(page, 'Forget it')
-      await page.waitForTimeout(500)
-      await toTop(page)
-    },
-  },
 
-  // C: focus is a view; the session and the thread are untouched.
-  {
-    id: 'c1-focus',
-    d: 'C',
-    go: async (page) => {
-      await button(page, 'Focus')
-      await page.waitForTimeout(500)
-      await toTop(page)
-    },
-  },
-  { id: 'c2-last', d: 'C', go: (page) => button(page, 'Focus') },
-  { id: 'c3-settings', d: 'C', go: (page) => notes(page) },
-  {
-    id: 'c4-forgotten',
-    d: 'C',
-    go: async (page) => {
-      await notes(page)
-      await button(page, 'Forget…')
-      await exact(page, 'Forget it')
-      await page.waitForTimeout(400)
-      await page.getByRole('radio', { name: 'Conversation' }).click()
-      await page.waitForTimeout(400)
-      await page.keyboard.press('b')
-      await page.keyboard.press('b')
-      await page.waitForTimeout(500)
-      await page.evaluate(() => {
-        if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
-      })
-      await toTop(page)
-    },
-  },
-  {
-    id: 'c5-show',
-    d: 'C',
-    go: async (page) => {
-      await button(page, 'Focus')
-      await page.waitForTimeout(500)
-      await button(page, 'Show all')
-    },
-  },
-
-  // B in a narrow window: the header keeps the glyphs, the labels in tooltips.
-  {
-    id: 'n1-b-narrow',
-    d: 'B',
-    width: 780,
-    height: 760,
-    room: 'talk',
-    go: async (page) => {
-      await button(page, 'New chat')
-      await page.waitForTimeout(500)
-    },
-  },
+  // In a narrow window, each placement keeps its label.
+  { id: 'n1-a-narrow', d: 'A', width: 780, height: 760 },
+  { id: 'n2-b-narrow', d: 'B', width: 780, height: 760 },
+  { id: 'n3-c-narrow', d: 'C', width: 780, height: 760 },
 ]
 
 const browser = await chromium.launch()
@@ -198,14 +139,11 @@ for (const shot of shots.filter((one) => only.length === 0 || only.includes(one.
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text().slice(0, 300))
   })
-  const hash = shot.hash ?? `#/projects/p1?room=${shot.room ?? 'both'}`
-  await page.goto(`http://localhost:5363/?d=${shot.d}&bare${hash}`)
+  await page.goto(`http://localhost:5363/?d=${shot.d}&bare#/projects/p1?room=both`)
   await page.waitForTimeout(1500)
   try {
     await shot.go?.(page)
-    // Off the buttons, so no tooltip stands over what was done.
-    await page.mouse.move(20, 300)
-    await page.waitForTimeout(900)
+    if (shot.settle !== false) await settle(page)
   } catch (error) {
     errors.push(String(error).split('\n')[0])
   }

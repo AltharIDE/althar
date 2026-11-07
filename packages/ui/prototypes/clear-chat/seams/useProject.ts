@@ -1,4 +1,4 @@
-// Scrappy: the project's model as the app reads it, with the conversation as the direction shows it, and the coordinator answering on the page.
+// Scrappy: the project's model as the app reads it, with the conversation as the clear has left it, and the coordinator answering on the page.
 import { type ProjectModel, useProject as useRealProject } from '../../../../../apps/desktop/src/renderer/features/project/useProject'
 import { proto, sessionOf, shownOf, useProto } from '../state'
 

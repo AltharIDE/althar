@@ -1,93 +1,51 @@
-// Scrappy: what the page holds: the direction shown, and for each, the conversation as its page, brief or focus has it.
+// Scrappy: what the page holds: the direction shown, and the conversation as each placement has cleared it.
 import { useSyncExternalStore } from 'react'
 
 import { items } from '../../../../apps/desktop/tests/fixtures'
-import { BRIEF, briefReply, type BriefLine, conversation, PAGE_OPENING, REPLY, stillOpen } from './data'
+import { conversation, REPLY, stillOpen } from './data'
 import type { SessionSummary, ThreadItem } from './deps'
 
 export type Direction = 'A' | 'B' | 'C' | 'Today'
 
 /** The directions in the switcher's order, each with its key: 1 to 4. */
 export const DIRECTIONS: ReadonlyArray<{ readonly value: Direction; readonly name: string; readonly about: string }> = [
-  {
-    value: 'A',
-    name: 'Pages',
-    about: 'A new page opens with the coordinator’s handover; earlier pages stay in the thread, folded',
-  },
-  {
-    value: 'B',
-    name: 'What it knows',
-    about: 'The thread is disposable; a brief you can read and edit holds what the coordinator knows',
-  },
-  { value: 'C', name: 'Focus', about: 'Hide what’s settled and older talk; the last exchange and what’s open stay' },
+  { value: 'A', name: 'Composer', about: 'Clear sits in the composer, beside the model; /clear does it from the field' },
+  { value: 'B', name: 'Thread head', about: 'A conversation bar above the thread holds Clear, beside what it clears' },
+  { value: 'C', name: 'Session ring', about: 'Clear sits in the context ring, where Compact already is' },
   { value: 'Today', name: 'Today', about: 'The conversation as built: nothing clears it' },
 ]
 
-/** What the coordinator holds: its session as it was, a page's handover, a brief, or nothing. */
-export type Memory = 'kept' | 'summary' | 'brief' | 'fresh'
-
-/** Where a page or a chat began and ended, by sequence and time. */
-export interface Bound {
-  readonly start: number
-  readonly began: string | null
-  readonly ended: string | null
-}
+/** What the coordinator holds after a clear: the same session, or a fresh one. */
+export type Memory = 'kept' | 'fresh'
 
 export interface Talk {
-  /** Everything the thread holds, oldest first. */
+  /** Everything the thread holds, oldest first; a wipe leaves only what is still open. */
   readonly items: ReadonlyArray<ThreadItem>
-  /** A: the pages closed, oldest first; the current page is the one begun after the last. */
-  readonly pages: ReadonlyArray<Bound>
-  /** A: where the current page begins, by sequence; null before the first new page. */
-  readonly pageStart: number | null
-  /** A: the earlier pages are shown above the current one. */
-  readonly pageOpen: boolean
-  /** B: the chats closed, oldest first; what comes after the last boundary is the current chat. */
-  readonly chats: ReadonlyArray<Bound>
-  /** B: where the current chat begins, by sequence; null before the first new chat. */
-  readonly chatStart: number | null
-  /** B: the earlier chat open in place of the current one, by its place in `chats`. */
-  readonly viewingChat: number | null
-  /** B: what it knows, as the person can read and edit it. */
-  readonly brief: ReadonlyArray<BriefLine>
-  /** C: what is settled and older talk is hidden. */
-  readonly focused: boolean
-  /** The conversation was forgotten: what is still open stays. */
+  /** Where the cleared view begins, by sequence; null until the view is cleared. */
+  readonly mark: number | null
+  /** The conversation before the mark is open above the divider. */
+  readonly earlierOpen: boolean
+  /** The conversation and what the coordinator learned from it are gone. */
   readonly wiped: boolean
   readonly memory: Memory
-  /** How full the coordinator's context is, in tokens; null with no session yet. */
+  /** How full the coordinator's context is, in tokens; null with no session. */
   readonly context: number | null
   /** The coordinator is answering. */
   readonly answering: boolean
-  /** Something was said since the current page or chat began. */
-  readonly saidSince: boolean
-  /** B: when the conversation was forgotten. */
-  readonly forgotten: string | null
-  /** A: what it was before the last new page, for undo. */
-  readonly before: Talk | null
+  /** What the view was before the last clear, for Undo. */
+  readonly before: { readonly mark: number | null; readonly earlierOpen: boolean } | null
 }
 
-const fresh = (): Talk => {
-  const all = conversation()
-  return {
-    items: all,
-    pages: [],
-    pageStart: null,
-    pageOpen: false,
-    chats: [],
-    chatStart: null,
-    viewingChat: null,
-    brief: BRIEF.map((line) => ({ ...line })),
-    focused: false,
-    wiped: false,
-    memory: 'kept',
-    context: 96_000,
-    answering: false,
-    saidSince: false,
-    forgotten: null,
-    before: null,
-  }
-}
+const fresh = (): Talk => ({
+  items: conversation(),
+  mark: null,
+  earlierOpen: false,
+  wiped: false,
+  memory: 'kept',
+  context: 96_000,
+  answering: false,
+  before: null,
+})
 
 export interface Proto {
   readonly direction: Direction
@@ -119,8 +77,6 @@ const lastSequence = (talk: Talk) => talk.items.at(-1)?.sequence ?? 0
 /** An item said now, rather than when the fixtures say. */
 const now = (item: ThreadItem): ThreadItem => ({ ...item, createdAt: new Date().toISOString() })
 
-const within = (talk: Talk, from: number, to: number) => talk.items.filter((item) => item.sequence >= from && item.sequence < to)
-
 /** The box the conversation scrolls in, whichever frame the app puts it in. */
 const threadBox = (): HTMLElement | null => {
   const thread = document.querySelector('section[aria-label="Conversation"]')
@@ -138,7 +94,7 @@ export const scrollThreadToEnd = () =>
     }),
   )
 
-/** An earlier page or chat opens at its own beginning. */
+/** A clear puts the view at the top, where its divider is; so does opening or closing the earlier conversation. */
 export const scrollThreadToTop = () =>
   requestAnimationFrame(() =>
     requestAnimationFrame(() => {
@@ -147,20 +103,15 @@ export const scrollThreadToTop = () =>
     }),
   )
 
-/** When a page or a chat ran, by its own items. */
-const boundOf = (talk: Talk, from: number, to: number): Bound => {
-  const own = within(talk, from, to)
-  return { start: from, began: own[0]?.createdAt ?? null, ended: own.at(-1)?.createdAt ?? null }
-}
+/** Whether the coordinator holds any conversation at all: open work alone isn't one, so a wipe leaves nothing to clear. */
+export const hasConversation = (talk: Talk): boolean => talk.items.some((item) => !stillOpen(item))
 
-/** What the person said on the page or in the chat shown: nothing to start one from, otherwise. */
-export const saidOnPage = (talk: Talk) => talk.items.some((item) => item.kind === 'user_message' && item.sequence >= (talk.pageStart ?? 0))
-export const saidInChat = (talk: Talk) =>
-  talk.items.some((item) => item.kind === 'user_message' && item.sequence > (talk.chatStart ?? Number.NEGATIVE_INFINITY))
+/** Whether the view shown has anything to clear: open work stays, and the earlier view is read, not cleared. */
+export const canClearView = (talk: Talk): boolean =>
+  !talk.earlierOpen && talk.items.some((item) => item.sequence >= (talk.mark ?? Number.NEGATIVE_INFINITY) && !stillOpen(item))
 
 /** What the coordinator answers, from what it remembers. */
-const answerFor = (talk: Talk): string =>
-  talk.wiped ? REPLY.fresh : talk.memory === 'brief' ? briefReply(talk.brief) : REPLY[talk.memory === 'summary' ? 'summary' : 'kept']
+const answerFor = (talk: Talk): string => (talk.memory === 'fresh' ? REPLY.fresh : REPLY.kept)
 
 export const proto = {
   get: () => state,
@@ -171,61 +122,36 @@ export const proto = {
   },
 
   /** Back to the conversation as it was this morning, in the direction shown. */
-  startOver: () => change(() => fresh()),
+  startOver: () => {
+    change(() => fresh())
+    scrollThreadToEnd()
+  },
 
-  /** A: the current page closes into the ones above, and a fresh session opens with what it carries over. */
-  newPage: () =>
-    change((talk) => {
-      if (!saidOnPage(talk)) return talk
-      const from = talk.pageStart ?? talk.items[0]!.sequence
-      const handover = now(items.says(PAGE_OPENING, 'claude-code', `page-${talk.pages.length + 2}`))
-      return {
-        ...talk,
-        items: [...talk.items, handover],
-        pages: [...talk.pages, boundOf(talk, from, handover.sequence)],
-        pageStart: handover.sequence,
-        pageOpen: false,
-        saidSince: false,
-        memory: 'summary',
-        context: 12_000,
-        before: talk,
-      }
-    }),
+  /** The view starts empty; the same session goes on, so the coordinator still knows the conversation. */
+  clearView: () => {
+    if (!canClearView(state.talks[state.direction])) return
+    change((talk) => ({
+      ...talk,
+      mark: lastSequence(talk) + 1,
+      earlierOpen: false,
+      before: { mark: talk.mark, earlierOpen: talk.earlierOpen },
+    }))
+    scrollThreadToTop()
+  },
 
-  /** A: the new page goes, and the session that was before it comes back, until something is said on it. */
-  undoPage: () => change((talk) => (talk.before === null || talk.saidSince ? talk : { ...talk.before, before: null })),
+  /** The clear is taken back: the whole conversation shows again. */
+  undoClear: () => {
+    change((talk) =>
+      talk.before === null ? talk : { ...talk, mark: talk.before.mark, earlierOpen: talk.before.earlierOpen, before: null },
+    )
+    scrollThreadToEnd()
+  },
 
-  /** A: the earlier pages are shown above the current one, or put away again. */
-  showPages: (open: boolean) => change((talk) => ({ ...talk, pageOpen: open })),
-
-  /** B: the thread starts empty; the brief and the earlier chat stay, and a fresh session is briefed from the brief. */
-  newChat: () =>
-    change((talk) => {
-      if (!saidInChat(talk)) return talk
-      const from =
-        talk.chatStart === null
-          ? talk.items[0]!.sequence
-          : (talk.items.find((item) => item.sequence > talk.chatStart!)?.sequence ?? talk.chatStart + 1)
-      const end = lastSequence(talk)
-      return {
-        ...talk,
-        chats: [...talk.chats, boundOf(talk, from, end + 1)],
-        chatStart: end,
-        viewingChat: null,
-        saidSince: false,
-        memory: 'brief',
-        context: 12_000,
-      }
-    }),
-
-  /** B: an earlier chat open in place of the current one. */
-  viewChat: (index: number | null) => change((talk) => ({ ...talk, viewingChat: index })),
-
-  /** B: one thing the brief holds is forgotten. */
-  forgetLine: (id: string) => change((talk) => ({ ...talk, brief: talk.brief.filter((line) => line.id !== id) })),
-
-  /** C: what is settled and older talk is hidden, or shown again. */
-  toggleFocus: () => change((talk) => ({ ...talk, focused: !talk.focused })),
+  /** The conversation before the clear is read above the divider, or put away again. */
+  showEarlier: (open: boolean) => {
+    change((talk) => ({ ...talk, earlierOpen: open }))
+    scrollThreadToTop()
+  },
 
   /** What the person says: it goes in the thread, and the coordinator answers from what it remembers. */
   say: (body: string) => {
@@ -233,11 +159,10 @@ export const proto = {
     change((talk) => ({
       ...talk,
       items: [...talk.items, now(items.you(body))],
-      saidSince: true,
-      viewingChat: null,
       answering: true,
+      // A wiped coordinator starts a session with this turn; the fresh line belongs to the empty view before it.
+      wiped: false,
       context: talk.context ?? 14_000,
-      before: null,
     }))
     scrollThreadToEnd()
     window.setTimeout(() => {
@@ -258,38 +183,32 @@ export const proto = {
   },
 
   /** The conversation and everything the coordinator learned from it go; what is still open stays. */
-  forget: () =>
+  forget: () => {
     change((talk) => ({
       ...talk,
       items: talk.items.filter(stillOpen),
-      pages: [],
-      pageStart: null,
-      pageOpen: false,
-      chats: [],
-      chatStart: null,
-      viewingChat: null,
-      brief: [],
-      focused: false,
+      mark: null,
+      earlierOpen: false,
       wiped: true,
       memory: 'fresh',
       context: null,
       answering: false,
-      saidSince: false,
-      forgotten: new Date().toISOString(),
       before: null,
-    })),
+    }))
+    scrollThreadToTop()
+  },
 }
 
 export const useProto = () => useSyncExternalStore(proto.subscribe, proto.get)
 
 export interface Shown {
-  /** What shows above the divider: before the page, chat or focus shown. */
+  /** What shows above the divider: the conversation before the clear. */
   readonly earlier: ReadonlyArray<ThreadItem>
-  /** What the thread holds now. */
+  /** What the thread holds now: what is still open, then what came after the clear. */
   readonly current: ReadonlyArray<ThreadItem>
   /** Whether there is a divider at all, and so whether the blocks are split. */
   readonly divided: boolean
-  /** C: what focus hides. */
+  /** What the clear took out of the view. */
   readonly hidden: ReadonlyArray<ThreadItem>
 }
 
@@ -297,47 +216,24 @@ const EMPTY: ReadonlyArray<ThreadItem> = []
 
 /** What the thread shows of the conversation, in the direction shown: what is still open is carried into the whole of it. */
 export const shownOf = (direction: Direction, talk: Talk): Shown => {
-  if (talk.wiped) return { earlier: EMPTY, current: talk.items.filter(stillOpen), divided: true, hidden: EMPTY }
+  if (talk.wiped) return { earlier: EMPTY, current: talk.items, divided: true, hidden: EMPTY }
+  if (direction === 'Today' || talk.mark === null) return { earlier: EMPTY, current: talk.items, divided: false, hidden: EMPTY }
 
-  if (direction === 'A') {
-    if (talk.pageStart === null) return { earlier: EMPTY, current: talk.items, divided: false, hidden: EMPTY }
-    const carried = talk.items.filter((item) => item.sequence < talk.pageStart! && stillOpen(item))
-    const own = talk.items.filter((item) => item.sequence >= talk.pageStart!)
-    const earlier = talk.pageOpen ? talk.items.filter((item) => item.sequence < talk.pageStart! && !stillOpen(item)) : EMPTY
-    // The page opens with the coordinator's word, then what is still open, then what is said on it.
-    const opening = own.slice(0, 1)
-    return { earlier, current: [...opening, ...carried, ...own.slice(1)], divided: true, hidden: EMPTY }
+  const before = talk.items.filter((item) => item.sequence < talk.mark!)
+  const after = talk.items.filter((item) => item.sequence >= talk.mark!)
+  const carried = before.filter(stillOpen)
+  const hidden = before.filter((item) => !stillOpen(item))
+  // The earlier conversation is read in the thread's place, the divider at the top saying how to come back.
+  if (talk.earlierOpen) return { earlier: EMPTY, current: hidden, divided: hidden.length > 0, hidden }
+  return {
+    earlier: EMPTY,
+    current: [...carried, ...after],
+    divided: hidden.length > 0,
+    hidden,
   }
-
-  if (direction === 'B') {
-    if (talk.viewingChat !== null) {
-      const one = talk.chats[talk.viewingChat]
-      if (one === undefined) return { earlier: EMPTY, current: talk.items, divided: false, hidden: EMPTY }
-      const end = talk.chats[talk.viewingChat + 1]?.start ?? (talk.chatStart ?? Number.POSITIVE_INFINITY) + 1
-      const current = talk.items.filter((item) => item.sequence >= one.start && item.sequence < end)
-      return { earlier: EMPTY, current, divided: true, hidden: EMPTY }
-    }
-    if (talk.chatStart === null) return { earlier: EMPTY, current: talk.items, divided: false, hidden: EMPTY }
-    const carried = talk.items.filter((item) => item.sequence <= talk.chatStart! && stillOpen(item))
-    const after = talk.items.filter((item) => item.sequence > talk.chatStart!)
-    return { earlier: EMPTY, current: [...carried, ...after], divided: talk.chats.length > 0, hidden: EMPTY }
-  }
-
-  if (direction === 'C') {
-    if (!talk.focused) return { earlier: EMPTY, current: talk.items, divided: false, hidden: EMPTY }
-    const last = [...talk.items].reverse().find((item) => item.kind === 'user_message')?.sequence ?? Number.POSITIVE_INFINITY
-    const carried = talk.items.filter((item) => item.sequence < last && stillOpen(item))
-    const own = talk.items.filter((item) => item.sequence >= last)
-    const current = [...carried, ...own]
-    const shown = new Set(current.map((item) => item.id))
-    const hidden = talk.items.filter((item) => !shown.has(item.id))
-    return { earlier: EMPTY, current, divided: hidden.length > 0, hidden }
-  }
-
-  return { earlier: EMPTY, current: talk.items, divided: false, hidden: EMPTY }
 }
 
-/** The coordinator's session as the composer shows it: none until a fresh one starts, else how full its context is. */
+/** The coordinator's session as the composer shows it: none after a wipe, else how full its context is. */
 export const sessionOf = (talk: Talk): SessionSummary | null =>
   talk.context === null
     ? null
@@ -357,7 +253,3 @@ export const sessionOf = (talk: Talk): SessionSummary | null =>
         context: { used: talk.context, size: 200_000 },
         background: [],
       }
-
-/** How many messages a part of the thread holds, apart from the cards that stand for work. */
-export const messagesIn = (part: ReadonlyArray<ThreadItem>) =>
-  part.filter((item) => item.kind !== 'task' && item.kind !== 'issue_draft' && item.kind !== 'issue_changes').length

@@ -112,40 +112,9 @@ export const stillOpen = (item: ThreadItem): boolean =>
   (item.kind === 'question' && item.content.state === 'open') ||
   (item.kind === 'task_ask' && item.content.state === 'open')
 
-/** A: the coordinator opens a new page with what it carries over; its first word there. */
-export const PAGE_OPENING = [
-  'Where we left off:',
-  '',
-  '- **Connectors: GitLab pages past 100** is in review. I’ll merge it once its checks pass.',
-  '- **Prototype: clearing a coordinator chat** is planned on Opus 5.5 at xhigh; it starts in a few minutes.',
-  '- The lane-count issue is drafted, waiting for you to file it.',
-  '- About 38% of the week’s Claude usage is left.',
-].join('\n')
-
-/** B: what the coordinator knows, as a brief it carries into every chat and the person can edit. */
-export interface BriefLine {
-  readonly id: string
-  readonly text: string
-}
-
-export const BRIEF: ReadonlyArray<BriefLine> = [
-  { id: 'merge', text: 'You asked me to merge **Connectors: GitLab pages past 100** once its checks pass.' },
-  { id: 'prototype', text: '**Prototype: clearing a coordinator chat** is planned on Opus 5.5 at xhigh.' },
-  { id: 'issue', text: 'The lane-count issue is drafted, waiting for you to file it.' },
-  { id: 'usage', text: 'About 38% of the week’s Claude usage is left; it resets Monday at 09:00.' },
-]
-
-/** What the coordinator answers on this page, by what it remembers: the whole conversation, a page's handover, a brief, or nothing. */
+/** What the coordinator answers on this page, by what it remembers: the conversation, or nothing of it. */
 export const REPLY = {
   kept: 'We were on three things: **Connectors: GitLab pages past 100** is in review, and I’ll merge it once its checks pass; **Prototype: clearing a coordinator chat** starts in a few minutes; and the lane-count issue is waiting for you to file it. And 38% of the week’s Claude usage is left.',
-  summary:
-    'From what I carried over: the GitLab paging task is in review and I’ll merge it once its checks pass; the clearing prototype starts shortly; the lane-count issue is yours to file. For anything else we said, I can read the last page.',
   fresh:
     'I’ve nothing of an earlier conversation, only the project’s records: **Connectors: GitLab pages past 100** is in review, with an errand to merge it once its checks pass, and **Prototype: clearing a coordinator chat** is planned. What would you like to pick up?',
 }
-
-/** B: the coordinator's answer when it has a brief, line for line, so forgetting a line changes what it says. */
-export const briefReply = (brief: ReadonlyArray<BriefLine>): string =>
-  brief.length === 0
-    ? REPLY.fresh
-    : ['From what I know:', '', ...brief.map((line) => `- ${line.text}`), '', 'The rest is in the earlier chat if you want it.'].join('\n')

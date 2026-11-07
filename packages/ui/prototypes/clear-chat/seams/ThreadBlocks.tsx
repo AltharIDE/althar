@@ -1,4 +1,4 @@
-// Scrappy: the thread's blocks as the app draws them, the direction's line where its page, chat or focus begins.
+// Scrappy: the thread's blocks as the app draws them, the clear's line where the cleared view begins.
 import type { ComponentProps } from 'react'
 
 import { ThreadBlocks as RealThreadBlocks } from '../../../../../apps/desktop/src/renderer/shared/ThreadBlocks'

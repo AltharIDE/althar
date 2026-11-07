@@ -8,7 +8,7 @@ import { defineConfig } from 'vite-plus'
  * Scrappy: the real desktop app, on the tests' fake client, in a browser,
  * opened on althar's coordinator beside its board. The seams swap a few
  * imports of the real project screen for this page alone, so each direction
- * gives the conversation its page, brief or focus without touching the app's code.
+ * puts the one clear where it says without touching the app's code.
  * Plain JavaScript, so the kit's type check leaves it out.
  */
 
@@ -17,15 +17,15 @@ const repo = resolve(here, '../../../..')
 
 const VIEW = 'features/project/ProjectView.tsx'
 const seams = [
-  // What the thread holds: the conversation as the direction shows it, and the coordinator answering on the page.
+  // What the thread holds: the conversation as the clear has left it, and the coordinator answering on the page.
   { importer: 'features/project/ProjectScreen.tsx', id: './useProject', to: 'seams/useProject.ts' },
-  // The kit as the project's screen sees it: its header carries the direction's own control.
+  // The kit as the project's screen sees it: the composer, the thread's face and the context ring, each with the clear where it goes.
   { importer: VIEW, id: '@althar/ui', to: 'seams/projectUi.tsx' },
-  // The thread's blocks, split where the direction's page, chat or focus begins, its line between.
+  // The context ring is drawn by the meter the project's screen composes, not by the screen itself.
+  { importer: 'shared/ContextMeter.tsx', id: '@althar/ui', to: 'seams/projectUi.tsx' },
+  // The thread's blocks, split where the cleared view begins, its line between.
   { importer: VIEW, id: '../../shared/thread', to: 'seams/thread.ts' },
   { importer: VIEW, id: '../../shared/ThreadBlocks', to: 'seams/ThreadBlocks.tsx' },
-  // The project's notes, in its settings: in C, forgetting the conversation is at their foot.
-  { importer: 'features/projectSettings/ProjectSettingsPage.tsx', id: './NotesSection', to: 'seams/NotesSection.tsx' },
 ]
 
 /** @type {import('vite-plus').Plugin} */

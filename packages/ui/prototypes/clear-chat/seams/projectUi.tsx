@@ -1,94 +1,82 @@
-// Scrappy: the kit as the project's screen sees it here: the header carries the direction's own control.
+// Scrappy: the kit as the project's screen sees it here, with the clear put where each direction says.
 import type { ComponentProps } from 'react'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
-import { ProjectHeader as RealProjectHeader } from '../../../src/chrome/ProjectHeader/ProjectHeader'
-import { ChromeButton } from '../../../src/chrome/ChromeButton/ChromeButton'
-import { Brief } from '../directions/Brief'
+import { Composer as RealComposer } from '../../../src/composer/Composer/Composer'
+import { ContextRing as RealContextRing } from '../../../src/composer/ContextRing/ContextRing'
+import { TaskFace as RealTaskFace } from '../../../src/thread/TaskFace/TaskFace'
+import { ClearDialog, ComposerClear, RingClear } from '../directions/Clear'
+import { ConversationHead } from '../directions/ThreadHead'
+import { hasConversation, useProto } from '../state'
 import s from '../directions/directions.module.css'
-import { ProjectMenu } from '../directions/ProjectMenu'
-import { proto, saidInChat, saidOnPage, useProto } from '../state'
 
 export * from '../../../src/index'
 
-/** Under this width the header's own buttons keep only their glyphs, the label in the tooltip. */
-const NARROW = 980
-const useNarrow = () => {
-  const [narrow, setNarrow] = useState(() => window.innerWidth < NARROW)
-  useEffect(() => {
-    const onResize = () => setNarrow(window.innerWidth < NARROW)
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
-  return narrow
-}
-
-/** A: a page starts only from something said on the one before it. */
-function NewPage({ narrow }: { narrow: boolean }) {
-  const talk = useProto().talks.A
-  return (
-    <ChromeButton
-      icon="create"
-      label="New page"
-      compact={narrow}
-      disabled={!saidOnPage(talk)}
-      className={saidOnPage(talk) ? undefined : s.off}
-      onClick={proto.newPage}
-    />
-  )
-}
-
-/** B: the thread goes; the brief and the earlier chat stay. */
-function NewChat({ narrow }: { narrow: boolean }) {
-  const talk = useProto().talks.B
-  return (
-    <ChromeButton
-      icon="plus"
-      label="New chat"
-      compact={narrow}
-      disabled={!saidInChat(talk)}
-      className={saidInChat(talk) ? undefined : s.off}
-      onClick={proto.newChat}
-    />
-  )
-}
-
-/** C: what is settled and older talk is hidden; the same button shows it again. */
-function Focus({ narrow }: { narrow: boolean }) {
-  const talk = useProto().talks.C
-  return (
-    <ChromeButton
-      icon={talk.focused ? 'expand' : 'compress'}
-      label={talk.focused ? 'Show all' : 'Focus'}
-      compact={narrow}
-      aria-pressed={talk.focused}
-      className={talk.focused ? s.on : undefined}
-      onClick={proto.toggleFocus}
-    />
-  )
-}
-
-export function ProjectHeader(props: ComponentProps<typeof RealProjectHeader>) {
+/** A: the control in the composer's row, and /clear in the field, both opening the one question. */
+export function Composer(props: ComponentProps<typeof RealComposer>) {
   const p = useProto()
-  const narrow = useNarrow()
-  if (p.direction === 'Today') return <RealProjectHeader {...props} />
-  const talk = p.talks[p.direction]
+  const [asking, setAsking] = useState(false)
+  if (p.direction !== 'A') return <RealComposer {...props} />
+  const slash = (text: string) => text.trim() === '/clear'
   return (
-    <RealProjectHeader
+    <>
+      <RealComposer
+        {...props}
+        picker={
+          <>
+            {props.picker}
+            <ComposerClear onAsk={() => setAsking(true)} />
+          </>
+        }
+        onSubmit={(text) => {
+          if (slash(text)) {
+            props.onChange('')
+            if (hasConversation(p.talks.A)) setAsking(true)
+            return
+          }
+          props.onSubmit(text)
+        }}
+        {...(props.onSendNow === undefined
+          ? {}
+          : {
+              onSendNow: (text: string) => {
+                if (slash(text)) {
+                  props.onChange('')
+                  if (hasConversation(p.talks.A)) setAsking(true)
+                  return
+                }
+                props.onSendNow?.(text)
+              },
+            })}
+      />
+      {asking && <ClearDialog talk={p.talks.A} onClose={() => setAsking(false)} />}
+    </>
+  )
+}
+
+/** B: the conversation's bar above the thread, with Clear in it. */
+export function TaskFace(props: ComponentProps<typeof RealTaskFace>) {
+  const p = useProto()
+  if (p.direction !== 'B') return <RealTaskFace {...props} />
+  return (
+    <div className={s.faceColumn}>
+      <ConversationHead />
+      <RealTaskFace {...props} />
+    </div>
+  )
+}
+
+/** C: Clear in the context ring's detail, under the numbers and beside Compact. */
+export function ContextRing(props: ComponentProps<typeof RealContextRing>) {
+  const p = useProto()
+  if (p.direction !== 'C') return <RealContextRing {...props} />
+  return (
+    <RealContextRing
       {...props}
-      parts={[]}
-      run={
+      note={
         <>
-          {props.run}
-          {p.direction === 'A' && <NewPage narrow={narrow} />}
-          {p.direction === 'B' && (
-            <>
-              <Brief talk={talk} compact={narrow} />
-              <NewChat narrow={narrow} />
-            </>
-          )}
-          {p.direction === 'C' && <Focus narrow={narrow} />}
-          <ProjectMenu direction={p.direction} talk={talk} parts={props.parts ?? []} />
+          {props.note}
+          <RingClear />
         </>
       }
     />
