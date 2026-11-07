@@ -5,6 +5,7 @@ import {
   NewProjectDefaults,
   PlansAndReviews,
   PROJECT_SETTINGS_SECTIONS,
+  ProjectInk,
   ProjectTracker,
   RepositoryFilesSetting,
   RepositoryRole,
@@ -372,6 +373,7 @@ export class SettingsTools extends Context.Service<
           scope: 'project',
           fields: {
             name: field('Name', 'a few words', Schema.String),
+            ink: field('Colour', `the ink of the project's mark: ${ProjectInk.literals.join(', ')}`, ProjectInk),
             worksIn: field('New tasks start', 'worktree (a folder of their own) or checkout (Local, in the person’s checkout)', WorksIn),
             workToward: field(
               'Work toward',
@@ -386,11 +388,12 @@ export class SettingsTools extends Context.Service<
           read: (projectId) =>
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
-              const [project] = yield* sql<{ name: string }>`SELECT name FROM projects WHERE id = ${projectId}`
+              const [project] = yield* sql<{ name: string; ink: string | null }>`SELECT name, ink FROM projects WHERE id = ${projectId}`
               const { view } = yield* rulesOf(projectId)
               const repositories = yield* repositoriesOf(projectId)
               return {
                 name: project?.name ?? '',
+                ink: project?.ink ?? null,
                 ...pick(view, ['worksIn', 'resolveConflicts', 'pushCommits', 'postScreenshots', 'moveIssues']),
                 workToward: Object.fromEntries(repositories.map((one) => [one.name, one.workToward])),
               }
@@ -399,6 +402,7 @@ export class SettingsTools extends Context.Service<
             Effect.gen(function* () {
               const projects = yield* Projects
               if (typeof change['name'] === 'string') yield* projects.rename(projectId, change['name'])
+              if (typeof change['ink'] === 'string') yield* projects.setInk(projectId, change['ink'] as ProjectInk)
               if (change['workToward'] !== undefined)
                 for (const { repository, value } of yield* byName(projectId, change['workToward'] as Values))
                   yield* projects.setRepository({ projectId, repositoryId: repository.id, workToward: value as string | null })
@@ -796,7 +800,14 @@ export class SettingsTools extends Context.Service<
           fields: {},
           read: () => Effect.succeed({}),
         })),
-        { id: 'althar/about', title: 'About Althar', scope: 'althar', note: 'Nothing to set.', fields: {}, read: () => Effect.succeed({}) },
+        {
+          id: 'althar/about',
+          title: 'About Althar',
+          scope: 'althar',
+          note: 'Usage data and crash reports are kept in the window on this computer: the person sets them there.',
+          fields: {},
+          read: () => Effect.succeed({}),
+        },
       ]
 
       const sectionOf = (id: string | undefined) => {
@@ -1257,3 +1268,77 @@ export const SETTINGS_ADDRESSES: ReadonlyArray<string> = [
   ...PROJECT_SETTINGS_SECTIONS.map((id) => `project/${id}`),
   ...SETTINGS_SECTIONS.map((id) => `althar/${id}`),
 ]
+
+/**
+ * Every change a Settings screen makes, by the API call or the window's preference it makes it with, and how the
+ * coordinator or a lead makes it too: a section's setting (`section.key`, through change_settings), another tool
+ * (`tool:` its name), or the person's own (`person:` why) or the window's (`window:` why), which no agent makes. A test
+ * walks the screens' calls against it, so a setting added to a screen without a way here fails it (ADR-097).
+ */
+export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
+  // project/general
+  renameProject: 'project/general.name',
+  setProjectInk: 'project/general.ink',
+  createBranch: 'person: makes a branch on the code host, for Work toward; workToward names one that is there',
+  removeProject: "person: removing the project can't be undone",
+  // project/code
+  setProjectTracker: 'project/code.tracker',
+  setRepository: 'project/code.repositories',
+  addRepositories: 'person: adding a repository is the person’s (project/code says so)',
+  leaveOutRepository: 'person: leaving a repository out is the person’s (project/code says so)',
+  // project/rules
+  setProjectRules: 'project/rules.never',
+  // project/notes
+  editProjectNote: 'tool:keep_note',
+  dropProjectNote: 'tool:drop_note',
+  // althar/agents
+  setDefaultEffort: 'althar/agents.efforts',
+  setModelBlocked: 'althar/agents.turnedOff',
+  installAgent: 'person: installing an agent on this computer',
+  addAccount: 'person: an agent’s accounts and their sign-ins',
+  startAccountSignIn: 'person: an agent’s accounts and their sign-ins',
+  signInAccount: 'person: an agent’s accounts and their sign-ins',
+  pasteAccountSignInCode: 'person: an agent’s accounts and their sign-ins',
+  cancelAccountSignIn: 'person: an agent’s accounts and their sign-ins',
+  renameAccount: 'person: an agent’s accounts and their sign-ins',
+  orderAccounts: 'person: an agent’s accounts and their sign-ins',
+  removeAccount: 'person: an agent’s accounts and their sign-ins',
+  // althar/skills
+  setSkillActive: 'althar/skills.skills',
+  stageSkill: 'person: installing a skill is the person’s',
+  approveSkill: 'person: installing a skill is the person’s',
+  rollBackSkill: 'person: installing a skill is the person’s',
+  uninstallSkill: 'person: removing a skill is the person’s',
+  // althar/code-hosts
+  disconnect: 'person: connections and their sign-ins',
+  // althar/this-mac
+  setAgentsAtOnce: 'althar/this-mac.agentsAtOnce',
+  setFolderWait: 'althar/this-mac.folderWait',
+  setAutomationsPaused: 'althar/this-mac.automationsPaused',
+  removeTaskFolder: "person: deleting a finished task's folder can't be undone",
+  cleanUpFolders: "person: deleting finished tasks' folders can't be undone",
+  keepAwake: 'window: kept in the window on this computer',
+  awakeOnBattery: 'window: kept in the window on this computer',
+  openAtLogin: 'window: kept in the window on this computer',
+  showLoad: 'window: kept in the window on this computer',
+  // althar/plans-and-reviews, althar/new-projects, althar/reviews
+  setPlansAndReviews: 'althar/plans-and-reviews.countdown',
+  setNewProjectDefaults: 'althar/new-projects.permissions',
+  setPostTeamReviews: 'althar/reviews.postTeamReviews',
+  setCoAuthor: 'althar/reviews.coAuthor',
+  setReviewSeal: 'althar/reviews.reviewSeal',
+  setReviewSealStyle: 'althar/reviews.reviewSealStyle',
+  // althar/notifications, althar/appearance, althar/editor, althar/about
+  notifyCalls: 'window: kept in the window on this computer',
+  notifyReady: 'window: kept in the window on this computer',
+  notifyStopped: 'window: kept in the window on this computer',
+  badge: 'window: kept in the window on this computer',
+  sound: 'window: kept in the window on this computer',
+  lastSound: 'window: kept in the window on this computer',
+  appearance: 'window: kept in the window on this computer',
+  accent: 'window: kept in the window on this computer',
+  editor: 'window: kept in the window on this computer',
+  usageData: 'window: kept in the window on this computer',
+  crashReports: 'window: kept in the window on this computer',
+  openInEditor: 'window: opens a file in the person’s editor; no setting',
+}

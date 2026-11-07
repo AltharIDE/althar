@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { dirname, join, relative, resolve } from 'node:path'
 
 import { Ids, newId, type ProjectId } from '@althar/domain'
 import { PROJECT_SETTINGS_SECTIONS, SETTINGS_SECTIONS, type SettingChangeCard } from '@althar/contracts'
@@ -15,7 +15,7 @@ import { Queries } from '../src/Queries'
 import { timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { SettingsTools } from '../src/SettingsTools'
+import { SCREEN_CHANGES, SettingsTools } from '../src/SettingsTools'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, listTools, repository, runtime } from './support'
 
@@ -97,6 +97,39 @@ const rulesNow = (projectId: ProjectId) =>
     return (yield* (yield* Policies).current(projectId)).rules
   })
 
+/**
+ * Every change the Settings screens make, by the API call or the window's preference that makes it: read from the
+ * screens' own files and the hooks and models they import, as the screens call them.
+ */
+const screensChanges = () => {
+  const renderer = join(__dirname, '../../../apps/desktop/src/renderer')
+  const own = ['features/settings', 'features/projectSettings'].flatMap((folder) =>
+    readdirSync(join(renderer, folder))
+      .filter((name) => /\.tsx?$/.test(name))
+      .map((name) => join(renderer, folder, name)),
+  )
+  const files = new Set(own)
+  for (const file of own)
+    for (const [, spec] of readFileSync(file, 'utf8').matchAll(/from '(\.[^']+)'/g)) {
+      const base = resolve(dirname(file), spec ?? '')
+      const found = [`${base}.ts`, `${base}.tsx`, join(base, 'index.ts')].find((one) => existsSync(one))
+      if (found !== undefined) files.add(found)
+    }
+  const made = new Map<string, string>()
+  for (const file of files) {
+    const source = readFileSync(file, 'utf8')
+    const where = relative(renderer, file)
+    // What the screens call: anything that isn't only a read.
+    for (const [, call] of source.matchAll(/client\.([a-zA-Z]+)\(/g))
+      if (call !== undefined && !/^(get|list|read|find|search|watch|status|check|look)/.test(call)) made.set(call, where)
+    // The window's own preferences, set by name, and those a map names.
+    for (const [, key] of source.matchAll(/\bset\('([a-zA-Z]+)'/g)) if (key !== undefined) made.set(key, where)
+    for (const [, keys] of source.matchAll(/const [A-Z_]+_KEYS = \{([^}]*)\}/g))
+      for (const [, key] of (keys ?? '').matchAll(/:\s*'([a-zA-Z]+)'/g)) if (key !== undefined) made.set(key, where)
+  }
+  return made
+}
+
 describe('settings, for the coordinator and leads', () => {
   it.live('are read and changed with the same pair of tools in both roles', () =>
     Effect.gen(function* () {
@@ -124,6 +157,37 @@ describe('settings, for the coordinator and leads', () => {
       const rules = yield* callTool(coordinator, 'read_settings', { section: 'project/rules' })
       assert.match(rules, /never \(Never\): \[/)
       assert.match(rules, /Loosens what asks when a kind taken out/)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('every change a Settings screen makes has a way for agents, or a reason it is the person’s', () =>
+    Effect.gen(function* () {
+      const { coordinator, lead } = yield* opened
+      const made = screensChanges()
+      // The walk finds what it should: a screen's API call, and a preference the window keeps.
+      assert.isTrue(made.has('setPostTeamReviews') && made.has('usageData'), 'the walk of the screens found nothing')
+      for (const [change, where] of made)
+        assert.property(SCREEN_CHANGES, change, `${where} makes ${change}, which SCREEN_CHANGES (SettingsTools.ts) doesn't name`)
+      // And nothing it names is gone from the screens.
+      for (const change of Object.keys(SCREEN_CHANGES)) assert.isTrue(made.has(change), `no Settings screen makes ${change} any more`)
+      const tools = { coordinator: yield* listTools(coordinator), lead: yield* listTools(lead) }
+      for (const [change, how] of Object.entries(SCREEN_CHANGES)) {
+        const setting = /^((?:project|althar)\/[a-z-]+)\.([a-zA-Z]+)$/.exec(how)
+        if (setting !== null) {
+          const shown = yield* callTool(coordinator, 'read_settings', { section: setting[1] })
+          assert.include(shown, `- ${setting[2]} (`, `${change}: read_settings ${setting[1]} has no ${setting[2]}`)
+        } else if (how.startsWith('tool:')) {
+          const name = how.slice('tool:'.length)
+          assert.include(tools.coordinator, name, `${change}: the coordinator has no ${name}`)
+          assert.include(tools.lead, name, `${change}: a lead has no ${name}`)
+        } else assert.match(how, /^(person|window): \S/, `${change}: say how it is made, or why no agent makes it`)
+      }
+      // The project's colour, which the screen had and the tools didn't, goes as the screen's does.
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { section: 'project/general', change: { ink: 'moss' } }),
+        /^Changed General/,
+      )
+      assert.include(yield* callTool(coordinator, 'read_settings', { section: 'project/general' }), '- ink (Colour): "moss"')
     }).pipe(Effect.provide(withQueries())),
   )
 
