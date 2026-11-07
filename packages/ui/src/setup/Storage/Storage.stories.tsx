@@ -50,7 +50,7 @@ export const WithSizes: Story = {
     await expect(view.getByText('24 GB')).toBeInTheDocument()
     await userEvent.click(
       view.getByRole('button', {
-        name: 'Show Task folders in the file manager',
+        name: 'Show in Files, Task folders',
       }),
     )
     await expect(args.onShow).toHaveBeenCalledWith('worktrees')
@@ -99,7 +99,7 @@ export const MissingFolder: Story = {
     await expect(view.getByText('couldn’t be measured')).toBeInTheDocument()
     await expect(
       view.getByRole('button', {
-        name: 'Show Task folders in the file manager',
+        name: 'Show in Files, Task folders',
       }),
     ).toBeDisabled()
   },
