@@ -1,6 +1,7 @@
 import { EarlierTurns } from '../../shared/EarlierTurns'
+import { ThreadWaysContext } from '../../shared/ThreadBlocks'
 import { useNavigate } from '@tanstack/react-router'
-import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import type { AttentionRequest, TaskAction, ThreadSnapshot } from '@althar/contracts'
 import {
@@ -342,6 +343,7 @@ export function TaskView({
   onRules,
   onSignIn,
   onConnections,
+  onOpenTask,
 }: {
   model: TaskModel
   /** Back to the project, on Escape. */
@@ -352,6 +354,8 @@ export function TaskView({
   onSignIn?: (agentId: string) => void
   /** Opens the code hosts and trackers in Settings, for one to connect or sign in to again. */
   onConnections?: () => void
+  /** Opens another task, by its thread: one this task's lead started, from its thread's line. */
+  onOpenTask?: (threadId: string) => void
 }) {
   // What the person writes to the lead, kept by the task while they are elsewhere, as are its images and what they dictate.
   const kept = draftKey.task(model.snapshot?.threadId ?? '')
@@ -440,7 +444,13 @@ export function TaskView({
   const opener = useOpener(taskId ?? null, showTalk)
   const navigate = useNavigate()
   const comments = useComments(kept)
+  // The page belongs to the conversation: Outputs and Graph leave it out, and coming back brings it as it was (ADR-100).
+  const conversation = face === null || face === 'talk' || (face === 'graph' && (model.snapshot?.task.graph?.length ?? 0) === 0)
   // What the thread's parts open: a picture in the lightbox, a document or a file the lead names, or a page, beside the thread.
+  const ways = useMemo(
+    () => ({ ...(onRules === undefined ? {} : { onRules }), ...(onSignIn === undefined ? {} : { onSignIn }) }),
+    [onRules, onSignIn],
+  )
   const host = useThreadHost(
     true,
     { threadId: model.snapshot?.threadId ?? null, taskId: model.snapshot?.task.id ?? null },
@@ -456,6 +466,7 @@ export function TaskView({
             void navigate({ to: '/pages/$owner', params: { owner: taskId } })
           },
         },
+    conversation,
   )
   // Report this, on a stuck step: Report a problem, with this task (DEV-61).
   const { reportProblem } = useServices().host
@@ -672,7 +683,17 @@ export function TaskView({
         ? null
         : { agentId: resume.id, model: null, effort: null })
   const waiting = session === null || !session.held || handover?.agentId === session.agentId ? null : handover
-  const choice = session === null || !session.held ? chosen : (waiting ?? runningOn(session))
+  // Its lead changed from its next turn, by the team dialog or a tool: the picker shows who leads it then.
+  const upcoming = session?.held === true ? session.nextLead : null
+  const pending: Choice | null =
+    session === null || upcoming == null
+      ? null
+      : {
+          agentId: upcoming.agentId,
+          model: upcoming.model ?? (upcoming.agentId === session.agentId ? session.model : null),
+          effort: upcoming.effort ?? (upcoming.agentId === session.agentId ? session.effort : null),
+        }
+  const choice = session === null || !session.held ? chosen : (waiting ?? pending ?? runningOn(session))
 
   // The agent what the person says goes to: one picked to take over, else the lead on it, else the one it would start; and whether it takes images.
   const receiving = waiting?.agentId ?? (session?.held ? session.agentId : undefined) ?? chosen?.agentId ?? null
@@ -1124,6 +1145,9 @@ export function TaskView({
                     })
                   }
                   onMarkReady={(url) => void model.markReady(url)}
+                  onMarkAllReady={(urls) => void model.markAllReady(urls)}
+                  merging={model.merging}
+                  mergeRefused={model.mergeRefused}
                   onPostScreenshots={model.postScreenshots}
                   onOpenFile={changes.show}
                   conflict={model.conflict}
@@ -1197,78 +1221,80 @@ export function TaskView({
                   loading={model.loadingEarlier}
                 />
                 <ThreadShellProvider value={host.shell}>
-                  <TaskThread
-                    rounds={blocks}
-                    versionOf={versionOf}
-                    settledOf={settledOf}
-                    reviewing={reviewing}
-                    // Settling a review, its lead works quietly.
-                    settling={snapshot.task.step === 'settle'}
-                    threadId={snapshot.threadId}
-                    worktree={snapshot.task.worktree}
-                    {...(openFile === undefined ? {} : { openFile })}
-                    session={session}
-                    project={snapshot.project.name}
-                    // A failed turn is tried again here, unless its step waits on the person, whose call has its ways on.
-                    {...(busy || stuckOpen ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
-                    {...(onSignIn === undefined || stuckOpen ? {} : { onSignIn })}
-                    onPassOn={(words) => void model.send(words)}
-                    onAnswerQuestion={model.answerQuestion}
-                    {...(asking == null ? {} : { focusQuestion: asking })}
-                    run={(run) => (
-                      <RunOf
-                        run={run}
-                        now={now}
-                        onStop={(id) => void model.stopLaunch(id)}
-                        onRunAgain={(_taskId, runnableId) => void model.runProject(runnableId)}
-                      />
-                    )}
-                    // An issue the lead drafted is filed from its card, only when the person says.
-                    draft={(draft) => (
-                      <DraftCard
-                        draft={draft}
-                        actions={{
-                          onFile: (draftId) => void model.fileIssueDraft(draftId),
-                          onChange: model.changeIssueDraft,
-                          onDiscard: (draftId) => void model.discardIssueDraft(draftId),
-                          onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
-                        }}
-                      />
-                    )}
-                    // Changes to its issue its lead or Althar proposed apply from their card, only when the person says.
-                    changes={(changes) => (
-                      <ChangesCard
-                        changes={changes}
-                        actions={{
-                          onApply: (changesId) => void model.applyIssueChanges(changesId),
-                          onDiscard: (changesId) => void model.discardIssueChanges(changesId),
-                          onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
-                        }}
-                      />
-                    )}
-                    // A review the lead drafted is posted from its card, only when the person says.
-                    review={(draft) => (
-                      <ReviewCard
-                        draft={draft}
-                        actions={{
-                          onChange: model.changeReview,
-                          onPost: (draftId) => void model.postReview(draftId),
-                          onPostFromNow: (draftId, automationId) => void model.postReviewsFromNow(draftId, automationId),
-                          onDiscard: (draftId) => void model.discardReview(draftId),
-                        }}
-                      />
-                    )}
-                    // A push the lead asked for is pushed as the outputs push: up to the head it shows.
-                    push={(request, at) => (
-                      <PushRequestOf
-                        request={request}
-                        at={at}
-                        {...(lead.name === '' ? {} : { by: lead.name })}
-                        pushing={model.pending}
-                        onPush={(head, url) => void model.push(head, url)}
-                      />
-                    )}
-                  />
+                  <ThreadWaysContext.Provider value={ways}>
+                    <TaskThread
+                      rounds={blocks}
+                      versionOf={versionOf}
+                      settledOf={settledOf}
+                      reviewing={reviewing}
+                      threadId={snapshot.threadId}
+                      worktree={snapshot.task.worktree}
+                      {...(openFile === undefined ? {} : { openFile })}
+                      session={session}
+                      retryable={snapshot.retryable}
+                      project={snapshot.project.name}
+                      // A failed turn is tried again here, unless its step waits on the person, whose call has its ways on.
+                      {...(busy || stuckOpen ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
+                      {...(onSignIn === undefined || stuckOpen ? {} : { onSignIn })}
+                      onPassOn={(words) => void model.send(words)}
+                      {...(onOpenTask === undefined ? {} : { onOpenTask })}
+                      onAnswerQuestion={model.answerQuestion}
+                      {...(asking == null ? {} : { focusQuestion: asking })}
+                      run={(run) => (
+                        <RunOf
+                          run={run}
+                          now={now}
+                          onStop={(id) => void model.stopLaunch(id)}
+                          onRunAgain={(_taskId, runnableId) => void model.runProject(runnableId)}
+                        />
+                      )}
+                      // An issue the lead drafted is filed from its card, only when the person says.
+                      draft={(draft) => (
+                        <DraftCard
+                          draft={draft}
+                          actions={{
+                            onFile: (draftId) => void model.fileIssueDraft(draftId),
+                            onChange: model.changeIssueDraft,
+                            onDiscard: (draftId) => void model.discardIssueDraft(draftId),
+                            onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
+                          }}
+                        />
+                      )}
+                      // Changes to its issue its lead or Althar proposed apply from their card, only when the person says.
+                      changes={(changes) => (
+                        <ChangesCard
+                          changes={changes}
+                          actions={{
+                            onApply: (changesId) => void model.applyIssueChanges(changesId),
+                            onDiscard: (changesId) => void model.discardIssueChanges(changesId),
+                            onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
+                          }}
+                        />
+                      )}
+                      // A review the lead drafted is posted from its card, only when the person says.
+                      review={(draft) => (
+                        <ReviewCard
+                          draft={draft}
+                          actions={{
+                            onChange: model.changeReview,
+                            onPost: (draftId) => void model.postReview(draftId),
+                            onPostFromNow: (draftId, automationId) => void model.postReviewsFromNow(draftId, automationId),
+                            onDiscard: (draftId) => void model.discardReview(draftId),
+                          }}
+                        />
+                      )}
+                      // A push the lead asked for is pushed as the outputs push: up to the head it shows.
+                      push={(request, at) => (
+                        <PushRequestOf
+                          request={request}
+                          at={at}
+                          {...(lead.name === '' ? {} : { by: lead.name })}
+                          pushing={model.pending}
+                          onPush={(head, url) => void model.push(head, url)}
+                        />
+                      )}
+                    />
+                  </ThreadWaysContext.Provider>
                 </ThreadShellProvider>
                 {waitingIssues.length > 1 && (
                   <div className={s.fileAll}>

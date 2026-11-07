@@ -4,7 +4,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Connections } from './Connections'
 import { forkOf } from './forks'
-import { commitOf, type FetchSource, fetchSpecs, git, gitOutcome, namedRemotes, redactUrl, remoteHeads } from './git'
+import { commitOf, type FetchSource, fetchSpecs, git, gitOutcome, hostNameOf, namedRemotes, redactUrl, remoteHeads } from './git'
 import { Instance } from './Instance'
 import { type Tool, ToolRefused, ToolServer } from './ToolServer'
 
@@ -67,6 +67,8 @@ export interface Offered {
   readonly branches: ReadonlyArray<string>
   /** Why it lists less than it might: its remote couldn't be reached, or no connection lists its pull requests; null where it lists all. */
   readonly note: string | null
+  /** The host of its remote, by name, where no connection reaches it: its pull requests aren't listed until one does. */
+  readonly unconnected: string | null
   /** The host has more open pull requests than it listed: words find them, searched there. */
   readonly more: boolean
 }
@@ -368,6 +370,8 @@ export class Fetches extends Context.Service<
                     : yield* signed.host
                         .listChanges(signed.repository, { state: 'open', limit: LISTED, ...(words === '' ? {} : { text: words }) })
                         .pipe(Effect.orElseSucceed(() => null))
+                // A host Althar has no connection to is named, to connect; a listing that failed on a connected one is only said.
+                const unconnected = origin !== null && signed === null ? hostNameOf(origin.url) : null
                 return {
                   repository: binding.name,
                   pullRequests: (listed?.changes ?? []).map((change) => ({
@@ -383,9 +387,10 @@ export class Fetches extends Context.Service<
                   note:
                     heads === null
                       ? `Althar couldn't reach ${binding.name}'s remote: this computer may be offline, or its host isn't connected.`
-                      : listed === null
-                        ? 'Connect its host in Settings to see its pull requests here. A number, as #12, runs one still.'
+                      : listed === null && unconnected === null
+                        ? `${binding.name}'s pull requests couldn't be listed just now.`
                         : null,
+                  unconnected,
                   more: listed?.more ?? false,
                 } satisfies Offered
               }),

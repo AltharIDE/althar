@@ -27,7 +27,8 @@ import s from './Tool.module.css'
  * the diff its body.
  */
 
-function glyphOf(kind: ToolKind): IconName {
+/** The icon a tool call of a kind goes by: its row's, and its line while it is what a turn is doing now (WorkNow). */
+export function glyphOf(kind: ToolKind): IconName {
   switch (kind) {
     case ToolKind.Read:
       return 'file'

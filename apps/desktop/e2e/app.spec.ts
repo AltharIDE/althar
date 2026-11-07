@@ -90,7 +90,7 @@ test('makes the first project of a repository it found, starts a task, and talks
     await expect(page.getByText('chosen=allow-once')).toBeVisible()
     // The round is over, so its work is one line, how long it took.
     await page
-      .getByRole('button', { name: /[Ww]orked \d/ })
+      .getByRole('button', { name: /[Ww]orked (for )?\d/ })
       .last()
       .click()
     await expect(page.getByText('hello.txt', { exact: true })).toBeVisible()
@@ -109,15 +109,15 @@ test('makes the first project of a repository it found, starts a task, and talks
     // Its line says how long it worked once the round has ended; until then it is still working. Built nothing, the task offers
     // Done in its header once its lead is at rest.
     await expect(page.getByRole('banner', { name: 'Add a retry to the checkout call' }).getByRole('button', { name: 'Done' })).toBeVisible()
-    await expect(page.getByRole('button', { name: /^Working · / })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /^Working for / })).toHaveCount(0)
     await page
-      .getByRole('button', { name: /[Ww]orked \d/ })
+      .getByRole('button', { name: /[Ww]orked (for )?\d/ })
       .last()
       .click()
     // A thought folds to its line once the turn has moved on.
     await expect(page.getByRole('button', { name: /^Thought/ })).toBeVisible()
     // A round with nothing to say is its line alone, with who worked.
-    const folds = page.getByRole('button', { name: /[Ww]orked \d/ })
+    const folds = page.getByRole('button', { name: /[Ww]orked (for )?\d/ })
     const before = await folds.count()
     await say(page, 'updates')
     await expect(folds).toHaveCount(before + 1)

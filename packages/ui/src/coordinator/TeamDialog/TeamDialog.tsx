@@ -9,7 +9,7 @@ import { Segmented } from '../../primitives/Segmented/Segmented'
 import s from './TeamDialog.module.css'
 
 /*
- * Who does a task that hasn't begun, changed before it does: its plan's steps,
+ * Who does a task, changed before it begins or after: its plan's steps,
  * numbered and joined by a line as the plan card shows them, each with its
  * picker and why it was picked, then how the work ends. Nothing changes until
  * the person saves; a held task can start with its new team at once. The
@@ -28,6 +28,8 @@ export interface TeamDialogStep {
   /** Left out of the plan: it says so, and `onAdd` puts it back. */
   skipped?: boolean
   onAdd?: () => void
+  /** Who does it, once it can't change any more: shown in the picker's place, as text; `why` says why. */
+  locked?: string
 }
 
 export interface TeamDialogText {
@@ -83,8 +85,12 @@ export function TeamDialog({ task, steps, end, onSave, onStart, onClose, busy = 
           <span className={s.none}>{t.skipped(step.label)}</span>
           {step.onAdd !== undefined && <LinkButton onClick={step.onAdd}>{t.add(step.label)}</LinkButton>}
         </div>
-      ) : (
+      ) : step.locked === undefined ? (
         <div className={s.line}>{step.picker}</div>
+      ) : (
+        <div className={s.line}>
+          <span className={s.locked}>{step.locked}</span>
+        </div>
       ),
       why: step.skipped ? undefined : step.why,
     })),

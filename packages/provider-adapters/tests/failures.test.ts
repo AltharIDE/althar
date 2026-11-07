@@ -104,6 +104,14 @@ describe('structuredFailure', () => {
     assert.strictEqual(structuredFailure(meta({ severity: 'error', title: 'Failed', ...failure }), now)?.classified.failure, kind)
   })
 
+  it('distinguishes a lost worker from a model service error or a reconnecting warning', () => {
+    const report = (category: string, severity = 'error') =>
+      structuredFailure(meta({ category, severity, title: 'Lost', actions: ['new_session'] }), now)
+    assert.isTrue(report('connection')?.connectionLost)
+    assert.isUndefined(report('connection', 'warning')?.connectionLost)
+    assert.isUndefined(report('service')?.connectionLost)
+  })
+
   it('keeps the severity, the whole message, and when a quota resets', () => {
     assert.deepStrictEqual(
       structuredFailure(

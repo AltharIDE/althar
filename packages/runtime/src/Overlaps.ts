@@ -9,6 +9,7 @@ import { Live, type LiveEvent } from './Live'
 import { changeOf, sharedPaths, type TaskChange } from './otherTasks'
 import { fact } from './records'
 import { Sessions } from './Sessions'
+import { addItem } from './threads'
 
 /*
  * A heads-up for leads whose work meets (docs/architecture/04, "What a lead
@@ -41,6 +42,17 @@ export const overlapWords = (other: { readonly slug: string; readonly title: str
   const named = files.slice(0, 8)
   const more = files.length - named.length
   return `Heads-up: another running task, ${other.title} (${other.slug}), is changing ${files.length === 1 ? 'a file' : 'files'} you are changing too: ${named.join(', ')}${more > 0 ? ` and ${more} more` : ''}. Before you go further there, read its work with read_task_diff and read_task (read_thread for what it was asked), so yours doesn't conflict with it. You can't message its lead; where you need it to change course, say so in your report. Althar won't say it again for that task.`
+}
+
+/** The file's name, without the folders it is in. */
+const nameOf = (path: string) => path.slice(path.lastIndexOf('/') + 1)
+
+/** The line in a thread when another task changes its files too, as plain text: `Other changes `TaskView.tsx` too. Both leads were told.` */
+export const overlapLine = (title: string, files: ReadonlyArray<string>) => {
+  const names = [...new Set(files.map(nameOf))]
+  const named = names.slice(0, 2).map((name) => `\`${name}\``)
+  const more = names.length - named.length
+  return `${title} changes ${named.join(', ')}${more > 0 ? ` and ${more} more` : ''} too. Both leads were told.`
 }
 
 export class Overlaps extends Context.Service<
@@ -79,7 +91,7 @@ export class Overlaps extends Context.Service<
       /** Tells a task's lead, once, of another task changing the files it changes, and keeps that it was told. */
       const tell = (
         to: { readonly id: string; readonly projectId: string; readonly threadId: string },
-        about: { readonly id: string; readonly slug: string; readonly title: string },
+        about: { readonly id: string; readonly slug: string; readonly title: string; readonly threadId: string },
         files: ReadonlyArray<string>,
       ) =>
         Effect.gen(function* () {
@@ -96,6 +108,15 @@ export class Overlaps extends Context.Service<
             type: 'task.overlap_noticed',
             payload: { other: about.id, files },
             actorId: instance.systemId,
+          })
+          // The person's thread says it too, where it happens: nothing on the board.
+          yield* addItem({ projectId: to.projectId as ProjectId, threadId: to.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: overlapLine(about.title, files),
+            description: null,
+            task: { taskId: about.id, slug: about.slug, title: about.title, threadId: about.threadId },
+            situation: { kind: 'overlap', files },
           })
           const body = overlapWords(about, files)
           yield* sessions.send({

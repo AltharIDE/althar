@@ -3,6 +3,7 @@ import { expect, within } from 'storybook/test'
 
 import { States } from '../../storybook/States'
 import { threadDecorator } from '../../storybook/ThreadFrame'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { AltharLine } from './AltharLine'
 
 const meta = {
@@ -30,6 +31,20 @@ export const Warning: Story = {
   },
 }
 
+/** A task this task's lead started (ADR-097): its title opens it. */
+export const StartedATask: Story = {
+  args: {
+    children: (
+      <>
+        Started <LinkButton onClick={() => undefined}>Built-in browser beside the conversation</LinkButton>
+      </>
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('button', { name: 'Built-in browser beside the conversation' })).toBeVisible()
+  },
+}
+
 export const AllStates: Story = {
   render: (args) => (
     <States
@@ -51,7 +66,7 @@ export const AllStates: Story = {
   ),
 }
 
-/** A task's folder whose link to its repository git couldn't repair: what git said, the folder left as it was (ADR-101). */
+/** A task's folder whose link to its repository git couldn't repair: what git said, the folder left as it was (ADR-102). */
 export const FolderNotRepaired: Story = {
   args: {
     tone: 'warning',

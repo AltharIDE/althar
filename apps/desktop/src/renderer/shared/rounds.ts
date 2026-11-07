@@ -2,7 +2,7 @@ import type { ThreadItem } from '@althar/contracts'
 import { ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar } from './handed'
-import { type Block, blocksOf, carriedOn, type Part, relayed, type StepResult, type Streamed } from './thread'
+import { type Block, blocksOf, carriedOn, type Doing, doingOf, type Part, relayed, type StepResult, type Streamed } from './thread'
 import { text as threadText } from './ThreadBlocks'
 import { took } from './time'
 
@@ -11,11 +11,13 @@ import { took } from './time'
  * person said, what the coordinator passed on, a review's findings, Althar
  * asking the lead to settle a conflict. The lead answers in at most three
  * parts: what it said first, when it said it soon and before changing
- * anything (its acknowledgement); one line for all its work, what it said
- * on the way among it; and its result, what it said last, with what its
- * report showed. While it works, the line says what it is on, in its own
- * last words. What Althar did along the way, a branch made or a loop
- * stopped, is work too; what the person should know is a line of its own.
+ * anything (its acknowledgement); its work, what it said on the way among
+ * it; and its result, what it said last, with what its report showed. While
+ * it works, what it writes now stands where its result will, and the rest
+ * shows under its work's header; once it is writing after its report, that
+ * is its answer, and its work folds (ADR-099). What Althar did along the
+ * way, a branch made or a loop stopped, is work too; what the person should
+ * know is a line of its own.
  *
  * The thread's items are read as blocks (thread.ts), in stretches that end
  * at a report, so what was said after a report stays after it; then each run
@@ -51,8 +53,8 @@ export interface Work {
   readonly live: boolean
   /** What it did, counted: "edited 3 files, ran 4 commands". */
   readonly counts: string
-  /** While it works: what it is on, in its own last words, or its last call. */
-  readonly now: string | null
+  /** While it works: what it is doing now, in one line; none while it writes. */
+  readonly doing: Doing | null
 }
 
 /** Pictures the lead showed the person (show_pictures), as one set. */
@@ -69,6 +71,10 @@ export interface Round {
   readonly work: Work | null
   /** What it said last, once the round is over. */
   readonly result: Said | null
+  /** While it runs: what it is writing now, the last thing it did, where its result will stand. */
+  readonly writing: Said | null
+  /** It is writing after its report, its answer: its work is over, and folds. */
+  readonly answered: boolean
   /** Its report, where it handed one in: what it built, and what it showed. */
   readonly report: { readonly id: string; readonly result: StepResult } | null
   /** The error its agent's turn ended with, said in the open: there's no answer to come. */
@@ -88,7 +94,16 @@ export type RoundBlock =
   /** What the coordinator passed on to the lead: an ask, in a line of what it is and the rest. */
   | { readonly kind: 'relayed'; readonly id: string; readonly title: string | null; readonly body: string }
   /** Althar, saying something the person should know: a conflict, checks. */
-  | { readonly kind: 'althar'; readonly id: string; readonly text: string; readonly tone: 'info' | 'warning' }
+  | {
+      readonly kind: 'althar'
+      readonly id: string
+      readonly text: string
+      readonly tone: 'info' | 'warning'
+      /** A task the line is about, which it links to: one this task's lead started (ADR-097). */
+      readonly task?: { readonly threadId: string; readonly title: string }
+      /** What the line is about another task, drawn as its own words: one that ended without reaching this, or one changing the same files. */
+      readonly situation?: NoticeContent['situation']
+    }
   /** Its folder went, or came back: a line across the thread, a change of scene (ADR-056). */
   | { readonly kind: 'folder'; readonly id: string; readonly text: string }
   /** What a lead's agent could see of the person's skills and the repository's. */
@@ -154,15 +169,6 @@ export const countsOf = (steps: ReadonlyArray<WorkStep>): string => {
   ]
     .filter((one) => one !== null)
     .join(', ')
-}
-
-/** How long what the lead says on the way may be on the line, as what it is on. */
-const NOW_LENGTH = 110
-
-/** The first line of what it said, short, as what it is on. */
-export const nowOf = (text: string): string => {
-  const first = (text.trim().split('\n')[0] ?? '').replace(/[*_`]/g, '').replace(/:$/, '')
-  return first.length > NOW_LENGTH ? `${first.slice(0, NOW_LENGTH - 2).trimEnd()}…` : first
 }
 
 /** What Althar says of files, said shorter: a list of them becomes how many. */
@@ -258,17 +264,20 @@ export const roundsOf = (
   const running = turnRunning && !blocks.slice(lastTurn + 1).some((block) => block.kind === 'divider' && carriedOn(noticeOf(block)))
   const out: Array<RoundBlock> = []
   let open: Gathering | null = null
+  // The round its lead's turn runs in now, by its id: it stays open for what follows the turn, as the report it hands in
+  // before its answer.
+  let liveId: string | null = null
   // What Althar did between rounds goes in the next one's work.
   let pending: Array<WorkStep> = []
-  const close = (live: boolean) => {
-    if (open !== null) out.push(roundOf(open, live, at, worktree, now))
+  const close = () => {
+    if (open !== null) out.push(roundOf(open, open.id === liveId, at, worktree, now))
     open = null
   }
   blocks.forEach((block, index) => {
     switch (block.kind) {
       case 'turn': {
         if (open === null || open.agentId !== block.agentId) {
-          close(false)
+          close()
           open = {
             id: block.id,
             agentId: block.agentId,
@@ -281,16 +290,16 @@ export const roundsOf = (
           pending = []
         }
         open.steps.push(...block.parts)
-        if (running && index === lastTurn) close(true)
+        if (running && index === lastTurn) liveId = open.id
         return
       }
       case 'step': {
         const result = block.result
         if (result.step === 'review') {
-          close(false)
+          close()
           out.push({ kind: 'verdict', id: block.id, at: block.at, model: block.result.model ?? null, result, settle: null })
         } else if (result.step === 'publish') {
-          close(false)
+          close()
           out.push({ kind: 'published', id: block.id, at: block.at, result })
         } else if (open !== null) {
           // A second report with no ask between them, as in threads from before what was passed on had its place: the first
@@ -299,8 +308,10 @@ export const roundsOf = (
             const later = open.steps.slice(open.reportedAfter)
             const first = later[0]
             out.push(roundOf({ ...open, steps: open.steps.slice(0, open.reportedAfter) }, false, at, worktree, now))
+            const id = first?.id ?? block.id
+            if (open.id === liveId) liveId = id
             open = {
-              id: first?.id ?? block.id,
+              id,
               agentId: open.agentId,
               model: open.model,
               at: first === undefined ? block.at : ago(at.get(first.id) ?? now),
@@ -321,6 +332,8 @@ export const roundsOf = (
             ack: null,
             work: null,
             result: null,
+            writing: null,
+            answered: false,
             report: { id: block.id, result },
             failed: null,
             handed: handedBy([], worktree),
@@ -339,7 +352,7 @@ export const roundsOf = (
         }
         const role = roleOf(content)
         if (role === 'relayed') {
-          close(false)
+          close()
           const body = content.description ?? block.text.replace(/^From the coordinator:\s*/, '')
           const named = NAMED.exec(body)
           out.push({ kind: 'relayed', id: block.id, title: named?.[1] ?? null, body: named?.[2] ?? body })
@@ -351,12 +364,19 @@ export const roundsOf = (
           else pending.push(aside)
           return
         }
-        close(false)
+        close()
         if (role === 'folder') {
           out.push({ kind: 'folder', id: block.id, text: block.text })
           return
         }
-        out.push({ kind: 'althar', id: block.id, text: shorter(block.text), tone: content.severity === 'info' ? 'info' : 'warning' })
+        out.push({
+          kind: 'althar',
+          id: block.id,
+          text: shorter(block.text),
+          tone: content.severity === 'info' ? 'info' : 'warning',
+          ...(content.task === undefined ? {} : { task: { threadId: content.task.threadId, title: content.task.title } }),
+          ...(content.situation === undefined ? {} : { situation: content.situation }),
+        })
         return
       }
       case 'setup': {
@@ -368,16 +388,16 @@ export const roundsOf = (
           else pending.push(aside)
           return
         }
-        close(false)
+        close()
         out.push(block)
         return
       }
       default:
-        close(false)
+        close()
         out.push(block)
     }
   })
-  close(turnRunning)
+  close()
   return withSettled(out)
 }
 
@@ -424,6 +444,8 @@ const roundOf = (open: Gathering, live: boolean, at: ReadonlyMap<string, string>
         : [step],
   )
   const messages = steps.flatMap((step) => (step.kind === 'message' && step.text.trim() !== '' ? [step] : []))
+  // What it is writing now: while it runs, the message it is on.
+  const writing = live ? messages.findLast((message) => message.live === true) : undefined
   const time = (id: string) => Date.parse(at.get(id) ?? now)
   const start = steps[0] === undefined ? Date.parse(now) : time(steps[0].id)
   const firstChange = steps.findIndex((step) => step.kind === 'tool' && CHANGES.has(step.toolKind))
@@ -437,12 +459,15 @@ const roundOf = (open: Gathering, live: boolean, at: ReadonlyMap<string, string>
   const ack =
     first !== undefined &&
     first !== result &&
+    first !== writing &&
     (live || followed) &&
     time(first.id) - start < ACK_WITHIN &&
     (firstChange < 0 || steps.indexOf(first) < firstChange)
       ? first
       : undefined
-  const work = steps.filter((step) => step !== ack && step !== result)
+  const work = steps.filter((step) => step !== ack && step !== result && step !== writing)
+  // Writing after its report, it is answering: its work is over.
+  const answered = writing !== undefined && open.report !== null && afterReport.has(writing.id)
   // What its work wrote or pointed at, and what it handed over in what it said on the way, stand with its result; not the
   // pictures its tools looked at.
   const files = work.flatMap((step) =>
@@ -459,7 +484,6 @@ const roundOf = (open: Gathering, live: boolean, at: ReadonlyMap<string, string>
     handed: handedBy([...(withFiles ? files : []), { id: message.id, pictures: message.pictures, files: message.files }], worktree),
   })
   const lastStep = work.at(-1)
-  const lastSaid = work.findLast((step) => step.kind === 'message')
   const until = result === undefined ? (reported ?? (lastStep === undefined ? start : time(lastStep.id))) : time(result.id)
   const iso = (ms: number) => new Date(ms).toISOString()
   return {
@@ -476,18 +500,19 @@ const roundOf = (open: Gathering, live: boolean, at: ReadonlyMap<string, string>
         : {
             id: `work:${open.id}`,
             steps: work,
-            took: took(iso(work[0] === undefined ? start : time(work[0].id)), live ? now : iso(until)),
+            took: took(iso(work[0] === undefined ? start : time(work[0].id)), live && !answered ? now : iso(until)),
             live,
             counts: countsOf(work),
-            now: !live
-              ? null
-              : lastSaid !== undefined
-                ? nowOf(lastSaid.text)
-                : lastStep?.kind === 'tool'
-                  ? `${lastStep.verb} ${lastStep.target}`
-                  : null,
+            doing: live
+              ? doingOf(
+                  work.flatMap((step) => (step.kind === 'aside' ? [] : [step])),
+                  writing !== undefined,
+                )
+              : null,
           },
     result: result === undefined ? null : said(result, true),
+    writing: writing === undefined ? null : said(writing, false),
+    answered,
     report: open.report,
     failed: failed === undefined ? null : failed,
     handed: handedBy(result === undefined ? files : [], worktree),

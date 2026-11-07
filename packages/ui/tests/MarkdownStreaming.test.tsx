@@ -1,7 +1,8 @@
-import { render } from '@testing-library/react'
+import { act, render, type RenderResult } from '@testing-library/react'
 import { Lexer } from 'marked'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { FADE, Freshness } from '../src/thread/Markdown/fresh'
 import { blocksOf, type Lexed, lexOn } from '../src/thread/Markdown/lexed'
 import { Markdown } from '../src/thread/Markdown/Markdown'
 import { inOpenFence, streamable } from '../src/thread/Markdown/streaming'
@@ -9,8 +10,9 @@ import { headingOf, thoughtSummary } from '../src/thread/Reasoning/summary'
 
 /*
  * Markdown cut off mid-stream: shown without what would change its mind
- * (streaming.ts), read on from where it settled (lexed.ts); and what a
- * thought was about, in a line (Reasoning/summary.ts).
+ * (streaming.ts), read on from where it settled (lexed.ts), its newest
+ * words fading in (fresh.tsx); and what a thought was about, in a line
+ * (Reasoning/summary.ts).
  */
 
 const ANSWER = `It doesn't yet: the wait lives in memory, so a restart forgets it.
@@ -158,6 +160,84 @@ describe('markdown read as it grows', () => {
     view.rerender(<Markdown source="A **bold wo" />)
     expect(view.container.querySelector('strong')).toBeNull()
     expect(view.container.textContent).toBe('A **bold wo')
+  })
+})
+
+describe('the newest words of a text being written', () => {
+  it('keeps what showed lately, each stretch from where the last ended, for as long as it fades', () => {
+    const fresh = new Freshness()
+    // Its first words, drawn as they start, fade in too.
+    fresh.see(9, 0, true)
+    fresh.see(20, 100, true)
+    expect(fresh.reveals.map(({ from, to }) => [from, to])).toEqual([
+      [0, 9],
+      [9, 20],
+    ])
+    expect(fresh.since).toBe(0)
+    fresh.see(20, FADE + 50, true)
+    expect(fresh.reveals.map(({ from, to }) => [from, to])).toEqual([[9, 20]])
+    fresh.see(20, FADE + 200, true)
+    expect(fresh.reveals).toEqual([])
+    expect(fresh.since).toBe(Number.POSITIVE_INFINITY)
+    // What it shows at once as it stops fades in too; what grows after doesn't.
+    fresh.see(40, 2000, false)
+    expect(fresh.reveals.map(({ from, to }) => [from, to])).toEqual([[20, 40]])
+    fresh.see(60, 2100, false)
+    expect(fresh.reveals.map(({ from, to }) => [from, to])).toEqual([[20, 40]])
+  })
+
+  it('shows as it is what was there when it first drew: a text opened mid-stream, or one not being written', () => {
+    const opened = new Freshness()
+    opened.see(400, 0, true)
+    expect(opened.reveals).toEqual([])
+    opened.see(410, 10, true)
+    expect(opened.reveals.map(({ from, to }) => [from, to])).toEqual([[400, 410]])
+    const still = new Freshness()
+    still.see(10, 0, false)
+    still.see(20, 10, false)
+    expect(still.reveals).toEqual([])
+  })
+
+  describe('drawn', () => {
+    beforeEach(() => vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame', 'performance'] }))
+    afterEach(() => {
+      vi.useRealTimers()
+      vi.restoreAllMocks()
+    })
+    const fading = (view: RenderResult) => [...view.container.querySelectorAll('[class*="fresh"]')].map((one) => one.textContent)
+
+    it('fades in each stretch as it shows, in bold and code too, and draws it as plain text once it has', () => {
+      const view = render(<Markdown source="It starts" streaming />)
+      expect(fading(view)).toEqual(['It starts'])
+      view.rerender(<Markdown source="It starts in **Follow.ts**, at `poll()`, which" streaming />)
+      // What fades, frame by frame, as the pace shows it.
+      const seen = new Set<string>()
+      let bold = false
+      for (let frame = 0; frame < 120; frame++) {
+        act(() => void vi.advanceTimersByTime(16))
+        for (const words of fading(view)) seen.add(words ?? '')
+        bold ||= view.container.querySelector('strong [class*="fresh"]') !== null
+      }
+      expect([...seen].join(' ')).toContain('Follow.ts')
+      expect([...seen].join(' ')).toContain('poll()')
+      expect(bold).toBe(true)
+      act(() => void vi.advanceTimersByTime(2000))
+      view.rerender(<Markdown source="It starts in **Follow.ts**, at `poll()`, which polls." streaming />)
+      act(() => void vi.advanceTimersByTime(50))
+      // Only what came in since fades: what showed before stands as it is.
+      expect(fading(view).length).toBeGreaterThan(0)
+      expect(fading(view).join('')).not.toContain('Follow.ts')
+      act(() => void vi.advanceTimersByTime(1000))
+      expect(view.container.textContent).toBe('It starts in Follow.ts, at poll(), which polls.')
+    })
+
+    it('shows words as they arrive, with none fading, with reduced motion', () => {
+      vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: true } as MediaQueryList)
+      const view = render(<Markdown source="It starts" streaming />)
+      view.rerender(<Markdown source="It starts in Follow.ts" streaming />)
+      expect(view.container.textContent).toBe('It starts in Follow.ts')
+      expect(fading(view)).toEqual([])
+    })
   })
 })
 

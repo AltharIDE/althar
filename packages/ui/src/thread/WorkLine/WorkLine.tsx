@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { Icon } from '../../foundations/Icon/Icon'
 import { useControlled } from '../../lib/controlled'
 import { cx } from '../../lib/cx'
-import { Disclosure, DisclosureTrigger, Fold, Unfold, type Disclosable } from '../../primitives/Fold/Fold'
+import { Disclosure, DisclosureTrigger, Fold, type Disclosable } from '../../primitives/Fold/Fold'
 import { Model, type ModelInfo } from '../../primitives/Model/Model'
 import { Spinner } from '../../primitives/Spinner/Spinner'
 import { ImageView } from '../Lightbox/Lightbox'
@@ -39,13 +39,6 @@ export interface WorkLineProps extends Disclosable {
   who?: ModelInfo
   /** Every step of the work, in order, shown when opened. Without them, the line doesn't open. */
   children?: ReactNode
-  /**
-   * While it works, what it is thinking, under the line: its latest thought,
-   * streaming as it thinks and folded to its line once it moves on (a live
-   * Reasoning). It folds away with the work, and while the work is open,
-   * where every step shows.
-   */
-  thinking?: ReactNode
   className?: string
   text?: Partial<WorkLineText>
 }
@@ -63,7 +56,6 @@ export function WorkLine({
   summary,
   who,
   children,
-  thinking,
   className,
   text,
   open,
@@ -72,7 +64,6 @@ export function WorkLine({
 }: WorkLineProps) {
   const t = { ...workLineText, ...text }
   const [opened, setOpened] = useControlled(open, defaultOpen, onOpenChange)
-  const tail = <Unfold open={live && thinking !== undefined && thinking !== null && !opened}>{thinking}</Unfold>
   const words = who === undefined ? (live ? t.working(took) : t.worked(took)) : live ? t.workingBy(took) : t.workedBy(took)
   const line = (
     <>
@@ -95,7 +86,6 @@ export function WorkLine({
         <div className={s.row} aria-busy={live || undefined}>
           {line}
         </div>
-        {tail}
       </div>
     )
   return (
@@ -108,7 +98,6 @@ export function WorkLine({
       <Fold bleed={false}>
         <div className={s.body}>{children}</div>
       </Fold>
-      {tail}
     </Disclosure>
   )
 }

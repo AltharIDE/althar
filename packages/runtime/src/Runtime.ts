@@ -22,6 +22,7 @@ import { Launches } from './Launches'
 import { Live } from './Live'
 import { MachineLoad } from './MachineLoad'
 import { Overlaps } from './Overlaps'
+import { Situations } from './Situations'
 import { PlanUsage } from './PlanUsage'
 import { Permissions } from './Permissions'
 import { Questions } from './Questions'
@@ -29,6 +30,7 @@ import { PermissionJudge } from './PermissionJudge'
 import { Policies } from './Policies'
 import { Projects } from './Projects'
 import { Coordinator } from './Coordinator'
+import { SettingsTools } from './SettingsTools'
 import { TaskActions } from './TaskActions'
 import { Plans } from './Plans'
 import { Reviews } from './Reviews'
@@ -144,7 +146,7 @@ export const layer = (options: RuntimeLayerOptions) => {
   const shown = PullRequestScreenshots.layer.pipe(Layer.provideMerge(linked))
   // Runs drive a task's steps; plans start runs when their time comes; the person steers a task's course; the coordinator plans tasks and passes messages on.
   // Finished tasks' folders go after their wait, or when the person cleans up, and come back when needed (ADR-056).
-  // Worktrees whose link to their repository broke are repaired as Althar starts, or as git fails in one (ADR-101).
+  // Worktrees whose link to their repository broke are repaired as Althar starts, or as git fails in one (ADR-102).
   const work = Layer.mergeAll(Tasks.layer, FolderCleanup.layer, WorktreeRepair.layer).pipe(
     Layer.provideMerge(Plans.layer.pipe(Layer.provideMerge(startupLayer('runs', Runs.layer).pipe(Layer.provideMerge(shown))))),
   )
@@ -160,8 +162,12 @@ export const layer = (options: RuntimeLayerOptions) => {
       Layer.mergeAll(
         startupLayer('coordinator', Coordinator.layer),
         TaskActions.layer,
+        // The settings, read and changed by the coordinator and leads as the person can (ADR-097).
+        SettingsTools.layer,
         MachineLoad.layer,
         Overlaps.layer,
+        // A child that ended, and a call that waits while the person is away (Situations.ts).
+        Situations.layer,
         startupLayer('search-index', fillIndex),
       ).pipe(Layer.provideMerge(automating)),
     ),

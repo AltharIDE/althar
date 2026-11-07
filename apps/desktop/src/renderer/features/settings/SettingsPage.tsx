@@ -69,6 +69,7 @@ import type { StartModel } from '../start/useStart'
 import { EXAMPLE, IslandPicture, MenuPicture, shownGlance } from './EdgePicture'
 import { ModelsView } from './ModelsView'
 import { QuickCards } from './QuickCards'
+import { ChangedBy } from './ChangedBy'
 import { GROUPS, type Section, sectionText } from './sections'
 import s from './Settings.module.css'
 import { text } from './text'
@@ -169,6 +170,7 @@ export function SettingsPage({ start, section, onSection, onTask, signIn }: Sett
         </>
       }
     >
+      <ChangedBy projectId={null} section={`althar/${section}`} />
       <SectionBody
         section={section}
         start={start}

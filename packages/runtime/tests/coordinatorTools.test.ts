@@ -65,17 +65,19 @@ describe('a lead settling its task as the person says', () => {
       }
       const settle = (how: 'done' | 'keep' | 'discard') => callTool(lead, 'settle_task', { how })
 
-      assert.match(yield* settle('keep'), /^Kept it for later: it is out of Needs you as it is/)
+      // As the coordinator's settle_task: one tool, with the lead's own task where it names none (ADR-097).
+      assert.match(yield* settle('keep'), /^Kept which-partners-still-call-v1 for later: out of Needs you as it is/)
       assert.isNotNull((yield* stateOf(task.taskId))[0]?.keptAt)
-      assert.strictEqual(yield* settle('keep'), 'It is kept for later already.')
+      assert.match(yield* settle('keep'), /^Nothing changed: which-partners-still-call-v1 is kept for later already\./)
       // The coordinator finds it as kept for later.
       const threadId = yield* (yield* Coordinator).thread(project.projectId)
       const coordinator: ToolAccess = { role: 'coordinator', projectId: project.projectId, threadId, sessionId: 'none', taskId: null }
       assert.include(yield* callTool(coordinator, 'find_tasks', { text: 'partners' }), '(kept for later; id ')
-      assert.match(yield* settle('done'), /^Marked it done: it is in Settled/)
+      assert.match(yield* settle('done'), /^Marked which-partners-still-call-v1 done: it is in Settled/)
       assert.strictEqual((yield* stateOf(task.taskId))[0]?.state, 'done')
-      assert.strictEqual(yield* settle('done'), 'It is done already: it is in Settled.')
-      assert.strictEqual(yield* settle('keep'), 'It is done already: it is in Settled, so there is nothing to keep.')
+      // Its own thread says so, once: the lead acted in it.
+      assert.match(yield* settle('done'), /is done already: it is in Settled\./)
+      assert.match(yield* settle('keep'), /is settled already\./)
       assert.strictEqual(yield* settle('discard'), 'It is done already: it is in Settled, so there is nothing to discard.')
     }).pipe(Effect.provide(runtime())),
   )
@@ -107,7 +109,8 @@ describe('a lead settling its task as the person says', () => {
       }
       assert.match(yield* callTool(lead, 'settle_task', { how: 'discard' }), /^It is discarded as your turn ends/)
       yield* until(stateOf(task.taskId), ([row]) => row?.state === 'abandoned')
-      assert.strictEqual(yield* callTool(lead, 'settle_task', { how: 'done' }), 'It is discarded already.')
+      assert.match(yield* callTool(lead, 'settle_task', { how: 'done' }), /^Nothing changed: sketch-the-settings is discarded/)
+      assert.strictEqual(yield* callTool(lead, 'settle_task', { how: 'discard' }), 'It is discarded already.')
     }).pipe(Effect.provide(runtime())),
   )
 
@@ -139,13 +142,14 @@ describe('a lead settling its task as the person says', () => {
         sessionId: 'none',
         taskId: change.taskId,
       }
-      assert.strictEqual(
+      assert.match(
         yield* callTool(lead, 'settle_task', { how: 'done' }),
-        'This task is a change: the person accepts it from its card, or abandons it from its menu. Carry on with what they asked.',
+        /^Nothing changed: retry-the-checkout is a change: it is done once its pull request merges/,
       )
+      // Without a task of its own, it names one.
       assert.strictEqual(
         yield* callTool({ ...lead, taskId: null }, 'settle_task', { how: 'keep' }),
-        'Only the lead of one of the project’s tasks settles its task.',
+        'Name the task, by its slug as list_tasks shows it.',
       )
       assert.strictEqual((yield* stateOf(change.taskId))[0]?.state, 'draft')
     }).pipe(Effect.provide(runtime())),

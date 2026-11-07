@@ -21,6 +21,7 @@ const show = (
   props: {
     project?: string
     openFile?: (path: string) => void
+    retryable?: boolean
     onTryAgain?: () => void
     onSignIn?: (agentId: string) => void
     onCompact?: () => void
@@ -28,7 +29,7 @@ const show = (
 ) => {
   const { client } = fakeClient()
   const blocks = blocksOf({ items: thread, turnRunning: false, worktree: '/w/meridian' }, new Map(), () => 'just now')
-  withServices(<ThreadBlocks blocks={blocks} threadId="th1" worktree="/w/meridian" {...props} />, client)
+  withServices(<ThreadBlocks blocks={blocks} threadId="th1" worktree="/w/meridian" retryable={true} {...props} />, client)
   return client
 }
 
@@ -258,6 +259,21 @@ describe('a turn that failed on its connection', () => {
     expect(screen.getByText(/API Error: Connection error\./)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(onTryAgain).toHaveBeenCalledOnce()
+  })
+
+  it('offers nothing for an error the runtime cannot retry', () => {
+    show(
+      [
+        items.you('Hi'),
+        items.says('Committed and pushed.'),
+        items.notice({
+          severity: 'error',
+          title: 'The connection to Claude was lost.',
+        }),
+      ],
+      { onTryAgain: vi.fn(), retryable: false },
+    )
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
   })
 
   it('offers it only under the last turn, where it ended in an error, and where the screen can try again', () => {

@@ -19,6 +19,7 @@ import {
   IssueChangesCard,
   IssueDraftCard,
   ReviewDraftCard,
+  SettingChangeCard,
   type IssueSummary,
   type HeldForConnection,
   type HeldForLimit,
@@ -50,9 +51,10 @@ import { Clock, Context, Deferred, Duration, Effect, Layer, Option, Schema } fro
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Busy, type Line } from './Busy'
+import { markOf, openItem, viewOf } from './chatView'
 import { ModelFacts } from './ModelFacts'
 import { PlanUsage } from './PlanUsage'
-import { checkoutWaitOf, PlanParameters, planWaits } from './Runs'
+import { checkoutWaitOf, PlanParameters, planWaits, reviewerChange } from './Runs'
 import { localTakenFor } from './local'
 import { towardChoicesOf } from './towards'
 import { Agents, RuntimeConfig } from './Config'
@@ -140,6 +142,9 @@ const saidOf = (item: { readonly id: string; readonly kind: string; readonly con
       return text === undefined ? null : { itemId: item.id, text, relayed }
     },
   })
+
+/** How many open items, at most, a cleared view carries in from before its mark. */
+const CARRIED = 200
 
 /** How many items further back, at most, a page of a task's thread reaches for the start of its first round: one enormous round loads in pages. */
 const ROUND_REACH = 2_000
@@ -361,6 +366,17 @@ const checkoutTitle = (payload: unknown) =>
     ? `${text(payload, 'repository') || 'Local'} is on another branch`
     : `${text(payload, 'repository') || 'Local'} has uncommitted changes`
 
+/** Where a call that waited reached the person besides the window, and whether its lead was set aside to go on (docs/decisions/097). */
+const reachedOf = (payload: unknown) => {
+  const reached = field(payload, 'reached')
+  const device = text(reached, 'device')
+  const at = text(reached, 'at')
+  return {
+    ...(device === '' || at === '' ? {} : { reached: { device, at } }),
+    ...(field(payload, 'setAside') === true ? { setAside: true } : {}),
+  }
+}
+
 /** A call that waits on the person, as a screen shows it: what was asked, why it waits, and, for a step that needs them, which and why. */
 const callOf = (request: {
   readonly id: string
@@ -394,6 +410,7 @@ const callOf = (request: {
     ...(command === null ? {} : { label: shortCommand(command) }),
     // A permission the rules keep for the person whatever they let through: no "always allow" can answer it.
     ...(request.kind === 'permission' && field(payload, 'held') === true ? { held: true } : {}),
+    ...reachedOf(payload),
     stuck: request.kind === 'stuck' ? stuckOf(payload) : null,
     // What Althar asks before a Local task takes a checkout (ADR-091).
     ...Option.match(request.kind === 'checkout' ? Schema.decodeUnknownOption(CheckoutAsk)(payload) : Option.none(), {
@@ -472,6 +489,11 @@ const decodeReviewDraft = Schema.decodeUnknownOption(ReviewDraftCard)
 const decodeAutomation = Schema.decodeUnknownOption(AutomationCard)
 const decodePushRequest = Schema.decodeUnknownOption(PushRequestItem.fields.content)
 const decodeTaskAsk = Schema.decodeUnknownOption(TaskAskItem.fields.content)
+const decodeSettingChange = Schema.decodeUnknownOption(SettingChangeCard)
+/** The task a notice is about, which the thread links to: one its lead started (ADR-097). */
+const decodeNoticeTask = Schema.decodeUnknownOption(
+  Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String }),
+)
 const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
 
 const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'] as const
@@ -512,12 +534,19 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
               },
       }
     case 'agent_message':
-    case 'agent_thought':
+    case 'agent_thought': {
+      const answer = field(content, 'answer')
       return {
         ...base,
         kind: row.kind,
-        content: { text: text(content, 'text'), pictures: picturesOf(field(content, 'pictures')), files: filesOf(field(content, 'files')) },
+        content: {
+          text: text(content, 'text'),
+          pictures: picturesOf(field(content, 'pictures')),
+          files: filesOf(field(content, 'files')),
+          ...(typeof answer === 'boolean' ? { answer } : {}),
+        },
       }
+    }
     case 'tool_call': {
       const locations = field(content, 'locations')
       const exit = field(content, 'exit')
@@ -587,6 +616,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           ...(role === 'aside' || role === 'relayed' || role === 'folder' || role === 'skills' ? { role } : {}),
           ...(role === 'skills' ? { skills: skillsSeenOf(field(content, 'skills')) } : {}),
           ...(failure === undefined || failure === '' ? {} : { failure }),
+          ...Option.match(decodeNoticeTask(field(content, 'task')), { onNone: () => ({}), onSome: (task) => ({ task }) }),
         },
       }
     }
@@ -744,6 +774,12 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       return Option.match(decodeTaskAsk(content), {
         onNone: () => undefined,
         onSome: (asked): ThreadItem => ({ ...base, kind: 'task_ask', content: asked }),
+      })
+    // A setting changed, or a change that loosens what asks waiting on the person's card (SettingsTools.ts).
+    case 'setting':
+      return Option.match(decodeSettingChange(content), {
+        onNone: () => undefined,
+        onSome: (card): ThreadItem => ({ ...base, kind: 'setting', content: card }),
       })
     case 'setup': {
       const ended = field(content, 'ended')
@@ -989,6 +1025,8 @@ export class Queries extends Context.Service<
           readonly before?: number
           /** The first sequence read, where the page starts at a given item. */
           readonly from?: number
+          /** Only items that are still open: what a cleared view carries into the thread (`openItem`). */
+          readonly open?: boolean
           readonly itemId?: string
           readonly limit: number
           readonly reports?: boolean
@@ -1031,6 +1069,7 @@ export class Queries extends Context.Service<
               AND ${where.itemId === undefined ? sql`(u.state IS NULL OR u.state <> 'withdrawn')` : sql`i.id = ${where.itemId}`}
               AND ${where.before === undefined ? sql`1 = 1` : sql`i.sequence < ${where.before}`}
               AND ${where.from === undefined ? sql`1 = 1` : sql`i.sequence >= ${where.from}`}
+              AND ${where.open === true ? sql.unsafe(openItem) : sql`1 = 1`}
               AND ${where.reports === true ? sql`i.kind = 'step_result'` : sql`1 = 1`}
             ORDER BY i.sequence DESC LIMIT ${where.limit + 1}`
           // One more than asked for says whether there are earlier ones.
@@ -1086,6 +1125,14 @@ export class Queries extends Context.Service<
             // Whether the runtime holds a session on this thread, which takes a note and makes a start refuse. The summary describes that held
             // session, not a newer row a switch is still starting, so a model or effort pick is compared with what the runtime runs.
             held: Option.isSome(running),
+            nextLead:
+              Option.isSome(running) && running.value.nextLead !== undefined
+                ? {
+                    agentId: running.value.nextLead.agentId,
+                    model: running.value.nextLead.model ?? null,
+                    effort: running.value.nextLead.effort ?? null,
+                  }
+                : null,
             context: Option.isSome(running) && running.value.sessionId === session.id ? running.value.context : null,
             background: Option.isSome(running) && running.value.sessionId === session.id ? running.value.background : [],
           }
@@ -2022,6 +2069,10 @@ export class Queries extends Context.Service<
             runPlan: string | null
             local: number
             toward: string | null
+            parentId: string | null
+            parentSlug: string | null
+            parentTitle: string | null
+            parentThread: string | null
           }>`
             SELECT k.project_id, t.id AS thread_id, k.title, k.slug, k.state, k.settled_at, k.kept_at, k.created_at,
               ${sql.unsafe(SHOWN_BRANCH)},
@@ -2051,6 +2102,11 @@ export class Queries extends Context.Service<
               (SELECT tw.toward FROM workspaces tw JOIN repository_bindings tb ON tb.id = tw.binding_id
                 WHERE tw.task_id = k.id AND tw.device_id = ${instance.deviceId} AND tw.toward IS NOT NULL
                 ORDER BY tb.created_at, tb.rowid LIMIT 1) AS toward,
+              -- The task a lead started it from, where one did (ADR-097): its card says "started by" it.
+              k.parent_task_id AS parent_id,
+              (SELECT pk.slug FROM tasks pk WHERE pk.id = k.parent_task_id) AS parent_slug,
+              (SELECT pk.title FROM tasks pk WHERE pk.id = k.parent_task_id) AS parent_title,
+              (SELECT pt.id FROM threads pt WHERE pt.task_id = k.parent_task_id AND pt.kind = 'task') AS parent_thread,
               (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') + ${sql.unsafe(issueCardsWaiting('k'))} AS waiting,
               (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' LIMIT 1) AS review,
               (SELECT agent_id FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead,
@@ -2299,9 +2355,15 @@ export class Queries extends Context.Service<
             // Its folder being set up before its lead's first turn: the install its lockfile names, or the setup kept for it.
             ...(settingUp ? { settingUp: task.settingUp === 1 ? ('kept' as const) : ('install' as const) } : {}),
             kind,
+            // Started by another task's lead: that task, which the card names.
+            ...(task.parentId === null || task.parentSlug === null || task.parentTitle === null || task.parentThread === null
+              ? {}
+              : { startedBy: { taskId: task.parentId, slug: task.parentSlug, title: task.parentTitle, threadId: task.parentThread } }),
             // What a plain task handed back, small on its card while it waits for the person.
             handed: kind === 'plain' ? yield* handedFor(task.threadId, latest?.content ?? null, task.runAt) : null,
             reviewing,
+            // Once its plan has begun, when a change of its reviewer would take effect: the person's dialog reads it.
+            ...(task.planState === 'accepted' && task.state === 'open' ? { reviewerChange: yield* reviewerChange(taskId) } : {}),
             plan:
               task.planId === null
                 ? null
@@ -2763,10 +2825,24 @@ export class Queries extends Context.Service<
         })
 
       /** A page of a thread's items, as screens show them; a task's starts at a round (`fromRound`). */
-      const pageOf = (threadId: string, page: { readonly before?: number; readonly limit?: number }, rounds = false) =>
+      const pageOf = (
+        threadId: string,
+        page: {
+          readonly before?: number
+          readonly limit?: number
+          readonly from?: number
+          readonly until?: number
+          readonly open?: boolean
+        },
+        rounds = false,
+      ) =>
         Effect.gen(function* () {
+          // A page ends before `until`, and before the one asked for, whichever is first.
+          const before = page.until === undefined ? page.before : Math.min(page.before ?? page.until, page.until)
           const read = yield* itemRows(threadId, {
-            ...(page.before === undefined ? {} : { before: page.before }),
+            ...(before === undefined ? {} : { before }),
+            ...(page.from === undefined ? {} : { from: page.from }),
+            ...(page.open === true ? { open: true } : {}),
             limit: page.limit ?? PAGE,
           })
           const { items, earlier } = rounds ? yield* fromRound(threadId, read) : read
@@ -2973,10 +3049,15 @@ export class Queries extends Context.Service<
           const card: TaskCard | undefined = yield* cardFor(head.taskId, links)
           const session = yield* sessionOf(threadId)
           // Who leads it when no lead runs: the last on its thread, else its plan's.
-          const [last] = yield* sql<{ agentId: string; model: string | null; account: string | null }>`
-            SELECT s.agent_id, s.model, a.name AS account FROM provider_sessions s LEFT JOIN agent_accounts a ON a.id = s.account_id
+          const [last] = yield* sql<{ agentId: string; model: string | null; account: string | null; startedAt: string }>`
+            SELECT s.agent_id, s.model, a.name AS account, s.started_at FROM provider_sessions s LEFT JOIN agent_accounts a ON a.id = s.account_id
             WHERE s.thread_id = ${threadId} ORDER BY s.started_at DESC, s.rowid DESC LIMIT 1`
           const planned = card?.plan?.steps.find((step) => step.key === 'implement')
+          // Its lead changed since its last session began, with no lead running to change: the plan's lead is who leads it next.
+          const [changedLead] = yield* sql<{ at: string | null }>`
+            SELECT json_extract(parameters, '$.leadChanged') AS at FROM task_plans
+            WHERE task_id = ${head.taskId} AND state IN ('proposed', 'accepted') ORDER BY proposed_at DESC LIMIT 1`
+          const leadMoved = last !== undefined && changedLead?.at != null && changedLead.at > last.startedAt && !session?.held
           // What the person can do to it as a whole, from where it stands.
           const standing = yield* standingOf(head.taskId)
           // Its folder, removed once it finished or on its way back (ADR-056).
@@ -3038,7 +3119,14 @@ export class Queries extends Context.Service<
               steps: card?.plan?.steps ?? [],
               // Its graph is a part of its own: one that can't be read leaves the face out, not the thread.
               ...Option.match(graph, { onNone: () => ({}), onSome: (rounds) => ({ graph: rounds }) }),
-              lead: last ?? (planned === undefined ? null : { agentId: planned.agentId, model: planned.model, account: null }),
+              lead:
+                leadMoved && planned !== undefined
+                  ? { agentId: planned.agentId, model: planned.model, account: null }
+                  : last === undefined
+                    ? planned === undefined
+                      ? null
+                      : { agentId: planned.agentId, model: planned.model, account: null }
+                    : { agentId: last.agentId, model: last.model, account: last.account },
               step: card?.step ?? null,
               startedAt: card?.startedAt ?? null,
               stepAt: onStep?.admittedAt ?? null,
@@ -3085,6 +3173,7 @@ export class Queries extends Context.Service<
               review: yield* reviewBriefOf(head.taskId),
             },
             session,
+            retryable: yield* (yield* Sessions).retryable(threadId),
             attention: attention.map(callOf),
             items,
             earlier,
@@ -3112,11 +3201,27 @@ export class Queries extends Context.Service<
           const [project] = yield* sql<{ name: string }>`SELECT name FROM projects WHERE id = ${projectId}`
           if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
           const threadId = yield* coordinators.thread(projectId)
+          // A cleared view starts at its mark, or, with the earlier conversation open, ends before it.
+          const mark = yield* markOf(threadId)
+          const within = mark === null ? {} : mark.earlierShown ? { until: mark.from } : { from: mark.from }
           // Its cards, the agent on it, the one it would start on and the project's host, read at the same time.
-          const [{ items, earlier }, session, suggested, host] = yield* Effect.all(
-            [pageOf(threadId, page), sessionOf(threadId), coordinators.suggested(projectId), hostOf(projectId)],
+          const [read, session, suggested, host, view] = yield* Effect.all(
+            [
+              pageOf(threadId, { ...page, ...within }),
+              sessionOf(threadId),
+              coordinators.suggested(projectId),
+              hostOf(projectId),
+              viewOf(threadId),
+            ],
             { concurrency: 'unbounded' },
           )
+          // What is still open stays in a cleared view: carried in at its start, once the page reaches it.
+          const carried =
+            mark === null || mark.earlierShown || read.earlier
+              ? []
+              : yield* pageOf(threadId, { until: mark.from, limit: CARRIED, open: true }).pipe(Effect.map((one) => one.items))
+          const { earlier } = read
+          const items = [...carried, ...read.items]
           // What it used today, since this computer's midnight, of each account it ran on (ADR-084).
           const midnight = new Date(yield* Clock.currentTimeMillis)
           midnight.setHours(0, 0, 0, 0)
@@ -3127,9 +3232,11 @@ export class Queries extends Context.Service<
             usage,
             project: { id: projectId, name: project.name },
             session,
+            retryable: yield* (yield* Sessions).retryable(threadId),
             suggested,
             items,
             earlier,
+            view,
             host,
             runnables: yield* launches.runnables(projectId, null).pipe(Effect.orElseSucceed(() => [])),
             // Every run in the project, the tasks' too: the coordinator's screen is the project's.
@@ -3151,6 +3258,7 @@ export class Queries extends Context.Service<
           return yield* sql<ThreadChange>`
             SELECT c.cursor, c.aggregate_type, c.aggregate_id, c.project_id,
               CASE c.aggregate_type
+                WHEN 'thread' THEN c.aggregate_id
                 WHEN 'thread_item' THEN (SELECT thread_id FROM thread_items WHERE id = c.aggregate_id)
                 WHEN 'turn_delivery' THEN (SELECT thread_id FROM turn_deliveries WHERE id = c.aggregate_id)
                 WHEN 'provider_session' THEN (SELECT thread_id FROM provider_sessions WHERE id = c.aggregate_id)

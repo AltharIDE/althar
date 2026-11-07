@@ -1012,9 +1012,9 @@ describe('making a quick task a change', () => {
         createdAt: at,
         updatedAt: at,
       })}`
-      assert.strictEqual(
+      assert.match(
         yield* callTool(quickLead, 'make_it_a_change', asked),
-        'This task has a pull request already, so it is a change: there is nothing to make.',
+        /^This task has a pull request already, so it is a change: there is nothing to make\. Where the person wants another change made from it, .*draft_task, then propose_plan\.$/,
       )
       // And only a task's lead makes its task one.
       const none: ToolAccess = { role: 'lead', ...place, sessionId: 'none', taskId: null }

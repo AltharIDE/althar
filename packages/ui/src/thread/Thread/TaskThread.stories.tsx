@@ -1,5 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useEffect, useState } from 'react'
+
+import type { IconName } from '../../foundations/Icon/Icon'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import { CODEX, OPUS } from '../../fixtures/models'
@@ -7,24 +9,25 @@ import { ToolKind, ToolState, Verdict } from '../../foundations/vocabulary'
 import { ThreadFrame } from '../../storybook/ThreadFrame'
 import { AltharLine } from '../AltharLine/AltharLine'
 import { Markdown } from '../Markdown/Markdown'
-import { Reasoning } from '../Reasoning/Reasoning'
+import { Reasoning, Thinking } from '../Reasoning/Reasoning'
 import { Reviewer, type ReviewerFinding } from '../Reviewer/Reviewer'
 import { ReviewLine } from '../ReviewLine/ReviewLine'
 import { Round } from '../Round/Round'
-import { Tool } from '../Tool/Tool'
+import { glyphOf, Tool } from '../Tool/Tool'
 import { Turn } from '../Turn/Turn'
-import { WorkedFor } from '../WorkedFor/WorkedFor'
+import { WorkedFor, WorkNow } from '../WorkedFor/WorkedFor'
 import { WorkLine, WorkSaid } from '../WorkLine/WorkLine'
 import { You } from '../You/You'
 import { Thread } from './Thread'
 
 /*
  * A task's thread as the app draws it (the desktop's TaskThread), from the
- * kit's parts: a turn while it runs, its thinking streaming under its line
- * and folding to a line as it moves on, its words streaming at an even
- * pace; a long turn once it is over; a task with two rounds of review, each
- * a line, the lead's latest handoff open under them; and the coordinator's
- * turn as it thinks and answers.
+ * kit's parts: a turn while it runs, as Codex's app shows one (how long it
+ * has worked, what it said on the way and one line for what it does now,
+ * folding away under "Worked for" as it answers, its words fading in at an
+ * even pace); a long turn once it is over; a task with two rounds of review,
+ * each a line, the lead's latest handoff open under them; and the
+ * coordinator's turn as it works and answers.
  */
 
 const meta = {
@@ -90,9 +93,10 @@ const FINDINGS: ReviewerFinding[] = [
   },
 ]
 
-/** A run of a long turn's work, as its line opens to it: reads, edits, commands, what it said on the way, and its thoughts, folded. */
+/** A run of a long turn's work, as its header opens to it: what it said first and on the way, reads, edits, commands, and its thoughts, folded. */
 const longWork = (
   <>
+    <WorkSaid source={ACK} />
     <Reasoning source={THOUGHT_CLAUDE} took="27s" />
     <Tool kind={ToolKind.Search} verb="Searched" target="POLL_EVERY" state={ToolState.Done} />
     <Tool kind={ToolKind.Read} verb="Read" target="packages/runtime/src/MergeLine.ts" state={ToolState.Done} />
@@ -112,17 +116,14 @@ const longWork = (
   </>
 )
 
-/** A long turn, once it is over: what it said first, its work in one line (its thoughts folded inside), and its handoff. */
+/** A long turn, once it is over: its work folded under how long it took (what it said on the way and its thoughts inside), and its handoff. */
 export const FinishedLongTurn: Story = {
   args: {
     children: (
       <>
         <You at="2h ago">{REQUEST}</You>
         <Round model={OPUS} at="2h ago" copy={RESULT}>
-          <Markdown source={ACK} />
-          <WorkLine took="8m 37s" summary="edited 4 files, read 4 files, ran 4 commands">
-            {longWork}
-          </WorkLine>
+          <WorkedFor took="8m 37s">{longWork}</WorkedFor>
           <Markdown source={RESULT} />
         </Round>
       </>
@@ -130,10 +131,12 @@ export const FinishedLongTurn: Story = {
   },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    // Opened, its thoughts are folded lines, each how long and what about.
-    await userEvent.click(c.getByRole('button', { name: /Worked 8m 37s/ }))
+    // Folded, nothing of the work shows; opened, what it said first and its thoughts, each a line of how long and what about.
+    await expect(c.queryByText(ACK)).toBeNull()
+    await userEvent.click(c.getByRole('button', { name: /Worked for 8m 37s/ }))
     await waitFor(() => expect(c.getByRole('button', { name: /Thought for 42s.*Keeping GitHub's reset time on the error/ })).toBeVisible())
     await expect(c.getByRole('button', { name: /Thought for 27s.*The person wants the merge line to back off/ })).toBeTruthy()
+    await expect(c.getByText(ACK)).toBeVisible()
   },
 }
 
@@ -144,17 +147,14 @@ export const TwoReviewRounds: Story = {
       <>
         <You at="2h ago">{REQUEST}</You>
         <Round model={OPUS} at="2h ago">
-          <Markdown source={ACK} />
-          <WorkLine took="8m 37s" summary="edited 4 files, read 4 files, ran 4 commands">
-            {longWork}
-          </WorkLine>
+          <WorkedFor took="8m 37s">{longWork}</WorkedFor>
           <Markdown source={RESULT} />
         </Round>
         <ReviewLine model={CODEX} verdict={Verdict.Changes} findings={3} settled="2 fixed, 1 declined">
           <Reviewer verdict={Verdict.Changes} findings={FINDINGS} said={false} />
           <Markdown source="The back-off is in the right place and the connector change is small. Three things before this goes in." />
           <Round model={OPUS} at="2h ago">
-            <WorkLine took="3m 18s" summary="edited 2 files, read 1 file, ran 2 commands" />
+            <WorkedFor took="3m 18s" />
             <Markdown source="Settled the review: fixed the jitter and the clock, and set the card's time aside: it already says *until 14:32*." />
           </Round>
         </ReviewLine>
@@ -174,7 +174,7 @@ export const TwoReviewRounds: Story = {
           />
         </ReviewLine>
         <Round model={OPUS} at="2h ago" copy={SETTLED}>
-          <WorkLine took="1m 56s" summary="edited 2 files, read 1 file, ran 1 command" />
+          <WorkedFor took="1m 56s" />
           <Markdown source={SETTLED} />
         </Round>
         <ReviewLine model={CODEX} verdict={Verdict.Pass}>
@@ -194,96 +194,155 @@ export const TwoReviewRounds: Story = {
   },
 }
 
-/** What a live turn goes through, again and again: what it said first, then thinking, a tool, thinking again, its answer. */
-type Beat = { readonly think: string } | { readonly tool: string; readonly ms: number } | { readonly say: string }
+/** A round with nothing said in it, only work: who worked, and for how long, in one line. */
+export const QuietRound: Story = {
+  args: {
+    children: (
+      <>
+        <You at="1h ago">Rebase on main and run the checks again.</You>
+        <WorkLine who={OPUS} took="2m 4s" summary="ran 3 commands">
+          {longWork}
+        </WorkLine>
+      </>
+    ),
+  },
+}
+
+/**
+ * What a live turn goes through, again and again: thinking with nothing to
+ * show, then what it says it will do, its steps one after another, thinking
+ * again, and its answer.
+ */
+type Beat =
+  | { readonly wait: number }
+  | { readonly think: string; readonly ms: number }
+  | { readonly tool: string; readonly kind: ToolKind; readonly verb: readonly [string, string]; readonly ms: number }
+  | { readonly say: string }
+  | { readonly answer: string }
 
 const BEATS: ReadonlyArray<Beat> = [
-  { think: THOUGHT_CLAUDE },
-  { tool: 'Reading packages/runtime/src/Follow.ts', ms: 1400 },
-  { tool: 'Running bunx vitest run tests/follow.test.ts', ms: 1800 },
-  { think: THOUGHT_CODEX },
-  { tool: 'Editing packages/runtime/src/Follow.ts', ms: 1200 },
-  { say: RESULT },
+  { wait: 2200 },
+  { think: THOUGHT_CODEX, ms: 1800 },
+  { say: ACK },
+  { tool: 'POLL_EVERY', kind: ToolKind.Search, verb: ['Searching', 'Searched'], ms: 1600 },
+  { tool: 'packages/runtime/src/Follow.ts', kind: ToolKind.Read, verb: ['Reading', 'Read'], ms: 1800 },
+  { think: THOUGHT_CLAUDE, ms: 1600 },
+  { say: 'The poll interval is fixed in `Follow.ts`, and the connector drops the headers that say when to come back. Fixing both.' },
+  { tool: 'packages/runtime/src/Follow.ts', kind: ToolKind.Edit, verb: ['Editing', 'Edited'], ms: 1400 },
+  { tool: 'bunx vitest run tests/follow.test.ts', kind: ToolKind.Run, verb: ['Running', 'Ran'], ms: 2000 },
+  { answer: RESULT },
 ]
 
 /** Plays the beats as a model sends them: text in uneven bursts of a few words, with the odd stall. */
 const usePlayed = (beats: ReadonlyArray<Beat>) => {
-  const [at, setAt] = useState({ beat: 0, chars: 0 })
+  const [at, setAt] = useState({ beat: 0, chars: 0, since: Date.now(), began: [Date.now()] })
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const tick = window.setInterval(() => setNow(Date.now()), 250)
+    return () => window.clearInterval(tick)
+  }, [])
   const beat = beats[at.beat]
   useEffect(() => {
+    const next = () => setAt((one) => ({ beat: one.beat + 1, chars: 0, since: one.since, began: [...one.began, Date.now()] }))
     if (beat === undefined) {
-      const again = window.setTimeout(() => setAt({ beat: 0, chars: 0 }), 3000)
+      const again = window.setTimeout(() => setAt({ beat: 0, chars: 0, since: Date.now(), began: [Date.now()] }), 4000)
       return () => window.clearTimeout(again)
     }
-    if ('tool' in beat) {
-      const done = window.setTimeout(() => setAt({ beat: at.beat + 1, chars: 0 }), beat.ms)
+    if ('wait' in beat || 'tool' in beat || 'think' in beat) {
+      const done = window.setTimeout(next, 'wait' in beat ? beat.wait : beat.ms)
       return () => window.clearTimeout(done)
     }
-    const whole = 'think' in beat ? beat.think : beat.say
+    const whole = 'say' in beat ? beat.say : beat.answer
     if (at.chars >= whole.length) {
-      const next = window.setTimeout(() => setAt({ beat: at.beat + 1, chars: 0 }), 500)
-      return () => window.clearTimeout(next)
+      const done = window.setTimeout(next, 500)
+      return () => window.clearTimeout(done)
     }
     const stall = Math.random() < 0.08 ? 400 + Math.random() * 500 : 0
     const wait = 50 + stall
     const more = window.setTimeout(
-      () => setAt({ beat: at.beat, chars: Math.min(whole.length, at.chars + Math.round((wait * 300) / 1000)) }),
+      () => setAt((one) => ({ ...one, chars: Math.min(whole.length, one.chars + Math.round((wait * 300) / 1000)) })),
       wait,
     )
     return () => window.clearTimeout(more)
   }, [at, beat])
-  return { at, beats }
+  return { at, beats, now }
 }
 
-/** The turn as it stands at a moment of the play: its line, its latest thought, and its answer once it gives one. */
-const playedTurn = (played: ReturnType<typeof usePlayed>) => {
-  const { at, beats } = played
-  const shown = beats.slice(0, at.beat + 1)
-  const thoughts = shown.flatMap((beat, index) => ('think' in beat ? [{ index, text: beat.think }] : []))
-  const latest = thoughts.at(-1)
-  const now = beats[at.beat]
-  const thinking = now !== undefined && 'think' in now
-  const answering = now === undefined || 'say' in now
-  const doing = [...shown].reverse().find((beat) => 'tool' in beat)
-  const answer = beats.find((beat) => 'say' in beat)
-  return {
-    over: now === undefined,
-    summary: doing !== undefined && 'tool' in doing ? doing.tool : undefined,
-    thinking:
-      latest === undefined || answering ? undefined : (
-        <Reasoning
-          key={latest.index}
-          source={thinking ? latest.text.slice(0, at.chars) : latest.text}
-          live={thinking}
-          {...(thinking ? {} : { took: '14s' })}
-        />
-      ),
-    answer:
-      answer === undefined || !answering || !('say' in answer) ? undefined : (
-        <Markdown source={now === undefined ? answer.say : answer.say.slice(0, at.chars)} streaming={now !== undefined} />
-      ),
-  }
+const clock = (ms: number) => {
+  const all = Math.max(0, Math.floor(ms / 1000))
+  return all < 60 ? `${all}s` : `${Math.floor(all / 60)}m ${all % 60}s`
 }
 
-/** A task's round while its lead works: its thinking streams under its line, folds to a line as it moves on; then its answer. */
+/** The turn as it stands at a moment of the play: its work's header, what it said on the way and does now, and its answer. */
+function PlayedTurn({ played, foldAt }: { played: ReturnType<typeof usePlayed>; foldAt: 'answer' | 'end' }) {
+  const { at, beats, now } = played
+  const current = beats[at.beat]
+  const over = current === undefined
+  // It works from the end of its wait; answering, its work stops where the answer began.
+  const started = at.began[1] ?? now
+  if (current !== undefined && 'wait' in current) return <Thinking />
+  const shown = beats.slice(0, over ? beats.length : at.beat + 1)
+  const answering = over || (current !== undefined && 'answer' in current)
+  const writing = current !== undefined && ('say' in current || 'answer' in current)
+  // What it said on the way: each word it is done with; what it writes now stands under the work, where its answer will.
+  const said = shown.flatMap((beat, index) => ('say' in beat && index !== at.beat ? [beat.say] : []))
+  const step = [...shown].reverse().find((beat) => 'tool' in beat || 'think' in beat)
+  const now_ =
+    writing || step === undefined
+      ? null
+      : 'tool' in step
+        ? { icon: glyphOf(step.kind) as IconName | undefined, text: `${step.verb[0]} ${step.tool}` }
+        : { icon: undefined, text: step.think.startsWith('**') ? (step.think.split('**')[1] ?? 'Thinking') : 'Thinking' }
+  const answer = beats.find((beat): beat is { answer: string } => 'answer' in beat)?.answer ?? ''
+  const live = !over && !(foldAt === 'answer' && answering)
+  const answerStart = at.began[beats.findIndex((beat) => 'answer' in beat)] ?? now
+  const took = clock((live ? now : Math.min(now, answerStart)) - started)
+  const trail = shown.map((beat, index) =>
+    'think' in beat ? (
+      <Reasoning key={index} source={beat.think} live={index === at.beat} took={clock(beat.ms)} />
+    ) : 'tool' in beat ? (
+      <Tool
+        key={index}
+        kind={beat.kind}
+        verb={index === at.beat ? beat.verb[0] : beat.verb[1]}
+        target={beat.tool}
+        state={index === at.beat ? ToolState.Running : ToolState.Done}
+      />
+    ) : 'say' in beat && index !== at.beat ? (
+      <WorkSaid key={index} source={beat.say} />
+    ) : null,
+  )
+  return (
+    <>
+      <WorkedFor
+        took={took}
+        live={live}
+        said={said.length === 0 ? undefined : said.map((words) => <Markdown key={words} source={words} />)}
+        now={now_ === null ? undefined : <WorkNow {...(now_.icon === undefined ? {} : { icon: now_.icon })}>{now_.text}</WorkNow>}
+      >
+        {trail}
+      </WorkedFor>
+      {current !== undefined && 'say' in current && <Markdown key={at.beat} source={current.say.slice(0, at.chars)} streaming />}
+      {answering && <Markdown key="answer" source={over ? answer : answer.slice(0, at.chars)} streaming={!over} />}
+    </>
+  )
+}
+
+/**
+ * A task's round while its lead works, as Codex's app shows a turn: thinking
+ * before anything, then how long it has worked, what it says it will do, and
+ * one line for its step, replaced in place; its handoff comes in as the work
+ * folds away under how long it took, its newest words fading in.
+ */
 export const LiveTurn: Story = {
   render: function LiveTurn(args) {
-    const turn = playedTurn(usePlayed(BEATS))
+    const played = usePlayed(BEATS)
     return (
       <ThreadFrame>
         <Thread {...args}>
           <You at="just now">Does the back-off survive a restart?</You>
           <Round model={OPUS} at="just now">
-            <Markdown source="I’ll check what the merge line reads back when Althar starts." />
-            <WorkLine
-              took="1m 4s"
-              live={!turn.over}
-              {...(turn.summary === undefined ? {} : { summary: turn.summary })}
-              thinking={turn.thinking}
-            >
-              {longWork}
-            </WorkLine>
-            {turn.answer}
+            <PlayedTurn played={played} foldAt="answer" />
           </Round>
         </Thread>
       </ThreadFrame>
@@ -291,29 +350,22 @@ export const LiveTurn: Story = {
   },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    // Thinking, it shows as it streams, under the line.
-    await waitFor(() => expect(c.getByRole('button', { name: /Thinking/ })).toBeTruthy())
+    // Thinking before anything, then at work: how long, and one line for what it does now.
+    await waitFor(() => expect(c.getByRole('status')).toHaveTextContent('Thinking'))
+    await waitFor(() => expect(c.getByRole('button', { name: /Working for/ })).toBeTruthy(), { timeout: 4000 })
   },
 }
 
-/** The coordinator's turn: its thinking under its line, then its answer streaming in at an even pace. */
+/** The coordinator's turn: the same, but for its answer, which it can't tell from what it says on the way until its turn ends. */
 export const CoordinatorLive: Story = {
   render: function CoordinatorLive(args) {
-    const turn = playedTurn(usePlayed(BEATS))
+    const played = usePlayed(BEATS)
     return (
       <ThreadFrame>
         <Thread {...args}>
           <You at="just now">What needs me today?</You>
           <Turn model={CODEX} at="just now">
-            <WorkedFor
-              took="12s"
-              live={!turn.over}
-              {...(turn.summary === undefined ? {} : { summary: turn.summary })}
-              thinking={turn.thinking}
-            >
-              {longWork}
-            </WorkedFor>
-            {turn.answer}
+            <PlayedTurn played={played} foldAt="end" />
           </Turn>
         </Thread>
       </ThreadFrame>

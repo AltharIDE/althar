@@ -75,7 +75,7 @@ test('asks the person a question on the home, keeps it across a restart, and car
     if (shots) await page.screenshot({ path: join(shots, 'app-thread-question-answered.png') })
     // What the lead was told is with the work that led to its report.
     await page
-      .getByRole('button', { name: /[Ww]orked \d/ })
+      .getByRole('button', { name: /[Ww]orked (for )?\d/ })
       .last()
       .click()
     // The words it was told, where the work that led to its report keeps them: they may share a line with what Althar

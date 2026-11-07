@@ -25,7 +25,7 @@ import { lineOf, type RunCommand, runOf, type Script, scriptsIn, setupIn } from 
 import { endedHow, installedAsLocked, runSpec } from './runProcess'
 import { shotOf, shotWords, VIEWPORT } from './screenshots'
 import { Setups } from './Setups'
-import { type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
+import { POOL, type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
 
 /*
  * The project run by Althar itself, with no agent (ADR-023): the command that
@@ -783,6 +783,12 @@ export class Launches extends Context.Service<
                 ? places.find(({ binding }) => binding.id === asked.bindingId)
                 : (kept.map((one) => places.find(({ binding }) => binding.id === one.bindingId)).find((one) => one !== undefined) ??
                   places[0])
+            // A pull request or branch is one repository's: what another repository runs can't run on it.
+            if (place === undefined && asked !== undefined && input.repository !== undefined && places.length > 0)
+              return yield* new LaunchRefused({
+                why: 'which',
+                message: `${asked.name ?? asked.command} runs in another repository than ${input.repository}, so it can't run on its branch or pull request.`,
+              })
             if (place === undefined)
               return yield* new LaunchRefused({ why: 'elsewhere', message: `Its repository has no copy on ${thisDevice()} to run it in.` })
             const { binding } = place
@@ -1284,10 +1290,15 @@ export class Launches extends Context.Service<
           return `${running}. It hasn't said where it answers yet; the person sees it in Run’s list, with its address once it says, and stops it there.`
         })
 
+      /*
+       * The project run as Althar runs it for the person, by the coordinator or a lead: one tool for both (ADR-097). A lead
+       * runs its own worktree unless it names something else; the coordinator a fresh copy of the branch the project works
+       * toward. Either may name a task's worktree, a branch or a pull request, which run in a copy Althar fetches itself.
+       */
       const runTool: Tool = {
         name: 'run_project',
         description:
-          "Runs the project for the person, with no agent: Althar starts its default run command itself, or with run the one of its runnables by that name, after its setup, and shows it over the composer, with where it answers once it says. Without task, branch or pull_request, in a fresh copy of the branch the project works toward: its default branch, unless its Work toward says another. With task, in that task's worktree, to see what it built. With branch (its name on the remote) or pull_request (its number or link), in a throwaway copy of it that Althar fetches from the code host itself, with its own sign-in, so it needs nothing pulled or checked out: when the person asks to start, run, try or see a branch or a pull request, even one not pulled yet, use this rather than starting a task. An unknown branch is refused, with the names like it. It stays running until the person stops it; a branch's copy goes when it stops. In a project of several repositories, say which, as repository.",
+          "Runs the project as Althar runs it for the person, with no agent and outside your sandbox: its default run command, or with run the one of its runnables by that name (Storybook), after its setup. Use it rather than starting a dev server yourself: the person sees it in Run’s list, in the task’s bar or on the project’s front, with where it answers once it says, and can open or stop it there. It returns once it says where it answers, or ends, with its last lines if it did; a run of it already going is the one returned. Where: a task's lead without task, branch or pull_request runs its own worktree; the coordinator, a fresh copy of the branch the project works toward (its default branch, unless its Work toward says another). With task, in that task's worktree, to see what it built. With branch (its name on the remote) or pull_request (its number or link), in a throwaway copy of it that Althar fetches from the code host itself, with its own sign-in, so it needs nothing pulled or checked out: when the person asks to start, run, try or see a branch or a pull request, even one not pulled yet, use this rather than starting a task. An unknown branch is refused, with the names like it. It stays running until it is stopped (stop_project, or the person); a branch's copy goes when it stops. Stop what you ran once you no longer need it. In a project of several repositories, say which, as repository.",
         input: {
           type: 'object',
           properties: {
@@ -1315,13 +1326,27 @@ export class Launches extends Context.Service<
                       ? { kind: 'pull_request', which: String(asked.pull_request) }
                       : undefined
                 const sql = yield* SqlClient.SqlClient
+                // A lead naming nothing runs its own worktree.
+                const own = access.role === 'lead' && asked.task === undefined && ref === undefined ? access.taskId : null
+                const named = own ?? asked.task
                 const [task] =
-                  asked.task === undefined
+                  named == null
                     ? []
                     : yield* sql<{ id: string; slug: string }>`
-                        SELECT id, slug FROM tasks WHERE project_id = ${access.projectId} AND (id = ${asked.task} OR slug = ${asked.task})`
-                if (asked.task !== undefined && task === undefined)
-                  return yield* new ToolRefused({ message: `This project has no task ${asked.task}. list_tasks shows them.` })
+                        SELECT id, slug FROM tasks WHERE project_id = ${access.projectId} AND (id = ${named} OR slug = ${named})`
+                if (named != null && task === undefined)
+                  return yield* new ToolRefused({
+                    message:
+                      own === null
+                        ? `This project has no task ${named}. list_tasks shows them.`
+                        : 'Althar can’t find this task. Tell the person.',
+                  })
+                if (own !== null && task !== undefined)
+                  return yield* runFor(access, task, asked, 'your worktree', {
+                    answering:
+                      'Read it there, or take a screenshot of it with screenshot; stop it with stop_project once you no longer need it.',
+                    quiet: 'Fix what stopped it, or, if how it runs is wrong, keep how with set_run_command or keep_run, and run it again.',
+                  })
                 // A copy of the branch the project works toward, where it says one (ADR-093); its default branch's otherwise.
                 const [toward] = yield* sql<{ branch: string }>`
                   SELECT work_toward AS branch FROM repository_bindings
@@ -1345,74 +1370,43 @@ export class Launches extends Context.Service<
           ),
       }
 
-      /*
-       * A lead runs the project in its own worktree, as the coordinator runs a
-       * task's: the same run, with its card in the task's thread and in the
-       * task's Run list, which the person opens and stops as any other. It stops
-       * only its task's runs.
-       */
-      const LeadAsked = Schema.Struct({ run: Schema.optional(Schema.String), repository: Schema.optional(Schema.String) })
-      const leadRunTool: Tool = {
-        name: 'run_project',
+      const StopAsked = Schema.Struct({ run: Schema.optional(Schema.String), task: Schema.optional(Schema.String) })
+      const stopTool: Tool = {
+        name: 'stop_project',
         description:
-          'Runs the project in your worktree, outside your sandbox, as Althar runs it for the person: its default run command, or with run the one of the things it runs by that name (Storybook), after its setup. Use it rather than starting a dev server yourself: it answers on localhost as it would, and the person sees it in Run’s list, in the task’s bar or on the project’s front, with where it answers, and can open or stop it there. It returns once it says where it answers, or ends, with its last lines if it did; a run of it already going is the one returned. It stays running until you stop it with stop_project, or the person stops it: stop it once you no longer need it. In a task of several repositories, say which, as repository.',
-        input: {
-          type: 'object',
-          properties: {
-            run: {
-              type: 'string',
-              description: 'The name of one of the things the project runs, as keep_run kept it; its default without.',
-            },
-            repository: { type: 'string' },
-          },
-        },
+          "Stops what runs from run_project, or what the person ran: with run, the one by that name or command; without, each of them. A task's lead without task stops its own worktree's runs; with task, that task's; the coordinator without task, what runs in its copies of a branch. It goes from Run’s list.",
+        input: { type: 'object', properties: { run: { type: 'string' }, task: { type: 'string', description: "The task's slug." } } },
         call: (input, access) =>
           said(
             provide(
               Effect.gen(function* () {
-                if (access.taskId === null) return yield* new ToolRefused({ message: 'This tool is for a task’s lead.' })
-                const asked = yield* read(LeadAsked, input)
+                const asked = yield* read(StopAsked, input)
                 const sql = yield* SqlClient.SqlClient
-                const [task] = yield* sql<{ id: string; slug: string }>`SELECT id, slug FROM tasks WHERE id = ${access.taskId}`
-                if (task === undefined) return yield* new ToolRefused({ message: 'Althar can’t find this task. Tell the person.' })
-                return yield* runFor(access, task, asked, 'your worktree', {
-                  answering:
-                    'Read it there, or take a screenshot of it with screenshot; stop it with stop_project once you no longer need it.',
-                  quiet: 'Fix what stopped it, or, if how it runs is wrong, keep how with set_run_command or keep_run, and run it again.',
-                })
+                const [task] =
+                  asked.task === undefined
+                    ? []
+                    : yield* sql<{ id: string; slug: string }>`
+                        SELECT id, slug FROM tasks WHERE project_id = ${access.projectId} AND (id = ${asked.task} OR slug = ${asked.task})`
+                if (asked.task !== undefined && task === undefined)
+                  return yield* new ToolRefused({ message: `This project has no task ${asked.task}. list_tasks shows them.` })
+                const taskId = task?.id ?? (access.role === 'lead' ? access.taskId : null)
+                const where = task !== undefined ? `${task.slug}'s worktree` : access.role === 'lead' ? 'your worktree' : 'your copies'
+                const ours = [...launches.values()].filter((launch) => launch.projectId === access.projectId && launch.taskId === taskId)
+                const wanted = asked.run?.trim().toLowerCase()
+                const chosen =
+                  wanted === undefined || wanted === ''
+                    ? ours
+                    : ours.filter((launch) => launch.name?.toLowerCase() === wanted || launch.command.toLowerCase() === wanted)
+                if (chosen.length === 0)
+                  return ours.length === 0
+                    ? `Nothing runs in ${where}, so there was nothing to stop.`
+                    : yield* new ToolRefused({
+                        message: `Nothing called ${asked.run} runs in ${where}. What runs there: ${ours.map((launch) => launch.name ?? launch.command).join(', ')}.`,
+                      })
+                for (const launch of chosen) yield* stop(launch.id)
+                return `Stopped ${chosen.map((launch) => `\`${launch.command}\``).join(', ')} in ${where}.`
               }),
             ),
-          ),
-      }
-
-      const StopAsked = Schema.Struct({ run: Schema.optional(Schema.String) })
-      const stopTool: Tool = {
-        name: 'stop_project',
-        description:
-          "Stops what you ran with run_project in your worktree, or the person ran there: with run, the one by that name or command; without, each of the task's runs. It goes from Run’s list. What runs from the default branch, or another task's worktree, isn't yours to stop.",
-        input: { type: 'object', properties: { run: { type: 'string' } } },
-        call: (input, access) =>
-          said(
-            Effect.gen(function* () {
-              if (access.taskId === null) return yield* new ToolRefused({ message: 'This tool is for a task’s lead.' })
-              const asked = yield* read(StopAsked, input)
-              const ours = [...launches.values()].filter(
-                (launch) => launch.projectId === access.projectId && launch.taskId === access.taskId,
-              )
-              const wanted = asked.run?.trim().toLowerCase()
-              const chosen =
-                wanted === undefined || wanted === ''
-                  ? ours
-                  : ours.filter((launch) => launch.name?.toLowerCase() === wanted || launch.command.toLowerCase() === wanted)
-              if (chosen.length === 0)
-                return ours.length === 0
-                  ? 'Nothing runs in your worktree, so there was nothing to stop.'
-                  : yield* new ToolRefused({
-                      message: `Nothing called ${asked.run} runs in your worktree. What runs there: ${ours.map((launch) => launch.name ?? launch.command).join(', ')}.`,
-                    })
-              for (const launch of chosen) yield* stop(launch.id)
-              return `Stopped ${chosen.map((launch) => `\`${launch.command}\``).join(', ')} in your worktree.`
-            }),
           ),
       }
 
@@ -1451,19 +1445,9 @@ export class Launches extends Context.Service<
           }),
       }
 
-      yield* toolServer.serve('coordinator', [
-        screenshotTool,
-        runTool,
-        keepTool(() => instance.coordinatorId),
-        keepRunTool(() => instance.coordinatorId),
-      ])
-      yield* toolServer.serve('lead', [
-        keepTool(() => instance.systemId),
-        keepRunTool(() => instance.systemId),
-        leadRunTool,
-        stopTool,
-        screenshotTool,
-      ])
+      // One set for leads and the coordinator (ADR-097): each reads its role where they differ.
+      const actorOf = (access: ToolAccess) => (access.role === 'coordinator' ? instance.coordinatorId : instance.systemId)
+      yield* toolServer.serve(POOL, [screenshotTool, runTool, stopTool, keepTool(actorOf), keepRunTool(actorOf)])
 
       return Launches.of({
         start,

@@ -1,4 +1,4 @@
-# ADR-101: Althar repairs a worktree's broken link to its repository
+# ADR-102: Althar repairs a worktree's broken link to its repository
 
 - **Status:** Accepted
 - **Date:** 2026-11-07

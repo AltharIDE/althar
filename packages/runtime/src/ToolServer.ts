@@ -40,6 +40,9 @@ export interface ToolAccess {
 
 export type ToolRole = 'coordinator' | 'lead' | 'reviewer'
 
+/** Leads and the coordinator: one pool of tools (ADR-097). */
+export const POOL: ReadonlyArray<ToolRole> = ['coordinator', 'lead']
+
 /** A tool's answer with a picture beside its words, as a screenshot's: the picture as base64, and its type. */
 export interface ToolPicture {
   readonly text: string
@@ -81,10 +84,14 @@ export class ToolServer extends Context.Service<
   {
     /** The server a session is given, and how to take it back. */
     grant(access: ToolAccess): Effect.Effect<{ readonly server: McpServer; readonly revoke: Effect.Effect<void> }>
-    /** Adds tools to a role, replacing any of the same name. Each service that owns tools adds them once it is built. */
-    serve(role: ToolRole, tools: ReadonlyArray<Tool>): Effect.Effect<void>
+    /**
+     * Adds tools to a role, or to several, replacing any of the same name. Each service that owns tools adds them once it is
+     * built. Leads and the coordinator share one tool set (ADR-097): a tool is defined once and served to both, and reads
+     * `access.role` where the two differ (a lead's own task and folder).
+     */
+    serve(role: ToolRole | ReadonlyArray<ToolRole>, tools: ReadonlyArray<Tool>): Effect.Effect<void>
     /** Adds a guard to a role's tools: a tool it refuses isn't listed to that session, and is refused if called. */
-    guard(role: ToolRole, check: ToolGuard): Effect.Effect<void>
+    guard(role: ToolRole | ReadonlyArray<ToolRole>, check: ToolGuard): Effect.Effect<void>
   }
 >()('@althar/runtime/ToolServer') {
   static readonly layer: Layer.Layer<ToolServer, never, Errands> = Layer.effect(
@@ -197,14 +204,16 @@ export class ToolServer extends Context.Service<
               revoke: Effect.sync(() => void grants.delete(token)),
             }
           }),
-        serve: (role, tools) =>
+        serve: (to, tools) =>
           Effect.sync(() => {
-            const kept = (roles.get(role) ?? []).filter((tool) => !tools.some((added) => added.name === tool.name))
-            roles.set(role, [...kept, ...tools])
+            for (const role of typeof to === 'string' ? [to] : to) {
+              const kept = (roles.get(role) ?? []).filter((tool) => !tools.some((added) => added.name === tool.name))
+              roles.set(role, [...kept, ...tools])
+            }
           }),
-        guard: (role, check) =>
+        guard: (to, check) =>
           Effect.sync(() => {
-            guards.set(role, [...(guards.get(role) ?? []), check])
+            for (const role of typeof to === 'string' ? [to] : to) guards.set(role, [...(guards.get(role) ?? []), check])
           }),
       })
     }),
