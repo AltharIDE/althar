@@ -19,7 +19,7 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const ContextCompacted: Story = {}
-/** A task's folder whose link to its repository broke, as after moving to another build with the same profile, repaired by Althar (ADR-102). */
+/** A task's folder whose link to its repository broke, as after moving to another build with the same profile, repaired by Althar (ADR-104). */
 export const FolderRepaired: Story = {
   args: { icon: 'folder', children: 'Folder link repaired, and its review copy’s', action: undefined, onAction: undefined },
 }
