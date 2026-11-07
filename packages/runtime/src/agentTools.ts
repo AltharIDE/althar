@@ -97,9 +97,9 @@ const FOLDERS: Readonly<Record<SyncedAgent, string>> = {
 }
 
 /** Where the person's agents' commands are, beside the PATH Althar was started with, which an app opened from the Dock lacks. */
-const agentPath = (homeDir: string) =>
+const agentPath = (homeDir: string, path: string | undefined) =>
   [
-    process.env['PATH'] ?? '',
+    path ?? '',
     join(homeDir, '.local', 'bin'),
     join(homeDir, '.opencode', 'bin'),
     join(homeDir, '.bun', 'bin'),
@@ -110,14 +110,42 @@ const agentPath = (homeDir: string) =>
     .filter((one) => one !== '')
     .join(delimiter)
 
+/** The variables that move where an agent keeps its settings: a command sync runs sees only those its settings were read by. */
+const PLACES = ['CODEX_HOME', 'XDG_CONFIG_HOME', 'CLAUDE_CONFIG_DIR', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR'] as const
+
+/**
+ * The environment an agent's command runs in, as sync writes through it: the
+ * same home and the same places its settings were read from (`env`), so a
+ * write lands in the file that was read, never one an inherited `CODEX_HOME`
+ * or another home names.
+ */
+export const commandEnv = (
+  homeDir: string,
+  env: Readonly<Record<string, string | undefined>>,
+  inherited: Readonly<Record<string, string | undefined>> = process.env,
+): Record<string, string> => {
+  const kept = Object.entries(inherited).filter(([key]) => !(PLACES as ReadonlyArray<string>).includes(key) && key !== 'HOME')
+  const places = PLACES.flatMap((key) => (env[key] === undefined ? [] : [[key, env[key]] as const]))
+  const defined = (entries: ReadonlyArray<readonly [string, string | undefined]>) =>
+    entries.flatMap(([key, value]) => (value === undefined ? [] : [[key, value] as const]))
+  return {
+    ...Object.fromEntries(defined(kept)),
+    ...Object.fromEntries(defined(places)),
+    HOME: homeDir,
+    // Codex's home where its settings were read: the configured one, else the home's own.
+    CODEX_HOME: env['CODEX_HOME'] || join(homeDir, '.codex'),
+    PATH: agentPath(homeDir, env['PATH'] ?? inherited['PATH']),
+  }
+}
+
 const NAMES: Readonly<Record<string, string>> = { claude: 'Claude Code', codex: 'Codex' }
 
 /** Runs one of the person's agents' own commands, as sync writes through them; one that isn't on this computer says so. */
-const runIn =
-  (homeDir: string): mcp.Run =>
+export const runIn =
+  (homeDir: string, env: Readonly<Record<string, string | undefined>> = process.env): mcp.Run =>
   (command, args) =>
     new Promise((resolve) => {
-      execFile(command, [...args], { timeout: 60_000, env: { ...process.env, PATH: agentPath(homeDir) } }, (error, stdout, stderr) => {
+      execFile(command, [...args], { timeout: 60_000, env: commandEnv(homeDir, env) }, (error, stdout, stderr) => {
         if (error !== null && (error as NodeJS.ErrnoException).code === 'ENOENT')
           return resolve({
             code: 127,
@@ -132,7 +160,7 @@ const ioOf = (configs: NonNullable<RuntimeOptions['agentConfigs']>, now: string)
   homeDir: configs.homeDir,
   env: configs.env ?? process.env,
   folder: configs.folder,
-  run: configs.run ?? runIn(configs.homeDir),
+  run: configs.run ?? runIn(configs.homeDir, configs.env ?? process.env),
   now: () => now,
 })
 
