@@ -256,17 +256,17 @@ export function RepositorySetups({ repositories, onChange, onClear, error }: Rep
             onSave={(copy) => save({ copy })}
           />
         </div>
-        <div className={s.foot}>
-          <span className={s.note}>
-            {who === null ? '' : `${who} `}
-            {setup !== null && repositorySetupsText.newTasks}
-          </span>
-          {setup !== null && (
+        {setup !== null && (
+          <div className={s.foot}>
+            <span className={s.note}>
+              {who === null ? '' : `${who} `}
+              {repositorySetupsText.newTasks}
+            </span>
             <Button size="small" variant="danger" onClick={() => onClear(repository.id)}>
               {repositorySetupsText.clear}
             </Button>
-          )}
-        </div>
+          </div>
+        )}
       </section>
       {error !== undefined && (
         <p className={s.error} role="alert">
