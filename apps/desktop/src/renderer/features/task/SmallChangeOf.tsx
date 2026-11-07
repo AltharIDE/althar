@@ -21,14 +21,12 @@ export const text = {
 
 export function SmallChangeOf({
   card,
-  itemId,
   named,
   busy,
   onMerge,
   onOpen,
 }: {
   card: SmallChangeContent
-  itemId: string
   named: NameModel
   busy: boolean
   /** Merges its open change, as the task's header does, which asks first. */
@@ -42,10 +40,12 @@ export function SmallChangeOf({
   const change = card.change
   const head = change?.head ?? null
   const name = change === null ? '' : `${change.prefix}${change.number}`
+  // Where its review went: the one its merge started, or the one it became a full task with.
+  const made = card.fullTask ?? card.review ?? null
   const makeFullTask = () => {
     setError(null)
     setMaking(true)
-    client.makeItAFullTask(itemId).then(
+    client.makeItAFullTask(card.taskId).then(
       () => setMaking(false),
       (failure: unknown) => {
         setMaking(false)
@@ -61,9 +61,7 @@ export function SmallChangeOf({
         skips={card.skips}
         steps={card.steps}
         {...(change === null ? {} : { change: { name, state: change.state } })}
-        {...(card.review == null || onOpen === undefined
-          ? {}
-          : { review: { title: card.review.title, onOpen: () => onOpen(card.review?.threadId ?? '') } })}
+        {...(made === null || onOpen === undefined ? {} : { review: { title: made.title, onOpen: () => onOpen(made.threadId) } })}
         {...(card.fullTask == null ? {} : { fullTask: true })}
         busy={busy || making}
         {...(change === null || head === null ? {} : { onMerge: () => onMerge({ head, url: change.url }) })}

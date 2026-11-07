@@ -4011,7 +4011,7 @@ export const Api = RpcGroup.make(
    * Takes a small change out of the fast lane: its change is reviewed before it merges, by the reviewer its plan named,
    * instead of after. The card folds to the line saying what was made.
    */
-  command('MakeItAFullTask', { itemId: Schema.String }, Schema.Void),
+  command('MakeItAFullTask', { taskId: Schema.String }, Schema.Void),
   /** Keeps the heavier model for this task, as the line Auto moved the lead with offers: Auto moves nothing more here. */
   command('KeepTheModel', { itemId: Schema.String }, Schema.Void),
   /** Puts the move Auto made again, after Keep: the task's lead may move back to the lighter model. */

@@ -1098,7 +1098,7 @@ export const handlers = Api.toLayer(
         once(commandId, api(automations.runNow(automationId, instance.personId, itemId))),
       DeleteAutomation: ({ commandId, automationId }) => once(commandId, api(automations.remove(automationId, instance.personId))),
       AnswerTaskAsk: ({ commandId, itemId, yes }) => once(commandId, api(taskActions.answer(itemId, yes, instance.personId))),
-      MakeItAFullTask: ({ commandId, itemId }) => once(commandId, api(fastLane.makeFullTask(itemId))),
+      MakeItAFullTask: ({ commandId, taskId }) => once(commandId, api(fastLane.makeFullTask(taskId))),
       KeepTheModel: ({ commandId, itemId }) => once(commandId, api(fastLane.keepTheModel(itemId))),
       UndoTheModelMove: ({ commandId, itemId }) => once(commandId, api(fastLane.undoTheModelMove(itemId))),
       UndoAutomationChange: ({ commandId, itemId }) => once(commandId, api(automations.undo(itemId, instance.personId))),

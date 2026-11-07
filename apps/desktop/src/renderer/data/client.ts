@@ -253,7 +253,7 @@ export interface Client {
   /** Answers the coordinator's card asking to stop, hold, restart or settle a task: yes does it. */
   readonly answerTaskAsk: (itemId: string, yes: boolean) => Promise<void>
   /** Makes a small change a full task: its change is reviewed before it merges, by the reviewer its plan named. */
-  readonly makeItAFullTask: (itemId: string) => Promise<void>
+  readonly makeItAFullTask: (taskId: string) => Promise<void>
   /** Keeps the heavier model for this task, as the line Auto moved the lead with offers. */
   readonly keepTheModel: (itemId: string) => Promise<void>
   /** Puts the move Auto made again, after Keep. */
@@ -741,7 +741,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
       command((commandId) => api.RunAutomationNow({ commandId, automationId, ...(itemId === undefined ? {} : { itemId }) })),
     deleteAutomation: (automationId) => command((commandId) => api.DeleteAutomation({ commandId, automationId })),
     answerTaskAsk: (itemId, yes) => command((commandId) => api.AnswerTaskAsk({ commandId, itemId, yes })),
-    makeItAFullTask: (itemId) => command((commandId) => api.MakeItAFullTask({ commandId, itemId })),
+    makeItAFullTask: (taskId) => command((commandId) => api.MakeItAFullTask({ commandId, taskId })),
     keepTheModel: (itemId) => command((commandId) => api.KeepTheModel({ commandId, itemId })),
     undoTheModelMove: (itemId) => command((commandId) => api.UndoTheModelMove({ commandId, itemId })),
     undoAutomationChange: (itemId) => command((commandId) => api.UndoAutomationChange({ commandId, itemId })),

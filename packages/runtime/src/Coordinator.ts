@@ -1431,7 +1431,8 @@ export class Coordinator extends Context.Service<
             end: yield* changes.endFor(access.projectId, task.id),
             worksIn,
             ...(proposed.works_in_why === undefined ? {} : { worksInWhy: proposed.works_in_why }),
-            ...(small ? { reviewAfterMerge: true, startsIn: Duration.zero } : {}),
+            // A plan the person held stays held; otherwise a small change starts at once.
+            ...(small ? { reviewAfterMerge: true, ...(held === undefined ? { startsIn: Duration.zero } : {}) } : {}),
           })
           const where = yield* localLine(access.projectId, task.id, worksIn)
           if (held !== undefined)

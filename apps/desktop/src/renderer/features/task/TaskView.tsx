@@ -1270,10 +1270,9 @@ export function TaskView({
                       />
                     )}
                     // A small change's card: Merge as the header's, and Make it a full task (README section 6).
-                    smallChange={(card, itemId) => (
+                    smallChange={(card) => (
                       <SmallChangeOf
                         card={card}
-                        itemId={itemId}
                         named={named}
                         busy={model.pending}
                         onMerge={(change) => void model.accept([change])}

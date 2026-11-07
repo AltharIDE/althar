@@ -1,11 +1,12 @@
 import type { ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
+import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { envelope } from './envelope'
 import { Instance } from './Instance'
 import { ReviewRefused, Reviews } from './Reviews'
+import { Sessions } from './Sessions'
 import { timestamp } from './records'
 import { smallChangeOf } from './smallChange'
 import { updateItem } from './threads'
@@ -24,7 +25,7 @@ import { updateItem } from './threads'
 /** Why the fast lane couldn't do what the person pressed, in words for the window. */
 export class FastLaneRefused extends Schema.TaggedError<FastLaneRefused>()('FastLaneRefused', { message: Schema.String }) {}
 
-type Store = SqlClient.SqlClient | Instance | Reviews | Ledger | Crypto.Crypto
+type Store = SqlClient.SqlClient | Instance | Reviews | Sessions | Ledger | Crypto.Crypto
 
 /** The item a card is, as the store keeps it. */
 interface Card {
@@ -44,7 +45,7 @@ export class FastLane extends Context.Service<
      * linking the review. Refused where there is no open change to review, or
      * the plan named no reviewer.
      */
-    makeFullTask(itemId: string): Effect.Effect<void, unknown>
+    makeFullTask(taskId: string): Effect.Effect<void, unknown>
     /** Keeps the heavier model for this task, as the line Auto moved the lead with offers: Auto moves nothing more here. */
     keepTheModel(itemId: string): Effect.Effect<void, unknown>
     /** Puts the move Auto made again: the task's lead may move to the lighter model at its next step. */
@@ -62,6 +63,7 @@ export class FastLane extends Context.Service<
       const sql = yield* SqlClient.SqlClient
       const instance = yield* Instance
       const reviews = yield* Reviews
+      const sessions = yield* Sessions
       const context = yield* Effect.context<Store>()
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
 
@@ -152,11 +154,8 @@ export class FastLane extends Context.Service<
           return row.projectId
         })
 
-      const makeFullTask = (itemId: string) =>
+      const makeFullTask = (taskId: string) =>
         Effect.gen(function* () {
-          const found = yield* card(itemId, 'small_change')
-          if (found === undefined) return yield* new FastLaneRefused({ message: 'That card isn’t here any more.' })
-          const taskId = typeof found.content.taskId === 'string' ? found.content.taskId : ''
           const change = yield* changeOf(taskId)
           yield* startReview(taskId, {
             afterMerge: change?.state === 'merged',
@@ -201,7 +200,7 @@ export class FastLane extends Context.Service<
         }).pipe(Effect.catchCause(() => Effect.void))
 
       return FastLane.of({
-        makeFullTask: (itemId) => provide(makeFullTask(itemId)).pipe(Effect.asVoid),
+        makeFullTask: (taskId) => provide(makeFullTask(taskId)).pipe(Effect.asVoid),
         keepTheModel: (itemId) => provide(keepTheModel(itemId)).pipe(Effect.asVoid),
         undoTheModelMove: (itemId) => provide(undoTheModelMove(itemId)).pipe(Effect.asVoid),
         reviewMerged: (taskId) => provide(reviewMerged(taskId)).pipe(Effect.asVoid),
