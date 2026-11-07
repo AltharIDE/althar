@@ -14,6 +14,7 @@ import { useRefocus } from '../../lib/refocus'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Spinner } from '../../primitives/Spinner/Spinner'
 import { Menu, MenuRadioGroup, MenuRadioItem } from '../../primitives/Menu/Menu'
+import { CommentChip, type ComposerComment } from '../Comments/Comments'
 import s from './Composer.module.css'
 
 /* Bars at rest, for a transcriber that does not report levels. */
@@ -232,6 +233,16 @@ export interface ComposerProps {
   onRemoveImage?: (id: string) => void
   /** Takes a file or folder off. Without it, they have no remove button. */
   onRemoveFile?: (id: string) => void
+  /**
+   * Comments made on what is beside the conversation (a spot on a page, a
+   * line of the diff), to go after what is written: each a chip with its
+   * card. They go when it is sent, even with nothing written.
+   */
+  comments?: readonly ComposerComment[]
+  /** Opens a comment again where it was made. Without it, its chip is only read. */
+  onOpenComment?: (id: string) => void
+  /** Takes a comment off. Without it, comments have no remove button. */
+  onRemoveComment?: (id: string) => void
   /** What the consumer says of what is added, in a line over the field: one it refused, and why; or that the agent doesn't take images. */
   fileNote?: string
   inputRef?: RefObject<HTMLTextAreaElement | null>
@@ -271,6 +282,9 @@ export function Composer({
   tray,
   images = [],
   files = [],
+  comments = [],
+  onOpenComment,
+  onRemoveComment,
   onAddFiles,
   onRemoveImage,
   onRemoveFile,
@@ -322,7 +336,7 @@ export function Composer({
   const before = value.slice(0, at)
   const after = value.slice(at)
   /* images or files alone are something to send */
-  const attached = images.length + files.length
+  const attached = comments.length + images.length + files.length
   const drafted = value.trim() !== '' || attached > 0
   /* the microphone takes focus back when its tray closes with focus inside it */
   const mic = useRefocus<HTMLButtonElement>(tray != null)
@@ -459,6 +473,15 @@ export function Composer({
         <ListMotion within={form} enter="grow">
           {attached > 0 && (
             <ul className={s.images} aria-label={t.attachments(attached)}>
+              {comments.map((comment) => (
+                <li key={comment.id} data-move={comment.id}>
+                  <CommentChip
+                    comment={comment}
+                    {...(onOpenComment === undefined ? {} : { onOpen: () => onOpenComment(comment.id) })}
+                    {...(onRemoveComment === undefined ? {} : { onRemove: () => onRemoveComment(comment.id) })}
+                  />
+                </li>
+              ))}
               {images.map((image) => (
                 <li key={image.id} data-move={image.id} className={s.image}>
                   {image.reading ? (

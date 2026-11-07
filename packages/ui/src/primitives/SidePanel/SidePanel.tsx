@@ -80,8 +80,9 @@ export function SidePanel({
       {...rest}
       onKeyDown={(e) => {
         onKeyDown?.(e)
-        /* last: a menu or a form inside takes its own Escape first and marks it handled */
-        if (e.key !== 'Escape' || e.defaultPrevented) return
+        /* last: a menu or a form inside takes its own Escape first and marks it handled; one the panel opened over the
+           window (a popover, a menu: in a portal, outside the panel, though React bubbles its keys here) closes itself alone */
+        if (e.key !== 'Escape' || e.defaultPrevented || !(e.target instanceof Node && e.currentTarget.contains(e.target))) return
         e.preventDefault()
         onClose()
       }}

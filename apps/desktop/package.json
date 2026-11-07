@@ -7,8 +7,8 @@
   "type": "module",
   "main": "dist/main/main.js",
   "scripts": {
-    "build": "vp build --config vite.node.config.ts && vp build --config vite.preload.config.ts && vp build",
-    "build:package": "vp build --config vite.node.config.ts --mode package && vp build --config vite.preload.config.ts && vp build",
+    "build": "vp build --config vite.node.config.ts && vp build --config vite.preload.config.ts && vp build --config vite.overlay.config.ts && vp build",
+    "build:package": "vp build --config vite.node.config.ts --mode package && vp build --config vite.preload.config.ts && vp build --config vite.overlay.config.ts && vp build",
     "start": "electron .",
     "measure:startup": "bun run build && bun build scripts/measure-startup.ts --target=node --external=@playwright/test --external=electron --outfile=test-results/measure-startup.mjs && node test-results/measure-startup.mjs > test-results/startup-measurements.jsonl",
     "dev": "bun run build && electron .",
