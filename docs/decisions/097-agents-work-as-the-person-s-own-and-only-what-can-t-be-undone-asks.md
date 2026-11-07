@@ -559,6 +559,55 @@ flowchart LR
 - **Answering a permission request or a question** stays theirs alone
   (ADR-019).
 
+## Situations: what Althar says in a thread of the work around it
+
+Five things happen to a task that its lead, working alone, cannot see or say.
+Each is a line in the task's thread, where it happens, in Althar's own voice
+(the kit's `AltharLine`, in its warning tone where the person may need to act),
+and each has what the runtime needs. They went from the #640 prototype with
+these changes to its sketches:
+
+- **A Never rule an agent meets.** The call stands declined, and under it:
+  "Refused by your rule `rm -rf ~/Library`. The lead was told so. Rules". The
+  same words, "Refused by your rule `rm -rf ~/Library`.", are the tool's result
+  to the lead (`refusedWords`, Permissions.ts). Nothing asks and nothing waits:
+  Never is the person's answer given ahead. A kind the project never allows
+  reads "Refused by your rule against force pushes."
+- **An ask that waits while the person is away.** The request records where it
+  reached the person besides the window (`attention_request.reached`: the
+  device and when) and its card says how long it has waited: "Waiting 40 min ·
+  sent to your iPhone at 13:20". *Different from the prototype:* nothing in
+  Althar sends to a device yet, so the record is what a channel calls
+  (`Permissions.reached`) and the line shows only where it was. Once a request
+  that reached a device has waited three minutes, its lead is let go on without
+  it (`Permissions.setAside`, Situations.ts): the call is refused with a word
+  saying the person is away, the request stays open for the person and is out
+  of the session's way, and the lead is told when it is answered. An allowed
+  call goes through once, the next time the lead makes the same call, short of
+  what is never allowed. The kept call is the person's to answer, not a
+  suspended one: an agent's permission request cannot outlive its turn, so the
+  lead repeats it.
+- **A task a lead started that stops reaching its parent.** Settled without a
+  change, failed, or stopped by the person (stopped by anyone else says
+  nothing): once, a line in the parent's thread in its warning tone, "<child>
+  stopped without a change: <why>. Its report" (or "stopped by you"), and
+  news that wakes the parent's lead, started again if it had stopped, as
+  `message_lead` does (`task.parent_told` keeps that it was said). The why is
+  the first sentence of the child's last report.
+- **Two tasks changing the same files.** Overlaps.ts already told both leads
+  once; it now also puts "<other task> changes `TaskView.tsx` too. Both leads
+  were told." in each thread. Nothing on the board.
+- **A server that fails mid-task.** claude-agent-acp reports a server that
+  failed to start or needs signing in in a notice's `_meta.claudeCode`
+  (`kind: "mcpServerStatus"`); a call to that server that then fails keeps
+  which server and how (`server` on the tool call), and the thread says so
+  under the call: "Claude Code isn't signed in to Linear, so this didn't go
+  through. Sign in". *Different from the prototype:* the call isn't turned to
+  done by signing in (the lead goes on, and Althar can't repeat its call), and
+  the line doesn't say what the call would have done: Althar knows its title,
+  not its effect. Sign in opens the agent's sign-in in Settings until the MCP
+  servers' own page can take it.
+
 ## The coordinator is optional
 
 A task can start without it: from the board, from the composer, or from a

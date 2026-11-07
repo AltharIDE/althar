@@ -307,6 +307,57 @@ const YouView = memo(
 /** What the thread says of a task this task's lead started, before its title, which opens it. */
 const STARTED = 'Started'
 
+const situationText = {
+  unchanged: 'stopped without a change',
+  failed: 'failed',
+  stopped: 'stopped by you',
+  report: 'Its report',
+  overlap: (names: ReadonlyArray<string>, more: number) =>
+    ` changes ${names.map((name) => `\u0000${name}\u0000`).join(', ')}${more > 0 ? ` and ${more} more` : ''} too. Both leads were told.`,
+}
+
+const fileName = (path: string) => path.slice(path.lastIndexOf('/') + 1)
+
+/** Another task's end, or its changing the same files, as Althar says it with the task linked (ADR-097, "Situations"). */
+function Situation({
+  situation,
+  task,
+  onOpenTask,
+}: {
+  situation: NonNullable<Extract<RoundBlock, { kind: 'althar' }>['situation']>
+  task: { readonly threadId: string; readonly title: string }
+  onOpenTask?: (threadId: string) => void
+}) {
+  const link = (
+    <LinkButton onClick={() => onOpenTask?.(task.threadId)} disabled={onOpenTask === undefined}>
+      {task.title}
+    </LinkButton>
+  )
+  if (situation.kind === 'overlap') {
+    const names = [...new Set(situation.files.map(fileName))]
+    const shown = names.slice(0, 2)
+    return (
+      <>
+        {link}
+        {situationText
+          .overlap(shown, names.length - shown.length)
+          .split('\u0000')
+          .map((piece, at) => (at % 2 === 1 ? <code key={at}>{piece}</code> : <Fragment key={at}>{piece}</Fragment>))}
+      </>
+    )
+  }
+  const why = situation.how === 'stopped' || situation.why === undefined ? '' : `: ${situation.why.replace(/\.$/, '')}.`
+  return (
+    <>
+      {link} {situationText[situation.how]}
+      {situation.how === 'stopped' ? '.' : why}{' '}
+      <LinkButton onClick={() => onOpenTask?.(task.threadId)} disabled={onOpenTask === undefined}>
+        {situationText.report}
+      </LinkButton>
+    </>
+  )
+}
+
 export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing = null, ...shared }: TaskThreadProps) {
   const { threadId, worktree = null, openFile, session, project, onTryAgain, onCompact, onSignIn } = shared
   const named = useModelNames()
@@ -383,7 +434,9 @@ export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing
       case 'althar':
         return (
           <AltharLine key={block.id} tone={block.tone}>
-            {block.task !== undefined && onOpenTask !== undefined ? (
+            {block.situation !== undefined && block.task !== undefined ? (
+              <Situation situation={block.situation} task={block.task} {...(onOpenTask === undefined ? {} : { onOpenTask })} />
+            ) : block.task !== undefined && onOpenTask !== undefined ? (
               <>
                 {STARTED} <LinkButton onClick={() => onOpenTask(block.task?.threadId ?? '')}>{block.task.title}</LinkButton>
               </>

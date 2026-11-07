@@ -88,4 +88,32 @@ describe('the thread recorder, at its edges', () => {
       assert.deepStrictEqual(tool?.content.diagnostic, { text: 'npm ERR! Missing script: "lint"', truncated: false, redacted: false })
     }).pipe(Effect.provide(runtime())),
   )
+
+  it.live('says under a call to a server that was down which server and how, only once it failed', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const writer = recorder({ ...where, lead: 'Claude Code', leadId: 'claude-code' })
+      const events: ReadonlyArray<SessionEvent> = [
+        {
+          _tag: 'Notice',
+          severity: 'info',
+          title: 'MCP server "linear" needs authentication',
+          server: { name: 'linear', status: 'needs-auth' },
+        },
+        { _tag: 'ToolCall', toolCallId: 'c1', title: 'mcp__linear__save_issue', kind: 'other', status: 'in_progress', server: 'linear' },
+        { _tag: 'ToolCallUpdate', toolCallId: 'c1', status: 'failed', server: 'linear' },
+        // A call to a server that is up says nothing, though it fails.
+        { _tag: 'ToolCall', toolCallId: 'c2', title: 'mcp__github__get_pr', kind: 'other', status: 'failed', server: 'github' },
+      ]
+      for (const event of events) yield* writer.record(event)
+      yield* writer.flush
+      const calls = (yield* items(where.threadId))
+        .slice(where.before)
+        .flatMap((item) => (item.kind === 'tool_call' ? [[item.content.title, item.content.server ?? null]] : []))
+      assert.deepStrictEqual(calls, [
+        ['mcp__linear__save_issue', { name: 'linear', down: 'needs-auth', agentId: 'claude-code' }],
+        ['mcp__github__get_pr', null],
+      ])
+    }).pipe(Effect.provide(runtime())),
+  )
 })

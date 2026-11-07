@@ -101,6 +101,8 @@ export type RoundBlock =
       readonly tone: 'info' | 'warning'
       /** A task the line is about, which it links to: one this task's lead started (ADR-097). */
       readonly task?: { readonly threadId: string; readonly title: string }
+      /** What the line is about another task, drawn as its own words: one that ended without reaching this, or one changing the same files. */
+      readonly situation?: NoticeContent['situation']
     }
   /** Its folder went, or came back: a line across the thread, a change of scene (ADR-056). */
   | { readonly kind: 'folder'; readonly id: string; readonly text: string }
@@ -373,6 +375,7 @@ export const roundsOf = (
           text: shorter(block.text),
           tone: content.severity === 'info' ? 'info' : 'warning',
           ...(content.task === undefined ? {} : { task: { threadId: content.task.threadId, title: content.task.title } }),
+          ...(content.situation === undefined ? {} : { situation: content.situation }),
         })
         return
       }

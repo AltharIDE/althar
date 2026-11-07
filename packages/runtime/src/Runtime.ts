@@ -22,6 +22,7 @@ import { Launches } from './Launches'
 import { Live } from './Live'
 import { MachineLoad } from './MachineLoad'
 import { Overlaps } from './Overlaps'
+import { Situations } from './Situations'
 import { PlanUsage } from './PlanUsage'
 import { Permissions } from './Permissions'
 import { Questions } from './Questions'
@@ -163,6 +164,8 @@ export const layer = (options: RuntimeLayerOptions) => {
         SettingsTools.layer,
         MachineLoad.layer,
         Overlaps.layer,
+        // A child that ended, and a call that waits while the person is away (Situations.ts).
+        Situations.layer,
         startupLayer('search-index', fillIndex),
       ).pipe(Layer.provideMerge(automating)),
     ),

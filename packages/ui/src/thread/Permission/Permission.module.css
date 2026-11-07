@@ -39,6 +39,15 @@
   color: var(--t-3);
 }
 
+.waited {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
+
 .options {
   display: flex;
   flex-direction: column;
