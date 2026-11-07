@@ -1,4 +1,4 @@
-import { type ReactNode, type Ref, useEffect, useState } from 'react'
+import { type ReactNode, type Ref, useState } from 'react'
 import { flushSync } from 'react-dom'
 
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
@@ -153,10 +153,8 @@ export function PagePanel<V extends string>({
 }: PagePanelProps<V>) {
   const t = { ...pagePanelText, ...text }
   const [editing, setEditing] = useState(false)
+  // What is typed, while the field is being edited; at rest it shows the page's address, and takes it again as it is focused.
   const [typed, setTyped] = useState(full)
-  useEffect(() => {
-    if (!editing) setTyped(full)
-  }, [full, editing])
   const chosen = viewports.find((one) => one.value === viewport)
   const fits = viewports[0]?.value === viewport
   const head = (
@@ -315,11 +313,11 @@ export interface PageLineProps {
 export function PageLine({ icon, children, action, onDismiss, text }: PageLineProps) {
   const t = { dismiss: 'Dismiss', ...text }
   return (
-    <div className={s.line} role="status">
+    <output className={s.line}>
       <Icon name={icon} size={13} className={s.lineIcon} />
       <span className={s.lineWords}>{children}</span>
       {action !== undefined && <LinkButton onClick={action.onAction}>{action.label}</LinkButton>}
       {onDismiss !== undefined && <IconButton icon="close" label={t.dismiss} size="small" className={s.lineDismiss} onClick={onDismiss} />}
-    </div>
+    </output>
   )
 }

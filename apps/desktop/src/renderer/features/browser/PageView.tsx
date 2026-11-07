@@ -136,19 +136,19 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
 
   const [writing, setWriting] = useState<Writing | null>(null)
   const covered = useCovered(panel, () => document.getElementById('root'))
-  const [still, setStill] = useState<string | null>(null)
+  const [coveredStill, setCoveredStill] = useState<string | null>(null)
   // Whether the page should be aside now: a picture that finishes drawing after what was over it went must not hide it again.
   const aside = useRef(false)
-  aside.current = covered || writing !== null
+  useLayoutEffect(() => {
+    aside.current = covered || writing !== null
+  }, [covered, writing])
   // While something of the window's is over it, or a comment is written on it, a picture shows in its place; the page steps aside once it is drawn.
   useEffect(() => {
     if (browser === undefined) return
     let live = true
-    if (writing !== null) {
-      // With no picture of the page, the comment is written over the panel's own ground: the page steps aside at once.
-      if (writing.pointed.still === '') void browser.cover(owner, true)
-      setStill(writing.pointed.still === '' ? null : writing.pointed.still)
-    } else if (covered)
+    // With no picture of the page, a comment is written over the panel's own ground: the page steps aside at once.
+    if (writing !== null && writing.pointed.still === '') void browser.cover(owner, true)
+    else if (writing === null && covered)
       void browser
         .still(owner)
         .catch(() => null)
@@ -156,12 +156,12 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
           if (!live) return
           // With no picture to show, the page steps aside all the same: what is over it must show.
           if (picture === null) void browser.cover(owner, true)
-          setStill(picture)
+          setCoveredStill(picture)
         })
-    else {
+    else if (writing === null) {
       void browser.cover(owner, false)
       // The picture goes once the page is back over it, so nothing between blinks.
-      const frame = requestAnimationFrame(() => setStill(null))
+      const frame = requestAnimationFrame(() => setCoveredStill(null))
       return () => {
         live = false
         cancelAnimationFrame(frame)
@@ -171,6 +171,7 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
       live = false
     }
   }, [browser, owner, covered, writing])
+  const still = writing === null ? coveredStill : writing.pointed.still === '' ? null : writing.pointed.still
   // Closing or leaving, the page comes back for whoever shows it next.
   useEffect(() => () => void browser?.cover(owner, false), [browser, owner])
 

@@ -42,10 +42,7 @@ export const coveredNow = (root: Element | null, place: Place): boolean => {
 export const useCovered = (place: Place | null, root: () => Element | null): boolean => {
   const [covered, setCovered] = useState(false)
   useEffect(() => {
-    if (place === null) {
-      setCovered(false)
-      return
-    }
+    if (place === null) return
     let frames: Array<number> = []
     const look = () => setCovered(coveredNow(root(), place))
     // What opens is placed a frame or two after it is added: looked at as it is added, and again as it settles.
@@ -62,5 +59,6 @@ export const useCovered = (place: Place | null, root: () => Element | null): boo
       for (const frame of frames) cancelAnimationFrame(frame)
     }
   }, [place, root])
-  return covered
+  // A page with no place has nothing over it.
+  return place !== null && covered
 }

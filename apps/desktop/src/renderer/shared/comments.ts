@@ -78,7 +78,8 @@ export const giveBack = (key: string, comments: ReadonlyArray<GatheredComment>) 
 
 /** Forgets every draft's comments: for tests. */
 export const forgetComments = () => {
-  for (const key of [...gathered.keys()]) changed(key, [])
+  // A Map may lose the key it is on while it is gone through.
+  for (const key of gathered.keys()) changed(key, [])
 }
 
 /** The comments waiting in a draft, as they change. */

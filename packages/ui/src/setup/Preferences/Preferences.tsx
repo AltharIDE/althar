@@ -905,7 +905,7 @@ export function BrowserPreferences({
   return (
     <SettingList>
       <SettingRow title={t.links} note={t.linksNote} glyph={<Icon name="globe" size={15} />}>
-        {(ids) => (
+        {() => (
           <Segmented<LinksOpen>
             label={t.links}
             value={links}

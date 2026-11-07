@@ -41,7 +41,7 @@ import { vi } from 'vitest'
 import { type AppPreferences, DEFAULT_PREFERENCES } from '../src/main/appPreferences'
 import type { Client, ProjectRulesChange } from '../src/renderer/data/client'
 import { withChange } from '../src/renderer/features/rules/useRules'
-import type { Host } from '../src/renderer/data/services'
+import type { Host, PagesHost } from '../src/renderer/data/services'
 
 /* What the runtime would say, as plain values, and a client that says it. */
 
@@ -1300,6 +1300,30 @@ const keptPreferences = (): Pick<Host, 'preferences' | 'setPreference'> => {
     }),
   }
 }
+
+/** The main process's pages beside the conversations, doing nothing: a test sets what it looks at. */
+export const fakePagesHost = (overrides: Partial<PagesHost> = {}): PagesHost => ({
+  open: vi.fn(async () => null),
+  state: vi.fn(async () => null),
+  show: vi.fn(),
+  move: vi.fn(async () => {}),
+  viewport: vi.fn(async () => {}),
+  point: vi.fn(async () => null),
+  stopPointing: vi.fn(async () => {}),
+  pins: vi.fn(async () => {}),
+  find: vi.fn(async () => null),
+  still: vi.fn(async () => null),
+  cover: vi.fn(async () => {}),
+  focus: vi.fn(async () => {}),
+  outside: vi.fn(async () => {}),
+  dismiss: vi.fn(async () => {}),
+  close: vi.fn(async () => {}),
+  clear: vi.fn(async () => {}),
+  clearAll: vi.fn(async () => {}),
+  onState: () => () => {},
+  onKey: () => () => {},
+  ...overrides,
+})
 
 export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   ...keptPreferences(),
