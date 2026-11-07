@@ -99,6 +99,7 @@ export const viewOf = (threadId: string) =>
     return {
       cleared: mark !== null,
       earlierOpen: mark?.earlierShown ?? false,
+      from: mark?.from ?? null,
       clearable: seen?.clearable === 1,
       forgettable: seen?.forgettable === 1,
       version: row.revision,

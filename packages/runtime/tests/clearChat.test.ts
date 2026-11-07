@@ -130,6 +130,7 @@ describe('clearing the coordinator’s view', () => {
       assert.deepStrictEqual(flags((yield* snapshot(projectId)).view), {
         cleared: false,
         earlierOpen: false,
+        from: null,
         clearable: true,
         forgettable: true,
       })
@@ -140,7 +141,10 @@ describe('clearing the coordinator’s view', () => {
       const cleared = yield* snapshot(projectId)
       assert.deepStrictEqual(cleared.items, [])
       assert.isFalse(cleared.earlier)
-      assert.deepStrictEqual(flags(cleared.view), { cleared: true, earlierOpen: false, clearable: false, forgettable: true })
+      const { from, ...rest } = flags(cleared.view)
+      assert.deepStrictEqual(rest, { cleared: true, earlierOpen: false, clearable: false, forgettable: true })
+      // The mark is where the view begins: the sequence after the last item, which an item before it is not at.
+      assert.isNumber(from)
       const refused = yield* Effect.flip(clear(threadId))
       assert.instanceOf(refused, NothingToClear)
 
@@ -291,7 +295,7 @@ describe('forgetting the coordinator’s conversation', () => {
       )
       // The thread says where the fresh session begins; no one is left to forget.
       const shown = yield* snapshot(projectId)
-      assert.deepStrictEqual(flags(shown.view), { cleared: false, earlierOpen: false, clearable: false, forgettable: false })
+      assert.deepStrictEqual(flags(shown.view), { cleared: false, earlierOpen: false, from: null, clearable: false, forgettable: false })
       const last = shown.items.at(-1)
       assert.strictEqual(last?.kind === 'notice' ? last.content.title : null, FRESH_SESSION)
       // The records stay: the notes, the task and its plan.

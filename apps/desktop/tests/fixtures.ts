@@ -827,7 +827,7 @@ export const coordinatorSnapshot = (overrides: Partial<CoordinatorSnapshot> = {}
   suggested: { agentId: 'claude-code', agentName: 'Claude Code', model: null, effort: null, available: true },
   items: [],
   earlier: false,
-  view: { cleared: false, earlierOpen: false, clearable: false, forgettable: false, version: 1 },
+  view: { cleared: false, earlierOpen: false, from: null, clearable: false, forgettable: false, version: 1 },
   host: null,
   runnables: [],
   launches: [],

@@ -3146,6 +3146,8 @@ export const ConversationView = Schema.Struct({
   cleared: Schema.Boolean,
   /** The conversation before the clear is read in the thread's place. */
   earlierOpen: Schema.Boolean,
+  /** The sequence where the cleared view begins; null while the view is whole. An item before it belongs to the earlier conversation. */
+  from: Schema.NullOr(Schema.Int),
   /** There is something in the view to clear. */
   clearable: Schema.Boolean,
   /** There is a conversation to forget: its messages, or the session that holds it. */

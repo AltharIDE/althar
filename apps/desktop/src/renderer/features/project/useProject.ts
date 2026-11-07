@@ -24,7 +24,7 @@ import { type Outgoing, sentWith } from '../../shared/useAttachments'
 import { useOutputs } from '../../shared/useOutputs'
 import { useStreamed } from '../../shared/useStreamed'
 import { canPick } from '../../shared/agents'
-import { isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
+import { inView, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
 import type { Streamed } from '../../shared/thread'
 
@@ -174,11 +174,32 @@ export const useProject = (projectId: string): ProjectModel => {
 
   const fail = useCallback((failure: unknown) => setError(messageOf(failure)), [])
 
+  /**
+   * Items read or heard join the thread the window shows, by its view: not one of the conversation before a clear while the
+   * view is cleared, nor one after it while the earlier conversation is open. `version` is the view's when the read began: a
+   * read that outlived a clear, a wipe or an undo is of another thread, and is dropped.
+   */
   const arrived = useCallback(
-    (items: ReadonlyArray<ThreadItem>) => {
-      setCoordinator((current) => ({ ...current, items: mergeItems(current.items, items) }))
+    (items: ReadonlyArray<ThreadItem>, version?: number) => {
+      setCoordinator((current) =>
+        version !== undefined && current.view.version !== version
+          ? current
+          : {
+              ...current,
+              items: mergeItems(
+                current.items,
+                items.filter((item) => inView(current.view, current.items, item)),
+              ),
+            },
+      )
     },
     [setCoordinator],
+  )
+
+  /** The version of the view the window holds now, for a read that lands later. */
+  const viewVersion = useCallback(
+    () => cache.getQueryData<CoordinatorSnapshot>(keys.coordinator(projectId))?.view.version,
+    [cache, projectId],
   )
 
   /** What the window holds of the thread now, for a read that lands later. */
@@ -189,8 +210,13 @@ export const useProject = (projectId: string): ProjectModel => {
     (ids: Iterable<string>) =>
       threadId === null
         ? Promise.resolve()
-        : Promise.all([...ids].map((itemId) => newest(itemId, client.getThreadItem(threadId, itemId), (item) => arrived([item]), fail))),
-    [client, threadId, newest, arrived, fail],
+        : Promise.all(
+            [...ids].map((itemId) => {
+              const version = viewVersion()
+              return newest(itemId, client.getThreadItem(threadId, itemId), (item) => arrived([item], version), fail)
+            }),
+          ),
+    [client, threadId, newest, arrived, viewVersion, fail],
   )
 
   /**
@@ -208,7 +234,15 @@ export const useProject = (projectId: string): ProjectModel => {
         client.getCoordinator(projectId, { limit: 0 }).finally(() => readItems(new Set([...also, ...waiting(held.current)]))),
         (head) =>
           cache.setQueryData<CoordinatorSnapshot>(keys.coordinator(projectId), (current) =>
-            current === undefined ? head : { ...head, items: current.items, earlier: current.earlier },
+            current === undefined
+              ? head
+              : // Its view is the one held while the thread was rewritten since: the whole thread is read for that, and takes the new.
+                {
+                  ...head,
+                  view: head.view.version === current.view.version ? head.view : current.view,
+                  items: current.items,
+                  earlier: current.earlier,
+                },
           ),
         fail,
       ),
@@ -286,11 +320,13 @@ export const useProject = (projectId: string): ProjectModel => {
       const first = coordinator?.items[0]
       if (first === undefined || !coordinator?.earlier) return Promise.resolve()
       setLoadingEarlier(true)
+      const version = coordinator.view.version
       const request = client
         .getCoordinator(projectId, { before: first.sequence, limit: PAGE })
         .then((page) => {
+          // A page read before the view was cleared, opened, restored or wiped is of another thread, though the thread is the same.
           setCoordinator((current) =>
-            current.threadId === page.threadId
+            current.threadId === page.threadId && current.view.version === version && page.view.version === version
               ? { ...current, items: mergeItems(current.items, page.items), earlier: page.earlier }
               : current,
           )

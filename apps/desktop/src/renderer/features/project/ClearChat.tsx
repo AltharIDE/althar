@@ -25,7 +25,10 @@ export const clearText = {
 export interface ClearChat {
   /** The bar above the thread; none until the thread is read. */
   readonly head: ReactNode
-  /** Where the cleared view begins, at the top of the thread; none while the view is whole or has more before it to read. */
+  /**
+   * Where the cleared view begins, at the top of the thread; none while the view is whole, or has more before it to read. With
+   * the earlier conversation open it stays, its way back with it, whatever more of that conversation there is to read.
+   */
   readonly line: ReactNode
   /** The question, while it is asked. */
   readonly dialog: ReactNode
@@ -48,7 +51,7 @@ export function useClearChat(model: ProjectModel): ClearChat {
         </ThreadHead>
       ),
     line:
-      view?.cleared !== true || coordinator?.earlier === true ? null : (
+      view?.cleared !== true || (coordinator?.earlier === true && !view.earlierOpen) ? null : (
         <ClearedLine
           earlierOpen={view.earlierOpen}
           onShowEarlier={() => void model.showEarlier(true)}

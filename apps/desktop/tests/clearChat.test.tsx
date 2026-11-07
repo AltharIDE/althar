@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { ConversationView, CoordinatorSnapshot } from '@althar/contracts'
+import type { ConversationView, CoordinatorSnapshot, ThreadItem } from '@althar/contracts'
 
 import { ServicesProvider } from '../src/renderer/data/services'
 import { continued } from '../src/renderer/data/reads'
@@ -40,7 +40,7 @@ const session = {
   background: [],
 } as const
 
-const whole: ConversationView = { cleared: false, earlierOpen: false, clearable: true, forgettable: true, version: 1 }
+const whole: ConversationView = { cleared: false, earlierOpen: false, from: null, clearable: true, forgettable: true, version: 1 }
 
 const talk = (view: Partial<ConversationView> = {}, overrides: Partial<CoordinatorSnapshot> = {}) =>
   coordinatorSnapshot({
@@ -219,6 +219,15 @@ describe('the line where the view was cleared', () => {
     expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull()
   })
 
+  it('keeps its way back with the earlier conversation open, though there is more of it to read', async () => {
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => talk({ cleared: true, earlierOpen: true, from: 100 }, { earlier: true })),
+    })
+    withServices(<Project />, client)
+    expect(await screen.findByRole('button', { name: 'Back to now' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeTruthy()
+  })
+
   it('does not take an empty cleared thread for a new project’s', async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () => talk({ cleared: true, clearable: false }, { items: [] })),
@@ -272,5 +281,103 @@ describe('the thread, rewritten under the window', () => {
     // And dropped once something did: a deleted item would otherwise stay in the window.
     const rewritten = { ...was, view: { ...was.view, version: 2 }, items: [second!] }
     expect(continued(held, rewritten).items).toEqual([second])
+  })
+})
+
+/** A read that stays open until it is answered. */
+const deferred = <A,>() => {
+  let answer: (value: A) => void = () => undefined
+  const promise = new Promise<A>((resolve) => {
+    answer = resolve
+  })
+  return { promise, answer }
+}
+
+const at = (item: ThreadItem, sequence: number): ThreadItem => ({ ...item, sequence })
+
+describe('what the window hears of a thread whose view is cleared', () => {
+  it('does not bring back an item from before the clear that its agent goes on writing', async () => {
+    const streaming = at(items.says('Half of an answer', 'claude-code', 'live'), 4)
+    let now = talk({}, { items: [at(items.you('Why?'), 3), streaming] })
+    const getThreadItem = vi.fn(async (_threadId: string, itemId: string) =>
+      itemId === 'live'
+        ? at(items.says('Half of an answer, and the rest', 'claude-code', 'live'), 4)
+        : at(items.says('After', 'claude-code', 'after'), 101),
+    )
+    const { client, emit } = fakeClient({ getCoordinator: vi.fn(async () => now), getThreadItem })
+    const { result } = modelOf(client)
+    await waitFor(() => expect(result.current.coordinator?.items).toHaveLength(2))
+    // Cleared in another window while the agent was answering.
+    now = talk({ cleared: true, from: 100, clearable: false, version: 2 }, { items: [] })
+    act(() => emit(changed('thread', 'thc', 'thc', 'p1')))
+    await waitFor(() => expect(result.current.coordinator?.view.cleared).toBe(true))
+    // The agent's next words are of an item before the mark: the view is not theirs. What it says after the mark is.
+    act(() => emit(changed('thread_item', 'live', 'thc', 'p1')))
+    await waitFor(() => expect(getThreadItem).toHaveBeenCalledWith('thc', 'live'))
+    act(() => emit(changed('thread_item', 'after', 'thc', 'p1')))
+    await waitFor(() => expect(result.current.coordinator?.items.map((item) => item.id)).toEqual(['after']))
+  })
+
+  it('keeps the earlier conversation to itself while it is open, but for what it already holds', async () => {
+    const held = at(items.says('Before', 'claude-code', 'held'), 5)
+    const now = talk({ cleared: true, earlierOpen: true, from: 100, version: 2 }, { items: [at(items.you('Then'), 4), held] })
+    const getThreadItem = vi.fn(async (_threadId: string, itemId: string) =>
+      itemId === 'new' ? at(items.says('Just said', 'claude-code', 'new'), 101) : at(items.says('Before, again', 'claude-code', itemId), 5),
+    )
+    const { client, emit } = fakeClient({ getCoordinator: vi.fn(async () => now), getThreadItem })
+    const { result } = modelOf(client)
+    await waitFor(() => expect(result.current.coordinator?.items).toHaveLength(2))
+    act(() => emit(changed('thread_item', 'new', 'thc', 'p1')))
+    act(() => emit(changed('thread_item', 'held', 'thc', 'p1')))
+    await waitFor(() =>
+      expect(result.current.coordinator?.items.some((item) => item.kind === 'agent_message' && item.content.text === 'Before, again')).toBe(
+        true,
+      ),
+    )
+    expect(getThreadItem).toHaveBeenCalledWith('thc', 'new')
+    expect(result.current.coordinator?.items.map((item) => item.id)).not.toContain('new')
+  })
+
+  it('drops an earlier page that lands after the view was cleared or the conversation wiped', async () => {
+    const page = deferred<CoordinatorSnapshot>()
+    let now = talk({}, { earlier: true, items: [at(items.you('Newest'), 30)] })
+    const getCoordinator = vi.fn(async (_projectId: string, options?: { readonly before?: number }) =>
+      options?.before === undefined ? now : page.promise,
+    )
+    const { client, emit } = fakeClient({ getCoordinator })
+    const { result } = modelOf(client)
+    await waitFor(() => expect(result.current.coordinator?.earlier).toBe(true))
+    let paging: Promise<void> = Promise.resolve()
+    act(() => {
+      paging = result.current.loadEarlier(true)
+    })
+    // Wiped meanwhile, here or in another window: the thread is the same, and holds nothing of what the page has.
+    now = talk({ forgettable: false, clearable: false, version: 2 }, { earlier: false, items: [] })
+    act(() => emit(changed('thread', 'thc', 'thc', 'p1')))
+    await waitFor(() => expect(result.current.coordinator?.view.version).toBe(2))
+    await act(async () => {
+      page.answer(talk({}, { earlier: false, items: [at(items.you('Deleted words'), 2)] }))
+      await paging
+    })
+    expect(result.current.coordinator?.items).toEqual([])
+  })
+
+  it('drops an item read that lands after the thread was wiped', async () => {
+    const read = deferred<ThreadItem>()
+    let now = talk({}, { items: [at(items.says('Said', 'claude-code', 'said'), 3)] })
+    const getThreadItem = vi.fn(() => read.promise)
+    const { client, emit } = fakeClient({ getCoordinator: vi.fn(async () => now), getThreadItem })
+    const { result } = modelOf(client)
+    await waitFor(() => expect(result.current.coordinator?.items).toHaveLength(1))
+    act(() => emit(changed('thread_item', 'said', 'thc', 'p1')))
+    await waitFor(() => expect(getThreadItem).toHaveBeenCalled())
+    now = talk({ forgettable: false, clearable: false, version: 2 }, { items: [] })
+    act(() => emit(changed('thread', 'thc', 'thc', 'p1')))
+    await waitFor(() => expect(result.current.coordinator?.view.version).toBe(2))
+    await act(async () => {
+      read.answer(at(items.says('Said, late', 'claude-code', 'said'), 3))
+      await Promise.resolve()
+    })
+    expect(result.current.coordinator?.items).toEqual([])
   })
 })
