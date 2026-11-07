@@ -16,8 +16,8 @@ What the person decided on 6 November, and what each surface draws from it. Then
 - **What asks: A**, the four kinds in Rules. Open: whether they live in the person's own Settings instead (2 · B).
 - **MCP servers and skills:** the role table, a card for each act in the thread, and **one switch** that keeps the person's agents the same. Open: how it says what it writes to their files and what it leaves alone (3 · A, B).
 - **Settings an agent changed: A**, a line each.
-- **A task's parts: one Parts button** just before the faces; the faces, Run and the menu never move. The rail beside the thread is out, as DESIGN.md rules out side panels. Open: how the button and what it opens look (5 · A to C).
-- Not yet decided: a lead-started task (1).
+- **A task's parts: C**, the parts' own icons just before the faces, what waits on the person first, each opening in place; the faces, Run and the menu never move. The rail beside the thread is out, as DESIGN.md rules out side panels.
+- **A lead-started task (1)** and **settings an agent changed (4)** were built in #663 (ADR-097), in direction A; where it went another way than recommended here (the countdown on a lead's start, loosening on the person's word), those sections say so.
 - The directions not picked are gone from the code too; the history has them.
 
 The flow, as it stands:
@@ -26,9 +26,8 @@ The flow, as it stands:
 flowchart LR
   P[The person] -->|says it| C[Coordinator]
   C -->|plans, starts, directs| S[The task starts]
-  L[A lead] -->|in a turn the person started| S
-  L -->|in a turn news started| K[A card: Start it?]
-  K -->|their word| S
+  L[A lead] -->|at most 3 a turn| K[The plan's countdown, with Hold]
+  K --> S
   S --> A{Can it be undone?}
   A -->|yes| G[Goes ahead]
   A -->|no, and they asked for it in the thread| G
@@ -180,7 +179,7 @@ Sketches are single states, not choices between directions: things the decisions
 - **No first-time card** (7 Nov). The sketch put "Agents can do more now" in the coordinator's conversation, once after updating. It's gone: a new user has no "before" to be told about, someone who never opens the coordinator never sees it, and Settings is no place to send anyone who hasn't asked. What there is to learn shows where it happens, the same for everyone: the ask card says why it asks ("Can't be undone", and what stays), and each task's "could see 9 skills and 7 MCP servers" line says what loaded. A project the person had set to ask first stays so, unannounced. "While you were away" sits in the same conversation and has the same problem: it needs a home that isn't the coordinator's.
 - **While you were away**: what agents did outside their worktrees across the project (merged, posted, moved an issue, started a task, changed a setting), by task and time, with Revert it, Delete it or Undo where it can be undone.
 - **A server that fails**: the call where it ran ("Move DEV-188 to In Review", Linear), failed, and under it Althar's own line, the kit's `AltharLine` in its warning tone: "Claude Code isn't signed in to Linear, so DEV-188 wasn't moved. Sign in". The lead goes on and doesn't repeat it. Signing in turns the call to Moved. Two earlier versions, a warning card and a red line with a button, read as blocks apart from the thread.
-- **A lead that starts several**: "Started 4 tasks from your 'split it by ADR'", started at once, with no countdown: starting a task can be undone by stopping it, so nothing asks. Each is a row that opens it, with its model and where it stands (Running, Planning, After ADR-013 merges); Stop on hover, then Start again. The first version's Hold the rest and Change one didn't say what they'd hold or change.
+- **A lead that starts several**: "Started 4 tasks from your 'split it by ADR'", started at once, with no countdown: starting a task can be undone by stopping it, so nothing asks. Each is a row that opens it, with its model and where it stands (Running, Planning, After ADR-013 merges); Stop on hover, then Start again. The first version's Hold the rest and Change one didn't say what they'd hold or change. As built (#663) each would wait the plan's countdown instead, and a lead starts at most 3 in a turn.
 
 What the runtime needs: a small-change path (a plan of one step, a lighter model, review after); a log of acts outside worktrees across the project, each with how it is undone; a server's failure as a thread item, by agent and cause; a batch of starts as one item with one hold; a review's `outside` from the host's author association, and a Run it command that gives it a worktree; pushes seen on the host that Althar didn't make, attributed to the task by branch, as a thread item.
 
