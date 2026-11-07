@@ -143,6 +143,7 @@ import { Sessions } from './Sessions'
 import { LeftBehind } from './LeftBehind'
 import { spanOf } from './stallWatch'
 import { addItem, updateItem } from './threads'
+import { recordAct } from './outsideActs'
 import { readReviewed, reviewOf } from './reviewing'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
 import { summarize, words } from './words'
@@ -770,6 +771,15 @@ export class Changes extends Context.Service<
       taskId: string,
       reply: { readonly body: string; readonly threadId: string | null; readonly by: string | null },
     ): Effect.Effect<ChangeSummary, unknown>
+    /**
+     * Deletes a comment its lead wrote on one of the task's pull requests, as
+     * the board's While you were away takes it back (ADR-097), unless someone
+     * wrote there after it: then nothing is deleted, and who did is said.
+     */
+    unpost(
+      taskId: string,
+      comment: { readonly url: string; readonly commentId: string; readonly at: string; readonly inThread: boolean },
+    ): Effect.Effect<{ readonly deleted: true } | { readonly replied: string }, unknown>
     /**
      * Gives the task's open pull request at `url` (else its current one)
      * another title, description, or both, and the task's title follows its
@@ -3180,7 +3190,7 @@ export class Changes extends Context.Service<
             .update(`${input.threadId ?? ''}\0${input.body}`)
             .digest('hex')
             .slice(0, 32)
-          yield* outward({
+          const posted = yield* outward({
             projectId: link.projectId,
             subject: { type: 'external_link', id: link.id },
             target: `${host.product}:${snapshot.repository.join('/')}`,
@@ -3193,8 +3203,54 @@ export class Changes extends Context.Service<
             encode: (answer) => answer,
             decode: (kept) => Option.getOrUndefined(Schema.decodeUnknownOption(Comment)(kept)),
           })
+          // A lead's word on the pull request is one of the acts outside its worktree the board says (ADR-097): Delete, while no one replied.
+          if (posted !== undefined) {
+            const sql = yield* SqlClient.SqlClient
+            const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task' LIMIT 1`
+            const name = `${host.words.prefix}${snapshot.number}`
+            yield* recordAct({
+              projectId: link.projectId,
+              taskId,
+              threadId: thread?.id ?? null,
+              kind: 'post',
+              what: input.threadId === null ? `Commented on ${name}` : `Replied on ${name}`,
+              source: `comment:${link.id}:${posted.id}`,
+              ...(host.removeComment === undefined
+                ? { cant: 'Already sent' }
+                : {
+                    undo: {
+                      way: 'comment',
+                      linkUrl: snapshot.url,
+                      taskId,
+                      commentId: posted.id,
+                      number: snapshot.number,
+                      at: posted.at,
+                      ...(input.threadId === null ? {} : { inThread: true }),
+                    },
+                  }),
+              actorId: instance.systemId,
+            })
+          }
           yield* news(taskId)
           return yield* summaryOf(link)
+        })
+
+      const unpost = (
+        taskId: string,
+        comment: { readonly url: string; readonly commentId: string; readonly at: string; readonly inThread: boolean },
+      ) =>
+        Effect.gen(function* () {
+          const { snapshot, host, repository, account } = yield* current(taskId, comment.url)
+          if (host.removeComment === undefined) return yield* new NotConnected({ product: host.product, what: 'deleting a comment' })
+          // Someone who wrote after it read it, and may have answered it: it stays, and the board says who.
+          const seen = yield* host.activity(repository, snapshot.number, null)
+          const after = [...seen.comments, ...seen.reviews]
+            .filter((one) => one.at > comment.at && one.id !== comment.commentId && one.author.id !== account.id && !one.author.bot)
+            .toSorted((a, b) => a.at.localeCompare(b.at))
+          const first = after[0]
+          if (first !== undefined) return { replied: first.author.name ?? first.author.login }
+          yield* host.removeComment(repository, snapshot.number, comment.commentId, comment.inThread)
+          return { deleted: true } as const
         })
 
       /**
@@ -7299,6 +7355,7 @@ export class Changes extends Context.Service<
         opensNext: (taskId, opening) => Effect.sync(() => void (opening ? nextOpening.add(taskId) : nextOpening.delete(taskId))),
         pushBranch: (taskId, heads) => provide(locked(taskId)(pushBranch(taskId, heads))),
         reply: (taskId, input) => provide(locked(taskId)(reply(taskId, input))),
+        unpost: (taskId, comment) => provide(unpost(taskId, comment)),
         edit: (taskId, asked, by) => provide(locked(taskId)(edit(taskId, asked, by))),
         followTitle: (taskId) => provide(locked(taskId)(followTitle(taskId))),
         followTitleLater,

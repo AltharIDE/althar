@@ -1757,6 +1757,14 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
             : error,
         ),
       ),
+    removeComment: (repository, _number, commentId, inThread) =>
+      Effect.asVoid(
+        http.json(
+          Schema.Unknown,
+          'DELETE',
+          `${repo(repository)}/${inThread ? 'pulls' : 'issues'}/comments/${encodeURIComponent(commentId)}`,
+        ),
+      ),
     editComment: (repository, _number, commentId, body) =>
       Effect.map(
         http.json(CommentAnswer, 'PATCH', `${repo(repository)}/issues/comments/${encodeURIComponent(commentId)}`, { body }),

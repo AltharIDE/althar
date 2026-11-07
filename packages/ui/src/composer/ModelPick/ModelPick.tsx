@@ -32,6 +32,9 @@ export interface ModelPickText {
   /** Going ahead with a pick that asked first, and not. */
   proceed: string
   cancel: string
+  /** The choice that leaves the model to Althar, for each task: what its row and the button say. */
+  auto: string
+  autoNote: string
 }
 
 export const modelPickText: ModelPickText = {
@@ -47,7 +50,12 @@ export const modelPickText: ModelPickText = {
   team: 'Change the team…',
   proceed: 'Switch',
   cancel: 'Cancel',
+  auto: 'Auto',
+  autoNote: 'Picks for each task',
 }
+
+/** Auto's value in the list, which no model's id is. */
+const AUTO = '\u0000auto'
 
 export interface ModelPickProps {
   /** The model in use. */
@@ -68,6 +76,11 @@ export interface ModelPickProps {
   onRemove?: () => void
   /** Open everyone on the work, in a dialog the consumer shows: the lead's pick of a plan that hasn't begun. Without it, there is no such row. */
   onTeam?: () => void
+  /**
+   * Auto, first in the list: Althar picks the model for each task. While it is on, the button says Auto and there is no
+   * effort; picking a model turns it off (`onChange`). Without it, there is no such row.
+   */
+  auto?: { readonly on: boolean; readonly onPick: () => void }
   /** How many models there are in all, on the browse row. */
   count?: number
   /** Whose model this is: Lead, Coordinator, Review. */
@@ -107,6 +120,7 @@ export function ModelPick({
   onBrowse,
   onRemove,
   onTeam,
+  auto,
   count,
   owner,
   variant = 'quiet',
@@ -142,8 +156,9 @@ export function ModelPick({
   }
   const isPinned = (x: ModelInfo) => pinned.some((p) => p.id === x.id)
   const list = isPinned(model) ? pinned : [model, ...pinned]
-  /* A model with no effort levels gets no control, whatever effort says. */
-  const level = model.efforts.length > 0 ? effort : null
+  const isAuto = auto?.on === true
+  /* A model with no effort levels gets no control, whatever effort says; nor does Auto, which picks it too. */
+  const level = model.efforts.length > 0 && !isAuto ? effort : null
   /* An agent's level called "Default" says nothing about how hard it thinks: the chip leaves it out, the list still has it. */
   const shownLevel = level !== null && level.toLowerCase() !== 'default' ? level : null
 
@@ -159,8 +174,8 @@ export function ModelPick({
         onOpenChange={setOpen}
         className={s.pop}
         trigger={
-          <button type="button" className={cx(s.button, s[variant])} aria-label={t.current(owner, model.short, level)}>
-            <Model model={model} short className={s.name} />
+          <button type="button" className={cx(s.button, s[variant])} aria-label={t.current(owner, isAuto ? t.auto : model.short, level)}>
+            {isAuto ? <span className={s.name}>{t.auto}</span> : <Model model={model} short className={s.name} />}
             <span className={s.tail}>
               {shownLevel !== null && <span className={s.effort}>{shownLevel}</span>}
               <Icon name="chevronD" size={10} className={s.chev} />
@@ -173,17 +188,25 @@ export function ModelPick({
         <RadioGroup.Root
           className={s.list}
           aria-label={t.pinned}
-          value={model.id}
+          value={isAuto ? AUTO : model.id}
           onValueChange={(id) => {
+            if (id === AUTO) return auto?.onPick()
             const x = list.find((candidate) => candidate.id === id)
-            if (x !== undefined && id !== model.id) pick(x)
+            if (x !== undefined && (isAuto || id !== model.id)) pick(x)
           }}
           loop
         >
+          {auto !== undefined && (
+            <RadioGroup.Item value={AUTO} className={cx(s.option, isAuto && s.current)}>
+              <span className={s.auto}>{t.auto}</span>
+              <span className={s.autoNote}>{t.autoNote}</span>
+              <Icon name="check" size={11} className={s.check} />
+            </RadioGroup.Item>
+          )}
           {list.map((x) => {
             const left = room?.(x)
             return (
-              <RadioGroup.Item key={x.id} value={x.id} className={cx(s.option, x.id === model.id && s.current)}>
+              <RadioGroup.Item key={x.id} value={x.id} className={cx(s.option, !isAuto && x.id === model.id && s.current)}>
                 <Model model={x} />
                 {left !== undefined && <RoomNote room={left} text={roomText} className={s.room} />}
                 <Icon name="check" size={11} className={s.check} />
@@ -284,7 +307,7 @@ export function ModelPick({
           </button>
         )}
       </Popover>
-      <RoomSaid room={room?.(model)} text={roomText} />
+      {!isAuto && <RoomSaid room={room?.(model)} text={roomText} />}
     </>
   )
 }

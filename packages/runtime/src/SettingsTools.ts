@@ -43,6 +43,7 @@ import {
   allowsEverything,
   modeOf,
   movesIssues,
+  hasCoordinator,
   Policies,
   postsScreenshots,
   pushesCommits,
@@ -300,6 +301,7 @@ export class SettingsTools extends Context.Service<
               pushCommits: pushesCommits(rules),
               postScreenshots: postsScreenshots(rules),
               moveIssues: movesIssues(rules),
+              coordinator: hasCoordinator(rules),
               branchPattern: rules.branchPattern ?? null,
               titlePattern: rules.titlePattern ?? null,
             } as Values,
@@ -323,6 +325,7 @@ export class SettingsTools extends Context.Service<
         'pushCommits',
         'postScreenshots',
         'moveIssues',
+        'coordinator',
         'branchPattern',
         'titlePattern',
       ])
@@ -385,6 +388,11 @@ export class SettingsTools extends Context.Service<
             pushCommits: field('Push the lead’s commits automatically', SWITCH, Schema.Boolean),
             postScreenshots: field('Post screenshots automatically', SWITCH, Schema.Boolean),
             moveIssues: field('Move issues automatically', SWITCH, Schema.Boolean),
+            coordinator: field(
+              'Use the coordinator',
+              `${SWITCH}; off, what the person writes in the project's conversation starts a task at once, and nothing wakes the coordinator`,
+              Schema.Boolean,
+            ),
           },
           read: (projectId) =>
             Effect.gen(function* () {
@@ -395,7 +403,7 @@ export class SettingsTools extends Context.Service<
               return {
                 name: project?.name ?? '',
                 ink: project?.ink ?? null,
-                ...pick(view, ['worksIn', 'resolveConflicts', 'pushCommits', 'postScreenshots', 'moveIssues']),
+                ...pick(view, ['worksIn', 'resolveConflicts', 'pushCommits', 'postScreenshots', 'moveIssues', 'coordinator']),
                 workToward: Object.fromEntries(repositories.map((one) => [one.name, one.workToward])),
               }
             }),
@@ -418,7 +426,7 @@ export class SettingsTools extends Context.Service<
                         ),
                     ),
                   )
-              const rules = pick(change, ['worksIn', 'resolveConflicts', 'pushCommits', 'postScreenshots', 'moveIssues'])
+              const rules = pick(change, ['worksIn', 'resolveConflicts', 'pushCommits', 'postScreenshots', 'moveIssues', 'coordinator'])
               const given = Object.fromEntries(Object.entries(rules).filter(([, value]) => value !== undefined))
               if (Object.keys(given).length > 0) yield* writeRules(projectId, given, actorId)
             }),

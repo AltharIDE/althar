@@ -16,6 +16,7 @@ import { envelope } from './envelope'
 import { type AskedAction, type AskedResult, type ErrandStep, Errands, type FreshAction } from './Errands'
 import { contained } from './Failures'
 import { Instance } from './Instance'
+import { recordAct } from './outsideActs'
 import { makeKeyedLock } from './keyedLock'
 import { checksOf, nameOf } from './pullRequestWords'
 import { timestamp } from './records'
@@ -213,6 +214,30 @@ const note = (projectId: string, subject: string, kind: string, id: string, payl
     return (inserted?.n ?? 0) > 0
   })
 
+/**
+ * A merge on the line landed, while the person may be away: one of the acts outside a worktree the board says
+ * (ADR-097), which a revert takes back.
+ */
+const mergedAct = (
+  projectId: string,
+  entry: Entry,
+  change: { readonly number: number; readonly url: string; readonly words: { readonly prefix: string } },
+) =>
+  Effect.gen(function* () {
+    const instance = yield* Instance
+    const name = `${change.words.prefix}${change.number}`
+    yield* recordAct({
+      projectId,
+      taskId: entry.taskId,
+      threadId: entry.threadId,
+      kind: 'merge',
+      what: `Merged ${name} into ${entry.branch}`,
+      source: `merge:${change.url}`,
+      undo: { way: 'revert', url: change.url, name, branch: entry.branch },
+      actorId: instance.systemId,
+    })
+  })
+
 /** A note as kept: what it said, and when. */
 type Note = Readonly<Record<string, unknown>> & { readonly at: string }
 
@@ -338,7 +363,8 @@ export class MergeLine extends Context.Service<
               : yield* pushedBy(projectId, entry, { host, repository, change }, change.headSha)
           const moved = by === undefined ? {} : { pushedBy: by }
           if (change.state === 'merged') {
-            yield* note(projectId, lineOf(entry), 'landed', `landed:${place.number}`, { number: place.number })
+            if (yield* note(projectId, lineOf(entry), 'landed', `landed:${place.number}`, { number: place.number }))
+              yield* mergedAct(projectId, entry, { number: place.number, url: change.url, words: host.words })
             yield* settleTask(entry)
             if (by === 'other') {
               const reason = `${name} was merged on ${hostName(host)} at ${short(change.headSha)}, a head someone else pushed, not the one the person saw.`
@@ -604,7 +630,8 @@ export class MergeLine extends Context.Service<
               yield* note(projectId, stepOf(entry), 'merging', id, { head: change.headSha })
               const merged = yield* host.merge(repository, change, how).pipe(Effect.catch(failed))
               if (merged.state === 'merged') {
-                yield* note(projectId, lineOf(entry), 'landed', `landed:${change.number}`, { number: change.number })
+                if (yield* note(projectId, lineOf(entry), 'landed', `landed:${change.number}`, { number: change.number }))
+                  yield* mergedAct(projectId, entry, { number: change.number, url: change.url, words: host.words })
                 yield* settleTask(entry)
                 return `Merged ${name} at ${short(change.headSha)} into ${entry.branch}, by ${how.method}.`
               }

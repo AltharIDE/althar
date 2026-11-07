@@ -65,6 +65,7 @@ export const Ids = {
   automation: kind('auto', 'AutomationId'),
   automationOccurrence: kind('occ', 'AutomationOccurrenceId'),
   onePress: kind('press', 'OnePressId'),
+  outsideAct: kind('oac', 'OutsideActId'),
 } as const
 
 export type IdKind = keyof typeof Ids

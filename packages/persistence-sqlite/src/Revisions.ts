@@ -48,6 +48,7 @@ export const revisionedTables = [
   'automations',
   'automation_occurrences',
   'setting_changes',
+  'outside_acts',
 ] as const
 export type RevisionedTable = (typeof revisionedTables)[number]
 

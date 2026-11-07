@@ -574,6 +574,12 @@ export interface CodeHost extends HostReleases {
    * `capabilities.pictures`.
    */
   editComment?(repository: Repository, number: number, commentId: string, body: string): Effect.Effect<Comment, ConnectorFailed>
+  /**
+   * Deletes a comment the account wrote on a change: in its conversation, or
+   * a reply in a thread on its lines (`inThread`). `not_found` where it is
+   * gone already. GitHub's and GitLab's.
+   */
+  removeComment?(repository: Repository, number: number, commentId: string, inThread: boolean): Effect.Effect<void, ConnectorFailed>
 }
 
 /** A host's refusal of a picture, where it has no `capabilities.pictures`. */

@@ -1,0 +1,140 @@
+/* Over the board's lanes, as wide as they are: a quiet box of rows, one column each down the list. */
+.away {
+  container-type: inline-size;
+  display: grid;
+  gap: 6px;
+  margin: 12px 16px 4px 0;
+  padding: 10px 14px 8px;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px var(--line);
+  background: var(--paper);
+  font-size: 13px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  min-height: 24px;
+}
+.title {
+  font-weight: 560;
+  color: var(--t-1);
+}
+.since,
+.at,
+.cant,
+.undoing {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+.clear {
+  margin-left: auto;
+}
+
+/* The rows share their columns, so each glyph, task, time and link lines up with the ones above it. */
+.acts {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1.6fr) minmax(0, 1fr) max-content minmax(0, max-content) max-content;
+  column-gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.act {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  min-height: 28px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+}
+
+.glyph {
+  justify-self: center;
+  color: var(--t-3);
+}
+.what,
+.task,
+.task > *,
+.cant {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.what {
+  color: var(--t-1);
+}
+.task {
+  color: var(--t-3);
+}
+.open {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.open:hover {
+  color: var(--t-1);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.open:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+.undo {
+  justify-self: end;
+  font-size: 12px;
+}
+.failed {
+  color: var(--danger);
+}
+
+/* Taken back: what it did is struck through, and quieter. */
+.act[data-undone] .what {
+  color: var(--t-4);
+  text-decoration: line-through;
+}
+
+/* Narrow, beside the conversation: the task goes under what it did, and the time with it. */
+@container (max-width: 520px) {
+  .acts {
+    grid-template-columns: 16px minmax(0, 1fr) max-content max-content;
+  }
+  .act {
+    grid-template-areas:
+      'glyph what what undo'
+      '. task at cant';
+    padding: 4px 0;
+    row-gap: 1px;
+  }
+  .glyph {
+    grid-area: glyph;
+  }
+  .what {
+    grid-area: what;
+  }
+  .task {
+    grid-area: task;
+  }
+  .at {
+    grid-area: at;
+  }
+  .cant {
+    grid-area: cant;
+    justify-self: end;
+  }
+  .undo {
+    grid-area: undo;
+  }
+}

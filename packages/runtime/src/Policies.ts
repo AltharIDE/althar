@@ -106,6 +106,13 @@ export const ProjectRules = Schema.Struct({
   ),
   moveIssues: Schema.optional(Schema.Boolean),
   /**
+   * Whether the project has a coordinator (ADR-097, "The coordinator is
+   * optional"): on without it. Off, what the person writes in the project's
+   * conversation starts a task at once with Auto, nothing wakes the
+   * coordinator, and its news goes nowhere; a task a lead starts still starts.
+   */
+  coordinator: Schema.optional(Schema.Boolean),
+  /**
    * Where new tasks start (ADR-091): in a worktree of their own, or Local, in
    * each repository's own checkout here, one task at a time. The coordinator
    * chooses per task. A worktree without it.
@@ -206,6 +213,9 @@ export const usageLimitOf = (rules: ProjectRules): UsageLimit => rules.usageLimi
 
 /** Whether a revision's rules move a task's issue to In Progress as the task starts: they do unless the person turned it off. */
 export const movesIssues = (rules: ProjectRules): boolean => rules.moveIssues ?? true
+
+/** Whether a revision's rules keep the project's coordinator: they do unless the person turned it off. */
+export const hasCoordinator = (rules: ProjectRules): boolean => rules.coordinator !== false
 
 /** Where a revision's rules start new tasks (ADR-091): in a worktree of their own unless the person chose Local. */
 export const worksInOf = (rules: ProjectRules): WorksIn => rules.worksIn ?? 'worktree'
