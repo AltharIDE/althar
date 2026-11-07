@@ -165,5 +165,9 @@ export const worktreeAt = (folder: string, within: string): string | null => {
 }
 
 /** What git says when it can't open a worktree for its link, whichever side of it broke. */
+/** Whether git itself, in its own `fatal:` or `error:` line, not a host's `remote:` one or a hook's, said a folder's link to its repository broke. */
+export const linkBroke = (stderr: string): boolean =>
+  stderr.split('\n').some((line) => /^(?:fatal|error): /.test(line) && BROKEN_LINK.test(line))
+
 export const BROKEN_LINK =
   /gitfile does not point to a valid repository|invalid gitfile format|not a git repository|\.git file broken|unable to locate repository|gitdir (?:incorrect|unreadable|file points to non-existent location)/i

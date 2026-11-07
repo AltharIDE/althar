@@ -147,8 +147,8 @@ import { spanOf } from './stallWatch'
 import { addItem, updateItem } from './threads'
 import { readReviewed, reviewOf } from './reviewing'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
-import { gitLine, gitSummary, redacted } from './gitSaid'
-import { summarize, words } from './words'
+import { type GitFailure, gitFailureOf, gitLine, gitSummary, redacted } from './gitSaid'
+import { sentence, summarize, words } from './words'
 import { BETWEEN_AGENTS_MS, betweenAgents } from './needsYou'
 
 /*
@@ -603,8 +603,11 @@ const RoundWaiting = Schema.Struct({
 })
 type RoundWaiting = typeof RoundWaiting.Type
 
-/** Why reading a repository failed, in a sentence: the git subcommand and its most telling line, or what went wrong otherwise. */
-const gitSaid = (cause: Cause.Cause<unknown>) => summarize(cause)
+/** Why something failed, after a sentence that already names what was tried: git's most telling line, or what went wrong otherwise. */
+const saidOf = (cause: Cause.Cause<unknown>) => {
+  const failed = gitFailureOf(cause)
+  return failed === undefined ? summarize(cause) : sentence(gitLineOf(failed))
+}
 
 /** A branch that couldn't be fetched to merge with a task's, for its card: with what git said. */
 const couldntFetch = (target: string, failed: GitFailed) =>
@@ -614,10 +617,7 @@ const couldntFetch = (target: string, failed: GitFailed) =>
 const couldntRead = (failed: GitFailed) => `Althar couldn’t read the branch here: ${sentence(gitLineOf(failed))}`
 
 /** What git said of a failure, in a line, or how it ended where it said nothing. */
-const gitLineOf = (failed: GitFailed) => gitLine(failed.stderr) || gitSummary(failed)
-
-/** A sentence, with its full stop. */
-const sentence = (words: string) => (/[.!?…]$/.test(words) ? words : `${words}.`)
+const gitLineOf = (failed: GitFailure) => gitLine(failed.stderr) || gitSummary(failed)
 
 /** One of a task's repositories here: its worktree and branch, the default branch it merges into, and whether it has a pull request. */
 interface HereRow {
@@ -5226,7 +5226,7 @@ export class Changes extends Context.Service<
                 ? { why: 'Its worktree is gone.', uncommitted: false }
                 : yield* unresolved(worktree, conflict).pipe(
                     contained('Changes.settleRound', (cause) => ({
-                      why: `Althar couldn’t read its worktree: ${gitSaid(cause)}`,
+                      why: `Althar couldn’t read its worktree: ${saidOf(cause)}`,
                       uncommitted: false,
                     })),
                   )
@@ -6160,7 +6160,7 @@ export class Changes extends Context.Service<
           return failed.why === 'failed'
             ? `Althar couldn't push: ${(failed.detail ?? '').trim().split('\n')[0]?.replace(/\.$/, '') ?? ''}`
             : words(failed, String).message.replace(/\.$/, '')
-        return `Althar couldn't push: ${gitSaid(cause).replace(/\.$/, '')}`
+        return `Althar couldn't push: ${saidOf(cause).replace(/\.$/, '')}`
       }
 
       /**

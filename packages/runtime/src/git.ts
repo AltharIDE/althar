@@ -6,12 +6,12 @@ import { dirname, join, posix, resolve, sep } from 'node:path'
 
 import type { ChangeTarget } from '@althar/domain'
 import { cleanUp } from '@althar/provider-adapters'
-import { Cause, Context, Duration, Effect } from 'effect'
+import { Cause, Clock, Context, Duration, Effect } from 'effect'
 
 import { afterOpen, startup } from './startup'
 import { GitFailed } from './errors'
 import { forkOf } from './forks'
-import { BROKEN_LINK } from './worktreeLinks'
+import { linkBroke } from './worktreeLinks'
 
 /*
  * The git commands the runtime runs itself, outside any agent. They never
@@ -255,8 +255,11 @@ const runOnce = (
  * What repairs a worktree whose link to its repository broke, for the
  * worktrees under a folder: whether it did. The runtime sets one for its
  * worktrees (WorktreeRepair.ts), which knows where each one's repository is.
+ * Whether a command that failed `since` (by the clock, in ms) should run
+ * again: one it repaired, or that was repaired after the command started. A
+ * mender runs git with `runProcess`, never `run`, which would come back to it.
  */
-export type Mender = (cwd: string) => Effect.Effect<boolean>
+export type Mender = (cwd: string, since: number) => Effect.Effect<boolean>
 
 /** Each folder's mender, by the folder its worktrees are under. */
 const menders = new Map<string, Mender>()
@@ -271,9 +274,9 @@ export const mendingUnder = (within: string, mender: Mender) => {
 }
 
 /** Repairs the worktree `cwd` is in, where a mender knows it: whether it did. */
-const mendAt = (cwd: string): Effect.Effect<boolean> => {
+const mendAt = (cwd: string, since: number): Effect.Effect<boolean> => {
   const at = resolve(cwd)
-  for (const [within, mender] of menders) if (at === within || at.startsWith(`${within}${sep}`)) return mender(at)
+  for (const [within, mender] of menders) if (at === within || at.startsWith(`${within}${sep}`)) return mender(at, since)
   return Effect.succeed(false)
 }
 
@@ -287,11 +290,13 @@ const run = (
   input?: string,
 ): Effect.Effect<string, GitFailed> =>
   // A worktree git can't open for its link to its repository is repaired, where Althar knows it, and the command runs once more.
-  runOnce(timeout, cwd, args, env, trim, input).pipe(
-    Effect.catchTag('GitFailed', (failed) =>
-      BROKEN_LINK.test(failed.stderr)
-        ? Effect.flatMap(mendAt(cwd), (mended) => (mended ? runOnce(timeout, cwd, args, env, trim, input) : Effect.fail(failed)))
-        : Effect.fail(failed),
+  Effect.flatMap(Clock.currentTimeMillis, (since) =>
+    runOnce(timeout, cwd, args, env, trim, input).pipe(
+      Effect.catchTag('GitFailed', (failed) =>
+        linkBroke(failed.stderr)
+          ? Effect.flatMap(mendAt(cwd, since), (mended) => (mended ? runOnce(timeout, cwd, args, env, trim, input) : Effect.fail(failed)))
+          : Effect.fail(failed),
+      ),
     ),
   )
 

@@ -46,13 +46,20 @@
     branch). Otherwise it records `workspace.repair_failed`, says the record
     is another folder's, or on another branch, and changes nothing.
   - **What it records:** a `workspace.repaired` (or
-    `workspace.repair_failed`) fact on the workspace, a line in the task's
-    thread ("Althar repaired this task's folder link to the repository"), and
-    an INFO line in the log.
+    `workspace.repair_failed`) fact on the workspace, one line across the
+    task's thread for what it repaired ("Folder link repaired", "…, and its
+    review copy's"), and an INFO line in the log.
   - **What it never does:** move, remove, reset or prune anything. Where git
-    can't repair a folder, git's own words go to the thread and the log, the
-    folder stays as it is, and Althar doesn't try that folder again until it
-    restarts. A worktree whose folder is missing is left to "its folder isn't
+    can't repair a folder, or the repair would take another's record, the
+    folder stays as it is and the thread says so in the person's words, with
+    a way out: the task's commits are on its branch, and the folder can be
+    moved aside and added back from it; a review's copy can be removed, as
+    the next review makes it again; a copy at another place, as an old
+    profile's, can be removed. Git's words come after, and go to the log. A
+    failure is recorded and said once: one that fails again as the last did,
+    as at each start, isn't. Only git's own `fatal:`/`error:` lines start a
+    repair, and a command runs again only after a repair that finished while
+    it ran. A worktree whose folder is missing is left to "its folder isn't
     on this computer".
 - **Alternatives considered:**
   - **Ask the person first.** The repair only rewrites two pointer files to

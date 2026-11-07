@@ -56,7 +56,7 @@ const hostDenied =
   'Althar can’t reach this computer from inside its Flatpak sandbox. Give the Flatpak permission to talk to org.freedesktop.Flatpak (flatpak override --user --talk-name=org.freedesktop.Flatpak dev.althar.app), then try again.'
 
 /** A sentence, with its full stop. */
-const sentence = (words: string): string => (/[.!?]$/.test(words) ? words : `${words}.`)
+export const sentence = (words: string): string => (/[.!?…]$/.test(words) ? words : `${words}.`)
 
 /**
  * OpenCode 1.x on a data folder OpenCode 2 has migrated: 2's `workspace_domain`

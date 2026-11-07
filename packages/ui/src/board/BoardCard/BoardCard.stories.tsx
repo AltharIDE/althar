@@ -656,7 +656,7 @@ export const StartedByALead: Story = {
 export const ErrandWaiting: Story = { args: { ...CHANGE_READY, errands: ['Waiting for #1187: checks at 9b50d2c.'] } }
 export const ErrandPaused: Story = { args: { ...CHANGE_READY, errands: ['Paused for #1187: changes requested.'] } }
 
-/** A card's foot where Althar couldn't look at a conflict for a git failure, as it said it before git's reason was carried through. */
+/** A card's foot where Althar couldn't look at a conflict for a git failure, with what git said. */
 const unsentFoot = (why: string): Story => ({
   args: {
     ...CHANGE_CONFLICT,
@@ -675,15 +675,12 @@ const unsentFoot = (why: string): Story => ({
     ),
   },
 })
-export const CouldntFetchBefore: Story = unsentFoot('Althar couldn’t fetch main to merge it with the branch here.')
-/** After: what git said, on the card. */
-export const CouldntFetchAfter: Story = unsentFoot(
+export const CouldntFetch: Story = unsentFoot(
   "Althar couldn’t fetch main to merge it with the branch here: could not read Username for 'https://github.com': terminal prompts disabled.",
 )
-export const CouldntFetchAfterDark: Story = { ...CouldntFetchAfter, globals: { theme: 'dark' } }
-export const CouldntReadBefore: Story = unsentFoot('Althar couldn’t read the branch here.')
-/** After: git's line, as when the folder's link to its repository broke. */
-export const CouldntReadAfter: Story = unsentFoot(
+export const CouldntFetchDark: Story = { ...CouldntFetch, globals: { theme: 'dark' } }
+/** Git's line, as when the folder's link to its repository broke. */
+export const CouldntRead: Story = unsentFoot(
   'Althar couldn’t read the branch here: gitfile does not point to a valid repository: ~/.local/share/althar/worktrees/orchy/fix-login/orchy/.git.',
 )
-export const CouldntReadAfterDark: Story = { ...CouldntReadAfter, globals: { theme: 'dark' } }
+export const CouldntReadDark: Story = { ...CouldntRead, globals: { theme: 'dark' } }

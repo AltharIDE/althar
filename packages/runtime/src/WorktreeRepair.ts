@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 
 import type { ProjectId } from '@althar/domain'
 import { bumpRevision, type Ledger } from '@althar/persistence-sqlite'
-import { Cause, Context, type Crypto, Effect, Layer, Result, Semaphore } from 'effect'
+import { Cause, Clock, Context, type Crypto, Effect, Layer, Result, Semaphore } from 'effect'
 import { SqlClient } from 'effect/sql'
 import type { SqlError } from 'effect/sql/SqlError'
 
@@ -11,7 +11,7 @@ import { taskThreadOf } from './bringBack'
 import { RuntimeConfig } from './Config'
 import { GitFailed } from './errors'
 import { mendingUnder, repairWorktree } from './git'
-import { gitSummary, homeShortened } from './gitSaid'
+import { gitLine, gitSummary, homeShortened } from './gitSaid'
 import { Instance } from './Instance'
 import { fact } from './records'
 import { reviewCopyOf } from './reviewCopy'
@@ -60,15 +60,49 @@ export interface Repaired {
   readonly copy: boolean
   readonly why: BrokenWhy
   readonly repaired: boolean
+  /** What git said, or why it wasn't asked: what the record keeps. */
   readonly said: string
+  /** What the task's thread says of it, where it wasn't repaired: a fact and a way out, in the person's words. */
+  readonly words?: { readonly title: string; readonly description: string }
 }
 
-/** The line a task's thread gets when its folder's link is repaired. */
-export const repairedWords = 'Althar repaired this task’s folder link to the repository.'
+/** The line across a task's thread when its folders' links are repaired: its folder's, the copy its reviews read's, or both, once. */
+export const repairedWords = (folder: boolean, copy: boolean) =>
+  folder && copy ? 'Folder link repaired, and its review copy’s' : copy ? 'Review copy’s folder link repaired' : 'Folder link repaired'
 
-/** The line it gets when git couldn't repair it: what git said. */
-export const unrepairedWords = (said: string) =>
-  `Althar couldn’t repair this task’s folder link to the repository: ${/[.!?…]$/.test(said) ? said : `${said}.`}`
+const stop = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`)
+
+/** The way out where a task's own folder can't be joined to its repository again: its work is on its branch, the folder left as it is. */
+const wayOut = (folder: string, root: string, branch: string | null) =>
+  branch === null
+    ? `Its commits are safe in the repository, and the folder is left as it is, uncommitted changes and all. To work in it again, move the folder aside and add it back with git worktree add ${homeShortened(folder)} in ${homeShortened(root)}.`
+    : `Its commits are safe on its branch, ${branch}, and the folder is left as it is, uncommitted changes and all. To work in it again, move the folder aside and add it back with git worktree add ${homeShortened(folder)} ${branch} in ${homeShortened(root)}.`
+
+/** The way out for the copy a task's reviews read: nothing of the work is in it, and the next review makes it again. */
+const copyWayOut = (folder: string) =>
+  `Nothing of the task’s work is in it: remove the folder, ${homeShortened(folder)}, and Althar makes it again at the next review.`
+
+/** What the thread says where git couldn't repair a folder's link: the fact, the way out, then what git said. */
+export const unrepairedWords = (folder: string, copy: boolean, root: string, branch: string | null, said: string) => ({
+  title: copy
+    ? 'The copy this task’s reviews read lost its link to the repository, and Althar couldn’t restore it.'
+    : 'This task’s folder lost its link to the repository, and Althar couldn’t restore it.',
+  description: `${copy ? copyWayOut(folder) : wayOut(folder, root, branch)} Git said: ${stop(said)}`,
+})
+
+/** What it says where the repair would take another's record, so nothing was changed. */
+export const takenWords = (folder: string, copy: boolean, root: string, branch: string | null, taken: Taken) => {
+  const which = copy ? 'The copy this task’s reviews read' : 'This task’s folder'
+  return 'folder' in taken
+    ? {
+        title: `${which} is linked to another copy, at ${homeShortened(taken.folder)}, so Althar left both as they are.`,
+        description: 'If that copy is from an old profile, remove it and restart Althar.',
+      }
+    : {
+        title: `${which} is linked to another branch in the repository, ${taken.branch}, so Althar left it as it is.`,
+        description: copy ? copyWayOut(folder) : wayOut(folder, root, branch),
+      }
+}
 
 export class WorktreeRepair extends Context.Service<
   WorktreeRepair,
@@ -76,7 +110,7 @@ export class WorktreeRepair extends Context.Service<
     /** Looks at every worktree Althar keeps on this computer, and the copies its reviews read, and repairs those whose link broke. */
     readonly sweep: Effect.Effect<ReadonlyArray<Repaired>, SqlError>
     /** Repairs the worktree a folder is in, where its link broke and Althar keeps it: whether it did. */
-    readonly mend: (folder: string) => Effect.Effect<boolean>
+    readonly mend: (folder: string, since?: number) => Effect.Effect<boolean>
   }
 >()('@althar/runtime/WorktreeRepair') {
   static readonly layer: Layer.Layer<WorktreeRepair, never, Store> = Layer.effect(
@@ -88,8 +122,8 @@ export class WorktreeRepair extends Context.Service<
       const config = yield* RuntimeConfig
       /** One repair at a time: git repairs every worktree of a repository whose `.git` file broke at once. */
       const serial = Semaphore.makeUnsafe(1)
-      /** Folders repaired since Althar started: a command that failed while another repaired its folder runs again. */
-      const repairedHere = new Set<string>()
+      /** Folders repaired since Althar started, with when: a command that failed while another repaired its folder runs again. */
+      const repairedHere = new Map<string, number>()
       /** Folders git couldn't repair since Althar started: not tried again on each command that fails there. */
       const unrepaired = new Set<string>()
 
@@ -109,14 +143,27 @@ export class WorktreeRepair extends Context.Service<
         { folder: resolve(reviewCopyOf(worktree.path)), copy: true },
       ]
 
-      /** Records a repair on its workspace, as a fact, and says so in its task's thread. */
+      /**
+       * Records a repair on its workspace, as a fact: whether it is news. One
+       * that failed as the last one for that folder did, as a folder git
+       * can't repair fails at each start, isn't recorded again, nor said.
+       */
       const record = (worktree: Kept, done: Repaired) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          yield* sql.withTransaction(
+          return yield* sql.withTransaction(
             Effect.gen(function* () {
+              const [last] = yield* sql<{ type: string; payload: string }>`
+                SELECT type, payload FROM record_events
+                WHERE aggregate_id = ${worktree.id} AND type IN ('workspace.repaired', 'workspace.repair_failed')
+                  AND json_extract(payload, '$.folder') = ${done.folder}
+                ORDER BY rowid DESC LIMIT 1`
+              if (!done.repaired && last?.type === 'workspace.repair_failed') {
+                const was = JSON.parse(last.payload) as { why?: string; said?: string }
+                if (was.why === done.why && was.said === done.said) return false
+              }
               const [row] = yield* sql<{ revision: number }>`SELECT revision FROM workspaces WHERE id = ${worktree.id}`
-              if (row === undefined) return
+              if (row === undefined) return false
               const revision = yield* bumpRevision('workspaces', worktree.id, row.revision)
               yield* fact({
                 projectId: worktree.projectId,
@@ -127,25 +174,42 @@ export class WorktreeRepair extends Context.Service<
                 payload: { folder: done.folder, copy: done.copy, why: done.why, said: done.said },
                 actorId: instance.systemId,
               })
+              return true
             }),
           )
-          const thread = yield* taskThreadOf(worktree.taskId)
-          if (thread !== null)
-            yield* addItem({ projectId: thread.projectId, threadId: thread.id }, 'notice', {
-              source: 'runtime',
-              severity: done.repaired ? 'info' : 'warning',
-              title: done.repaired ? repairedWords : unrepairedWords(done.said),
-              description: `${done.copy ? 'The copy its reviews read' : 'Its folder'}, ${homeShortened(done.folder)}.`,
-              // Repaired, it is a line across the thread, as its folder going or coming back is; not repaired, a warning that is the person's.
-              ...(done.repaired ? { role: 'folder' as const } : {}),
-            })
         })
 
-      /** What a refusal says, for a record that is another's. */
-      const takenWords = (taken: Taken) =>
-        'folder' in taken
-          ? `the repository’s record it names is another folder’s, ${homeShortened(taken.folder)}, so nothing was changed`
-          : `the repository’s record it names is on another branch, ${taken.branch}, so nothing was changed`
+      /**
+       * Says in a task's thread how its folders' repairs went: one line
+       * across it for those repaired, as its folder going or coming back is,
+       * and a warning, the person's, for each that wasn't.
+       */
+      const say = (taskId: string, done: ReadonlyArray<Repaired>) =>
+        Effect.gen(function* () {
+          const thread = yield* taskThreadOf(taskId)
+          if (thread === null) return
+          const place = { projectId: thread.projectId, threadId: thread.id }
+          const repaired = done.filter((one) => one.repaired)
+          if (repaired.length > 0)
+            yield* addItem(place, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: repairedWords(
+                repaired.some((one) => !one.copy),
+                repaired.some((one) => one.copy),
+              ),
+              description: null,
+              role: 'folder',
+            })
+          for (const one of done)
+            if (one.words !== undefined)
+              yield* addItem(place, 'notice', {
+                source: 'runtime',
+                severity: 'warning',
+                title: one.words.title,
+                description: one.words.description,
+              })
+        })
 
       /** Records that a folder wasn't repaired, for the record git would join it to being another worktree's: git isn't run. */
       const refuse = (worktree: Kept, folder: string, copy: boolean, why: BrokenWhy, taken: Taken) =>
@@ -157,15 +221,23 @@ export class WorktreeRepair extends Context.Service<
             copy,
             why,
             repaired: false,
-            said: takenWords(taken),
+            said:
+              'folder' in taken ? `its record is another folder’s: ${taken.folder}` : `its record is on another branch: ${taken.branch}`,
+            words: takenWords(folder, copy, worktree.root, worktree.branch, taken),
           }
           unrepaired.add(folder)
           yield* Effect.logWarning('Did not repair a worktree’s link: the record it names is another worktree’s').pipe(
             Effect.annotateLogs({ task: worktree.taskId, workspace: worktree.id, folder, copy, why, repository: worktree.root, ...taken }),
           )
-          yield* record(worktree, done).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record a worktree’s repair', cause)))
-          return done
+          return yield* recorded(worktree, done)
         })
+
+      /** Records it, and hands it on to be said where it is news. */
+      const recorded = (worktree: Kept, done: Repaired) =>
+        record(worktree, done).pipe(
+          Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not record a worktree’s repair', cause), true)),
+          Effect.map((news) => ({ done, news })),
+        )
 
       /** Has git repair one folder's link from the repository's main checkout, and records how it went; not where it would take another's record. */
       const repair = (worktree: Kept, folder: string, copy: boolean, link: Link & { readonly state: 'broken' }) =>
@@ -194,9 +266,10 @@ export class WorktreeRepair extends Context.Service<
             why,
             repaired: failed === null,
             said: failed === null ? (Result.isSuccess(ran) ? ran.success : ran.failure.stderr) : gitSummary(failed),
+            ...(failed === null ? {} : { words: unrepairedWords(folder, copy, worktree.root, worktree.branch, gitLine(failed.stderr)) }),
           }
           if (failed === null) {
-            repairedHere.add(folder)
+            repairedHere.set(folder, yield* Clock.currentTimeMillis)
             unrepaired.delete(folder)
             yield* Effect.logInfo('Repaired a worktree’s link to its repository').pipe(
               Effect.annotateLogs({ task: worktree.taskId, workspace: worktree.id, folder, copy, why, repository: worktree.root }),
@@ -207,8 +280,7 @@ export class WorktreeRepair extends Context.Service<
               Effect.annotateLogs({ task: worktree.taskId, workspace: worktree.id, folder, copy, why }),
             )
           }
-          yield* record(worktree, done).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record a worktree’s repair', cause)))
-          return done
+          return yield* recorded(worktree, done)
         })
 
       /**
@@ -232,13 +304,22 @@ export class WorktreeRepair extends Context.Service<
               if (link.state === 'broken' && !unrepaired.has(folder)) broken.push({ worktree, folder, copy, link })
             }
           const done: Array<Repaired> = []
-          for (const { worktree, folder, copy, link } of broken) done.push(yield* repair(worktree, folder, copy, link))
+          const news = new Map<string, Array<Repaired>>()
+          for (const { worktree, folder, copy, link } of broken) {
+            const one = yield* repair(worktree, folder, copy, link)
+            done.push(one.done)
+            if (one.news) news.set(worktree.taskId, [...(news.get(worktree.taskId) ?? []), one.done])
+          }
+          for (const [taskId, said] of news)
+            yield* say(taskId, said).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not say how a worktree’s repair went', cause)),
+            )
           return done
         })
 
       const sweep = serial.withPermits(1)(repairBroken(() => true))
 
-      const mend = (cwd: string): Effect.Effect<boolean> =>
+      const mend = (cwd: string, since = 0): Effect.Effect<boolean> =>
         serial
           .withPermits(1)(
             Effect.gen(function* () {
@@ -246,7 +327,7 @@ export class WorktreeRepair extends Context.Service<
               if (folder === null) return false
               const link = linkOf(folder)
               // Repaired meanwhile, as one more command waited for the repair: it runs again.
-              if (link.state !== 'broken') return repairedHere.has(folder)
+              if (link.state !== 'broken') return (repairedHere.get(folder) ?? -1) >= since
               if (unrepaired.has(folder)) return false
               const worktree = (yield* kept).find((one) => foldersOf(one).some((entry) => entry.folder === folder))
               if (worktree === undefined) return false

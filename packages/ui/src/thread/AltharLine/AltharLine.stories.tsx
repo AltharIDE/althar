@@ -66,12 +66,21 @@ export const AllStates: Story = {
   ),
 }
 
-/** A task's folder whose link to its repository git couldn't repair: what git said, the folder left as it was (ADR-102). */
+/** A task's folder whose link to its repository git couldn't repair: the fact, the way out, then what git said; the folder left as it was (ADR-102). */
 export const FolderNotRepaired: Story = {
   args: {
     tone: 'warning',
     children:
-      'Althar couldn’t repair this task’s folder link to the repository: git worktree: unable to locate repository; .git file does not reference a repository: ~/.local/share/althar/worktrees/orchy/fix-login/orchy/.git.',
+      'This task’s folder lost its link to the repository, and Althar couldn’t restore it. Its commits are safe on its branch, althar/fix-login, and the folder is left as it is, uncommitted changes and all. To work in it again, move the folder aside and add it back with git worktree add ~/.local/share/althar/worktrees/orchy/fix-login/orchy althar/fix-login in ~/projects/orchy. Git said: unable to locate repository; .git file does not reference a repository: ~/.local/share/althar/worktrees/orchy/fix-login/orchy/.git.',
   },
 }
+/** One linked to another copy, as a profile copied rather than moved leaves it: both left as they are, and what to do. */
+export const FolderLinkedElsewhere: Story = {
+  args: {
+    tone: 'warning',
+    children:
+      'This task’s folder is linked to another copy, at ~/.var/app/dev.althar.app/data/althar/worktrees/orchy/fix-login/orchy, so Althar left both as they are. If that copy is from an old profile, remove it and restart Althar.',
+  },
+}
+export const FolderLinkedElsewhereDark: Story = { ...FolderLinkedElsewhere, globals: { theme: 'dark' } }
 export const FolderNotRepairedDark: Story = { ...FolderNotRepaired, globals: { theme: 'dark' } }

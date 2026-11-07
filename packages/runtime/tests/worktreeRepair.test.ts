@@ -11,8 +11,8 @@ import { git as runtimeGit, repairWorktree } from '../src/git'
 import { Projects } from '../src/Projects'
 import { reviewCopyOf } from '../src/reviewCopy'
 import * as Runtime from '../src/Runtime'
-import { BROKEN_LINK, linkOf, takenFrom } from '../src/worktreeLinks'
-import { repairedWords, WorktreeRepair } from '../src/WorktreeRepair'
+import { linkBroke, linkOf, takenFrom } from '../src/worktreeLinks'
+import { WorktreeRepair } from '../src/WorktreeRepair'
 import { Queries } from '../src/Queries'
 import { repository, runtime } from './support'
 
@@ -58,13 +58,20 @@ const relativeWorktrees = (() => {
 const repaired = (main: string, folder: string) => Effect.runPromise(repairWorktree(main, folder))
 
 describe('a worktree whose link broke', () => {
+  it('is told by git’s own fatal or error line, not by a host’s or a hook’s that says the same', () => {
+    assert.isTrue(linkBroke('fatal: gitfile does not point to a valid repository: /x/.git\n'))
+    assert.isTrue(linkBroke('warning: something\nfatal: not a git repository: /x/.git/worktrees/y\n'))
+    assert.isFalse(linkBroke('remote: fatal: not a git repository\nfatal: the remote end hung up unexpectedly\n'))
+    assert.isFalse(linkBroke('pre-commit: not a git repository, skipping\n'))
+  })
+
   it('whose .git names a place that isn’t there: git fails before, and works after the repair', async () => {
     const { at, main } = fixture(['bogus'])
     const folder = join(at, 'bogus')
     writeFileSync(join(folder, '.git'), 'gitdir: /nowhere/althar/worktrees/orchy/.git/worktrees/bogus\n')
     const before = tried(folder, 'rev-parse', 'HEAD')
     assert.isFalse(before.ok)
-    assert.match(before.stderr, BROKEN_LINK)
+    assert.isTrue(linkBroke(before.stderr))
     assert.match(before.stderr, /gitfile does not point to a valid repository/)
     assert.deepInclude(linkOf(folder), { state: 'broken', why: 'gitdir' })
     await repaired(main, folder)
@@ -224,7 +231,7 @@ const folderLines = (threadId: string) =>
     }>`SELECT content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'notice' ORDER BY sequence`
     return rows
       .map((row) => JSON.parse(row.content) as { title: string; severity: string; description: string | null; role?: string })
-      .filter((notice) => /folder link to the repository/.test(notice.title))
+      .filter((notice) => /link to the repository|link repaired|is linked to another/.test(notice.title))
   })
 
 const factsOf = (workspaceId: string) =>
@@ -245,7 +252,7 @@ describe('a task’s worktree whose link broke, in the runtime', () => {
       assert.strictEqual(yield* runtimeGit(task.worktree, 'rev-parse', 'HEAD'), head)
       assert.deepStrictEqual(linkOf(task.worktree), { state: 'fine' })
       const [line] = yield* folderLines(task.threadId)
-      assert.strictEqual(line?.title, repairedWords)
+      assert.strictEqual(line?.title, 'Folder link repaired')
       assert.strictEqual(line?.severity, 'info')
       assert.strictEqual(line?.role, 'folder')
       const [recorded] = yield* factsOf(task.workspaceId)
@@ -263,7 +270,7 @@ describe('a task’s worktree whose link broke, in the runtime', () => {
       for (const task of [first!, second!]) {
         assert.deepStrictEqual(
           (yield* folderLines(task.threadId)).map((line) => line.title),
-          [repairedWords],
+          ['Folder link repaired'],
         )
         assert.strictEqual((yield* factsOf(task.workspaceId))[0]?.type, 'workspace.repaired')
       }
@@ -290,12 +297,10 @@ describe('a task’s worktree whose link broke, in the runtime', () => {
       assert.deepStrictEqual(linkOf(task.worktree), { state: 'fine' })
       assert.deepStrictEqual(linkOf(copy), { state: 'fine' })
       assert.isTrue(tried(copy, 'status').ok)
+      // One line for the two, said once.
       assert.deepStrictEqual(
-        (yield* folderLines(task.threadId)).map((line) => [line.title, line.description?.startsWith('The copy its reviews read') ?? false]),
-        [
-          [repairedWords, false],
-          [repairedWords, true],
-        ],
+        (yield* folderLines(task.threadId)).map((line) => [line.title, line.role]),
+        [['Folder link repaired, and its review copy’s', 'folder']],
       )
       // Nothing more to repair the next time.
       assert.deepStrictEqual(yield* (yield* WorktreeRepair).sweep, [])
@@ -313,10 +318,14 @@ describe('a task’s worktree whose link broke, in the runtime', () => {
       assert.strictEqual(readFileSync(join(task.worktree, '.git'), 'utf8'), before)
       assert.isTrue(existsSync(task.worktree))
       const [line] = yield* folderLines(task.threadId)
+      // The fact and the way out in the person's words, git's line after them, without its subcommand.
+      assert.strictEqual(line?.title, 'This task’s folder lost its link to the repository, and Althar couldn’t restore it.')
+      assert.match(line?.description ?? '', /^Its commits are safe on its branch, .+, and the folder is left as it is/)
       assert.match(
-        line?.title ?? '',
-        /^Althar couldn’t repair this task’s folder link to the repository: git worktree: unable to locate repository/,
+        line?.description ?? '',
+        /move the folder aside and add it back with git worktree add .+ Git said: unable to locate repository/,
       )
+      assert.notInclude(line?.description ?? '', 'git worktree:')
       // A warning of Althar's in the thread, not a line across it as a repaired folder is.
       assert.strictEqual(line?.severity, 'warning')
       assert.isUndefined(line?.role)
@@ -341,10 +350,8 @@ describe('a task’s worktree whose link broke, in the runtime', () => {
       assert.deepStrictEqual(linkOf(live!.worktree), { state: 'fine' })
       assert.isTrue(tried(live!.worktree, 'status').ok)
       const [line] = yield* folderLines(moved!.threadId)
-      assert.match(
-        line?.title ?? '',
-        /^Althar couldn’t repair this task’s folder link to the repository: the repository’s record it names is another folder’s, .+, so nothing was changed\.$/,
-      )
+      assert.match(line?.title ?? '', /^This task’s folder is linked to another copy, at .+, so Althar left both as they are\.$/)
+      assert.strictEqual(line?.description, 'If that copy is from an old profile, remove it and restart Althar.')
       assert.strictEqual(line?.severity, 'warning')
       assert.strictEqual((yield* factsOf(moved!.workspaceId))[0]?.type, 'workspace.repair_failed')
       assert.lengthOf(yield* folderLines(live!.threadId), 0)
@@ -369,6 +376,25 @@ describe('a task’s worktree whose link broke, in the runtime', () => {
       assert.deepStrictEqual(linkOf(live!.worktree), { state: 'fine' })
       // Not looked at again.
       assert.deepStrictEqual(yield* (yield* WorktreeRepair).sweep, [])
+    }).pipe(Effect.provide(withRepair())),
+  )
+
+  it.live('where git can’t repair it, says so once, not again at each start', () =>
+    Effect.gen(function* () {
+      const task = yield* aTask
+      const name = readFileSync(join(task.worktree, '.git'), 'utf8').trim().split('/').at(-1) ?? ''
+      rmSync(join(task.root, '.git', 'worktrees', name), { recursive: true })
+      // Each start is a new service over the same record.
+      const started = Effect.gen(function* () {
+        return yield* (yield* WorktreeRepair).sweep
+      }).pipe(Effect.provide(Layer.fresh(WorktreeRepair.layer)))
+      // Its own sweep as it starts looks first: what this one is handed may be nothing.
+      for (let start = 0; start < 3; start++) yield* started
+      assert.lengthOf(yield* folderLines(task.threadId), 1)
+      assert.deepStrictEqual(
+        (yield* factsOf(task.workspaceId)).map((one) => one.type),
+        ['workspace.repair_failed'],
+      )
     }).pipe(Effect.provide(withRepair())),
   )
 })
