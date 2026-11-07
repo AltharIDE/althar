@@ -17,6 +17,7 @@ export const SETTINGS_SECTIONS = [
   'new-projects',
   'reviews',
   'notifications',
+  'dictation',
   'appearance',
   'editor',
   'browser',

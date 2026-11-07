@@ -193,6 +193,7 @@ contextBridge.exposeInMainWorld('althar', {
           allow: (): Promise<boolean> => ipcRenderer.invoke('althar:dictation-allow'),
           download: (): Promise<void> => ipcRenderer.invoke('althar:dictation-download'),
           cancel: (): Promise<void> => ipcRenderer.invoke('althar:dictation-cancel'),
+          remove: (): Promise<void> => ipcRenderer.invoke('althar:dictation-remove'),
           prepare: (): Promise<void> => ipcRenderer.invoke('althar:dictation-prepare'),
           transcribe: (samples: Float32Array, sampleRate: number): Promise<string> =>
             ipcRenderer.invoke('althar:dictation-transcribe', samples, sampleRate),

@@ -804,9 +804,11 @@ export class SettingsTools extends Context.Service<
               if (change['reviewSealStyle'] !== undefined) yield* setReviewSealStyle(change['reviewSealStyle'] as typeof SealStyle.Type)
             }),
         },
-        ...(['notifications', 'appearance', 'editor', 'browser'] as const).map((id): Section => ({
+        ...(['notifications', 'dictation', 'appearance', 'editor', 'browser'] as const).map((id): Section => ({
           id: `althar/${id}`,
-          title: { notifications: 'Notifications', appearance: 'Appearance', editor: 'Editor', browser: 'Browser' }[id],
+          title: { notifications: 'Notifications', dictation: 'Dictation', appearance: 'Appearance', editor: 'Editor', browser: 'Browser' }[
+            id
+          ],
           scope: 'althar',
           note: 'Kept in the window on this computer: the person sets these there.',
           fields: {},
