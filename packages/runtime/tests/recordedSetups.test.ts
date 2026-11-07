@@ -137,7 +137,7 @@ describe('a setup the person changes in the project’s settings', () => {
       yield* callTool(first.lead, 'record_setup', { copy: ['.env'], commands: [step('one')] })
       const projects = yield* Projects
       const [repository] = yield* projects.repositories(first.project.projectId)
-      assert.deepStrictEqual(repository?.setup, { copy: ['.env'], commands: [step('one')] })
+      assert.deepStrictEqual(repository?.setup, { copy: ['.env'], commands: [step('one')], by: 'agent' })
 
       yield* projects.setRepository({
         projectId: first.project.projectId,
@@ -150,7 +150,7 @@ describe('a setup the person changes in the project’s settings', () => {
         taskId: null,
       })
       const [read] = yield* projects.repositories(first.project.projectId)
-      assert.deepStrictEqual(read?.setup, { copy: ['.env'], commands: [step('two'), step('three')] })
+      assert.deepStrictEqual(read?.setup, { copy: ['.env'], commands: [step('two'), step('three')], by: 'person' })
 
       const later = yield* taskIn(path, 'Refund over budget')
       assert.deepInclude(yield* setUpOf(later.task.taskId), { code: 0 })
@@ -174,6 +174,57 @@ describe('a setup the person changes in the project’s settings', () => {
       )
       assert.deepInclude(refused, { _tag: 'ProjectRefused', reason: 'bad_setup' })
       assert.isNull(yield* recordedIn(project.projectId))
+    }).pipe(Effect.provide(runtime())),
+  )
+})
+
+describe('a setup the person edited', () => {
+  it.live('isn’t replaced by a lead that doesn’t say the person agreed, and is once they did', () =>
+    Effect.gen(function* () {
+      const path = withEnv()
+      const first = yield* taskIn(path)
+      yield* setUpOf(first.task.taskId)
+      yield* callTool(first.lead, 'record_setup', { commands: [step('lead')] })
+      const projects = yield* Projects
+      const [repository] = yield* projects.repositories(first.project.projectId)
+      yield* projects.setRepository({
+        projectId: first.project.projectId,
+        repositoryId: repository?.id ?? '',
+        setup: { copy: [], commands: [step('mine')] },
+      })
+
+      const later = yield* taskIn(path, 'Refund over budget')
+      const refused = yield* callTool(later.lead, 'record_setup', { commands: [step('lead again')] })
+      assert.include(refused, 'edited')
+      assert.include(refused, 'person_agreed')
+      assert.deepInclude((yield* recordedIn(first.project.projectId)) ?? {}, { commands: [step('mine')], taskId: null })
+
+      yield* callTool(later.lead, 'record_setup', { commands: [step('agreed')], person_agreed: true })
+      assert.deepInclude((yield* recordedIn(first.project.projectId)) ?? {}, { commands: [step('agreed')], taskId: later.task.taskId })
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('is cleared, so the next lead is asked again and may record freely; worktrees made already keep theirs', () =>
+    Effect.gen(function* () {
+      const path = withEnv()
+      const first = yield* taskIn(path)
+      yield* setUpOf(first.task.taskId)
+      const projects = yield* Projects
+      const [repository] = yield* projects.repositories(first.project.projectId)
+      const repositoryId = repository?.id ?? ''
+      yield* projects.setRepository({ projectId: first.project.projectId, repositoryId, setup: { copy: [], commands: [step('mine')] } })
+      const before = yield* setUpOf(first.task.taskId)
+
+      yield* projects.setRepository({ projectId: first.project.projectId, repositoryId, setup: null })
+      assert.isNull(yield* recordedIn(first.project.projectId))
+      assert.isNull((yield* projects.repositories(first.project.projectId))[0]?.setup)
+      assert.deepStrictEqual(yield* setUpOf(first.task.taskId), before)
+
+      const later = yield* taskIn(path, 'Refund over budget')
+      yield* setUpOf(later.task.taskId)
+      assert.include(yield* brief(later.task.threadId), 'No setup is recorded for the repository yet')
+      yield* callTool(later.lead, 'record_setup', { commands: [step('lead')] })
+      assert.deepInclude((yield* recordedIn(first.project.projectId)) ?? {}, { commands: [step('lead')], taskId: later.task.taskId })
     }).pipe(Effect.provide(runtime())),
   )
 })

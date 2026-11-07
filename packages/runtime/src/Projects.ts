@@ -86,7 +86,9 @@ export interface Reading {
 /** A repository's recorded setup as its settings show it: its files and commands; null for none. */
 const setupShown = (json: string | null) => {
   const recorded = recordedOf(json)
-  return recorded === null ? null : { copy: recorded.copy, commands: recorded.commands }
+  return recorded === null
+    ? null
+    : { copy: recorded.copy, commands: recorded.commands, by: recorded.taskId === null ? ('person' as const) : ('agent' as const) }
 }
 
 const real = (path: string) => {
@@ -217,7 +219,12 @@ export interface ProjectRepository {
   /** Tasks under way that change it, which keep it if it is left out. */
   readonly tasks: number
   /** How each new task's folder of it gets ready (ADR-080); null until a lead records it. */
-  readonly setup: { readonly copy: ReadonlyArray<string>; readonly commands: ReadonlyArray<string> } | null
+  readonly setup: {
+    readonly copy: ReadonlyArray<string>
+    readonly commands: ReadonlyArray<string>
+    /** Who has it as it is: the lead that recorded it, or the person who edited it. */
+    readonly by: 'agent' | 'person'
+  } | null
   /** Its default branch, as its remote said when it was added. */
   readonly defaultBranch: string
   /** The branch new tasks work toward there, where it isn't the default (ADR-093); null for the default. */
@@ -508,7 +515,7 @@ export class Projects extends Context.Service<
       readonly role?: string
       readonly changeTarget?: string
       readonly notNow?: boolean
-      readonly setup?: { readonly copy: ReadonlyArray<string>; readonly commands: ReadonlyArray<string> }
+      readonly setup?: { readonly copy: ReadonlyArray<string>; readonly commands: ReadonlyArray<string> } | null
       readonly workToward?: string | null
       readonly commandId?: CommandId
     }): Effect.Effect<void, NotFound | ProjectRefused | BranchNotFound | GitFailed | Failure>
@@ -1205,7 +1212,7 @@ export class Projects extends Context.Service<
         readonly changeTarget?: string
         readonly notNow?: boolean
         /** Its setup as the person changed it in the project's settings (ADR-080). */
-        readonly setup?: { readonly copy: ReadonlyArray<string>; readonly commands: ReadonlyArray<string> }
+        readonly setup?: { readonly copy: ReadonlyArray<string>; readonly commands: ReadonlyArray<string> } | null
         readonly workToward?: string | null
         readonly commandId?: CommandId
       }) =>
@@ -1239,9 +1246,18 @@ export class Projects extends Context.Service<
               )
             }
           }
-          if (input.setup !== undefined) {
+          if (input.setup === null) {
+            // Cleared: nothing is kept, so the next task's lead works it out and records it again.
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                yield* sql`UPDATE repository_bindings SET recorded_setup = NULL WHERE id = ${binding.id}`
+                yield* changed(input.projectId, 'project.setup_cleared', { repository: binding.name }, input.commandId)
+              }),
+            )
+          } else if (input.setup !== undefined) {
             const tidy = setupOf(input.setup)
             if ('refused' in tidy) return yield* new ProjectRefused({ reason: 'bad_setup' })
+            // The person's: no task's lead recorded it (taskId null), so a lead asks before replacing it.
             const recorded = JSON.stringify({ ...tidy, at: yield* timestamp, taskId: null })
             yield* sql.withTransaction(
               Effect.gen(function* () {

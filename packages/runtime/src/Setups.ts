@@ -521,6 +521,7 @@ export class Setups extends Context.Service<
                 name: row.name,
                 setUp: JSON.parse(row.setup) as SetUp,
                 recorded: recordedOf(row.recorded) !== null,
+                byPerson: recordedOf(row.recorded)?.taskId === null,
                 checkout: row.checkout,
               })),
               rows.length > 1,
@@ -622,13 +623,14 @@ export class Setups extends Context.Service<
       const recordTool = {
         name: 'record_setup',
         description:
-          "Records how your repository's folder gets ready to work in, for Althar to do the same in every later task's folder before its lead starts: copy, the ignored files and folders to copy from the person's checkout (such as `.env`, a local config), from the repository's root; and commands, what installs what it needs, one after another from the repository's folder, each a line as you ran it (`bun install --frozen-lockfile`, `bunx playwright install chromium`). Althar runs the commands itself, outside any agent's sandbox, and stops at the first that fails. Record only what worked here, the whole of it: it replaces the setup recorded before, and the person sees it in the project's settings. Where the folder needs nothing, record that, with no commands and no files. Althar copies the files into your folder now, so you have them. In a task of several repositories, repository names the one.",
+          "Records how your repository's folder gets ready to work in, for Althar to do the same in every later task's folder before its lead starts: copy, the ignored files and folders to copy from the person's checkout (such as `.env`, a local config), from the repository's root; and commands, what installs what it needs, one after another from the repository's folder, each a line as you ran it (`bun install --frozen-lockfile`, `bunx playwright install chromium`). Althar runs the commands itself, outside any agent's sandbox, and stops at the first that fails. Record only what worked here, the whole of it: it replaces the setup recorded before, and the person sees it in the project's settings. Where the person edited the setup themselves, it is theirs: ask them first, and only once they agree call again with person_agreed true; without it the edit stays. Where the folder needs nothing, record that, with no commands and no files. Althar copies the files into your folder now, so you have them. In a task of several repositories, repository names the one.",
         input: {
           type: 'object',
           properties: {
             copy: { type: 'array', items: { type: 'string' } },
             commands: { type: 'array', items: { type: 'string' } },
             repository: { type: 'string' },
+            person_agreed: { type: 'boolean' },
           },
           required: ['commands'],
         },
@@ -640,6 +642,7 @@ export class Setups extends Context.Service<
               readonly copy?: unknown
               readonly commands?: unknown
               readonly repository?: unknown
+              readonly person_agreed?: unknown
             }
             const strings = (value: unknown) => (Array.isArray(value) ? value.filter((one): one is string => typeof one === 'string') : [])
             const tidy = setupOf({ copy: strings(asked.copy), commands: strings(asked.commands) })
@@ -655,6 +658,11 @@ export class Setups extends Context.Service<
             if (all.length > 1)
               return yield* new ToolRefused({
                 message: `Say which repository it is for, as repository: ${all.map((each) => each.name).join(', ')}.`,
+              })
+            // What the person edited is theirs: it is replaced only once they agreed to it.
+            if (recordedOf(one.recorded)?.taskId === null && asked.person_agreed !== true)
+              return yield* new ToolRefused({
+                message: `The person edited ${one.name}'s setup themselves, so it stays as they left it. Tell them what you would change and why, and ask. Only once they agree, call record_setup again with person_agreed true.`,
               })
             const recorded: Recorded = { copy: [...copy], commands: [...commands], at: yield* provide(timestamp), taskId }
             yield* provide(record(one.projectId, one.bindingId, one.name, recorded, instance.systemId))
@@ -708,12 +716,14 @@ export const toldOf = (
     readonly setUp: SetUp
     /** It ran the setup a lead recorded for the repository. */
     readonly recorded: boolean
+    /** That recorded setup is the person's own edit, not a lead's. */
+    readonly byPerson?: boolean
     readonly checkout: string | null
   }>,
   several: boolean,
 ) =>
   each
-    .flatMap(({ name, setUp, recorded, checkout }) => {
+    .flatMap(({ name, setUp, recorded, byPerson = false, checkout }) => {
       const where = several ? `${name}'s worktree` : 'the worktree'
       const how = recorded ? "the repository's recorded setup" : `\`${setUp.command}\``
       const ran =
@@ -728,7 +738,9 @@ export const toldOf = (
       const from = checkout === null ? "the person's checkout" : `the person's checkout at ${checkout}`
       const asked = recorded
         ? failedSetUp(setUp)
-          ? `See why first, then get ${where} ready yourself, and record the setup that works with record_setup: it replaces the one that failed, for every later task.`
+          ? byPerson
+            ? `See why first, then get ${where} ready yourself. The person edited this setup themselves, so don't replace it with record_setup on your own: tell them what failed and what you would change, and ask.`
+            : `See why first, then get ${where} ready yourself, and record the setup that works with record_setup: it replaces the one that failed, for every later task.`
           : null
         : `No setup is recorded for ${several ? name : 'the repository'} yet, so get ${where} ready to work in before anything else: install what it needs, its dependencies and what its tools download (Electron's build, Playwright's browsers), and copy the ignored files it needs from ${from}, such as \`.env\`, by naming them to record_setup. Then record what worked with record_setup, or that it needs nothing, so Althar gets every later task's folder ready the same way before its lead starts.`
       return [ran, asked].filter((said) => said !== null)
