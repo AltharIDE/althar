@@ -113,9 +113,14 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
     const watching = new ResizeObserver(measure)
     watching.observe(place)
     window.addEventListener('resize', measure)
+    // What moves it without resizing it, as something sliding or growing beside it, has settled once its animation ends.
+    document.addEventListener('animationend', measure, true)
+    document.addEventListener('transitionend', measure, true)
     return () => {
       watching.disconnect()
       window.removeEventListener('resize', measure)
+      document.removeEventListener('animationend', measure, true)
+      document.removeEventListener('transitionend', measure, true)
     }
   }, [place, measure])
   // Things above it can move it without resizing it, as a line under the bar comes and goes: looked at after each render.

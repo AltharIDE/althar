@@ -129,6 +129,14 @@ const shoot = async (page: Page, electronApp: ElectronApplication, path: string,
   })
 }
 
+/** Whether the page is laid exactly where its panel keeps its place: under its bar and line, across the panel inside its edge. */
+const onItsPlace = async (electronApp: ElectronApplication, panel: Locator) => {
+  const [view] = await drawn(electronApp)
+  const box = await panel.boundingBox()
+  if (view === undefined || box === null) return false
+  return Math.abs(view.bounds.x - box.x) <= 1 && Math.abs(view.bounds.x + view.bounds.width - (box.x + box.width)) <= 1
+}
+
 /** What the main process opened in the person's browser, as it would. */
 const openedOutside = (electronApp: ElectronApplication) =>
   electronApp.evaluate(() => (globalThis as unknown as { opened?: Array<string> }).opened ?? [])
@@ -174,8 +182,9 @@ test('a task’s run opens beside its thread, isolated; a comment pointed on it 
     const panel = page.getByRole('complementary', { name: 'Page' })
     await expect(panel.getByRole('textbox', { name: 'Address' })).toHaveValue(address)
     await expect.poll(() => inPage<string>(electronApp, 'document.title')).toBe('Refunds')
-    // The thread and its composer stay beside it.
+    // The thread and its composer stay beside it, and the page is laid on its panel's place.
     await expect(page.getByRole('textbox', { name: /^Tell .* something/ })).toBeVisible()
+    await expect.poll(() => onItsPlace(electronApp, panel)).toBe(true)
     await still(page)
     await shoot(page, electronApp, 'test-results/browser-beside.png')
 
@@ -288,6 +297,7 @@ test('a task’s run opens beside its thread, isolated; a comment pointed on it 
     const tabbed = page.getByRole('complementary', { name: 'Page' })
     await expect(tabbed.getByRole('textbox', { name: 'Address' })).toHaveValue(address)
     await expect.poll(async () => (await drawn(electronApp))[0]?.bounds.width ?? 0).toBeGreaterThan(1200)
+    await expect.poll(() => onItsPlace(electronApp, tabbed)).toBe(true)
     expect(await inPage(electronApp, 'location.href')).toBe(`http://${address}/`)
     await still(page)
     await shoot(page, electronApp, 'test-results/browser-tab.png')
@@ -350,13 +360,15 @@ test('from the coordinator, the project’s run opens beside its conversation, t
     await expect(panel.getByRole('textbox', { name: 'Address' })).toHaveValue(address)
     await expect(page.getByRole('radio', { name: 'Conversation', checked: true })).toBeVisible()
     await expect.poll(() => inPage<string>(electronApp, 'document.title')).toBe('Refunds')
+    await expect.poll(() => onItsPlace(electronApp, panel)).toBe(true)
+    await still(page)
+    await shoot(page, electronApp, 'test-results/browser-coordinator.png')
+    // Its session is the project's, kept until the project is removed where the person keeps cookies until a task is done.
     await panel.getByRole('button', { name: 'Its own session' }).click()
     await expect(page.getByText('The project’s own session')).toBeVisible()
     await expect(page.getByText('Cookies kept until the project is removed.')).toBeVisible()
     await page.keyboard.press('Escape')
     await expect.poll(async () => (await drawn(electronApp)).length).toBe(1)
-    await still(page)
-    await shoot(page, electronApp, 'test-results/browser-coordinator.png')
   } finally {
     await electronApp.close()
   }

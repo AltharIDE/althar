@@ -2,6 +2,10 @@
 .panel {
   container-type: inline-size;
 }
+/* It doesn't slide in as a side panel does: the page over it is a native view, which can't slide with it. */
+.panel.panel {
+  animation: none;
+}
 /* The bar takes the head's room from its left, back to Close: the address is the widest thing in it. */
 .head {
   gap: 6px;
