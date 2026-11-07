@@ -80,6 +80,8 @@ test('the coordinator answers a task permission, leaves always-ask items to the 
     // On the project first: its settings are a view of it.
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await openRules(page)
+    // Asked about more than what can't be undone, the rest can go to the coordinator (ADR-097).
+    await page.getByRole('button', { name: 'Ask about more' }).click()
     await choose(page, 'allowed', 'The coordinator decides')
     await expect(sentence(page, 'The rest')).toContainText('the coordinator decides')
     await backToWork(page)
