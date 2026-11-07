@@ -436,6 +436,8 @@ export interface Contained {
 export interface UpFront {
   readonly commands: ReadonlyArray<string>
   readonly hosts: ReadonlyArray<string>
+  /** Hosts the person explicitly put in Never; these hold over the open network. */
+  readonly deniedHosts?: ReadonlyArray<string>
   /**
    * Folders outside its own it writes to without asking, from the home
    * folder as `~/…`: the caches of the tools its project installs with, as
@@ -729,8 +731,8 @@ const codexReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<
  * prototype can serve a showcase page without leaving the sandbox. On macOS
  * Claude documents that this setting is broader than listening: commands may
  * also connect to any localhost port, including services outside the sandbox,
- * and listen on non-loopback addresses. The domain allowlist and writable
- * paths are unchanged. Where the sandbox can start (`claudeSandboxStarts`),
+ * and listen on non-loopback addresses. Networking and Unix sockets are
+ * open; writable paths and secret-file exclusions remain. Where the sandbox can start (`claudeSandboxStarts`),
  * the session doesn't start without it, so a command it holds can run without
  * Althar reading it (ADR-071); elsewhere commands run without it and every
  * one asks, and meets the rules.
@@ -784,7 +786,12 @@ const claudeAsks = (
           allowUnsandboxedCommands: true,
           failIfUnavailable: starts,
           ...(sandbox.commands.length === 0 ? {} : { excludedCommands: excludedCommandsOf(sandbox.commands) }),
-          network: { allowLocalBinding: true, allowedDomains: ['*'] },
+          network: {
+            allowLocalBinding: true,
+            allowAllUnixSockets: true,
+            allowedDomains: ['*'],
+            ...(sandbox.deniedHosts?.length ? { deniedDomains: [...sandbox.deniedHosts] } : {}),
+          },
           ...(writes.length === 0 ? {} : { filesystem: { allowWrite: [...writes] } }),
         },
       },
@@ -878,11 +885,8 @@ const claudeHolds = (role: 'lead' | 'reader' = 'lead', options: SessionOptions =
  * Claude Code for the coordinator, a trusted reader in its own copies of the
  * project's repositories (ADR-058): its shell commands run in its sandbox
  * without asking, held to the coordinator's folder. They write only there
- * (and in the sandbox's own temporary folder); read none of the home
- * folder, the person's checkouts or the project's task folders but what
- * Althar gives back (the folder, the mirrors its copies fetch from, the
- * objects they borrow, the toolchains in the home folder), and nothing
- * where the person keeps keys and sign-ins. Commands reach any host and may
+ * (and in the sandbox's own temporary folder), and may read ordinary files
+ * anywhere, with secret files and sign-ins still denied. Commands reach any host and may
  * listen locally, and never run outside it (`allowUnsandboxedCommands: false`).
  * It loads no settings file (`settingSources: []`) and runs no hook, as a
  * review's lead: no allow rule or sandbox exemption of the person's or the
@@ -906,7 +910,7 @@ const claudeContains = ({ folder, reads }: Contained) => ({
           autoAllowBashIfSandboxed: true,
           allowUnsandboxedCommands: false,
           failIfUnavailable: true,
-          network: { allowedDomains: ['*'], allowLocalBinding: true },
+          network: { allowedDomains: ['*'], allowLocalBinding: true, allowAllUnixSockets: true },
           filesystem: { allowWrite: [folder], denyRead: [...reads.denied], allowRead: [...reads.allowed] },
         },
       },
@@ -1108,7 +1112,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      * switch controls native search separately, not a shell's network.
      */
     knownGaps: [
-      'It works inside its sandbox without asking: it edits the workspace and runs commands there, and asks only to go beyond it, such as for the network. As a reader too, so it never leads a review of a pull request from outside.',
+      'It works inside its sandbox without asking: it edits the workspace and runs commands there, and asks only to go beyond it, such as writing outside its folder. As a reader too, so it never leads a review of a pull request from outside.',
       "Shell networking is open. The project's web switch controls native search and page opening separately.",
       "codex-acp marks every session folder trusted, so a repository's own `.codex` config and hooks apply; a review's lead has hooks off.",
       'The adapter holds usage limits but sends them nowhere over ACP (/status prints text); Althar asks the Codex app-server for them (`usage.ts`).',
@@ -1305,7 +1309,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     /*
      * The version it was installed as, not one it downloaded since
      * (`--no-auto-update`); none of the GitHub tools it would reach with the
-     * person's sign-in (`--disable-builtin-mcps`), as Althar pushes for agents;
+     * person's sign-in are available too (ADR-097);
      * and not the person's login-shell environment, which it otherwise gives
      * every command it runs, past Althar's allowlist.
      */

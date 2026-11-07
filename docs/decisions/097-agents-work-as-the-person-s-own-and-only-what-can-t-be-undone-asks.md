@@ -361,8 +361,8 @@ it comes to matter.
 Agents may use the person's own `gh`, `glab` and git sign-in where they have
 one set up: their `gh` and `glab` config, git's credential helpers and their
 SSH agent are no longer taken out of the agent's environment
-(`runtime/src/Config.ts`, ADR-011). A project switch, "Agents use my code
-host sign-in", on by default, turns it off.
+(`runtime/src/Config.ts`, ADR-011). The proposed project switch is not
+implemented by this sweep; the inherited environment is the default.
 
 In the Flatpak the person's sign-in is on the device, not in the sandbox
 (ADR-027, ADR-073). Agents that run on the device get it as their
@@ -691,3 +691,38 @@ the network, screenshots, and a draft that carries pictures.
 | 089 | `reflog expire` and `gc --prune` asking in the other modes | The guard's reads, teardown and publishing asking |
 | 094 | Skills for leads only, off until turned on | One store, the catalog, reviewed installs |
 | 095 | The Repository files switches and the held push | – |
+
+## Enforcement sweep, 7 November 2026
+
+The sandbox and environment tranche is built. The rules and session
+instructions tranche waits for #684 to merge; the audit marks those rows
+pending. This sweep is not complete.
+
+The [limits audit](../plans/no-arbitrary-limits-audit.md) records every
+restriction found, its disposition and regression coverage. Sandboxed shell
+commands reach every host, without a project host list. Claude Code gets an
+open network; Codex gets it in both its session config and the adapter's
+per-turn policy; OpenCode has no OS sandbox and goes through the rules.
+An outside review remains offline.
+
+The coordinator may read ordinary files anywhere and reach the network;
+its OS sandbox still holds writes to its folder and temporary files.
+Secret-file protections remain. Common dev servers and test runners started
+by hand get the same sandbox exclusions as recorded project commands.
+
+The person's code-host identity is inherited: gh/glab config and tokens,
+git's credential helpers and the SSH agent. This completes the environment
+part of phase 3 here. Althar's sealed connection secrets and provider API
+keys are not inherited. Explicit credential-export commands still refuse.
+The git guard remains in place regardless of which sign-in pushes.
+
+Skill and OpenSpec files are ordinary repository files, with no separate
+push consent. Copilot's built-in tools remain available. Screenshots may
+visit any HTTP or HTTPS page, including redirects, in the existing isolated
+browser session; file URLs remain refused.
+
+A refusal that leaves an agent silent is followed up, and any final notice
+names the command and the reason Althar refused it. Review workspaces,
+reviewers' tool lists and running review code are moved to the task-as-parts
+work by the coordinator's direction; they are not a separate path in this
+sweep.

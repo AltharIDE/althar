@@ -355,6 +355,7 @@ describe('a lead’s session', () => {
       const sandbox = yield* leading({ allowEverything: true, commands: [{ pattern: 'uploads.linear.app', decision: 'never' }] })
       assert.include(sandbox?.hosts ?? [], 'registry.npmjs.org')
       assert.notInclude(sandbox?.hosts ?? [], 'uploads.linear.app')
+      assert.deepStrictEqual(sandbox?.deniedHosts, ['uploads.linear.app'])
     }).pipe(Effect.provide(runtime())),
   )
 

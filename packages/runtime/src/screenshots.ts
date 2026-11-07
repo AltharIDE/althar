@@ -1,11 +1,8 @@
 import type { Shot } from './Config'
 
 /*
- * A screenshot an agent asks Althar for (Launches.ts, `screenshot`): what of
- * it Althar reads, and where it may be of. Only a page served on this
- * computer, such as a run's or a dev server's on localhost, never one out on
- * the internet: Althar draws it outside the agent's sandbox, so a page
- * elsewhere would be a way out of it.
+ * Screenshots may visit any HTTP(S) page (ADR-097). The desktop browser
+ * remains isolated from the app and refuses local-file and other schemes.
  */
 
 /** The viewport an agent gets without saying, and the least and most it may ask for. */
@@ -29,15 +26,15 @@ export const isLocal = (hostname: string) => {
   )
 }
 
-/** Whether a page at `url` may be drawn: over http, on this computer or at one of Althar's runs' `origins`. */
-export const mayDraw = (url: string, origins: ReadonlyArray<string>) => {
+/** Whether a page at `url` may be drawn: over http, at any host. */
+export const mayDraw = (url: string, _origins: ReadonlyArray<string>) => {
   let at: URL
   try {
     at = new URL(url)
   } catch {
     return false
   }
-  return (at.protocol === 'http:' || at.protocol === 'https:') && (isLocal(at.hostname) || origins.includes(at.origin))
+  return at.protocol === 'http:' || at.protocol === 'https:'
 }
 
 const within = (value: unknown, least: number, most: number, otherwise: number) =>
@@ -67,8 +64,6 @@ export const shotOf = (input: unknown, running: ReadonlyArray<string>): Shot | s
       return []
     }
   })
-  if (!mayDraw(url.href, origins))
-    return `Althar takes screenshots only of what is served on this computer, such as a run's or a dev server's on localhost: not ${url.host}.`
   const selector = typeof asked.selector === 'string' && asked.selector.trim() !== '' ? asked.selector.trim() : null
   return {
     url: url.href,

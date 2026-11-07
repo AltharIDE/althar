@@ -39,6 +39,7 @@ import { cachesOf, TOOL_PLACES } from './toolPlaces'
 export interface Reach {
   readonly commands: ReadonlyArray<string>
   readonly hosts: ReadonlyArray<string>
+  readonly deniedHosts?: ReadonlyArray<string>
   readonly writes: ReadonlyArray<string>
 }
 

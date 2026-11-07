@@ -112,10 +112,10 @@ coordinator may run in copies of its own
   call Althar's tools: Codex's `read-only` sandbox, and Claude Code with its
   edit tools denied and every shell command asking. The coordinator's Claude
   Code, where its sandbox can start, runs its commands in it without asking,
-  held to its folder: writes only there, no network, no socket, reads none
-  of the home folder, the person's checkouts or the task folders but its
-  folder, the mirrors, the objects its copies borrow, the toolchains and
-  git's config files (never its credential store), and never outside it;
+  held to its folder for writes, with open networking and Unix sockets,
+  and ordinary files readable anywhere. Secret paths remain denied, including
+  git's credential store at its XDG location. It never runs commands outside
+  that sandbox;
   it loads no settings file and runs no hook. A command Claude Code can't
   read itself (a `for` loop, `$((…))`, `f=$(…)`, a heredoc) still asks, and
   Althar lets it run there without reading it

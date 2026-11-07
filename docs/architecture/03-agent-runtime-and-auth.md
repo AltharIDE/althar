@@ -892,28 +892,20 @@ What keeps each agent asking, whatever its own settings say:
 command carries only its text, and no rule can tell what a script will write.
 So where an agent has a sandbox, it keeps commands inside the worktree:
 
-- Codex's, in `workspace-write`, with the network off. Its only network
-  setting (`network_access`) is all or nothing, with no localhost-only form, so
-  it stays off, until ADR-097's first phase turns it on.
-- Claude Code's, switched on for every session. A command that stays inside
-  runs without asking. One that needs the network asks per host. A write
-  outside is blocked, and Claude reports it instead of retrying outside the
-  sandbox unless asked to. Where it can start (macOS; Linux with bubblewrap
-  and socat that start a namespace, outside a Flatpak), a lead's session
-  doesn't start without it, and Althar relies on it
-  ([ADR-071](../decisions/071-the-sandbox-is-the-boundary-anything-inside-it-runs.md)):
-  a command Claude Code can't read itself (a loop, `$(…)`, a heredoc, a
-  script) still asks, and Althar lets it run there without reading it. A lead's sandbox also lets commands bind and
-  listen on localhost (`sandbox.network.allowLocalBinding`), so tests that
-  start a server, and a prototype's throwaway showcase server that the person
-  opens from the Running pill, don't have to leave it. The setting is broader
-  than listening (macOS, per Claude's sandbox docs): sandboxed commands can
-  also connect to any localhost port, including an unauthenticated local
-  service outside the sandbox such as a debugger or proxy, and can listen on
-  non-loopback addresses that other machines may reach. We accept that for
-  leads. It adds no writable paths, and readers don't get it.
-- OpenCode has none yet. Wrapping it in the same sandbox-runtime Claude uses
-  is next.
+- Codex's `workspace-write` sandbox has open networking. Its ACP adapter
+  also applies that setting on every turn, instead of overriding it with a
+  network-off policy. Ordinary readers get network access too; outside
+  reviews remain offline.
+- Claude Code's sandbox is on wherever it can start (macOS; Linux with
+  working bubblewrap and socat, outside a Flatpak). Commands inside it run
+  unread. Its network reaches any host, and commands may bind localhost.
+  The writable roots and secret-file exclusions remain. Recorded commands
+  and common dev/test tools started by hand run outside from the start,
+  still meeting the irreversible rules. A line starting with `bun` is kept
+  inside by Claude itself; use the command its script runs when necessary.
+- OpenCode has no OS sandbox. Each command reaches Althar's rules; with
+  Allow everything, only a visible irreversible operation or the person's
+  own rule asks.
 
 **Project leads can read the web** ([ADR-078](../decisions/078-project-leads-can-read-the-web.md)).
 “Leads can reach the web”, on by default in project Settings → General,
@@ -924,21 +916,9 @@ pull request reviews remain offline (ADR-058); Codex remains ineligible to
 lead them. The coordinator’s settings are unchanged. Changes apply to new
 sessions; restart an existing session after changing the switch.
 
-Shell networking stays constrained (until ADR-097's first phase, which gives
-Codex's shell the network and drops the `curl` form below, since with
-everything allowed a host a command asks for goes ahead): Codex’s
-all-or-nothing switch stays off, and Claude’s known-host allowlist stays in
-place. Neither can grant GETs
-without also granting POSTs and uploads. Instead the rules allow plain
-HTTP(S) reads to stdout, such as `curl -q -fsSL https://example.com` and
-`wget --no-config --no-netrc --no-hsts -qO- https://example.com`, while the project switch is on.
-Disabling local config prevents it from silently selecting an upload or
-another method. Explicit command rules still win. Scripts, compound
-commands, custom headers, output files and uploads retain the existing
-rules; a host-only sandbox request is not proof of a GET and receives no new
-exemption. Prefer native web tools when a sandbox cannot express that read.
-Off, native fetches ask again, native search is gated (disabled for Codex),
-and shell commands receive no new read exemption.
+Shell networking is independent of the native web-tools switch. There is
+no host allowlist and no GET-only command form needed to reach the network.
+An outside review's offline setting still holds.
 
 A lead reading a private repository could be steered by a web page into
 leaking code through a URL or search query. Read-only requests still carry

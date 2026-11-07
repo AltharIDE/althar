@@ -822,6 +822,13 @@ export class Permissions extends Context.Service<
           return {
             commands: withEdits(reach.commands, edits?.commands),
             hosts: withEdits(reach.hosts, edits?.hosts).filter(reached),
+            // The open network does not undo a host the person explicitly put in Never.
+            deniedHosts: project.commands.flatMap((rule) => {
+              if (rule.decision !== 'never') return []
+              const pattern = rule.pattern.trim().toLowerCase()
+              if (hostOf(pattern) === pattern) return [pattern]
+              return pattern.startsWith('*.') && hostOf(pattern.slice(2)) === pattern.slice(2) ? [pattern] : []
+            }),
             writes: reach.writes,
           } satisfies Reach
         })

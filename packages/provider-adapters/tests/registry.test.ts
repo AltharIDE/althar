@@ -185,11 +185,11 @@ describe('the agent registry', () => {
   })
 
   it('lets a Claude Code lead listen on localhost in its sandbox, and a reader not', () => {
-    type Sandbox = { network?: { allowLocalBinding?: boolean; allowedDomains?: string[] } }
+    type Sandbox = { network?: { allowLocalBinding?: boolean; allowAllUnixSockets?: boolean; allowedDomains?: string[] } }
     const sandboxOf = (role?: 'reader') =>
       (agents['claude-code'].sessionMeta?.(role) as { claudeCode: { options: { settings: { sandbox: Sandbox } } } }).claudeCode.options
         .settings.sandbox
-    assert.deepStrictEqual(sandboxOf().network, { allowLocalBinding: true, allowedDomains: ['*'] })
+    assert.deepStrictEqual(sandboxOf().network, { allowLocalBinding: true, allowAllUnixSockets: true, allowedDomains: ['*'] })
     assert.isUndefined(sandboxOf('reader').network)
   })
 
@@ -198,7 +198,7 @@ describe('the agent registry', () => {
       autoAllowBashIfSandboxed: boolean
       allowUnsandboxedCommands: boolean
       excludedCommands?: Array<string>
-      network?: { allowLocalBinding?: boolean; allowedDomains?: Array<string> }
+      network?: { allowLocalBinding?: boolean; allowAllUnixSockets?: boolean; allowedDomains?: Array<string>; deniedDomains?: string[] }
       filesystem?: { allowWrite?: Array<string> }
     }
     const metaOf = agents['claude-code'].sessionMeta
@@ -217,7 +217,12 @@ describe('the agent registry', () => {
       'env -i',
       'env -i *',
     ])
-    assert.deepStrictEqual(lead.sandbox.network, { allowLocalBinding: true, allowedDomains: ['*'] })
+    assert.deepStrictEqual(lead.sandbox.network, { allowLocalBinding: true, allowAllUnixSockets: true, allowedDomains: ['*'] })
+    assert.deepStrictEqual(
+      sandboxOf('lead', { sandbox: { ...upFront, deniedHosts: ['private.example.com', '*.internal.example.com'] } }).sandbox.network
+        ?.deniedDomains,
+      ['private.example.com', '*.internal.example.com'],
+    )
     // Without caches given, it writes nowhere beyond its folder.
     assert.isUndefined(lead.sandbox.filesystem)
     // The tools' caches it writes to, but never where keys and sign-ins are kept, nor anything not from the home folder.
@@ -239,7 +244,7 @@ describe('the agent registry', () => {
     // Without known commands or hosts, the settings say nothing of them.
     const plain = sandboxOf('lead', { sandbox: { commands: [], hosts: [] } }).sandbox
     assert.isUndefined(plain.excludedCommands)
-    assert.deepStrictEqual(plain.network, { allowLocalBinding: true, allowedDomains: ['*'] })
+    assert.deepStrictEqual(plain.network, { allowLocalBinding: true, allowAllUnixSockets: true, allowedDomains: ['*'] })
     // A reader is given neither, whatever it is passed.
     const reader = sandboxOf('reader', { sandbox: upFront }).sandbox
     assert.isUndefined(reader.excludedCommands)
@@ -346,7 +351,7 @@ describe('the agent registry', () => {
       autoAllowBashIfSandboxed: true,
       allowUnsandboxedCommands: false,
       failIfUnavailable: true,
-      network: { allowedDomains: ['*'], allowLocalBinding: true },
+      network: { allowedDomains: ['*'], allowLocalBinding: true, allowAllUnixSockets: true },
       // It writes only its folder, and reads none of the home folder or the person's checkouts but what it is given back.
       filesystem: { allowWrite: [folder], denyRead: reads.denied, allowRead: reads.allowed },
     })
