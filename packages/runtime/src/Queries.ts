@@ -518,12 +518,19 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
               },
       }
     case 'agent_message':
-    case 'agent_thought':
+    case 'agent_thought': {
+      const answer = field(content, 'answer')
       return {
         ...base,
         kind: row.kind,
-        content: { text: text(content, 'text'), pictures: picturesOf(field(content, 'pictures')), files: filesOf(field(content, 'files')) },
+        content: {
+          text: text(content, 'text'),
+          pictures: picturesOf(field(content, 'pictures')),
+          files: filesOf(field(content, 'files')),
+          ...(typeof answer === 'boolean' ? { answer } : {}),
+        },
       }
+    }
     case 'tool_call': {
       const locations = field(content, 'locations')
       const exit = field(content, 'exit')

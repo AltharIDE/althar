@@ -95,7 +95,16 @@ export interface TerminalReport {
 }
 
 export type SessionEvent =
-  | { readonly _tag: 'AgentMessage'; readonly text: string; readonly messageId?: string }
+  | {
+      readonly _tag: 'AgentMessage'
+      readonly text: string
+      readonly messageId?: string
+      /**
+       * Whether the message is the agent's answer, ending its turn, or a word on the way between its steps, where it says
+       * (`answerOf`); absent where it doesn't.
+       */
+      readonly answer?: boolean
+    }
   /** Something in a message that isn't words: a picture, or a file it points at. */
   | { readonly _tag: 'AgentContent'; readonly content: Handed; readonly messageId?: string }
   | { readonly _tag: 'AgentThought'; readonly text: string }
@@ -334,11 +343,23 @@ export const normalizeUsage = (usage: acp.Usage | null | undefined): TokenUsage 
         ...defined('cachedWriteTokens', usage.cachedWriteTokens),
       }
 
+/**
+ * Whether a message is the agent's answer: Codex says of each one whether it
+ * is its final answer or commentary on the way, and codex-acp passes that on
+ * to an AIR client, as Althar is, on each of its chunks from the first.
+ * Claude Code and OpenCode don't say.
+ */
+export const answerOf = (meta: unknown): boolean | undefined => {
+  const phase = recordOf(recordOf(recordOf(meta)?.jetbrains)?.air)?.phase
+  return phase === 'final_answer' ? true : phase === 'commentary' ? false : undefined
+}
+
 export const normalize = (update: acp.SessionUpdate): SessionEvent => {
   switch (update.sessionUpdate) {
     case 'agent_message_chunk': {
       const text = textOf(update.content)
-      if (text !== undefined) return { _tag: 'AgentMessage', text, ...defined('messageId', update.messageId) }
+      if (text !== undefined)
+        return { _tag: 'AgentMessage', text, ...defined('messageId', update.messageId), ...defined('answer', answerOf(update._meta)) }
       const handed = handedOf(update.content)
       return handed === undefined
         ? { _tag: 'Other', update: update.sessionUpdate, raw: update }

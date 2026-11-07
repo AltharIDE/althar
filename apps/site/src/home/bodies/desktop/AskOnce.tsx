@@ -1,4 +1,4 @@
-import { Composer, IssueDraft, IssueDraftState, Turn, WorkedFor, You } from '@althar/ui'
+import { Composer, IssueDraft, IssueDraftState, Turn, WorkedFor, WorkNow, You } from '@althar/ui'
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { askedSecond } from '../../../lib/browser'
@@ -150,11 +150,7 @@ export function AskOnce() {
               {f.sent && <You at="11:01">{ASK}</You>}
               {(f.working || f.worked) && (
                 <Turn voice="Tally’s coordinator" at="11:01">
-                  <WorkedFor
-                    took={`${f.took}s`}
-                    live={f.working}
-                    summary={f.working ? 'Reading src/refunds and PR 1184' : 'Read tally-api, PR 1184 and Tally’s rules'}
-                  >
+                  <WorkedFor took={`${f.took}s`} live={f.working} now={<WorkNow icon="file">Reading src/refunds and PR 1184</WorkNow>}>
                     <p className={s.said}>Read 2 repositories, PR 1184 and the project’s rules.</p>
                   </WorkedFor>
                   {f.said && (

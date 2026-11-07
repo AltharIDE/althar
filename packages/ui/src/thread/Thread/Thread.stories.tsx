@@ -67,7 +67,7 @@ export const HandsBack: Story = {
       <Thread {...args}>
         <You at="1h ago">Make refunds rate-limit like charges, check the dashboard, and write the reference for partners.</You>
         <Turn model={OPUS} at="58m ago" copy={LIMITS} meta="2.4k tokens">
-          <WorkedFor took="12m 40s" summary="1 file written · 2 commands" defaultOpen>
+          <WorkedFor took="12m 40s" defaultOpen>
             <Tool kind={ToolKind.Edit} verb="Edited" target="src/refunds/router.ts" />
             <Tool kind={ToolKind.Run} verb="Ran" target="pnpm test refunds" copy="pnpm test refunds" took="12s" defaultOpen>
               <Terminal lines={TEST_OUTPUT} earlier={TEST_EARLIER} exit={0} />
@@ -90,7 +90,7 @@ export const WorkingNow: Story = {
       <Thread {...args} busy>
         <You at="2m ago">Run the whole suite before you open the pull request.</You>
         <Turn model={CODEX} at="now">
-          <WorkedFor took="1m 12s" summary="Running pnpm test" live defaultOpen>
+          <WorkedFor took="1m 12s" live defaultOpen>
             <Tool kind={ToolKind.Run} verb="Running" target="pnpm test" state={ToolState.Running} copy="pnpm test" defaultOpen>
               <Terminal lines={[' ✓ charges/limit (14)', ' ✓ refunds/router (38)']} live=" ⋯ webhooks/deliver (running 22 of 41)" />
             </Tool>

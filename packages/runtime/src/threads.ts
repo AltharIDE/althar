@@ -267,6 +267,8 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
         readonly id: string
         /** The id the agent gave this message, where it gives one. */
         messageId: string | undefined
+        /** It is the agent's answer, or a word on the way, where the agent says (Codex). */
+        answer: boolean | undefined
         text: string
         written: number
         writtenAt: number
@@ -282,6 +284,10 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   const folders = place.folders ?? []
   const where = (itemId: string) => ({ projectId: place.projectId, itemId, folders })
 
+  /** What a message says, and whether it is the agent's answer where it says. */
+  const said = (open: { readonly text: string; readonly answer: boolean | undefined }) =>
+    open.answer === undefined ? { text: open.text } : { text: open.text, answer: open.answer }
+
   /**
    * Writes the message being gathered; its item was placed when its first chunk arrived.
    * It is let go once written, or failed; a write cut short by interruption leaves it
@@ -290,7 +296,7 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   const flush = Effect.gen(function* () {
     const open = gathering
     if (open === undefined) return
-    yield* updateItem(place.projectId, open.id, withHanded({ text: open.text }, open.handed)).pipe(
+    yield* updateItem(place.projectId, open.id, withHanded(said(open), open.handed)).pipe(
       Effect.onExit((exit) =>
         Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)
           ? Effect.void
@@ -302,7 +308,7 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   })
 
   /** The message being gathered, or a new one: what it hands back goes with its words. */
-  const gathered = (kind: 'agent_message' | 'agent_thought', text: string, messageId?: string) =>
+  const gathered = (kind: 'agent_message' | 'agent_thought', text: string, messageId?: string, answer?: boolean) =>
     Effect.gen(function* () {
       // A different kind, or a message id other than the open one's, starts a new item; without ids, chunks run on.
       if (
@@ -314,8 +320,9 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
       // The item is placed when its first chunk arrives, so the thread keeps the order things happened in.
       const open = {
         kind,
-        id: yield* addItem(place, kind, { text }),
+        id: yield* addItem(place, kind, said({ text, answer })),
         messageId,
+        answer,
         text,
         written: text.length,
         writtenAt: yield* Clock.currentTimeMillis,
@@ -325,16 +332,17 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
       return { open, fresh: true }
     })
 
-  const gather = (kind: 'agent_message' | 'agent_thought', text: string, messageId?: string) =>
+  const gather = (kind: 'agent_message' | 'agent_thought', text: string, messageId?: string, answer?: boolean) =>
     Effect.gen(function* () {
-      const { open, fresh } = yield* gathered(kind, text, messageId)
+      const { open, fresh } = yield* gathered(kind, text, messageId, answer)
       if (fresh) return
       if (open.messageId === undefined && messageId !== undefined) open.messageId = messageId
+      if (open.answer === undefined && answer !== undefined) open.answer = answer
       const now = yield* Clock.currentTimeMillis
       open.text += text
       // A long message is written as it grows, so a crash loses only its last few seconds.
       if (open.text.length - open.written >= WRITE_EVERY_CHARACTERS || now - open.writtenAt >= WRITE_EVERY_MILLIS) {
-        yield* updateItem(place.projectId, open.id, withHanded({ text: open.text }, open.handed))
+        yield* updateItem(place.projectId, open.id, withHanded(said(open), open.handed))
         open.written = open.text.length
         open.writtenAt = now
       }
@@ -347,7 +355,7 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
       const now = yield* handedNow(where(open.id), content)
       if (now.pictures.length === 0 && now.files.length === 0) return
       open.handed = together(open.handed, now)
-      yield* updateItem(place.projectId, open.id, withHanded({ text: open.text }, open.handed))
+      yield* updateItem(place.projectId, open.id, withHanded(said(open), open.handed))
       open.written = open.text.length
       open.writtenAt = yield* Clock.currentTimeMillis
     })
@@ -444,7 +452,7 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   const record = (event: SessionEvent) => {
     switch (event._tag) {
       case 'AgentMessage':
-        return gather('agent_message', event.text, event.messageId)
+        return gather('agent_message', event.text, event.messageId, event.answer)
       case 'AgentThought':
         return gather('agent_thought', event.text)
       case 'AgentContent':
