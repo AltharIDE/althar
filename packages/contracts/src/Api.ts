@@ -2454,8 +2454,84 @@ export const SettingItem = Schema.Struct({
   content: SettingChangeCard,
 })
 
+/** One step of a small change, as its card shows it: what happened, and when. */
+export const SmallChangeStep = Schema.Struct({
+  key: Schema.Literals(['started', 'changed', 'checks', 'merged', 'review']),
+  /** What happened, in a few words: "Changed 1 line in RunMenu.tsx", "Checks pass". */
+  what: Schema.String,
+  /** When it happened; null until it has. */
+  at: Schema.NullOr(Schema.String),
+  done: Schema.Boolean,
+})
+
+/**
+ * A small change's card in its thread: the one-step path a change of a few lines takes. It says what it skipped, each
+ * step with its time, and Merge, which still asks; Make it a full task takes the review before it merges instead of
+ * after. Althar posts it when the change starts and keeps it current.
+ */
+export const SmallChangeItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('small_change'),
+  content: Schema.Struct({
+    taskId: Schema.String,
+    /** The task's own thread, where its title opens it. */
+    threadId: Schema.String,
+    slug: Schema.String,
+    title: Schema.String,
+    /** Who leads it, and on which model and effort: the lighter one the small path picks. */
+    lead: Schema.Struct({
+      agentId: Schema.String,
+      model: Schema.NullOr(Schema.String),
+      effort: Schema.optional(Schema.NullOr(Schema.String)),
+    }),
+    /** What the path leaves out, in a short line each: "no plan", "reviewed after it merges". */
+    skips: Schema.Array(Schema.String),
+    steps: Schema.Array(SmallChangeStep),
+    /** Its pull request as last seen, where it has one: Merge acts on it, and the card says when it is merged. */
+    change: Schema.NullOr(ChangeSummary),
+    /** Where its review went once it merged, where one was started: the task that reads the merged change. */
+    review: Schema.optional(
+      Schema.NullOr(Schema.Struct({ taskId: Schema.String, slug: Schema.String, threadId: Schema.String, title: Schema.String })),
+    ),
+    /** The person made it a full task, reviewed before it merges: the card folds to the line saying what was made. */
+    fullTask: Schema.optional(
+      Schema.NullOr(Schema.Struct({ taskId: Schema.String, slug: Schema.String, threadId: Schema.String, title: Schema.String })),
+    ),
+  }),
+})
+
+/**
+ * Auto moving a task's lead to a lighter model, in its thread, because the plan is nearly out: from and to which model,
+ * the plan's usage and when it resets, and the way back for this task. Its words after the line are the new model's.
+ * Althar posts it and keeps it current.
+ */
+export const ModelMoveItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('model_move'),
+  content: Schema.Struct({
+    taskId: Schema.String,
+    /** The model it moved from, and the lighter one it moved to, as the agent's ids for them. */
+    from: Schema.Struct({ agentId: Schema.String, model: Schema.NullOr(Schema.String) }),
+    to: Schema.Struct({ agentId: Schema.String, model: Schema.NullOr(Schema.String) }),
+    /** Why: which window of the plan, the share of it used, and when it resets. */
+    why: Schema.Struct({
+      /** 0 to 100, used. */
+      percent: Schema.Number,
+      /** The plan's own name, as the line says it: Claude. */
+      plan: Schema.String,
+      /** The window as a thread says it: "the week". */
+      window: Schema.String,
+      resetsAt: Schema.NullOr(Schema.String),
+    }),
+    /** The person kept the heavier model for this task: the way back was pressed, and Undo puts the move again. */
+    kept: Schema.Boolean,
+  }),
+})
+
 export const ThreadItem = Schema.Union([
   SettingItem,
+  SmallChangeItem,
+  ModelMoveItem,
   UserMessageItem,
   AgentTextItem,
   ToolCallItem,
@@ -4002,6 +4078,15 @@ export const Api = RpcGroup.make(
   command('DeleteAutomation', { automationId: Schema.String }, Schema.Void),
   /** The person answers the coordinator's card asking to stop, hold, restart or settle a task: yes does it, as their own press would. */
   command('AnswerTaskAsk', { itemId: Schema.String, yes: Schema.Boolean }, Schema.Void),
+  /**
+   * Takes a small change out of the fast lane: its change is reviewed before it merges, by the reviewer its plan named,
+   * instead of after. The card folds to the line saying what was made.
+   */
+  command('MakeItAFullTask', { taskId: Schema.String }, Schema.Void),
+  /** Keeps the heavier model for this task, as the line Auto moved the lead with offers: Auto moves nothing more here. */
+  command('KeepTheModel', { itemId: Schema.String }, Schema.Void),
+  /** Puts the move Auto made again, after Keep: the task's lead may move back to the lighter model. */
+  command('UndoTheModelMove', { itemId: Schema.String }, Schema.Void),
   /** Puts back what the coordinator changed an automation from, as the card in its thread shows it. */
   command('UndoAutomationChange', { itemId: Schema.String }, Schema.Void),
   /** The person answers an agent's card asking to change a setting that loosens what asks: yes makes it, as their own change. */

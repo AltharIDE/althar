@@ -48,6 +48,8 @@ export class Plans extends Context.Service<
       readonly here?: boolean
       /** A review of someone else's pull request, its one step its lead (`PlanParameters.reads`). */
       readonly reads?: boolean
+      /** The fast lane: reviewed after it merges, not before (`PlanParameters.reviewAfterMerge`). */
+      readonly reviewAfterMerge?: boolean
       /** Where it works (ADR-091), and why, where that isn't the project's default (`PlanParameters.worksIn`). */
       readonly worksIn?: WorksIn
       readonly worksInWhy?: string | null
@@ -188,6 +190,7 @@ export class Plans extends Context.Service<
                     end: input.end ?? null,
                     ...(input.here === true ? { here: true } : {}),
                     ...(input.reads === true ? { reads: true } : {}),
+                    ...(input.reviewAfterMerge === true ? { reviewAfterMerge: true } : {}),
                     ...(input.worksIn === undefined ? {} : { worksIn: input.worksIn }),
                     ...(input.worksInWhy == null || input.worksInWhy.trim() === '' ? {} : { worksInWhy: input.worksInWhy.trim() }),
                     ...(input.proposal === undefined ? {} : { proposal: input.proposal }),

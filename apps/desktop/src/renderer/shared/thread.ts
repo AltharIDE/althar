@@ -112,6 +112,8 @@ export type ReviewDraftContent = Extract<ThreadItem, { kind: 'review_draft' }>['
 export type AutomationCardContent = Extract<ThreadItem, { kind: 'automation' }>['content']
 export type TaskAskContent = Extract<ThreadItem, { kind: 'task_ask' }>['content']
 export type SettingChangeContent = Extract<ThreadItem, { kind: 'setting' }>['content']
+export type SmallChangeContent = Extract<ThreadItem, { kind: 'small_change' }>['content']
+export type ModelMoveContent = Extract<ThreadItem, { kind: 'model_move' }>['content']
 
 export type Block =
   | {
@@ -183,6 +185,10 @@ export type Block =
   | { readonly kind: 'task_ask'; readonly id: string; readonly ask: TaskAskContent }
   /** An agent's change to a setting: a line with Undo, or a card the person presses first (ADR-097). */
   | { readonly kind: 'setting'; readonly id: string; readonly change: SettingChangeContent }
+  /** A small change's card: what its one-step path skipped, each step with its time, and Merge (README section 6). */
+  | { readonly kind: 'small_change'; readonly id: string; readonly card: SmallChangeContent }
+  /** Auto's line on moving the lead to a lighter model, with the way back (README section 7). */
+  | { readonly kind: 'model_move'; readonly id: string; readonly move: ModelMoveContent }
   /**
    * The agent's turn runs on what it was last asked, and it hasn't said
    * anything yet: where its reply will start, held for it, with how long it
@@ -683,6 +689,12 @@ export const blocksOf = (
         continue
       case 'setting':
         blocks.push({ kind: 'setting', id: item.id, change: item.content })
+        continue
+      case 'small_change':
+        blocks.push({ kind: 'small_change', id: item.id, card: item.content })
+        continue
+      case 'model_move':
+        blocks.push({ kind: 'model_move', id: item.id, move: item.content })
         continue
       case 'notice':
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.

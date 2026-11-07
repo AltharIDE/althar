@@ -51,6 +51,8 @@ import type {
   ReviewDraftContent,
   Part,
   PushRequestContent,
+  ModelMoveContent,
+  SmallChangeContent,
   TaskAskContent,
   QuestionContent,
   RunContent,
@@ -477,6 +479,8 @@ export function ThreadBlocks({
   review,
   automation,
   taskAsk,
+  smallChange,
+  modelMove,
   queued,
   retryable,
   onTryAgain,
@@ -520,6 +524,10 @@ export function ThreadBlocks({
   automation?: (automation: AutomationCardContent, itemId: string) => ReactNode
   /** Draws the coordinator's card asking to stop, hold, restart or settle a task, by its item, which answering it names. */
   taskAsk?: (ask: TaskAskContent, itemId: string) => ReactNode
+  /** Draws a small change's card, by its item, which Merge and Make it a full task name. */
+  smallChange?: (card: SmallChangeContent, itemId: string) => ReactNode
+  /** Draws Auto's line on moving the lead to a lighter model, by its item, which Keep and Undo name. */
+  modelMove?: (move: ModelMoveContent, itemId: string) => ReactNode
   /** What a message still waiting says: who reads it next. */
   queued?: string
   /** The runtime's retry eligibility, refreshed with the thread's head. */
@@ -612,6 +620,10 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{automation?.(block.automation, block.id)}</Fragment>
       case 'task_ask':
         return <Fragment key={block.id}>{taskAsk?.(block.ask, block.id)}</Fragment>
+      case 'small_change':
+        return <Fragment key={block.id}>{smallChange?.(block.card, block.id)}</Fragment>
+      case 'model_move':
+        return <Fragment key={block.id}>{modelMove?.(block.move, block.id)}</Fragment>
       case 'setting':
         return <SettingChangeOf key={block.id} change={block.change} itemId={block.id} />
       case 'waiting':
