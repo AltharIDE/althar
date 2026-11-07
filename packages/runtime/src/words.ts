@@ -2,6 +2,7 @@ import { basename } from 'node:path'
 
 import { MESSAGE_FILES } from '@althar/contracts'
 import { products } from '@althar/connectors'
+import { firstErrorLine, startFailureOf } from '@althar/provider-adapters'
 import { Cause, Option } from 'effect'
 
 import { thisDevice } from './device'
@@ -87,6 +88,36 @@ export const startedAfreshWords = (agent: string) => `${agent} had lost this con
 /** An agent whose account is signed out, as a step's call says it: the call itself offers signing in again. */
 export const signedOutWords = 'The agent is signed out. Sign it in again in Settings, then try again.'
 
+/** An agent whose sign-in was there and has ended: the same way on, signing in again, as a step's call offers. */
+export const signInEndedWords = 'The agent’s sign-in has ended. Sign it in again in Settings, then try again.'
+
+/** An agent that couldn't reach its servers: nothing to sign in, the connection to look at. */
+export const unreachableWords = (device: string) => `The agent can’t reach its servers. Check ${device}’s connection, then try again.`
+
+/** Whether a call's words are a sign-in to do again, signed out or ended, which the call offers to start. */
+export const signInWords = (words: string | null | undefined): boolean => words === signedOutWords || words === signInEndedWords
+
+/**
+ * Why an agent couldn't start or be reached, in one plain line, where it is a
+ * class the person can act on: not installed, not signed in, its sign-in
+ * ended, or the network in the way (DEV-196). Undefined for anything else,
+ * which the agent's own first error line says.
+ */
+const classed = (said: string, command: string, authRequired = false): string | undefined => {
+  switch (startFailureOf(said, authRequired)) {
+    case 'not_installed':
+      return `${command === '' ? 'The agent' : command} isn't installed, or isn't on ${thisDevice()}'s PATH.`
+    case 'signed_out':
+      return signedOutWords
+    case 'sign_in_ended':
+      return signInEndedWords
+    case 'unreachable':
+      return unreachableWords(thisDevice())
+    case undefined:
+      return undefined
+  }
+}
+
 /** What an agent's own error says, when the runtime can put it in words. */
 export const agentSaid = (error: unknown): string | undefined => {
   switch (tagOf(error)) {
@@ -97,21 +128,24 @@ export const agentSaid = (error: unknown): string | undefined => {
       const reason = text(error, 'reason')
       // The person's own command, where the sandbox cannot reach the device: say what to put right, never "isn't installed".
       if (command === 'flatpak-spawn' || /flatpak|org\.freedesktop\.Flatpak/i.test(reason)) return hostDenied
-      return /ENOENT/.test(reason)
-        ? `${command} isn't installed, or isn't on ${thisDevice()}'s PATH.`
-        : sentence(`${command} wouldn't start: ${reason}`)
+      if (/ENOENT/.test(reason)) return `${command} isn't installed, or isn't on ${thisDevice()}'s PATH.`
+      return classed(reason, command) ?? sentence(`${command} wouldn't start: ${reason}`)
     }
     case 'AgentExited': {
-      const said = lastLine(text(error, 'stderr'))
+      const stderr = text(error, 'stderr')
       // A bridge that started and then could not take the command out to the device says so; keep its sentence, not "the agent stopped".
-      if (/flatpak-spawn|org\.freedesktop\.Flatpak/i.test(said)) return hostDenied
-      if (olderOpenCode.test(said)) return olderOpenCodeWords
-      return said === '' ? 'The agent stopped.' : sentence(`The agent stopped: ${said}`)
+      if (/flatpak-spawn|org\.freedesktop\.Flatpak/i.test(lastLine(stderr))) return hostDenied
+      if (olderOpenCode.test(stderr)) return olderOpenCodeWords
+      const said = firstErrorLine(stderr)
+      return classed(stderr, '') ?? (said === '' ? 'The agent stopped.' : sentence(`The agent stopped: ${said}`))
     }
     case 'AgentRequestFailed':
       switch (fieldOf(error, 'failure')) {
         case 'auth_required':
-          return signedOutWords
+          return classed(text(error, 'message'), '', true) ?? signedOutWords
+        // A connection that failed, said as what to look at; a server's own trouble stays in its words.
+        case 'transient':
+          return classed(text(error, 'message'), '') ?? sentence(text(error, 'message'))
         case 'usage_limit': {
           const until = text(error, 'resetsAt')
           return until === '' ? "The agent's usage limit is reached." : `The agent's usage limit is reached until ${until}.`

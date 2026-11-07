@@ -78,7 +78,7 @@ import { type GiveUp, watchStalls } from './Stalls'
 import type { Tried } from './stallWatch'
 import { addItem } from './threads'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
-import { signedOutWords, summarize } from './words'
+import { signInWords, summarize } from './words'
 
 /*
  * A task's run (docs/architecture/05; docs/plans/mvp.md, "The plan"): its
@@ -1305,8 +1305,7 @@ export class Runs extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           // An agent that couldn't start because it is signed out is signed out: signing it in again is the way on.
-          const told: StuckInfo =
-            asked.why === 'failed_to_start' && asked.detail === signedOutWords ? { ...asked, why: 'signed_out' } : asked
+          const told: StuckInfo = asked.why === 'failed_to_start' && signInWords(asked.detail) ? { ...asked, why: 'signed_out' } : asked
           // The model it was on, so handing the step on can leave out the one that failed.
           const on =
             told.agentId === null || told.step === 'publish' || told.model !== undefined

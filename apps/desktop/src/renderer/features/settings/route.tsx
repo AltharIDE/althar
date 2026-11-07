@@ -10,14 +10,18 @@ import { SettingsPage } from './SettingsPage'
 /** What the Settings tab's address can ask beyond its section: an agent to sign in again, as a signed-out agent's error asks. */
 export interface SettingsSearch {
   readonly signIn?: string
+  /** Which of its accounts, where it has several and one is meant: one whose sign-in ends soon. */
+  readonly account?: string
 }
 
 const settingsSearchOf = (search: Record<string, unknown>): SettingsSearch =>
-  typeof search.signIn === 'string' && search.signIn !== '' ? { signIn: search.signIn } : {}
+  typeof search.signIn === 'string' && search.signIn !== ''
+    ? { signIn: search.signIn, ...(typeof search.account === 'string' && search.account !== '' ? { account: search.account } : {}) }
+    : {}
 
 function Settings() {
   const { section } = settingsRoute.useParams()
-  const { signIn } = settingsRoute.useSearch()
+  const { signIn, account } = settingsRoute.useSearch()
   const navigate = useNavigate()
   // The agents are signed in here, so each is asked again as the tab opens.
   const start = useStart({ recheck: true })
@@ -26,6 +30,7 @@ function Settings() {
       start={start}
       section={isSection(section) ? section : FIRST_SECTION}
       {...(signIn === undefined ? {} : { signIn })}
+      {...(account === undefined ? {} : { account })}
       onSection={(next) => void navigate({ to: '/settings/$section', params: { section: next } })}
       onTask={(threadId) => void navigate({ to: '/threads/$threadId', params: { threadId } })}
     />

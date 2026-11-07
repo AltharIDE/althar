@@ -170,6 +170,12 @@ export interface AgentDefinition {
      */
     readonly paidBy?: (output: string) => PaidBy | undefined
     /**
+     * When the sign-in ends, from the same output, as an ISO time; undefined
+     * where the agent doesn't say. Only an agent whose status says when the
+     * person must sign in again has one: never a token it renews by itself.
+     */
+    readonly endsAt?: (output: string) => string | undefined
+    /**
      * For an agent that reaches several providers, each with a sign-in of its
      * own (OpenCode: `opencode-go/glm-5.3`): the providers its status lists
      * as signed in (`connections` says by what, so a changed sign-in is told from the same), and the provider a model at the agent goes through.

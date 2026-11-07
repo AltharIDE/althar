@@ -33,10 +33,21 @@ const providersOf = (account: AccountStatus): Pick<AccountEntry, 'providers'> =>
   }
 }
 
+/** How long before a sign-in ends its row says so in the signal's colour, as the runtime's one warning is raised (signInEnding.ts). */
+const SOON_MS = 3 * 24 * 60 * 60 * 1000
+
+/** When an account's sign-in ends, where its agent says; none once it has ended, as its row then says it is signed out. */
+const endsOf = (account: AccountStatus, now: Date): Pick<AccountEntry, 'ends'> => {
+  const at = account.endsAt === undefined ? Number.NaN : Date.parse(account.endsAt)
+  if (account.endsAt === undefined || Number.isNaN(at) || at <= now.getTime()) return {}
+  return { ends: { at: clock(account.endsAt, now), ...(at - now.getTime() <= SOON_MS ? { soon: true } : {}) } }
+}
+
 /** An account, as a line of the kit's list of an agent's accounts. */
 export const accountEntry = (account: AccountStatus, now: Date = new Date()): AccountEntry => ({
   id: account.id,
   name: account.name,
+  ...endsOf(account, now),
   // Each provider within the agent in its own state, one that refused work lately as the line's button.
   ...providersOf(account),
   place:

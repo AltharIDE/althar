@@ -540,6 +540,7 @@ export const handlers = Api.toLayer(
           paidBy: check.paidBy,
           outUntil: Option.getOrNull(Option.map(out, (each) => each.until)),
           adoptedFrom: account.adoptedFrom,
+          ...(check.endsAt === undefined ? {} : { endsAt: check.endsAt }),
           ...(providers === undefined ? {} : { providers }),
         } satisfies AccountStatus
       }).pipe(
@@ -1661,6 +1662,7 @@ export const handlers = Api.toLayer(
       ListEditors: () => Effect.succeed(config.editors?.list() ?? []),
       GetLoad: () => api(machine.now),
       GetPlanUsage: ({ refresh }) => api(planUsage.now(refresh === true)),
+      DismissSignInEnding: ({ commandId, accountId, endsAt }) => once(commandId, api(planUsage.dismiss(accountId, endsAt))),
       GetModelRooms: ({ projectId }) =>
         api(
           modelRooms(projectId).pipe(

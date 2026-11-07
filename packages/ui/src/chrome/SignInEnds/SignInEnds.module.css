@@ -1,0 +1,44 @@
+/* One line in the window's bar: whose sign-in ends and when, then what to do about it. */
+.line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--t-3);
+  white-space: nowrap;
+  /* it comes in from the bar's end, where it sits */
+  transform-origin: 100% 50%;
+  animation: arrive var(--enter) var(--ease-out);
+}
+.icon {
+  flex: none;
+  color: var(--signal);
+}
+.says {
+  overflow: hidden;
+  max-width: 32ch;
+  color: var(--t-2);
+  text-overflow: ellipsis;
+}
+.dismiss {
+  margin-inline-start: -4px;
+}
+
+@keyframes arrive {
+  from {
+    opacity: 0;
+    transform: translateX(6px) scale(var(--scale-pop));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .line {
+    animation-name: fade;
+  }
+  @keyframes fade {
+    from {
+      opacity: 0;
+    }
+  }
+}

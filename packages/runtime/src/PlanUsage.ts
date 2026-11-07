@@ -1,7 +1,7 @@
 import { afterOpen, startup } from './startup'
 import { homedir } from 'node:os'
 
-import type { AccountUsage, PlanUsage as PlanUsageView, UsageFaultKind } from '@althar/contracts'
+import type { AccountUsage, PlanUsage as PlanUsageView, SignInEnding, UsageFaultKind } from '@althar/contracts'
 import {
   adapterNode,
   type AgentDefinition,
@@ -32,6 +32,7 @@ import { Agents, RuntimeConfig } from './Config'
 import { Live } from './Live'
 import { timestamp } from './records'
 import { SignIns } from './SignIns'
+import { type Warned, warnedKey, warnedOf, warns } from './signInEnding'
 
 /*
  * What each account's plan has left (docs/plans/plan-usage.md), for
@@ -159,6 +160,8 @@ export class PlanUsage extends Context.Service<
     readonly now: (refresh?: boolean) => Effect.Effect<PlanUsageView, Failure>
     /** The windows Claude Code's adapter reported on a session of the account, from one event. */
     readonly heard: (accountId: string, agentId: string, windows: ReadonlyArray<UsageWindow>) => Effect.Effect<void, never>
+    /** Puts aside the warning that the account's sign-in ends at `endsAt`, for good: only another sign-in raises one again. */
+    readonly dismiss: (accountId: string, endsAt: string) => Effect.Effect<void, Failure>
     /**
      * How the account is paid for and its plan's name, as last read, without asking again: null where nothing was read of it
      * yet. For an agent whose providers each have a sign-in (OpenCode), how each listed is paid too, as its listing was last
@@ -580,13 +583,34 @@ export class PlanUsage extends Context.Service<
             return read
           })
 
+        /* Each account's warning put aside, by the end it was about: read from the store each time the view is. */
+        const warnedAll = Effect.map(
+          sql<{ key: string; value: string }>`SELECT key, value FROM settings WHERE key LIKE ${`${warnedKey('')}%`}`.pipe(
+            Effect.orElseSucceed(() => []),
+          ),
+          (rows) => new Map(rows.map((row) => [row.key, warnedOf(row.value)])),
+        )
+
         const view = Effect.gen(function* () {
           yield* hydrate
           const now = yield* Clock.currentTimeMillis
           const list: AccountUsage[] = []
+          const endings: SignInEnding[] = []
+          const warned = yield* warnedAll
           for (const entry of agents.list) {
-            for (const account of yield* accounts.of(entry.definition.id)) {
+            const all = yield* accounts.of(entry.definition.id)
+            for (const account of all) {
               const check = yield* signIns.account(account)
+              // A sign-in that ends within its last days, read with its account, warns once (signInEnding.ts).
+              if (check.endsAt !== undefined && warns(check.endsAt, warned.get(warnedKey(account.id)), now))
+                endings.push({
+                  agentId: entry.definition.id,
+                  agentName: entry.definition.name,
+                  accountId: account.id,
+                  accountName: account.name,
+                  several: all.length > 1,
+                  endsAt: check.endsAt,
+                })
               const mine = held.get(account.id)
               const paidBy = mine?.paidBy ?? check.paidBy
               const key = paidBy === 'key'
@@ -615,7 +639,9 @@ export class PlanUsage extends Context.Service<
               })
             }
           }
-          return { accounts: list } satisfies PlanUsageView
+          // The soonest first: the one card says it, and the rest wait behind it.
+          endings.sort((a, b) => Date.parse(a.endsAt) - Date.parse(b.endsAt))
+          return { accounts: list, ...(endings.length === 0 ? {} : { endings }) } satisfies PlanUsageView
         })
 
         const told = view.pipe(
@@ -645,6 +671,13 @@ export class PlanUsage extends Context.Service<
           )
 
         return PlanUsage.of({
+          dismiss: (accountId, endsAt) =>
+            Effect.gen(function* () {
+              const value = JSON.stringify({ endsAt, dismissed: true } satisfies Warned)
+              yield* sql`INSERT INTO settings ${sql.insert({ key: warnedKey(accountId), value, updatedAt: yield* timestamp })}
+                ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+              yield* told
+            }),
           paidBy: (accountId) =>
             Effect.map(hydrate, () => {
               const one = held.get(accountId)

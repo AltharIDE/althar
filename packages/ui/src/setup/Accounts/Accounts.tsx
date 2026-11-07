@@ -50,6 +50,11 @@ export interface AccountEntry {
   /** The plan that pays for it, when the agent says: Claude Max. */
   plan?: string
   /**
+   * When its sign-in ends, where the agent says, as the person reads it: 12 Dec 14:00. Said quietly, before its plan's word;
+   * `soon` within its last days, when it says so in the signal's colour.
+   */
+  ends?: { at: string; soon?: boolean }
+  /**
    * For an agent with a sign-in for each provider it reaches (OpenCode): those to say, each with how it is paid for, and
    * whether it refused work lately though the account is signed in. Said in place of the account's one word.
    */
@@ -92,6 +97,8 @@ export interface AccountsText {
   signedOut: string
   checking: string
   out: (back: string) => string
+  /** When its sign-in ends. */
+  ends: (at: string) => string
   signIn: string
   signInAgain: string
   /** A provider within the agent that refused its sign-in, as the button that signs it in. */
@@ -120,6 +127,7 @@ export const accountsText: AccountsText = {
   signedOut: 'Signed out',
   checking: 'Checking…',
   out: (back) => `until ${back}`,
+  ends: (at) => `sign-in ends ${at}`,
   signIn: 'Sign in',
   signInAgain: 'Sign in again',
   providerSignIn: (provider) => `${provider}: sign in again`,
@@ -233,6 +241,16 @@ function Row({ account, number, first, last, busy, t, onSignIn, onRename, onMove
   const { state, place } = account
   // Who it is when the agent says; a folder another tool made, by where it is.
   const who = account.who ?? (place.kind === 'adopted' ? [place.folder, place.from].filter(Boolean).join(' · ') : null)
+  // When its sign-in ends, quietly before its one word, where the agent says.
+  const withEnds = (word: ReactNode): ReactNode =>
+    account.ends === undefined ? (
+      word
+    ) : (
+      <span className={s.endsWith}>
+        <span className={cx(s.ends, account.ends.soon === true && s.soon)}>{t.ends(account.ends.at)}</span>
+        {word}
+      </span>
+    )
   const end = ((): ReactNode => {
     switch (state.kind) {
       case 'ready':
@@ -259,7 +277,7 @@ function Row({ account, number, first, last, busy, t, onSignIn, onRename, onMove
               )}
             </span>
           )
-        return account.plan ?? (state.paid === 'key' ? t.key : state.paid === 'plan' ? t.plan : null)
+        return withEnds(account.plan ?? (state.paid === 'key' ? t.key : state.paid === 'plan' ? t.plan : null))
       case 'out':
         return (
           <span className={s.until}>
