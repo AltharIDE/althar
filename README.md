@@ -1,13 +1,11 @@
-<p align="center">
+<p>
   <a href="https://althar.ai">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="brand/export/lockup/lockup-horizontal-paper.svg" />
-      <img src="brand/export/lockup/lockup-horizontal-ink.svg" width="168" alt="Althar" />
+      <source media="(prefers-color-scheme: dark)" srcset="brand/export/banner/readme-header-ink.png" />
+      <img src="brand/export/banner/readme-header.png" width="100%" alt="Althar. Building software has never felt so fast. Open source, with the agents you already pay for." />
     </picture>
   </a>
 </p>
-
-<h1 align="center">Building software has never felt so fast.</h1>
 
 <p align="center">
   Althar is an open-source IDE for building with AI agents.<br />

@@ -34,11 +34,12 @@ Use the 1024 square wherever a place takes one, and the smaller sizes where it a
 
 ### Banners
 
-All six, and the printed avatar, are the README's printed look: two inks on paper stock, the mark as a halftone, the name off the bottom edge. They differ in how they arrange it for their shape.
+All seven, and the printed avatar, are the README's printed look: two inks on paper stock, the mark as a halftone, the name off the bottom edge. They differ in how they arrange it for their shape.
 
 | File | Size | Where |
 | --- | --- | --- |
-| `readme-header.png` | 2560 × 800 | The repository README |
+| `readme-header.png` | 2560 × 800 | The repository README, on a light page. Its lines are the site's hero |
+| `readme-header-ink.png` | 2560 × 800 | The same on a dark page: light inks on a dark stock |
 | `github-social-preview.png` | 1280 × 640 | GitHub's social preview, in the repository's settings |
 | `og-default.png` | 1200 × 630 | Open Graph and Twitter card, for any page without a card of its own |
 | `x-header.png` | 1500 × 500 | X profile header |
