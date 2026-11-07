@@ -91,6 +91,9 @@ export const sessionMetas: Array<{ readonly role: 'lead' | 'reader' | undefined;
 /** Whether the fake `claude-code` holds the coordinator in a sandbox it never leaves, as Claude Code's does where it starts. */
 export const fakeSandbox = { contains: false }
 
+/** When a fake agent's sign-in ends, by its id, as its status says it where the test sets one (Claude Code's claude.ai sign-in). */
+export const fakeSignInEnds = new Map<string, string>()
+
 export const definition = (
   id: string,
   signedOut: ReadonlyArray<string> = [],
@@ -115,6 +118,7 @@ export const definition = (
     read: (output) => !signedOut.includes(id) && !signedOut.includes(output.trim()),
     // On a plan, unless the test says it is paid per use, or that its status can't tell.
     paidBy: (output) => (unsure.includes(id) ? undefined : perUse.includes(id) || perUse.includes(output.trim()) ? 'key' : 'plan'),
+    endsAt: () => fakeSignInEnds.get(id),
     login: `fake-login ${id}`,
     // Says which home it signed out of, in the file the test names.
     logout: {

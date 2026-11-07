@@ -91,6 +91,45 @@ export const AProviderRefused: Story = {
   },
 }
 
+/**
+ * Claude Code says when a claude.ai sign-in ends: quietly, before the plan's word, on each account it says it of; in the
+ * signal's colour within its last days.
+ */
+export const SignInEnds: Story = {
+  args: {
+    agent: 'Claude Code',
+    accounts: [
+      {
+        id: 'acc_usual',
+        name: 'Personal',
+        place: { kind: 'usual' },
+        state: { kind: 'ready', paid: 'plan' },
+        who: 'you@meridian.dev',
+        plan: 'Claude Max',
+        ends: { at: '12 Dec 14:00' },
+      },
+      {
+        id: 'acc_work',
+        name: 'Work',
+        place: { kind: 'own' },
+        state: { kind: 'ready', paid: 'plan' },
+        who: 'you@halyard.co',
+        plan: 'Claude Team',
+        ends: { at: 'Mon 09:30', soon: true },
+      },
+      { id: 'acc_key', name: 'API', place: { kind: 'own' }, state: { kind: 'ready', paid: 'key' } },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('sign-in ends by 12 Dec 14:00')).toBeInTheDocument()
+    await expect(c.getByText('sign-in ends by Mon 09:30')).toBeInTheDocument()
+    await expect(c.getByText('Claude Max')).toBeInTheDocument()
+    // A key says no end: it has none.
+    await expect(c.getAllByText(/sign-in ends/)).toHaveLength(2)
+  },
+}
+
 /** The agent's usual sign-in alone: no word on the order, which only matters with two. */
 export const OnlyTheUsual: Story = {
   args: { accounts: ACCOUNTS.slice(0, 1) },

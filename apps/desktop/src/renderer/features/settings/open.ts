@@ -7,8 +7,8 @@ import { useNavigate } from '@tanstack/react-router'
  */
 
 export interface SettingsWays {
-  /** Opens the agent's tab with its sign-in started, by the agent's id. */
-  readonly signIn: (agentId: string) => void
+  /** Opens the agent's tab with its sign-in started, by the agent's id: the account's, where one is named. */
+  readonly signIn: (agentId: string, accountId?: string) => void
   /** Opens the agents, to sign one in. */
   readonly agents: () => void
   /** Opens the code hosts and trackers, to connect one or sign in to it again. */
@@ -18,7 +18,12 @@ export interface SettingsWays {
 export const useSettingsWays = (): SettingsWays => {
   const navigate = useNavigate()
   return {
-    signIn: (agentId) => void navigate({ to: '/settings/$section', params: { section: 'agents' }, search: { signIn: agentId } }),
+    signIn: (agentId, accountId) =>
+      void navigate({
+        to: '/settings/$section',
+        params: { section: 'agents' },
+        search: { signIn: agentId, ...(accountId === undefined ? {} : { account: accountId }) },
+      }),
     agents: () => void navigate({ to: '/settings/$section', params: { section: 'agents' } }),
     connections: () => void navigate({ to: '/settings/$section', params: { section: 'code-hosts' } }),
   }

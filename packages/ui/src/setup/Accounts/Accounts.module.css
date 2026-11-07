@@ -172,3 +172,15 @@
     grid-row: 1 / span 2;
   }
 }
+/* when its sign-in ends, before its one word: quiet, in the signal's colour within its last days */
+.endsWith {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.ends {
+  color: var(--t-3);
+}
+.soon {
+  color: var(--signal);
+}

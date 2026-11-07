@@ -8,6 +8,7 @@ import { RuntimeState } from '@althar/ui'
 
 import { useServices } from '../src/renderer/data/services'
 import { accountEntry } from '../src/renderer/features/accounts/AgentAccounts'
+import { clock } from '../src/renderer/shared/time'
 import { useAccountSignIn } from '../src/renderer/features/accounts/useAccountSignIn'
 import { HomeView } from '../src/renderer/features/home/HomeView'
 import { useHome } from '../src/renderer/features/home/useHome'
@@ -80,6 +81,16 @@ describe('accounts in settings', () => {
     const own = { ...usual('acc_3', 'signed_in'), home: '/Users/me/profile/accounts/acc_3', outUntil: '2026-10-03T14:00:00' }
     expect(accountEntry(own, now)).toMatchObject({ place: { kind: 'own' }, state: { kind: 'out' } })
     expect(accountEntry({ ...usual('acc_4', 'unknown') }, now).state).toEqual({ kind: 'ready' })
+  })
+
+  it('says quietly when a sign-in ends, where its agent says, and in the signal’s colour where the runtime says it ends soon', () => {
+    const now = new Date('2026-10-03T12:00:00.000Z')
+    const ends = (endsAt: string, endsSoon = false) => accountEntry({ ...usual('acc_1', 'signed_in'), endsAt, endsSoon }, now).ends
+    expect(ends('2026-11-02T12:00:00.000Z')).toEqual({ at: clock('2026-11-02T12:00:00.000Z', now) })
+    expect(ends('2026-10-08T12:00:00.000Z', true)).toEqual({ at: clock('2026-10-08T12:00:00.000Z', now), soon: true })
+    // Past its end, its row says it is signed out instead: no end to say.
+    expect(ends('2026-10-01T12:00:00.000Z')).toBeUndefined()
+    expect(accountEntry(usual('acc_1', 'signed_in'), now).ends).toBeUndefined()
   })
 
   it('says Go and Zen each in its own state, the one that refused work lately as its button, and no provider it can’t place', () => {

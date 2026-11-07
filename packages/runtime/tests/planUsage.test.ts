@@ -1,3 +1,7 @@
+import { mkdirSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { assert, describe, it } from '@effect/vitest'
 import type { PlanUsage as PlanUsageView } from '@althar/contracts'
 import { Ids, newId } from '@althar/domain'
@@ -16,7 +20,7 @@ import { PlanUsage } from '../src/PlanUsage'
 import { Queries } from '../src/Queries'
 import { SignIns } from '../src/SignIns'
 import { usableModels } from '../src/usableModels'
-import { fakeAgents, runtime, task, until } from './support'
+import { fakeAgents, fakeSignInEnds, runtime, task, until } from './support'
 
 /*
  * Plan usage (docs/plans/plan-usage.md): where each account's windows come
@@ -1061,6 +1065,74 @@ describe('telling the window', () => {
       yield* TestClock.adjust(Duration.millis(250))
       const heard = yield* plans(events)
       assert.strictEqual(accountOf(heard, 'claude-code').windows.length, 2)
+    }).pipe(Effect.provide(Layer.fresh(withUsage({})))),
+  )
+})
+
+describe('a sign-in that ends soon (DEV-196)', () => {
+  const at = (hours: number) => new Date(hours * 3_600_000).toISOString()
+  const ending = (endsAt: string) =>
+    Effect.acquireRelease(
+      Effect.sync(() => fakeSignInEnds.set('claude-code', endsAt)),
+      () => Effect.sync(() => fakeSignInEnds.delete('claude-code')),
+    )
+
+  it.effect('says nothing while the end is days off, and shows the end on its account', () =>
+    Effect.gen(function* () {
+      yield* ending(at(24 * 10))
+      const view = yield* (yield* PlanUsage).now(true)
+      assert.isUndefined(view.endings)
+      const [account] = yield* (yield* Accounts).of('claude-code')
+      assert.strictEqual((yield* (yield* SignIns).account(account!, true)).endsAt, at(24 * 10))
+    }).pipe(Effect.scoped, Effect.provide(Layer.fresh(withUsage({})))),
+  )
+
+  it.effect('is raised within its last days, for that agent alone, and stays aside once put aside', () =>
+    Effect.gen(function* () {
+      yield* ending(at(30))
+      const usage = yield* PlanUsage
+      const [account] = yield* (yield* Accounts).of('claude-code')
+      const raised = (yield* usage.now(true)).endings ?? []
+      assert.deepStrictEqual(raised, [
+        {
+          agentId: 'claude-code',
+          agentName: 'Fake claude-code',
+          accountId: account!.id,
+          accountName: account!.name,
+          several: false,
+          endsAt: at(30),
+        },
+      ])
+      yield* usage.dismiss(account!.id, at(30))
+      assert.isUndefined((yield* usage.now(true)).endings)
+      // Put aside, it stays aside after the sign-in has ended too.
+      yield* TestClock.adjust(Duration.hours(31))
+      assert.isUndefined((yield* usage.now(true)).endings)
+      // Signed in again, with an end of its own: its last days raise it once more.
+      fakeSignInEnds.set('claude-code', at(31 + 24 * 5))
+      // Read again once its last check is older than a minute, as the five-minute reading does.
+      yield* TestClock.adjust(Duration.minutes(2))
+      assert.strictEqual((yield* usage.now(true)).endings?.[0]?.endsAt, at(31 + 24 * 5))
+    }).pipe(Effect.scoped, Effect.provide(Layer.fresh(withUsage({})))),
+  )
+
+  it.effect('is put aside only for an account there is, and what was kept of it goes with the account', () =>
+    Effect.gen(function* () {
+      const usage = yield* PlanUsage
+      const accounts = yield* Accounts
+      const sql = yield* SqlClient.SqlClient
+      const kept = (accountId: string) => sql<{ key: string }>`SELECT key FROM settings WHERE key = ${`sign_in_ending:${accountId}`}`
+      const refused = yield* Effect.flip(usage.dismiss('acc_nobody', at(30)))
+      assert.strictEqual(refused._tag, 'NotFound')
+      assert.lengthOf(yield* kept('acc_nobody'), 0)
+      // An account another tool's folder holds, so removing it signs nothing out.
+      const home = join(mkdtempSync(join(tmpdir(), 'althar-home-')), 'claude-work')
+      mkdirSync(home)
+      const work = yield* accounts.add({ agentId: 'claude-code', name: 'work', folder: home })
+      yield* usage.dismiss(work.id, at(30))
+      assert.lengthOf(yield* kept(work.id), 1)
+      yield* accounts.remove(work.id)
+      assert.lengthOf(yield* kept(work.id), 0)
     }).pipe(Effect.provide(Layer.fresh(withUsage({})))),
   )
 })

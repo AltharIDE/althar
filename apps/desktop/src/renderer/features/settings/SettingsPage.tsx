@@ -110,9 +110,11 @@ export interface SettingsPageProps {
    * its tab opens, with its sign-in started, once while the page shows.
    */
   signIn?: string
+  /** Its account to sign in again, where one is meant: one whose sign-in ends soon. */
+  account?: string
 }
 
-export function SettingsPage({ start, section, onSection, onTask, signIn }: SettingsPageProps) {
+export function SettingsPage({ start, section, onSection, onTask, signIn, account: meant }: SettingsPageProps) {
   const preferences = usePreferences()
   const sounds = useSounds()
   const connections = useConnections()
@@ -132,6 +134,7 @@ export function SettingsPage({ start, section, onSection, onTask, signIn }: Sett
     if (wanted.installed && wanted.problem === null) {
       // The account signed out, else one a provider within it refused (OpenCode Go), else its first.
       const account =
+        wanted.accounts.find((one) => one.id === meant) ??
         wanted.accounts.find((one) => one.signIn === 'signed_out') ??
         wanted.accounts.find((one) => one.providers?.some((provider) => provider.refusedAt !== null) === true) ??
         wanted.accounts[0]

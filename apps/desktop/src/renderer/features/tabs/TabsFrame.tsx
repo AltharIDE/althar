@@ -10,6 +10,7 @@ import { FinderView } from '../finder/FinderView'
 import { QuickSettings } from '../settings/QuickSettings'
 import { CarriedAtFoot, CarriedBack } from '../../shared/dictation/Carried'
 import { PlanBar } from '../usage/PlanBar'
+import { SignInEnding } from '../usage/SignInEnding'
 import { useWindowChrome } from '../../shared/useWindowChrome'
 import { useOnline } from '../../shared/useOnline'
 import { useUpdate } from '../../shared/useUpdate'
@@ -147,6 +148,7 @@ function TabsBar({
           <PlanBar open={usage.open} onOpenChange={usage.set} />
           {!online && <Offline />}
           {update.ready !== null && <UpdateReady {...update.ready} />}
+          <SignInEnding />
           <QuickSettings open={quick} onOpenChange={onQuick} onSettings={tabs.openSettings} />
         </>
       }
