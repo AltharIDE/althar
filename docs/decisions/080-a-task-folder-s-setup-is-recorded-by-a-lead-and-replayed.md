@@ -48,7 +48,9 @@
   - **A replay that fails never holds the task up.** The lead starts, told
     what failed, with the end of what it printed, and asked to get the
     folder ready and record the setup that works, which replaces the old
-    one for every later task.
+    one for every later task, unless the person edited it: then the lead is
+    told to report and ask, and `record_setup` refuses until it is called
+    with `person_agreed`.
   - **Secret files are copied by default.** `.env` and the like are copied
     as any other file the setup names; the person asked for it. The lead's
     sandbox can read the person's checkout already, so asking for each file
@@ -59,7 +61,11 @@
     in place and kept as the person leaves them (`SetRepository`'s
     `setup`). Lines and boxes, not named steps: the person turned down a
     table of steps and plain text boxes alike. A change is checked as a
-    lead's is, and replaces what the lead recorded.
+    lead's is, and replaces what the lead recorded. The person's edit is
+    kept with no task id and is theirs: a lead's `record_setup` is refused
+    until it passes `person_agreed`, which the lead declares itself (Althar
+    doesn't yet check that the person said yes). Clearing it in Running
+    keeps nothing, so the next lead records it again.
 - **Alternatives considered:**
   - **Althar suggests a setup from the repository, the person confirms
     it.** A step the person has to take for every project, and a guess from

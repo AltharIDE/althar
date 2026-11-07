@@ -26,7 +26,7 @@ test('changes a repository’s setup in Running: kept, read back, and a refused 
     const group = page.getByRole('region', { name: 'Before each task starts' })
     const commands = page.getByRole('textbox', { name: /: commands$/ })
     const files = page.getByRole('textbox', { name: /: files copied from your checkout$/ })
-    await expect(commands).toHaveAttribute('placeholder', 'The first task’s lead fills this in.')
+    await expect(commands).toHaveAttribute('placeholder', 'None yet: the first task’s agent sets it.')
     await group.scrollIntoViewIfNeeded()
     await still(page)
     await group.screenshot({ path: '../../test-results/setups-empty.png', scale: 'css' })

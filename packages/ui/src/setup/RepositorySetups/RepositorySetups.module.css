@@ -69,6 +69,19 @@
 .part:first-child {
   border-top: 0;
 }
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--paper-plain);
+}
+.note {
+  font-size: 12px;
+  color: var(--t-3);
+}
 .error {
   margin: 0;
   font-size: 12.5px;

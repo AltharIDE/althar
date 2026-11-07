@@ -437,7 +437,8 @@ export interface Client {
     readonly changeTarget?: ChangeTarget
     /** Answers the offer to push a fork's branches upstream with no. */
     readonly notNow?: boolean
-    readonly setup?: RepositorySetup
+    /** The setup the person edited; null clears it, for a lead to record again. */
+    readonly setup?: RepositorySetup | null
     /** The branch new tasks work toward there (ADR-093); null for its default branch. */
     readonly workToward?: string | null
   }) => Promise<void>

@@ -210,7 +210,7 @@ export const repositories: ReadonlyArray<ProjectRepository> = [
     role: 'service',
     fork: null,
     tasks: 1,
-    setup: { copy: ['.env'], commands: ['bun install --frozen-lockfile'] },
+    setup: { copy: ['.env'], commands: ['bun install --frozen-lockfile'], by: 'agent' },
   },
   {
     id: 'repo_web',

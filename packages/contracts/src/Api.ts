@@ -602,6 +602,10 @@ export const RepositorySetup = Schema.Struct({
 })
 export type RepositorySetup = typeof RepositorySetup.Type
 
+/** A repository's kept setup as the settings show it: who has it as it is, a lead who recorded it or the person who edited it (an agent asks before replacing the person's). */
+export const KeptSetup = Schema.Struct({ ...RepositorySetup.fields, by: Schema.Literals(['agent', 'person']) })
+export type KeptSetup = typeof KeptSetup.Type
+
 export const ProjectRepository = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
@@ -631,7 +635,7 @@ export const ProjectRepository = Schema.Struct({
   /** Tasks under way that change it: they keep it if it is left out. */
   tasks: Schema.Number,
   /** How each new task's folder of it gets ready (ADR-080): the files copied from the checkout here, and the commands; null until a lead records it. */
-  setup: Schema.NullOr(RepositorySetup),
+  setup: Schema.NullOr(KeptSetup),
   /** Its default branch, as its remote says: main. */
   defaultBranch: Schema.optional(Schema.String),
   /** The branch new tasks work toward there, where it isn't the default (ADR-093): release/0.8.0; null or absent for the default. */
@@ -3634,7 +3638,8 @@ export const Api = RpcGroup.make(
       role: Schema.optional(RepositoryRole),
       changeTarget: Schema.optional(ChangeTarget),
       notNow: Schema.optional(Schema.Boolean),
-      setup: Schema.optional(RepositorySetup),
+      /** The setup the person edited, kept as theirs; null clears it, so a lead records it again. Worktrees made already are left as they are. */
+      setup: Schema.optional(Schema.NullOr(RepositorySetup)),
       /** The branch new tasks work toward there (ADR-093); null for its default branch. Tasks made already keep theirs. */
       workToward: Schema.optional(Schema.NullOr(Schema.String)),
     },

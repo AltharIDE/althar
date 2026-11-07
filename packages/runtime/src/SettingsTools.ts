@@ -594,7 +594,7 @@ export class SettingsTools extends Context.Service<
                   yield* projects.setRepository({
                     projectId,
                     repositoryId: repository.id,
-                    setup: (value as { copy: ReadonlyArray<string>; commands: ReadonlyArray<string> } | null) ?? { copy: [], commands: [] },
+                    setup: value as { copy: ReadonlyArray<string>; commands: ReadonlyArray<string> } | null,
                   })
               const patterns = Object.fromEntries(
                 Object.entries(pick(change, ['branchPattern', 'titlePattern'])).filter(([, value]) => value !== undefined),

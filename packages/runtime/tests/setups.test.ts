@@ -310,6 +310,9 @@ describe('what sets up a worktree', () => {
       replayed,
       "When the worktree was made, Althar set it up with the repository's recorded setup, and that went through: what it installs and copies is there, so don't run it again.",
     )
+    // One the person edited that failed: the lead isn't to replace it on its own.
+    const mine = toldOf([{ name: 'meridian', setUp: { ...done, code: 1 }, recorded: true, byPerson: true, checkout: null }], false)
+    assert.include(mine, "The person edited this setup themselves, so don't replace it with record_setup on your own")
     // Nothing ran and nothing recorded: only the ask.
     assert.match(
       toldOf([{ name: 'meridian', setUp: { ...done, command: null }, recorded: false, checkout: null }], false),
