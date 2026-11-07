@@ -5,7 +5,7 @@ import { type CommandEnvelope, type ProjectId, type WorksIn } from '@althar/doma
 import type { Commands, Ledger } from '@althar/persistence-sqlite'
 import { AUTOMATION_DEFAULTS, type AutomationDefinition, knownModelName, Schedule, scheduleInLine } from '@althar/contracts'
 import { Priority, StatusCategory } from '@althar/connectors'
-import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema, Stream } from 'effect'
+import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema, Semaphore, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { thisDevice } from './device'
@@ -1440,7 +1440,21 @@ export class Coordinator extends Context.Service<
           return { agentId, model: pick.model ?? null, ...(effort === null ? {} : { effort }) }
         })
 
+      /**
+       * A task is planned one call at a time, from looking for the plan this call already made to making one: a call repeated
+       * while its first is still being handled (the connection dropped, the agent asked again) waits, then finds that plan.
+       */
+      const planning = new Map<string, Semaphore.Semaphore>()
       const propose = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const { task: slug } = yield* read(Proposed, input, PLAN_SHAPE)
+          const task = yield* taskOf(access, slug)
+          const lock = planning.get(task.id) ?? Semaphore.makeUnsafe(1)
+          planning.set(task.id, lock)
+          return yield* lock.withPermits(1)(proposeLocked(access, input))
+        })
+
+      const proposeLocked = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const proposed = yield* read(Proposed, input, PLAN_SHAPE)
           const task = yield* taskOf(access, proposed.task)

@@ -1399,6 +1399,32 @@ describe("the coordinator's tools", () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('makes one plan when the same propose_plan arrives again while its first is still being handled', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, threadId } = yield* opened
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      yield* callTool(access, 'draft_task', { title: 'Shape it' })
+      const plan = { task: 'shape-it', lead: { agent: 'codex', model: 'large' } }
+      const answers = yield* Effect.all(
+        [callTool(access, 'propose_plan', plan), callTool(access, 'propose_plan', plan), callTool(access, 'propose_plan', plan)],
+        {
+          concurrency: 'unbounded',
+        },
+      )
+      assert.lengthOf(
+        answers.filter((answer) => answer.includes('Planned shape-it.')),
+        1,
+      )
+      assert.lengthOf(
+        answers.filter((answer) => answer.includes('already proposed')),
+        2,
+      )
+      // Every plan ever made for the task, replaced ones included: one, so the countdown was never restarted.
+      assert.lengthOf(yield* sql`SELECT id FROM task_plans`, 1)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('keeps the connection an agent holds for its next call open for minutes, not Node’s five seconds', () =>
     Effect.gen(function* () {
       const { projectId, threadId } = yield* opened
