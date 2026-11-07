@@ -86,8 +86,8 @@ describe('a piece of evidence', () => {
   it('shows a long log’s last lines, those before them a click away', () => {
     const printed = Array.from({ length: 15 }, (_, index) => `line ${index + 1}`).join('\n')
     const log = pieceOf(piece({ kind: 'log', caption: 'The server', text: `${printed}\n` }), 'l')
-    expect(log).toMatchObject({ form: 'output', earlier: ['line 1', 'line 2', 'line 3'] })
-    expect(log.form === 'output' && [log.lines[0], log.lines.at(-1), log.lines.length]).toEqual(['line 4', 'line 15', 12])
+    expect(log).toMatchObject({ form: 'output', earlier: Array.from({ length: 7 }, (_, index) => `line ${index + 1}`) })
+    expect(log.form === 'output' && [log.lines[0], log.lines.at(-1), log.lines.length]).toEqual(['line 8', 'line 15', 8])
   })
 
   it('says a note with nothing in it by its caption alone', () => {

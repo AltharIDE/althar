@@ -23,6 +23,7 @@ export const PAUSE_MS = 120
 /** Where a found task stands, as the finder says it in a word. */
 export const stateOf = (task: FoundTask): FoundState => {
   switch (task.phase) {
+    case 'drafting':
     case 'planned':
     case 'held':
       return FoundState.Planned

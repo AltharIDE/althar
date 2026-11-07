@@ -443,7 +443,7 @@ describe('tool calls', () => {
     )
   })
 
-  it('says what it does as it stands: running, done, or the plain verb when declined, failed or stopped', () => {
+  it('says what it does as it stands: running, done, or the plain verb when declined, failed or stopped, but a failed command ran', () => {
     expect(toolStateOf('completed', false)).toBe(ToolState.Done)
     expect(toolStateOf('failed', true)).toBe(ToolState.Failed)
     expect(toolStateOf('in_progress', true)).toBe(ToolState.Running)
@@ -454,7 +454,8 @@ describe('tool calls', () => {
       [ToolState.Running, ToolState.Done, ToolState.Declined, ToolState.Failed, ToolState.Cancelled].map((state) =>
         verbFor(ToolKind.Run, state),
       ),
-    ).toEqual(['Running', 'Ran', 'Run', 'Run', 'Run'])
+    ).toEqual(['Running', 'Ran', 'Run', 'Ran', 'Run'])
+    expect(verbFor(ToolKind.Edit, ToolState.Failed)).toBe('Edit')
   })
 
   it('says on a refused call who refused it and why, and nothing where the person did', () => {

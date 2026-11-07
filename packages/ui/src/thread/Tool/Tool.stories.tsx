@@ -67,7 +67,7 @@ export const CommandFolded: Story = {
   args: { ...Command.args, defaultOpen: false },
 }
 
-/** Opened, a command becomes a sheet, with Copy in its header. */
+/** Opened, a command shows what it printed under its row; Copy is an icon on the row, shown on hover. */
 export const OpeningACommand: Story = {
   args: { ...Command.args, defaultOpen: false },
   play: async ({ canvasElement }) => {
@@ -76,7 +76,8 @@ export const OpeningACommand: Story = {
     await userEvent.click(row)
     await expect(row).toHaveAttribute('aria-expanded', 'true')
     /* it eases in: wait for the transition to finish */
-    await waitFor(() => expect(c.getByRole('button', { name: 'Copy command' })).toBeVisible())
+    await waitFor(() => expect(c.getByRole('button', { name: /earlier lines/ })).toBeVisible())
+    await expect(c.getByRole('button', { name: 'Copy command' })).toBeInTheDocument()
   },
 }
 
@@ -124,6 +125,21 @@ export const LongCommand: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByText("python3 - <<'EOF' …")).toBeInTheDocument()
+  },
+}
+
+/** Opened, a long command shows whole in its row, each line wrapping under its start, and isn't said again over its output. */
+export const LongCommandOpen: Story = {
+  args: {
+    ...LongCommand.args,
+    copy: LongCommand.args?.target,
+    defaultOpen: true,
+    children: <Terminal lines={['done']} exit={0} />,
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText(/p.write_text/)).toBeInTheDocument()
+    await expect(c.queryByText("python3 - <<'EOF' …")).not.toBeInTheDocument()
   },
 }
 

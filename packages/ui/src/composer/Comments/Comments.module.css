@@ -1,0 +1,136 @@
+/* A comment in the composer: a chip the height of a file's, its crop where a file's glyph would be. */
+.chip {
+  position: relative;
+  display: flex;
+  height: 56px;
+  max-width: 240px;
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  transition: box-shadow var(--fast) var(--ease);
+}
+.chip:hover {
+  box-shadow: inset 0 0 0 1px var(--line-3);
+}
+.open {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 0 34px 0 10px;
+  border: 0;
+  border-radius: inherit;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.thumb {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--n-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: left top;
+}
+.words {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  line-height: 1.25;
+}
+.note {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--t-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.place {
+  overflow: hidden;
+  font: 400 11px var(--mono);
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.remove {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+}
+
+/* the card, on hover: the crop, what was said, then every fact of what it is on */
+.card {
+  display: grid;
+  gap: 10px;
+  text-align: left;
+}
+.crop {
+  display: block;
+  width: 100%;
+  max-height: 140px;
+  object-fit: cover;
+  object-position: left top;
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px var(--line);
+}
+.said {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: start;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--t-1);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.n {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: 9px;
+  background: var(--signal-fill);
+  color: var(--on-signal);
+  font-size: 10.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.thumb .n {
+  margin: 0;
+}
+.facts {
+  font-size: 12px;
+  color: var(--t-2);
+}
+.code {
+  font: 400 11.5px var(--mono);
+  color: var(--t-1);
+  overflow-wrap: anywhere;
+}
+.quote {
+  color: var(--t-1);
+}
+.colour {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
