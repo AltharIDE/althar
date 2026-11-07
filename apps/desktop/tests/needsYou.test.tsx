@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { BoardTask, HomeCall, HomeTask } from '@althar/contracts'
 
 import { BoardView } from '../src/renderer/features/board/BoardView'
-import { lanesOf, yoursOf } from '../src/renderer/features/board/lanes'
+import { lanesOf, yoursByProject, yoursOf } from '../src/renderer/features/board/lanes'
 import { HomeView } from '../src/renderer/features/home/HomeView'
 import { useHome } from '../src/renderer/features/home/useHome'
 import { useStart } from '../src/renderer/features/start/useStart'
@@ -210,4 +210,41 @@ describe('what needs the person', () => {
       if (one.needs) expect(await screen.findByRole('article', { name: one.task.title })).toBeTruthy()
       else expect(screen.queryByRole('article', { name: one.task.title })).toBeNull()
     })
+})
+
+/*
+ * A project's dot is the count of its board's Needs you lane, from the same
+ * cards: the tabs, the switcher and Elsewhere take it from the home
+ * (`yoursByProject`), never a second reading of what waits.
+ */
+describe('a project’s dot', () => {
+  /** What its board counts in Needs you, and what its dot says, from the same cards. */
+  const alike = (tasks: ReadonlyArray<HomeTask>, calls: ReadonlyArray<HomeCall> = []) => [
+    yoursOf(lanesOf({ cursor: 1, tasks: tasks as ReadonlyArray<BoardTask>, calls, settledTotal: 0 })),
+    yoursByProject(home({ tasks: [...tasks], calls: [...calls], projects: [project] })).get(project.id) ?? 0,
+  ]
+
+  it('is lit only where its board has a card in Needs you', () => {
+    // A task kept for later waits behind Settled, out of Needs you.
+    expect(alike([task({ taskId: 'kept', threadId: 'thk', title: 'Kept', phase: 'kept', keptAt: NOW })])).toEqual([0, 0])
+    // A settled task with a call never answered still waits on the person, once, as its board shows it.
+    expect(
+      alike(
+        [task({ taskId: 'settled', threadId: 'ths', title: 'Settled', phase: 'settled', state: 'done', settledAt: NOW })],
+        [{ ...permission, id: 'a3', taskId: 'settled', threadId: 'ths', taskTitle: 'Settled' }],
+      ),
+    ).toEqual([1, 1])
+    // The coordinator's own question, in no task, is theirs too.
+    expect(alike([], [{ ...permission, id: 'a4', taskId: null, threadId: 'thcoord', taskTitle: null }])).toEqual([1, 1])
+    // fnt: its last runs passed, but its pull requests' checks run now, so its board has them in Running and its dot is dark.
+    expect(
+      alike([
+        task({ taskId: 'run1', threadId: 'thr1', title: 'Checks run', phase: 'running' }),
+        task({ taskId: 'run2', threadId: 'thr2', title: 'Fixing', phase: 'running' }),
+        task({ taskId: 'run3', threadId: 'thr3', title: 'Pushing', phase: 'running' }),
+      ]),
+    ).toEqual([0, 0])
+    // A lead stopped with no agent on it waits for the person to carry on or abandon it, as its board says.
+    expect(alike([task({ taskId: 'stop', threadId: 'thp', title: 'Stopped', phase: 'stopped' })])).toEqual([1, 1])
+  })
 })

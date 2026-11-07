@@ -117,3 +117,20 @@ export const replyOf = (answer: PermissionAnswer): Reply => {
 /** The rule that let a request through, in words. */
 export const ruleWordsOf = (rule: AllowedBy): string =>
   'kind' in rule ? text.kinds[rule.kind] : rule.match === 'exact' ? text.exact : text.prefix(rule.pattern)
+
+/** How long a call has waited, in the words a person uses: "40 min", "2 h 5 min". */
+export const waitedFor = (since: string, now: number): string => {
+  const minutes = Math.max(1, Math.floor((now - Date.parse(since)) / 60_000))
+  const hours = Math.floor(minutes / 60)
+  return hours === 0 ? `${minutes} min` : minutes % 60 === 0 ? `${hours} h` : `${hours} h ${minutes % 60} min`
+}
+
+/**
+ * What a call that waits while the person is away says: how long, and where else it reached them. Nothing for one that
+ * reached no other device, which waits where the person is looking.
+ */
+export const waitedWords = (request: Pick<AttentionRequest, 'createdAt' | 'reached'>, now: number): string | undefined => {
+  if (request.reached === undefined) return undefined
+  const at = new Date(request.reached.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+  return `Waiting ${waitedFor(request.createdAt, now)} · sent to your ${request.reached.device} at ${at}`
+}

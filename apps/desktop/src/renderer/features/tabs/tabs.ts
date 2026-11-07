@@ -53,7 +53,11 @@ export const whereOf = (pathname: string): Where => {
   return { kind: 'home' }
 }
 
-/** What waits on the person in a project, as its board counts it: its calls, and its tasks ready for them. */
+/**
+ * What the projects list says waits on the person there, for choosing the tabs
+ * a window opens with before the home is read. A tab's dot is the board's own
+ * count (`yoursByProject`), never this: it is a quick reading, not the rule.
+ */
 export const yoursIn = (project: ProjectSummary): number => project.waiting + project.ready
 
 /**
@@ -90,10 +94,14 @@ export const beside = (open: ReadonlyArray<string>, current: string | null, step
   return all[(at + step + all.length) % all.length] ?? null
 }
 
-/** A project as its tab shows it: its mark, its name, whether a task is under way, and what waits on the person. */
-export const tabOf = (project: ProjectSummary): ProjectTab => {
+/**
+ * A project as its tab shows it: its mark, its name, whether a task is under
+ * way, and what waits on the person there, as its board counts it
+ * (`yoursByProject`).
+ */
+export const tabOf = (project: ProjectSummary, yours: number): ProjectTab => {
   const { seed, ink, name } = refOf(project)
-  return { id: project.id, name, seed, ink, running: project.working > 0, yours: yoursIn(project) }
+  return { id: project.id, name, seed, ink, running: project.working > 0, yours }
 }
 
 const isRoom = (value: unknown): value is Room => Object.values(Room).some((room) => room === value)

@@ -382,6 +382,17 @@ const checkoutTitle = (payload: unknown) =>
     ? `${text(payload, 'repository') || 'Local'} is on another branch`
     : `${text(payload, 'repository') || 'Local'} has uncommitted changes`
 
+/** Where a call that waited reached the person besides the window, and whether its lead was set aside to go on (docs/decisions/097). */
+const reachedOf = (payload: unknown) => {
+  const reached = field(payload, 'reached')
+  const device = text(reached, 'device')
+  const at = text(reached, 'at')
+  return {
+    ...(device === '' || at === '' ? {} : { reached: { device, at } }),
+    ...(field(payload, 'setAside') === true ? { setAside: true } : {}),
+  }
+}
+
 /** A call that waits on the person, as a screen shows it: what was asked, why it waits, and, for a step that needs them, which and why. */
 const callOf = (request: {
   readonly id: string
@@ -420,6 +431,7 @@ const callOf = (request: {
       request.kind === 'permission' ? Schema.decodeUnknownOption(Irreversible)(field(payload, 'irreversible')) : Option.none(),
       { onNone: () => ({}), onSome: (irreversible) => ({ irreversible }) },
     ),
+    ...reachedOf(payload),
     stuck: request.kind === 'stuck' ? stuckOf(payload) : null,
     // What Althar asks before a Local task takes a checkout (ADR-091).
     ...Option.match(request.kind === 'checkout' ? Schema.decodeUnknownOption(CheckoutAsk)(payload) : Option.none(), {
@@ -543,12 +555,19 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
               },
       }
     case 'agent_message':
-    case 'agent_thought':
+    case 'agent_thought': {
+      const answer = field(content, 'answer')
       return {
         ...base,
         kind: row.kind,
-        content: { text: text(content, 'text'), pictures: picturesOf(field(content, 'pictures')), files: filesOf(field(content, 'files')) },
+        content: {
+          text: text(content, 'text'),
+          pictures: picturesOf(field(content, 'pictures')),
+          files: filesOf(field(content, 'files')),
+          ...(typeof answer === 'boolean' ? { answer } : {}),
+        },
       }
+    }
     case 'tool_call': {
       const locations = field(content, 'locations')
       const exit = field(content, 'exit')

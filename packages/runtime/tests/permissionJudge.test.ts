@@ -668,7 +668,7 @@ describe('coordinator permission judgments', () => {
       respond?.('{"decision":"allow","reason":"Deploy the changes."}')
       const decision = yield* Fiber.join(pending)
       assert.strictEqual(decision.decision, 'reject')
-      assert.include(decision.reason ?? '', 'never allow')
+      assert.include(decision.reason ?? '', 'Refused by your rule')
       const [row] = yield* sql<{ actor: string }>`SELECT decided_by_actor_id AS actor FROM decisions`
       assert.strictEqual(row?.actor, instance.systemId)
     }).pipe(

@@ -6,6 +6,7 @@ import type { ToolKind } from '@althar/domain'
 import type { BackgroundEvent } from './background'
 import type { Classified } from './failures'
 import { type SeenSkill, skillLoadedBy, skillsAmong } from './skills'
+import { serverOfCall, serverStatusOf, type ServerStatus } from './serverStatus'
 import { claudeRateLimitWindows, record, type UsageWindow } from './usage'
 import { type McpCall, mcpCallOf } from './mcpCalls'
 
@@ -96,7 +97,16 @@ export interface TerminalReport {
 }
 
 export type SessionEvent =
-  | { readonly _tag: 'AgentMessage'; readonly text: string; readonly messageId?: string }
+  | {
+      readonly _tag: 'AgentMessage'
+      readonly text: string
+      readonly messageId?: string
+      /**
+       * Whether the message is the agent's answer, ending its turn, or a word on the way between its steps, where it says
+       * (`answerOf`); absent where it doesn't.
+       */
+      readonly answer?: boolean
+    }
   /** Something in a message that isn't words: a picture, or a file it points at. */
   | { readonly _tag: 'AgentContent'; readonly content: Handed; readonly messageId?: string }
   | { readonly _tag: 'AgentThought'; readonly text: string }
@@ -117,6 +127,8 @@ export type SessionEvent =
       readonly skill?: string
       /** The person's MCP server and tool it calls, where it is a call to one. */
       readonly mcp?: McpCall
+      /** The person's MCP server it calls, where it is a call to one (`serverStatus.ts`). */
+      readonly server?: string
     }
   | {
       readonly _tag: 'ToolCallUpdate'
@@ -132,6 +144,7 @@ export type SessionEvent =
       readonly terminal?: TerminalReport
       readonly skill?: string
       readonly mcp?: McpCall
+      readonly server?: string
     }
   /** The skills it could see, as it says, whole each time (`skills.ts`). */
   | { readonly _tag: 'SkillsSeen'; readonly skills: ReadonlyArray<SeenSkill> }
@@ -149,7 +162,14 @@ export type SessionEvent =
   | { readonly _tag: 'OptionsChanged'; readonly options: ReadonlyArray<ConfigOption> }
   /** The mode changed. `byAgent` when Althar didn't ask for it, such as a plan session leaving plan mode. */
   | { readonly _tag: 'ModeChanged'; readonly modeId: string; readonly byAgent: boolean }
-  | { readonly _tag: 'Notice'; readonly severity: string; readonly title: string; readonly description?: string }
+  | {
+      readonly _tag: 'Notice'
+      readonly severity: string
+      readonly title: string
+      readonly description?: string
+      /** Where the notice is a server's status: which of the person's MCP servers, and how it stands (`serverStatus.ts`). */
+      readonly server?: { readonly name: string; readonly status: ServerStatus }
+    }
   /**
    * Althar answered a permission request. `optionId` is what was sent to
    * the agent (null when the request was cancelled), and `stopsTurn` says the
@@ -338,11 +358,28 @@ export const normalizeUsage = (usage: acp.Usage | null | undefined): TokenUsage 
         ...defined('cachedWriteTokens', usage.cachedWriteTokens),
       }
 
+/**
+ * Whether a message is the agent's answer: Codex says of each one whether it
+ * is its final answer or commentary on the way, and codex-acp passes that on
+ * to an AIR client, as Althar is, on each of its chunks from the first.
+ * Claude Code and OpenCode don't say.
+ */
+export const answerOf = (meta: unknown): boolean | undefined => {
+  const phase = recordOf(recordOf(recordOf(meta)?.jetbrains)?.air)?.phase
+  return phase === 'final_answer' ? true : phase === 'commentary' ? false : undefined
+}
+
+const serverNoticeOf = (meta: unknown) => {
+  const status = serverStatusOf(meta)
+  return status === undefined ? undefined : { name: status.server, status: status.status }
+}
+
 export const normalize = (update: acp.SessionUpdate): SessionEvent => {
   switch (update.sessionUpdate) {
     case 'agent_message_chunk': {
       const text = textOf(update.content)
-      if (text !== undefined) return { _tag: 'AgentMessage', text, ...defined('messageId', update.messageId) }
+      if (text !== undefined)
+        return { _tag: 'AgentMessage', text, ...defined('messageId', update.messageId), ...defined('answer', answerOf(update._meta)) }
       const handed = handedOf(update.content)
       return handed === undefined
         ? { _tag: 'Other', update: update.sessionUpdate, raw: update }
@@ -366,6 +403,7 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         ...defined('terminal', terminalOf(update._meta)),
         ...defined('skill', skillLoadedBy(update)),
         ...defined('mcp', mcpCallOf(update.title, update._meta)),
+        ...defined('server', serverOfCall(update.title, update._meta)),
       }
     case 'tool_call_update':
       return {
@@ -380,6 +418,7 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         ...defined('terminal', terminalOf(update._meta)),
         ...defined('skill', skillLoadedBy(update)),
         ...defined('mcp', mcpCallOf(update.title ?? '', update._meta)),
+        ...defined('server', serverOfCall(update.title ?? '', update._meta)),
       }
     case 'plan':
       return { _tag: 'Plan', entries: update.entries.map((entry) => ({ content: entry.content, status: entry.status })) }
@@ -404,7 +443,13 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
     case 'current_mode_update':
       return { _tag: 'ModeChanged', modeId: update.currentModeId, byAgent: true }
     case 'notice':
-      return { _tag: 'Notice', severity: update.severity, title: update.title, ...defined('description', update.description) }
+      return {
+        _tag: 'Notice',
+        severity: update.severity,
+        title: update.title,
+        ...defined('description', update.description),
+        ...defined('server', serverNoticeOf((update as { readonly _meta?: unknown })._meta)),
+      }
     case 'available_commands_update': {
       const skills = skillsAmong(update.availableCommands)
       return skills === undefined ? { _tag: 'Other', update: update.sessionUpdate, raw: update } : { _tag: 'SkillsSeen', skills }

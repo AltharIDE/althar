@@ -318,15 +318,45 @@ describe('work, folded', () => {
       items.tool({ status: 'in_progress', locations: [{ path: '/w/meridian/src/a.ts' }] }),
     ]
     const [, turn] = blocksOf(source(thread, true), new Map(), at, '2026-09-29T12:01:12.000Z')
-    expect(turn).toMatchObject({ live: true, took: '1m 12s', doing: 'Reading src/a.ts' })
-    expect(counts(turn)).toEqual({ work: ['tool'], said: ['message'] })
-    // Thinking, it says nothing on the line: the thought itself streams under it, live.
+    // What it said on the way is its work, with its steps; what it does now is its latest step, as it runs.
+    expect(turn).toMatchObject({ live: true, took: '1m 12s', doing: { tool: ToolKind.Read, text: 'Reading src/a.ts' } })
+    expect(counts(turn)).toEqual({ work: ['message', 'tool'], said: [] })
+    // Writing, what it writes stands apart, where its answer will, and no step is said.
+    const writing = blocksOf(source([...thread, items.says('Found it.')], true), new Map(), at)[1]
+    expect(writing).toMatchObject({ doing: null })
+    expect(counts(writing)).toEqual({ work: ['message', 'tool'], said: ['message'] })
+    // Thinking, the line says so, by the thought's latest heading where it has one; the thought itself stays in the work.
     const thinking = blocksOf(source([items.thinks('Hm')], true), new Map(), at)[0]
-    expect(thinking).toMatchObject({ doing: null, work: [{ kind: 'thought', live: true }] })
+    expect(thinking).toMatchObject({ doing: { tool: null, text: 'Thinking' }, work: [{ kind: 'thought', live: true }] })
+    const headed = blocksOf(source([items.thinks('**Reading the call**\n\nIt retries.')], true), new Map(), at)[0]
+    expect(headed).toMatchObject({ doing: { tool: null, text: 'Reading the call' } })
+    // A plan, or Althar's note, isn't a step: before any, it is thinking.
     const planning = blocksOf(source([items.plan([{ content: 'Test', status: 'pending' }])], true), new Map(), at)[0]
-    expect(planning).toMatchObject({ doing: 'Planning' })
+    expect(planning).toMatchObject({ doing: { tool: null, text: 'Thinking' } })
     const noted = blocksOf(source([items.notice({ title: 'Hm' })], true), new Map(), at)[0]
-    expect(noted).toMatchObject({ doing: null })
+    expect(noted).toMatchObject({ doing: { tool: null, text: 'Thinking' } })
+  })
+
+  it('has a running turn’s work over once what it writes after it is its answer: as Codex says, else once it is more than a note', () => {
+    const work = [items.you('What runs?'), items.says('I’ll check the board.'), items.tool({ status: 'completed' })]
+    const writing = (message: ThreadItem) =>
+      blocksOf(source([...work, later(message, 20)], true), new Map(), at, '2026-09-29T12:01:00.000Z')[1]
+    const marked = (text: string, answer: boolean): ThreadItem => {
+      const said = items.says(text)
+      return said.kind === 'agent_message' ? { ...said, content: { ...said.content, answer } } : said
+    }
+    // Codex says so: its answer from its first word, its work as long as it took until then.
+    expect(writing(marked('Two', true))).toMatchObject({ live: true, answering: true, took: '20s', doing: null })
+    // A word on the way, however long, is not: its work goes on.
+    expect(writing(marked('Now the tasks. '.repeat(30), false))).toMatchObject({ answering: false, took: '1m 0s' })
+    // Where the agent doesn't say: a sentence or two is a word on the way; more, or a list, a table or code, is its answer.
+    expect(writing(items.says('Now the second task.'))).toMatchObject({ answering: false })
+    expect(writing(items.says('Two tasks run:\n\n- Checkout\n- Search'))).toMatchObject({ answering: true })
+    expect(writing(items.says('| Task | State |'))).toMatchObject({ answering: true })
+    expect(writing(items.says('word '.repeat(70)))).toMatchObject({ answering: true })
+    // Before any work, nor over, there is no work to fold.
+    expect(blocksOf(source([items.you('Hi'), marked('Hello.', true)], true), new Map(), at)[1]).toMatchObject({ answering: false })
+    expect(blocksOf(source([...work, marked('Two', true)]), new Map(), at)[1]).toMatchObject({ live: false, answering: false })
   })
 
   it("folds all of a turn a step's result ends, and stands the result under it; a task's card is a block of its own", () => {
@@ -469,6 +499,35 @@ describe('tool calls', () => {
     const [turn] = blocksOf(source([refused]), new Map(), at)
     const tool = turn?.kind === 'turn' ? turn.parts.find((part) => part.kind === 'tool') : undefined
     expect(tool).toMatchObject({ state: ToolState.Declined, why: 'Althar’s rules: No writes' })
+  })
+
+  it('keeps a call the person\u2019s own rule refused as the rule\u2019s words, for Althar\u2019s line under it', () => {
+    const refused = items.tool({
+      toolKind: 'execute',
+      declined: true,
+      command: 'rm -rf ~/Library',
+      declinedBy: 'rules',
+      declinedWhy: 'Refused by your rule `rm -rf ~/Library`.',
+    })
+    const [turn] = blocksOf(source([refused]), new Map(), at)
+    const tool = turn?.kind === 'turn' ? turn.parts.find((part) => part.kind === 'tool') : undefined
+    expect(tool).toMatchObject({ state: ToolState.Declined, refused: 'Refused by your rule `rm -rf ~/Library`.' })
+    expect(tool).not.toHaveProperty('why')
+  })
+
+  it('keeps which server was down under a call to it that failed, and nothing under one that went through', () => {
+    const partOf = (status: string) => {
+      const call = items.tool({
+        title: 'mcp__linear__save_issue',
+        toolKind: 'other',
+        status,
+        server: { name: 'linear', down: 'needs-auth', agentId: 'claude-code' },
+      })
+      const [turn] = blocksOf(source([call]), new Map(), at)
+      return turn?.kind === 'turn' ? turn.parts.find((part) => part.kind === 'tool') : undefined
+    }
+    expect(partOf('failed')).toMatchObject({ server: { name: 'linear', down: 'needs-auth', agentId: 'claude-code' } })
+    expect(partOf('completed')).not.toHaveProperty('server')
   })
 
   it('makes a skill loaded a row naming it, and a read of its file a row saying so', () => {

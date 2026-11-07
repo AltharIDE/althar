@@ -1,7 +1,8 @@
+import { ConnectorFailed } from '@althar/connectors'
 import { type PictureReport, type ScreenshotNow, type ScreenshotsOnChange, screenshotsNow } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema, Scope } from 'effect'
+import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema, Scope } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Artifacts } from './Artifacts'
@@ -303,14 +304,17 @@ export class PullRequestScreenshots extends Context.Service<
               earlier,
               leftOut,
               uploads,
-              postedAt: comment.at,
+              postedAt: new Date(comment.at).toISOString(),
               failed: null,
             })
             yield* touchTask(input.taskId)
           }).pipe(
+            Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? Effect.interrupt : Effect.fail(Cause.squash(cause)))),
             // A try that failed is said on the card, until one goes up: not that there was nothing to post, which is said as it is asked.
             Effect.tapError((error) =>
               Effect.gen(function* () {
+                if (!(error instanceof ScreenshotsRefused) && !(error instanceof ConnectorFailed))
+                  yield* Effect.logWarning('Screenshots.post failed', error)
                 if (error instanceof ScreenshotsRefused && error.why === 'none') return
                 const at = yield* Effect.option(changes.pullRequest(input.taskId, input.url))
                 if (Option.isNone(at)) return
@@ -409,7 +413,6 @@ const hostName = (product: string) =>
 
 /** A failure in a few words for the card: a refusal's own, else the host's, else that it failed. */
 const failureWords = (error: unknown): string => {
-  if (typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string' && error.message !== '')
-    return error.message.slice(0, 300)
-  return 'Posting the screenshots failed.'
+  if ((error instanceof ScreenshotsRefused || error instanceof ConnectorFailed) && error.message !== '') return error.message.slice(0, 300)
+  return 'Althar couldn’t post the screenshots.'
 }

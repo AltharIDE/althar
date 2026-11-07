@@ -149,6 +149,8 @@ describe('running a branch or a pull request on a connected code host', () => {
         assert.lengthOf(listed?.pullRequests ?? [], 50)
         assert.isTrue(listed?.more)
         assert.isNull(listed?.note)
+        // A connected host is nothing to connect.
+        assert.isNull(listed?.unconnected)
         assert.deepStrictEqual(listed?.branches, ['main', 'feature/find-a-pro'])
         assert.notInclude(
           (listed?.pullRequests ?? []).map((one) => one.title),
@@ -192,6 +194,25 @@ describe('running a branch or a pull request on a connected code host', () => {
       }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))))
     }).pipe(Effect.scoped)
   })
+
+  it.live(
+    'names a host Althar has no connection to, in the form its remote gives it, and says nothing of pull requests it can’t list',
+    () => {
+      const path = repository()
+      // A self-hosted GitLab nobody connected, written the way git's ssh form does; nothing answers there.
+      git(path, 'remote', 'add', 'origin', 'git@gitlab.fnt.example:fnt/engine.git')
+      return Effect.gen(function* () {
+        const fetches = yield* Fetches
+        const projects = yield* Projects
+        const { projectId } = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
+        const [listed] = yield* fetches.offered(projectId)
+        assert.strictEqual(listed?.unconnected, 'gitlab.fnt.example')
+        assert.deepStrictEqual(listed?.pullRequests, [])
+        // The sentence that told the person to connect it, and what a number does, is gone: the host is named as data.
+        assert.notInclude(listed?.note ?? '', 'A number, as #12')
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {})))))
+    },
+  )
 
   it.live('refuses a pull request’s link on another host or repository, from the coordinator’s run and a lead’s fetch alike', () => {
     const { path, root } = onHost()

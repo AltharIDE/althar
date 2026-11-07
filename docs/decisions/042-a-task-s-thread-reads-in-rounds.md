@@ -1,6 +1,6 @@
 # ADR-042: A task's thread reads in rounds: an ask, then what its lead says first, its work in a line, and what it says last
 
-- **Status:** Accepted; a reviewer's verdict is a line of the thread since [ADR-099](099-thinking-shows-live-then-folds-reviews-are-a-line.md)
+- **Status:** Accepted; since [ADR-099](099-a-turn-s-work-is-one-live-line-then-folds-reviews-are-a-line.md), a reviewer's verdict is a line of the thread, and a round's acknowledgement folds with its work under "Worked for 12m", which says what it is doing while it works in a line of its own
 - **Date:** 2026-10-15
 - **Owner:** Repository maintainers
 - **Context:** A task's thread was hard to follow. Everything one agent did

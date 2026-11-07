@@ -70,6 +70,8 @@ export interface PermissionRequest {
    * under the answers.
    */
   held?: ReactNode
+  /** For a call that waits while the person is away: how long, and where else it reached them. */
+  waited?: ReactNode
   /** The model asking. */
   agent?: ModelInfo
   /** The step it is on. */
@@ -283,6 +285,7 @@ function Card({
   cmd,
   why,
   held,
+  waited,
   agent,
   step,
   prefix,
@@ -398,6 +401,7 @@ function Card({
         focusOnMount={focusOnMount}
         onAnswer={(decision) => onAnswer(decision === Decision.AllowOnce ? { decision, cmd } : { decision, cmd, note: '' })}
         onAll={onAll}
+        waited={waited}
         t={t}
       />
     )
@@ -487,6 +491,12 @@ function Card({
             </div>
           ))}
         </fieldset>
+        {waited && (
+          <p className={s.waited}>
+            <Icon name="clock" size={12} />
+            <span>{waited}</span>
+          </p>
+        )}
         {held && <p className={s.why}>{held}</p>}
         <AskFoot>
           <Button type="submit" variant="signal" kbd="↵">
@@ -535,6 +545,7 @@ function IrreversibleCard({
   focusOnMount,
   onAnswer,
   onAll,
+  waited,
   t,
 }: {
   words: IrreversibleWords
@@ -547,6 +558,8 @@ function IrreversibleCard({
   focusOnMount: PermissionFocus
   onAnswer: (decision: Decision.AllowOnce | Decision.Deny) => void
   onAll: (() => void) | undefined
+  /** How long it has waited, and where else it reached the person. */
+  waited: ReactNode
   t: PermissionText
 }) {
   const act = useRef<HTMLButtonElement>(null)
@@ -587,6 +600,12 @@ function IrreversibleCard({
       <p className={s.from}>
         <Through through={words.through} />
       </p>
+      {waited && (
+        <p className={s.waited}>
+          <Icon name="clock" size={12} />
+          <span>{waited}</span>
+        </p>
+      )}
       <AskFoot>
         <Button variant="quiet" disabled={phase !== null} onClick={() => onAnswer(Decision.Deny)}>
           {t.notNow}

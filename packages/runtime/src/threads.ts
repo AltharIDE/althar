@@ -9,6 +9,7 @@ import {
   type Handed,
   type QuestionField,
   type SeenSkill,
+  serverOfCall,
   type SessionEvent,
 } from '@althar/provider-adapters'
 import { Cause, Clock, Duration, Effect, Exit, Fiber, Scope, Semaphore } from 'effect'
@@ -96,6 +97,8 @@ export interface ItemPlace {
   readonly sandboxed?: boolean
   /** A task's lead, by its agent's name: the thread says which skills it could see. */
   readonly lead?: string
+  /** The same agent's id, so a line about it can lead to its sign-in. */
+  readonly leadId?: string
 }
 
 /** Adds an item at the end of the thread. */
@@ -309,6 +312,8 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
         readonly id: string
         /** The id the agent gave this message, where it gives one. */
         messageId: string | undefined
+        /** It is the agent's answer, or a word on the way, where the agent says (Codex). */
+        answer: boolean | undefined
         text: string
         written: number
         writtenAt: number
@@ -319,10 +324,18 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   let plan: string | undefined
   /** Commands' output as it comes, by tool call, until each ends. */
   const outputs = new Map<string, Output>()
+  /** The person's MCP servers the agent said are down in this session, and how: a call to one that fails says so under it. */
+  const down = new Map<string, 'needs-auth' | 'failed'>()
+  /** Which of the person's servers each call went to, from the event that named it: an update that only says it failed doesn't. */
+  const servers = new Map<string, string>()
   /** Commands that ended, whose output is kept. */
   const finished = new Set<string>()
   const folders = place.folders ?? []
   const where = (itemId: string) => ({ projectId: place.projectId, itemId, folders })
+
+  /** What a message says, and whether it is the agent's answer where it says. */
+  const said = (open: { readonly text: string; readonly answer: boolean | undefined }) =>
+    open.answer === undefined ? { text: open.text } : { text: open.text, answer: open.answer }
 
   /**
    * Writes the message being gathered; its item was placed when its first chunk arrived.
@@ -332,7 +345,7 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   const flush = Effect.gen(function* () {
     const open = gathering
     if (open === undefined) return
-    yield* updateItem(place.projectId, open.id, withHanded({ text: open.text }, open.handed)).pipe(
+    yield* updateItem(place.projectId, open.id, withHanded(said(open), open.handed)).pipe(
       Effect.onExit((exit) =>
         Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)
           ? Effect.void
@@ -344,7 +357,7 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   })
 
   /** The message being gathered, or a new one: what it hands back goes with its words. */
-  const gathered = (kind: 'agent_message' | 'agent_thought', text: string, messageId?: string) =>
+  const gathered = (kind: 'agent_message' | 'agent_thought', text: string, messageId?: string, answer?: boolean) =>
     Effect.gen(function* () {
       // A different kind, or a message id other than the open one's, starts a new item; without ids, chunks run on.
       if (
@@ -356,8 +369,9 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
       // The item is placed when its first chunk arrives, so the thread keeps the order things happened in.
       const open = {
         kind,
-        id: yield* addItem(place, kind, { text }),
+        id: yield* addItem(place, kind, said({ text, answer })),
         messageId,
+        answer,
         text,
         written: text.length,
         writtenAt: yield* Clock.currentTimeMillis,
@@ -367,16 +381,17 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
       return { open, fresh: true }
     })
 
-  const gather = (kind: 'agent_message' | 'agent_thought', text: string, messageId?: string) =>
+  const gather = (kind: 'agent_message' | 'agent_thought', text: string, messageId?: string, answer?: boolean) =>
     Effect.gen(function* () {
-      const { open, fresh } = yield* gathered(kind, text, messageId)
+      const { open, fresh } = yield* gathered(kind, text, messageId, answer)
       if (fresh) return
       if (open.messageId === undefined && messageId !== undefined) open.messageId = messageId
+      if (open.answer === undefined && answer !== undefined) open.answer = answer
       const now = yield* Clock.currentTimeMillis
       open.text += text
       // A long message is written as it grows, so a crash loses only its last few seconds.
       if (open.text.length - open.written >= WRITE_EVERY_CHARACTERS || now - open.writtenAt >= WRITE_EVERY_MILLIS) {
-        yield* updateItem(place.projectId, open.id, withHanded({ text: open.text }, open.handed))
+        yield* updateItem(place.projectId, open.id, withHanded(said(open), open.handed))
         open.written = open.text.length
         open.writtenAt = now
       }
@@ -389,7 +404,7 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
       const now = yield* handedNow(where(open.id), content)
       if (now.pictures.length === 0 && now.files.length === 0) return
       open.handed = together(open.handed, now)
-      yield* updateItem(place.projectId, open.id, withHanded({ text: open.text }, open.handed))
+      yield* updateItem(place.projectId, open.id, withHanded(said(open), open.handed))
       open.written = open.text.length
       open.writtenAt = yield* Clock.currentTimeMillis
     })
@@ -486,7 +501,7 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   const record = (event: SessionEvent) => {
     switch (event._tag) {
       case 'AgentMessage':
-        return gather('agent_message', event.text, event.messageId)
+        return gather('agent_message', event.text, event.messageId, event.answer)
       case 'AgentThought':
         return gather('agent_thought', event.text)
       case 'AgentContent':
@@ -511,6 +526,7 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
             ...(cut.length === 0 ? content : { ...content, cut }),
             ...(event.skill === undefined ? {} : { skill: { names: [event.skill], reported: true } }),
             ...mcpKept(event, existing?.content),
+            ...serverDown(event),
           }
           // Only what it read of the skills its agent listed: an agent that says what it loads has said so.
           const read = (stored: Readonly<Record<string, unknown>>) =>
@@ -539,6 +555,10 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
       case 'SkillsSeen':
         return place.lead === undefined ? Effect.void : Effect.andThen(flush, sawSkills({ ...place, lead: place.lead }, event.skills))
       case 'Notice':
+        if (event.server !== undefined) {
+          if (event.server.status === 'needs-auth' || event.server.status === 'failed') down.set(event.server.name, event.server.status)
+          else down.delete(event.server.name)
+        }
         return notice({ source: 'agent', severity: event.severity, title: event.title, description: event.description })
       case 'AgentFailure':
         return notice({ source: 'agent', severity: event.severity, title: event.classified.message, failure: event.classified.failure })
@@ -552,6 +572,16 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
       default:
         return Effect.void
     }
+  }
+
+  /** A call to a server that was down, once it failed: which, and how, for the thread to say under it. */
+  const serverDown = (event: Extract<SessionEvent, { _tag: 'ToolCall' | 'ToolCallUpdate' }>) => {
+    if (event.server !== undefined) servers.set(event.toolCallId, event.server)
+    const name = event.server ?? servers.get(event.toolCallId) ?? serverOfCall(event.title ?? '')
+    const how = name === undefined ? undefined : down.get(name)
+    return name === undefined || how === undefined || event.status !== 'failed'
+      ? {}
+      : { server: { name, down: how, ...(place.leadId === undefined ? {} : { agentId: place.leadId }) } }
   }
 
   /** The message being gathered, as far as it has come: what a watching client shows while it streams. */

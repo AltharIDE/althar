@@ -1,5 +1,5 @@
 import type { AllowedBy, AttachedFile, FileMention, Picture, ShownPicture, ThreadItem, Unfurl } from '@althar/contracts'
-import { Delivery, PlanState, ToolKind, ToolState } from '@althar/ui'
+import { Delivery, headingOf, oneLine, PlanState, ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar, type PartHanded, type Ran, ranOf } from './handed'
 import { isSending } from './items'
@@ -17,8 +17,12 @@ import { took } from './time'
  * calls, thoughts and plan, and what it said on the way, under how long it
  * worked. Only its last message stays open, or nothing when a step's result
  * follows, since the step's summary is what the person reads. While it runs,
- * the fold says how long it has worked so far and what it is doing now.
- * Before it has said anything, where its reply will start is held for it.
+ * only what it is writing now stands apart, where its answer will; the rest
+ * is its work, which shows how long it has worked so far, what it said on
+ * the way and what it is doing now (ADR-099). Once what it writes after its
+ * work is its answer, its work is over, and folds: where the agent says so
+ * (Codex), or once it is more than a word on the way (`answers`). Before it
+ * has said anything, where its reply will start is held for it.
  *
  * A thought says how long it took (until whatever came next), and the
  * message or thought the running turn is on now is live: still being
@@ -38,6 +42,8 @@ export type Part =
       readonly text: string
       /** Still being written: the running turn's last part. */
       readonly live?: boolean
+      /** It is the agent's answer, ending its turn, or a word on the way between its steps, where the agent says (Codex). */
+      readonly answer?: boolean
     } & HandedParts)
   | {
       readonly kind: 'thought'
@@ -63,6 +69,10 @@ export type Part =
       readonly skills?: { readonly names: ReadonlyArray<string>; readonly reported: boolean }
       /** For a refused call: who refused it and why, as the row says it; absent where the person refused it. */
       readonly why?: string
+      /** For a call the person's own Never rule refused: the words the lead was given, naming the rule; Althar's line under the call says them. */
+      readonly refused?: string
+      /** For a call to one of the person's MCP servers that failed because it was down: which, and how, under it as Althar's line. */
+      readonly server?: NonNullable<ToolContent['server']>
       /** The project's rule that let it through without asking (ADR-018), where one did. */
       readonly allowedBy?: AllowedBy
       /** For a command: its output so far, or how much it printed once it ended (handed.ts). */
@@ -134,10 +144,12 @@ export type Block =
       readonly said: ReadonlyArray<Part>
       /** It is still running. */
       readonly live: boolean
-      /** How long it worked, from its first item to its last, or until now while it runs. */
+      /** It runs, and what it writes now is its answer: its work is over, and folds (`answers`). */
+      readonly answering: boolean
+      /** How long it worked, from its first item to its last, until now while it works, or until it began to answer. */
       readonly took: string
-      /** While it runs, what it is doing now, in a few words. */
-      readonly doing: string | null
+      /** While it runs, what it is doing now, in one line; none while it writes. */
+      readonly doing: Doing | null
       /** What it handed back beside its words: pictures, documents, files. */
       readonly handed: Handed
     }
@@ -287,6 +299,15 @@ export const declinedWords = (by?: 'rules' | 'coordinator' | 'person', why?: str
   return reason ? `${who}: ${reason}` : who
 }
 
+/** What the lead is told of a command the person's Never rule refused, which Althar says under the call (runtime Permissions.ts). */
+const REFUSED = 'Refused by your rule'
+
+type RefusableCall = { readonly declinedBy?: 'rules' | 'coordinator' | 'person'; readonly declinedWhy?: string }
+
+/** The words of a refusal by the person's own rule, where the call was one. */
+export const ruleRefusal = (call: RefusableCall): string | undefined =>
+  call.declinedBy === 'rules' && call.declinedWhy?.startsWith(REFUSED) === true ? call.declinedWhy : undefined
+
 /** A plan step's status, as the kit's. A step still in progress when its turn has ended waits for the next. */
 export const planStateOf = (status: string, turnRunning: boolean): PlanState =>
   status === 'completed' ? PlanState.Done : status === 'in_progress' && turnRunning ? PlanState.Running : PlanState.Queued
@@ -358,7 +379,14 @@ const partOf = (
       const text = live !== undefined && live.length >= item.content.text.length ? live : item.content.text
       return item.kind === 'agent_thought'
         ? { kind: 'thought', id: item.id, text }
-        : { kind: 'message', id: item.id, text, pictures: item.content.pictures, files: item.content.files }
+        : {
+            kind: 'message',
+            id: item.id,
+            text,
+            pictures: item.content.pictures,
+            files: item.content.files,
+            ...(item.content.answer === undefined ? {} : { answer: item.content.answer }),
+          }
     }
     case 'tool_call': {
       const { mcp } = item.content
@@ -394,7 +422,8 @@ const partOf = (
       // A load is a row of its own, naming the skill; a command that printed one stays what it ran, and says so.
       const toolKind = skill !== undefined && ranKind !== ToolKind.Run ? ToolKind.Skill : ranKind
       const state = toolStateOf(item.content.status, turnRunning, item.content.declined)
-      const why = declinedWords(item.content.declinedBy, item.content.declinedWhy)
+      const refused = ruleRefusal(item.content)
+      const why = refused === undefined ? declinedWords(item.content.declinedBy, item.content.declinedWhy) : undefined
       return {
         kind: 'tool',
         id: item.id,
@@ -407,6 +436,8 @@ const partOf = (
         ...(item.content.label === undefined ? {} : { label: item.content.label }),
         ...(item.content.allowedBy === undefined ? {} : { allowedBy: item.content.allowedBy }),
         ...(state === ToolState.Declined && why !== undefined ? { why } : {}),
+        ...(state === ToolState.Declined && refused !== undefined ? { refused } : {}),
+        ...(state === ToolState.Failed && item.content.server !== undefined ? { server: item.content.server } : {}),
         ran: ranOf(item.content, state, outputs.get(item.id)),
         exit: item.content.exit,
         touches: [...item.content.locations.map((location) => location.path), ...item.content.files.map((file) => file.path)],
@@ -481,14 +512,20 @@ const partHanded = (part: Part): PartHanded => {
 }
 
 /**
- * A turn's work and what it said: all but its last message folds, and all of it before a step's result. Pictures it showed
- * the person never fold.
+ * A turn's work and what it said: all but its last message folds, and all of it before a step's result; while it runs,
+ * all but what it is writing now. Pictures it showed the person never fold.
  */
-const splitOf = (parts: ReadonlyArray<Part>, beforeStep: boolean) => {
+const splitOf = (parts: ReadonlyArray<Part>, beforeStep: boolean, running: boolean) => {
   // A turn an error ended says so in the open: there's no answer to come.
   const ending = parts.at(-1)
   const failed = ending?.kind === 'notice' && ending.tone === 'error' ? parts.length - 1 : -1
-  const last = beforeStep ? -1 : parts.findLastIndex((part) => part.kind === 'message')
+  const last = running
+    ? ending?.kind === 'message'
+      ? parts.length - 1
+      : -1
+    : beforeStep
+      ? -1
+      : parts.findLastIndex((part) => part.kind === 'message')
   const open = (part: Part, index: number) => index === last || index === failed || part.kind === 'pictures'
   return {
     work: parts.filter((part, index) => !open(part, index)),
@@ -518,20 +555,44 @@ const timed = (
     return { ...part, took: thought, ...(live ? { live } : {}) }
   })
 
-/** What a running turn is doing, from the last thing it did. A thought shows itself, under the line (the turn's `thinking`). */
-const doingOf = (work: ReadonlyArray<Part>): string | null => {
-  const last = work.at(-1)
-  switch (last?.kind) {
-    case 'tool':
-      return `${last.verb} ${last.target}`
-    case 'plan':
-      return text.planning
-    default:
-      return null
-  }
+/** What a running turn is doing now, as its one line says it: a step, by the kind of tool it is, or what it thinks about. */
+export interface Doing {
+  /** The kind of tool it is running, for its icon; null while it thinks. */
+  readonly tool: ToolKind | null
+  readonly text: string
 }
 
-export const text = { thinking: 'Thinking', planning: 'Planning' }
+/**
+ * What a running turn is doing now, from its latest step: the tool it runs,
+ * or ran last, as it runs ("Reading MEMORY.md"), until the next replaces it;
+ * a thought by its latest heading, where it has one (Codex's), else
+ * Thinking; Thinking too before any step. What it says, its plan and
+ * Althar's notes aren't steps. While it writes, none: its words are.
+ */
+export const doingOf = (work: ReadonlyArray<Part>, writing: boolean): Doing | null => {
+  if (writing) return null
+  const step = work.findLast((part) => part.kind === 'tool' || part.kind === 'thought')
+  if (step?.kind === 'tool') return { tool: step.toolKind, text: `${verbs[step.toolKind].running} ${oneLine(step.target)}` }
+  return { tool: null, text: (step?.kind === 'thought' ? headingOf(step.text) : null) ?? text.thinking }
+}
+
+/**
+ * How long what an agent writes after its steps may grow, where it doesn't say whether it is its answer (Claude Code,
+ * OpenCode), before it reads as one: what an agent says between its steps is a sentence or two.
+ */
+const NOTE_LENGTH = 280
+/** A list, a heading, a table or code: what an answer has, and a word on the way between steps doesn't. */
+const ANSWER_BLOCK = /^ {0,3}(?:[-*+] |\d{1,3}[.)] |#{1,6} |```|~~~|\|)/m
+
+/**
+ * What a turn writes after its steps is its answer, ending its turn, rather than a word on the way to its next step: where
+ * the agent says which (Codex), as it says; else once it is more than a note, longer than a sentence or two, or with a
+ * list, a heading, a table or code. Should a step follow after all, it was a word on the way, and its work goes on.
+ */
+export const answers = (message: { readonly text: string; readonly answer?: boolean }): boolean =>
+  message.answer ?? (message.text.trim().length > NOTE_LENGTH || ANSWER_BLOCK.test(message.text))
+
+export const text = { thinking: 'Thinking' }
 
 /** The blocks of a thread, oldest first, with what is still being written but not yet read at the end. */
 export const blocksOf = (
@@ -576,6 +637,7 @@ export const blocksOf = (
       work: [],
       said: [],
       live: false,
+      answering: false,
       took: '',
       doing: null,
       handed: handedBy([], null),
@@ -735,15 +797,20 @@ export const blocksOf = (
     const span = known === undefined ? undefined : { ...known, to: endOf(index, known) }
     const running = index === live
     const parts = timed(block.parts, atOf, running, span?.to)
-    const { work, said } = splitOf(parts, !running && merged[index + 1]?.kind === 'step')
+    const { work, said } = splitOf(parts, !running && merged[index + 1]?.kind === 'step', running)
+    // Running, what it writes after its work may be its answer: its work is over then, as long as it took until it began it.
+    const writing = running ? parts.at(-1) : undefined
+    const answer = writing?.kind === 'message' && work.length > 0 && answers(writing) ? writing : undefined
+    const until = answer === undefined ? (running ? now : span?.to) : (atOf.get(answer.id) ?? now)
     return {
       ...block,
       parts,
       work,
       said,
       live: running,
-      took: span === undefined ? '' : took(span.from, running ? now : span.to),
-      doing: running ? doingOf(work) : null,
+      answering: answer !== undefined,
+      took: span === undefined || until === undefined ? '' : took(span.from, until),
+      doing: running ? doingOf(work, writing?.kind === 'message') : null,
       handed: handedBy(block.parts.map(partHanded), worktree),
     }
   })
