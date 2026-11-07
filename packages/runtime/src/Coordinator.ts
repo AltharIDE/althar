@@ -1472,7 +1472,7 @@ export class Coordinator extends Context.Service<
       /**
        * Puts a task's lead and reviewer on other models, efforts or agents, as the task's team dialog does: from the lead's next
        * turn, never in the one it is in, by the same handover as its model picker, which gives the new agent the thread so far;
-       * the reviewer until its review round starts, and from the next round during one. A step held for an agent's usage limit goes
+       * the reviewer until its review round starts, and from the next round during one. The lead's own step, held for an agent's usage limit, goes
        * to the lead named at once, as the held card's Hand over does.
        */
       const changeLead = (access: ToolAccess, input: unknown) =>
@@ -1488,11 +1488,19 @@ export class Coordinator extends Context.Service<
           const named = yield* modelNamer
           const said: Array<string> = []
           const sql = yield* SqlClient.SqlClient
+          // Only the lead's own step held for a usage limit goes to the lead named at once; a held review is the reviewer's, and the lead
+          // named for it changes from its next turn, as for any task at work.
           const [held] = yield* sql<{ one: number }>`
             SELECT 1 AS one FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
-            JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.id} AND a.state = 'held' AND a.hold_reason = 'usage_limit' LIMIT 1`
+            JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.id} AND a.state = 'held' AND a.hold_reason = 'usage_limit'
+            AND n.node_key <> 'review' LIMIT 1`
           if (lead !== undefined && held !== undefined) {
-            const answer = { kind: 'retry' as const, agentId: lead.agentId, ...(lead.model === null ? {} : { model: lead.model }) }
+            const answer = {
+              kind: 'retry' as const,
+              agentId: lead.agentId,
+              ...(lead.model === null ? {} : { model: lead.model }),
+              ...(lead.effort == null ? {} : { effort: lead.effort }),
+            }
             yield* (yield* Runs).handOverHeld({
               envelope: yield* envelope('task.hand_over_held', { taskId: task.id, answer }, undefined, instance.coordinatorId),
               taskId: task.id,
@@ -2526,7 +2534,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'change_lead',
-          "Changes who leads or reviews a task, as its Change the team dialog does, at any time before it merges. The lead changes from its next turn, never in the one it is in: another model, effort or agent takes over as the task's model picker and Hand over do, briefed with the thread so far, and message, where you give one, is said to it first. The reviewer changes until its review round starts, and from the next round during one; null for review removes it, and it can't change once the review is done. Name models as list_models writes them. A step held for an agent's usage limit goes to the lead named at once, as the held card's Hand over does. It acts at once, with a line in your thread and the task's.",
+          "Changes who leads or reviews a task, as its Change the team dialog does, at any time before it merges. The lead changes from its next turn, never in the one it is in: another model, effort or agent takes over as the task's model picker and Hand over do, briefed with the thread so far, and message, where you give one, is said to it first. The reviewer changes until its review round starts, and from the next round during one; null for review removes it, and it can't change once the review is done. Name models as list_models writes them. The lead's own step, held for an agent's usage limit, goes to the lead named at once, as the held card's Hand over does. It acts at once, with a line in your thread and the task's.",
           {
             type: 'object',
             properties: {
