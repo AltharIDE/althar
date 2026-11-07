@@ -42,6 +42,7 @@ import { checkNow, startUpdates } from './updater'
 import type { UpdateGlance, Updates } from './updates'
 import { installOf, usageData } from './usageData'
 import { masker } from '../logs/mask'
+import { outsideOf } from './browser/addresses'
 import { browserAgent } from './browser/devices'
 import { handlePages } from './browser/ipc'
 import { ownersOnDisk, partitionsIn, type Pages, startPages } from './browser/pages'
@@ -825,6 +826,8 @@ const openWindow = () => {
   window.on('unmaximize', () => window.webContents.send('althar:maximized', false))
   window.on('closed', () => {
     windows.delete(window)
+    // The pages it showed stay, hidden, for a window opened after to show again.
+    pages?.windowClosed(window)
     // Off a Mac, closing Althar's last window quits, as it did before the edge kept pages of its own open, unless the person chose to keep working in the background.
     if (windows.size === 0 && process.platform !== 'darwin' && !keepingOn) quitWhenNoneLeft()
   })
@@ -1055,12 +1058,19 @@ void ready.then(() => {
     overlay: () => overlay,
     keep: () => preferences.browserCookies,
     partitions: partitionsIn(app.getPath('userData')),
-    outside: openOutside,
+    // A page's own address goes out as it is, plain http: on another host too, where a link from the window's own page wouldn't.
+    outside: (address) => {
+      const out = outsideOf(address)
+      if (out !== null) void shell.openExternal(out)
+    },
     tell: (state) => {
       for (const window of windows) if (!window.isDestroyed()) window.webContents.send('althar:page', state)
     },
     pressed: (owner, key) => {
       for (const window of windows) if (!window.isDestroyed()) window.webContents.send('althar:page-key', owner, key)
+    },
+    closed: (owner) => {
+      for (const window of windows) if (!window.isDestroyed()) window.webContents.send('althar:page-closed', owner)
     },
     chrome: process.versions.chrome,
     agent: browserAgent(app.userAgentFallback),

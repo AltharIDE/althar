@@ -264,8 +264,8 @@ export interface Host {
 export interface PagesHost {
   /** Opens an address beside the owner's conversation (typed, a link, a run's); how the page then stands, or null for an owner that can't have one. */
   readonly open: (owner: string, address: string) => Promise<PageState | null>
-  /** How the owner's page stands, where it has one. */
-  readonly state: (owner: string) => Promise<PageState | null>
+  /** How each page open stands, for a window that opened after them. */
+  readonly states: () => Promise<ReadonlyArray<PageState>>
   /** Lays the page over the window where it keeps its place, in the window's pixels; null takes it off. Sent each frame of a drag. */
   readonly show: (owner: string, panel: { x: number; y: number; width: number; height: number } | null) => void
   readonly move: (owner: string, move: PageMove) => Promise<void>
@@ -281,7 +281,6 @@ export interface PagesHost {
   readonly still: (owner: string) => Promise<string | null>
   /** Hides the page while something of the window's is over it, and shows it again. */
   readonly cover: (owner: string, covered: boolean) => Promise<void>
-  readonly focus: (owner: string) => Promise<void>
   /** The page, or the download it was refused, in the person's browser. */
   readonly outside: (owner: string, what: 'page' | 'download') => Promise<void>
   /** Takes away the line under the page's bar. */
@@ -296,6 +295,8 @@ export interface PagesHost {
   readonly onState: (listener: (state: PageState) => void) => () => void
   /** Calls `listener` as the person presses, in a page, a key the window acts on. */
   readonly onKey: (listener: (owner: string, key: PageKey) => void) => () => void
+  /** Calls `listener` as a page closes of itself, its task done or its project removed. */
+  readonly onClosed: (listener: (owner: string) => void) => () => void
 }
 
 export interface Services {

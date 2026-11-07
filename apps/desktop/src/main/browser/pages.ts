@@ -51,9 +51,10 @@ export interface PagesOptions {
   readonly partitions: string
   /** Opens a web address in the person's browser. */
   readonly outside: (address: string) => void
-  /** Tells every window of Althar's how a page stands, and what the person pressed in one. */
+  /** Tells every window of Althar's how a page stands, what the person pressed in one, and that one closed of itself (its task done). */
   readonly tell: (state: PageState) => void
   readonly pressed: (owner: string, key: PageKey) => void
+  readonly closed: (owner: string) => void
   /** The Chromium the app runs, for a mobile browser's user agent. */
   readonly chrome: string
   /** Electron's own user agent, made Chrome's. */
@@ -290,6 +291,8 @@ export const startPages = (options: PagesOptions) => {
     }
     if (mod(input) && !input.shift && key.toLowerCase() === 'l') {
       event.preventDefault()
+      // The keys go to the window's address field from here on, not the page.
+      if (page.window !== null && !page.window.isDestroyed()) page.window.webContents.focus()
       return options.pressed(page.owner.id, 'address')
     }
     if ((mod(input) && !input.shift && key.toLowerCase() === 'r') || key === 'F5') {
@@ -415,15 +418,33 @@ export const startPages = (options: PagesOptions) => {
     await call(page, `pins(${JSON.stringify(shown)})`)
   }
 
+  /** Takes the view off its window, where that window is still there to take it from. */
+  const detach = (page: Page) => {
+    if (page.window !== null && !page.window.isDestroyed()) page.window.contentView.removeChildView(page.view)
+    page.window = null
+  }
+
+  /** Hides a page no conversation shows now: it stays, where it was, until it is shown again or put to sleep. */
+  const hide = (page: Page) => {
+    detach(page)
+    page.panel = null
+    page.covered = false
+    hidings += 1
+    page.hiddenSince = hidings
+  }
+
   const close = (page: Page) => {
     pages.delete(page.owner.id)
-    page.window?.contentView.removeChildView(page.view)
-    page.window = null
+    detach(page)
     downloads.delete(page.contents.id)
     if (!page.contents.isDestroyed()) page.contents.close()
   }
 
-  /** Closes the pages hidden longest, past the few kept, remembering where each was. */
+  /**
+   * Closes the pages hidden longest, past the few kept, remembering where
+   * each was. Asleep, a page isn't closed for the person: it opens again
+   * where it was, its session as it was, so nothing it kept is cleared.
+   */
   const sleep = () => {
     const hidden = [...pages.values()].filter((page) => page.panel === null).sort((a, b) => a.hiddenSince - b.hiddenSince)
     for (const page of hidden.slice(0, Math.max(0, hidden.length - KEPT_HIDDEN))) {
@@ -508,11 +529,8 @@ export const startPages = (options: PagesOptions) => {
       }
       return stateOf(page)
     },
-    /** How an owner's page stands, where it has one. */
-    state: (ownerId: string): PageState | null => {
-      const page = live(ownerId)
-      return page === null ? null : stateOf(page)
-    },
+    /** How each page open stands: for a window opened after them, which hasn't heard. */
+    states: (): ReadonlyArray<PageState> => [...pages.values()].flatMap((page) => (page.contents.isDestroyed() ? [] : [stateOf(page)])),
     /** Lays the page over the window where it keeps its place, or takes it off while no conversation shows it. */
     show: (window: BrowserWindow, ownerId: string, panel: Rect | null) => {
       const owner = ownerOf(ownerId)
@@ -520,16 +538,12 @@ export const startPages = (options: PagesOptions) => {
       if (panel === null) {
         const page = live(ownerId)
         if (page === null || page.panel === null) return
-        page.window?.contentView.removeChildView(page.view)
-        page.window = null
-        page.panel = null
-        hidings += 1
-        page.hiddenSince = hidings
+        hide(page)
         return sleep()
       }
       const page = pageOf(owner)
       if (page.window !== window) {
-        page.window?.contentView.removeChildView(page.view)
+        detach(page)
         window.contentView.addChildView(page.view)
         page.window = window
       }
@@ -606,6 +620,11 @@ export const startPages = (options: PagesOptions) => {
       const picture = await page.contents.capturePage().catch(() => null)
       return picture === null || picture.isEmpty() ? null : dataUrl(picture, 'jpeg')
     },
+    /** A window closed: the pages it showed are hidden, to show again in a window that asks for them. */
+    windowClosed: (window: BrowserWindow) => {
+      for (const page of pages.values()) if (page.window === window) hide(page)
+      sleep()
+    },
     /** Hides the view while something of the window's is over it, and shows it again after. */
     cover: (ownerId: string, covered: boolean) => {
       const page = live(ownerId)
@@ -613,7 +632,6 @@ export const startPages = (options: PagesOptions) => {
       page.covered = covered
       page.view.setVisible(!covered && page.panel !== null)
     },
-    focus: (ownerId: string) => live(ownerId)?.contents.focus(),
     /** The page's address in the person's browser; with a refused download, the download's. */
     outside: (ownerId: string, what: 'page' | 'download') => {
       const page = live(ownerId)
@@ -650,16 +668,27 @@ export const startPages = (options: PagesOptions) => {
       await Promise.all([...owners.values()].map(clearSession))
       for (const page of pages.values()) page.contents.reload()
     },
-    /** At a moment that may end what pages kept: their tasks settled, Althar quitting or starting. */
+    /**
+     * At a moment that may end what pages kept: their tasks settled, Althar
+     * quitting or starting. A settled task's page closes first, and the
+     * windows hear it closed; one that can't close leaves the others to clear.
+     */
     moment: async (moment: Moment, settled: ReadonlyArray<string> = []) => {
       if (!clearsAt(options.keep(), moment)) return
       const owners = moment === 'settled' ? settled.flatMap((id) => ownerOf(id) ?? []) : await ownersOnDisk(options.partitions)
-      for (const owner of owners) {
-        const page = live(owner.id)
-        if (moment === 'settled' && page !== null) close(page)
-        asleep.delete(owner.id)
-      }
-      await Promise.all(owners.map(clearSession))
+      if (moment === 'settled')
+        for (const owner of owners) {
+          const page = pages.get(owner.id)
+          const slept = asleep.delete(owner.id)
+          if (page === undefined && !slept) continue
+          try {
+            if (page !== undefined) close(page)
+          } catch {
+            // Gone from the pages all the same: the window hears it closed, and every owner's session is still cleared.
+          }
+          options.closed(owner.id)
+        }
+      await Promise.allSettled(owners.map(clearSession))
     },
     /** Whether web contents are a page's, which is no window of Althar's own. */
     has: (contents: WebContents) => byContents(contents) !== undefined,

@@ -1,10 +1,12 @@
 import { createRoute, redirect, useNavigate } from '@tanstack/react-router'
+import { useEffect } from 'react'
 
 import { CommentChip, Room } from '@althar/ui'
 
+import { useServices } from '../../data/services'
 import { rootRoute } from '../../root'
 import { composerComment, drop, useComments } from '../../shared/comments'
-import { type Origin, pages } from './pages'
+import { type Origin, pages, usePage } from './pages'
 import { PageView } from './PageView'
 import s from './PageTab.module.css'
 
@@ -13,7 +15,8 @@ import s from './PageTab.module.css'
  * from beside its conversation, with its history and its session, and back
  * beside it when the person says. Its comments still go to the
  * conversation it came from: they wait in that conversation's composer, and
- * show at the tab's foot, each opening again on the page.
+ * show at the tab's foot, each opening again on the page. Once the page is
+ * no longer in its tab, closed or back beside, the window goes back there.
  */
 
 export const text = {
@@ -21,7 +24,7 @@ export const text = {
 } as const
 
 /** Back beside the conversation the page came from: its task, or its project's conversation. */
-export const toOrigin = (navigate: ReturnType<typeof useNavigate>, origin: Origin) =>
+const toOrigin = (navigate: ReturnType<typeof useNavigate>, origin: Origin) =>
   origin.kind === 'task'
     ? navigate({ to: '/threads/$threadId', params: { threadId: origin.threadId } })
     : navigate({ to: '/projects/$projectId', params: { projectId: origin.projectId }, search: { room: Room.Talk } })
@@ -29,22 +32,18 @@ export const toOrigin = (navigate: ReturnType<typeof useNavigate>, origin: Origi
 function PageTab() {
   const { owner } = pageRoute.useParams()
   const navigate = useNavigate()
+  const { where } = usePage(owner, useServices().host.pages)
   const origin = pages.originOf(owner)
   const comments = useComments(origin?.draft ?? '')
-  if (origin === null) return null
+  const away = where !== 'tab'
+  useEffect(() => {
+    if (away && origin !== null) void toOrigin(navigate, origin)
+  }, [away, origin, navigate])
+  if (origin === null || away) return null
   return (
     <div className={s.tab}>
       <div className={s.page}>
-        <PageView
-          owner={owner}
-          kind={origin.kind}
-          draft={origin.draft}
-          where="tab"
-          onDock={() => {
-            pages.place(owner, 'beside')
-            void toOrigin(navigate, origin)
-          }}
-        />
+        <PageView owner={owner} kind={origin.kind} draft={origin.draft} where="tab" onDock={() => pages.place(owner, 'beside')} />
       </div>
       {comments.length > 0 && (
         <ul className={s.comments} aria-label={text.comments}>

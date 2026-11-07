@@ -42,6 +42,16 @@ export const refusalOf = (address: string, where: FrameKind = 'top'): Refusal | 
   return url.protocol === 'file:' ? 'file' : 'scheme'
 }
 
+/**
+ * What a page hands to the person's browser (its own address, a download
+ * it was refused, a sign-in): any web page's address, plain `http:` off this
+ * computer too, as the page was on it already; nothing else.
+ */
+export const outsideOf = (address: string): string | null => {
+  const url = parse(address)
+  return url !== null && WEB.has(url.protocol) ? url.toString() : null
+}
+
 /** A host on this computer: localhost and its names, and the loopback addresses. */
 export const isLocalHost = (host: string): boolean =>
   host === 'localhost' ||

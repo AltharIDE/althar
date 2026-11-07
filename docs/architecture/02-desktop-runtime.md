@@ -281,7 +281,11 @@ flowchart LR
 - **Cookies** are kept as the person chooses (Settings › Browser). The
   runtime tells the main process as tasks are done or abandoned and
   projects removed, and the main process clears their partitions where the
-  person keeps cookies only that long.
+  person keeps cookies only that long. Their pages close then, and the
+  windows hear it.
+- **Pages are the main process's, not a window's.** A window that closes
+  leaves its pages hidden; one opened after asks how each stands, and
+  shows it again where it was.
 
 ### Window close and application quit
 

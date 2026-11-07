@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_PREFERENCES, holds } from '../src/main/appPreferences'
-import { isLocalHost, refusalOf, shownAddress, signInOf, typedAddress } from '../src/main/browser/addresses'
+import { isLocalHost, outsideOf, refusalOf, shownAddress, signInOf, typedAddress } from '../src/main/browser/addresses'
 import { clearsAt, COOKIE_KEEPS, isCookieKeep, type Moment, ownerOf, ownerOfFolder, partitionOf } from '../src/main/browser/cookies'
 import { browserAgent, DEVICES, deviceOf, isViewport, mobileAgent, placed, WELL } from '../src/main/browser/devices'
 import { allowed, askedOf, blockedFile, downloadOffered, navigation, popUp } from '../src/main/browser/guards'
@@ -82,6 +82,23 @@ describe('what loads beside the conversation', () => {
     expect(shownAddress('http://localhost:5321/')).toBe('localhost:5321')
     expect(shownAddress('https://althar.ai/changelog?x=1#y')).toBe('althar.ai/changelog?x=1#y')
     expect(shownAddress('http://example.com/a')).toBe('http://example.com/a')
+  })
+})
+
+describe('what a page hands to the person’s browser', () => {
+  it('is any web page’s address, plain http: off this computer too, as the page was on it already', () => {
+    expect(outsideOf('https://example.com/a?b=1')).toBe('https://example.com/a?b=1')
+    expect(outsideOf('http://example.com/')).toBe('http://example.com/')
+    expect(outsideOf('http://192.168.1.20:3000/refunds')).toBe('http://192.168.1.20:3000/refunds')
+    expect(outsideOf('http://localhost:5173')).toBe('http://localhost:5173/')
+  })
+
+  it('is never a file, a script, another app’s scheme or what isn’t an address', () => {
+    expect(outsideOf('file:///etc/hosts')).toBeNull()
+    expect(outsideOf('javascript:alert(1)')).toBeNull()
+    expect(outsideOf('vscode://file/etc/hosts')).toBeNull()
+    expect(outsideOf('data:text/html,<p>x</p>')).toBeNull()
+    expect(outsideOf('not an address')).toBeNull()
   })
 })
 

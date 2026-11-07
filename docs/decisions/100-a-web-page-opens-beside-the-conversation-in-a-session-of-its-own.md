@@ -146,7 +146,9 @@
     the task is done; the others are until the page closes, until Althar
     quits, or as long as each site asks.
     - The runtime tells the main process each task done or abandoned and
-      each project removed (`settling`).
+      each project removed (`settling`). Where that ends what the page
+      keeps, its page closes, and the windows hear it closed: one beside
+      its conversation goes, one in a tab goes back to the conversation.
     - As Althar starts, the main process asks which of the partitions on
       disk belong to tasks and projects that are over (`settledAmong`).
     - A session open this launch is cleared. One not open has its folder
@@ -198,8 +200,13 @@
     can see that a host element was added, and remove it; the overlay puts
     it back.
   - **Pages hidden from every conversation are kept for a while.** Three
-    are kept alive. Past that, the oldest is closed, and loads again where
-    it was when shown, without its history.
+    are kept alive. Past that, the oldest is put to sleep, and loads again
+    where it was when shown, without its history. Asleep isn't closed for
+    the person, who never closed it: its session stays, so its sign-ins
+    hold as it wakes, even where cookies are kept until the page closes.
+  - **Pages outlive the window that showed them.** Closing the window on a
+    Mac, or working in the background, hides them. A window opened after
+    asks the main process how each stands, and shows it again where it was.
   - **A page's session persists on disk** until the person's choice clears
     it.
   - **A sign-in to a service other than the four** (a company's own SSO, a

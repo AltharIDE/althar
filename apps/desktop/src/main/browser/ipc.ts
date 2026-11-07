@@ -58,9 +58,9 @@ export const handlePages = (pages: Pages, mine: (contents: WebContents) => boole
     if (asked === null) throw new Error('That isn’t an address.')
     return pages.open(ownerIn(owner), asked)
   })
-  ipcMain.handle('althar:page-state', (event, owner: unknown) => {
+  ipcMain.handle('althar:pages-states', (event) => {
     from(event)
-    return pages.state(ownerIn(owner))
+    return pages.states()
   })
   // Sent every frame while the person drags the workbench's edge: no answer is waited for.
   ipcMain.on('althar:page-show', (event, owner: unknown, panel: unknown) => {
@@ -106,10 +106,6 @@ export const handlePages = (pages: Pages, mine: (contents: WebContents) => boole
   ipcMain.handle('althar:page-cover', (event, owner: unknown, covered: unknown) => {
     from(event)
     pages.cover(ownerIn(owner), covered === true)
-  })
-  ipcMain.handle('althar:page-focus', (event, owner: unknown) => {
-    from(event)
-    pages.focus(ownerIn(owner))
   })
   ipcMain.handle('althar:page-outside', (event, owner: unknown, what: unknown) => {
     from(event)

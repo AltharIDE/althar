@@ -9,7 +9,7 @@ import type { Host, PagesHost } from '../src/renderer/data/services'
 import { ServicesProvider } from '../src/renderer/data/services'
 import { coveredNow } from '../src/renderer/features/browser/cover'
 import { useOpener } from '../src/renderer/features/browser/opener'
-import { forgetPages, pages } from '../src/renderer/features/browser/pages'
+import { forgetPages, pages, usePage } from '../src/renderer/features/browser/pages'
 import { PageView } from '../src/renderer/features/browser/PageView'
 import { commentsOf, forgetComments, gather } from '../src/renderer/shared/comments'
 import { fakeClient, fakeHost } from './fixtures'
@@ -65,9 +65,10 @@ const pointed: Pointed = {
 const fakePages = () => {
   const states = new Set<(state: PageState) => void>()
   const keys = new Set<(owner: string, key: PageKey) => void>()
+  const closings = new Set<(owner: string) => void>()
   const host: PagesHost = {
     open: vi.fn(async (owner: string, address: string) => stateOf({ owner, address })),
-    state: vi.fn(async () => stateOf()),
+    states: vi.fn(async () => []),
     show: vi.fn(),
     move: vi.fn(async () => {}),
     viewport: vi.fn(async () => {}),
@@ -77,7 +78,6 @@ const fakePages = () => {
     find: vi.fn(async () => pointed),
     still: vi.fn(async () => 'data:image/jpeg;base64,BBBB'),
     cover: vi.fn(async () => {}),
-    focus: vi.fn(async () => {}),
     outside: vi.fn(async () => {}),
     dismiss: vi.fn(async () => {}),
     close: vi.fn(async () => {}),
@@ -91,6 +91,10 @@ const fakePages = () => {
       keys.add(listener)
       return () => void keys.delete(listener)
     },
+    onClosed: (listener) => {
+      closings.add(listener)
+      return () => void closings.delete(listener)
+    },
   }
   return {
     host,
@@ -101,6 +105,8 @@ const fakePages = () => {
         states.forEach((listener) => listener(state))
       }),
     press: (key: PageKey) => act(() => keys.forEach((listener) => listener(OWNER, key))),
+    // A page main closed of itself, as its task was done.
+    closed: (owner = OWNER) => act(() => closings.forEach((listener) => listener(owner))),
   }
 }
 
@@ -415,8 +421,33 @@ describe('the pages this window shows', () => {
     expect(pages.originOf('task_a')).toEqual({ kind: 'task', threadId: 'thr_a', draft: 'task:thr_a' })
     pages.hide('task_b')
     expect(pages.where('task_b')).toBeNull()
+    // Closed, a page shows nowhere; where it came from stays, for its tab to go back to.
     pages.forget('task_a')
-    expect(pages.originOf('task_a')).toBeNull()
+    expect(pages.where('task_a')).toBeNull()
+    expect(pages.tabs()).toEqual(['proj_c'])
+    expect(pages.originOf('task_a')).toEqual({ kind: 'task', threadId: 'thr_a', draft: 'task:thr_a' })
+  })
+
+  it('are heard from main as the window opens, after them, and forgotten as main closes one, its task done', async () => {
+    const fake = fakePages()
+    const open = stateOf({ address: 'http://localhost:5173/kept' })
+    vi.mocked(fake.host.states).mockResolvedValue([open])
+    renderHook(() => usePage(OWNER, fake.host))
+    await waitFor(() => expect(pages.state(OWNER)).toEqual(open))
+    act(() => pages.place(OWNER, 'beside'))
+    fake.closed()
+    expect(pages.where(OWNER)).toBeNull()
+    expect(pages.state(OWNER)).toBeNull()
+  })
+
+  it('keep what main said of a page since over what the window asked as it opened', async () => {
+    const fake = fakePages()
+    let answer: (states: ReadonlyArray<PageState>) => void = () => {}
+    vi.mocked(fake.host.states).mockReturnValue(new Promise((resolve) => (answer = resolve)))
+    renderHook(() => usePage(OWNER, fake.host))
+    fake.say(stateOf({ address: 'http://localhost:5173/now' }))
+    await act(async () => answer([stateOf({ address: 'http://localhost:5173/before' })]))
+    expect(pages.state(OWNER)?.address).toBe('http://localhost:5173/now')
   })
 
   it('hand a comment to open again to the page that takes it, once', () => {

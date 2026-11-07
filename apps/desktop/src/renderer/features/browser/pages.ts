@@ -38,7 +38,11 @@ const subscribe = (listener: () => void) => {
   return () => void listeners.delete(listener)
 }
 
-/* Main's word on every page, heard once a window, from the first that asks. */
+/*
+ * Main's word on every page, heard once a window, from the first that asks:
+ * how each stands, and that one closed of itself, its task done. A window
+ * opened after its pages, as one reopened on a Mac, asks how those stand.
+ */
 let heard: PagesHost | null = null
 const hear = (host: PagesHost | undefined) => {
   if (host === undefined || heard === host) return
@@ -47,6 +51,17 @@ const hear = (host: PagesHost | undefined) => {
     states.set(state.owner, state)
     changed()
   })
+  host.onClosed((owner) => pages.forget(owner))
+  void host
+    .states()
+    .then((open) => {
+      // What main said since is newer than this.
+      const missing = open.filter((state) => !states.has(state.owner))
+      if (missing.length === 0) return
+      for (const state of missing) states.set(state.owner, state)
+      changed()
+    })
+    .catch(() => undefined)
 }
 
 export const pages = {
@@ -67,11 +82,10 @@ export const pages = {
     if (!placed.delete(owner)) return
     changed()
   },
-  /** Forgets an owner's page, once it is closed. */
+  /** Forgets an owner's page, once it is closed; where it came from stays, for its tab to go back to. */
   forget: (owner: string) => {
     placed.delete(owner)
     states.delete(owner)
-    origins.delete(owner)
     reopening.delete(owner)
     changed()
   },

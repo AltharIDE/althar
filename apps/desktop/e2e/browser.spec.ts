@@ -137,6 +137,37 @@ const onItsPlace = async (electronApp: ElectronApplication, panel: Locator) => {
   return Math.abs(view.bounds.x - box.x) <= 1 && Math.abs(view.bounds.x + view.bounds.width - (box.x + box.width)) <= 1
 }
 
+/**
+ * How many times main gave the window's own contents the keyboard, from
+ * here on: the window under test is never the system's active one, so
+ * which contents has the keyboard can't be read from it.
+ */
+const windowFocuses = (electronApp: ElectronApplication) =>
+  electronApp.evaluate(({ BrowserWindow }) => {
+    const kept = globalThis as unknown as { focuses?: number }
+    const window = BrowserWindow.getAllWindows().find((one) => one.webContents.getURL().includes('/renderer/index.html'))
+    if (window !== undefined && kept.focuses === undefined) {
+      kept.focuses = 0
+      const focus = window.webContents.focus.bind(window.webContents)
+      window.webContents.focus = () => {
+        kept.focuses = (kept.focuses ?? 0) + 1
+        focus()
+      }
+    }
+    return kept.focuses ?? 0
+  })
+
+/** Gives the page the keyboard, and presses ⌘L (Ctrl+L off a Mac) in it, as the person would there. */
+const pressAddressKeyInPage = (electronApp: ElectronApplication) =>
+  electronApp.evaluate(({ BrowserWindow }, mac) => {
+    const window = BrowserWindow.getAllWindows().find((one) => one.webContents.getURL().includes('/renderer/index.html'))
+    const view = window?.contentView.children.find((child) => 'webContents' in child) as Electron.WebContentsView | undefined
+    if (view === undefined) throw new Error('No page beside the conversation.')
+    const modifiers: Array<'meta' | 'control'> = [mac ? 'meta' : 'control']
+    view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'L', modifiers })
+    view.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'L', modifiers })
+  }, process.platform === 'darwin')
+
 /** What the main process opened in the person's browser, as it would. */
 const openedOutside = (electronApp: ElectronApplication) =>
   electronApp.evaluate(() => (globalThis as unknown as { opened?: Array<string> }).opened ?? [])
@@ -288,6 +319,17 @@ test('a task’s run opens beside its thread, isolated; a comment pointed on it 
     await field.press('Enter')
     await expect(panel.getByText('GitHub’s sign-in opened in your browser.')).toBeVisible()
     expect(await openedOutside(electronApp)).toEqual(['https://github.com/login'])
+    // Open in your browser hands it the page's own address.
+    await panel.getByRole('button', { name: 'Open in your browser' }).click()
+    await expect.poll(() => openedOutside(electronApp)).toEqual(['https://github.com/login', `http://${address}/`])
+
+    // ⌘L pressed in the page gives the keyboard to the window, and its address field: what is typed next goes there, not to the page.
+    await page.getByRole('textbox', { name: /^Tell .* something/ }).focus()
+    const focuses = await windowFocuses(electronApp)
+    await pressAddressKeyInPage(electronApp)
+    await expect(field).toBeFocused()
+    expect(await windowFocuses(electronApp)).toBe(focuses + 1)
+    await field.blur()
 
     // Open as a tab: the page takes a tab of its own after the projects', where it was, and Back beside the task returns it.
     await panel.getByRole('button', { name: 'Open as a tab' }).click()
@@ -369,6 +411,18 @@ test('from the coordinator, the project’s run opens beside its conversation, t
     await expect(page.getByText('Cookies kept until the project is removed.')).toBeVisible()
     await page.keyboard.press('Escape')
     await expect.poll(async () => (await drawn(electronApp)).length).toBe(1)
+
+    // In a tab of its own, the bar's Close closes the page and goes back to the conversation it came from.
+    await panel.getByRole('button', { name: 'Open as a tab' }).click()
+    await expect(page.getByRole('list', { name: 'Pages' }).getByRole('button', { name: 'Refunds', exact: true })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    await page.getByRole('complementary', { name: 'Page' }).getByRole('button', { name: 'Close' }).click()
+    await expect(page.getByRole('list', { name: 'Pages' })).toHaveCount(0)
+    await expect(page.getByRole('radio', { name: 'Conversation', checked: true })).toBeVisible()
+    await expect(page.getByRole('complementary', { name: 'Page' })).toHaveCount(0)
+    await expect.poll(async () => (await drawn(electronApp)).length).toBe(0)
   } finally {
     await electronApp.close()
   }

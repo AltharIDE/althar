@@ -1304,7 +1304,7 @@ const keptPreferences = (): Pick<Host, 'preferences' | 'setPreference'> => {
 /** The main process's pages beside the conversations, doing nothing: a test sets what it looks at. */
 export const fakePagesHost = (overrides: Partial<PagesHost> = {}): PagesHost => ({
   open: vi.fn(async () => null),
-  state: vi.fn(async () => null),
+  states: vi.fn(async () => []),
   show: vi.fn(),
   move: vi.fn(async () => {}),
   viewport: vi.fn(async () => {}),
@@ -1314,7 +1314,6 @@ export const fakePagesHost = (overrides: Partial<PagesHost> = {}): PagesHost => 
   find: vi.fn(async () => null),
   still: vi.fn(async () => null),
   cover: vi.fn(async () => {}),
-  focus: vi.fn(async () => {}),
   outside: vi.fn(async () => {}),
   dismiss: vi.fn(async () => {}),
   close: vi.fn(async () => {}),
@@ -1322,6 +1321,7 @@ export const fakePagesHost = (overrides: Partial<PagesHost> = {}): PagesHost => 
   clearAll: vi.fn(async () => {}),
   onState: () => () => {},
   onKey: () => () => {},
+  onClosed: () => () => {},
   ...overrides,
 })
 

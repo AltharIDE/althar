@@ -6,7 +6,6 @@ import { commandDown, LoadMeter, modKey, Offline, primaryDown, ProjectTabs, Room
 import { useServices } from '../../data/services'
 import { shownAddress } from '../../../main/browser/addresses'
 import { pages, usePageTabs } from '../browser/pages'
-import { toOrigin } from '../browser/route'
 import { FinderView } from '../finder/FinderView'
 import { QuickSettings } from '../settings/QuickSettings'
 import { CarriedAtFoot, CarriedBack } from '../../shared/dictation/Carried'
@@ -111,7 +110,7 @@ function TabsBar({
   const online = useOnline()
   const load = useLoad(tabs.tabs.length > 0 || tabs.others.length > 0)
   const { select, current } = tabs
-  // Pages in tabs of their own, after the projects': each named by its title, or where it is; closed, the page goes, and the window back to where it came from.
+  // Pages in tabs of their own, after the projects': each named by its title, or where it is; closed, the page goes, and its tab takes the window back to where it came from.
   const navigate = useNavigate()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const pageTabs = usePageTabs(host.pages).map(({ owner, state }) => ({
@@ -120,11 +119,8 @@ function TabsBar({
     current: pathname === `/pages/${owner}`,
     onSelect: () => void navigate({ to: '/pages/$owner', params: { owner } }),
     onClose: () => {
-      const origin = pages.originOf(owner)
-      const here = pathname === `/pages/${owner}`
       pages.forget(owner)
       void host.pages?.close(owner)
-      if (here && origin !== null) void toOrigin(navigate, origin)
     },
   }))
   return (

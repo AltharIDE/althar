@@ -115,6 +115,10 @@ const pageKeys = new Set<(owner: string, key: PageKey) => void>()
 ipcRenderer.on('althar:page-key', (_event, owner: string, key: PageKey) => {
   for (const listener of pageKeys) listener(owner, key)
 })
+const pagesClosed = new Set<(owner: string) => void>()
+ipcRenderer.on('althar:page-closed', (_event, owner: string) => {
+  for (const listener of pagesClosed) listener(owner)
+})
 
 contextBridge.exposeInMainWorld('althar', {
   // Which system it is, for the words the window uses (this Mac, this PC, this computer) and for its own chrome: on macOS the system draws the lights.
@@ -231,7 +235,7 @@ contextBridge.exposeInMainWorld('althar', {
   // The pages beside the conversations: each by its owner, a task's id or a project's (ADR-100).
   pages: {
     open: (owner: string, address: string): Promise<unknown> => ipcRenderer.invoke('althar:page-open', owner, address),
-    state: (owner: string): Promise<unknown> => ipcRenderer.invoke('althar:page-state', owner),
+    states: (): Promise<unknown> => ipcRenderer.invoke('althar:pages-states'),
     show: (owner: string, panel: { x: number; y: number; width: number; height: number } | null): void =>
       ipcRenderer.send('althar:page-show', owner, panel),
     move: (owner: string, move: string): Promise<void> => ipcRenderer.invoke('althar:page-move', owner, move),
@@ -243,7 +247,6 @@ contextBridge.exposeInMainWorld('althar', {
       ipcRenderer.invoke('althar:page-find', owner, selector, address),
     still: (owner: string): Promise<string | null> => ipcRenderer.invoke('althar:page-still', owner),
     cover: (owner: string, covered: boolean): Promise<void> => ipcRenderer.invoke('althar:page-cover', owner, covered),
-    focus: (owner: string): Promise<void> => ipcRenderer.invoke('althar:page-focus', owner),
     outside: (owner: string, what: 'page' | 'download'): Promise<void> => ipcRenderer.invoke('althar:page-outside', owner, what),
     dismiss: (owner: string): Promise<void> => ipcRenderer.invoke('althar:page-dismiss', owner),
     close: (owner: string): Promise<void> => ipcRenderer.invoke('althar:page-close', owner),
@@ -256,6 +259,10 @@ contextBridge.exposeInMainWorld('althar', {
     onKey: (listener: (owner: string, key: PageKey) => void): (() => void) => {
       pageKeys.add(listener)
       return () => void pageKeys.delete(listener)
+    },
+    onClosed: (listener: (owner: string) => void): (() => void) => {
+      pagesClosed.add(listener)
+      return () => void pagesClosed.delete(listener)
     },
   },
   // What the page couldn't handle, for main's log: its message and stack, nothing else.
