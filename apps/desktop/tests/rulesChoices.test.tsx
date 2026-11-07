@@ -53,7 +53,7 @@ describe('a project’s rules, changed from where they stand', () => {
   it('moves work on again where a limit made it wait', async () => {
     const { client } = fakeClient({ getProjectRules: rulesOf({ usageLimit: 'wait' }) })
     withServices(<Rules />, client)
-    await choose(await screen.findByRole('button', { name: 'waits for the reset' }), 'Move the work to the best free model')
+    await choose(await screen.findByRole('button', { name: 'waits for the reset' }), 'Move to the strongest model with usage left')
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', usageLimit: 'move' }))
   })
 
