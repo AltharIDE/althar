@@ -4,7 +4,7 @@ import { createContext, type ReactNode, useContext, useEffect, useEffectEvent } 
 
 import type { WatchEvent } from '@althar/contracts'
 
-import type { AppPreferences, PreferenceKey } from '../../main/appPreferences'
+import type { AppPreferences, PreferenceKey, TaskFolderChoice, TaskFolderState } from '../../main/appPreferences'
 import type { DesktopChrome } from '../../main/desktop'
 import type { Opened, ReportChoices, ReportContext, ReportPreview, Sent } from '../../main/report/bundle'
 import type { UpdateGlance } from '../../main/updates'
@@ -196,6 +196,10 @@ export interface Host {
   readonly setAppIcon: (icon: string) => Promise<void>
   /** The app's own preferences (`main/appPreferences`), as the main process keeps them. */
   readonly preferences: () => Promise<AppPreferences>
+  /** Where new tasks' folders go and who decided; absent where the main process keeps none. */
+  readonly taskFolder?: () => Promise<TaskFolderState>
+  /** Asks the person for another folder for new tasks, checks it and keeps it; why it was refused, or null when they cancel. */
+  readonly chooseTaskFolder?: () => Promise<TaskFolderChoice>
   /** Changes one, kept and acted on at once; all of them as they now stand. */
   readonly setPreference: <K extends PreferenceKey>(key: K, value: AppPreferences[K]) => Promise<AppPreferences>
   /** An editor's icon as a picture's address, by its id (`ListEditors`); null where it can't be drawn. */

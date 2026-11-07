@@ -47,6 +47,13 @@ const accent: Kind<AccentSource> = {
   holds: (value): value is AccentSource => value === 'althar' || value === 'system',
 }
 
+/** A folder by its full path; null for where the platform keeps them. */
+const folder: Kind<string | null> = {
+  starts: null,
+  holds: (value): value is string | null =>
+    value === null || (typeof value === 'string' && value.length < 4096 && /^([/\\]|[A-Za-z]:[/\\])/.test(value)),
+}
+
 export const PREFERENCES = {
   /** Keeps the Mac from sleeping while any work runs or waits; the display may still sleep. */
   keepAwake: onOff(true),
@@ -78,6 +85,8 @@ export const PREFERENCES = {
   accent,
   /** Althar opens at login, in the background, with no window, so automations run after a restart (loginItem.ts). */
   openAtLogin: onOff(false),
+  /** Where new tasks' worktrees go, chosen in Settings; ALTHAR_WORKTREES wins where it is set. Worktrees already made stay where they are. */
+  worktrees: folder,
 } as const
 
 type Kinds = typeof PREFERENCES
@@ -101,3 +110,12 @@ export const preferencesIn = (kept: Readonly<Record<string, unknown>>): AppPrefe
 /** Whether the person asked every tool on this computer to send nothing, as consoledonottrack.com has it: usage data and crash reports are off, whatever their switches say. */
 export const doNotTrack = (env: Readonly<Record<string, string | undefined>>): boolean =>
   ['1', 'true', 'yes'].includes((env.DO_NOT_TRACK ?? '').trim().toLowerCase())
+
+/** Where new tasks' worktrees go and who decided: the environment, the person's choice, or the platform. */
+export interface TaskFolderState {
+  readonly folder: string
+  readonly from: 'environment' | 'setting' | 'default'
+}
+
+/** What choosing a task folder came to: the state as it now stands, a refusal in a line, or nothing where the person cancelled. */
+export type TaskFolderChoice = TaskFolderState | { readonly refused: string } | null

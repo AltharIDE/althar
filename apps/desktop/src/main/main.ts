@@ -4,7 +4,8 @@ import { stat } from 'node:fs/promises'
 import { homedir, hostname, userInfo } from 'node:os'
 import { join } from 'node:path'
 
-import { locations as locationsOf } from './locations'
+import { locations as locationsOf, taskFolder as taskFolderOf } from './locations'
+import { refusalOf } from './taskFolderCheck'
 
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
 import { type AppPreferences, DEFAULT_PREFERENCES, doNotTrack, isPreferenceKey } from './appPreferences'
@@ -161,7 +162,9 @@ let storeFailure: StoreFailure | undefined
 let retrying = false
 
 /** The profile and worktrees, as the command-line client has them: a Flatpak's home is a fresh empty one each run, so it keeps worktrees beside its profile (locations.ts). */
-const locations = () => locationsOf(process.env, process.platform, homedir())
+const locations = () => locationsOf(process.env, process.platform, homedir(), undefined, preferences.worktrees)
+/** Where new tasks' worktrees go now, and who decided: the environment, the person's choice in Settings, or the platform (locations.ts). */
+const taskFolderNow = () => taskFolderOf(process.env, process.platform, homedir(), undefined, preferences.worktrees)
 
 // Althar is the name windows, window managers and the desktop see, whichever way the app was started.
 app.setName('Althar')
@@ -937,6 +940,8 @@ ipcMain.handle('althar:preferences', async () => {
 })
 ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unknown) => {
   if (!isPreferenceKey(key)) throw new Error(`Althar has no preference ${String(key)}.`)
+  // Checked before it is kept, so it goes through choose-task-folder.
+  if (key === 'worktrees') throw new Error('The task folder is chosen with its own dialog.')
   await preferencesRead
   // Merged into the preferences as they stand once it is kept, so changes made together each stay.
   const kept = await writeAppPreference(locations().profile, key, value)
@@ -946,6 +951,35 @@ ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unkn
   if (key === 'appearance') applyAppearance()
   app.setBadgeCount(dockCount(waiting, preferences))
   return preferences
+})
+
+// Where new tasks' worktrees go, who decided, and the person's choice of another: asked for in a folder dialog, checked, kept, and told to the runtime at once.
+ipcMain.handle('althar:task-folder', async () => {
+  await preferencesRead
+  const { folder, from } = taskFolderNow()
+  return { folder, from }
+})
+ipcMain.handle('althar:choose-task-folder', async (event) => {
+  await preferencesRead
+  if (taskFolderNow().from === 'environment') return { refused: 'ALTHAR_WORKTREES sets this folder; it can’t be changed here.' }
+  const window = BrowserWindow.fromWebContents(event.sender)
+  const options = {
+    properties: ['openDirectory' as const, 'createDirectory' as const],
+    title: 'Choose where task folders go',
+    message: 'Choose the folder new tasks’ folders are made in',
+    defaultPath: taskFolderNow().folder,
+  }
+  const result = window === null ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(window, options)
+  const path = result.canceled ? undefined : result.filePaths[0]
+  if (path === undefined) return null
+  const refused = refusalOf(path, locations().profile)
+  if (refused !== null) return { refused }
+  const kept = await writeAppPreference(locations().profile, 'worktrees', path)
+  preferences = { ...preferences, worktrees: kept }
+  // The runtime makes the next task's worktree there; those it made stay where they are.
+  runtime?.postMessage({ type: 'worktrees', root: path })
+  const { folder, from } = taskFolderNow()
+  return { folder, from }
 })
 
 // An editor's icon, as Finder draws it, by its id; null for one not found. Only editors Althar knows are drawn.
@@ -1012,7 +1046,8 @@ void ready.then(() => {
   powerMonitor.on('on-ac', awake.powerChanged)
   // Linux may not say when the power source changes, so there it is looked at again each minute too.
   if (process.platform === 'linux') setInterval(awake.powerChanged, 60_000).unref()
-  if (!noRuntime) startRuntime()
+  // After the preferences are read, as the person's choice of task folder is one of them.
+  if (!noRuntime) void preferencesRead.then(() => startRuntime())
   // A packaged app looks for updates, and tells every window as one is ready.
   // electron-updater supports the Mac's zip, Windows' NSIS installer and the Linux AppImage; deb/rpm use their package managers.
   if (

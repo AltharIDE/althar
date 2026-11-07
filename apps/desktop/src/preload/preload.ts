@@ -144,6 +144,8 @@ contextBridge.exposeInMainWorld('althar', {
   attachPasted: (): Promise<unknown> => ipcRenderer.invoke('althar:attach-pasted'),
   appIcon: (): Promise<string | null> => ipcRenderer.invoke('althar:app-icon'),
   setAppIcon: (icon: string): Promise<void> => ipcRenderer.invoke('althar:set-app-icon', icon),
+  taskFolder: (): Promise<unknown> => ipcRenderer.invoke('althar:task-folder'),
+  chooseTaskFolder: (): Promise<unknown> => ipcRenderer.invoke('althar:choose-task-folder'),
   preferences: (): Promise<unknown> => ipcRenderer.invoke('althar:preferences'),
   setPreference: (key: string, value: unknown): Promise<unknown> => ipcRenderer.invoke('althar:set-preference', key, value),
   sounds: (): Promise<ReadonlyArray<string>> => ipcRenderer.invoke('althar:sounds'),

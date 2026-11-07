@@ -1,0 +1,26 @@
+.control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.folder {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 12px/1.3 var(--font-mono, ui-monospace, monospace);
+  color: var(--t-2);
+}
+
+.line {
+  display: block;
+}
+
+.refusal {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--danger);
+}
