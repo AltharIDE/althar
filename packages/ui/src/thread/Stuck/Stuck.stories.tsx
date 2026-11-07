@@ -358,8 +358,9 @@ export const FailedToStart: Story = {
 }
 
 /**
- * Why its agent couldn't start, in one plain line the runtime gives (DEV-196): not installed, its servers out of reach, or
- * else the agent's own first error line. Not signed in, or a sign-in that ended, is the signed-out card, with its button.
+ * Why its agent couldn't start, in one plain line (DEV-196). Not installed, and a sign-in that ended, are cards of their own,
+ * each with the fix that puts it right in Settings; its servers out of reach, or else the agent's own first error line, say
+ * so after "couldn't start".
  */
 export const WhyItCouldntStart: Story = {
   render: (args) => (
@@ -369,8 +370,17 @@ export const WhyItCouldntStart: Story = {
         {
           state: 'not installed',
           node: (
-            <HandingOn {...args} {...FailedToStart.args} what="Codex couldn't start. codex isn't installed, or isn't on this Mac's PATH." />
+            <HandingOn
+              {...args}
+              {...FailedToStart.args}
+              what="Codex isn't installed, or isn't on this Mac's PATH."
+              fix={{ label: 'Install', onFix: fn() }}
+            />
           ),
+        },
+        {
+          state: 'sign-in ended',
+          node: <HandingOn {...args} {...SignedOut.args} what="Claude Code's sign-in has ended." />,
         },
         {
           state: 'network unreachable',
@@ -378,7 +388,7 @@ export const WhyItCouldntStart: Story = {
             <HandingOn
               {...args}
               {...FailedToStart.args}
-              what="Claude Code couldn't start. The agent can’t reach its servers. Check this Mac’s connection, then try again."
+              what="Claude Code couldn't start. Its servers can't be reached. Check this Mac's connection, then try again."
             />
           ),
         },
@@ -392,10 +402,22 @@ export const WhyItCouldntStart: Story = {
             />
           ),
         },
-        { state: 'sign-in ended', node: <HandingOn {...args} {...SignedOut.args} /> },
       ]}
     />
   ),
+}
+
+/** Not installed: Install opens the agent in Settings, where it is installed, then it is tried again. */
+export const NotInstalled: Story = {
+  args: {
+    ...FailedToStart.args,
+    what: "Codex isn't installed, or isn't on this Mac's PATH.",
+    fix: { label: 'Install', onFix: fn() },
+  },
+  play: async ({ args, canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Install' }))
+    await expect(args.fix?.onFix).toHaveBeenCalledOnce()
+  },
 }
 
 /** It stopped without reporting, after a reminder: the lead is told what to do, first; reminding it again would do the same. */

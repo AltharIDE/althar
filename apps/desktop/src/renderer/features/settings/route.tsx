@@ -7,21 +7,27 @@ import { useStart } from '../start/useStart'
 import { FIRST_SECTION, isSection } from './sections'
 import { SettingsPage } from './SettingsPage'
 
-/** What the Settings tab's address can ask beyond its section: an agent to sign in again, as a signed-out agent's error asks. */
+/** What the Settings tab's address can ask beyond its section: an agent to sign in again, as a signed-out agent's error asks, or one to show. */
 export interface SettingsSearch {
   readonly signIn?: string
   /** Which of its accounts, where it has several and one is meant: one whose sign-in ends soon. */
   readonly account?: string
+  /** An agent's tab to open, nothing started: one that isn't installed, where its Install is. */
+  readonly agent?: string
 }
 
+const given = (value: unknown): value is string => typeof value === 'string' && value !== ''
+
 const settingsSearchOf = (search: Record<string, unknown>): SettingsSearch =>
-  typeof search.signIn === 'string' && search.signIn !== ''
-    ? { signIn: search.signIn, ...(typeof search.account === 'string' && search.account !== '' ? { account: search.account } : {}) }
-    : {}
+  given(search.signIn)
+    ? { signIn: search.signIn, ...(given(search.account) ? { account: search.account } : {}) }
+    : given(search.agent)
+      ? { agent: search.agent }
+      : {}
 
 function Settings() {
   const { section } = settingsRoute.useParams()
-  const { signIn, account } = settingsRoute.useSearch()
+  const { signIn, account, agent } = settingsRoute.useSearch()
   const navigate = useNavigate()
   // The agents are signed in here, so each is asked again as the tab opens.
   const start = useStart({ recheck: true })
@@ -31,6 +37,7 @@ function Settings() {
       section={isSection(section) ? section : FIRST_SECTION}
       {...(signIn === undefined ? {} : { signIn })}
       {...(account === undefined ? {} : { account })}
+      {...(agent === undefined ? {} : { agent })}
       onSection={(next) => void navigate({ to: '/settings/$section', params: { section: next } })}
       onTask={(threadId) => void navigate({ to: '/threads/$threadId', params: { threadId } })}
     />

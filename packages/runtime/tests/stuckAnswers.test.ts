@@ -435,7 +435,8 @@ describe('a step held for a usage limit, handed to an agent that can’t start',
         answer: { kind: 'retry', agentId: 'missing' },
       })
       const call = yield* stuckCall(task.taskId)
-      assert.deepStrictEqual([call.step, call.why], ['implement', 'failed_to_start'])
+      // An agent that isn't here stops for that: installing it is the way on, which the call offers.
+      assert.deepStrictEqual([call.step, call.why], ['implement', 'not_installed'])
       assert.isNotNull(call.detail)
       assert.deepStrictEqual((yield* attempts(task.taskId)).at(-1), { step: 'implement', state: 'waiting_attention' })
     }).pipe(Effect.provide(withQueries(':memory:', {}, { each: { 'claude-code': { outOfUsage: { until: back } } } })))

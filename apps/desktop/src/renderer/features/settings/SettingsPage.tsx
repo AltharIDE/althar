@@ -112,9 +112,11 @@ export interface SettingsPageProps {
   signIn?: string
   /** Its account to sign in again, where one is meant: one whose sign-in ends soon. */
   account?: string
+  /** An agent whose tab opens, nothing started: one that isn't installed, where its Install is. */
+  agent?: string
 }
 
-export function SettingsPage({ start, section, onSection, onTask, signIn, account: meant }: SettingsPageProps) {
+export function SettingsPage({ start, section, onSection, onTask, signIn, account: meant, agent: shown }: SettingsPageProps) {
   const preferences = usePreferences()
   const sounds = useSounds()
   const connections = useConnections()
@@ -124,8 +126,8 @@ export function SettingsPage({ start, section, onSection, onTask, signIn, accoun
   const looks: Looks = { appIcon: useAppIcon(), edge: useEdgePlace(section === 'appearance') }
   const agents = start.status?.agents ?? []
   // Asked to sign an agent in again: its tab opens with its signed-out account's sign-in started, which takes focus. Once.
-  const [asked, setAsked] = useState(signIn)
-  if (signIn !== undefined && signIn !== asked) setAsked(signIn)
+  const [asked, setAsked] = useState(signIn ?? shown)
+  if ((signIn ?? shown) !== undefined && (signIn ?? shown) !== asked) setAsked(signIn ?? shown)
   // Started once the agents are read again as the page opens: a read already under way would take a Terminal sign-in as done.
   const [openedAt] = useState(start.checkedAt)
   const wanted = start.checkedAt > openedAt ? agents.find((agent) => agent.id === signIn) : undefined
@@ -141,8 +143,8 @@ export function SettingsPage({ start, section, onSection, onTask, signIn, accoun
       if (account === undefined) accounts.add(wanted.id)
       else accounts.again(wanted.id, account.id)
     }
-    // oxlint-disable-next-line react-hooks/exhaustive-deps -- started once for the agent asked about, as it is read
-  }, [wanted?.id])
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- started once for the agent and account asked about, as it is read
+  }, [wanted?.id, meant])
   // A section where something waits on the person has a dot: an account to sign in again.
   const yours: Partial<Record<Section, boolean>> = {
     agents: agents.some((agent) => agent.accounts.some((account) => account.signIn === 'signed_out')),

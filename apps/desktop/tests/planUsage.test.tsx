@@ -592,6 +592,7 @@ describe('a sign-in that ends soon, in the bar (DEV-196)', () => {
     accountName: 'personal',
     several: false,
     endsAt: ENDS,
+    stage: 'soon' as const,
   }
 
   it('says nothing while all is well', async () => {
@@ -605,12 +606,13 @@ describe('a sign-in that ends soon, in the bar (DEV-196)', () => {
     const said = await screen.findByText(`Claude Code (personal)’s sign-in ends by ${clock(ENDS, NOW)}`)
     expect(said).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
-    expect(fake.client.dismissSignInEnding).toHaveBeenCalledWith('acc_claude', ENDS)
+    expect(fake.client.dismissSignInEnding).toHaveBeenCalledWith('acc_claude', ENDS, 'soon')
     expect(screen.queryByText(/sign-in ends/)).toBeNull()
   })
 
-  it('says it has ended once its time has passed', async () => {
-    windowAt('/', { ...planUsage([claude]), endings: [{ ...ending, endsAt: '2026-10-15T09:00:00.000Z' }] })
+  it('says it has ended where the runtime says so, its date passed or its check signed out before it', async () => {
+    // Its date is days off: the check already said signed out, and the bar says what the row does.
+    windowAt('/', { ...planUsage([claude]), endings: [{ ...ending, stage: 'ended' as const }] })
     expect(await screen.findByText('Claude Code’s sign-in has ended')).toBeTruthy()
   })
 })

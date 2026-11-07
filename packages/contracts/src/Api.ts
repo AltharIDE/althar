@@ -212,6 +212,8 @@ export const SignInEnding = Schema.Struct({
   /** The agent has more than one account here, so the account is worth naming. */
   several: Schema.Boolean,
   endsAt: Schema.String,
+  /** Where it stands: within its last days, any day now (past the earliest it can end), or ended, by its date or as its check already says signed out. Put aside at one, it is raised again at a later one. */
+  stage: Schema.Literals(['soon', 'last', 'ended']),
 })
 export type SignInEnding = typeof SignInEnding.Type
 
@@ -2653,6 +2655,10 @@ export const StuckStep = Schema.Struct({
     'transient',
     // Its agent's account is signed out: signing it in again in Settings, then trying again, is the way on.
     'signed_out',
+    // Its agent's sign-in was there and has ended: the same way on (DEV-196).
+    'sign_in_ended',
+    // Its agent isn't installed, or isn't where Althar runs it from: installing it in Settings, then trying again.
+    'not_installed',
   ]),
   /** What went wrong, in the agent's or Althar's words; for the last round, the lead's summary. */
   detail: Schema.NullOr(Schema.String),
@@ -4329,7 +4335,11 @@ export const Api = RpcGroup.make(
   /** Every account's plan usage: read again first where `refresh`, else as kept (at most a minute old). */
   call('GetPlanUsage', { refresh: Schema.optional(Schema.Boolean) }, PlanUsage),
   /** Puts aside the warning that an account's sign-in ends at `endsAt`: it isn't raised again for that sign-in. */
-  command('DismissSignInEnding', { accountId: Schema.String, endsAt: Schema.String }, Schema.Void),
+  command(
+    'DismissSignInEnding',
+    { accountId: Schema.String, endsAt: Schema.String, stage: Schema.Literals(['soon', 'last', 'ended']) },
+    Schema.Void,
+  ),
   /** Each model's room where work on it would start, in the project where given (its rule for moving work through accounts): read again as plan usage changes. */
   call('GetModelRooms', { projectId: Schema.optional(Schema.String) }, Schema.Array(ModelRoom)),
   /** Downloads an agent's latest release for the person, checks it against the digest its release publishes, and keeps it for Althar to run; done once it is ready. */

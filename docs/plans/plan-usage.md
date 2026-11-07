@@ -155,6 +155,16 @@ something to read.
   03 and 05.
 - **Left for later**: an operating-system notification, if the gauge proves
   too quiet.
+- **A sign-in that ends soon** (DEV-196) rides this feed too, though it is a
+  sign-in fact, not usage: the view carries `endings`, built from the same
+  `SignIns.account` check the account row reads, because plan usage is
+  already told every five minutes and the bar already listens to it. That is
+  why `AccountSignIns` asks `PlanUsage.retell` once a sign-in in Althar
+  finishes, and why "ends soon" is worked out in two places (the row's
+  `endsSoon` in `Api.ts`, the bar's `endings` here), both from `endingOf`
+  in `signInEnding.ts`, so they can't drift. Should a second sign-in fact
+  want the bar, move the endings to a `Live` event `SignIns` owns, which the
+  row and the bar both read.
 
 ## Steering new work
 

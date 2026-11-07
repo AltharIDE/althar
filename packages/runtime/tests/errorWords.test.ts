@@ -7,7 +7,7 @@ import { CoordinatorUnavailable } from '../src/Coordinator'
 import { AlreadyDelivered, ChangedSinceSeen, ImageRefused, RuleOnAnotherList, RulesChanged } from '../src/errors'
 import { ReviewDraftClosed, ReviewDraftIncomplete } from '../src/Reviews'
 import { StartTimedOut } from '../src/Sessions'
-import { agentSaid, expected, signedOutWords, signInEndedWords, signInWords, summarize, unreachableWords, words } from '../src/words'
+import { agentSaid, expected, signedOutWords, signInEndedWords, stuckWhyOf, summarize, unreachableWords, words } from '../src/words'
 import { thisDevice } from '../src/device'
 
 /*
@@ -295,9 +295,23 @@ describe('why an agent couldn’t start or be reached (DEV-196)', () => {
       signInEndedWords,
     )
     assert.strictEqual(agentSaid(exited('Failed to authenticate: OAuth session expired and could not be refreshed')), signInEndedWords)
-    assert.isTrue(signInWords(signInEndedWords))
-    assert.isTrue(signInWords(signedOutWords))
-    assert.isFalse(signInWords('The agent stopped.'))
+  })
+
+  it('gives a step that stopped on it the reason whose call offers its fix: signing in again, or installing it', () => {
+    assert.strictEqual(stuckWhyOf(signedOutWords), 'signed_out')
+    assert.strictEqual(stuckWhyOf(signInEndedWords), 'sign_in_ended')
+    assert.strictEqual(stuckWhyOf(agentSaid(new AgentStartFailed({ command: 'codex', reason: 'spawn codex ENOENT' }))), 'not_installed')
+    assert.strictEqual(stuckWhyOf(agentSaid(exited('/bin/sh: 1: claude: not found\nspawn claude ENOENT'))), 'not_installed')
+    assert.isUndefined(stuckWhyOf(unreachableWords(thisDevice())))
+    assert.isUndefined(stuckWhyOf('The agent stopped.'))
+    assert.isUndefined(stuckWhyOf(null))
+  })
+
+  it('says its classes in straight apostrophes, as the line it follows does, and never names "the agent" after its name', () => {
+    for (const line of [signInEndedWords, unreachableWords(thisDevice())]) {
+      assert.notInclude(line, '’')
+      assert.notMatch(line, /^The agent/)
+    }
   })
 
   it('says the network is in the way, for a connection that failed, not a server’s own trouble', () => {

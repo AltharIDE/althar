@@ -80,7 +80,7 @@ import type { Tried } from './stallWatch'
 import { addItem } from './threads'
 import { coordinatorFolderAt } from './coordinatorFolder'
 import { POOL, ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
-import { signInWords, summarize } from './words'
+import { stuckWhyOf, summarize } from './words'
 
 /*
  * A task's run (docs/architecture/05; docs/plans/mvp.md, "The plan"): its
@@ -401,6 +401,10 @@ export type StuckWhy =
   | 'transient'
   /** Its agent's account is signed out: reminding it can't help; signing it in again can. */
   | 'signed_out'
+  /** Its agent's sign-in was there and has ended (DEV-196): signing it in again is the way on, as for signed out. */
+  | 'sign_in_ended'
+  /** Its agent isn't installed, or isn't where Althar runs it from: installing it is the way on. */
+  | 'not_installed'
 
 /** What a stuck step's call says: the step, why, what went wrong in words, who was on it, the round, and the findings still open. */
 export interface StuckInfo {
@@ -1306,8 +1310,10 @@ export class Runs extends Context.Service<
       const stuck = (run: RunRow, attempt: { readonly id: string } | null, asked: StuckInfo) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          // An agent that couldn't start because it is signed out is signed out: signing it in again is the way on.
-          const told: StuckInfo = asked.why === 'failed_to_start' && signInWords(asked.detail) ? { ...asked, why: 'signed_out' } : asked
+          // An agent that couldn't start because it is signed out, its sign-in ended or it isn't installed stops for that:
+          // signing it in again, or installing it, is the way on, which the call offers.
+          const startWhy = asked.why === 'failed_to_start' ? stuckWhyOf(asked.detail) : undefined
+          const told: StuckInfo = startWhy === undefined ? asked : { ...asked, why: startWhy }
           // The model it was on, so handing the step on can leave out the one that failed.
           const on =
             told.agentId === null || told.step === 'publish' || told.model !== undefined

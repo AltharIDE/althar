@@ -2,6 +2,7 @@ import {
   type CheckoutAnswer,
   type WorksIn,
   type AccountSignInState,
+  type SignInEnding,
   type InstalledSkill,
   type SkillList,
   type SkillReviewCard,
@@ -501,7 +502,7 @@ export interface Client {
   /** Every account's plan usage; with `refresh`, each account is read again first rather than as kept. */
   readonly getPlanUsage: (options?: { readonly refresh?: boolean }) => Promise<PlanUsage>
   /** Puts aside the warning that an account's sign-in ends at `endsAt`, for that sign-in. */
-  readonly dismissSignInEnding: (accountId: string, endsAt: string) => Promise<void>
+  readonly dismissSignInEnding: (accountId: string, endsAt: string, stage: SignInEnding['stage']) => Promise<void>
   /** Each model's room where work on it would start, in a project (its rule for moving work through accounts) or anywhere. */
   readonly getModelRooms: (projectId: string | null) => Promise<ReadonlyArray<ModelRoom>>
   /** Downloads an agent for the person, checks it, and keeps it for Althar to run; done once it is ready. */
@@ -867,7 +868,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     listEditors: () => settle(api.ListEditors({})),
     getLoad: () => settle(api.GetLoad({})),
     getPlanUsage: (options = {}) => settle(api.GetPlanUsage(options.refresh === undefined ? {} : { refresh: options.refresh })),
-    dismissSignInEnding: (accountId, endsAt) => command((commandId) => api.DismissSignInEnding({ commandId, accountId, endsAt })),
+    dismissSignInEnding: (accountId, endsAt, stage) =>
+      command((commandId) => api.DismissSignInEnding({ commandId, accountId, endsAt, stage })),
     getModelRooms: (projectId) => settle(api.GetModelRooms(projectId === null ? {} : { projectId })),
     openInEditor: (input) => command((commandId) => api.OpenInEditor({ commandId, ...input })),
     openCode: (input) => command((commandId) => api.OpenCode({ commandId, ...input })),

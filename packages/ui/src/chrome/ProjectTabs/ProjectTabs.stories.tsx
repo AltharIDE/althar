@@ -9,6 +9,8 @@ import { IconButton } from '../../primitives/IconButton/IconButton'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
 import { Offline } from '../Offline/Offline'
 import { RoomSwitch } from '../RoomSwitch/RoomSwitch'
+import { SignInEnds } from '../SignInEnds/SignInEnds'
+import { UpdateReady } from '../UpdateReady/UpdateReady'
 import { WorkStatus } from '../WorkStatus/WorkStatus'
 import { type ProjectTab, ProjectTabs, type ProjectTabsProps } from './ProjectTabs'
 
@@ -46,15 +48,17 @@ const TWENTY: ProjectTab[] = Array.from({ length: 20 }, (_, i) => {
 
 /*
  * The bar at the top of a window, with the screen's own controls at its end, as the app puts them; with `withSettings`,
- * Althar's settings open in their tab; `offline`, the computer offline, as the app's line says before them.
+ * Althar's settings open in their tab; `offline`, the computer offline, as the app's line says before them; `notices`, every
+ * line the window's bar can hold at once: offline, an update ready and a sign-in that ends soon.
  */
 function Window({
   initial,
   current: start = 'meridian',
   withSettings = false,
   offline = false,
+  notices = false,
   ...props
-}: Partial<ProjectTabsProps> & { initial?: readonly ProjectTab[]; withSettings?: boolean; offline?: boolean }) {
+}: Partial<ProjectTabsProps> & { initial?: readonly ProjectTab[]; withSettings?: boolean; offline?: boolean; notices?: boolean }) {
   const [open, setOpen] = useState<readonly ProjectTab[]>(initial ?? ALL.slice(0, 3))
   const [current, setCurrent] = useState<string | null>(start)
   const [settings, setSettings] = useState<'none' | 'open' | 'current'>(withSettings ? 'current' : 'none')
@@ -102,7 +106,9 @@ function Window({
         end={
           shown ? (
             <>
-              {offline && <Offline />}
+              {(offline || notices) && <Offline />}
+              {notices && <UpdateReady version="0.1.1" onRestart={fn()} />}
+              {notices && <SignInEnds whose="Claude Code (work)" when="Mon 14:00" onSignIn={fn()} onDismiss={fn()} />}
               <RoomSwitch value={Room.Talk} onChange={fn()} />
               {shown.yours > 0 && <WorkStatus yours={shown.yours} onYours={fn()} />}
               <ChromeButton icon="plus" label="New task" onClick={fn()} />
@@ -131,6 +137,12 @@ export const InAProject: Story = {}
 export const AtHome: Story = { args: { current: null } }
 /** The computer is offline: one quiet line for the whole app, before the screen's own controls. */
 export const WhileOffline: Story = { args: { offline: true } }
+
+/**
+ * Every line the bar can hold at once, offline, an update ready and a sign-in that ends soon: in a window narrower than
+ * 1100px the sign-in's line goes short, its account left to its tooltip, so the bar never crowds.
+ */
+export const EveryLine: Story = { args: { notices: true } }
 /** More open than fit: each tab gives way down to its mark and a few letters, and the tabs scroll. */
 export const ManyOpen: Story = { args: { initial: MANY, current: 'billing-web' } }
 /** Twenty open: every tab gives way down to its mark, and the tabs scroll, by wheel too. */

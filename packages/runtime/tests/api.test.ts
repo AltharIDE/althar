@@ -2267,7 +2267,7 @@ describe('the coordinator, through the API', () => {
         const call = waiting.attention[0]
         assert.deepStrictEqual(
           [call?.kind, call?.stuck?.step, call?.stuck?.why, call?.stuck?.agentId],
-          ['stuck', 'implement', 'failed_to_start', 'missing'],
+          ['stuck', 'implement', 'not_installed', 'missing'],
         )
         // On the board, the call waits on the person, with the task it holds, and the task says it waits.
         const board = yield* client.GetBoard({ projectId: project.id })

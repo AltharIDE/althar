@@ -21,8 +21,22 @@
   color: var(--t-2);
   text-overflow: ellipsis;
 }
+.short {
+  display: none;
+  color: var(--t-2);
+}
 .dismiss {
   margin-inline-start: -4px;
+}
+
+/* A narrow window, where the bar also holds the update's line and Offline: the short line, never a crowded bar. */
+@media (max-width: 1100px) {
+  .says {
+    display: none;
+  }
+  .short {
+    display: inline;
+  }
 }
 
 @keyframes arrive {

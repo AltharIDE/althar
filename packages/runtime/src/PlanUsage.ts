@@ -33,7 +33,7 @@ import type { NotFound } from './errors'
 import { Live } from './Live'
 import { timestamp } from './records'
 import { SignIns } from './SignIns'
-import { type Warned, warnedKey, warnedOf, warns } from './signInEnding'
+import { type Stage, type Warned, warnedKey, warnedOf, warning } from './signInEnding'
 
 /*
  * What each account's plan has left (docs/plans/plan-usage.md), for
@@ -165,7 +165,7 @@ export class PlanUsage extends Context.Service<
      * Puts aside the warning that the account's sign-in ends at `endsAt`, for good: only another sign-in raises one again. Only
      * for an account there is: what is kept goes with the account when it is removed (`Accounts.remove`).
      */
-    readonly dismiss: (accountId: string, endsAt: string) => Effect.Effect<void, NotFound | Failure>
+    readonly dismiss: (accountId: string, endsAt: string, stage: Stage) => Effect.Effect<void, NotFound | Failure>
     /** Tells the view again at once, as an account signed in again: a warning its old sign-in raised goes from the window's bar with it. */
     readonly retell: Effect.Effect<void>
     /**
@@ -607,8 +607,10 @@ export class PlanUsage extends Context.Service<
             const all = yield* accounts.of(entry.definition.id)
             for (const account of all) {
               const check = yield* signIns.account(account)
-              // A sign-in that ends within its last days, read with its account, warns once (signInEnding.ts).
-              if (check.endsAt !== undefined && warns(check.endsAt, warned.get(warnedKey(account.id)), now))
+              // A sign-in that ends within its last days, read with its account, warns once at each stage (signInEnding.ts); one
+              // whose check already says signed out has ended, so the bar never says "ends by" beside a signed-out row.
+              const stage = warning(check.endsAt, warned.get(warnedKey(account.id)), now, check.status === 'signed_out')
+              if (check.endsAt !== undefined && stage !== undefined)
                 endings.push({
                   agentId: entry.definition.id,
                   agentName: entry.definition.name,
@@ -616,6 +618,7 @@ export class PlanUsage extends Context.Service<
                   accountName: account.name,
                   several: all.length > 1,
                   endsAt: check.endsAt,
+                  stage,
                 })
               const mine = held.get(account.id)
               const paidBy = mine?.paidBy ?? check.paidBy
@@ -678,10 +681,10 @@ export class PlanUsage extends Context.Service<
 
         return PlanUsage.of({
           retell: told,
-          dismiss: (accountId, endsAt) =>
+          dismiss: (accountId, endsAt, stage) =>
             Effect.gen(function* () {
               yield* accounts.get(accountId)
-              const value = JSON.stringify({ endsAt, dismissed: true } satisfies Warned)
+              const value = JSON.stringify({ endsAt, dismissed: stage } satisfies Warned)
               yield* sql`INSERT INTO settings ${sql.insert({ key: warnedKey(accountId), value, updatedAt: yield* timestamp })}
                 ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
               yield* told

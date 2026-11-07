@@ -1087,9 +1087,9 @@ describe('a sign-in that ends soon (DEV-196)', () => {
     }).pipe(Effect.scoped, Effect.provide(Layer.fresh(withUsage({})))),
   )
 
-  it.effect('is raised within its last days, for that agent alone, and stays aside once put aside', () =>
+  it.effect('is raised within its last days, for that agent alone, and put aside, raised once more at each later stage', () =>
     Effect.gen(function* () {
-      yield* ending(at(30))
+      yield* ending(at(24 * 5))
       const usage = yield* PlanUsage
       const [account] = yield* (yield* Accounts).of('claude-code')
       const raised = (yield* usage.now(true)).endings ?? []
@@ -1100,20 +1100,40 @@ describe('a sign-in that ends soon (DEV-196)', () => {
           accountId: account!.id,
           accountName: account!.name,
           several: false,
-          endsAt: at(30),
+          endsAt: at(24 * 5),
+          stage: 'soon',
         },
       ])
-      yield* usage.dismiss(account!.id, at(30))
-      assert.isUndefined((yield* usage.now(true)).endings)
-      // Put aside, it stays aside after the sign-in has ended too.
-      yield* TestClock.adjust(Duration.hours(31))
-      assert.isUndefined((yield* usage.now(true)).endings)
+      const stage = () => usage.now(true).pipe(Effect.map((view) => view.endings?.[0]?.stage))
+      // Put aside five days out, meaning later: it stays aside while it is only soon.
+      yield* usage.dismiss(account!.id, at(24 * 5), 'soon')
+      assert.isUndefined(yield* stage())
+      yield* TestClock.adjust(Duration.hours(24))
+      assert.isUndefined(yield* stage())
+      // Past the earliest it can end, it is raised once more; put aside then, it stays aside until the end.
+      yield* TestClock.adjust(Duration.hours(24 + 1))
+      assert.strictEqual(yield* stage(), 'last')
+      yield* usage.dismiss(account!.id, at(24 * 5), 'last')
+      assert.isUndefined(yield* stage())
+      // Ended: raised one last time, and put aside, gone for this sign-in.
+      yield* TestClock.adjust(Duration.hours(24 * 3))
+      assert.strictEqual(yield* stage(), 'ended')
+      yield* usage.dismiss(account!.id, at(24 * 5), 'ended')
+      assert.isUndefined(yield* stage())
       // Signed in again, with an end of its own: its last days raise it once more.
-      fakeSignInEnds.set('claude-code', at(31 + 24 * 5))
+      const next = at(24 * 5 + 1 + 24 * 5)
+      fakeSignInEnds.set('claude-code', next)
       // Read again once its last check is older than a minute, as the five-minute reading does.
       yield* TestClock.adjust(Duration.minutes(2))
-      assert.strictEqual((yield* usage.now(true)).endings?.[0]?.endsAt, at(31 + 24 * 5))
+      assert.strictEqual((yield* usage.now(true)).endings?.[0]?.endsAt, next)
     }).pipe(Effect.scoped, Effect.provide(Layer.fresh(withUsage({})))),
+  )
+
+  it.effect('has ended once its check says signed out, though its date is days off: the real end can come first', () =>
+    Effect.gen(function* () {
+      yield* ending(at(24 * 4))
+      assert.strictEqual((yield* (yield* PlanUsage).now(true)).endings?.[0]?.stage, 'ended')
+    }).pipe(Effect.scoped, Effect.provide(Layer.fresh(withUsage({}, { signedOut: ['claude-code'] })))),
   )
 
   it.effect('is put aside only for an account there is, and what was kept of it goes with the account', () =>
@@ -1122,14 +1142,14 @@ describe('a sign-in that ends soon (DEV-196)', () => {
       const accounts = yield* Accounts
       const sql = yield* SqlClient.SqlClient
       const kept = (accountId: string) => sql<{ key: string }>`SELECT key FROM settings WHERE key = ${`sign_in_ending:${accountId}`}`
-      const refused = yield* Effect.flip(usage.dismiss('acc_nobody', at(30)))
+      const refused = yield* Effect.flip(usage.dismiss('acc_nobody', at(30), 'soon'))
       assert.strictEqual(refused._tag, 'NotFound')
       assert.lengthOf(yield* kept('acc_nobody'), 0)
       // An account another tool's folder holds, so removing it signs nothing out.
       const home = join(mkdtempSync(join(tmpdir(), 'althar-home-')), 'claude-work')
       mkdirSync(home)
       const work = yield* accounts.add({ agentId: 'claude-code', name: 'work', folder: home })
-      yield* usage.dismiss(work.id, at(30))
+      yield* usage.dismiss(work.id, at(30), 'soon')
       assert.lengthOf(yield* kept(work.id), 1)
       yield* accounts.remove(work.id)
       assert.lengthOf(yield* kept(work.id), 0)

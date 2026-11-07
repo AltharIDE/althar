@@ -341,6 +341,7 @@ export function TaskView({
   onBack,
   onRules,
   onSignIn,
+  onInstall,
   onConnections,
   onOpenTask,
 }: {
@@ -351,6 +352,8 @@ export function TaskView({
   onRules?: () => void
   /** Opens Settings at an agent's sign-in, started, for a lead that is signed out. */
   onSignIn?: (agentId: string) => void
+  /** Opens the agent's tab in Settings, where it is installed, for a step whose agent isn't. */
+  onInstall?: (agentId: string) => void
   /** Opens the code hosts and trackers in Settings, for one to connect or sign in to again. */
   onConnections?: () => void
   /** Opens another task, by its thread: one this task's lead started, from its thread's line. */
@@ -1005,6 +1008,7 @@ export function TaskView({
         agentName={agentName}
         onAnswer={model.answerStuck}
         {...(onSignIn === undefined ? {} : { onSignIn })}
+        {...(onInstall === undefined ? {} : { onInstall })}
         {...(onConnections === undefined ? {} : { onConnect: onConnections })}
         {...(reportProblem === undefined
           ? {}

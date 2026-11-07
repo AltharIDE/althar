@@ -261,6 +261,46 @@ describe('the ways on each card offers', () => {
     ])
   })
 
+  it('says a sign-in that ended as such, not signed out, and offers its sign-in first all the same', async () => {
+    const onSignIn = vi.fn()
+    const { client } = fakeClient()
+    const step = stuck({ why: 'sign_in_ended', detail: 'Its sign-in has ended. Sign it in again in Settings, then try again.' })
+    withServices(
+      <StuckCall
+        request={request(step)}
+        stuck={step}
+        agents={agents}
+        agentName={() => 'Claude Code'}
+        onAnswer={vi.fn()}
+        onSignIn={onSignIn}
+      />,
+      client,
+    )
+    expect(await screen.findByText("Claude Code's sign-in has ended.")).toBeTruthy()
+    expect(screen.queryByText(/is signed out/)).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
+    expect(onSignIn).toHaveBeenCalledWith('codex')
+  })
+
+  it('offers an agent that isn’t installed its install in Settings first, then trying again', async () => {
+    const onInstall = vi.fn()
+    const { client } = fakeClient()
+    const step = stuck({ why: 'not_installed', detail: "codex isn't installed, or isn't on this Mac's PATH." })
+    withServices(
+      <StuckCall request={request(step)} stuck={step} agents={agents} agentName={() => 'Codex'} onAnswer={vi.fn()} onInstall={onInstall} />,
+      client,
+    )
+    expect((await screen.findAllByRole('button')).map((button) => button.textContent)).toEqual([
+      'Install',
+      'Try again',
+      'Continue with another model',
+      'Abandon this step',
+    ])
+    expect(screen.getByText(/^Codex isn't installed, or isn't on .+'s PATH\.$/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Install' }))
+    expect(onInstall).toHaveBeenCalledWith('codex')
+  })
+
   it('offers the pull request only trying again or going on without it', async () => {
     expect(await buttonsOf(stuck({ step: 'publish', why: 'failed_to_start', agentId: null }))).toEqual([
       'Try again',

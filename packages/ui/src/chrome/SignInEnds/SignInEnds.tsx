@@ -17,6 +17,9 @@ export interface SignInEndsText {
   /** Whose sign-in ends, and by when as the person reads it, the latest its agent gives: Claude Code’s sign-in ends by Mon 14:00. */
   ends: (whose: string, when: string) => string
   ended: (whose: string) => string
+  /** The same, shorter, where the window is narrow and the bar holds other lines too: its account named only in the tooltip. */
+  endsShort: (when: string) => string
+  endedShort: string
   signIn: string
   dismiss: string
 }
@@ -24,6 +27,8 @@ export interface SignInEndsText {
 export const signInEndsText: SignInEndsText = {
   ends: (whose, when) => `${whose}’s sign-in ends by ${when}`,
   ended: (whose) => `${whose}’s sign-in has ended`,
+  endsShort: (when) => `Sign-in ends by ${when}`,
+  endedShort: 'Sign-in has ended',
   signIn: 'Sign in again',
   dismiss: 'Dismiss',
 }
@@ -46,12 +51,17 @@ export type SignInEndsProps = RootProps<
 export function SignInEnds({ whose, when, onSignIn, onDismiss, text, className, ...rest }: SignInEndsProps) {
   const t = { ...signInEndsText, ...text }
   const says = when === undefined ? t.ended(whose) : t.ends(whose, when)
+  const short = when === undefined ? t.endedShort : t.endsShort(when)
   return (
     // An output is a live status: the line is read out as it appears.
     <output className={cx(s.line, className)} {...rest}>
       <Icon name="clock" size={12} className={s.icon} />
+      {/* One of the two shows, by the window's width: the long names whose; the short leaves that to its tooltip. */}
       <span className={s.says} title={says}>
         {says}
+      </span>
+      <span className={s.short} title={says}>
+        {short}
       </span>
       <LinkButton onClick={onSignIn}>{t.signIn}</LinkButton>
       <IconButton icon="close" label={t.dismiss} size="small" onClick={onDismiss} className={s.dismiss} />

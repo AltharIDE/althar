@@ -89,14 +89,30 @@ export const startedAfreshWords = (agent: string) => `${agent} had lost this con
 /** An agent whose account is signed out, as a step's call says it: the call itself offers signing in again. */
 export const signedOutWords = 'The agent is signed out. Sign it in again in Settings, then try again.'
 
-/** An agent whose sign-in was there and has ended: the same way on, signing in again, as a step's call offers. */
-export const signInEndedWords = 'The agent’s sign-in has ended. Sign it in again in Settings, then try again.'
+/** An agent whose sign-in was there and has ended: the same way on, signing in again, as a step's call offers. After "<agent> couldn't start.", so its agent isn't named again. */
+export const signInEndedWords = 'Its sign-in has ended. Sign it in again in Settings, then try again.'
 
 /** An agent that couldn't reach its servers: nothing to sign in, the connection to look at. */
-export const unreachableWords = (device: string) => `The agent can’t reach its servers. Check ${device}’s connection, then try again.`
+export const unreachableWords = (device: string) => `Its servers can't be reached. Check ${device}'s connection, then try again.`
 
-/** Whether a call's words are a sign-in to do again, signed out or ended, which the call offers to start. */
-export const signInWords = (words: string | null | undefined): boolean => words === signedOutWords || words === signInEndedWords
+/** An agent that isn't there to start, by the command Althar ran: installing it is the way on. */
+const notInstalledWords = (command: string) =>
+  `${command === '' ? 'The agent' : command} isn't installed, or isn't on ${thisDevice()}'s PATH.`
+const notInstalledLine = / isn't installed, or isn't on .+'s PATH\.$/
+
+/**
+ * The reason a step stopped where its agent couldn't start, as the step's call
+ * offers its way on: signing in again, for one signed out or whose sign-in
+ * ended; installing it, for one that isn't there. Undefined for any other words.
+ */
+export const stuckWhyOf = (words: string | null | undefined): 'signed_out' | 'sign_in_ended' | 'not_installed' | undefined =>
+  words === signedOutWords
+    ? 'signed_out'
+    : words === signInEndedWords
+      ? 'sign_in_ended'
+      : words != null && notInstalledLine.test(words)
+        ? 'not_installed'
+        : undefined
 
 /**
  * Why an agent couldn't start or be reached, in one plain line, where it is a
@@ -107,7 +123,7 @@ export const signInWords = (words: string | null | undefined): boolean => words 
 const classWords = (failure: StartFailure | undefined, command: string): string | undefined => {
   switch (failure) {
     case 'not_installed':
-      return `${command === '' ? 'The agent' : command} isn't installed, or isn't on ${thisDevice()}'s PATH.`
+      return notInstalledWords(command)
     case 'signed_out':
       return signedOutWords
     case 'sign_in_ended':
@@ -139,7 +155,7 @@ export const agentSaid = (error: unknown): string | undefined => {
       const reason = text(error, 'reason')
       // The person's own command, where the sandbox cannot reach the device: say what to put right, never "isn't installed".
       if (command === 'flatpak-spawn' || /flatpak|org\.freedesktop\.Flatpak/i.test(reason)) return hostDenied
-      if (/ENOENT/.test(reason)) return `${command} isn't installed, or isn't on ${thisDevice()}'s PATH.`
+      if (/ENOENT/.test(reason)) return notInstalledWords(command)
       return classed(reason, command) ?? sentence(`${command} wouldn't start: ${own(firstErrorLine(reason))}`)
     }
     case 'AgentExited': {
