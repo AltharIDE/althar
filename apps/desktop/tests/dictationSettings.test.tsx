@@ -239,6 +239,10 @@ describe('Settings, Dictation: a download from another window', () => {
     host.set(state({}, { ...gone, got: 100_000_000, downloading: true }))
     host.send({ type: 'progress', got: 100_000_000, size: SIZE })
     expect(await screen.findByText(/Downloading Parakeet TDT 0.6B v3: 100 MB of 670 MB/)).toBeTruthy()
+    host.send({ type: 'progress', got: 300_000_000, size: SIZE })
+    expect(await screen.findByText(/Downloading Parakeet TDT 0.6B v3: 300 MB of 670 MB/)).toBeTruthy()
+    host.send({ type: 'progress', got: 500_000_000, size: SIZE })
+    expect(await screen.findByText(/Downloading Parakeet TDT 0.6B v3: 500 MB of 670 MB/)).toBeTruthy()
   })
 })
 

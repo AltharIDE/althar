@@ -65,8 +65,11 @@ export const useDictationSettings = (): DictationSettingsModel | null => {
         .catch(() => {})
     read()
     const off = voice.onEvent((event) => {
-      const type = (event as { type?: unknown } | null)?.type
-      if (type !== 'progress' || !downloading.current) read()
+      const e = event as { type?: unknown; got?: unknown } | null
+      if (e?.type === 'progress' && downloading.current && typeof e.got === 'number') {
+        const got = e.got
+        setState((s) => (s === null ? s : { ...s, model: { ...s.model, got } }))
+      } else read()
     })
     return () => {
       live = false
