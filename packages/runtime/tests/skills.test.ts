@@ -185,7 +185,8 @@ describe('skills for a task’s lead', () => {
         const folder = launches.at(-1)?.options?.skills ?? ''
         assert.isTrue(folder.startsWith(join(skills.root, 'runs')), folder)
         assert.deepStrictEqual(readdirSync(folder).toSorted(), ['alpha', 'beta'])
-        // Its launch carries OpenCode's own config, as the registry makes it, with that folder among its skills' paths.
+        // The fake runs in this process, so what is read is the environment `Agents.fromRegistry` composes from this launch's
+        // arguments, not one a process received: OpenCode's own config, with that folder among its skills' paths.
         const config = JSON.parse(launches.at(-1)?.launched?.OPENCODE_CONFIG_CONTENT ?? '{}') as { skills?: { paths?: Array<string> } }
         assert.include(config.skills?.paths ?? [], folder)
         yield* sessions.stop(created.threadId)

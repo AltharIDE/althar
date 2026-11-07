@@ -651,15 +651,22 @@ checks and the harness permission rules remain the enforcement.
   `debug skill` lists all 33 from `skills.paths` with an isolated home; Codex
   0.160.1's app server lists all 33 from the extra root codex-acp sets.
 - **Checked on every run of `test:agents` (DEV-187), without a sign-in or a
-  model call:** a run's folder, laid out as each registry entry says and handed
-  over as Althar hands it, is found by the real agent: Claude Code (through
-  claude-agent-acp 0.101.0) lists its plugin's skills as `althar:<skill>`
-  commands, Codex (codex-acp 2.5.0) lists the folder added to its session, and
-  OpenCode's `debug skill` lists it from `skills.paths` (seen with 1.18.31).
-  Each skips where its agent isn't installed. No workflow runs `test:agents`
-  yet. The runtime's tests check the other half on every pull request: that
-  the plugin, the added directory and the `skills.paths` the registry makes
-  reach the session.
+  model call:** a run's folder, laid out by `@althar/skills`' `projectRun` for
+  each registry entry's layout and handed over as Althar hands it, is found by
+  the real agent: Claude Code (through claude-agent-acp 0.101.0) lists its
+  plugin's skills as `althar:<skill>` commands, Codex (codex-acp 2.5.0) lists
+  the folder added to its session, and OpenCode lists it from `skills.paths`:
+  1.x in `debug skill` (seen with 1.18.31), 2.x, which has no `debug skill`,
+  from its own server's `GET /api/skill` (seen with 2.2.6). Althar runs the
+  person's OpenCode where they have one, of either major, and downloads 2.x
+  where they don't; `ALTHAR_TEST_OPENCODE` names the copy to check. Claude Code
+  skips where its adapter or the program it starts can't be found, OpenCode
+  where it isn't installed. No workflow runs `test:agents` yet. On every pull
+  request, the runtime's tests check the other half: that the plugin and the
+  added directory reach the session the fake agent opens, and that the launch
+  `Agents.fromRegistry` composes for OpenCode carries the run's folder in
+  `skills.paths` (the fake runs in the test's process, so that is the
+  composed environment, not one a process received).
 - **Repository files in the project's settings (2026-10-18).** The project's
   Settings panel has a Repository files module that says where they stand and
   opens out to the three switches of section 4, each off until turned on and

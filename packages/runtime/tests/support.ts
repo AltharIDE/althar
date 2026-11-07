@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { cpSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
@@ -93,18 +93,34 @@ export const sessionsAsked: Array<{
   readonly params: Parameters<NonNullable<FakeAgentOptions['sessionAsked']>>[0]
 }> = []
 
-/** The registry's own launches, for the environment a real agent of a fake's id would start with: made once, as it makes a folder. */
-let registryLaunches: ReturnType<typeof Agents.fromRegistry> | undefined
+/** What the registry's launch reads of this machine for an agent's own config, set aside while it is made here. */
+const MACHINE_CONFIG = ['HOME', 'TMPDIR', 'XDG_CONFIG_HOME', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR', 'OPENCODE_CONFIG_CONTENT'] as const
 
 /**
- * The environment the registry's agent of this id would be launched with, from the same arguments: for one given its skills
- * through it, as OpenCode is, so a test sees the real setting reach the launch rather than a fake's own.
+ * The environment the registry's agent of this id would be launched with, from the same arguments, as `Agents.fromRegistry`
+ * composes it: for one given its skills through it, as OpenCode is, so a test sees the registry's own setting in that
+ * launch rather than a fake's. Only for a launch given skills, and in a home and a temporary folder of its own, removed
+ * after: the registry reads the agent's config from the home and makes a folder in the temporary one.
  */
 const launchedEnv = (agentId: string, cwd: string, env: Readonly<Record<string, string>>, options: SessionOptions | undefined) => {
-  if (registry[agentId as AgentId]?.skills?.via.kind !== 'env') return undefined
-  registryLaunches ??= Agents.fromRegistry()
-  const made = registryLaunches.list.find((entry) => entry.definition.id === agentId)?.transport(cwd, env, options)
-  return made?._tag === 'Process' ? made.spec.env : undefined
+  if (options?.skills === undefined || registry[agentId as AgentId]?.skills?.via.kind !== 'env') return undefined
+  const aside = mkdtempSync(join(tmpdir(), 'althar-registry-launch-'))
+  const before = MACHINE_CONFIG.map((name) => [name, process.env[name]] as const)
+  for (const name of MACHINE_CONFIG) delete process.env[name]
+  process.env.HOME = aside
+  process.env.TMPDIR = aside
+  try {
+    const made = Agents.fromRegistry()
+      .list.find((entry) => entry.definition.id === agentId)
+      ?.transport(cwd, env, options)
+    return made?._tag === 'Process' ? made.spec.env : undefined
+  } finally {
+    for (const [name, value] of before) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+    rmSync(aside, { recursive: true, force: true })
+  }
 }
 
 /** What each session of the fake agent with session options (`claude-code`) was started as: its role, and its options. */
