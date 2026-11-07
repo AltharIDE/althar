@@ -110,8 +110,8 @@ source and caches, then available capacity. Reserve resources atomically at
 the worker so two homes cannot both count the same spare memory. Limits
 include host concurrency, disk reserve, per-project concurrency and any
 person-set spending cap. An unavailable eligible worker leaves the task
-waiting with its reason. Never spill into another pool or buy capacity
-beyond a cap on the agent's initiative.
+waiting with its reason. Never spill into a pool the project isn't assigned,
+or buy capacity beyond a cap, on the agent's initiative.
 
 Keep the task's repositories and sessions together on that worker initially.
 New tasks may go elsewhere when it fills. A running task stays put; load is
@@ -388,7 +388,10 @@ remote host just by exposing a socket.
    setup, files/diffs/artifacts, run forwarding, editor handoff and reconnect.
    Prove on a real VPS that a task builds and records its result with the
    Mac asleep, then reconnect and answer an ask. Prove another unpaired
-   process cannot submit a person-only answer. This is the first usable slice.
+   process cannot submit a person-only answer. Gate each agent on its
+   headless subscription sign-in, refresh and plan usage working on that
+   VPS; an agent that fails stays off remote hosts until it passes. This is
+   the first usable slice.
 2. **Several workers and local testing.** Automatic placement across assigned
    pools, resource reservations, fenced leases, host outages and snapshots;
    Run on this computer and platform-qualified setup. Prove a saturated host
@@ -410,7 +413,8 @@ remote host just by exposing a socket.
    adds people, roles and a shared authority. Reuse placement and lease
    protocols. Prove tenant separation, cancellation, no secret in a reusable
    snapshot, regional placement, and export of unpushed work before retiring
-   capacity. Provider-specific sign-in support is a release gate, not assumed.
+   capacity. Provider sign-in in managed environments is its own release
+   gate, checked again rather than carried over from phase 1.
 
 Each slice includes focused contract/failure tests. Fake agents prove protocol
 behavior, not Linux isolation, provider sign-in, real Git credentials or
