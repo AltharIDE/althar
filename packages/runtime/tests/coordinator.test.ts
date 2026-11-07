@@ -1621,8 +1621,8 @@ describe('the coordinator, a trusted reader in its own copies (ADR-058)', () => 
       assert.strictEqual(contained?.folder, folder)
       const real = (path: string) => realpathSync(path)
       const { allowed = [], denied = [] } = contained?.reads ?? {}
-      // None of the home folder, the person's checkout or the project's task folders, but its own folder and what it fetches from.
-      assert.includeMembers([...denied], [real(homedir()), real(join(config.worktreeRoot, project?.slug ?? ''))])
+      // None of the home folder, the person's checkout or the task folders' root (every project's), but its own folder and what it fetches from.
+      assert.includeMembers([...denied], [real(homedir()), real(config.worktreeRoot)])
       const [checkout] = yield* sql<{ path: string }>`SELECT path FROM repository_locations`
       assert.include(denied, real(checkout?.path ?? ''))
       assert.includeMembers([...allowed], [real(folder), real(join(config.worktreeRoot, project?.slug ?? '', '.coordinator-mirrors'))])
