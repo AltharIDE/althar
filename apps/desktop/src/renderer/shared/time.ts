@@ -27,12 +27,14 @@ export const clock = (iso: string, now: Date = new Date()): string => {
   const at = new Date(iso)
   const time = at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
   if (at.toDateString() === now.toDateString()) return time
-  const soon = at.getTime() - now.getTime() < 6 * 24 * 60 * 60 * 1000
+  // A weekday names a coming day; a past one would read as the next such day, so it gets its date.
+  const ahead = at.getTime() - now.getTime()
+  const soon = ahead >= 0 && ahead < 6 * 24 * 60 * 60 * 1000
   return `${at.toLocaleDateString(undefined, soon ? { weekday: 'short' } : { day: 'numeric', month: 'short' })} ${time}`
 }
 
 /**
- * How long until a time, as a plan window's reset says it: "in 45 m", "in 2 h 10 m", "in 1 d 3 h". Whole minutes, rounded up so
+ * How long until a time, as a plan window's reset says it: "in 45m", "in 2h 10m", "in 1d 3h". Whole minutes, rounded up so
  * it never says 0 before it arrives; from a day, days and hours. Null for a time that isn't one or has passed.
  */
 export const timeLeft = (iso: string, now: Date = new Date()): string | null => {
@@ -40,13 +42,13 @@ export const timeLeft = (iso: string, now: Date = new Date()): string | null => 
   const ms = new Date(iso).getTime() - now.getTime()
   if (ms <= 0) return null
   const minutes = Math.ceil(ms / 60_000)
-  if (minutes < 60) return `in ${minutes} m`
+  if (minutes < 60) return `in ${minutes}m`
   const hours = Math.floor(minutes / 60)
   const rest = minutes % 60
-  if (hours < 24) return rest === 0 ? `in ${hours} h` : `in ${hours} h ${rest} m`
+  if (hours < 24) return rest === 0 ? `in ${hours}h` : `in ${hours}h ${rest}m`
   const days = Math.floor(hours / 24)
   const more = hours % 24
-  return more === 0 ? `in ${days} d` : `in ${days} d ${more} h`
+  return more === 0 ? `in ${days}d` : `in ${days}d ${more}h`
 }
 
 /** How long something took, from two instants: "12s", "3m 5s", "1h 4m". */

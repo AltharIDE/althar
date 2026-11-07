@@ -103,7 +103,7 @@ function Window({ window, t }: { window: PlanWindow; t: PlanPeekText }) {
     >
       <span>{window.label}</span>
       {window.unread === true ? (
-        <span className={s.windowUnknown} />
+        <span className={s.windowUnknown} aria-hidden="true" />
       ) : (
         <>
           <Bar left={window.left} className={s.windowBar} />

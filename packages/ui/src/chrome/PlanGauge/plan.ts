@@ -18,7 +18,7 @@ export interface PlanWindow {
   /** When it resets, as the consumer words a time: 14:00, Mon 09:00. */
   until: string | null
   /**
-   * When it resets, in the consumer's words, for every window: "resets 14:00 · in 2 h 10 m", or "reset at 14:00 · not read
+   * When it resets, in the consumer's words, for every window: "resets 14:00 · in 2h 10m", or "reset at 14:00 · not read
    * since" where it has reset and no one has read it again, or that the provider gave no time.
    */
   resets?: string

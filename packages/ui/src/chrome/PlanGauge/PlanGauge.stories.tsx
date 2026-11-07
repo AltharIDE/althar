@@ -98,7 +98,7 @@ export const Resets: Story = {
   play: async () => {
     const page = within(document.body)
     await userEvent.click(page.getByRole('button', { name: /^Claude Code/ }))
-    await expect(page.getByText('resets Fri 09:00 · in 1 d 18 h')).toBeInTheDocument()
+    await expect(page.getByText('resets Fri 09:00 · in 1d 18h')).toBeInTheDocument()
     await expect(page.getByText('reset at 14:00 · not read since')).toBeInTheDocument()
     await expect(page.getByText('no reset time given')).toBeInTheDocument()
   },
@@ -110,7 +110,7 @@ export const ResetsTwoAccounts: Story = {
   play: async () => {
     const page = within(document.body)
     await userEvent.click(page.getByRole('button', { name: /^Claude Code/ }))
-    await expect(page.getByText('resets 15:40 · in 50 m')).toBeInTheDocument()
+    await expect(page.getByText('resets 15:40 · in 50m')).toBeInTheDocument()
   },
 }
 

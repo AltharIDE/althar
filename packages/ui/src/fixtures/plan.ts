@@ -119,8 +119,8 @@ export const CLAUDE_TWO: PlanAgent = {
       age: null,
       fault: null,
       windows: [
-        { id: 'five_hour', label: '5 hours', left: 52, until: '17:00', resets: 'resets 17:00 · in 2 h 10 m' },
-        { id: 'weekly', label: 'Week', left: 0, until: 'Mon 09:00', resets: 'resets Mon 09:00 · in 3 d 18 h' },
+        { id: 'five_hour', label: '5 hours', left: 52, until: '17:00', resets: 'resets 17:00 · in 2h 10m' },
+        { id: 'weekly', label: 'Week', left: 0, until: 'Mon 09:00', resets: 'resets Mon 09:00 · in 3d 18h' },
       ],
     },
     {
@@ -129,8 +129,8 @@ export const CLAUDE_TWO: PlanAgent = {
       age: 'read 2 hours ago',
       fault: 'Claude Code didn’t answer when it was last asked; these are its last numbers.',
       windows: [
-        { id: 'five_hour', label: '5 hours', left: 80, until: '15:40', resets: 'resets 15:40 · in 50 m' },
-        { id: 'weekly', label: 'Week', left: 41, until: 'Fri 09:00', resets: 'resets Fri 09:00 · in 1 d 18 h' },
+        { id: 'five_hour', label: '5 hours', left: 80, until: '15:40', resets: 'resets 15:40 · in 50m' },
+        { id: 'weekly', label: 'Week', left: 41, until: 'Fri 09:00', resets: 'resets Fri 09:00 · in 1d 18h' },
       ],
     },
   ],
@@ -153,7 +153,7 @@ export const CLAUDE_RESETS: PlanAgent = {
       fault: null,
       windows: [
         { id: 'five_hour', label: '5 hours', left: 0, until: '14:00', resets: 'reset at 14:00 · not read since', unread: true },
-        { id: 'weekly', label: 'Week', left: 45, until: 'Fri 09:00', resets: 'resets Fri 09:00 · in 1 d 18 h' },
+        { id: 'weekly', label: 'Week', left: 45, until: 'Fri 09:00', resets: 'resets Fri 09:00 · in 1d 18h' },
         { id: 'weekly:Opus', label: 'Opus week', left: 70, until: null, resets: 'no reset time given' },
       ],
     },

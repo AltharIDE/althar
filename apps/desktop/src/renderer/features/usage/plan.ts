@@ -33,7 +33,7 @@ export const text = {
   unread: 'Not read since reset',
   /** A plan signed in and able to run, whose usage nothing reads (OpenCode Go without a Console sign-in). */
   connected: 'Connected',
-  /** A window's reset, with the time left: resets 14:00 · in 2 h 10 m. */
+  /** A window's reset, with the time left: resets 14:00 · in 2h 10m. */
   resets: (at: string, left: string | null) => (left === null ? `resets ${at}` : `resets ${at} · ${left}`),
   /** A window that has reset since it was read, and not been read again. */
   resetUnread: (at: string) => `reset at ${at} · not read since`,

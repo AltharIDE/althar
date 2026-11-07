@@ -358,13 +358,13 @@ describe('what the window says of a plan', () => {
     })
     const windows = (at: Date) => planOf(planUsage([account]), at).agents[0]?.accounts[0]?.windows
     expect(windows(NOW)?.map((window) => window.resets)).toEqual([
-      `resets ${clock(RESET, NOW)} · in 4 h 55 m`,
-      `resets ${clock(WEEK, NOW)} · in 3 d 22 h`,
+      `resets ${clock(RESET, NOW)} · in 4h 55m`,
+      `resets ${clock(WEEK, NOW)} · in 3d 22h`,
       'no reset time given',
     ])
     // The time left moves with the clock, though nothing is read again.
     const later = new Date('2026-10-15T12:35:00.000Z')
-    expect(windows(later)?.[0]?.resets).toBe(`resets ${clock(RESET, later)} · in 2 h 25 m`)
+    expect(windows(later)?.[0]?.resets).toBe(`resets ${clock(RESET, later)} · in 2h 25m`)
     // Reset since it was read: said so, with no figure that could read as an empty limit.
     const after = new Date('2026-10-15T15:01:00.000Z')
     expect(windows(after)?.[0]).toMatchObject({ resets: `reset at ${clock(RESET, after)} · not read since`, unread: true })
