@@ -5,7 +5,7 @@ import { type CommandEnvelope, type ProjectId, type WorksIn } from '@althar/doma
 import type { Commands, Ledger } from '@althar/persistence-sqlite'
 import { AUTOMATION_DEFAULTS, type AutomationDefinition, knownModelName, Schedule, scheduleInLine } from '@althar/contracts'
 import { Priority, StatusCategory } from '@althar/connectors'
-import { Clock, Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
+import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { thisDevice } from './device'
@@ -14,6 +14,7 @@ import { Connections } from './Connections'
 import { touchCard } from './cards'
 import { Changes } from './Changes'
 import { endWords, modelNamer, teamOf, withEffort } from './coordinatorNews'
+import { armDraftDeadlines, surfaceDraftAt } from './draftDeadlines'
 import { suggestedCoordinator } from './coordinatorChoice'
 import { Accounts } from './Accounts'
 import { AutomationRefused, Automations } from './Automations'
@@ -30,6 +31,7 @@ import { findWords, foundLine, Issues, keysOf, READ_ISSUE, READ_ISSUE_INPUT, sto
 import { quickIn } from './kinds'
 import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
+import { DRAFTING_MS } from './needsYou'
 import { Installs } from './Installs'
 import { Models } from './Models'
 import { Plans } from './Plans'
@@ -329,6 +331,17 @@ export class Coordinator extends Context.Service<
     Effect.gen(function* () {
       const context = yield* Effect.context<Store>()
       const instance = yield* Instance
+      const config = yield* RuntimeConfig
+      // The runtime's own lifetime: a draft's deadline outlives the turn that made it.
+      const lifetime = yield* Effect.scope
+      const draftingMs = Duration.toMillis(config.drafting ?? Duration.millis(DRAFTING_MS))
+      // A launch arms the deadline of every draft already waiting: the wake the launch before it set died with it.
+      yield* Effect.forkIn(
+        armDraftDeadlines(draftingMs).pipe(
+          Effect.catchCause((cause) => Effect.logWarning('Could not arm the deadlines of drafts left waiting', cause)),
+        ),
+        lifetime,
+      )
       const agents = yield* Agents
       const sessions = yield* Sessions
       const projects = yield* Projects
@@ -946,6 +959,14 @@ export class Coordinator extends Context.Service<
         Effect.gen(function* () {
           const { pull_request: pullRequest, ...drafted } = yield* read(DraftedTask, input)
           const { created, issue } = yield* drafting(access, drafted)
+          // Its plan comes in this turn. If it never does, every open board is told when its moment ends, so the draft
+          // shows in Needs you then: a board reads again only when the feed says something changed.
+          yield* Effect.forkIn(
+            surfaceDraftAt(created.taskId, draftingMs).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not surface a draft whose plan never came', cause)),
+            ),
+            lifetime,
+          )
           const from = issue === undefined ? '' : drafted.part_of === true ? `, part of ${issue.key}` : `, from ${issue.key}`
           if (pullRequest === undefined) return `Drafted ${created.slug}${from}. Now propose its plan with propose_plan.`
           // A new task has nothing of its own to lose: it starts on the pull request's head.

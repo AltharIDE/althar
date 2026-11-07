@@ -151,6 +151,8 @@ export const text = {
   needsYou: 'Needs you',
   /** A review of someone else's pull request, drafted: the person's to post. */
   drafted: 'Review drafted',
+  /** Drafted by the coordinator, its plan not proposed yet: it is off the board until it is. */
+  planning: 'Being planned',
   /** A task that isn't a change, its lead done: the person settles it, or keeps it for later. */
   finished: 'Finished',
   kept: 'Kept for later',
@@ -231,6 +233,8 @@ export const statusOf = (
   if (phase === 'settled') return { status: TaskStatus.Done, state: snapshot.task.state === 'abandoned' ? text.abandoned : text.done }
   // On a step another agent takes, a review, while its lead waits.
   if (phase === 'running' && doing !== undefined) return { status: TaskStatus.Running, state: doing }
+  // Drafted by the coordinator, its plan not proposed yet: under way, nowhere on the board.
+  if (phase === 'drafting') return { status: TaskStatus.Running, state: text.planning }
   // Stopped, as its card says, whatever session its lead keeps; and what stopped it, where something says, in the board's words.
   if (phase === 'stopped' || snapshot.session === null || !snapshot.session.held) {
     const by = snapshot.task.stopped?.by
