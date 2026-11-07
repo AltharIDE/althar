@@ -51,6 +51,8 @@ export class Plans extends Context.Service<
       /** Where it works (ADR-091), and why, where that isn't the project's default (`PlanParameters.worksIn`). */
       readonly worksIn?: WorksIn
       readonly worksInWhy?: string | null
+      /** Proposed once by this id: asked again, it is the plan made then, whatever became of it, and nothing changes. */
+      readonly id?: string
     }): Effect.Effect<string, unknown>
     /**
      * Starts a proposed plan now: its first step is under way (`running`), or
@@ -149,14 +151,20 @@ export class Plans extends Context.Service<
         provide(
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
-            const planId = yield* newId(Ids.taskPlan)
+            const planId = input.id ?? (yield* newId(Ids.taskPlan))
             const workflowVersionId = yield* runs.workflowVersion
             const at = yield* timestamp
             const countdown = input.startsIn ?? testCountdown ?? (yield* countdownNow)
             const countdownEnds = new Date(Date.parse(at) + Duration.toMillis(countdown)).toISOString()
             let startsAt: string | null = null
+            let made = true
             yield* sql.withTransaction(
               Effect.gen(function* () {
+                // Proposed by its id before: that plan stands. Transactions here go one at a time, so two asking at once make one.
+                if (input.id !== undefined) {
+                  const [before] = yield* sql<{ id: string }>`SELECT id FROM task_plans WHERE id = ${input.id}`
+                  if (before !== undefined) return void (made = false)
+                }
                 // A task has one plan waiting: a new proposal replaces the one before.
                 const earlier = yield* sql<{ id: string; startsAt: string | null }>`
                   SELECT id, starts_at FROM task_plans WHERE task_id = ${input.taskId} AND state = 'proposed'`
@@ -204,6 +212,7 @@ export class Plans extends Context.Service<
                 })
               }),
             )
+            if (!made) return planId
             yield* postCard(input.projectId, input.taskId)
             yield* Queue.offer(wake, undefined)
             return planId

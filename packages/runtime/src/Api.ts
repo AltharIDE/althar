@@ -744,11 +744,18 @@ export const handlers = Api.toLayer(
         worksIn,
         issue,
         end,
-      }: { readonly worksIn?: WorksIn | undefined; readonly issue?: string | undefined; readonly end?: TaskEnd | null | undefined } = {},
+        planId,
+      }: {
+        readonly worksIn?: WorksIn | undefined
+        readonly issue?: string | undefined
+        readonly end?: TaskEnd | null | undefined
+        /** Proposed by this id, once: asked again it is the same plan, which starting again runs once. */
+        readonly planId?: string | undefined
+      } = {},
     ) =>
       Effect.gen(function* () {
         if (issue !== undefined) yield* issues.attach({ projectId: projectId as ProjectId, taskId, issue })
-        const planId = yield* plans.propose({
+        const proposed = yield* plans.propose({
           projectId: projectId as ProjectId,
           taskId,
           steps: team.steps,
@@ -757,8 +764,9 @@ export const handlers = Api.toLayer(
           actorId: instance.personId,
           startsIn: Duration.zero,
           end: end === undefined ? yield* pullRequests.endFor(projectId, taskId) : end,
+          ...(planId === undefined ? {} : { id: planId }),
         })
-        yield* plans.start(planId, instance.personId)
+        yield* plans.start(proposed, instance.personId)
       })
 
     /**
@@ -792,9 +800,9 @@ export const handlers = Api.toLayer(
               yield* teamOf(task.projectId, undefined)
               return { id: yield* makeTask(commandId, task) }
             }),
-          launch: (task, taskId) =>
+          launch: (task, taskId, planId) =>
             Effect.gen(function* () {
-              yield* launchTask(task.projectId, taskId, yield* teamOf(task.projectId, undefined))
+              yield* launchTask(task.projectId, taskId, yield* teamOf(task.projectId, undefined), { planId })
             }),
         },
         agentName,

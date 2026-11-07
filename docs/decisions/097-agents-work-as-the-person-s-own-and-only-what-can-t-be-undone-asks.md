@@ -618,12 +618,16 @@ shows; a mark never moves back, so an older window's press doesn't bring back
 what a newer one cleared. Taking an act back first claims it in one write
 (done or failed to under way), so two windows pressing at once take it back
 once. A revert's task is made by a command of the act's own (`cmd_` and the
-act's id), so made again it is the same task, from its receipt; the press
-whose write links that task to the act starts it, and any other leaves it. A
-claim whose revert hasn't started (no plan) after five minutes, as when
-Althar stopped in the middle, reads as failed and can be pressed again, which
-finds the same task and starts it; one that has started holds however long
-it runs.
+act's id), so made again it is the same task, from its receipt; it is started
+by a plan of the act's own too (`plan_` and the act's id), so proposed again
+it is the same plan, and starting that again runs it once. A claim whose
+revert hasn't started (no plan of it accepted, a proposed or held one
+included) after five minutes reads as failed and can be pressed again: as
+when Althar stopped in the middle, or held the plan coming back up because
+its time came while it wasn't running. The press again finds the same task
+and plan and starts them, and a press that stalled and was overtaken starts
+nothing more when it goes on. One that has started holds however long it
+runs.
 
 Where this goes another way than #640's README: the list starts from the last
 act the person had seen when they last pressed ×, not from when they last

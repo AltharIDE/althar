@@ -185,8 +185,12 @@ export const CLAIM_HOLDS_MS = 5 * 60_000
 
 const STOPPED = 'Althar stopped before it was taken back.'
 
-/** A revert's task that has started: it has a plan. Until then a claim on its act can still be cut short. */
-const LAUNCHED = 'EXISTS (SELECT 1 FROM task_plans p WHERE p.task_id = outside_acts.undo_task_id)'
+/**
+ * A revert's task that has started: a plan of it accepted. Until then, one
+ * proposed or held included (Althar holds a plan whose time came while it
+ * wasn't running), a claim on its act can be cut short and pressed again.
+ */
+const LAUNCHED = "EXISTS (SELECT 1 FROM task_plans p WHERE p.task_id = outside_acts.undo_task_id AND p.state = 'accepted')"
 
 /** Whether a row under way was cut short: claimed longer ago than a claim holds, and no revert's task started. */
 const cutShort = (row: Pick<ActRow, 'state' | 'updatedAt'> & { readonly launched: number }, now: Date) =>
@@ -197,6 +201,13 @@ const cutShort = (row: Pick<ActRow, 'state' | 'updatedAt'> & { readonly launched
  * claim cut short is pressed again, it is the same task, from its receipt.
  */
 export const revertCommand = (actId: string) => `cmd_${actId.slice(actId.indexOf('_') + 1)}`
+
+/**
+ * The plan a revert's task is started by, one for each act: proposed again,
+ * as a press overtakes one that stalled, it is the same plan, and starting it
+ * again runs it once.
+ */
+export const revertPlan = (actId: string) => `plan_${actId.slice(actId.indexOf('_') + 1)}`
 
 /**
  * Claims an act for taking back, in one write: from done or failed, or from a
@@ -245,6 +256,14 @@ const linkRevert = (row: Pick<ActRow, 'id' | 'projectId'>, taskId: string) =>
       aggregateRevision: won.revision,
     })
     return true
+  })
+
+/** Whether an act's revert has started, as another press may have started it while this one failed to. */
+const started = (row: Pick<ActRow, 'id'>) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [it] = yield* sql<{ launched: number }>`SELECT ${sql.unsafe(LAUNCHED)} AS launched FROM outside_acts WHERE id = ${row.id}`
+    return it?.launched === 1
   })
 
 /** How many acts the board shows at first, the newest; each "N earlier" shows this many more. */
@@ -337,7 +356,7 @@ export interface RevertTask {
 /** How a revert's task is made and started: made as a draft by its command, once for it; then planned and started. */
 export interface Revert<Made, Launched> {
   readonly make: (task: RevertTask, commandId: string) => Effect.Effect<{ readonly id: string }, unknown, Made>
-  readonly launch: (task: RevertTask, taskId: string) => Effect.Effect<unknown, unknown, Launched>
+  readonly launch: (task: RevertTask, taskId: string, planId: string) => Effect.Effect<unknown, unknown, Launched>
 }
 
 /**
@@ -374,8 +393,9 @@ export const undoAct = <Made, Launched>(
         const made = yield* Effect.result(revert.make(task, revertCommand(row.id)))
         if (made._tag === 'Failure') return yield* failed(made.failure)
         if (!(yield* linkRevert(row, made.success.id))) return
-        const launched = yield* Effect.result(revert.launch(task, made.success.id))
-        if (launched._tag === 'Failure')
+        // Started by the act's own plan: a press that stalled here and one that overtook it start it once between them.
+        const launched = yield* Effect.result(revert.launch(task, made.success.id, revertPlan(row.id)))
+        if (launched._tag === 'Failure' && !(yield* started(row)))
           return yield* settleAct(row, { state: 'failed', error: words(launched.failure, agentName).message, undoTaskId: null })
         return
       }
