@@ -262,6 +262,28 @@ lasted of it).
   (ADR-071's review steps).
 - **Helpers** (ADR-087, when built) get their lead's MCP servers and skills.
 
+**As built.** One tool set: each tool is defined once and served to both
+roles (`ToolServer.serve(POOL, …)`); the coordinator has every tool but a
+lead's own task's (`finish_step`, its pull request's push and checks,
+`record_setup`, `draft_review`, `make_it_a_change`), and a task's reviewer
+reads the project's tasks only. `runtime/src/windowActions.ts` lists every
+action of the window's task model with its tool, or why it has none (the
+person's own, the window's, or a lead's on its own task); the desktop app's
+test checks the list against the model, the runtime's that both roles have
+each tool. New tools for buttons that had none: `skip_review`, `push_task`,
+`open_task_pull_request`, `push_task_branch`, `resolve_conflicts`,
+`move_to_front`, `stop_following`, `change_lead`, `try_again`,
+`compact_lead`, `set_part_of_issue`. A stuck step's answers act at once
+too; the `task_ask` card is no longer made (old ones still read and
+answer). Lineage, caps and countdown are as ADR-097 now says. Still open:
+the coordinator's sandbox reaching a lead's hosts and its reader rules
+where no sandbox holds (its install runs outside its sandbox, through
+`install_dependencies`, so a test run inside needs no network); a task's
+reviewer running tests and builds, which phase 4 takes with the review
+steps; the per-task Allow everything switch, which stays the person's
+(it loosens what asks); the settings the renderer keeps (Notifications,
+Appearance, Editor), which `read_settings` names as the person's.
+
 ### 3. Host tools
 
 - **The person's own sign-in.** Stop taking `gh`, `glab`, git's credential

@@ -404,6 +404,7 @@ describe('a lead’s brief', () => {
   it('says what it can read of other tasks, and when to', () => {
     assert.include(OTHER_TASKS, 'read_task_diff')
     assert.include(OTHER_TASKS, 'before you change code another open task changes, and where your brief names another task')
-    assert.include(OTHER_TASKS, "you can't message another task's lead")
+    assert.include(OTHER_TASKS, 'draft it with draft_task and plan it with propose_plan')
+    assert.include(OTHER_TASKS, 'Accepting and merging stay on the person')
   })
 })

@@ -1383,9 +1383,14 @@ describe("the coordinator's tools", () => {
       assert.isEmpty(said)
       const [waiting] = yield* sql<{ body: string; state: string }>`SELECT body, state FROM user_inputs WHERE body LIKE '%Keep it short.'`
       assert.deepStrictEqual(waiting, { body: 'The coordinator passes this on:\n\nKeep it short.', state: 'queued' })
-      // A lead has its own tools, not the coordinator's; with no step waiting, its summary is still kept.
+      // A lead has the coordinator's tools too (ADR-097), and its own; with no step waiting, its summary is still kept.
       const lead: ToolAccess = { role: 'lead', projectId, threadId, sessionId: 'none', taskId: null }
-      assert.strictEqual(yield* callTool(lead, 'draft_task', { title: 'x' }), 'Althar has no tool called draft_task.')
+      assert.match(yield* callTool(lead, 'draft_task', { title: 'x' }), /^Drafted x\./)
+      // A reviewer only reads.
+      assert.strictEqual(
+        yield* callTool({ ...lead, role: 'reviewer' }, 'draft_task', { title: 'y' }),
+        'Althar has no tool called draft_task.',
+      )
       assert.strictEqual(yield* callTool(lead, 'finish_step', { summary: 'Did it.', built: 'A hello.' }), 'Althar has your summary.')
       const reviewer: ToolAccess = { role: 'reviewer', projectId, threadId, sessionId: 'none', taskId: null }
       assert.strictEqual(yield* callTool(reviewer, 'report_review', { verdict: 'pass', summary: 'Fine.' }), 'No review is waiting on you.')
