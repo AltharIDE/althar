@@ -3,7 +3,7 @@ import { Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts } from '../src/Accounts'
-import { Limits, outWords, whenWords } from '../src/Limits'
+import { Limits, lowWords, outWords, whenWords } from '../src/Limits'
 import { callWords, issuesWords } from '../src/Nudges'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
@@ -27,6 +27,31 @@ describe('the words for an agent out of usage', () => {
       outWords({ from: 'Codex', resetsAt: null, now, waits: 'step' }),
       'Codex ran out of usage. The step waits until Codex is back.',
     )
+  })
+
+  it('names same-maker review accurately and leaves it off fixes', () => {
+    const to = { agent: 'OpenCode', model: 'Claude Strong', ownWork: true }
+    for (const step of ['implement', 'review', 'settle'] as const) {
+      const out = outWords({ from: 'Codex', resetsAt: null, now: 0, step, to })
+      const low = lowWords({
+        from: 'Codex',
+        now: 0,
+        step,
+        to,
+        room: {
+          agentId: 'codex',
+          accountId: 'account',
+          leftPercent: 3,
+          resetsAt: null,
+          kind: 'weekly',
+          label: null,
+        },
+      })
+      for (const words of [out, low]) {
+        assert.notInclude(words, 'reviews its own work')
+        assert.strictEqual(words.includes('with the review by the same maker'), step !== 'settle')
+      }
+    }
   })
 
   it('in a nudge, say who ran out opening a pull request, and how many issues wait to be filed', () => {

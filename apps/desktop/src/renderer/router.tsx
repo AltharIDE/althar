@@ -1,5 +1,6 @@
 import { createHashHistory, createRouter, type RouterHistory } from '@tanstack/react-router'
 
+import { pageRoute } from './features/browser/route'
 import { newProjectRoute } from './features/newProject/route'
 import { projectRoute } from './features/project/route'
 import { settingsRoute } from './features/settings/route'
@@ -21,7 +22,7 @@ import { type RouterContext, rootRoute } from './root'
  * is kept as they left it (`KeptScreens`).
  */
 
-export const routeTree = rootRoute.addChildren([startRoute, newProjectRoute, projectRoute, taskRoute, settingsRoute])
+export const routeTree = rootRoute.addChildren([startRoute, newProjectRoute, projectRoute, taskRoute, settingsRoute, pageRoute])
 
 /** How long a read may take before the place's outline shows, and how long the outline stays once it does. */
 export const PENDING = { after: 150, atLeast: 300 }

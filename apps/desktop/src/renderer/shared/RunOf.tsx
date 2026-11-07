@@ -1,12 +1,13 @@
 import { RunCard } from '@althar/ui'
 
 import type { RunRef } from '../data/client'
+import { usePageOpener } from '../features/browser/opener'
 import { runCardOf } from './running'
 import type { RunContent } from './thread'
 
 /*
  * A run of the project Althar started, in the thread it was asked for in
- * (ADR-023): where it answers opens in the person's browser; Stop while it
+ * (ADR-023): where it answers opens beside the conversation (ADR-100); Stop while it
  * runs, Run again once it ended. The card follows the run as the runtime
  * changes it, and stays once the run is gone.
  */
@@ -28,10 +29,11 @@ export function RunOf({
   onRunAgain: (taskId: string | null, runnableId: string | null, ref?: RunRef) => void
 }) {
   const url = run.url
+  const opener = usePageOpener()
   return (
     <RunCard
       {...runCardOf(run, now)}
-      {...(url === null ? {} : { onOpen: () => void window.open(url, '_blank') })}
+      {...(url === null ? {} : { onOpen: () => opener.run(url) })}
       {...(run.ended === null
         ? { onStop: () => onStop(run.launchId) }
         : { onRunAgain: () => onRunAgain(run.taskId, run.runnableId ?? null, ...(run.ref == null ? [] : [refOf(run.ref)])) })}

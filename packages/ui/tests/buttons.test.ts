@@ -28,6 +28,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'chrome/WindowButtons/WindowButtons.tsx': 'the traffic lights, whose shape is the system’s own',
   'chrome/WorkStatus/WorkStatus.tsx': 'a row of what needs you, in the count’s preview; the bare count, the words of the chip it sits in',
   'chrome/LoadMeter/LoadPeek.tsx': 'a piece of work’s row, which opens it',
+  'composer/Comments/Comments.tsx': 'a comment’s chip, the whole of which opens it again on the page',
   'thread/StepGraph/StepGraph.tsx': 'a step’s card, the whole of which opens its report; a round’s marker, a pill over the lanes',
   'screens/Automations/Automations.tsx': 'an automation’s name, stretched over its card, which opens its page',
   'screens/Automations/AutomationPage.tsx': 'a run’s row, which opens its task',
