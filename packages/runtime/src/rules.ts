@@ -1274,6 +1274,8 @@ const splitCommandLine = (source: string) => {
   let grouped = false
   /** An expansion that can set a variable or work out arithmetic (`evaluates`). */
   let evaluated = false
+  /** A process substitution outside quotes, `<(…)` or `>(…)`: inside quotes it is text (`git grep -E "<(a|b)"`). */
+  let substituted = false
   const endWord = () => {
     if (inWord) {
       if (expands || (braces && /\{[^{}]*(,|\.\.)[^{}]*\}/.test(word))) expanding.add(words.length)
@@ -1352,6 +1354,7 @@ const splitCommandLine = (source: string) => {
     }
     if (char === '`' || (char === '$' && text[index + 1] === '(')) opaque = true
     if (char === '$' && evaluates(text, index)) evaluated = true
+    if ((char === '<' || char === '>') && text[index + 1] === '(') substituted = true
     if (char === '(' || char === ')') grouped = true
     const separator = SEPARATORS.find((candidate) => rest.startsWith(candidate))
     if (separator !== undefined && !(separator === '&' && rest.startsWith('&>'))) {
@@ -1390,7 +1393,7 @@ const splitCommandLine = (source: string) => {
     inWord = true
   }
   endCommand()
-  return { commands, ends, operators, expanded, opaque, grouped, evaluated, starts }
+  return { commands, ends, operators, expanded, opaque, grouped, evaluated, substituted, starts }
 }
 
 /** Commands as the shell runs them: a script handed to a shell is read as commands of its own. */
@@ -4523,6 +4526,9 @@ const closingOf = (text: string, from: number): number => {
   return -1
 }
 
+/** What a process substitution stands for once its command is read: a file descriptor's path. */
+const PROCESS_FILE = '/dev/fd/63'
+
 /**
  * The commands a line's substitutions run, `$(…)` and backticks, and the
  * line with each one's output standing as `OUTPUT`, outside quotes, so it
@@ -4567,6 +4573,15 @@ const substitutionsIn = (
         return "Althar can't tell where this `$((…))` ends, and this role only reads."
       out += arithmeticStandIn(arithmetic.length)
       arithmetic.push(text.slice(index + 3, end - 1))
+      index = end
+      continue
+    }
+    // `<(…)` and `>(…)` run a command of their own too, which stands as a file: read like `$(…)`, never refused for being one.
+    if ((char === '<' || char === '>') && text[index + 1] === '(' && !quoted) {
+      const end = closingOf(text, index + 2)
+      if (end === -1) return "Althar can't tell where this process substitution ends, and this role only reads."
+      scripts.push(text.slice(index + 2, end))
+      out += PROCESS_FILE
       index = end
       continue
     }
@@ -5016,8 +5031,9 @@ const readerCommandReason = (
   // How a shell's script is read: a trusted reader's as a line of its own, its variables and loops with it.
   scriptReason: (text: string) => string | undefined = (inner) => readerCommandReason(inner, trusted),
 ): string | undefined => {
-  if (/[<>]\(/.test(text)) return 'A process substitution, `<(…)`, runs a command of its own, and this role only reads.'
-  const { commands, operators, expanded, opaque, grouped, evaluated } = splitCommandLine(text)
+  const { commands, operators, expanded, opaque, grouped, evaluated, substituted } = splitCommandLine(text)
+  // Only outside quotes: inside them `<(` is text. A trusted reader's are read before this, as `$(…)` is (`substitutionsIn`).
+  if (substituted) return 'A process substitution, `<(…)`, runs a command of its own, and this role only reads.'
   if (opaque) return "Althar can't tell what this command does until it runs, and this role only reads."
   if (grouped)
     return 'Parentheses start a subshell, define a function or qualify a pattern, any of which can run a command of its own; quote them where they are text, as this role only reads.'

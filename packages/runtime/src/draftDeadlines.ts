@@ -14,7 +14,7 @@ import { DRAFTING_MS } from './needsYou'
  */
 
 /** Whether the task is still a draft with no plan proposed or accepted. */
-const stillDraft = (taskId: string) =>
+export const stillDraft = (taskId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const [draft] = yield* sql<{ one: number }>`

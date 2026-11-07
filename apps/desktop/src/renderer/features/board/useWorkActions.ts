@@ -23,6 +23,10 @@ export interface ActionFailure {
   readonly message: string
 }
 
+/** What the coordinator is asked when the person carries on a draft that has no plan: it plans it, or says why it can't. */
+const planIt = (task: { readonly title: string; readonly slug: string }) =>
+  `Plan “${task.title}” (${task.slug}): it is a draft with no plan. Call propose_plan for it, or tell me why you can't.`
+
 export interface WorkActions {
   readonly error: string | null
   /** What last failed for each task, which action it was, and why, for its own card to say; a task's is cleared when it is tried again, and no other's. */
@@ -193,6 +197,12 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
           const restarting = head.session === null || !head.session.held
           // The lead as the thread has it now, not as the card was read: it may have changed since.
           const lead = head.task.lead?.agentId ?? null
+          // A draft whose plan never came has no lead to carry on, and nothing to start: the coordinator is asked to plan it.
+          if (head.task.state === 'draft' && head.task.planId === null && lead === null) {
+            const coordinator = await client.getCoordinator(head.project.id, { limit: 0 })
+            await client.send({ threadId: coordinator.threadId, body: planIt(head.task), disposition: 'after_current' })
+            return
+          }
           // A thread the runtime no longer holds can't take it — its recorded session may be stale or dead — so the lead starts again on the agent that led it.
           // A held thread takes the note itself: running, after the current turn; between turns, now. With no lead to start, the person is told why.
           if (restarting && lead === null)
