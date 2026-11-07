@@ -54,6 +54,8 @@ export interface ProjectModel {
   readonly outputs: ReadonlyMap<string, OutputSoFar>
   /** Agents that could work: signed in, or that don't say. */
   readonly agents: ReadonlyArray<AgentStatus>
+  /** The agents have been read: none above then means none can work, not that none are known yet. */
+  readonly agentsKnown: boolean
   readonly error: string | null
   /** An action is on its way to the runtime. */
   readonly pending: boolean
@@ -349,6 +351,7 @@ export const useProject = (projectId: string): ProjectModel => {
     streaming,
     outputs,
     agents,
+    agentsKnown: status !== undefined,
     error,
     pending,
     loadingEarlier,

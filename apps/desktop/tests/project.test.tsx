@@ -1030,6 +1030,26 @@ describe('what can go wrong', () => {
     expect(screen.queryByRole('button', { name: /^Coordinator:/ })).toBeNull()
   })
 
+  it('says nothing about agents until they are read, then asks for one when none is signed in', async () => {
+    // The agents' read stays open while the coordinator's thread is already read.
+    let answer: (value: typeof status) => void = () => undefined
+    const reading = new Promise<typeof status>((resolve) => (answer = resolve))
+    const { client } = fakeClient({
+      status: vi.fn(async () => reading),
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.says('Ready.')] })),
+    })
+    const ways = { signIn: vi.fn(), agents: vi.fn(), connections: vi.fn() }
+    withServices(<Project room={Room.Talk} ways={ways} />, client)
+    expect(await screen.findByText('Ready.')).toBeTruthy()
+    // No agent is known yet, so nothing is said about there being none.
+    expect(screen.queryByText(/No agent is signed in\./)).toBeNull()
+    // Every agent signed out: once they are known, it asks for one.
+    await act(async () => answer({ ...status, agents: status.agents.map((agent) => ({ ...agent, signIn: 'signed_out' as const })) }))
+    expect(await screen.findByText(/^No agent is signed in\./)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Sign one in' }))
+    expect(ways.agents).toHaveBeenCalledOnce()
+  })
+
   it("says when the project can't be read, or the runtime didn't answer", async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () =>
