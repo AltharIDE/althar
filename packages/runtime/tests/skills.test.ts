@@ -15,7 +15,7 @@ import { type Failure, Failures, failuresLayer } from '../src/Failures'
 import { onlyReads, Sessions } from '../src/Sessions'
 import { listSkills, runSkills } from '../src/Skills'
 import { recorder, transcript } from '../src/threads'
-import { fakeAgents, items, launches, notices, runtime, sessionMetas, task, turns, until } from './support'
+import { fakeAgents, items, launches, notices, runtime, sessionMetas, sessionsAsked, task, turns, until } from './support'
 
 /*
  * Althar-selected skills reach a task's lead on every agent the registry says how to give them to, from Althar's own
@@ -112,6 +112,11 @@ describe('skills for a task’s lead', () => {
         assert.isTrue(plugin.startsWith(join(skills.root, 'runs')), plugin)
         assert.include(readFileSync(join(plugin, 'skills', 'alpha', 'SKILL.md'), 'utf8'), 'name: alpha')
         assert.include(readFileSync(join(plugin, '.claude-plugin', 'plugin.json'), 'utf8'), '"name": "althar"')
+        // Its session is asked to load that folder as a local plugin, as Claude Code's own session options name it.
+        const asked = sessionsAsked.findLast((one) => one.agentId === 'claude-code')?.params._meta as
+          | { claudeCode?: { options?: { plugins?: unknown } } }
+          | undefined
+        assert.deepStrictEqual(asked?.claudeCode?.options?.plugins, [{ type: 'local', path: plugin }])
         // Beta needs subagents, which Claude Code has.
         assert.isTrue(existsSync(join(plugin, 'skills', 'beta', 'SKILL.md')))
         // Never in the worktree: no skill root, no copy of a skill file in it.
@@ -144,6 +149,8 @@ describe('skills for a task’s lead', () => {
         const [run = ''] = readdirSync(join(skills.root, 'runs'))
         const folder = join(skills.root, 'runs', run, 'codex')
         assert.include(readFileSync(join(folder, '.agents', 'skills', 'alpha', 'SKILL.md'), 'utf8'), 'name: alpha')
+        // Its session is asked to add that folder, whose `.agents/skills` codex-acp makes one of Codex's skill roots.
+        assert.deepStrictEqual(sessionsAsked.findLast((one) => one.agentId === 'codex')?.params.additionalDirectories, [folder])
         // Beta needs subagents, which Codex isn't counted on for: left out, and the thread says so.
         assert.isFalse(existsSync(join(folder, '.agents', 'skills', 'beta')))
         const said = yield* notices(created.threadId)
@@ -178,6 +185,9 @@ describe('skills for a task’s lead', () => {
         const folder = launches.at(-1)?.options?.skills ?? ''
         assert.isTrue(folder.startsWith(join(skills.root, 'runs')), folder)
         assert.deepStrictEqual(readdirSync(folder).toSorted(), ['alpha', 'beta'])
+        // Its launch carries OpenCode's own config, as the registry makes it, with that folder among its skills' paths.
+        const config = JSON.parse(launches.at(-1)?.launched?.OPENCODE_CONFIG_CONTENT ?? '{}') as { skills?: { paths?: Array<string> } }
+        assert.include(config.skills?.paths ?? [], folder)
         yield* sessions.stop(created.threadId)
         assert.isFalse(existsSync(folder))
       }),

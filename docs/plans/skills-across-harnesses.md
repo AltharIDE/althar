@@ -650,6 +650,16 @@ checks and the harness permission rules remain the enforcement.
 - **Checked live (2026-10-18), without a model call:** OpenCode 1.19.0's
   `debug skill` lists all 33 from `skills.paths` with an isolated home; Codex
   0.160.1's app server lists all 33 from the extra root codex-acp sets.
+- **Checked on every run of `test:agents` (DEV-187), without a sign-in or a
+  model call:** a run's folder, laid out as each registry entry says and handed
+  over as Althar hands it, is found by the real agent: Claude Code (through
+  claude-agent-acp 0.101.0) lists its plugin's skills as `althar:<skill>`
+  commands, Codex (codex-acp 2.5.0) lists the folder added to its session, and
+  OpenCode's `debug skill` lists it from `skills.paths` (seen with 1.18.31).
+  Each skips where its agent isn't installed. No workflow runs `test:agents`
+  yet. The runtime's tests check the other half on every pull request: that
+  the plugin, the added directory and the `skills.paths` the registry makes
+  reach the session.
 - **Repository files in the project's settings (2026-10-18).** The project's
   Settings panel has a Repository files module that says where they stand and
   opens out to the three switches of section 4, each off until turned on and
@@ -703,7 +713,8 @@ checks and the harness permission rules remain the enforcement.
 - Where Codex and OpenCode read skills from was probed (Implementation
   status, "Checked live"): Codex 0.160.1 through codex-acp's extra roots,
   OpenCode 1.19.0 through `skills.paths`. Each new version needs the probe
-  again. Codex may still truncate its initial list under its context budget;
+  again: `test:agents` repeats it for Althar's own folder, by hand until a
+  workflow runs it. Codex may still truncate its initial list under its context budget;
   reporting that is not built.
 - Native repo skills can differ by harness and may be automatically loaded.
   Althar must surface this extra context and prove any attempt to suppress it;

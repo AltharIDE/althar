@@ -3,7 +3,7 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
-import type { AgentDefinition, AgentId, SessionOptions } from '@althar/provider-adapters'
+import { type AgentDefinition, type AgentId, agents as registry, type SessionOptions } from '@althar/provider-adapters'
 import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, fakeAgentMain } from '@althar/provider-adapters/testing'
 import { Clock, Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -83,7 +83,29 @@ export const launches: Array<{
   readonly cwd: string
   readonly env: Readonly<Record<string, string>>
   readonly options?: SessionOptions | undefined
+  /** For an agent given its skills by its environment, what the registry's own launch of it would carry. */
+  readonly launched?: Readonly<Record<string, string>> | undefined
 }> = []
+
+/** What each fake agent in this process was asked as a session started, as it received it: its added directories and `_meta`. */
+export const sessionsAsked: Array<{
+  readonly agentId: string
+  readonly params: Parameters<NonNullable<FakeAgentOptions['sessionAsked']>>[0]
+}> = []
+
+/** The registry's own launches, for the environment a real agent of a fake's id would start with: made once, as it makes a folder. */
+let registryLaunches: ReturnType<typeof Agents.fromRegistry> | undefined
+
+/**
+ * The environment the registry's agent of this id would be launched with, from the same arguments: for one given its skills
+ * through it, as OpenCode is, so a test sees the real setting reach the launch rather than a fake's own.
+ */
+const launchedEnv = (agentId: string, cwd: string, env: Readonly<Record<string, string>>, options: SessionOptions | undefined) => {
+  if (registry[agentId as AgentId]?.skills?.via.kind !== 'env') return undefined
+  registryLaunches ??= Agents.fromRegistry()
+  const made = registryLaunches.list.find((entry) => entry.definition.id === agentId)?.transport(cwd, env, options)
+  return made?._tag === 'Process' ? made.spec.env : undefined
+}
 
 /** What each session of the fake agent with session options (`claude-code`) was started as: its role, and its options. */
 export const sessionMetas: Array<{ readonly role: 'lead' | 'reader' | undefined; readonly options: SessionOptions | undefined }> = []
@@ -140,26 +162,16 @@ export const definition = (
     ? {
         sessionMeta: (role?: 'lead' | 'reader', options?: SessionOptions) => {
           sessionMetas.push({ role, options })
-          return { fake: { asks: true } }
+          // Given skills, with Claude Code's own session options beside its own, so the plugin they name reaches the session.
+          return { ...(options?.skills === undefined ? {} : registry['claude-code'].sessionMeta?.(role, options)), fake: { asks: true } }
         },
         contains: () => fakeSandbox.contains,
         upFront: true as const,
       }
     : {}),
-  // Given a run's skills as the registry's agents of the same id are: in its session, as an added directory, in its environment; the rest none.
-  ...(id === 'claude-code'
-    ? { skills: { layout: 'claude-plugin' as const, capabilities: ['subagents'], via: { kind: 'meta' as const } } }
-    : id === 'codex'
-      ? { skills: { layout: 'agents' as const, capabilities: [], via: { kind: 'directory' as const } } }
-      : id === 'opencode'
-        ? {
-            skills: {
-              layout: 'plain' as const,
-              capabilities: ['subagents'],
-              via: { kind: 'env' as const, env: (folder: string) => ({ FAKE_SKILLS: folder }) },
-            },
-          }
-        : { skills: null }),
+  // Given a run's skills as the registry's agents of the same id are, by their own entries: in its session (Claude Code's
+  // options, above), as an added directory, in its environment (`launched` below); the rest none.
+  skills: registry[id as AgentId]?.skills ?? null,
   // Each may lead a review of a pull request from outside but `codex`, as the registry's Codex may not.
   reviewing: { outside: id !== 'codex' },
   knownGaps: [],
@@ -186,7 +198,7 @@ export const fakeAgents = (
     (agentId: string): AgentEntry => ({
       definition: definition(agentId, signedOut, perUse, oneAccount, unsure),
       transport: (cwd, env = {}, session) => {
-        launches.push({ agentId, cwd, env, options: session })
+        launches.push({ agentId, cwd, env, options: session, launched: launchedEnv(agentId, cwd, env, session) })
         // As a real process, it carries whose work it is, as every agent does (machine.ts).
         const work = env[WORK]
         return agentId === 'process' || agentId === 'process-temp'
@@ -207,6 +219,7 @@ export const fakeAgents = (
                 _tag: 'InProcess',
                 agent: fakeAgent({
                   now: () => clock.currentTimeMillisUnsafe(),
+                  sessionAsked: (params) => void sessionsAsked.push({ agentId, params }),
                   ...options,
                   ...each[agentId],
                   ...each[`${agentId}@${env.FAKE_HOME === undefined ? 'usual' : basename(env.FAKE_HOME)}`],

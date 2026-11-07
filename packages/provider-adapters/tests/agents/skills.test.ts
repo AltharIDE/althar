@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable, Writable } from 'node:stream'
@@ -20,6 +20,13 @@ import { agents, bundledCodex } from '../../src/registry'
  *
  * OpenCode says nothing over ACP in 2.x, and only the names in 1.x, so it is
  * started against a stand-in model here, and what it offers that model read.
+ *
+ * The skills Althar selects for a lead reach it from a folder of Althar's own,
+ * as the registry says for each (`skills.via`): Claude Code's as a local plugin
+ * its session options name, Codex's as a directory added to its session,
+ * OpenCode's in its config's `skills.paths`. Those are checked last, with no
+ * model call either: what Claude Code and Codex list as a session opens, and
+ * OpenCode's `debug skill`. Each skips where its agent isn't installed.
  */
 
 const skill = (root: string, name: string) => {
@@ -44,12 +51,16 @@ const fixture = () => {
 
 const withEnv = (env: Readonly<Record<string, string>>) => ({ PATH: process.env.PATH ?? '', TERM: 'dumb', ...env })
 
-/** Starts an agent over ACP as Althar does (an AIR client), opens a session, and hands back the commands it listed. */
+/**
+ * Starts an agent over ACP as Althar does (an AIR client), opens a session, and hands back the commands it listed. The
+ * session is opened with what else Althar asks it for, where given: its added directories, its `_meta`.
+ */
 const commandsOf = async (
   command: string,
   args: ReadonlyArray<string>,
   cwd: string,
   env: Readonly<Record<string, string>>,
+  session: Pick<acp.NewSessionRequest, 'additionalDirectories' | '_meta'> = {},
 ): Promise<ReadonlyArray<acp.AvailableCommand>> => {
   const child = spawn(command, [...args], { cwd, env, stdio: ['pipe', 'pipe', 'inherit'] })
   const stream = acp.ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>)
@@ -66,7 +77,7 @@ const commandsOf = async (
           protocolVersion: acp.PROTOCOL_VERSION,
           clientCapabilities: { _meta: { jetbrains: { air: { capabilities: [] } } } },
         })
-        await context.request(acp.methods.agent.session.new, { cwd, mcpServers: [] })
+        await context.request(acp.methods.agent.session.new, { cwd, mcpServers: [], ...session })
         for (let waited = 0; waited < 30_000 && skillsAmong(listed) === undefined; waited += 250)
           await new Promise((resolve) => setTimeout(resolve, 250))
       })
@@ -75,6 +86,8 @@ const commandsOf = async (
     child.kill()
   }
 }
+
+const opencode = locate('opencode', { bundled: null, kept: null })
 
 const names = (commands: ReadonlyArray<acp.AvailableCommand>) => (skillsAmong(commands) ?? []).map(({ name }) => name).toSorted()
 
@@ -115,8 +128,6 @@ describe('the real agents find the skills', () => {
     execFileSync('ln', ['-s', join(home, '.codex', 'skills'), join(account, 'skills')])
     expect(names(await commandsOf(spec.command, spec.args, repository, env))).toEqual(['person-agents', 'person-codex', 'repo-agents'])
   })
-
-  const opencode = locate('opencode', { bundled: null, kept: null })
 
   /** What OpenCode offers a stand-in model, started with this environment and this config. */
   const offeredByOpenCode = async (
@@ -196,6 +207,90 @@ describe('the real agents find the skills', () => {
         JSON.parse(agents.opencode.withoutOwnTools?.({ env, homeDir: home, cwd: repository, inSandbox }).OPENCODE_CONFIG_CONTENT ?? '{}')
       expect(await offeredByOpenCode(repository, env, configOf(false))).not.toContain('person-opencode')
       expect(await offeredByOpenCode(repository, env, configOf(true))).toContain('person-opencode')
+    },
+  )
+})
+
+/**
+ * A run's folder as `@althar/skills`' projection lays it out for each layout (projection.ts), read-only as it is: the
+ * folder Althar hands the agent, and where its skills are in it.
+ */
+const runFolder = (layout: 'claude-plugin' | 'agents' | 'plain', names: ReadonlyArray<string>) => {
+  const base = mkdtempSync(join(tmpdir(), 'althar-skills-run-'))
+  const folder = layout === 'claude-plugin' ? join(base, 'plugin') : base
+  const skillsAt = layout === 'claude-plugin' ? join(folder, 'skills') : layout === 'agents' ? join(folder, '.agents', 'skills') : folder
+  mkdirSync(skillsAt, { recursive: true })
+  if (layout === 'claude-plugin') {
+    mkdirSync(join(folder, '.claude-plugin'))
+    writeFileSync(
+      join(folder, '.claude-plugin', 'plugin.json'),
+      `${JSON.stringify({ name: 'althar', description: 'Skills Althar selected for this run', version: '0.0.0' }, null, 2)}\n`,
+    )
+  }
+  for (const name of names) {
+    skill(skillsAt, name)
+    chmodSync(join(skillsAt, name, 'SKILL.md'), 0o444)
+  }
+  return { folder, skillsAt }
+}
+
+/** The skills listed from under a folder, by name. */
+const namesUnder = (commands: ReadonlyArray<acp.AvailableCommand>, folder: string) =>
+  (skillsAmong(commands) ?? [])
+    .filter(({ path }) => path.startsWith(folder))
+    .map(({ name }) => name)
+    .toSorted()
+
+describe('the real agents find the skills Althar gives a lead', () => {
+  it('Claude Code: the run’s plugin, as its session options name it', { timeout: 60_000 }, async () => {
+    const { home, repository } = fixture()
+    const definition = agents['claude-code']
+    expect(definition.skills?.via.kind).toBe('meta')
+    const { folder } = runFolder(definition.skills?.layout ?? 'plain', ['althar-alpha', 'althar-beta'])
+    const spec = definition.launch(adapterNode())
+    const _meta = definition.sessionMeta?.('lead', { skills: folder })
+    const listed = await commandsOf(spec.command, spec.args, repository, withEnv({ HOME: home }), _meta ? { _meta } : {})
+    // Listed among its commands as the plugin's, `althar:<skill>`, though with no path to say where from (claude-agent-acp
+    // 0.101.0): only the run's plugin is named `althar`.
+    expect(
+      listed
+        .map(({ name }) => name)
+        .filter((name) => name.startsWith('althar:'))
+        .toSorted(),
+    ).toEqual(['althar:althar-alpha', 'althar:althar-beta'])
+  })
+
+  it.skipIf(bundledCodex() === null)('Codex: the run’s folder, added to its session', { timeout: 60_000 }, async () => {
+    const { home, repository } = fixture()
+    expect(agents.codex.skills?.via.kind).toBe('directory')
+    writeFileSync(join(home, '.codex', 'auth.json'), JSON.stringify({ auth_mode: 'apikey', OPENAI_API_KEY: 'sk-fixture' }))
+    const { folder, skillsAt } = runFolder(agents.codex.skills?.layout ?? 'plain', ['althar-alpha', 'althar-beta'])
+    const spec = agents.codex.launch(adapterNode())
+    const env = withEnv({ HOME: home, CODEX_PATH: bundledCodex() ?? '' })
+    const listed = await commandsOf(spec.command, spec.args, repository, env, { additionalDirectories: [folder] })
+    expect(namesUnder(listed, skillsAt)).toEqual(['althar-alpha', 'althar-beta'])
+  })
+
+  it.skipIf(opencode === null)(
+    'OpenCode: the run’s folder, among its config’s skills.paths, as `debug skill` lists them',
+    { timeout: 60_000 },
+    async () => {
+      const { home, repository } = fixture()
+      const via = agents.opencode.skills?.via
+      if (via?.kind !== 'env') throw new Error(`OpenCode is given its skills by ${via?.kind ?? 'nothing'}`)
+      const { folder } = runFolder(agents.opencode.skills?.layout ?? 'plain', ['althar-alpha', 'althar-beta'])
+      // Its environment as Althar starts it: its own config, then the run's folder added to it.
+      const own = agents.opencode.withoutOwnTools?.({ env: { HOME: home }, homeDir: home, cwd: repository }) ?? {}
+      const env = withEnv({ HOME: home, ...own, ...via.env(folder, own) })
+      const listed = JSON.parse(
+        execFileSync(opencode?.command ?? 'opencode', ['debug', 'skill'], { cwd: repository, env, encoding: 'utf8', timeout: 50_000 }),
+      ) as ReadonlyArray<{ readonly name: string; readonly location: string }>
+      expect(
+        listed
+          .filter(({ location }) => location.startsWith(folder))
+          .map(({ name }) => name)
+          .toSorted(),
+      ).toEqual(['althar-alpha', 'althar-beta'])
     },
   )
 })
