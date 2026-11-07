@@ -44,13 +44,21 @@ describe('one tool set', () => {
         title: 'Prototype the browser',
       })
       const coordinator: ToolAccess = { role: 'coordinator', projectId: project.projectId, threadId, sessionId: 'none', taskId: null }
-      const lead: ToolAccess = { role: 'lead', projectId: project.projectId, threadId: created.threadId, sessionId: 'none', taskId: created.taskId }
+      const lead: ToolAccess = {
+        role: 'lead',
+        projectId: project.projectId,
+        threadId: created.threadId,
+        sessionId: 'none',
+        taskId: created.taskId,
+      }
       const theirs = { coordinator: yield* listTools(coordinator), lead: yield* listTools(lead) }
 
       const missing = Object.entries(WINDOW_ACTIONS).flatMap(([name, action]: [string, WindowAction]) => {
         const tool = toolOf(action)
         if (tool !== null)
-          return (['coordinator', 'lead'] as const).flatMap((role) => (theirs[role].includes(tool) ? [] : [`${name}: ${role} lacks ${tool}`]))
+          return (['coordinator', 'lead'] as const).flatMap((role) =>
+            theirs[role].includes(tool) ? [] : [`${name}: ${role} lacks ${tool}`],
+          )
         return 'own' in action && !theirs.lead.includes(action.own) ? [`${name}: the lead lacks ${action.own}`] : []
       })
       assert.deepStrictEqual(missing, [])

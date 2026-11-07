@@ -43,7 +43,9 @@ export const WINDOW_ACTIONS = {
   resume: { tool: 'restart_task' },
   setResolveConflicts: { tool: 'resolve_conflicts' },
   resolveConflictsNow: { tool: 'resolve_conflicts' },
-  setAllowEverything: { person: 'loosens what asks on the task: an agent never frees itself from an ask (change_settings for the project’s)' },
+  setAllowEverything: {
+    person: 'loosens what asks on the task: an agent never frees itself from an ask (change_settings for the project’s)',
+  },
   abandon: { tool: 'settle_task' },
   reopen: { tool: 'restart_task' },
   markDone: { tool: 'settle_task' },
