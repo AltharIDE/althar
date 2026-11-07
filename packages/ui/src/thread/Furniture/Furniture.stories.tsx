@@ -134,3 +134,4 @@ export const AllStates: Story = {
     />
   ),
 }
+export const FolderRepairedDark: Story = { ...FolderRepaired, globals: { theme: 'dark' } }

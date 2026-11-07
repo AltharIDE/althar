@@ -494,3 +494,18 @@ export const AllStates: Story = {
     />
   ),
 }
+
+/** Before: an agent that couldn't start for a git failure said only the error's name, not what git said. */
+export const CouldntStartGitBefore: Story = {
+  args: { tried: [], read: undefined, output: undefined, what: "Codex couldn't start. GitFailed:." },
+}
+/** After: the git subcommand and git's own line, the home folder shortened to ~ and any secret redacted. */
+export const CouldntStartGitAfter: Story = {
+  args: {
+    tried: [],
+    read: undefined,
+    output: undefined,
+    what: "Codex couldn't start. git rev-parse: gitfile does not point to a valid repository: ~/.local/share/althar/worktrees/orchy/fix-login/orchy/.git.",
+  },
+}
+export const CouldntStartGitAfterDark: Story = { ...CouldntStartGitAfter, globals: { theme: 'dark' } }
