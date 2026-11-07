@@ -1,4 +1,4 @@
-import type { BoardCall, BoardSnapshot, BoardTask } from '@althar/contracts'
+import type { BoardCall, BoardSnapshot, BoardTask, HomeCall, HomeSnapshot, HomeTask } from '@althar/contracts'
 
 import { asMerging } from '../../data/merges'
 import { readyOf, standingCalls } from '../../shared/calls'
@@ -213,3 +213,26 @@ export const holding = (lanes: Lanes, held: Held): Lanes => {
 
 /** How many cards are in Needs you: what waits on the person, each once. */
 export const yoursOf = (lanes: Lanes) => lanes.waiting.length + lanes.stopped.length + lanes.calls.length + lanes.ready.length
+
+/**
+ * What waits on the person in each project, as its board counts it: the same
+ * lanes, over the home's tasks and calls, which are the same cards. A
+ * project's dot, the switcher and Elsewhere take it, so none of them lights
+ * where a board's Needs you is empty, or stays dark where it isn't.
+ */
+export const yoursByProject = (home: HomeSnapshot, merging: ReadonlySet<string> = new Set()): ReadonlyMap<string, number> => {
+  const projects = new Map<string, { tasks: Array<HomeTask>; calls: Array<HomeCall> }>()
+  const place = (projectId: string) => {
+    const found = projects.get(projectId) ?? { tasks: [], calls: [] }
+    projects.set(projectId, found)
+    return found
+  }
+  for (const task of home.tasks) place(task.projectId).tasks.push(task)
+  for (const call of home.calls) place(call.projectId).calls.push(call)
+  return new Map(
+    [...projects].map(([projectId, { tasks, calls }]) => [
+      projectId,
+      yoursOf(lanesOf({ cursor: home.cursor, tasks, calls, settledTotal: 0 }, merging)),
+    ]),
+  )
+}
