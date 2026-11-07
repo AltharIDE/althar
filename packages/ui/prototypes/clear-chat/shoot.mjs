@@ -31,11 +31,11 @@ const clear = async (page, direction, kind) => {
   await (direction === 'C' ? page.getByRole('button', { name: 'Clear chat…' }).click() : exact(page, 'Clear'))
   await page.waitForTimeout(500)
   if (kind === 'forget') {
-    await page.getByRole('radio', { name: /Forget it too/ }).click()
+    await page.getByRole('radio', { name: /Forget the conversation too/ }).click()
     await page.waitForTimeout(200)
     await page.getByRole('button', { name: 'Clear and forget' }).click()
   } else {
-    await page.getByRole('radio', { name: /Keep what the coordinator knows/ }).click()
+    await page.getByRole('radio', { name: /Clear only the view/ }).click()
     await page.waitForTimeout(200)
     await page.getByRole('button', { name: 'Clear the view' }).click()
   }
@@ -113,7 +113,7 @@ const shots = [
     go: async (page) => {
       await exact(page, 'Clear')
       await page.waitForTimeout(500)
-      await page.getByRole('radio', { name: /Forget it too/ }).click()
+      await page.getByRole('radio', { name: /Forget the conversation too/ }).click()
       await page.waitForTimeout(300)
     },
   },

@@ -40,14 +40,14 @@ const ask = async (direction) => {
 }
 const clearView = async (direction) => {
   await ask(direction)
-  await page.getByRole('radio', { name: /Keep what the coordinator knows/ }).click()
+  await page.getByRole('radio', { name: /Clear only the view/ }).click()
   await page.waitForTimeout(200)
   await click('Clear the view')
   await page.waitForTimeout(900)
 }
 const forget = async (direction) => {
   await ask(direction)
-  await page.getByRole('radio', { name: /Forget it too/ }).click()
+  await page.getByRole('radio', { name: /Forget the conversation too/ }).click()
   await page.waitForTimeout(200)
   await click('Clear and forget')
   await page.waitForTimeout(900)
@@ -136,8 +136,11 @@ check(
 )
 await page.getByRole('button', { name: 'Clear chat…' }).click()
 await page.waitForTimeout(500)
-check('C opens on the wipe, with the light clear offered', (await page.getByRole('radio', { name: /Forget it too/ }).isChecked()) === true)
-await page.getByRole('radio', { name: /Keep what the coordinator knows/ }).click()
+check(
+  'C opens on the wipe, with the light clear offered',
+  (await page.getByRole('radio', { name: /Forget the conversation too/ }).isChecked()) === true,
+)
+await page.getByRole('radio', { name: /Clear only the view/ }).click()
 await page.waitForTimeout(200)
 await click('Clear the view')
 await page.waitForTimeout(900)

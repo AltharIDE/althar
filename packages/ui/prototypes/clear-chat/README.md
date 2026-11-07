@@ -8,8 +8,8 @@ Run it with `Clearing prototype` in Run's list, or open <http://localhost:5363/>
 
 One control — `Clear`, or `Clear chat…` in the ring — opens one question with two kinds:
 
-- **Keep what the coordinator knows** (the default in A and B). The view starts empty; the same session goes on. The divider reads `Cleared · Show earlier · Undo`. `Show earlier` reads the old conversation in the thread's place, with `Back to now` at the top. `Undo` brings the whole conversation back.
-- **Forget it too**. The coordinator loses the conversation and what it learned from it; the button turns red and reads `Clear and forget`, and the option says `Can’t be undone.` The divider reads `Fresh session`; the next message starts a new session.
+- **Clear only the view** (the default in A and B). The view starts empty; the coordinator keeps the conversation, and the same session goes on. The divider reads `Cleared · Show earlier · Undo`. `Show earlier` reads the old conversation in the thread's place, with `Back to now` at the top. `Undo` brings the whole conversation back.
+- **Forget the conversation too**. The coordinator loses the conversation and what it learned from it; the button turns red and reads `Clear and forget`, and the option says `Can’t be undone.` The divider reads `Fresh session`; the next message starts a new session.
 
 What stays in both kinds: running and planned tasks with their errands, pending issue drafts, open questions, and the board. What goes with the view: messages, tool calls, finished tasks and filed drafts. The coordinator says nothing after a clear; a message would refill the view it just emptied. Its first word is an answer to what you say next: from the kept conversation after a light clear, from the project's records after a wipe.
 
