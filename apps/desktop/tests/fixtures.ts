@@ -80,7 +80,6 @@ export const projectRules: ProjectRulesView = {
   branchPattern: null,
   titlePattern: null,
   moveIssues: true,
-  coordinator: true,
   repositoryFiles: { writeSkills: false, writeOpenSpec: false, pushProtected: false },
   conventions: [{ repository: 'api', branch: null, title: null, template: null }],
   sandbox: {
@@ -1075,9 +1074,6 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       lines: 3,
     })),
     getBoard: vi.fn(async () => ({ cursor: 1, tasks: [], calls: [], settledTotal: 0 })),
-    getAway: vi.fn(async () => ({ looked: null, acts: [], upTo: 0, earlier: 0 })),
-    clearAway: vi.fn(async () => {}),
-    undoAway: vi.fn(async () => {}),
     getOlderSettled: vi.fn(async () => []),
     getHome: vi.fn(async () => home()),
     leftHome: vi.fn(async () => {}),

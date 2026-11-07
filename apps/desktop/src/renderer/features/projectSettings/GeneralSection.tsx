@@ -68,10 +68,6 @@ export const text = {
     title: 'Move issues along with their tasks',
     line: 'To In Progress, In Review, then Done',
   },
-  coordinator: {
-    title: 'Use the coordinator',
-    line: 'Off, what you write in the project’s conversation starts a task at once.',
-  },
   repositoryFiles: 'Repository files',
 }
 
@@ -169,7 +165,6 @@ export function GeneralSection({
     rules === null
       ? []
       : [
-          { rule: 'coordinator', words: text.coordinator, on: rules.coordinator, set: model.setCoordinator },
           { rule: 'resolveConflicts', words: text.conflicts, on: rules.resolveConflicts, set: model.setResolveConflicts },
           { rule: 'pushCommits', words: text.pushCommits, on: rules.pushCommits, set: model.setPushCommits },
           { rule: 'postScreenshots', words: text.postScreenshots, on: rules.postScreenshots, set: model.setPostScreenshots },

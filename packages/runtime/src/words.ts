@@ -234,10 +234,6 @@ export const words = (
         const summary = text(error, 'summary')
         return `${agentName(text(error, 'agentId'))}’s model didn't change.${summary === '' ? '' : ` ${summary}`}`
       }
-      case 'NoAgentCanWork':
-        return 'No agent is signed in. Sign one in, then start it again.'
-      case 'CoordinatorOff':
-        return `The coordinator is off in ${text(error, 'project') || 'this project'}. Turn it on in the project’s settings, or describe a task.`
       case 'CoordinatorUnavailable':
         return `${text(error, 'agentName')} isn't signed in. Sign it in, or pick another agent for the coordinator.`
       case 'AttentionClosed':

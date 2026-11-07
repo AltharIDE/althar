@@ -19,7 +19,6 @@ import { Instance } from './Instance'
 import { freeSlug, slugify } from './Projects'
 import { logForLead, logPage, readLog } from './checkLogs'
 import { checksLine, checksOf, commentLine, nameOf, quoted, reviewLine, signed, standing } from './pullRequestWords'
-import { recordAct } from './outsideActs'
 import { change, fact, timestamp } from './records'
 import { automationOf, linkTask } from './automated'
 import { copyReviewed, LOGS_SHOWN, type ReviewOf, reviewOf, type Reviewed, SAID_SHOWN } from './reviewing'
@@ -1087,19 +1086,6 @@ export class Reviews extends Context.Service<
               (now) => (now.state === 'posted' ? settle(now, actorId) : Effect.void),
             )
             if (made._tag === 'Failure') yield* Effect.logWarning('A review could not be posted', made.failure)
-            // Posted by the person's setting rather than their press: one of the acts outside a worktree the board says (ADR-097).
-            if (made._tag === 'Success' && ended.changed && actorId !== instance.personId)
-              yield* recordAct({
-                projectId: row.projectId,
-                taskId: row.taskId,
-                threadId: row.threadId,
-                kind: 'post',
-                what: `Posted a review on ${row.author}’s ${row.product === 'gitlab' ? '!' : '#'}${row.number}`,
-                source: `review:${row.id}`,
-                // A review posted stays: the host deletes none.
-                cant: 'Reviews stay posted',
-                actorId: instance.systemId,
-              })
             return yield* cardFor(ended.row)
           }),
         )

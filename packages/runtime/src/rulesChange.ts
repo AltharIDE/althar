@@ -1,12 +1,10 @@
 import type { ActorId, ProjectId } from '@althar/domain'
 import { Effect } from 'effect'
-import { SqlClient } from 'effect/sql'
 
 import { Changes } from './Changes'
 import { Permissions } from './Permissions'
-import { accountsOf, hasCoordinator, Policies, postsScreenshots, pushesCommits, resolvesConflicts, type RulesChange } from './Policies'
+import { accountsOf, Policies, postsScreenshots, pushesCommits, resolvesConflicts, type RulesChange } from './Policies'
 import { PullRequestScreenshots } from './PullRequestScreenshots'
-import { Sessions } from './Sessions'
 
 /** A change to a project's rules as the rules screen sends it: the rules, and the accounts its work runs on. */
 export type RulesSent = RulesChange & {
@@ -40,13 +38,5 @@ export const applyRules = (projectId: string, sent: RulesSent, actorId: ActorId,
     if (!resolvesConflicts(was) && resolvesConflicts(kept.rules)) yield* pullRequests.resolveNow({ projectId })
     if (!pushesCommits(was) && pushesCommits(kept.rules)) yield* pullRequests.pushNow({ projectId })
     if (!postsScreenshots(was) && postsScreenshots(kept.rules)) yield* (yield* PullRequestScreenshots).syncNow({ projectId })
-    // Turned off, the coordinator stops, whoever turned it off: nothing wakes it until it is on again (ADR-097).
-    // Apart from this change, so a coordinator that turns itself off ends its own call before its session goes.
-    if (hasCoordinator(was) && !hasCoordinator(kept.rules)) {
-      const sql = yield* SqlClient.SqlClient
-      const sessions = yield* Sessions
-      const homes = yield* sql<{ id: string }>`SELECT id FROM threads WHERE project_id = ${projectId} AND kind = 'coordinator'`
-      for (const home of homes) yield* Effect.forkDetach(Effect.ignore(sessions.stop(home.id)))
-    }
     return kept
   })

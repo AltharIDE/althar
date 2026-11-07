@@ -12,7 +12,6 @@ import { coordinatorFolderAt } from './coordinatorFolder'
 import { repositoryOf, viaHost } from './coordinatorPullRequests'
 import type { AskedAction, AskedResult, FreshAction } from './Errands'
 import { Instance } from './Instance'
-import { releasedIn } from './outsideActs'
 import { branchOn, commitsOf, fetchBranch, fetchInto, fetchSpecs, git, PUSHED, pushTo } from './git'
 import { bounded } from './readChecks'
 import { ActionNotPerformed, ToolRefused } from './toolErrors'
@@ -447,8 +446,6 @@ const publishRelease = (projectId: string, input: unknown) =>
           })
           // Files put in Downloads one by one: refused half way, some may be there, and are read back.
           .pipe(Effect.mapError((error) => (files.length > 1 ? refused(error.message) : definite(error))))
-        // The merges the board says an agent made there are out now: their row says so beside Revert it (ADR-097).
-        yield* releasedIn(projectId, repository.path.join('/'), name)
         return host.releasing === 'downloads'
           ? `Put ${files.map((file) => file.name).join(', ')} in ${repository.path.join('/')}'s Downloads, for ${name}${out.url === null ? '' : `: ${out.url}`}.`
           : `Published ${name}${out.url === null ? '' : `: ${out.url}`}. Everyone who can see the repository has it now, and its updaters find it.`

@@ -43,7 +43,6 @@ import {
   allowsEverything,
   modeOf,
   movesIssues,
-  hasCoordinator,
   Policies,
   postsScreenshots,
   pushesCommits,
@@ -61,7 +60,6 @@ import { fact, timestamp } from './records'
 import { postTeamReviews, setPostTeamReviews } from './Reviews'
 import { applyRules, type RulesSent } from './rulesChange'
 import { workedOutReach } from './sandboxReach'
-import { Sessions } from './Sessions'
 import { listSkills } from './Skills'
 import { addItem, updateItem } from './threads'
 import { POOL, ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
@@ -120,7 +118,6 @@ type Needs =
   | Permissions
   | Changes
   | PullRequestScreenshots
-  | Sessions
   | Projects
   | Busy
   | FolderCleanup
@@ -303,7 +300,6 @@ export class SettingsTools extends Context.Service<
               pushCommits: pushesCommits(rules),
               postScreenshots: postsScreenshots(rules),
               moveIssues: movesIssues(rules),
-              coordinator: hasCoordinator(rules),
               branchPattern: rules.branchPattern ?? null,
               titlePattern: rules.titlePattern ?? null,
             } as Values,
@@ -327,7 +323,6 @@ export class SettingsTools extends Context.Service<
         'pushCommits',
         'postScreenshots',
         'moveIssues',
-        'coordinator',
         'branchPattern',
         'titlePattern',
       ])
@@ -390,11 +385,6 @@ export class SettingsTools extends Context.Service<
             pushCommits: field('Push the lead’s commits automatically', SWITCH, Schema.Boolean),
             postScreenshots: field('Post screenshots automatically', SWITCH, Schema.Boolean),
             moveIssues: field('Move issues automatically', SWITCH, Schema.Boolean),
-            coordinator: field(
-              'Use the coordinator',
-              `${SWITCH}; off, what the person writes in the project's conversation starts a task at once, and nothing wakes the coordinator`,
-              Schema.Boolean,
-            ),
           },
           read: (projectId) =>
             Effect.gen(function* () {
@@ -405,7 +395,7 @@ export class SettingsTools extends Context.Service<
               return {
                 name: project?.name ?? '',
                 ink: project?.ink ?? null,
-                ...pick(view, ['worksIn', 'resolveConflicts', 'pushCommits', 'postScreenshots', 'moveIssues', 'coordinator']),
+                ...pick(view, ['worksIn', 'resolveConflicts', 'pushCommits', 'postScreenshots', 'moveIssues']),
                 workToward: Object.fromEntries(repositories.map((one) => [one.name, one.workToward])),
               }
             }),
@@ -428,7 +418,7 @@ export class SettingsTools extends Context.Service<
                         ),
                     ),
                   )
-              const rules = pick(change, ['worksIn', 'resolveConflicts', 'pushCommits', 'postScreenshots', 'moveIssues', 'coordinator'])
+              const rules = pick(change, ['worksIn', 'resolveConflicts', 'pushCommits', 'postScreenshots', 'moveIssues'])
               const given = Object.fromEntries(Object.entries(rules).filter(([, value]) => value !== undefined))
               if (Object.keys(given).length > 0) yield* writeRules(projectId, given, actorId)
             }),

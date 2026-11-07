@@ -27,7 +27,6 @@ import { anything, AskedFields, fieldSchema, readFields, type Wanted, wantedFiel
 import { Issues, keyRange } from './Issues'
 import { outward } from './outward'
 import { movesIssues, Policies } from './Policies'
-import { recordAct } from './outsideActs'
 import { change, fact, timestamp } from './records'
 import { Sessions } from './Sessions'
 import { addItem, updateItem } from './threads'
@@ -760,8 +759,6 @@ export class IssueChanges extends Context.Service<
                 )
                 if (now._tag === 'Success' && now.success !== undefined) yield* refreshOwn(row, entry, now.success)
               }
-            // Applied at once, with no press of the person's, each issue is an act outside a worktree the board says (ADR-097).
-            if (ended.changed && row.direct === 1 && actorId !== instance.personId) yield* issueActs(row, after)
             // What it applied at once, its lead heard from its tool already.
             if (ended.changed && row.direct === 0)
               yield* tellLead(
@@ -773,39 +770,6 @@ export class IssueChanges extends Context.Service<
             return cardOf(ended.row)
           }),
         )
-
-      /** What a card applied at once did to each issue, kept for the board: a move, with the status it had to put it back; a comment. */
-      const issueActs = (row: Row, entries: ReadonlyArray<Entry>) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const [thread] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM threads WHERE id = ${row.threadId}`
-          for (const [index, entry] of entries.entries()) {
-            if (entry.applied !== true || entry.link !== undefined) continue
-            const fields = fieldsOf(entry.change)
-            const moved = entry.comment === undefined && fields.length === 1 && fields[0] === 'status'
-            yield* recordAct({
-              projectId: row.projectId,
-              taskId: thread?.taskId ?? null,
-              threadId: row.threadId,
-              kind: entry.comment === undefined ? 'issue' : 'post',
-              what:
-                entry.comment !== undefined
-                  ? `Commented on ${entry.key}`
-                  : moved
-                    ? `Moved ${entry.key} to ${entry.became ?? entry.change.status?.name ?? ''}`.trim()
-                    : fields.includes('close')
-                      ? `Closed ${entry.key}`
-                      : `Changed ${entry.key}`,
-              source: `issue:${row.id}:${index}`,
-              ...(entry.comment !== undefined
-                ? { cant: 'Already sent' }
-                : moved && entry.from !== undefined
-                  ? { undo: { way: 'issue', connectionId: entry.connectionId, ref: entry.ref, key: entry.key, status: entry.from } }
-                  : {}),
-              actorId: instance.systemId,
-            })
-          }
-        })
 
       const discard: IssueChanges['Service']['discard'] = (changesId, actorId) =>
         provide(

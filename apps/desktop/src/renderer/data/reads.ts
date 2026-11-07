@@ -13,18 +13,12 @@ import type { Client } from './client'
  * runtime's change feed is the only thing that ends them.
  */
 
-/** How many acts While you were away shows at first, as the runtime does; each "N earlier" shows this many more. */
-export const AWAY_FIRST = 30
-export const AWAY_MORE = 200
-
 export const keys = {
   projects: ['projects'] as const,
   /** The agents on this Mac, as the runtime last checked them. */
   status: ['status'] as const,
   home: ['home'] as const,
   board: (projectId: string) => ['board', projectId] as const,
-  away: (projectId: string) => ['away', projectId] as const,
-  awayShown: (projectId: string, shown: number) => ['away', projectId, shown] as const,
   coordinator: (projectId: string) => ['coordinator', projectId] as const,
   thread: (threadId: string) => ['thread', threadId] as const,
   /** A task's head alone, as the board stood at `version` (`headVersion`): what the dock shows of a ready task. */
@@ -117,12 +111,6 @@ export const reads = (client: Client) => ({
       queryFn: () => client.getHome(homeSince(client).since),
     }),
   board: (projectId: string) => queryOptions({ queryKey: keys.board(projectId), queryFn: () => client.getBoard(projectId) }),
-  /** The newest `shown` of what agents did outside their worktrees, 30 at first; more as the person asks for earlier ones. */
-  away: (projectId: string, shown = AWAY_FIRST) =>
-    queryOptions({
-      queryKey: keys.awayShown(projectId, shown),
-      queryFn: () => client.getAway(projectId, shown === AWAY_FIRST ? undefined : shown),
-    }),
   coordinator: (projectId: string) =>
     queryOptions({
       queryKey: keys.coordinator(projectId),

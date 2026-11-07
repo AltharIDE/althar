@@ -25,7 +25,6 @@ import {
   type SealStyle,
   Api,
   ApiError,
-  type AwaySnapshot,
   type BoardSnapshot,
   type HomeSnapshot,
   clientProtocol,
@@ -176,12 +175,6 @@ export interface Client {
   readonly readCode: (threadId: string, path: string, at?: { readonly commit?: string; readonly line?: number }) => Promise<CodeText>
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
   readonly getBoard: (projectId: string) => Promise<BoardSnapshot>
-  /** What agents did outside their worktrees in the project since the person last looked (ADR-097). */
-  readonly getAway: (projectId: string, shown?: number) => Promise<AwaySnapshot>
-  /** The person has seen it: the list starts again from now. */
-  readonly clearAway: (projectId: string, upTo: number) => Promise<void>
-  /** Takes back one of those acts, the way its row says. */
-  readonly undoAway: (actId: string) => Promise<void>
   /** The next page of a project's settled tasks, older than the one settled at `before` (`taskId` breaking a tie). */
   readonly getOlderSettled: (projectId: string, before: string, taskId: string) => Promise<ReadonlyArray<BoardTask>>
   /** The home, across every project; what the loop did from `since`, else from when the person last left the home. */
@@ -351,11 +344,7 @@ export interface Client {
     readonly projectId: string
     readonly title: string
     readonly description?: string
-    /** Who does it; Auto picks, without (ADR-097). */
-    readonly steps?: ReadonlyArray<PlanStep>
-    /** Where it works, and what it works toward; the project's own without. */
-    readonly worksIn?: WorksIn
-    readonly toward?: string
+    readonly steps: ReadonlyArray<PlanStep>
     /** The issue it comes from: its link or key. */
     readonly issue?: string
     readonly end?: TaskEnd | null
@@ -715,9 +704,6 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
         }),
       ),
     getBoard: (projectId) => settle(api.GetBoard({ projectId })),
-    getAway: (projectId, shown) => settle(api.GetAway({ projectId, ...(shown === undefined ? {} : { shown }) })),
-    clearAway: (projectId, upTo) => command((commandId) => api.ClearAway({ commandId, projectId, upTo })),
-    undoAway: (actId) => command((commandId) => api.UndoAway({ commandId, actId })),
     getOlderSettled: (projectId, before, taskId) => settle(api.GetOlderSettled({ projectId, before, taskId })).then((older) => older.tasks),
     getHome: (since) => settle(api.GetHome(since === undefined ? {} : { since })),
     leftHome: () => command((commandId) => api.LeftHome({ commandId })),

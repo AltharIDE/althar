@@ -835,11 +835,6 @@ export const ProjectRulesView = Schema.Struct({
   titlePattern: Schema.NullOr(Schema.String),
   /** Whether a task's issue is moved along with it: to its tracker's In Progress as it starts, In Review and Done with its pull request. */
   moveIssues: Schema.Boolean,
-  /**
-   * Whether the project has a coordinator (ADR-097): off, what the person writes in its conversation starts a task at once,
-   * with Auto, and nothing wakes the coordinator; a task a lead starts still starts.
-   */
-  coordinator: Schema.Boolean,
   /** Whether skill and OpenSpec files may be written to, committed in, or pushed from the project's repositories; each off unless turned on. */
   repositoryFiles: RepositoryFilesSetting,
   /** What each of the project's repositories says, in the project's order. */
@@ -3172,56 +3167,6 @@ export const BoardSnapshot = Schema.Struct({
 })
 export type BoardSnapshot = typeof BoardSnapshot.Type
 
-/** What kind of act an agent did outside its worktree, as the board's While you were away says it (ADR-097). */
-export const AwayKind = Schema.Literals(['merge', 'post', 'issue', 'start', 'other'])
-export type AwayKind = typeof AwayKind.Type
-
-/** How an act outside a worktree is taken back: a revert, a task of its own; or undone through the same host or tracker. */
-export const AwayUndo = Schema.Literals(['revert', 'undo'])
-export type AwayUndo = typeof AwayUndo.Type
-
-/** A task as While you were away links it. */
-const AwayTask = Schema.Struct({ taskId: Schema.String, threadId: Schema.String, title: Schema.String })
-
-/**
- * Something an agent did outside its worktree (ADR-097): merged a pull
- * request, posted on one, moved an issue, started tasks. By its task and
- * time; how it is taken back, where it can be, and why not, where it can't
- * now: someone replied under a post, or a release holds a merge (whose
- * revert is still offered, but takes nothing back from what went out).
- */
-export const AwayAct = Schema.Struct({
-  id: Schema.String,
-  kind: AwayKind,
-  /** What it did: Merged #634 into main. */
-  what: Schema.String,
-  at: Schema.String,
-  /** The task it was done for; null for the coordinator's own. */
-  task: Schema.NullOr(AwayTask),
-  /** How it is taken back; null where it can't be. */
-  undo: Schema.NullOr(AwayUndo),
-  /** Why it can't be taken back now, or what taking it back leaves: dana replied, Released in 0.8.4. */
-  cant: Schema.NullOr(Schema.String),
-  /** Taking it back: not asked, under way (a revert's task at work), done, or failed with why. */
-  state: Schema.Literals(['done', 'undoing', 'undone', 'failed']),
-  error: Schema.NullOr(Schema.String),
-  /** The task that reverts it, once asked. */
-  undoTask: Schema.NullOr(AwayTask),
-})
-export type AwayAct = typeof AwayAct.Type
-
-/** What agents did outside their worktrees in a project since the person last looked, newest first. */
-export const AwaySnapshot = Schema.Struct({
-  /** When the person last cleared it; null before they ever did. */
-  looked: Schema.NullOr(Schema.String),
-  acts: Schema.Array(AwayAct),
-  /** The newest act shown, as a mark: Clear sends it back, so what came after this read still shows. 0 with none. */
-  upTo: Schema.Number,
-  /** How many acts not seen yet are older than those shown, read with `all`. */
-  earlier: Schema.Number,
-})
-export type AwaySnapshot = typeof AwaySnapshot.Type
-
 /**
  * A project's coordinator thread: the agent working on it, if one is, the one
  * it would start on, and a page of its items. The coordinator starts when you
@@ -3811,13 +3756,6 @@ export const Api = RpcGroup.make(
   ),
   /** The home, across every project; what the loop did, from `since` where the window says, else from when the person last left the home. */
   call('GetHome', { since: Schema.optional(Schema.String) }, HomeSnapshot),
-  /** What agents did outside their worktrees in a project since the person last looked (ADR-097): the newest `shown`, 30 unless said. */
-  call('GetAway', { projectId: Schema.String, shown: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))) }, AwaySnapshot),
-  /** The person has seen it, up to the newest act their read showed (`upTo`): the list starts again after it. */
-  command('ClearAway', { projectId: Schema.String, upTo: Schema.Number }, Schema.Void),
-  /** Takes back something an agent did outside its worktree, the way its row says: a revert starts a task, an undo goes through the same host or tracker. */
-  command('UndoAway', { actId: Schema.String }, Schema.Void),
-
   /** The person left the home: what the loop does from now on is new to them. */
   command('LeftHome', {}, Schema.Void),
   /**
@@ -3877,22 +3815,14 @@ export const Api = RpcGroup.make(
   ),
   /** The project's coordinator thread, made the first time it is asked for. */
   call('GetCoordinator', { projectId: Schema.String, before: Schema.optional(Schema.Int), limit }, CoordinatorSnapshot),
-  /**
-   * Starts a task you planned yourself, or described in a few words where the project's coordinator is off: it shows in the
-   * coordinator's thread like one it planned, and starts at once. Without steps, Auto picks who does it: the team the
-   * project's last task had, where its agents can still work, else an agent that can, on its own model.
-   */
+  /** Starts a task you planned yourself: it shows in the coordinator's thread like one it planned, and starts at once. */
   command(
     'StartTask',
     {
       projectId: Schema.String,
       title: Schema.String,
       description: Schema.optional(Schema.String),
-      steps: Schema.optional(Schema.Array(PlanStep)),
-      /** Where it works; the project's New tasks start in without it (ADR-091). */
-      worksIn: Schema.optional(WorksIn),
-      /** The branch it works toward; the project's Work toward without it (ADR-093). */
-      toward: Schema.optional(Schema.String),
+      steps: Schema.Array(PlanStep),
       /** The issue it comes from: its link or its key. */
       issue: Schema.optional(Schema.String),
       /** What happens when the work is done; without it, a draft pull request where the repository's host is connected. */
@@ -4357,8 +4287,6 @@ export const Api = RpcGroup.make(
       branchPattern: Schema.optional(Schema.NullOr(Schema.String)),
       titlePattern: Schema.optional(Schema.NullOr(Schema.String)),
       moveIssues: Schema.optional(Schema.Boolean),
-      /** Turned off, the coordinator's session stops, and its news goes nowhere until it is on again. */
-      coordinator: Schema.optional(Schema.Boolean),
       repositoryFiles: Schema.optional(RepositoryFilesSetting),
       /** What the person changed of what leads' sandboxes let through, each list whole. */
       sandbox: Schema.optional(Schema.Struct({ commands: Schema.optional(SandboxEdits), hosts: Schema.optional(SandboxEdits) })),

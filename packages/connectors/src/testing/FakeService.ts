@@ -978,22 +978,6 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         )
         return Effect.succeed(edited)
       }),
-    removeComment: (_repository, number, commentId) =>
-      Effect.andThen(called('removeComment'), () => {
-        const said = comments.get(number) ?? []
-        const found = said.find((comment) => comment.id === commentId)
-        if (found === undefined) return Effect.fail(missing(`comment ${commentId}`))
-        // As a host: only its author deletes it.
-        if (found.author.id !== account.id)
-          return Effect.fail(
-            new ConnectorFailed({ product, reason: 'forbidden', status: 403, message: 'Only its author deletes a comment' }),
-          )
-        comments.set(
-          number,
-          said.filter((comment) => comment.id !== commentId),
-        )
-        return Effect.void
-      }),
     changeToReview: (_repository, number) =>
       Effect.andThen(called('changeToReview'), () => {
         if (!service.capabilities.reviews) return Effect.fail(noReviews(product, service.words))

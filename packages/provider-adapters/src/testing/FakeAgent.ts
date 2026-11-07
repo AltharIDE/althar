@@ -1119,9 +1119,6 @@ const playRole = async (
         await commitIn(session.cwd, 'pushed.txt', 'Tidy up before pushing')
         return await call('push_to_pull_request', {})
       }
-      // Asked to say something on its pull request, it comments there: one of its acts outside its worktree (ADR-097).
-      if (available.has('reply_on_pull_request') && session.markers.has('[lead:comment]') && /\bcomment pls\b/i.test(text))
-        return await call('reply_on_pull_request', { body: 'Tried it on a slow network too.' })
       // Asked to tidy up, it commits and ends its turn: what goes up, and when, isn't its to say.
       if (session.markers.has('[lead:commit]') && /\btidy pls\b/i.test(text)) {
         commitIn(session.cwd, 'tidied.txt', 'Tidy up')
@@ -1223,22 +1220,6 @@ const playRole = async (
         if (!fixMore) return 'Fixed the failing check, and committed it.'
         await commitIn(session.cwd, 'more.txt', 'Tidy up while here')
         return 'Fixed the failing check, committed it, and tidied up while here.'
-      }
-      // Starts another task from its own, as a lead may (ADR-097): what its line says before the marker is the title.
-      if (available.has('start_task') && text.includes('[lead:start-task]')) {
-        const line = text.split('\n').find((one) => one.includes('[lead:start-task]')) ?? ''
-        const title =
-          line
-            .slice(0, line.indexOf('[lead:start-task]'))
-            .replace(/^\[\w+\]\s*/, '')
-            .trim() || 'Try it'
-        await call('start_task', {
-          title,
-          description: 'Try it and say how it went.',
-          lead: { agent: 'claude-code', reason: 'Quick to start.' },
-        })
-        await call('finish_step', { summary: `Started “${title}”.` })
-        return `Started “${title}”.`
       }
       // Works until it is stopped: for a lead that goes in the middle of its step.
       if (text.includes('[lead:wait]')) {

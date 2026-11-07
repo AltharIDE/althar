@@ -103,21 +103,6 @@ describe('what the client sends', () => {
     expect((await sent(heard, client.getHome())).payload).toEqual({})
   })
 
-  it('starts a task with Auto, without steps, where it works and what it works toward; and reads and clears While you were away', async () => {
-    const { client, heard } = await standIn()
-    expect((await sent(heard, client.startTask({ projectId: 'proj_1', title: 'Fix the Run menu' }))).payload).toEqual({
-      projectId: 'proj_1',
-      title: 'Fix the Run menu',
-    })
-    expect(
-      (await sent(heard, client.startTask({ projectId: 'proj_1', title: 'Fix it', worksIn: 'checkout', toward: 'release/0.8' }))).payload,
-    ).toEqual({ projectId: 'proj_1', title: 'Fix it', worksIn: 'checkout', toward: 'release/0.8' })
-    expect(await sent(heard, client.getAway('proj_1'))).toEqual({ tag: 'GetAway', payload: { projectId: 'proj_1' } })
-    expect(await sent(heard, client.getAway('proj_1', 230))).toEqual({ tag: 'GetAway', payload: { projectId: 'proj_1', shown: 230 } })
-    expect(await sent(heard, client.clearAway('proj_1', 7))).toEqual({ tag: 'ClearAway', payload: { projectId: 'proj_1', upTo: 7 } })
-    expect(await sent(heard, client.undoAway('oac_1'))).toEqual({ tag: 'UndoAway', payload: { actId: 'oac_1' } })
-  })
-
   it('changes a plan’s steps, and how it ends where that was changed too', async () => {
     const { client, heard } = await standIn()
     const steps: ReadonlyArray<PlanStep> = [{ key: 'implement', agentId: 'codex', model: null, skipped: false }]

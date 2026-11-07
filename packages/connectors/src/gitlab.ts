@@ -1289,11 +1289,6 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
           })
         return `${web}/${repository.path.join('/')}${answer.url}`
       }),
-    // A reply in a discussion is a note like any other.
-    removeComment: (repository, number, commentId) =>
-      Effect.asVoid(
-        http.json(Schema.Unknown, 'DELETE', `${project(repository)}/merge_requests/${number}/notes/${encodeURIComponent(commentId)}`),
-      ),
     editComment: (repository, number, commentId, body) =>
       Effect.map(
         http.json(NoteAnswer, 'PUT', `${project(repository)}/merge_requests/${number}/notes/${encodeURIComponent(commentId)}`, { body }),

@@ -6,10 +6,8 @@ import { type CSSProperties, type ReactNode, useCallback, useEffect, useState } 
 import type { ThreadItem } from '@althar/contracts'
 
 import {
-  Away,
   Behind,
   Composer,
-  CoordinatorOff,
   DictationTray,
   LinkButton,
   ResizeHandle,
@@ -28,7 +26,6 @@ import { contextMeter } from '../../shared/ContextMeter'
 import { useModels } from '../../data/models'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { messageOf } from '../../data/client'
 import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
 import { draftKey, setDraftDictated, useDraft } from '../../shared/drafts'
@@ -56,7 +53,6 @@ import { BoardView } from '../board/BoardView'
 import { ChangeTeam, teamChangeOf } from '../team/Team'
 import type { SettingsWays } from '../settings/open'
 import { useFolds } from '../board/folds'
-import { atWords, useAway } from '../board/useAway'
 import { useClosePullRequests } from '../board/useClosePullRequests'
 import { lanesOf, yoursOf } from '../board/lanes'
 import { firstNeedOf, needsOf } from '../board/needs'
@@ -87,12 +83,9 @@ import type { ProjectModel } from './useProject'
  * waits on the person. The header says how the project stands (what needs
  * you: pointed at, what it is; clicked, the first of it), holds its views,
  * runs it, and lists what it is made of under ⋯.
- * The coordinator answers questions itself and turns changes into tasks.
- * Where the person turned it off (ADR-097), what they write in the
- * conversation starts a task at once, with Auto or the lead they pick, and
- * the conversation says so. What agents did outside their worktrees since
- * the person last looked sits over the board's lanes, with or without it.
- * What you open from the board opens its task.
+ * The coordinator answers questions itself and turns changes into tasks:
+ * there is no task to start without it. What you open from the board opens
+ * its task.
  */
 
 export const text = {
@@ -104,9 +97,6 @@ export const text = {
   conversation: 'Conversation',
   coordinator: 'Coordinator',
   placeholder: 'Tell the coordinator something',
-  /** With the coordinator off: what the composer does, and whose pick its model is. */
-  describe: 'Describe a task',
-  lead: 'Lead',
   /** Another agent's model, picked: nothing happens until the person says something. */
   handingOver: (to: string, from: string) => `${to} takes over from ${from} when you send.`,
   keep: (from: string) => `Keep ${from}`,
@@ -124,22 +114,6 @@ export const text = {
   olderFailed: 'Althar couldn’t load older tasks.',
   boardReading: 'Reading the board',
   width: 'Width of the conversation',
-}
-
-/** How long a task's title is at most, as the coordinator keeps it: read at a glance, on every screen. */
-const TITLE_LENGTH = 60
-
-/** A task's title from the words that describe it: their first line, cut at a word where it is long. */
-export const titleOf = (words: string): string => {
-  const line =
-    words
-      .split('\n')
-      .map((one) => one.trim())
-      .find((one) => one !== '') ?? ''
-  if (line.length <= TITLE_LENGTH) return line
-  const cut = line.slice(0, TITLE_LENGTH - 1)
-  const space = cut.lastIndexOf(' ')
-  return `${(space > TITLE_LENGTH / 2 ? cut.slice(0, space) : cut).trimEnd()}…`
 }
 
 /**
@@ -309,11 +283,6 @@ export function ProjectView({
   const images = useAttachments(draftOf, useServices().host)
   const models = useModels()
   const [pick, setPick] = useState<Choice | null>(null)
-  // With the coordinator off, the lead of the task the person starts: Auto, or the one they picked.
-  const off = settings.model.rules?.coordinator === false
-  const [lead, setLead] = useState<Choice | null>(null)
-  const [startFailed, setStartFailed] = useState<string | null>(null)
-  const { client } = useServices()
   // Another agent's model, picked while the coordinator runs: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
   const coordinator = model.coordinator
@@ -379,28 +348,7 @@ export function ProjectView({
 
   // The agent what the person says goes to, and whether it takes images.
   const receiver = { name: agentName(chosen?.agentId ?? null), takes: takesImages(models, chosen?.agentId ?? null) }
-  /** With the coordinator off: the words start a task at once, with Auto or the lead picked; ones Althar doesn't take go back. */
-  const startFromWords = (body: string) => {
-    const words = withComments(body, takeAll(draftOf), 0, false)
-    if (about === null || words.trim() === '') return
-    setDraft('')
-    setStartFailed(null)
-    client
-      .startTask({
-        projectId: about,
-        title: titleOf(words),
-        description: words,
-        ...(lead === null
-          ? {}
-          : { steps: [{ key: 'implement', agentId: lead.agentId, model: lead.model, effort: lead.effort, skipped: false }] }),
-      })
-      .catch((failure: unknown) => {
-        setDraft((current) => withQueued(current, body))
-        setStartFailed(messageOf(failure))
-      })
-  }
   const send = (body: string, now: boolean) => {
-    if (off) return startFromWords(body)
     // Images that can't go yet hold the message back, and the composer says why.
     const own = images.take(receiver)
     if (own === null) return
@@ -456,7 +404,7 @@ export function ProjectView({
   }
 
   const line: ReactNode =
-    off && model.agents.length > 0 ? null : waiting !== null && session !== null ? (
+    waiting !== null && session !== null ? (
       <>
         {text.handingOver(named(waiting.agentId, waiting.model).name, named(session.agentId, session.model).name)}{' '}
         <LinkButton onClick={() => setHandover(null)}>{text.keep(named(session.agentId, session.model).name)}</LinkButton>
@@ -483,16 +431,11 @@ export function ProjectView({
         carried={<CarriedOver here={draftOf} />}
         // The lines about who answers go on the composer's edge, so a running launch's chip and they never overlap.
         notice={
-          model.error !== null || line !== null || startFailed !== null ? (
+          model.error !== null || line !== null ? (
             <>
               {model.error !== null && (
                 <div className={s.failure} role="alert">
                   {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
-                </div>
-              )}
-              {startFailed !== null && (
-                <div className={s.failure} role="alert">
-                  {startFailed} <LinkButton onClick={() => setStartFailed(null)}>{text.dismiss}</LinkButton>
                 </div>
               )}
               {line !== null && <div>{line}</div>}
@@ -521,8 +464,7 @@ export function ProjectView({
         }
         onSubmit={(body) => send(body, false)}
         onSendNow={(body) => send(body, true)}
-        // A task started from words takes no images yet: its lead is given the words alone.
-        {...(off ? {} : images.props(receiver))}
+        {...images.props(receiver)}
         comments={comments.map((comment, index) => composerComment(comment, index + 1))}
         onOpenComment={(id) => {
           if (about === null) return
@@ -532,37 +474,26 @@ export function ProjectView({
           pages.reopen(about, id)
         }}
         onRemoveComment={(id) => drop(draftOf, id)}
-        {...(busy && !off ? { onStopAgent: () => void model.interrupt() } : {})}
-        busy={busy && !off}
-        queued={off ? [] : queuedOf(coordinator?.items ?? [], queue)}
+        {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
+        busy={busy}
+        queued={queuedOf(coordinator?.items ?? [], queue)}
         onEditQueued={(id) => void edit(id)}
         onSendQueuedNow={(id) => void sendQueuedNow(id)}
         onUnqueue={(id) => void model.takeBack(id)}
         text={{ queued: text.queue, sendNowKey: modKey(keys.return) }}
-        placeholder={off ? text.describe : busy ? text.placeholderBusy : text.placeholder}
-        {...(off ? {} : { meter: contextMeter(session, named, model.compact, { usage: coordinator?.usage, heading: text.usageHeading }) })}
+        placeholder={busy ? text.placeholderBusy : text.placeholder}
+        meter={contextMeter(session, named, model.compact, { usage: coordinator?.usage, heading: text.usageHeading })}
         picker={
-          off
-            ? model.agents.length > 0 && (
-                <ModelChoice
-                  owner={text.lead}
-                  agents={model.agents}
-                  {...(about === null ? {} : { projectId: about })}
-                  value={lead ?? { agentId: model.agents[0]?.id ?? '', model: null, effort: null }}
-                  onChange={setLead}
-                  auto={{ on: lead === null, onPick: () => setLead(null) }}
-                />
-              )
-            : model.agents.length > 0 &&
-              chosen !== null && (
-                <ModelChoice
-                  owner={text.coordinator}
-                  agents={model.agents}
-                  {...(about === null ? {} : { projectId: about })}
-                  value={chosen}
-                  onChange={choose}
-                />
-              )
+          model.agents.length > 0 &&
+          chosen !== null && (
+            <ModelChoice
+              owner={text.coordinator}
+              agents={model.agents}
+              {...(about === null ? {} : { projectId: about })}
+              value={chosen}
+              onChange={choose}
+            />
+          )
         }
       />
     </div>
@@ -570,14 +501,11 @@ export function ProjectView({
 
   const talking = room !== Room.Board
   const boarding = room !== Room.Talk
-  /** Into the coordinator's composer, from an empty board: the conversation beside the board where it wasn't on screen. Off, it describes a task. */
+  /** Into the coordinator's composer, from an empty board: the conversation beside the board where it wasn't on screen. */
   const talkToCoordinator = () => {
     if (room === Room.Board) setRoom(Room.Both)
     requestAnimationFrame(() => voice.inputRef.current?.focus())
   }
-  // What agents did outside their worktrees since the person last looked, over the lanes (ADR-097).
-  const away = useAway(about ?? '')
-  const awayRows = away.rows(new Date(now))
   // The team of a plan up next, open from its row, while it can still change.
   const [teamFor, setTeamFor] = useState<string | null>(null)
   const teamTask = teamFor === null || lanes === null ? null : (lanes.next.find((one) => one.taskId === teamFor) ?? null)
@@ -778,14 +706,6 @@ export function ProjectView({
                           onAnswerQuestion={model.answerQuestion}
                         />
                       </ThreadShellProvider>
-                      {/* Off (ADR-097): what writing here does now, under what the coordinator said before, or alone. */}
-                      {off && (
-                        <CoordinatorOff
-                          project={kept.name ?? name}
-                          onTurnOn={() => kept.setCoordinator(true)}
-                          after={coordinator.items.length > 0 || coordinator.earlier}
-                        />
-                      )}
                     </Thread>
                   </TaskFace>
                 )}
@@ -824,20 +744,6 @@ export function ProjectView({
                         {text.olderFailed} {board.olderError}
                       </p>
                     )}
-                    {awayRows.length > 0 && (
-                      <Away
-                        {...(away.away?.looked == null ? {} : { since: atWords(away.away.looked, new Date(now)) })}
-                        acts={awayRows}
-                        onUndo={away.undo}
-                        onOpen={(id) => {
-                          const thread = away.threadOf(id)
-                          if (thread !== null) onTask(thread)
-                        }}
-                        onClear={away.clear}
-                        earlier={away.earlier}
-                        onEarlier={away.showEarlier}
-                      />
-                    )}
                     <BoardView
                       lanes={lanes}
                       agents={model.agents}
@@ -849,7 +755,6 @@ export function ProjectView({
                       folds={folds}
                       onFoldsChange={setFolds}
                       onTalk={talkToCoordinator}
-                      coordinatorOff={off}
                       team={{ projectId, start: (planId) => model.startPlan(planId), change: setTeamFor }}
                       {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                     />

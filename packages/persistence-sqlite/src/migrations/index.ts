@@ -67,7 +67,6 @@ import { statements as workToward } from './0062_work_toward'
 import { statements as skills } from './0063_skills'
 import { statements as taskParents } from './0064_task_parents'
 import { statements as settingChanges } from './0065_setting_changes'
-import { statements as outsideActs } from './0066_outside_acts'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -152,7 +151,6 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0063_skills', statements: skills },
   { key: '0064_task_parents', statements: taskParents },
   { key: '0065_setting_changes', statements: settingChanges },
-  { key: '0066_outside_acts', statements: outsideActs },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

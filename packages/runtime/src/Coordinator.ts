@@ -48,8 +48,7 @@ import {
 import { releaseTools } from './coordinatorReleases'
 import { findPullRequests } from './pullRequestList'
 import { finishedBy, listWords, type PullRequestFacts, sectionWords } from './pullRequestStanding'
-import { recordAct } from './outsideActs'
-import { hasCoordinator, Policies, worksInOf } from './Policies'
+import { Policies, worksInOf } from './Policies'
 import { localTakenFor, worksLocal } from './local'
 import { Projects } from './Projects'
 import { ReviewRefused, Reviews } from './Reviews'
@@ -99,9 +98,6 @@ export class CoordinatorUnavailable extends Schema.TaggedError<CoordinatorUnavai
   agentId: Schema.String,
   agentName: Schema.String,
 }) {}
-
-/** The project's coordinator is off (ADR-097): what the person writes there starts a task instead. */
-export class CoordinatorOff extends Schema.TaggedError<CoordinatorOff>()('CoordinatorOff', { project: Schema.String }) {}
 
 export interface Suggested {
   readonly agentId: string
@@ -398,12 +394,6 @@ export class Coordinator extends Context.Service<
             projectId: string
           }>`SELECT project_id FROM threads WHERE id = ${input.threadId} AND kind = 'coordinator'`
           if (row === undefined) return yield* new NotFound({ kind: 'thread', id: input.threadId })
-          // Off in its project, nothing wakes it: news and Althar's own words go nowhere, and the person's start a task instead.
-          if (!hasCoordinator((yield* (yield* Policies).current(row.projectId as ProjectId)).rules)) {
-            if (input.origin !== undefined || input.quiet === true) return
-            const [project] = yield* sql<{ name: string }>`SELECT name FROM projects WHERE id = ${row.projectId}`
-            return yield* new CoordinatorOff({ project: project?.name ?? '' })
-          }
           const running = yield* sessions.running(input.threadId)
           if (Option.isNone(running)) {
             const pick = yield* suggested(row.projectId)
@@ -490,16 +480,6 @@ export class Coordinator extends Context.Service<
             title: `Started “${child.title}”`,
             description: null,
             task: { taskId: child.taskId, slug: child.slug, title: child.title, threadId: row.threadId },
-          })
-          // One of the acts outside a worktree the board says (ADR-097); stopping the task takes it back, from its card.
-          yield* recordAct({
-            projectId: access.projectId,
-            taskId: parent,
-            threadId: access.threadId,
-            kind: 'start',
-            what: `Started “${child.title}”`,
-            source: `start:${child.taskId}`,
-            actorId: instance.coordinatorId,
           })
           yield* touchCard(child.taskId)
         })

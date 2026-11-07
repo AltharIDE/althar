@@ -54,8 +54,6 @@ export interface ModelChoiceProps {
   projectId?: string
   /** A conversation under way, which another agent's model hands over. */
   handover?: Handover
-  /** Auto, first in the list, where Althar may pick the model for each task: on, and picking it. */
-  auto?: { readonly on: boolean; readonly onPick: () => void }
   variant?: 'quiet' | 'field'
   placement?: 'above' | 'below'
   text?: Partial<ModelPickText>
@@ -71,7 +69,6 @@ export function ModelChoice({
   without = null,
   projectId,
   handover,
-  auto,
   variant,
   placement,
   text,
@@ -120,7 +117,6 @@ export function ModelChoice({
         onBrowse={() => setBrowsing(true)}
         {...(onRemove === undefined ? {} : { onRemove })}
         {...(onTeam === undefined ? {} : { onTeam })}
-        {...(auto === undefined ? {} : { auto })}
         {...(confirm === undefined ? {} : { confirm })}
         room={room}
         asking={asking}
