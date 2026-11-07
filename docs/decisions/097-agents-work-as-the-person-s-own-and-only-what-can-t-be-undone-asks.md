@@ -722,8 +722,14 @@ this ADR or the prototype's README.
   OpenCode has no such command, so its JSON is edited in place with its
   comments kept. A copy of each file is kept before Althar first writes to
   it, and a record of what it added: taking back removes only that, and only
-  while it is still as Althar wrote it. It reads the three files each time
-  Settings asks rather than watching them. A token goes across as its
+  while it is still as Althar wrote it: the same command, arguments,
+  environment, address, headers and token, and not turned off since; one the
+  person changed is theirs, and stays. What it couldn't take back stays its
+  own, to take back again, and what an agent's command couldn't do is said in
+  Settings. It brings the agents in step as Settings reads them and as each
+  session starts, which is when an agent reads its settings, rather than
+  watching the files. A pick for a server set up two ways replaces another
+  agent's way only where the picked one can go there as it is. A token goes across as its
   variable's name; one written out in a file isn't copied, nor a Codex
   command's variable by name (Codex's `--env` takes values), nor an SSE
   server to Codex: each is said under To settle. Sign-ins open each agent's
