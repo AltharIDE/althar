@@ -26,6 +26,19 @@
   margin-top: 2px;
 }
 
+/*
+ * While a column is dragged wider or narrower (ResizeHandle), what is off
+ * screen isn't laid out again at each width: it keeps the height it was last
+ * drawn at, so the drag stays smooth however long the thread, and is laid
+ * out once it ends. It stays in the page, found and read as ever.
+ */
+.thread > * {
+  contain-intrinsic-size: auto 600px;
+}
+:global(html[data-resizing]) .thread > * {
+  content-visibility: auto;
+}
+
 .measure {
   width: 100%;
   max-width: var(--measure);

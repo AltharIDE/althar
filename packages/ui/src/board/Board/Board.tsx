@@ -126,16 +126,38 @@ const chose = (folds: BoardFolds, lane: BoardLane, collapse: boolean): BoardFold
     : { collapsed: without(folds.collapsed), opened: [...without(folds.opened), lane] }
 }
 
-/** How wide the board is, and a lane's narrowest there (its container's `--lane-min`); 0 wide until it is measured. */
-function useRoom(ref: RefObject<HTMLElement | null>) {
-  const [room, setRoom] = useState({ width: 0, narrowest: NARROWEST })
+/** How wide the board is, and a lane's narrowest there (its container's `--lane-min`). */
+interface Room {
+  readonly width: number
+  readonly narrowest: number
+}
+
+/**
+ * The board's room, as far as its rails go: `rails` says which lanes a room makes rails of, by the lanes drawn now. A
+ * new width draws the board again only where it changes them, so a divider dragged beside the board doesn't draw it on
+ * each frame (nor have its cards measured and set moving, ListMotion). 0 wide until it is measured.
+ */
+function useRoom(ref: RefObject<HTMLElement | null>, rails: (room: Room) => string) {
+  const [room, setRoom] = useState<Room>({ width: 0, narrowest: NARROWEST })
+  // As last measured, which the room drawn may lag where the rails were the same.
+  const measured = useRef<Room | null>(null)
+  // The room drawn, and what decides the rails by the lanes drawn: a measure that changes nothing of them sets nothing.
+  const drawn = useRef({ room, rails })
+  // Drawn with other lanes or folds, the room last measured may make other rails than the one drawn: drawn again with it.
+  useLayoutEffect(() => {
+    drawn.current = { room, rails }
+    const now = measured.current
+    if (now !== null && now !== room && rails(now) !== rails(room)) setRoom(now)
+  }, [room, rails])
   useLayoutEffect(() => {
     const element = ref.current
     if (element === null || typeof ResizeObserver === 'undefined') return
     const measure = () => {
       const width = element.clientWidth
       const narrowest = Number.parseFloat(getComputedStyle(element).getPropertyValue('--lane-min')) || NARROWEST
-      setRoom((was) => (was.width === width && was.narrowest === narrowest ? was : { width, narrowest }))
+      const now = { width, narrowest }
+      measured.current = now
+      if (drawn.current.rails(now) !== drawn.current.rails(drawn.current.room)) setRoom(now)
     }
     measure()
     const observer = new ResizeObserver(measure)
@@ -197,12 +219,12 @@ export function Board({ children, label, folds, defaultFolds = NO_FOLDS, onFolds
     },
     [],
   )
-  const room = useRoom(ref)
   const lanes: ReadonlyArray<LaneCount> = Children.toArray(children).flatMap((child) =>
     isValidElement<BoardColumnProps>(child) && child.type === BoardColumn
       ? [{ lane: child.props.lane, count: child.props.count, ...(child.props.filled === undefined ? {} : { filled: child.props.filled }) }]
       : [],
   )
+  const room = useRoom(ref, ({ width, narrowest }) => [...railsOf(lanes, chosen, width, narrowest)].toSorted().join(' '))
   const rails = railsOf(lanes, chosen, room.width, room.narrowest)
   const style: CSSProperties | undefined =
     lanes.length === 0

@@ -88,6 +88,30 @@ describe('dragging a column’s edge', () => {
     expect(width()).toBe(400)
   })
 
+  it('marks the page while the pointer drags it, until it lets go, is cancelled, loses the pointer or goes', () => {
+    const marked = () => document.documentElement.hasAttribute('data-resizing')
+    const { unmount } = render(<Column />)
+    expect(marked()).toBe(false)
+    pointer('pointerDown', 100)
+    expect(marked()).toBe(true)
+    pointer('pointerMove', 150)
+    expect(marked()).toBe(true)
+    pointer('pointerUp', 150)
+    expect(marked()).toBe(false)
+    pointer('pointerDown', 100)
+    pointer('pointerCancel', 100)
+    expect(marked()).toBe(false)
+    pointer('pointerDown', 100)
+    fireEvent.lostPointerCapture(handle(), { pointerId: 1 })
+    expect(marked()).toBe(false)
+    // A key moves it without marking the page: there is no drag to wait for.
+    fireEvent.keyDown(handle(), { key: 'ArrowRight' })
+    expect(marked()).toBe(false)
+    pointer('pointerDown', 100)
+    unmount()
+    expect(marked()).toBe(false)
+  })
+
   it('takes no press but the main button’s', () => {
     render(<Column />)
     pointer('pointerDown', 100, { button: 2 })

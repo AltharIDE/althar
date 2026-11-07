@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type PointerEvent, useRef } from 'react'
+import { type KeyboardEvent, type PointerEvent, useEffect, useRef } from 'react'
 
 import { cx } from '../../lib/cx'
 import s from './ResizeHandle.module.css'
@@ -10,6 +10,8 @@ import s from './ResizeHandle.module.css'
  * its narrowest and widest, and a double click puts it back. The width is
  * the consumer's: `onChange` follows the drag, and `onCommit` says where it
  * ended (the pointer let go, a key moved it), so it is kept once a move.
+ * While the pointer drags it, the page says so (`data-resizing` on its root),
+ * so what is costly to lay out at each width, as a long thread, can wait.
  */
 
 export interface ResizeHandleProps {
@@ -31,6 +33,9 @@ export interface ResizeHandleProps {
   className?: string
 }
 
+/** The page's root, marked while a handle is dragged; one at a time, as there is one pointer. */
+const resizing = (on: boolean) => document.documentElement.toggleAttribute('data-resizing', on)
+
 const clamp = (width: number, min: number, max: number) => Math.round(Math.min(Math.max(width, min), Math.max(min, max)))
 
 export function ResizeHandle({
@@ -47,12 +52,24 @@ export function ResizeHandle({
 }: ResizeHandleProps) {
   const drag = useRef<{ readonly x: number; readonly width: number; at: number } | null>(null)
   const sign = edge === 'end' ? 1 : -1
+  // Gone mid-drag, the page isn't left marked.
+  useEffect(
+    () => () => {
+      if (drag.current !== null) resizing(false)
+    },
+    [],
+  )
+  const stop = () => {
+    if (drag.current !== null) resizing(false)
+    drag.current = null
+  }
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
     event.preventDefault()
     event.currentTarget.setPointerCapture(event.pointerId)
     drag.current = { x: event.clientX, width: value, at: value }
+    resizing(true)
   }
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
     const from = drag.current
@@ -62,7 +79,7 @@ export function ResizeHandle({
   }
   const end = (event: PointerEvent<HTMLDivElement>) => {
     const from = drag.current
-    drag.current = null
+    stop()
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
     if (from !== null && from.at !== from.width) onCommit?.(from.at)
   }
@@ -98,7 +115,7 @@ export function ResizeHandle({
       onPointerMove={onPointerMove}
       onPointerUp={end}
       onPointerCancel={end}
-      onLostPointerCapture={() => (drag.current = null)}
+      onLostPointerCapture={stop}
       onKeyDown={onKeyDown}
       onDoubleClick={onReset}
     />
