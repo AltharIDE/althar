@@ -1,7 +1,7 @@
 import { EarlierTurns } from '../../shared/EarlierTurns'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { type CSSProperties, type ReactNode, useCallback, useEffect, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useState } from 'react'
 
 import type { ThreadItem } from '@althar/contracts'
 
@@ -152,6 +152,44 @@ const useBothWidth = () => {
   return { width: Math.min(width, max), min: WIDTH.min, max, room, set: setWidth, keep, reset: () => keep(WIDTH.start) }
 }
 
+/**
+ * The conversation's column, and beside the board its divider and what opens over the board against it. The width is
+ * its own: a drag draws this again and nothing else, the thread and the board given as made (`children`, `over`), so a
+ * long thread and a full board stay as they are while it moves. It is set as the column's `width`, not a custom
+ * property, which every element of the thread would inherit and have its style worked out again for each move.
+ */
+function TalkColumn({
+  beside,
+  children,
+  over,
+}: {
+  beside: boolean
+  children: ReactNode
+  /** What opens over the board, against the conversation: by the conversation's width and the window's. */
+  over: (width: number, room: number) => ReactNode
+}) {
+  const both = useBothWidth()
+  return (
+    <>
+      <div className={s.talk} style={beside ? { width: both.width } : undefined}>
+        {children}
+        {beside && (
+          <ResizeHandle
+            value={both.width}
+            min={both.min}
+            max={both.max}
+            onChange={both.set}
+            onCommit={both.keep}
+            onReset={both.reset}
+            label={text.width}
+          />
+        )}
+      </div>
+      {beside && over(both.width, both.room)}
+    </>
+  )
+}
+
 /** The project's settings, and where they lead out of the project. */
 export interface ProjectSettingsActions {
   readonly model: ProjectSettingsModel
@@ -214,7 +252,6 @@ export function ProjectView({
     if (settings.section !== undefined) setSection(settings.section)
   }
   useEffect(() => onRoomChange?.(room), [room, onRoomChange])
-  const both = useBothWidth()
   // The lanes the person collapsed, kept for every project, apart beside the conversation.
   const [folds, setFolds] = useFolds(room === Room.Both ? 'beside' : 'alone')
   const lanes = board.board === null ? null : lanesOf(board.board, board.merging)
@@ -619,7 +656,16 @@ export function ProjectView({
         ) : (
           <div className={room === Room.Both ? `${s.rooms} ${s.both}` : s.rooms}>
             {talking && (
-              <div className={s.talk} style={room === Room.Both ? ({ '--talk-width': `${both.width}px` } as CSSProperties) : undefined}>
+              <TalkColumn
+                beside={room === Room.Both}
+                /*
+                 * Beside the board, a file the coordinator names opens over the board, against the conversation, dragged by its far
+                 * edge; where it would leave less of the board than a lane, as in a small window, it covers the board to the window's edge.
+                 */
+                over={(width, window) =>
+                  shown.workbench(null, { room: window - width, keep: WIDTH.lane, className: s.over, style: { left: width } })
+                }
+              >
                 {coordinator === null ? (
                   model.error === null ? (
                     <div className={s.reading}>
@@ -709,31 +755,8 @@ export function ProjectView({
                   </TaskFace>
                 )}
                 {shown.lightbox}
-                {room === Room.Both && (
-                  <ResizeHandle
-                    value={both.width}
-                    min={both.min}
-                    max={both.max}
-                    onChange={both.set}
-                    onCommit={both.keep}
-                    onReset={both.reset}
-                    label={text.width}
-                  />
-                )}
-              </div>
+              </TalkColumn>
             )}
-            {/*
-             * Beside the board, a file the coordinator names opens over the board, against the conversation, dragged by its far
-             * edge; where it would leave less of the board than a lane, as in a small window, it covers the board to the window's edge.
-             */}
-            {room === Room.Both &&
-              talking &&
-              shown.workbench(null, {
-                room: both.room - both.width,
-                keep: WIDTH.lane,
-                className: s.over,
-                style: { left: both.width },
-              })}
             {boarding && (
               <div className={s.board}>
                 {lanes !== null ? (

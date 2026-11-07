@@ -9,6 +9,15 @@ import { useEffect, useState } from 'react'
 /** Whether each is a time a date can be read from. */
 const known = (...isos: ReadonlyArray<string>) => isos.every((iso) => !Number.isNaN(new Date(iso).getTime()))
 
+/**
+ * A day and its month (12 Oct), as the date's `toLocaleDateString` says it, from one formatter made once: making one
+ * for each date, as that does, takes a fifth of a millisecond, and a project's thread and board say a hundred at once.
+ * It keeps the time zone it found when made: where the system's changes while the app runs, a date near midnight can
+ * say the day before or after until the app is reloaded, where `toLocaleDateString` would follow the change.
+ */
+let dayMonth: Intl.DateTimeFormat | undefined
+const dayAndMonth = (at: Date) => (dayMonth ??= new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' })).format(at)
+
 export const ago = (iso: string, now: Date = new Date()): string => {
   if (!known(iso)) return ''
   const then = new Date(iso)
@@ -18,7 +27,7 @@ export const ago = (iso: string, now: Date = new Date()): string => {
   if (minutes < 60) return `${minutes}m ago`
   const hours = Math.round(minutes / 60)
   if (hours < 24) return `${hours}h ago`
-  return then.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+  return dayAndMonth(then)
 }
 
 /** When something comes back, as a clock says it: the time, and the day where it isn't today. */
