@@ -2628,6 +2628,10 @@ export const SessionSummary = Schema.Struct({
    * is held, a note waits its turn there, running or between turns.
    */
   held: Schema.Boolean,
+  /** Who leads the thread from its next turn, where that was changed while it worked or waited; absent or null otherwise. */
+  nextLead: Schema.optional(
+    Schema.NullOr(Schema.Struct({ agentId: Schema.String, model: Schema.NullOr(Schema.String), effort: Schema.NullOr(Schema.String) })),
+  ),
   /** How full its context is, in tokens, as the agent last said while it runs; null until it says, or where it doesn't. */
   context: Schema.NullOr(ContextUse),
   /** What it left running in the background, while it runs, in the order it started them. */

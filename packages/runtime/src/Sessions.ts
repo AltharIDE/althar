@@ -808,6 +808,8 @@ export class Sessions extends Context.Service<
         readonly stopping: boolean
         /** What it left running in the background. */
         readonly background: ReadonlyArray<ShownLeftRunning>
+        /** Who leads from its next turn, where `changeLead` changed that. */
+        readonly nextLead?: { readonly agentId: string; readonly model?: string; readonly effort?: string }
       }>
     >
     /**
@@ -3732,14 +3734,24 @@ export class Sessions extends Context.Service<
       const startLast = (threadId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [last] = yield* sql<{ agentId: string; model: string | null; effort: string | null }>`
-            SELECT agent_id, model, effort FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
+          const [last] = yield* sql<{ agentId: string; model: string | null; effort: string | null; startedAt: string }>`
+            SELECT agent_id, model, effort, started_at FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
           if (last === undefined) return false
+          // Its lead changed since that session began, with none running to change: the plan's lead is who starts (`changeLead`).
+          const [changed] = yield* sql<{ at: string | null; agentId: string | null; model: string | null; effort: string | null }>`
+            SELECT json_extract(p.parameters, '$.leadChanged') AS at, json_extract(s.value, '$.agentId') AS agent_id,
+              json_extract(s.value, '$.model') AS model, json_extract(s.value, '$.effort') AS effort
+            FROM threads t JOIN task_plans p ON p.task_id = t.task_id AND p.state IN ('proposed', 'accepted'),
+              json_each(p.parameters, '$.steps') s
+            WHERE t.id = ${threadId} AND t.kind = 'task' AND json_extract(s.value, '$.key') = 'implement'
+            ORDER BY p.proposed_at DESC LIMIT 1`
+          const moved = changed?.at != null && changed.agentId != null && changed.at > last.startedAt
+          const on = moved && changed.agentId != null ? { agentId: changed.agentId, model: changed.model, effort: changed.effort } : last
           yield* start({
             threadId,
-            agentId: last.agentId,
-            ...(last.model === null ? {} : { model: last.model }),
-            ...(last.effort === null ? {} : { effort: last.effort }),
+            agentId: on.agentId,
+            ...(on.model === null ? {} : { model: on.model }),
+            ...(on.effort === null ? {} : { effort: on.effort }),
           })
           return true
         })
@@ -3887,6 +3899,7 @@ export class Sessions extends Context.Service<
                   context: running.context,
                   stopping: running.stopping,
                   background: [...running.background.values()].map(shownOf),
+                  ...(running.nextLead === undefined ? {} : { nextLead: running.nextLead }),
                 })
           }),
         askPermission: (threadId, request) =>

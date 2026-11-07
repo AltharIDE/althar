@@ -23,9 +23,10 @@ import { Questions } from '../src/Questions'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
+import type { ToolAccess } from '../src/ToolServer'
 import { Tasks } from '../src/Tasks'
 import { withoutReview } from './changesSupport'
-import { callTool, fakeConnectors, HOST, hosted, items, notices, repository, runtime, until } from './support'
+import { callTool, fakeConnectors, HOST, hosted, items, notices, repository, runtime, turns, until } from './support'
 
 /*
  * A task goes back to work whenever its lead does, and ships again
@@ -1219,6 +1220,261 @@ describe('a merged task with commits after its pull request', () => {
       assert.isNull(settled?.unshipped ?? null)
       assert.strictEqual((yield* taskRow(task.taskId))?.state, 'done')
       assert.deepStrictEqual(yield* (yield* Changes).unshipped(task.taskId), [])
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+})
+
+describe('changing the team of a task that has begun', () => {
+  const step = (key: 'implement' | 'review', agentId: string, model: string | null = null, skipped = false, effort?: string) => ({
+    key,
+    agentId,
+    model,
+    ...(effort === undefined ? {} : { effort }),
+    skipped,
+  })
+
+  /** The person changes the team, as the API does: the task's steps as the dialog sends them. */
+  const changeTeam = (taskId: string, steps: ReadonlyArray<ReturnType<typeof step>>) =>
+    Effect.gen(function* () {
+      const instance = yield* Instance
+      return yield* (yield* Runs).changeTeam({ taskId, steps, actorId: instance.personId })
+    })
+
+  const leadsOn = (threadId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      return (yield* sql<{
+        agentId: string
+      }>`SELECT agent_id FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at, rowid`).map((row) => row.agentId)
+    })
+
+  const planOf = (taskId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const [plan] = yield* sql<{ parameters: string }>`SELECT parameters FROM task_plans WHERE task_id = ${taskId} AND state = 'accepted'`
+      return JSON.parse(plan?.parameters ?? '{}') as {
+        steps: ReadonlyArray<{ key: string; agentId: string; model: string | null; skipped: boolean }>
+      }
+    })
+
+  /** A task the coordinator planned, its lead at work on it: claude-code leading and codex reviewing. */
+  const start = (working: string, markers: string) =>
+    Effect.gen(function* () {
+      yield* connect()
+      const projects = yield* Projects
+      const coordinator = yield* Coordinator
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      const threadId = yield* coordinator.thread(project.projectId)
+      const body = `Add a retry. [coordinator:plan] ${markers}`
+      yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
+      const [card] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'running')
+      const task = card ?? assert.fail('no card')
+      return { projectId: project.projectId, taskId: task.taskId, threadId: task.threadId }
+    })
+
+  it.live('puts another agent on the lead from its next turn, never in the one it is in, briefed with the work so far', () => {
+    const { working, github } = onGitHub()
+    const slow = holds()
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const task = yield* start(working, '[lead:slowly] [lead:finish] [lead:edit] [review:pass]')
+      const before = (yield* until(
+        Effect.map(sessions.running(task.threadId), (one) => (Option.isSome(one) ? [one.value] : [])),
+        (all) => all[0]?.turnRunning === true,
+      ))[0]
+      if (before === undefined) return assert.fail('no lead')
+
+      // Its turn is under way: it carries on, on the agent it began with.
+      const changed = yield* changeTeam(task.taskId, [step('implement', 'codex', 'large'), step('review', 'codex')])
+      assert.deepStrictEqual([changed.lead?.when, changed.review], ['next_turn', undefined])
+      const during = Option.getOrThrow(yield* sessions.running(task.threadId))
+      assert.deepStrictEqual([during.sessionId, during.agentId, during.turnRunning], [before.sessionId, 'claude-code', true])
+      assert.deepStrictEqual(
+        (yield* planOf(task.taskId)).steps.map((one) => [one.key, one.agentId, one.model]),
+        [
+          ['implement', 'codex', 'large'],
+          ['review', 'codex', null],
+        ],
+      )
+
+      // Its turn ends as it was going to: the review, and the pull request, as planned.
+      slow.open('[lead:slowly]')
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+      assert.deepStrictEqual(yield* leadsOn(task.threadId), ['claude-code'])
+
+      // What the person says next is read by the agent it was changed to, which was given the thread so far.
+      yield* say(task.threadId, 'Add the slider as well. [lead:finish]')
+      yield* until(leadsOn(task.threadId), (agents) => agents.length === 2)
+      assert.deepStrictEqual(yield* leadsOn(task.threadId), ['claude-code', 'codex'])
+      const [taken] = (yield* notices(task.threadId)).filter((notice) => notice.title?.startsWith('Switched from') === true)
+      assert.include(taken?.title, 'to Fake codex')
+      const prompts = (yield* until(turns(task.threadId), (rows) => rows.length >= 2 && rows.at(-1)?.prompt != null)).map(
+        (row) => row.prompt ?? '',
+      )
+      assert.include(prompts.at(-1), 'Add the slider as well.')
+      assert.include(prompts.at(-1), 'The thread so far')
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
+  })
+
+  it.live('changes only the effort of the lead without handing it over', () => {
+    const { working, github } = onGitHub()
+    const slow = holds()
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const task = yield* start(working, '[lead:slowly] [lead:finish] [review:pass]')
+      yield* until(
+        Effect.map(sessions.running(task.threadId), (one) => (Option.isSome(one) ? [one.value] : [])),
+        (all) => all[0]?.turnRunning === true,
+      )
+      const changed = yield* changeTeam(task.taskId, [step('implement', 'claude-code', null, false, 'high'), step('review', 'codex')])
+      assert.deepStrictEqual([changed.lead?.step.effort, changed.lead?.was.effort ?? null], ['high', null])
+      slow.open('[lead:slowly]')
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+      yield* say(task.threadId, 'More. [lead:finish]')
+      yield* until(turns(task.threadId), (rows) => rows.length >= 2 && rows.every((row) => !['pending', 'delivered'].includes(row.state)))
+      // The same session, on the same agent: nothing was handed over.
+      assert.deepStrictEqual(yield* leadsOn(task.threadId), ['claude-code'])
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
+  })
+
+  it.live('changes, adds and removes the reviewer until its round starts, and says so on the card', () => {
+    const { working, github } = onGitHub()
+    const slow = holds()
+    return Effect.gen(function* () {
+      const queries = yield* Queries
+      const task = yield* start(working, '[lead:slowly] [lead:finish] [lead:edit] [review:pass]')
+      const standing = () => Effect.map(cards(task.projectId), (all) => all[0]?.reviewerChange)
+      assert.strictEqual(yield* standing(), 'now')
+      // Taken off, put back on another model, and changed to another agent, all before its round: the last is the one that reviews.
+      const removed = yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'codex', null, true)])
+      assert.deepStrictEqual([removed.review?.step, removed.review?.when], [null, 'now'])
+      assert.deepStrictEqual(
+        (yield* planOf(task.taskId)).steps.map((one) => [one.key, one.skipped]),
+        [
+          ['implement', false],
+          ['review', true],
+        ],
+      )
+      const added = yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'claude-code', 'large')])
+      assert.deepStrictEqual([added.review?.step?.agentId, added.review?.step?.model, added.review?.when], ['claude-code', 'large', 'now'])
+      // Changing nothing changes nothing.
+      assert.deepStrictEqual(yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'claude-code', 'large')]), {})
+      const [run] = yield* runsOf(task.taskId)
+      assert.deepStrictEqual(
+        (JSON.parse(run?.parameters ?? '{}') as { steps: ReadonlyArray<{ key: string; agentId: string; skipped: boolean }> }).steps.map(
+          (one) => [one.key, one.agentId, one.skipped],
+        ),
+        [
+          ['implement', 'claude-code', false],
+          ['review', 'claude-code', false],
+        ],
+      )
+      slow.open('[lead:slowly]')
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+      const reviewed = (yield* results(task.threadId)).find((result) => result.step === 'review')
+      assert.deepStrictEqual([reviewed?.agentId, reviewed?.verdict], ['claude-code', 'pass'])
+      // Its review is done: the reviewer can't change any more, though the lead can.
+      assert.strictEqual(yield* standing(), 'never')
+      const refused = yield* Effect.flip(changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'codex')]))
+      assert.strictEqual((refused as { why?: string }).why, 'review_done')
+      assert.deepStrictEqual(
+        (yield* changeTeam(task.taskId, [step('implement', 'codex'), step('review', 'claude-code', 'large')])).lead?.step.agentId,
+        'codex',
+      )
+      // The lead it has now takes over from its next turn: the picker shows it, and the thread's lead is who runs until then.
+      assert.deepStrictEqual((yield* queries.thread(task.threadId)).session?.nextLead?.agentId, 'codex')
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
+  })
+
+  it.live('changes the reviewer in the middle of a review round without stopping it, and the next round has the new one', () => {
+    const { working, github } = onGitHub()
+    const slow = holds()
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* start(working, '[lead:finish] [lead:edit] [review:findings] [review:slowly]')
+      const reviewThread = () =>
+        sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${task.taskId} AND kind = 'step' AND node_key = 'review'`
+      const [round] = yield* until(reviewThread(), (rows) => rows.length > 0)
+      const reviewer = yield* until(
+        Effect.map(sessions.running(round?.id ?? ''), (one) => (Option.isSome(one) ? [one.value] : [])),
+        (all) => all.length > 0,
+      )
+      assert.strictEqual(reviewer[0]?.agentId, 'codex')
+      assert.strictEqual((yield* cards(task.projectId))[0]?.reviewerChange, 'next_round')
+
+      // The round carries on with the reviewer it began with; the change waits for the next.
+      const changed = yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'claude-code', 'large')])
+      assert.deepStrictEqual([changed.review?.step?.agentId, changed.review?.when], ['claude-code', 'next_round'])
+      const during = Option.getOrThrow(yield* sessions.running(round?.id ?? ''))
+      assert.deepStrictEqual([during.sessionId, during.agentId], [reviewer[0]?.sessionId, 'codex'])
+
+      // Its findings are reported, its lead settles them, and the next round is the new reviewer's, who passes it.
+      slow.open('[review:slowly]')
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+      const reviews = (yield* results(task.threadId)).filter((result) => result.step === 'review')
+      // The round under way was codex's, and every one after is the reviewer it was changed to: it passes the last.
+      assert.strictEqual(reviews[0]?.agentId, 'codex')
+      assert.isAbove(reviews.length, 1)
+      assert.isTrue(reviews.slice(1).every((result) => result.agentId === 'claude-code'))
+      assert.strictEqual(reviews.at(-1)?.verdict, 'pass')
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
+  })
+
+  it.live(
+    'is changed by the coordinator’s change_lead too: the reviewer, with the line in both threads, and not once the review is done',
+    () => {
+      const { working, github } = onGitHub()
+      const slow = holds()
+      return Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const task = yield* start(working, '[lead:slowly] [lead:finish] [lead:edit] [review:pass]')
+        const [row] = yield* sql<{ slug: string }>`SELECT slug FROM tasks WHERE id = ${task.taskId}`
+        const slug = row?.slug ?? ''
+        const coordinatorThread = yield* (yield* Coordinator).thread(task.projectId)
+        const access: ToolAccess = {
+          role: 'coordinator',
+          projectId: task.projectId,
+          threadId: coordinatorThread,
+          sessionId: 'none',
+          taskId: null,
+        }
+        assert.match(
+          yield* callTool(access, 'change_lead', { task: slug, review: { agent: 'claude-code' }, why: 'the person asked' }),
+          /^add-a-retry: changed the review to Fake claude-code's default model\. Both threads have a line saying so\.$/,
+        )
+        assert.deepStrictEqual(
+          (yield* notices(task.threadId)).map((notice) => notice.title).filter((title) => title?.includes('review') === true),
+          ["The coordinator changed the review to Fake claude-code's default model: the person asked"],
+        )
+        assert.isTrue((yield* notices(coordinatorThread)).some((notice) => notice.title?.startsWith('Changed the review to') === true))
+        assert.deepStrictEqual(
+          (yield* planOf(task.taskId)).steps.map((one) => [one.key, one.agentId, one.skipped]),
+          [
+            ['implement', 'claude-code', false],
+            ['review', 'claude-code', false],
+          ],
+        )
+        assert.match(yield* callTool(access, 'change_lead', { task: slug }), /^Name the lead, the review, or both/)
+        assert.match(yield* callTool(access, 'change_lead', { task: slug, review: null }), /^add-a-retry: removed the review\./)
+        slow.open('[lead:slowly]')
+        yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+        // No review ran: it was taken off before its round, so none is left to change.
+        assert.match(
+          yield* callTool(access, 'change_lead', { task: slug, review: { agent: 'codex' } }),
+          /Its review is done, so its reviewer can’t change/,
+        )
+      }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
+    },
+  )
+
+  it.live('refuses a merged task, with the reason, and a removed review that was never to come', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* merged(working, bare, github)
+      const refused = yield* Effect.flip(changeTeam(task.taskId, [step('implement', 'codex'), step('review', 'codex')]))
+      assert.strictEqual((refused as { _tag?: string; why?: string })._tag, 'TaskRefused')
+      assert.strictEqual((refused as { why?: string }).why, 'merged')
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })

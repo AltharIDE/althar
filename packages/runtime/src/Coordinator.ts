@@ -1443,12 +1443,14 @@ export class Coordinator extends Context.Service<
         task: { readonly id: string; readonly title: string; readonly threadId: string },
         what: string,
         here: string,
+        /** When it takes effect, where that isn't at once: said after why, in both threads. */
+        note?: string,
       ) =>
         Effect.gen(function* () {
           const own = access.role === 'lead' && task.id === access.taskId
           // None of these needs the person's word, so none quotes them: it says why, where the call did (ADR-086).
           const why = typeof input === 'object' && input !== null && 'why' in input && typeof input.why === 'string' ? input.why.trim() : ''
-          const as = why === '' ? '' : `: ${why.replace(/\.$/, '')}`
+          const as = `${why === '' ? '' : `: ${why.replace(/\.$/, '')}`}${note === undefined ? '' : `. ${note}`}`
           const by = own
             ? 'Its lead'
             : access.role === 'lead'
@@ -1538,9 +1540,16 @@ export class Coordinator extends Context.Service<
                 ),
               )
             for (const line of teamChanges(changed, named)) {
+              yield* saidOn(
+                access,
+                input,
+                task,
+                `${line.verb === 'changed' ? 'Changed' : 'Removed'} ${line.thing} on “${task.title}”`,
+                `${line.verb} ${line.thing}`,
+                line.note,
+              )
               const did = teamLine(line)
-              yield* saidOn(access, input, task, `${line.verb === 'changed' ? 'Changed' : 'Removed'} ${line.thing} on “${task.title}”`, did)
-              said.push(`${task.slug}: ${did}`)
+              said.push(`${task.slug}: ${did}${did.endsWith('.') ? '' : '.'}`)
             }
             if (changed.lead === undefined && changed.review === undefined && held === undefined)
               said.push(`Nothing changed: ${task.slug} has that team already.`)

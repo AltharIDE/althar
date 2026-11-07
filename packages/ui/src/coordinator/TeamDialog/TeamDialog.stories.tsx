@@ -38,7 +38,27 @@ function Pick({
   )
 }
 
-function Team({ held = true, ends = true, ...rest }: { held?: boolean; ends?: boolean; onSave: () => void; onStart: () => void }) {
+/** What a task that has begun says under each step, and of a review that is done: how its team stands. */
+interface AtWork {
+  lead: string
+  review?: string
+  /** Its review is done: the reviewer is shown as it stays. */
+  done?: string
+  error?: string
+}
+
+function Team({
+  held = true,
+  ends = true,
+  atWork,
+  ...rest
+}: {
+  held?: boolean
+  ends?: boolean
+  atWork?: AtWork
+  onSave: () => void
+  onStart: () => void
+}) {
   const [lead, setLead] = useState(OPUS)
   const [review, setReview] = useState<ModelInfo | null>(CODEX)
   const [end, setEnd] = useState(TaskEnd.DraftPr)
@@ -50,7 +70,7 @@ function Team({ held = true, ends = true, ...rest }: { held?: boolean; ends?: bo
           id: 'implement',
           label: 'Implement',
           picker: <Pick owner="Lead" value={lead} onChange={setLead} />,
-          why: 'Knows the merge code from #419, and this is mostly reading what changed on main.',
+          why: atWork === undefined ? 'Knows the merge code from #419, and this is mostly reading what changed on main.' : atWork.lead,
         },
         {
           id: 'review',
@@ -58,11 +78,13 @@ function Team({ held = true, ends = true, ...rest }: { held?: boolean; ends?: bo
           picker: review === null ? null : <Pick owner="Review" value={review} onChange={setReview} onRemove={() => setReview(null)} />,
           skipped: review === null,
           onAdd: () => setReview(CODEX),
+          ...(atWork?.review === undefined ? {} : { why: atWork.review }),
+          ...(atWork?.done === undefined ? {} : { locked: 'GPT-6.1 Terra', why: atWork.done }),
         },
       ]}
-      {...(ends ? { end: { value: end, onChange: setEnd } } : {})}
-      onSave={rest.onSave}
-      {...(held ? { onStart: rest.onStart } : {})}
+      {...(ends && atWork === undefined ? { end: { value: end, onChange: setEnd } } : {})}
+      {...(atWork?.error === undefined ? { onSave: rest.onSave } : { error: atWork.error })}
+      {...(held && atWork === undefined ? { onStart: rest.onStart } : {})}
       onClose={() => {}}
     />
   )
@@ -93,6 +115,26 @@ export const NoReview: Story = {
     await userEvent.click(await page.findByRole('button', { name: 'Remove from this step' }))
     await expect(page.getByText('No review')).toBeInTheDocument()
   },
+}
+
+const AT_WORK = { lead: 'From its next turn.' } satisfies AtWork
+
+/** A task at work: its lead changes from its next turn, its reviewer until its review round starts. Save only; it keeps its ending. */
+export const AtWorkBeforeReview: Story = { args: { held: false, atWork: AT_WORK } }
+
+/** In a review round, the reviewer changes from the next round. */
+export const AtWorkInAReviewRound: Story = { args: { held: false, atWork: { ...AT_WORK, review: 'From the next round.' } } }
+
+/** The review is done: the reviewer stays, and the dialog says so. The lead still changes. */
+export const ReviewDone: Story = {
+  args: { held: false, atWork: { ...AT_WORK, done: 'The review is done, so the reviewer stays.' } },
+}
+
+export const ReviewDoneDark: Story = { ...ReviewDone, globals: { theme: 'dark' } }
+
+/** Merged: nothing changes, and it says why. */
+export const Merged: Story = {
+  args: { held: false, atWork: { ...AT_WORK, error: 'It’s merged, so its team stays.' } },
 }
 
 /** Started, waiting for a free agent: it starts by itself, so only Save. */
