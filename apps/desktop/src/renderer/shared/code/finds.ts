@@ -81,6 +81,8 @@ export const foundRead = (client: Client, cache: QueryClient, threadId: string, 
     queryFn: async () => new Map((await askCode(client, cache, threadId, itemId, names)).map((found) => [found.name, found] as const)),
     staleTime: CODE_FRESH,
     gcTime: 10 * 60_000,
+    // What the names found so far still name while more are looked for, as a message's next block brings its own: its earlier names stay as they were.
+    placeholderData: (before) => before,
   })
 
 /** Where the thread's agent works, as the runtime last said with what it found; asked alone where nothing has asked yet. */
