@@ -447,7 +447,7 @@ describe('the coordinator loop', () => {
       const [call] = yield* sql<{ id: string; payload: string }>`SELECT id, payload FROM attention_requests WHERE kind = 'stuck'`
       assert.deepStrictEqual(pick(JSON.parse(call?.payload ?? '{}') as Record<string, unknown>, ['step', 'why', 'agentId']), {
         step: 'implement',
-        why: 'failed_to_start',
+        why: 'not_installed',
         agentId: 'missing',
       })
       // Handed to Codex, Implement carries on there.
@@ -1157,7 +1157,7 @@ describe('a step that needs the person', () => {
         { key: 'review', agentId: 'missing' },
       ])
       const call = yield* stuckCall(task.taskId)
-      assert.deepStrictEqual([call.step, call.why, call.agentId], ['review', 'failed_to_start', 'missing'])
+      assert.deepStrictEqual([call.step, call.why, call.agentId], ['review', 'not_installed', 'missing'])
       yield* answer(call.id, { kind: 'retry', agentId: 'codex' })
       yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
       const reviews = (yield* results(task.threadId)).filter((step) => step.step === 'review')
