@@ -993,10 +993,10 @@ describe('the agents run over ACP', () => {
       const [account] = yield* (yield* Accounts).of('kimi')
       assert.strictEqual((yield* signIns.account(account!)).paidBy, 'unknown')
       // Not read yet, it isn't taken for a plan: work moves to it unasked only where a plan pays.
-      assert.isUndefined(yield* limits.free([]))
+      assert.isUndefined(yield* limits.free({ besides: [] }))
       assert.strictEqual(accountOf(yield* (yield* PlanUsage).now(true), 'kimi').paidBy, 'plan')
       assert.strictEqual((yield* signIns.account(account!)).paidBy, 'plan')
-      assert.strictEqual(yield* limits.free([]), 'kimi')
+      assert.strictEqual((yield* limits.free({ besides: [] }))?.agentId, 'kimi')
       // The coordinator's list has its models on the plan, with what the plan has left.
       yield* until((yield* Models).catalog, (all) => all.every((agent) => !agent.probing))
       const routes = (yield* usableModels()).flatMap((model) => model.routes)

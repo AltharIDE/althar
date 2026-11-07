@@ -288,7 +288,13 @@ export interface FakeAgentOptions {
    * until `until` (in milliseconds, which the message gives as its reset), or
    * for good, saying no reset time.
    */
-  readonly outOfUsage?: { readonly until?: number }
+  readonly outOfUsage?: {
+    readonly until?: number
+    /** Work already done in the failed turn: emitted before its usage-limit error. */
+    readonly message?: string
+    /** The test holds the turn after that work, then lets it reach its limit. */
+    readonly beforeLimit?: (cwd: string) => Promise<void>
+  }
   /**
    * The time it is, in epoch milliseconds, which its usage's resets are read by: the clock of the runtime that started
    * it, in the same process, so a test that moves the runtime's clock moves the agent's too. The system's otherwise.
@@ -315,6 +321,8 @@ export interface FakeAgentOptions {
    * model levels of its own. Put on another model, a session takes its first.
    */
   readonly variants?: boolean
+  /** Models offered by this fake, for routing between makers. */
+  readonly models?: ReadonlyArray<{ readonly id: string; readonly name: string }>
   /** Models it fails to put a session on the first time, as Claude Code does now and then when Anthropic doesn't confirm one. */
   readonly failsOnce?: ReadonlyArray<string>
   /** Models it says yes to but doesn't put a session on: the session stays on the model it was on. */
@@ -1321,7 +1329,7 @@ const allowAllOption = (value: string): acp.SessionConfigOption => ({
   options: ['on', 'off'].map((each) => ({ value: each, name: each })),
 })
 
-const modelOption = (session: SessionState, variants: boolean): acp.SessionConfigOption => ({
+const modelOption = (session: SessionState, variants: boolean, models?: FakeAgentOptions['models']): acp.SessionConfigOption => ({
   id: 'model',
   name: 'Model',
   category: 'model',
@@ -1331,11 +1339,14 @@ const modelOption = (session: SessionState, variants: boolean): acp.SessionConfi
     {
       group: 'all',
       name: 'All',
-      options: [
-        { value: 'small', name: 'Small', description: 'Quick, for small things' },
-        { value: 'large', name: 'Large', description: 'The most capable' },
-        ...(variants ? [{ value: 'huge', name: 'Huge', description: 'Thinks the longest' }] : []),
-      ],
+      options:
+        models === undefined
+          ? [
+              { value: 'small', name: 'Small', description: 'Quick, for small things' },
+              { value: 'large', name: 'Large', description: 'The most capable' },
+              ...(variants ? [{ value: 'huge', name: 'Huge', description: 'Thinks the longest' }] : []),
+            ]
+          : models.map((model) => ({ value: model.id, name: model.name })),
     },
   ],
 })
@@ -1377,8 +1388,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
     const effort = levels.length === 0 ? [] : [effortOption(session, levels)]
     const allowAll = session.allowAll === undefined ? [] : [allowAllOption(session.allowAll)]
     return modes === 'config' || modes === 'stuck'
-      ? [modeOption(session), modelOption(session, variants), ...effort, ...allowAll]
-      : [modelOption(session, variants), ...effort, ...allowAll]
+      ? [modeOption(session), modelOption(session, variants, options.models), ...effort, ...allowAll]
+      : [modelOption(session, variants, options.models), ...effort, ...allowAll]
   }
   const sessions = new Map<string, SessionState>()
   const failedOnce = new Set<string>()
@@ -1424,7 +1435,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const sessionId = `fake-${created}`
       const session: SessionState = {
         mode: 'bypass',
-        model: 'small',
+        model: options.models?.[0]?.id ?? 'small',
         effort: variants ? '' : 'medium',
         cancelled: false,
         closed: false,
@@ -1479,7 +1490,10 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         throw acp.RequestError.internalError({ details: `Couldn't confirm model "${value}" with the API. Try again.` })
       } else if (params.configId === 'model' && options.staysOn?.includes(value)) {
         // Said yes to, and stays where it was.
-      } else if (params.configId === 'model' && (MODELS.includes(value) || (variants && value in VARIANTS))) {
+      } else if (
+        params.configId === 'model' &&
+        ((options.models?.some((model) => model.id === value) ?? MODELS.includes(value)) || (variants && value in VARIANTS))
+      ) {
         // OpenCode's way: another model's first variant, or none.
         if (variants && value !== session.model) session.effort = levelsOf(value)[0] ?? ''
         session.model = value
@@ -1563,14 +1577,17 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const reminded = words.length > 0 && words.length < paragraphs.length
       // The markers in a linked file's words play as a message's do, for what the person sends with no words.
       const text = `${again ? whole.slice(whole.lastIndexOf('\n\n') + 2) : reminded ? words.join('\n\n') : whole}${cuesIn(params.prompt)}`
+      const update = (value: acp.SessionUpdate) =>
+        client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: value })
       const out = options.outOfUsage
-      if (out !== undefined && (out.until === undefined || now() < out.until))
+      if (out !== undefined && (out.until === undefined || now() < out.until)) {
+        if (out.message !== undefined) await update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: out.message } })
+        await out.beforeLimit?.(session.cwd)
         throw new acp.RequestError(
           -32603,
           out.until === undefined ? 'Claude AI usage limit reached' : `Claude AI usage limit reached|${Math.ceil(out.until / 1000)}`,
         )
-      const update = (value: acp.SessionUpdate) =>
-        client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: value })
+      }
       const down = options.connection?.()
       // The agent keeps what it was sent, though its service never answered it, as the real ones do: its role's markers too.
       if (down !== undefined) for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)

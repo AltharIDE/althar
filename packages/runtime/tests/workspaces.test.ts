@@ -18,6 +18,7 @@ import { projectTracker } from '../src/projectTracker'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
+import { AfterOpen } from '../src/startup'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, repository, runtime } from './support'
 
@@ -286,7 +287,11 @@ describe('several Linear workspaces', () => {
         // Not knowing its own, it is taken for any workspace's link no other connection is in.
         assert.strictEqual((yield* (yield* Connections).resolve('https://linear.app/blushh/issue/ENG-1/x'))?.connectionId, fnt.id)
         return { althar, fnt }
-      }).pipe(Effect.provide(withWorkspaces(services, file, keychain)))
+      }).pipe(
+        Effect.provide(withWorkspaces(services, file, keychain)),
+        // Prepare the old store before this launch's background lookup can learn its workspace.
+        Effect.provideService(AfterOpen, Effect.never),
+      )
 
       yield* Effect.gen(function* () {
         const connections = yield* Connections
