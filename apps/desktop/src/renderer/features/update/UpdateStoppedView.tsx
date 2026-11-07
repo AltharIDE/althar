@@ -2,7 +2,7 @@ import { DataNotMoved } from '@althar/ui/screens'
 
 import type { Host, StoreFailure } from '../../data/services'
 import { deviceWords } from '../../shared/device'
-import { useMaximized } from '../../shared/useWindowChrome'
+import { useHostChrome } from '../../shared/useWindowChrome'
 
 /*
  * What the window shows instead of opening when an update couldn't move the
@@ -18,8 +18,7 @@ export function UpdateStoppedView({
   readonly host: Host
 }) {
   const { reportProblem } = host
-  const maximized = useMaximized(host)
-  const darwin = host.platform === 'darwin'
+  const chrome = useHostChrome(host)
   return (
     <DataNotMoved
       stopped={failure.stopped}
@@ -27,17 +26,7 @@ export function UpdateStoppedView({
       reason={failure.reason}
       onShowBackup={() => void host.showBackup()}
       {...(reportProblem === undefined ? {} : { onReport: () => reportProblem({ kind: 'update', reason: failure.reason }) })}
-      lights={darwin ? 'space' : 'drawn'}
-      {...(darwin
-        ? {}
-        : {
-            window: {
-              onClose: () => host.window('close'),
-              onMinimize: () => host.window('minimize'),
-              onToggleMaximize: () => host.window('toggle-maximize'),
-              maximized,
-            },
-          })}
+      {...chrome}
       text={{ show: `Show in ${deviceWords(host.platform).files}` }}
     />
   )

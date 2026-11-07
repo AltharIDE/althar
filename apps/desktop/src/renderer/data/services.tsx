@@ -5,6 +5,7 @@ import { createContext, type ReactNode, useContext, useEffect, useEffectEvent } 
 import type { WatchEvent } from '@althar/contracts'
 
 import type { AppPreferences, PreferenceKey } from '../../main/appPreferences'
+import type { DesktopChrome } from '../../main/desktop'
 import type { Opened, ReportChoices, ReportContext, ReportPreview, Sent } from '../../main/report/bundle'
 import type { UpdateGlance } from '../../main/updates'
 
@@ -163,6 +164,10 @@ export interface Host {
   readonly platform: string
   /** DO_NOT_TRACK is set where Althar started: usage data is off, whatever its switch says. */
   readonly doNotTrack?: boolean
+  /** The desktop the window sits on, and what it says of the window's own buttons and accent (`main/desktop`); absent where main said nothing, as on an edge page. */
+  readonly chrome?: () => DesktopChrome | undefined
+  /** Calls `listener` as the desktop changes them, until the returned function is called. */
+  readonly onChrome?: (listener: (chrome: DesktopChrome) => void) => () => void
   /** Closes, minimizes, or maximizes and restores the window itself. */
   readonly window: (action: WindowAction) => void
   /** Whether the window is maximized now, for the buttons' maximize or restore. */

@@ -94,13 +94,30 @@ const homeIn = (home: string): Record<string, string> =>
  * what a test finds is what it set up, not what this computer has installed. Playwright has the window's `prefers-color-scheme` say light unless told otherwise;
  * `scheme: 'system'` leaves it to the app's own appearance, as it is outside a test.
  */
+/** What names the desktop to the app (main/desktop.ts), left out of what a spec's app inherits. */
+const DESKTOP_NAMES = [
+  'XDG_CURRENT_DESKTOP',
+  'XDG_SESSION_DESKTOP',
+  'DESKTOP_SESSION',
+  'KDE_FULL_SESSION',
+  'KDE_SESSION_VERSION',
+  'GNOME_SHELL_SESSION_MODE',
+  'SWAYSOCK',
+  'I3SOCK',
+  'HYPRLAND_INSTANCE_SIGNATURE',
+  'NIRI_SOCKET',
+]
+
 export const launch = async (home: string, env: Record<string, string> = {}, { scheme }: { readonly scheme?: 'system' } = {}) => {
   // Run from inside an Electron app, as a lead in Althar is, the shell says to run Electron as Node; the app must run as itself.
   // And from inside an agent's sandbox, git is configured for the agent (its proxy, its safe folders): the app's git is its own.
   // Windows names it Path, and a second spelling beside it would leave which one the app reads to chance.
+  // And the desktop it runs on is none the app knows (main/desktop.ts), as CI's virtual display is: the window draws its own
+  // buttons, all three, whatever desktop the person running the specs is on (KWin's frame would draw none, GNOME close alone).
   const inherited = Object.fromEntries(
     Object.entries(process.env).filter(
-      ([name]) => name !== 'ELECTRON_RUN_AS_NODE' && !name.startsWith('GIT_') && name.toUpperCase() !== 'PATH',
+      ([name]) =>
+        name !== 'ELECTRON_RUN_AS_NODE' && !name.startsWith('GIT_') && name.toUpperCase() !== 'PATH' && !DESKTOP_NAMES.includes(name),
     ),
   )
   const electronApp = await electron.launch({

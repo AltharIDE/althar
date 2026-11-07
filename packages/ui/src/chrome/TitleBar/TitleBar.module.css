@@ -1,4 +1,6 @@
 .bar {
+  --bar-pad-start: 12px;
+  --bar-pad-end: 14px;
   position: relative;
   z-index: var(--z-float);
   display: flex;
@@ -6,7 +8,7 @@
   gap: 14px;
   min-width: 0;
   height: 46px;
-  padding: 0 14px 0 12px;
+  padding: 0 var(--bar-pad-end) 0 var(--bar-pad-start);
   background: var(--n-1);
   border-bottom: 1px solid var(--line);
   -webkit-app-region: drag;
@@ -44,6 +46,11 @@
 }
 .bar:hover .drawn i:nth-child(3) {
   background: #62b04f;
+}
+/* a desktop's buttons at the end sit a little closer to the window's edge, as their own bars have them */
+.end-gnome,
+.end-kde {
+  --bar-pad-end: 10px;
 }
 .start {
   flex: 1;

@@ -39,6 +39,7 @@ export const text = {
 }
 
 const STATUS: Readonly<Record<TaskCardContent['phase'], TaskStatus>> = {
+  drafting: TaskStatus.Running,
   planned: TaskStatus.Running,
   held: TaskStatus.Stopped,
   running: TaskStatus.Running,

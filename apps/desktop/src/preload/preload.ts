@@ -2,6 +2,7 @@ import { isStartupStage, type StartupStage } from '../startup'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 import { doNotTrack } from '../main/appPreferences'
+import { chromeFromArgs, type DesktopChrome, isDesktopChrome } from '../main/desktop'
 import type { WindowAction } from '../renderer/data/services'
 
 /*
@@ -11,7 +12,7 @@ import type { WindowAction } from '../renderer/data/services'
  * as a grant with its name and size, the thread a notification they clicked opens,
  * the icon they gave the app, the app's own preferences, where Althar
  * shows at the edge of the screen, which platform the window runs on, and the window's own buttons
- * (close, minimize, maximize). The edge's own pages say through it where they draw, and what to
+ * (close, minimize, maximize), with the desktop they're drawn for. The edge's own pages say through it where they draw, and what to
  * open in the window, and hear whether the pointer is on the island. And
  * dictation: where the speech model and the microphone stand, the model's
  * download, and what was said, sent to be written down. A token on the
@@ -52,6 +53,15 @@ ipcRenderer.on('althar:report', () => reportAsked({ kind: 'asked', from: 'menu' 
 const maximized = new Set<(maximized: boolean) => void>()
 ipcRenderer.on('althar:maximized', (_event, on: unknown) => {
   if (typeof on === 'boolean') for (const listener of maximized) listener(on)
+})
+
+/* The desktop the window sits on and what it says of the window's own buttons and accent: as main handed it, then as it changes. */
+let chrome = chromeFromArgs(process.argv)
+const chromes = new Set<(chrome: DesktopChrome) => void>()
+ipcRenderer.on('althar:chrome', (_event, next: unknown) => {
+  if (!isDesktopChrome(next)) return
+  chrome = next
+  for (const listener of chromes) listener(next)
 })
 
 /* A thread a notification the person clicked opens: held until the page listens, as a window that just opened doesn't yet. */
@@ -106,6 +116,12 @@ contextBridge.exposeInMainWorld('althar', {
   // Usage data stays off while it is set, whatever its switch says; the switch shows so.
   doNotTrack: doNotTrack(process.env),
   window: (action: WindowAction): void => ipcRenderer.send('althar:window', action),
+  // Which desktop, and where its window buttons go, in its own manner (ADR-098); absent on an edge page, which draws none.
+  chrome: (): DesktopChrome | undefined => chrome,
+  onChrome: (listener: (chrome: DesktopChrome) => void): (() => void) => {
+    chromes.add(listener)
+    return () => void chromes.delete(listener)
+  },
   maximized: (): Promise<boolean> => ipcRenderer.invoke('althar:maximized'),
   onMaximized: (listener: (maximized: boolean) => void): (() => void) => {
     maximized.add(listener)
