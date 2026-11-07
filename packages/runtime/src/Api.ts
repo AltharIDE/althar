@@ -50,6 +50,9 @@ import { codeRootOf } from './code'
 import { NotFound, ProjectRefused, RetryRefused } from './errors'
 import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
+import { modelNamer } from './coordinatorNews'
+import { teamChanges, teamLine } from './teamWords'
+import { addItem } from './threads'
 import { type ConnectionInfo, Connections } from './Connections'
 import { coAuthorLine, coAuthorOn, setCoAuthor } from './credit'
 import { plansAndReviewsOf, newProjectDefaultsOf, setPlansAndReviews, setNewProjectDefaults } from './plansAndReviews'
@@ -1289,6 +1292,29 @@ export const handlers = Api.toLayer(
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
       ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
         once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn, toward))),
+      ChangeTeam: ({ commandId, taskId, steps }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const changed = yield* runs.changeTeam({ taskId, steps, actorId: instance.personId })
+              const named = yield* modelNamer.pipe(Effect.provideService(Agents, agents), Effect.provideService(Models, models))
+              const [thread] = yield* sql<{ id: string; projectId: ProjectId }>`
+                SELECT id, project_id FROM threads WHERE task_id = ${taskId} AND kind = 'task'`
+              if (thread === undefined) return
+              // Each change, said in the task's thread as the person made it.
+              for (const line of teamChanges(changed, named))
+                yield* Effect.provideContext(
+                  addItem({ projectId: thread.projectId, threadId: thread.id }, 'notice', {
+                    source: 'runtime',
+                    severity: 'info',
+                    title: `You ${teamLine(line)}`,
+                  }),
+                  folderStore,
+                )
+            }),
+          ),
+        ),
       ChangeIssueDraft: ({ commandId, draftId, title, body, labels, priority }) =>
         once(
           commandId,

@@ -14,6 +14,8 @@ import { Connections } from './Connections'
 import { touchCard } from './cards'
 import { Changes } from './Changes'
 import { endWords, modelNamer, teamOf, withEffort } from './coordinatorNews'
+import { words } from './words'
+import { teamChanges, teamLine } from './teamWords'
 import { armDraftDeadlines, stillDraft, surfaceDraftAt } from './draftDeadlines'
 import { Live, type LiveEvent } from './Live'
 import { suggestedCoordinator } from './coordinatorChoice'
@@ -288,7 +290,13 @@ const DiffAsked = Schema.Struct({
 const Noted = Schema.Struct({ note: Schema.String })
 const Dropped = Schema.Struct({ id: Schema.String })
 const Passed = Schema.Struct({ task: Schema.String, message: Schema.String, now: Schema.optional(Schema.Boolean) })
-const Relead = Schema.Struct({ task: Schema.String, lead: StepPick, message: Schema.optional(Schema.String) })
+const Relead = Schema.Struct({
+  task: Schema.String,
+  lead: Schema.optional(StepPick),
+  /* Its reviewer: another model, or null for none. Left out, it stays as it is. */
+  review: Schema.optional(Schema.NullOr(StepPick)),
+  message: Schema.optional(Schema.String),
+})
 const OnTask = Schema.Struct({ task: Schema.String })
 const PartOf = Schema.Struct({ task: Schema.String, part_of: Schema.Boolean })
 
@@ -1532,12 +1540,14 @@ export class Coordinator extends Context.Service<
         task: { readonly id: string; readonly title: string; readonly threadId: string },
         what: string,
         here: string,
+        /** When it takes effect, where that isn't at once: said after why, in both threads. */
+        note?: string,
       ) =>
         Effect.gen(function* () {
           const own = access.role === 'lead' && task.id === access.taskId
           // None of these needs the person's word, so none quotes them: it says why, where the call did (ADR-086).
           const why = typeof input === 'object' && input !== null && 'why' in input && typeof input.why === 'string' ? input.why.trim() : ''
-          const as = why === '' ? '' : `: ${why.replace(/\.$/, '')}`
+          const as = `${why === '' ? '' : `: ${why.replace(/\.$/, '')}`}${note === undefined ? '' : `. ${note}`}`
           const by = own
             ? 'Its lead'
             : access.role === 'lead'
@@ -1557,9 +1567,10 @@ export class Coordinator extends Context.Service<
         })
 
       /**
-       * Puts a task's lead on another model, effort or agent, as the task's model picker and Hand over do: a session of the
-       * new agent, briefed with the thread so far, with what you say as its first turn. A step held for an agent's usage
-       * limit goes to it at once, as the held card's Hand over does.
+       * Puts a task's lead and reviewer on other models, efforts or agents, as the task's team dialog does: from the lead's next
+       * turn, never in the one it is in, by the same handover as its model picker, which gives the new agent the thread so far;
+       * the reviewer until its review round starts, and from the next round during one. The lead's own step, held for an agent's usage limit, goes
+       * to the lead named at once, as the held card's Hand over does.
        */
       const changeLead = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
@@ -1567,47 +1578,101 @@ export class Coordinator extends Context.Service<
           const task = yield* taskOf(access, asked.task)
           if (task.id === access.taskId)
             return yield* new ToolRefused({ message: `${task.slug} is your own task: the person changes who leads it.` })
-          const lead = yield* stepOf(access.projectId, asked.lead)
-          const named = `${lead.agentId}${lead.model === null ? '' : ` on ${lead.model}`}`
+          if (asked.lead === undefined && asked.review === undefined)
+            return yield* new ToolRefused({ message: 'Name the lead, the review, or both: what should change on the task.' })
+          const lead = asked.lead === undefined ? undefined : yield* stepOf(access.projectId, asked.lead)
+          const reviewer = asked.review == null ? asked.review : yield* stepOf(access.projectId, asked.review, 'the review')
+          const named = yield* modelNamer
+          const said: Array<string> = []
           const sql = yield* SqlClient.SqlClient
+          // Only the lead's own step held for a usage limit goes to the lead named at once; a held review is the reviewer's, and the lead
+          // named for it changes from its next turn, as for any task at work.
           const [held] = yield* sql<{ one: number }>`
             SELECT 1 AS one FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
-            JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.id} AND a.state = 'held' AND a.hold_reason = 'usage_limit' LIMIT 1`
-          if (held !== undefined) {
-            const answer = { kind: 'retry' as const, agentId: lead.agentId, ...(lead.model === null ? {} : { model: lead.model }) }
+            JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.id} AND a.state = 'held' AND a.hold_reason = 'usage_limit'
+            AND n.node_key <> 'review' LIMIT 1`
+          if (lead !== undefined && held !== undefined) {
+            const answer = {
+              kind: 'retry' as const,
+              agentId: lead.agentId,
+              ...(lead.model === null ? {} : { model: lead.model }),
+              ...(lead.effort == null ? {} : { effort: lead.effort }),
+            }
             yield* (yield* Runs).handOverHeld({
               envelope: yield* envelope('task.hand_over_held', { taskId: task.id, answer }, undefined, instance.coordinatorId),
               taskId: task.id,
               answer,
             })
-            yield* saidOn(access, input, task, `Handed “${task.title}” to ${named}`, `handed this task’s held step to ${named}`)
-            return `${task.slug}'s step, held for a usage limit, goes to ${named} now. Both threads have a line saying so.`
-          }
-          const body = asked.message?.trim()
-          yield* sessions
-            .switchAgent({
-              threadId: task.threadId,
-              agentId: lead.agentId,
-              ...(lead.model === null ? {} : { model: lead.model }),
-              ...(lead.effort === undefined ? {} : { effort: lead.effort }),
-              ...(body === undefined || body === ''
-                ? {}
-                : {
-                    message: {
-                      envelope: yield* envelope('thread.send', { threadId: task.threadId, body }, undefined, instance.coordinatorId),
-                      body: passedOn(body, yield* ownTitle(access)),
-                    },
-                  }),
-            })
-            .pipe(
-              Effect.mapError((error) =>
-                error instanceof ToolRefused
-                  ? error
-                  : new ToolRefused({ message: `Althar couldn't hand ${task.slug} to ${named}: ${error._tag}. Tell the person.` }),
-              ),
+            yield* saidOn(
+              access,
+              input,
+              task,
+              `Handed “${task.title}” to ${named({ key: 'implement', ...lead, skipped: false })}`,
+              `handed this task’s held step to ${named({ key: 'implement', ...lead, skipped: false })}`,
             )
-          yield* saidOn(access, input, task, `Put ${named} on “${task.title}”`, `put ${named} on this task`)
-          return `${task.slug}'s lead is ${named} now, briefed with its thread so far. Both threads have a line saying so.`
+            said.push(`${task.slug}'s step, held for a usage limit, goes to ${named({ key: 'implement', ...lead, skipped: false })} now.`)
+          }
+          if ((lead !== undefined && held === undefined) || asked.review !== undefined) {
+            const [plan] = yield* sql<{ state: string; parameters: string }>`
+              SELECT state, parameters FROM task_plans WHERE task_id = ${task.id} AND state IN ('proposed', 'accepted')
+              ORDER BY proposed_at DESC LIMIT 1`
+            if (plan === undefined || plan.state === 'proposed')
+              return yield* new ToolRefused({ message: `${task.slug} hasn't started: change its plan with propose_plan.` })
+            const before = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(plan.parameters)
+            const rest = before.steps.filter((step) => step.key !== 'implement' && step.key !== 'review')
+            const ownLead = before.steps.find((step) => step.key === 'implement')
+            const ownReview = before.steps.find((step) => step.key === 'review')
+            const steps: Array<PlanStep> = [
+              ...rest,
+              lead !== undefined && held === undefined ? { key: 'implement' as const, ...lead, skipped: false } : (ownLead ?? []),
+              ...(asked.review === undefined
+                ? ownReview === undefined
+                  ? []
+                  : [ownReview]
+                : reviewer == null
+                  ? ownReview === undefined
+                    ? []
+                    : [{ ...ownReview, skipped: true }]
+                  : [{ key: 'review' as const, ...reviewer, skipped: false }]),
+            ].flat()
+            const changed = yield* (yield* Runs)
+              .changeTeam({ taskId: task.id, steps, actorId: instance.coordinatorId })
+              .pipe(
+                Effect.catch((error) =>
+                  error instanceof TaskRefused
+                    ? Effect.fail(new ToolRefused({ message: `${task.slug}: ${words(error, (id) => id).message}` }))
+                    : error instanceof ReviewRefused
+                      ? Effect.fail(new ToolRefused({ message: `${task.slug}: ${error.message}` }))
+                      : Effect.fail(error),
+                ),
+              )
+            for (const line of teamChanges(changed, named)) {
+              yield* saidOn(
+                access,
+                input,
+                task,
+                `${line.verb === 'changed' ? 'Changed' : 'Removed'} ${line.thing} on “${task.title}”`,
+                `${line.verb} ${line.thing}`,
+                line.note,
+              )
+              const did = teamLine(line)
+              said.push(`${task.slug}: ${did}${did.endsWith('.') ? '' : '.'}`)
+            }
+            if (changed.lead === undefined && changed.review === undefined && held === undefined)
+              said.push(`Nothing changed: ${task.slug} has that team already.`)
+          }
+          // What the new lead is told first goes to the thread after the change, so the lead that takes over reads it.
+          const body = asked.message?.trim()
+          if (body !== undefined && body !== '')
+            yield* sessions
+              .send({
+                envelope: yield* envelope('thread.send', { threadId: task.threadId, body }, undefined, instance.coordinatorId),
+                threadId: task.threadId,
+                body: passedOn(body, yield* ownTitle(access)),
+                disposition: 'after_current',
+              })
+              .pipe(Effect.mapError(() => new ToolRefused({ message: `Althar couldn't pass that on to ${task.slug}'s lead.` })))
+          return `${said.join(' ')} Both threads have a line saying so.`
         })
 
       /** Tries a task lead's last turn again where it failed, as its Try again does: what was said in it goes again. */
@@ -2566,7 +2631,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'change_lead',
-          "Puts another model, effort or agent on a task's lead, as the task's model picker and Hand over do: a new session of that agent, briefed with the thread so far, and message, where you give one, as its first turn. Name the model as list_models writes it. A step held for an agent's usage limit goes to it at once, as the held card's Hand over does. It acts at once, with a line in your thread and the task's.",
+          "Changes who leads or reviews a task, as its Change the team dialog does, at any time before it merges. The lead changes from its next turn, never in the one it is in: another model, effort or agent takes over as the task's model picker and Hand over do, briefed with the thread so far, and message, where you give one, is said to it first. The reviewer changes until its review round starts, and from the next round during one; null for review removes it, and it can't change once the review is done. Name models as list_models writes them. The lead's own step, held for an agent's usage limit, goes to the lead named at once, as the held card's Hand over does. It acts at once, with a line in your thread and the task's.",
           {
             type: 'object',
             properties: {
@@ -2576,13 +2641,19 @@ export class Coordinator extends Context.Service<
                 properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort },
                 required: ['model'],
               },
+              review: {
+                type: ['object', 'null'],
+                description: "Its reviewer's model, or null for no review. Left out, the review stays as it is.",
+                properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort },
+                required: ['model'],
+              },
               message: { type: 'string', description: 'What the new lead is told first, after its brief.' },
               why: {
                 type: 'string',
                 description: 'Why, in a few plain words, said in both threads: "the person asked", or what is going wrong.',
               },
             },
-            required: ['task', 'lead'],
+            required: ['task'],
           },
           changeLead,
         ),

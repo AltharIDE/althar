@@ -144,6 +144,58 @@ describe('a task that ends in a pull request', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('keeps the reviewer once a real review passed and the ending waits on the person, and still changes the lead', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const projects = yield* Projects
+      const plans = yield* Plans
+      const runs = yield* Runs
+      const instance = yield* Instance
+      const queries = yield* Queries
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      const created = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'Add a retry',
+        description: '[lead:finish] [lead:edit] [review:pass]',
+        draft: true,
+      })
+      const team = (lead: string, review: string) => [
+        { key: 'implement' as const, agentId: lead, model: null, skipped: false },
+        { key: 'review' as const, agentId: review, model: null, skipped: false },
+      ]
+      const planId = yield* plans.propose({
+        projectId: project.projectId as ProjectId,
+        taskId: created.taskId,
+        steps: team('claude-code', 'codex'),
+        reason: null,
+        actorId: instance.personId,
+        startsIn: Duration.zero,
+        end: 'draft',
+      })
+      yield* plans.start(planId, instance.personId)
+      // The review runs and passes; then nothing reaches the host, so the ending (a real publish step) waits on the person.
+      const [call] = yield* until(
+        Effect.map(queries.thread(created.threadId), (snapshot) => snapshot.attention),
+        (attention) => attention.length === 1,
+      )
+      assert.deepInclude(call?.stuck, { step: 'publish', why: 'not_connected' })
+      const thread = yield* items(created.threadId)
+      assert.isTrue(thread.some((item) => item.kind === 'step_result' && item.content.step === 'review' && item.content.verdict === 'pass'))
+      // The run isn't over, yet its review is done: the reviewer stays, and the lead still changes.
+      assert.strictEqual((yield* cards(project.projectId))[0]?.reviewerChange, 'never')
+      const refused = yield* Effect.flip(
+        runs.changeTeam({ taskId: created.taskId, steps: team('claude-code', 'claude-code'), actorId: instance.personId }),
+      )
+      assert.strictEqual((refused as { why?: string }).why, 'review_done')
+      // The review stays codex's; only the lead changes.
+      const lead = yield* runs.changeTeam({ taskId: created.taskId, steps: team('codex', 'codex'), actorId: instance.personId })
+      assert.deepStrictEqual([lead.lead?.step.agentId, lead.review], ['codex', undefined])
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('asks the person to sign in again, not to connect, when the host’s sign-in is lost, and carries on once they have', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })

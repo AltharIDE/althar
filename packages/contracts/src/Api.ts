@@ -1974,6 +1974,11 @@ export const TaskCard = Schema.Struct({
   unshipped: Schema.optional(Schema.NullOr(Unshipped)),
   /** A change ready that built nothing: no commits on its branch and no pull request open or merged. Absent otherwise. */
   nothingBuilt: Schema.optional(Schema.Boolean),
+  /**
+   * When a change of its reviewer takes effect, once its steps have begun: `now`, before its review round starts or between
+   * rounds; `next_round`, in a round under way; `never`, once its review is done. Absent before its plan runs.
+   */
+  reviewerChange: Schema.optional(Schema.Literals(['now', 'next_round', 'never'])),
   /** The step it is on, by key, while it runs. */
   step: Schema.NullOr(Schema.String),
   /** It runs a round of work after its plan, as the person asked its lead for more (ADR-034). */
@@ -2623,6 +2628,10 @@ export const SessionSummary = Schema.Struct({
    * is held, a note waits its turn there, running or between turns.
    */
   held: Schema.Boolean,
+  /** Who leads the thread from its next turn, where that was changed while it worked or waited; absent or null otherwise. */
+  nextLead: Schema.optional(
+    Schema.NullOr(Schema.Struct({ agentId: Schema.String, model: Schema.NullOr(Schema.String), effort: Schema.NullOr(Schema.String) })),
+  ),
   /** How full its context is, in tokens, as the agent last said while it runs; null until it says, or where it doesn't. */
   context: Schema.NullOr(ContextUse),
   /** What it left running in the background, while it runs, in the order it started them. */
@@ -3850,6 +3859,11 @@ export const Api = RpcGroup.make(
     },
     Schema.Void,
   ),
+  /**
+   * Changes who leads and who reviews a task at any time before it merges. Its lead changes from its next turn, never in the one it
+   * is in; its reviewer until its review round starts, and from the next round during one, not once its review is done.
+   */
+  command('ChangeTeam', { taskId: Schema.String, steps: Schema.Array(PlanStep) }, Schema.Void),
   /** Changes what an issue the coordinator drafted says, before it is filed. */
   command(
     'ChangeIssueDraft',
