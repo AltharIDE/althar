@@ -27,6 +27,16 @@
   whether skill and OpenSpec files may be in its repository and be pushed.
   Each off unless the person turns it on.
 - **Owner:** Repository maintainers
+- **Current enforcement (7 November 2026):** [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md)
+  and the [limits audit](../plans/no-arbitrary-limits-audit.md) define the boundary.
+  Allow everything is the default. Sandboxed commands run unread; outside,
+  visible irreversible acts and the person's Ask rules ask. Never rules and
+  secret protections remain. An unreadable command is not refused merely
+  because a Never rule exists. The non-irreversible floor is gone. gh, glab
+  and the Flatpak bridge have no blanket refusal. The coordinator uses the
+  project rules, with only visible outside-folder writes refused without a
+  sandbox. The earlier mode descriptions apply when the person chooses
+  Ask about more; superseded historical restrictions below are not enforced.
 - **Context:** Every permission request reaches Althar
   ([ADR-007](007-permission-requests-reach-althar.md)), which answers it
   from its own rules. In the MVP those were fixed in code: everything

@@ -820,11 +820,12 @@ const claudeAsks = (
  * permission judge. Its rules and sandbox below are the programmatic
  * settings, which load whatever the sources.
  */
-const claudeReads = (flatpak: boolean, offline: boolean, untrusted: boolean, web?: boolean) => ({
+const claudeReads = (flatpak: boolean, offline: boolean, untrusted: boolean, web?: boolean, skills?: string) => ({
   claudeCode: {
     options: {
       allowDangerouslySkipPermissions: false,
       strictMcpConfig: true,
+      ...(skills === undefined ? {} : { plugins: [{ type: 'local', path: skills }] }),
       ...(untrusted ? { settingSources: [] } : {}),
       settings: {
         permissions: offline
@@ -891,26 +892,37 @@ const claudeHolds = (role: 'lead' | 'reader' = 'lead', options: SessionOptions =
  * It loads no settings file (`settingSources: []`) and runs no hook, as a
  * review's lead: no allow rule or sandbox exemption of the person's or the
  * repository's lets a command out, and no hook of theirs runs beside it. Its
- * edit tools stay denied: a change is a task. Where the sandbox can't start,
- * the session doesn't either (`failIfUnavailable`), so it is asked for only
- * where it can (`claudeSandboxStarts`); elsewhere the coordinator is started
- * as any reader.
+ * edits meet the project rules and can write its own folder. Without an OS
+ * sandbox, every command reaches those rules; only visible outside-folder
+ * writes are refused. Claude's own sandbox still refuses opening /dev/fd
+ * pipes; that native-provider limitation is recorded in the limits audit.
  */
-const claudeContains = ({ folder, reads }: Contained) => ({
+const claudeContains = (
+  { folder, reads }: Contained,
+  skills?: string,
+  deniedHosts?: ReadonlyArray<string>,
+  starts = claudeSandboxStarts(),
+) => ({
   claudeCode: {
     options: {
       allowDangerouslySkipPermissions: false,
       strictMcpConfig: true,
+      ...(skills === undefined ? {} : { plugins: [{ type: 'local', path: skills }] }),
       settingSources: [],
       settings: {
         disableAllHooks: true,
-        permissions: { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', ...secretReadRules()], ask: ['WebFetch'] },
+        permissions: { deny: secretReadRules(), ask: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch'] },
         sandbox: {
-          enabled: true,
-          autoAllowBashIfSandboxed: true,
-          allowUnsandboxedCommands: false,
-          failIfUnavailable: true,
-          network: { allowedDomains: ['*'], allowLocalBinding: true, allowAllUnixSockets: true },
+          enabled: starts,
+          autoAllowBashIfSandboxed: starts,
+          allowUnsandboxedCommands: !starts,
+          failIfUnavailable: starts,
+          network: {
+            allowedDomains: ['*'],
+            allowLocalBinding: true,
+            allowAllUnixSockets: true,
+            ...(deniedHosts?.length ? { deniedDomains: [...deniedHosts] } : {}),
+          },
           filesystem: { allowWrite: [folder], denyRead: [...reads.denied], allowRead: [...reads.allowed] },
         },
       },
@@ -996,9 +1008,15 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     sessionMeta: (role = 'lead', options = {}) =>
       role !== 'reader'
         ? claudeAsks(options.sandbox, options.skills, claudeSandboxStarts(), options.web === true && options.offline !== true)
-        : options.contained !== undefined && options.untrusted !== true && options.offline !== true && claudeSandboxStarts()
-          ? claudeContains(options.contained)
-          : claudeReads(process.env.FLATPAK_ID !== undefined, options.offline === true, options.untrusted === true, options.web),
+        : options.contained !== undefined && options.untrusted !== true && options.offline !== true
+          ? claudeContains(options.contained, options.skills, options.sandbox?.deniedHosts)
+          : claudeReads(
+              process.env.FLATPAK_ID !== undefined,
+              options.offline === true,
+              options.untrusted === true,
+              options.web,
+              options.skills,
+            ),
     contains: claudeSandboxStarts,
     upFront: true,
     /* A local plugin its session loads (claudeAsks); it dispatches subagents. */

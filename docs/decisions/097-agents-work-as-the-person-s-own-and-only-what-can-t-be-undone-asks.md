@@ -794,9 +794,10 @@ this ADR or the prototype's README.
 
 ## Enforcement sweep, 7 November 2026
 
-The sandbox and environment tranche is built. The rules and session
-instructions tranche waits for #684 to merge; the audit marks those rows
-pending. This sweep is not complete.
+The sandbox, environment, coordinator and rules sweep is built on #684.
+The audit records the limits removed and each retained boundary. Review
+workspaces and the in-task reviewer's tool list are deliberately left to the
+task-as-parts work.
 
 The [limits audit](../plans/no-arbitrary-limits-audit.md) records every
 restriction found, its disposition and regression coverage. Sandboxed shell
@@ -822,7 +823,23 @@ visit any HTTP or HTTPS page, including redirects, in the existing isolated
 browser session; file URLs remain refused.
 
 A refusal that leaves an agent silent is followed up, and any final notice
-names the command and the reason Althar refused it. Review workspaces,
-reviewers' tool lists and running review code are moved to the task-as-parts
-work by the coordinator's direction; they are not a separate path in this
-sweep.
+names the command and the reason Althar refused it. A review's lead of the
+repository's own people now has the full lead tool set; an outside author's
+review keeps the reading six tools, and its code does not run without the
+person's word. Review workspaces, the in-task reviewer's tool list and running
+the reviewed code remain with the task-as-parts work, by the coordinator's
+direction; they are not a separate path in this sweep.
+
+The coordinator uses the project rules, including the person's Never and Ask,
+rather than the strict reader whitelist. Without a sandbox only visible writes
+outside its folder are refused; unreadable commands run. A silent refusal is
+recovered in the same turn. Claude's native sandbox still refuses opening pipe
+descriptors under `/dev/fd`, even when those paths are explicitly allowed;
+Althar no longer refuses process substitution itself.
+
+The non-irreversible floor is gone in every mode. Code-host CLI changes and the
+Flatpak bridge are ordinary commands. Visible merges, releases, posts and
+credential exports remain held. Unknown host API mutations are allowed rather
+than treated as irreversible by default. Selected skills reach all ordinary
+roles, including the coordinator; outside reviews remain offline and load no
+executable skill plugins.

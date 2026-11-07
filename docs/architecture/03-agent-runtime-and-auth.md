@@ -875,7 +875,7 @@ including the always-ask list
   rules can't tell goes to the person. The thread keeps the two receipts
   apart: the rules' quiet line under a turn, and the coordinator's
   "By the coordinator: …" with its reason.
-- A session with a read-only role, such as the coordinator or a review step,
+- A review session with a read-only role (not the coordinator)
   starts in the agent's read-only mode where it has one (for example Claude
   Code's plan mode, Codex's read-only sandbox, or OpenCode's plan agent), and
   the rules deny it writes as well.
@@ -913,7 +913,7 @@ allows implementers and the project’s own reviewers to use Claude Code’s
 WebSearch/WebFetch, Codex’s live web_search and page opening, and OpenCode’s
 websearch/webfetch without a permission request reaching Althar. Outside
 pull request reviews remain offline (ADR-058); Codex remains ineligible to
-lead them. The coordinator’s settings are unchanged. Changes apply to new
+lead them. The coordinator uses the same native-web switch. Changes apply to new
 sessions; restart an existing session after changing the switch.
 
 Shell networking is independent of the native web-tools switch. There is
@@ -1080,10 +1080,8 @@ Only what the rules read as irreversible
 
 What the rules can't read goes ahead (ADR-067's amendment), and so do the
 stash, `git reflog expire` and `gc --prune`, and reading a `.env` outside
-the worktree. In the other modes the whole floor asks today (the stash
-entries that aren't the task's, what git keeps to recover lost work, a
-`.env` outside, writing outside); ADR-097's first phase drops the floor
-there too.
+the worktree. The extra non-irreversible floor is gone in every mode.
+Ask about more and the person's explicit Never and Ask rules still hold.
 
 #### MCP calls and the person's sign-in
 

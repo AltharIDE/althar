@@ -20,13 +20,16 @@ This table also records work deliberately moved out of this task by the coordina
 | Copilot built-in MCPs disabled (`registry.ts`) | Removed | `registry.test.ts`: built-in tools available, auto-approval still held off |
 | Screenshot restricted to localhost or known run origins (`screenshots.ts`, desktop screenshot navigation) | Removed | `leadRunTools.test.ts`, desktop `screenshots.test.ts`: remote HTTP works; file URLs stay refused |
 | Refusal followed by an empty turn hides what blocked the agent (`AgentConnection.ts`) | Removed | `connection.test.ts`: recovery and notice include the actual command and refusal reason |
-| Blanket `gh`/`glab` writes refusal (`rules.ts`) | Pending #684 merge | Replace with irreversible classification, keeping posting, publishing, merging and credential disclosure held |
-| Flatpak device-bridge refusal (`rules.ts`) | Pending #684 merge | Remove the blanket prohibition; visible irreversible operations still ask |
-| Read-only role refuses unreadable shell syntax, including process substitution (`rules.ts`) | Pending #684 merge | Coordinator commands inside its OS sandbox run unread; without it, only visible writes outside its folder are refused |
-| Non-irreversible permission floor and opaque-command refusals (`rules.ts`) | Pending #684 merge | Remove built-in limits beyond the list; retain the person's own Never and Ask rules |
-| Session brief says agents carry no host sign-in and imposes Althar's tools (`Sessions.ts`) | Pending #684 merge | Update the instructions to match actual access; Althar's tools are preferred |
-| Selected skills restricted to task leads (`Sessions.ts`) | Pending #684 merge | The person's enabled skills belong in ordinary coordinator/helper sessions too |
-| Reviewer tool lists, review lead's six-tool guard (`ToolServer.ts`, `Reviews.ts`), read-only review copies, running review code | Moved to the task-as-parts work | Explicit coordination decision; no review-only workspace path added here; #686 also changes Reviews.ts |
+| Blanket `gh`/`glab` writes refusal (`rules.ts`) | Removed | `rules.test.ts`: reversible edits run; posting, publishing, merging and credential disclosure remain held |
+| Flatpak device-bridge refusal (`rules.ts`) | Removed | `rules.test.ts`: transparent wrapper; visible merges and credential reads remain held |
+| Read-only role refuses unreadable shell syntax, including process substitution (`rules.ts`) | Removed | `rules.test.ts`, `sandboxBoundary.test.ts`, `coordinator.test.ts`: opaque commands run; visible outside writes refuse |
+| Non-irreversible permission floor and opaque-command refusals (`rules.ts`) | Removed | `rules.test.ts`, `sandboxBoundary.test.ts`: extra floor and opaque-command refusals removed; explicit Never and Ask still hold |
+| Session brief says agents carry no host sign-in and imposes Althar's tools (`Sessions.ts`) | Removed | Session briefs describe inherited identity and prefer Althar tools; coordinator/skills session tests |
+| Selected skills restricted to task leads (`Sessions.ts`) | Removed | `skills.test.ts`, `registry.test.ts`: enabled skills load in ordinary roles; outside reviews omit executable plugins |
+| Claude native sandbox refuses process-substitution pipes under `/dev/fd` | Unresolved upstream limit | Not on either retained list; live probe fails even with explicit fd allowances |
+| Review lead's six-tool list for a review of the repository's own people (`Reviews.ts`) | Removed | `reviews.test.ts`: a team's review lead lists and calls every lead tool, not only the reading six |
+| An outside author's review keeps the six reading tools (`Reviews.ts`) | Kept | What stays: “An outside author’s code doesn’t run without the person’s word”; `reviews.test.ts` |
+| Read-only review copies, the in-task reviewer's tool list, running the reviewed code | Moved to the task-as-parts work | Explicit coordination decision; `Reviews.ts` and the reviewer role are #686's and a later task's to change |
 | The OS sandbox's writable roots and protected hook/config locations | Kept | What stays: “The OS sandbox writes only the worktree, the temp folder and the tools' caches”; `sandboxBoundary.test.ts`, `registry.test.ts` |
 | Force pushes, default/integration branch pushes, deleting another branch, discarding another person's changes, deleting outside the worktree | Kept | Irreversible list: Lost work or history; `rules.test.ts`, `permissionEdges.test.ts`, `pushGuard.test.ts`, `workToward.test.ts` |
 | Git pre-push and reference-transaction guards, approval pass bound to one git invocation | Kept | What stays: “git's guard hooks on pushes and branch moves”; `pushGuard.test.ts` |
@@ -37,11 +40,11 @@ This table also records work deliberately moved out of this task by the coordina
 | Reading secret files, exporting credentials, keychain operations that read or change secrets | Kept | What stays: “Secret files and the keychain are refused”; `rules.test.ts`, `registry.test.ts`, `coordinatorCopies.test.ts` |
 | Provider modes/options that would auto-approve requests; judge has no tools; native slash commands cannot enable bypass | Kept | What stays: “No agent answers its own permission request”; `registry.test.ts`, `connection.test.ts`, `permissionJudge.test.ts` |
 | Loosening rules or server access without the person's live words, self-approval, permission answers by an agent | Kept | What stays: no self-approval or self-authorized loosening; `settingsTools.test.ts`, `coordinatorTools.test.ts`, `permissionJudge.test.ts` |
-| Asked-for tool authorization, errands paused on objections, live-person word for merge/publish/post | Kept | What stays: “Asked-for tools go only on the person's own message”; `coordinatorTools.test.ts`, `coordinatorTools.test.ts`, `taskButtons.test.ts` |
+| Asked-for tool authorization, errands paused on objections, live-person word for merge/publish/post | Kept | What stays: “Asked-for tools go only on the person's own message”; `coordinatorTools.test.ts`, `taskButtons.test.ts` |
 | Outside author's repository config/hooks/plugins disabled; code not run without the person's word; offline review commands | Kept | What stays: “An outside author's code doesn't run without the person's word”; review workspace changes deferred; `connections.test.ts`, `registry.test.ts`, `reviews.test.ts` |
 | Turn/hour/usage budgets, review rounds, helper and lead-started-task counts, scheduling slots | Kept | What stays: Cost caps; `limits.test.ts`, `leadTools.test.ts`, coordinator/task scheduling tests |
 | Process-group ownership, terminating only owned processes, valid MCP session tokens, supported protocol modes | Kept | Integrity of the sandbox and no self-approval, rather than command restrictions; `process.test.ts`, `connection.test.ts`, `coordinatorTools.test.ts` |
-| Screenshot viewport/pixel/time bounds and HTTP-only protocol | Kept | Resource bounds and secret-file protection; screenshot tests keep file URLs refused |
+| Screenshot viewport/pixel/time bounds and HTTP-only protocol | Kept | What stays: Cost caps and secret files; screenshot tests keep file URLs refused |
 
 ## Flow
 
@@ -70,22 +73,32 @@ unavailable live checks are recorded with the task's completion.
 
 ### Current results
 
-The sandbox/environment tranche is committed; the sweep is **not complete**.
-Main was fetched at `bd524e92ae07` (#686) and still contains no #684.
-`rules.ts`, `Policies.ts` and `Sessions.ts` have therefore not been edited.
-Once #684 merges, merge main, complete the pending rows above and rewrite the
-remaining rules/session documentation around that final behavior.
+#684 is merged into this branch. The pending rules/session rows are implemented.
+Review workspaces and the in-task reviewer's tool list remain moved to
+task-as-parts by the coordinator's explicit direction; they are not claimed
+removed here.
 
-The live probe fetched Google Fonts CSS through all three agents. Codex and
-OpenCode also served the Next/font page with HTTP 200; OpenCode has no OS
-sandbox. Claude's curl succeeded, but its Next compilation stalled until the
-120-second HTTP request bound. Polling avoids its native watcher failures;
-opening Unix sockets and disabling Node's global proxy mode did not resolve
-the compilation stall. Claude's full Next/font case remains unverified.
+The public-network probe has fetched Google Fonts and served a Next/font page
+with HTTP 200 through Claude Code, Codex and OpenCode. Claude's earlier runs
+intermittently stalled compiling Next; the fixture now uses one webpack worker
+and filesystem polling to avoid this shared Mac's worker/watcher limits.
+OpenCode has no OS sandbox; its check covers its real shell and permission path.
+The coordinator process-substitution check exercises both Althar's permission
+path (with and without a sandbox) and a real Codex sandbox.
 
-Focused adapter, refusal, runtime dev/screenshot, coordinator-copy, real
-skill-file push, desktop screenshot and irreversible git-guard tests pass.
-The guard tests now clear the live task's inherited guard scope so their
-scratch repositories are actually guarded. Checks pass for adapters,
-runtime, desktop and CLI. Full suites, coverage and desktop end-to-end runs
-were not run.
+**Unresolved upstream restriction:** Claude's bundled native sandbox refuses
+opening its own `/dev/fd/12` pipe in `diff <(printf same) <(printf same)`.
+Explicit read/write allowances for `/dev/fd` did not change that. Those ineffective
+allowances were removed. This is not an irreversible boundary, and is not
+claimed justified or removed. Claude process substitution remains unverified.
+
+Unit/fake-agent tests are separate from signed-in probes. Focused checks and
+final results are handed with the completion evidence. Full suites, coverage
+and desktop end-to-end runs are left to CI.
+
+### Allowed where uncertain
+
+Unreadable scripts and commands beside a Never rule run unless the rule visibly
+matches. Unknown code-host API mutations run. The rules do not infer that an
+unknown program publishes or speaks for the person. The OS sandbox, explicit
+secret protections, git guards and the person's visible rules remain.

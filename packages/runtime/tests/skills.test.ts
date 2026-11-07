@@ -261,7 +261,7 @@ describe('skills for a task’s lead', () => {
     ),
   )
 
-  it.live('gives the coordinator none, on any agent', () =>
+  it.live('gives the coordinator selected skills on every supported agent', () =>
     withStore({ alpha: skill('alpha') }, {}, (skills) =>
       Effect.gen(function* () {
         const sessions = yield* Sessions
@@ -270,11 +270,17 @@ describe('skills for a task’s lead', () => {
           yield* sessions.start({ threadId: project.coordinatorThreadId, agentId })
           if (agentId === 'claude-code') {
             assert.strictEqual(sessionMetas.at(-1)?.role, 'reader')
-            assert.isUndefined(sessionMetas.at(-1)?.options?.skills)
+            assert.isString(sessionMetas.at(-1)?.options?.skills)
           }
-          assert.isUndefined(launches.at(-1)?.options?.skills, agentId)
-          assert.isFalse(existsSync(join(skills.root, 'runs')) && readdirSync(join(skills.root, 'runs')).length > 0, agentId)
-          assert.deepStrictEqual(yield* givenTo(project.coordinatorThreadId), [], agentId)
+          assert.isTrue(
+            skillFilesUnder(skillsFolderOf(agentId, skills.root)).some((path) => path.endsWith('alpha/SKILL.md')),
+            agentId,
+          )
+          assert.deepStrictEqual(
+            (yield* givenTo(project.coordinatorThreadId)).map(({ id }) => id),
+            ['alpha'],
+            agentId,
+          )
           yield* sessions.stop(project.coordinatorThreadId)
         }
       }),

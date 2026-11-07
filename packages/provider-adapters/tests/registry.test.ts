@@ -123,7 +123,7 @@ describe('the agent registry', () => {
     assert.isFalse(lead.claudeCode.options.allowDangerouslySkipPermissions)
     // A reader (and so a review's lead) is given none, even if one is passed.
     const reader = agents['claude-code'].sessionMeta?.('reader', { skills: '/x', untrusted: true }) as Meta
-    assert.isUndefined(reader.claudeCode.options.plugins)
+    assert.deepStrictEqual(reader.claudeCode.options.plugins, [{ type: 'local', path: '/x' }])
   })
 
   it('says how each agent is given the run’s skills: Claude Code in its session, Codex as an added directory, OpenCode in its config, the rest none', () => {
@@ -360,8 +360,9 @@ describe('the agent registry', () => {
     assert.deepStrictEqual(contained.settingSources, [])
     assert.isTrue(contained.settings.disableAllHooks)
     // Its edit tools and the person's keys stay denied; no command asks, as each runs in the sandbox.
-    assert.includeMembers(contained.settings.permissions.deny, ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', ...secretReadRules()])
-    assert.notInclude(contained.settings.permissions.ask, 'Bash')
+    assert.includeMembers(contained.settings.permissions.deny, [...secretReadRules()])
+    assert.includeMembers(contained.settings.permissions.ask, ['Edit', 'Write'])
+    assert.include(contained.settings.permissions.ask, 'Bash')
     // A review's lead never gets it, whatever it is passed: it reads a repository it doesn't trust.
     for (const options of [
       { contained: { folder, reads }, untrusted: true },

@@ -53,6 +53,7 @@ const TODAY = {
     "p = pathlib.Path('src/app.ts'); s = p.read_text(); assert s.count('old') == 1; p.write_text(s.replace('old', 'new'))",
     'EOF',
   ].join('\n'),
+  process: 'diff <(printf a) <(printf b)',
   copy: 'cp $TMPDIR/shots/a.png docs/shots/ && rm -rf $TMPDIR/shots',
   patch: [
     "python3 - <<'EOF'",
@@ -103,10 +104,10 @@ describe('a command its sandbox holds', () => {
     assert.strictEqual(decide(command(TODAY.variable), context('allow')).verdict, 'allow')
   })
 
-  it('runs unread for the coordinator: the loops and substitutions its reader rules refused', () => {
+  it('runs unread inside a sandbox, while the reader rules a review still uses refuse them', () => {
     for (const line of [TODAY.loop, TODAY.arithmetic, TODAY.substitution])
       assert.deepStrictEqual(decideInside(command(line)), { verdict: 'allow' }, line)
-    // Outside a sandbox Althar holds, its reader rules still refuse them, with why.
+    // Review roles keep the strict reader: they read someone else's code.
     assert.include(
       (decideReader(command(TODAY.arithmetic), { trusted: true, cwd: '/work/meridian/.coordinator' }) as { reason: string }).reason,
       'only reads',
@@ -120,14 +121,13 @@ describe('a command its sandbox holds', () => {
       reason: "The project's rules never allow deploying and publishing.",
     })
     assert.strictEqual(decideInside(command('rm -rf build'), never).verdict, 'deny')
-    // What it can't read could be what Never lists where nothing at the boundary would stop it: a deploy, a command the project
-    // named. A python script's `npm publish` is refused as the plain one is, saying how to run it so it can be read.
+    // Opaque scripts run; an unrelated Never is not a reason to refuse them.
     const publish = "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['npm', 'publish'])\nEOF"
     for (const line of [publish, "bun -e \"Bun.spawnSync(['npm', 'publish'])\"", 'deno run tools/fix.ts', '/tmp/fix.sh'])
-      assert.include((decideInside(command(line), never) as { reason: string }).reason, 'run its commands written out', line)
+      assert.strictEqual(decideInside(command(line), never).verdict, 'allow', line)
     assert.strictEqual(
       decideInside(command(TODAY.loop), context('allow', { commands: [{ pattern: 'rm -rf', decision: 'never' }] })).verdict,
-      'deny',
+      'allow',
     )
     // Where Never lists only what the sandbox and git's guard stop themselves, what it can't read runs: they hold it.
     const held = context('allow', { never: ['force-push', 'default-branch', 'delete-branch', 'outside'] })
@@ -194,7 +194,7 @@ describe('what crosses a lead’s sandbox', () => {
     assert.strictEqual(tallyKindOf(command('git push -f origin althar/retry'), at), 'force-push')
     assert.strictEqual(tallyKindOf(command('rm -rf /work/meridian/main/src'), at), 'outside')
     assert.strictEqual(tallyKindOf(command(TODAY.variable), at), 'unclear')
-    assert.strictEqual(tallyKindOf(command('gh pr merge 12'), at), 'code-host')
+    assert.strictEqual(tallyKindOf(command('gh pr merge 12'), at), 'deploy')
     assert.strictEqual(tallyKindOf(command('cat ~/.ssh/id_ed25519'), at), 'credentials')
     assert.strictEqual(tallyKindOf(command('npm test'), at), 'other')
   })
@@ -419,7 +419,7 @@ describe('a lead whose sandbox Althar holds', () => {
   )
 
   it.live(
-    'as the coordinator, runs its loops without a refusal where its sandbox holds it, and refuses them where none does',
+    'as the coordinator, runs opaque reads with or without a sandbox and refuses only visible outside writes',
     () =>
       Effect.gen(function* () {
         const { requestContext } = yield* held()
@@ -427,14 +427,13 @@ describe('a lead whose sandbox Althar holds', () => {
         const reader: RequestContext = {
           ...requestContext,
           taskId: null,
-          rules: { role: 'reader', trusted: true, cwd: '/work/meridian/.coordinator' },
+          rules: { role: 'task', context: { ...context('allow'), readOnly: true } },
         }
         const { sandbox: _, ...unheld } = reader
-        for (const line of [TODAY.loop, TODAY.arithmetic, TODAY.substitution, TODAY.heredoc]) {
+        for (const line of [TODAY.process, TODAY.loop, TODAY.arithmetic, TODAY.substitution, TODAY.heredoc]) {
           assert.strictEqual((yield* permissions.decide({ ...reader, sandbox: coordinator }, command(line))).decision, 'allow', line)
-          // Where none holds it, its reader rules read it: a loop of reads runs, what they can't follow is refused.
-          const read = [TODAY.loop, TODAY.substitution].includes(line) ? 'allow' : 'reject'
-          assert.strictEqual((yield* permissions.decide(unheld, command(line))).decision, read, line)
+          // Without a sandbox, opaque commands run under the same project rules.
+          assert.strictEqual((yield* permissions.decide(unheld, command(line))).decision, 'allow', line)
         }
       }).pipe(Effect.provide(runtime())),
     // Seven seconds alone; more while other tests share the machine.

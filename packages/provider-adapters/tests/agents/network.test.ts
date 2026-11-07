@@ -17,12 +17,19 @@ beforeAll(() => {
     JSON.stringify({ private: true, dependencies: { next: '^16.0.0', react: '^19.0.0', 'react-dom': '^19.0.0' } }),
   )
   execFileSync('bun', ['install'], { cwd, stdio: 'pipe' })
+  writeFileSync(
+    join(cwd, 'next.config.mjs'),
+    'export default { agentRules: false, experimental: { cpus: 1 }, webpack(config) { config.parallelism = 1; return config } }',
+  )
   mkdirSync(join(cwd, 'pages'))
   writeFileSync(
     join(cwd, 'pages/index.js'),
     `import { Inter } from 'next/font/google'; const inter = Inter({subsets:['latin']}); export default function Page() { return <main className={inter.className}>Font network probe</main> }`,
   )
-  writeFileSync(join(cwd, 'AGENTS.md'), 'Run only the supplied public-network probe. Do not change any files or inspect sign-ins.\n')
+  writeFileSync(
+    join(cwd, 'AGENTS.md'),
+    'Run the supplied test commands exactly. Do not inspect sign-ins or change files except the probes’ own output.\n',
+  )
   writeFileSync(
     join(cwd, 'probe.mjs'),
     `
@@ -99,3 +106,48 @@ for (const id of ['claude-code', 'codex', 'opencode'] as const) {
     ),
   )
 }
+
+it.live('a sandboxed Codex coordinator runs process substitution', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const definition = agents.codex
+      const options = { contained: { folder: cwd, reads: { allowed: [] as string[], denied: [] as string[] } } }
+      const asked = yield* Ref.make<string[]>([])
+      const spec = definition.launch(process.execPath)
+      const own = definition.withoutOwnTools?.({ env: process.env, homeDir: homedir(), cwd }) ?? {}
+      const connection = yield* connect({
+        transport: { _tag: 'Process', cwd, spec: { ...spec, env: { ...spec.env, ...own } } },
+        permissions: definition.permissions,
+        onPermission: (request) =>
+          Ref.update(asked, (calls) => [...calls, request.title]).pipe(
+            Effect.as({ decision: 'allow' as const, reason: 'Public scratch-folder probe.' }),
+          ),
+      })
+      const session = yield* connection.newSession({
+        cwd,
+        mode: definition.modes.ask,
+        modeOptionId: definition.options.mode,
+        ...(definition.sessionMeta === undefined ? {} : { meta: definition.sessionMeta('lead', options) }),
+      })
+      const events = yield* Stream.runCollect(
+        session.prompt(
+          'Run exactly this read-only shell command in the sandbox, with no edits or alternatives: diff <(printf same) <(printf same) && printf PROCESS_SUBSTITUTION_PASSED. Report the output.',
+        ),
+      )
+      process.stdout.write(
+        `Coordinator events: ${JSON.stringify(events.filter((event) => event._tag === 'AgentMessage' || event._tag === 'ToolCallUpdate'))}\n`,
+      )
+      assert.isTrue(
+        events.some(
+          (event) =>
+            event._tag === 'ToolCallUpdate' &&
+            'terminal' in event &&
+            JSON.stringify(event.terminal).includes('PROCESS_SUBSTITUTION_PASSED'),
+        ),
+      )
+      assert.isTrue(events.some((event) => event._tag === 'ToolCallUpdate' && 'terminal' in event && event.terminal.exit?.code === 0))
+      assert.deepStrictEqual(yield* Ref.get(asked), [])
+      process.stdout.write('Coordinator process substitution: ran inside the sandbox; no permission requests.\n')
+    }),
+  ),
+)
