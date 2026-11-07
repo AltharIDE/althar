@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { request } from 'node:http'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 
@@ -15,6 +16,7 @@ import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
 import { NotFound } from '../src/errors'
 import { builtAsk } from '../src/evidence'
 import { Instance } from '../src/Instance'
+import { Live } from '../src/Live'
 import { setPlansAndReviews } from '../src/plansAndReviews'
 import { Models } from '../src/Models'
 import { Plans } from '../src/Plans'
@@ -25,7 +27,7 @@ import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import { addItem } from '../src/threads'
-import { ToolServer, type ToolAccess } from '../src/ToolServer'
+import { KEEP_ALIVE_MS, ToolServer, type ToolAccess } from '../src/ToolServer'
 import { callTool, fakeSandbox, notices, repository, runtime, sessionMetas, task as newTask, turns, until } from './support'
 
 /*
@@ -924,11 +926,12 @@ describe('the coordinator’s edges', () => {
       const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
       yield* coordinator.reading(() => Effect.succeed(undefined))
       yield* callTool(access, 'draft_task', { title: 'Add a retry' })
-      assert.strictEqual(yield* callTool(access, 'list_tasks', {}), '- add-a-retry: Add a retry (planned)')
+      assert.strictEqual(yield* callTool(access, 'list_tasks', {}), '- add-a-retry: Add a retry (drafted, no plan yet (call propose_plan))')
       const [thread] = yield* sql<{ id: string }>`
         SELECT t.id FROM threads t JOIN tasks k ON k.id = t.task_id WHERE k.slug = 'add-a-retry' AND t.kind = 'task'`
       yield* addItem({ projectId: projectId as Parameters<typeof addItem>[0]['projectId'], threadId: thread?.id ?? '' }, 'step_result', {})
       const read = yield* callTool(access, 'read_task', { task: 'add-a-retry' })
+      assert.include(read, 'Where it stands: drafted, no plan yet (call propose_plan). It has no plan, so nothing starts it.')
       assert.include(read, '\n\nstep: \n\n')
       assert.match(read, /Pull request: Althar could not read its state just now\.$/)
     }).pipe(Effect.provide(runtime())),
@@ -944,6 +947,40 @@ describe('the coordinator’s edges', () => {
       const refused = yield* Effect.flip(coordinator.say({ envelope, threadId, body, disposition: 'after_current', quiet: true }))
       assert.instanceOf(refused, CoordinatorUnavailable)
       assert.lengthOf(yield* sql`SELECT id FROM user_inputs WHERE thread_id = ${threadId} AND body = ${body}`, 1)
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { signedOut: ['claude-code'] }))),
+  )
+
+  it.live('tells the coordinator, as its turn ends, of a draft it made that has no plan, once, and of none that has one', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const live = yield* Live
+      const { projectId, threadId } = yield* opened
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      const ended = (state: string) => live.publish({ _tag: 'TurnEnded', threadId, turnId: 'turn', state })
+      const told = () =>
+        sql<{
+          body: string
+        }>`SELECT body FROM user_inputs WHERE thread_id = ${threadId} AND body LIKE ${'%has no plan%'} OR body LIKE ${'%have no plan%'}`
+      yield* callTool(access, 'draft_task', { title: 'Plan me' })
+      yield* callTool(access, 'draft_task', { title: 'Plan me too' })
+      yield* callTool(access, 'propose_plan', { task: 'plan-me-too', lead: { agent: 'codex', model: 'large' } })
+      // A turn the person stopped tells it nothing, and forgets the drafts.
+      yield* ended('interrupted')
+      yield* Effect.sleep('300 millis')
+      assert.lengthOf(yield* told(), 0)
+      yield* callTool(access, 'draft_task', { title: 'Plan me again' })
+      yield* callTool(access, 'propose_plan', { task: 'plan-me-again', lead: { agent: 'codex', model: 'large' } })
+      yield* callTool(access, 'draft_task', { title: 'Never planned' })
+      yield* ended('completed')
+      yield* until(told(), (rows) => rows.length === 1)
+      const [news] = yield* told()
+      assert.include(news?.body ?? '', 'never-planned is a draft that has no plan')
+      assert.notInclude(news?.body ?? '', 'plan-me-again')
+      assert.include(news?.body ?? '', 'Call propose_plan')
+      // Told once: a later turn that drafted nothing says nothing.
+      yield* ended('completed')
+      yield* Effect.sleep('300 millis')
+      assert.lengthOf(yield* told(), 1)
     }).pipe(Effect.provide(withQueries(undefined, undefined, { signedOut: ['claude-code'] }))),
   )
 
@@ -1294,6 +1331,121 @@ describe("the coordinator's tools", () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('calls a draft planned only once a plan is proposed for it, never from the draft alone', () =>
+    Effect.gen(function* () {
+      const { projectId, threadId } = yield* opened
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      yield* callTool(access, 'draft_task', { title: 'Plan me' })
+      assert.include(yield* callTool(access, 'list_tasks', {}), '(drafted, no plan yet (call propose_plan))')
+      assert.notInclude(yield* callTool(access, 'list_tasks', {}), 'planned')
+      assert.include(yield* callTool(access, 'read_task', { task: 'plan-me' }), 'drafted, no plan yet (call propose_plan)')
+      yield* callTool(access, 'propose_plan', { task: 'plan-me', lead: { agent: 'codex', model: 'large' } })
+      assert.include(yield* callTool(access, 'list_tasks', {}), '- plan-me: Plan me (planned)')
+      assert.notInclude(yield* callTool(access, 'read_task', { task: 'plan-me' }), 'no plan')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('says what propose_plan takes when lead or review is given as a name, and plans again without making a second plan', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, threadId } = yield* opened
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      yield* callTool(access, 'draft_task', { title: 'Shape it' })
+      const refused = yield* callTool(access, 'propose_plan', { task: 'shape-it', lead: 'codex', review: 'claude-code' })
+      assert.include(refused, "Althar couldn't read that")
+      assert.include(refused, 'lead and review are objects, not strings')
+      assert.include(refused, '"lead": { "model"')
+      assert.lengthOf(yield* sql`SELECT id FROM task_plans`, 0)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('takes a propose_plan repeated after its answer was lost for the plan it made, held, changed or started since', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const plans = yield* Plans
+      const { projectId, threadId } = yield* opened
+      const [person] = yield* sql<{ id: string }>`SELECT id FROM actors WHERE kind = 'person'`
+      const actor = (person?.id ?? '') as Parameters<typeof plans.hold>[1]
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      const live = () => sql<{ id: string; state: string; startsAt: string | null }>`
+        SELECT id, state, starts_at FROM task_plans WHERE state IN ('proposed', 'accepted')`
+      yield* callTool(access, 'draft_task', { title: 'Shape it' })
+      const plan = { task: 'shape-it', lead: { agent: 'codex', model: 'large' } }
+      assert.include(yield* callTool(access, 'propose_plan', plan), 'Planned shape-it.')
+      const [first] = yield* live()
+      if (first === undefined) return assert.fail('no plan was proposed')
+      // Repeated for want of knowing whether it went through (the socket closed): the same plan, the same countdown, no second.
+      assert.include(yield* callTool(access, 'propose_plan', plan), 'already proposed')
+      assert.deepStrictEqual(yield* live(), [first])
+      // The person held it, then it is repeated: still held, still the one plan.
+      yield* plans.hold(first?.id ?? '', actor)
+      assert.include(yield* callTool(access, 'propose_plan', plan), 'already proposed')
+      assert.deepStrictEqual(yield* live(), [{ ...first, startsAt: null }])
+      // A different call is a new plan, as an intended re-plan is.
+      yield* callTool(access, 'propose_plan', { ...plan, lead: { agent: 'codex', model: 'large', reason: 'faster' } })
+      const [second] = yield* live()
+      assert.notStrictEqual(second?.id, first?.id)
+      // Started before the repeat came: it says so, and a call that differs is refused as it was.
+      yield* plans.start(second?.id ?? '', actor)
+      assert.include(
+        yield* callTool(access, 'propose_plan', { ...plan, lead: { agent: 'codex', model: 'large', reason: 'faster' } }),
+        'has started',
+      )
+      assert.deepStrictEqual(
+        (yield* live()).map((one) => one.id),
+        [second?.id],
+      )
+      assert.include(yield* callTool(access, 'propose_plan', plan), 'has started already; message its lead instead')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('makes one plan when the same propose_plan arrives again while its first is still being handled', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, threadId } = yield* opened
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      yield* callTool(access, 'draft_task', { title: 'Shape it' })
+      const plan = { task: 'shape-it', lead: { agent: 'codex', model: 'large' } }
+      const answers = yield* Effect.all(
+        [callTool(access, 'propose_plan', plan), callTool(access, 'propose_plan', plan), callTool(access, 'propose_plan', plan)],
+        {
+          concurrency: 'unbounded',
+        },
+      )
+      assert.lengthOf(
+        answers.filter((answer) => answer.includes('Planned shape-it.')),
+        1,
+      )
+      assert.lengthOf(
+        answers.filter((answer) => answer.includes('already proposed')),
+        2,
+      )
+      // Every plan ever made for the task, replaced ones included: one, so the countdown was never restarted.
+      assert.lengthOf(yield* sql`SELECT id FROM task_plans`, 1)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('keeps the connection an agent holds for its next call open for minutes, not Node’s five seconds', () =>
+    Effect.gen(function* () {
+      const { projectId, threadId } = yield* opened
+      const granted = yield* (yield* ToolServer).grant({ role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null })
+      if (granted.server.type !== 'http') return assert.fail('no http server')
+      const { url, headers } = granted.server
+      const header = yield* Effect.promise(
+        () =>
+          new Promise<string | undefined>((resolve, reject) => {
+            const sent = request(url, { method: 'GET', headers: headers as Record<string, string> }, (reply) => {
+              reply.resume()
+              resolve(String(reply.headers['keep-alive']))
+            })
+            sent.on('error', reject)
+            sent.end()
+          }),
+      )
+      assert.include(header ?? '', `timeout=${Math.floor(KEEP_ALIVE_MS / 1000)}`)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('keeps a held plan held when the coordinator plans the task again', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -1347,7 +1499,10 @@ describe("the coordinator's tools", () => {
       )
       assert.strictEqual(yield* callTool(access, 'list_tasks'), 'The project has no tasks yet.')
       assert.match(yield* callTool(access, 'draft_task', { title: 'Tidy the README', description: 'Short.' }), /^Drafted tidy-the-readme\./)
-      assert.match(yield* callTool(access, 'list_tasks', {}), /tidy-the-readme: Tidy the README \(planned\)/)
+      assert.match(
+        yield* callTool(access, 'list_tasks', {}),
+        /tidy-the-readme: Tidy the README \(drafted, no plan yet \(call propose_plan\)\)/,
+      )
       assert.match(yield* callTool(access, 'read_task', { task: 'tidy-the-readme' }), /Short\./)
       assert.strictEqual(yield* callTool(access, 'read_thread', { task: 'tidy-the-readme' }), 'The thread is empty.')
       assert.match(yield* callTool(access, 'read_task', { task: 'nothing' }), /no task nothing/)
@@ -1368,7 +1523,10 @@ describe("the coordinator's tools", () => {
       // Called again, unsure the first worked, it gets the same task, not a second.
       assert.match(yield* callTool(access, 'draft_task', { title: 'Bump the version ' }), /^Drafted bump-the-version\./)
       assert.strictEqual((yield* sql<{ n: number }>`SELECT count(*) AS n FROM tasks WHERE title LIKE 'Bump%'`)[0]?.n, 1)
-      assert.match(yield* callTool(access, 'read_task', { task: 'bump-the-version' }), /^bump-the-version: Bump the version\n\nBranch /)
+      assert.match(
+        yield* callTool(access, 'read_task', { task: 'bump-the-version' }),
+        /^bump-the-version: Bump the version\n\nWhere it stands: drafted, no plan yet \(call propose_plan\)\. It has no plan, so nothing starts it\.\n\nBranch /,
+      )
       assert.match(
         yield* callTool(access, 'propose_plan', {
           task: 'bump-the-version',

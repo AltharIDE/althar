@@ -93,7 +93,7 @@ import { quickIn } from './kinds'
 import { defaultEffortOf } from './preferences'
 import { makeKeyedLock } from './keyedLock'
 import { makeInputBatches } from './inputBatches'
-import { addItem, betweenTurns, moveToEnd, type OutputSoFar, recorder, toolItem, transcript } from './threads'
+import { addItem, betweenTurns, keepAltharCall, moveToEnd, type OutputSoFar, recorder, toolItem, transcript } from './threads'
 import {
   addressOf,
   commandOfCall,
@@ -954,6 +954,13 @@ export class Sessions extends Context.Service<
         )
       }
       const toolServer = yield* ToolServer
+      // A call an agent made inside a tool of its own (OpenCode's `execute`) is kept on that tool's item in the thread.
+      yield* toolServer.observe((called) =>
+        keepAltharCall(
+          { projectId: called.access.projectId as ProjectId, threadId: called.access.threadId, sessionId: called.access.sessionId },
+          called,
+        ).pipe(Effect.provideContext(context), Effect.ignore),
+      )
       const setups = yield* Setups
       const runtimeConfig = yield* RuntimeConfig
       const skillsConfig = runtimeConfig.skills
