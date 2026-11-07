@@ -70,7 +70,7 @@ describe('telling a fork', () => {
     assert.strictEqual(forkOf([origin, upstream])?.by, 'names')
     // Once a host said, it is kept for the same repository however its address is written.
     tell('https://github.com/You/Web', { path: ['meridian', 'web'] }, 1)
-    assert.deepStrictEqual(toldOf(origin.url), { at: 1, parent: { path: ['meridian', 'web'] } })
+    assert.deepStrictEqual(toldOf(origin.url), { at: 1, parent: { path: ['meridian', 'web'] }, context: [] })
     assert.strictEqual(forkOf([origin, { name: 'base', url: upstream.url }])?.upstream.remote, 'base')
   })
 
@@ -85,6 +85,7 @@ describe('telling a fork', () => {
     assert.isTrue(tellOf(origin.url, { path: ['you', 'web'], parent: null }, 3))
     // Bitbucket Data Center's remote has `scm/` in front of the path its host gives.
     assert.isTrue(tellOf('https://git.example.com/scm/dana/web.git', { path: ['dana', 'web'], parent: { path: ['PRJ', 'web'] } }, 1))
+    assert.deepStrictEqual(toldOf('https://git.example.com/scm/dana/web.git')?.context, ['scm'])
   })
 
   it('reads a task’s base on whichever remote its parent is', () => {
@@ -112,12 +113,48 @@ describe('telling a fork', () => {
     assert.strictEqual(addressLike('ssh://git@host:7999/dana/api.git', ['PRJ', 'api'], ['dana', 'api']), 'ssh://git@host:7999/PRJ/api.git')
     // What the server puts in front of the repository stays.
     assert.strictEqual(
-      addressLike('https://git.example.com/scm/~dana/api.git', ['PRJ', 'api'], ['scm', '~dana', 'api']),
+      addressLike('https://git.example.com/scm/~dana/api.git', ['PRJ', 'api'], ['scm', '~dana', 'api'], ['scm']),
       'https://git.example.com/scm/PRJ/api.git',
     )
     assert.strictEqual(
-      addressLike('https://example.com/gitlab/dana/api.git', ['meridian', 'api'], ['gitlab', 'dana', 'api']),
+      addressLike('https://example.com/gitlab/dana/api.git', ['meridian', 'api'], ['gitlab', 'dana', 'api'], ['gitlab']),
       'https://example.com/gitlab/meridian/api.git',
     )
+    // However deep the parent's namespace, beside one as long as origin's path with the server's in front.
+    assert.strictEqual(
+      addressLike('https://example.com/gitlab/alice/api.git', ['group', 'subgroup', 'api'], ['gitlab', 'alice', 'api'], ['gitlab']),
+      'https://example.com/gitlab/group/subgroup/api.git',
+    )
+  })
+
+  it('on a self-hosted GitLab under a path of its own, keeps that path for its parent, however deep its namespace', () => {
+    const mounted = { name: 'origin', url: 'https://example.com/gitlab/alice/api.git' }
+    // As reading it from its host told: the host's path for origin is alice/api, so the server's own path is gitlab.
+    assert.isTrue(tellOf(mounted.url, { path: ['alice', 'api'], parent: { path: ['group', 'subgroup', 'api'] } }, 1))
+    const fork = forkOf([mounted])
+    assert.deepStrictEqual(fork?.upstream, {
+      url: 'https://example.com/gitlab/group/subgroup/api.git',
+      path: ['group', 'subgroup', 'api'],
+      remote: null,
+    })
+    // A remote at that address, by any name, is it.
+    const parent = { name: 'base', url: 'https://example.com/gitlab/group/subgroup/api' }
+    assert.strictEqual(forkOf([mounted, parent])?.upstream.remote, 'base')
+  })
+
+  it('is never a repository whose path only ends in its parent’s, however that remote is called', () => {
+    const lab = { name: 'origin', url: 'git@gitlab.com:you/repo.git' }
+    const archived = { name: 'upstream', url: 'git@gitlab.com:archive/group/repo.git' }
+    const parent = { name: 'base', url: 'git@gitlab.com:group/repo.git' }
+    // Beside the parent, the archived one called upstream isn't it.
+    assert.strictEqual(forkOf([lab, archived, parent], { path: ['group', 'repo'] })?.upstream.remote, 'base')
+    // On its own, the parent is among none of the remotes.
+    assert.isNull(forkOf([lab, archived], { path: ['group', 'repo'] })?.upstream.remote)
+    // Bitbucket Data Center's HTTPS address has scm/ in front of what its SSH one has, either one the parent.
+    const center = { name: 'origin', url: 'ssh://git@host:7999/~dana/api.git' }
+    const https = { name: 'base', url: 'https://host/scm/prj/api.git' }
+    assert.strictEqual(forkOf([center, https], { path: ['PRJ', 'api'] })?.upstream.remote, 'base')
+    const other = { name: 'upstream', url: 'https://host/scm/old/prj/api.git' }
+    assert.isNull(forkOf([center, other], { path: ['PRJ', 'api'] })?.upstream.remote)
   })
 })

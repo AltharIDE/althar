@@ -37,11 +37,21 @@ const keyOf = (ref: { readonly host: string; readonly path: ReadonlyArray<string
 const samePath = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) => a.join('/').toLowerCase() === b.join('/').toLowerCase()
 
 /**
- * Whether a remote's path is a host's path for a repository: the same, or the same under the server's own path or Bitbucket
- * Data Center's `scm/`, as a remote's address may have it in front.
+ * Whether a remote's path ends in a host's path for a repository: how `origin`'s address is matched to what its own host says
+ * of it, which tells what the server puts in front of a repository's path there (its own path, Bitbucket Data Center's `scm/`).
  */
-const pathIs = (remote: ReadonlyArray<string>, host: ReadonlyArray<string>) =>
+const endsIn = (remote: ReadonlyArray<string>, host: ReadonlyArray<string>) =>
   remote.length >= host.length && samePath(remote.slice(remote.length - host.length), host)
+
+/**
+ * Whether a remote's path is a host's path for a repository, with what the server puts in front of a repository's path there,
+ * as `origin`'s address has it: exactly that, so `archive/group/repo` is never `group/repo`. Bitbucket Data Center's HTTPS
+ * addresses have `scm/` there and its SSH ones don't, so either way.
+ */
+const pathIs = (remote: ReadonlyArray<string>, host: ReadonlyArray<string>, context: ReadonlyArray<string>) => {
+  const bare = context.at(-1)?.toLowerCase() === 'scm' ? context.slice(0, -1) : context
+  return [bare, [...bare, 'scm']].some((before) => samePath(remote, [...before, ...host]))
+}
 
 /**
  * What hosts last said of each repository they were asked about, by its
@@ -51,7 +61,14 @@ const pathIs = (remote: ReadonlyArray<string>, host: ReadonlyArray<string>) =>
  * process runs one runtime, so it is kept here, where every reader of remotes
  * reaches it, rather than on a service only some of them have.
  */
-const told = new Map<string, { readonly at: number; readonly parent: Parent }>()
+const told = new Map<string, Told>()
+
+/**
+ * What a host said of a repository, and when; with what the server puts in front of a repository's path in the address it was
+ * asked by, `origin`'s, which the host's own path for it leaves out: [] on GitHub, `scm` on Bitbucket Data Center over HTTPS, a
+ * server's own path where it is under one.
+ */
+type Told = { readonly at: number; readonly parent: Parent; readonly context: ReadonlyArray<string> }
 
 /** How long a host's answer stands before it is asked again: a fork's parent hardly ever changes. */
 export const PARENT_KEPT = 60 * 60_000
@@ -62,10 +79,13 @@ export const toldOf = (url: string) => {
   return ref === null ? undefined : told.get(keyOf(ref))
 }
 
-/** Keeps what a host said of the repository at an address: the one it was forked from, or that it is no fork. */
-export const tell = (url: string, parent: Parent, at: number) => {
+/**
+ * Keeps what a host said of the repository at an address: the one it was forked from, or that it is no fork; `context`, what
+ * the server puts in front of a repository's path in that address.
+ */
+export const tell = (url: string, parent: Parent, at: number, context: ReadonlyArray<string> = []) => {
   const ref = parseRemote(url)
-  if (ref !== null) told.set(keyOf(ref), { at, parent })
+  if (ref !== null) told.set(keyOf(ref), { at, parent, context })
 }
 
 /**
@@ -78,9 +98,9 @@ export const tellOf = (
   at: number,
 ) => {
   const ref = parseRemote(url)
-  if (repository.parent === undefined || ref === null || !pathIs(ref.path, repository.path)) return false
+  if (repository.parent === undefined || ref === null || !endsIn(ref.path, repository.path)) return false
   const was = told.get(keyOf(ref))?.parent
-  told.set(keyOf(ref), { at, parent: repository.parent })
+  told.set(keyOf(ref), { at, parent: repository.parent, context: ref.path.slice(0, ref.path.length - repository.path.length) })
   return was === undefined ? true : (was?.path.join('/') ?? null) !== (repository.parent?.path.join('/') ?? null)
 }
 
@@ -88,16 +108,15 @@ export const tellOf = (
 export const forgetTold = () => told.clear()
 
 /**
- * An address for a repository on the same host, written as `like` is (SSH or HTTPS, with `.git` or not): `like`'s repository
- * swapped for `path`, as many of its last segments as `path` has, so what the server puts in front stays (Bitbucket Data
- * Center's `scm/`, a server's own path).
+ * An address for a repository on the same host, written as `like` is (SSH or HTTPS, with `.git` or not): `like`'s repository,
+ * `own`, its path less what the server puts in front of it (`context`), swapped for `path`, so what is in front stays (Bitbucket
+ * Data Center's `scm/`, a server's own path), however deep either repository's namespace.
  */
-export const addressLike = (like: string, path: ReadonlyArray<string>, own: ReadonlyArray<string>) => {
-  const written = own.join('/')
+export const addressLike = (like: string, path: ReadonlyArray<string>, own: ReadonlyArray<string>, context: ReadonlyArray<string> = []) => {
+  const written = own.slice(context.length).join('/')
   const at = like.toLowerCase().lastIndexOf(written.toLowerCase())
-  if (at < 0) return null
-  const kept = own.slice(0, Math.max(0, own.length - path.length))
-  return `${like.slice(0, at)}${[...kept, ...path].join('/')}${like.slice(at + written.length)}`
+  if (at < 0 || written === '') return null
+  return `${like.slice(0, at)}${path.join('/')}${like.slice(at + written.length)}`
 }
 
 /**
@@ -106,19 +125,22 @@ export const addressLike = (like: string, path: ReadonlyArray<string>, own: Read
  * undefined where no host said. A host's parent is found among the remotes by
  * address, `upstream` first where several have it. A host saying it is no
  * fork leaves the remotes' names to say, so a clone with an `upstream` is
- * read as it always was.
+ * read as it always was. `context` is what the server puts in front of a
+ * repository's path, as the host's answer told it, else nothing.
  */
-export const forkOf = (remotes: ReadonlyArray<Remote>, said?: Parent): Fork | null => {
+export const forkOf = (remotes: ReadonlyArray<Remote>, said?: Parent, context?: ReadonlyArray<string>): Fork | null => {
   const origin = remotes.find((remote) => remote.name === 'origin')
   if (origin === undefined) return null
   const own = parseRemote(origin.url)
   if (own === null) return null
-  const parent = said === undefined ? told.get(keyOf(own))?.parent : said
-  if (parent != null && !samePath(parent.path, own.path)) {
+  const kept = told.get(keyOf(own))
+  const parent = said === undefined ? kept?.parent : said
+  const before = context ?? (said === undefined ? kept?.context : undefined) ?? []
+  if (parent != null && !samePath(parent.path, own.path.slice(before.length))) {
     const having = remotes.filter((remote) => {
       if (remote.name === 'origin') return false
       const ref = parseRemote(remote.url)
-      return ref !== null && ref.host === own.host && pathIs(ref.path, parent.path)
+      return ref !== null && ref.host === own.host && pathIs(ref.path, parent.path, before)
     })
     const there = having.find((remote) => remote.name === 'upstream') ?? having[0]
     return {
@@ -126,7 +148,9 @@ export const forkOf = (remotes: ReadonlyArray<Remote>, said?: Parent): Fork | nu
       upstream:
         there === undefined
           ? {
-              url: addressLike(origin.url, parent.path, own.path) ?? `https://${own.host}/${parent.path.join('/')}.git`,
+              url:
+                addressLike(origin.url, parent.path, own.path, before) ??
+                `https://${own.host}/${[...before, ...parent.path].join('/')}.git`,
               path: parent.path,
               remote: null,
             }
