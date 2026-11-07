@@ -164,7 +164,12 @@ export type SessionEvent =
   /** The adapter resumed a turn the agent stopped on a rejection, telling it why. */
   | { readonly _tag: 'Resumed'; readonly reason: string }
   /** The agent reported a failure in structured form, during a turn or between turns. */
-  | { readonly _tag: 'AgentFailure'; readonly severity: 'warning' | 'error'; readonly classified: Classified }
+  | {
+      readonly _tag: 'AgentFailure'
+      readonly severity: 'warning' | 'error'
+      readonly classified: Classified
+      readonly connectionLost?: true
+    }
   | { readonly _tag: 'Other'; readonly update: string; readonly raw: unknown }
   /** A command it left running started, said where its output goes, or ended (background.ts). */
   | BackgroundEvent

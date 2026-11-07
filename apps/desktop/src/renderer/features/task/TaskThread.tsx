@@ -310,7 +310,7 @@ export function TaskThread({ rounds, versionOf, settledOf, reviewing = null, set
     block !== last || block.failed === null
       ? null
       : {
-          again: onTryAgain !== undefined,
+          again: shared.retryable === true && onTryAgain !== undefined,
           compact: onCompact !== undefined,
           signIn: onSignIn === undefined ? null : (block.agentId ?? session?.agentId ?? null),
         }

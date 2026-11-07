@@ -288,6 +288,8 @@ export const classify = (error: unknown, now: Date): Classified => {
 export const structuredFailureCapability = { jetbrains: { air: { version: 1, capabilities: ['sessionFailure'] } } }
 
 export interface StructuredFailure {
+  /** The agent lost its worker, rather than a request to the model service failing. */
+  readonly connectionLost?: true
   readonly severity: 'warning' | 'error'
   readonly classified: Classified
 }
@@ -336,5 +338,9 @@ export const structuredFailure = (meta: unknown, now: Date): StructuredFailure |
   const kind = kindOf(textField(failure, 'category'), actions)
   // A warning that the agent is trying again by itself is a short limit, though it names no action, as Claude Code's at a 429.
   const read = severity === 'warning' && kind === 'usage_limit' && /\b(retrying|reconnecting)\b/i.test(message) ? 'transient' : kind
-  return { severity, classified: withReset(read, message, message, now) }
+  return {
+    severity,
+    classified: withReset(read, message, message, now),
+    ...(severity === 'error' && textField(failure, 'category') === 'connection' ? { connectionLost: true as const } : {}),
+  }
 }

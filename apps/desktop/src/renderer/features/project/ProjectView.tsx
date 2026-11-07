@@ -676,6 +676,7 @@ export function ProjectView({
                           )}
                           threadId={coordinator.threadId}
                           session={session}
+                          retryable={coordinator.retryable}
                           {...(busy ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
                           {...(ways === undefined ? {} : { onSignIn: ways.signIn })}
                           card={(card) => <Card card={card} actions={actions} />}

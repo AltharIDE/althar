@@ -435,6 +435,7 @@ export function ThreadBlocks({
   automation,
   taskAsk,
   queued,
+  retryable,
   onTryAgain,
   onSignIn,
   onCompact,
@@ -478,6 +479,8 @@ export function ThreadBlocks({
   taskAsk?: (ask: TaskAskContent, itemId: string) => ReactNode
   /** What a message still waiting says: who reads it next. */
   queued?: string
+  /** The runtime's retry eligibility, refreshed with the thread's head. */
+  retryable?: boolean | undefined
   /** Tries the last turn again, where it ended in an error, as on the connection: Try again under it. Without it, none. */
   onTryAgain?: () => void
   /** Opens Settings at an agent's sign-in, where the last turn failed for it being signed out: Sign in again. Without it, none. */
@@ -601,7 +604,12 @@ export function ThreadBlocks({
               <PartView key={part.id} part={part} threadId={threadId} />
             ))}
             {block.id === failed && ending?.kind === 'notice' && (
-              <WayOut failure={ending.failure} onTryAgain={onTryAgain} onSignIn={signInAs(block.agentId)} onCompact={onCompact} />
+              <WayOut
+                failure={ending.failure}
+                onTryAgain={retryable === true ? onTryAgain : undefined}
+                onSignIn={signInAs(block.agentId)}
+                onCompact={onCompact}
+              />
             )}
             <HandedBack handed={block.handed} threadId={threadId} versionOf={versionOf} {...(openFile === undefined ? {} : { openFile })} />
           </Turn>
