@@ -84,6 +84,11 @@ describe('a task’s buttons, as tools', () => {
         /^Nothing changed for add-a-retry: Its repositories have no remote to push to/,
       )
       assert.match(yield* callTool(coordinator, 'move_to_front', { task: task.slug }), /^Nothing changed: .* isn't waiting for a place/)
+      // Heads named, as read_task shows them: the same, as its branch's work is in its pull request.
+      assert.match(
+        yield* callTool(coordinator, 'push_task_branch', { task: task.slug, heads: [{ repository: 'api', head: 'abc1234' }] }),
+        /^Nothing changed for add-a-retry: Its repositories have no remote to push to/,
+      )
 
       assert.match(yield* callTool(coordinator, 'skip_review', { task: task.slug }), /^Skipped add-a-retry's review/)
       assert.include(yield* titles(task.threadId), 'The coordinator skipped this task’s review')
@@ -123,6 +128,62 @@ describe('a task’s buttons, as tools', () => {
       assert.match(yield* callTool(coordinator, 'stop_following', { task: task.slug }), /^Althar couldn't read that: .*pull_request/s)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
+})
+
+describe('settle_task, from a lead', () => {
+  it.live('settles another task, but a review’s lead settles only its own review, which is done once its draft is posted', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const projects = yield* Projects
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const projectId = project.projectId as ProjectId
+      const threadId = yield* (yield* Coordinator).thread(projectId)
+      const coordinator: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      const quick = (title: string) =>
+        Effect.gen(function* () {
+          yield* callTool(coordinator, 'start_task', { title, description: '[lead:finish]', lead: { agent: 'codex' } })
+          const [task] = yield* sql<{ taskId: string; threadId: string; slug: string }>`
+            SELECT k.id AS task_id, k.slug, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+            WHERE k.project_id = ${projectId} AND k.title = ${title}`
+          if (task === undefined) return assert.fail('no task')
+          return task
+        })
+      const one = yield* quick('Sketch the settings')
+      const other = yield* quick('Read the logs')
+      const lead: ToolAccess = { role: 'lead', projectId, threadId: other.threadId, sessionId: 'none', taskId: other.taskId }
+      assert.match(
+        yield* callTool(lead, 'settle_task', { task: one.slug, how: 'keep', why: 'the person asked' }),
+        /^Kept sketch-the-settings for later/,
+      )
+      assert.include(yield* titles(one.threadId), 'The lead of “Read the logs” kept this task for later: the person asked')
+
+      // Made a review of a pull request: its lead settles only it, and done waits for its draft to be posted.
+      const at = new Date().toISOString()
+      yield* sql`INSERT INTO external_links ${sql.insert({
+        id: 'xlink_a5500000000000000000000000000002',
+        projectId,
+        taskId: other.taskId,
+        connectionId: null,
+        product: 'github',
+        kind: 'review',
+        externalId: 'meridian/api#7',
+        ref: 'meridian/api#7',
+        key: 'meridian/api#7',
+        url: 'https://github.com/meridian/api/pull/7',
+        snapshot: '{}',
+        createdAt: at,
+        updatedAt: at,
+      })}`
+      assert.strictEqual(
+        yield* callTool(lead, 'settle_task', { task: one.slug, how: 'discard' }),
+        'A review’s lead settles only its own review.',
+      )
+      assert.match(
+        yield* callTool(coordinator, 'settle_task', { task: other.slug, how: 'done' }),
+        /reviews a pull request: it settles once its draft is posted/,
+      )
+    }).pipe(Effect.provide(runtime())),
+  )
 })
 
 describe('a coordinator’s card asking to move a task, made before moves went at once', () => {

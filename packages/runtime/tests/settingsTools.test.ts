@@ -1,15 +1,19 @@
 import { ProjectInk } from '@althar/contracts'
 import { execFileSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 
 import { Ids, newId, type ProjectId } from '@althar/domain'
+import { installLocalCatalog, setActive } from '@althar/skills'
 import { PROJECT_SETTINGS_SECTIONS, SETTINGS_SECTIONS, type SettingChangeCard } from '@althar/contracts'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { writeCatalog } from '../../skills/tests/support'
 import { Coordinator } from '../src/Coordinator'
+import { Instance } from '../src/Instance'
 import { plansAndReviewsOf } from '../src/plansAndReviews'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
@@ -755,5 +759,264 @@ describe('each section of the settings, as agents change it', () => {
       assert.strictEqual(lineless?.state, 'undone')
       assert.isDefined(projectId)
     }).pipe(Effect.provide(withQueries())),
+  )
+})
+
+/** A connection on this device, as connecting one keeps it: ready, or waiting to be signed in again. */
+const connection = (login: string, state: 'ready' | 'reauth_required') =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const id = yield* newId(Ids.connection)
+    const now = new Date().toISOString()
+    yield* sql`INSERT INTO connections ${sql.insert({
+      id,
+      deviceId: (yield* Instance).deviceId,
+      product: 'linear',
+      webUrl: 'https://linear.app',
+      apiUrl: 'https://api.linear.app',
+      accountId: login,
+      accountLogin: login,
+      auth: 'pkce',
+      credentialRef: `linear:${login}`,
+      state,
+      createdAt: now,
+      updatedAt: now,
+    })}`
+    return id
+  })
+
+/** A row of setting_changes as an agent's change leaves it, made by hand for what Althar's own calls can't reach. */
+const keptChange = (row: {
+  readonly id: string
+  readonly section: string
+  readonly threadId: string
+  readonly itemId: string | null
+  readonly before: string
+  readonly after: string
+  readonly state: 'done' | 'asked'
+  readonly byKind?: 'coordinator' | 'lead'
+}) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const at = yield* timestamp
+    yield* sql`INSERT INTO setting_changes ${sql.insert({
+      id: row.id,
+      projectId: null,
+      section: row.section,
+      change: row.after,
+      before: row.before,
+      after: row.after,
+      byKind: row.byKind ?? 'coordinator',
+      byTaskId: null,
+      threadId: row.threadId,
+      itemId: row.itemId,
+      words: null,
+      loosens: 0,
+      state: row.state,
+      createdAt: at,
+      updatedAt: at,
+    })}`
+  })
+
+describe('settings, at their edges', () => {
+  it.live('a fork’s work goes where it is told; a tracker and the code hosts read as connected', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      // A fork: its origin the person's, an upstream beside it on the same host.
+      const path = repository()
+      execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:you/web.git'], { cwd: path })
+      execFileSync('git', ['remote', 'add', 'upstream', 'https://github.com/meridian/web.git'], { cwd: path })
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
+      const projectId = project.projectId as ProjectId
+      const threadId = yield* (yield* Coordinator).thread(projectId)
+      const sql = yield* SqlClient.SqlClient
+      const sessionId = yield* newId(Ids.providerSession)
+      yield* sql`INSERT INTO provider_sessions ${sql.insert({ id: sessionId, projectId, threadId, agentId: 'codex', state: 'active', startedAt: yield* timestamp })}`
+      const coordinator: ToolAccess = { role: 'coordinator', projectId, threadId, taskId: null, sessionId }
+      const [fork] = yield* projects.repositories(projectId)
+      assert.isNotNull(fork?.fork ?? null, 'the repository is a fork')
+      const target = fork?.fork?.target === 'fork' ? 'upstream' : 'fork'
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', {
+          section: 'project/code',
+          change: { repositories: { [fork?.name ?? '']: { changeTarget: target } } },
+        }),
+        new RegExp(`^Changed Code and issues: Repositories: .*"changeTarget":"${target}"`),
+      )
+      assert.strictEqual((yield* projects.repositories(projectId))[0]?.fork?.target, target)
+
+      // Connections, as the code hosts' screen lists them; one is the project's tracker.
+      const ready = yield* connection('ada', 'ready')
+      yield* connection('bea', 'reauth_required')
+      const hosts = yield* callTool(coordinator, 'read_settings', { section: 'althar/code-hosts' })
+      assert.include(hosts, `as ada (${ready})"`)
+      assert.match(hosts, /as bea \(conn_[0-9a-f]+\), signed out/)
+      const tracked = yield* callTool(coordinator, 'change_settings', {
+        section: 'project/code',
+        change: { tracker: { connectionId: ready, container: { id: 'team-1', name: 'Web' } } },
+      })
+      assert.match(tracked, /^Changed Code and issues: Tracker: none → /)
+      assert.include(
+        yield* callTool(coordinator, 'read_settings', { section: 'project/code' }),
+        `- tracker (Tracker): {"connectionId":"${ready}","container":{"id":"team-1","name":"Web"}}`,
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('one setting of several changes alone, and an agent Althar doesn’t have turns nothing back on', () =>
+    Effect.gen(function* () {
+      const { projectId, coordinator, turn } = yield* opened
+      yield* turn(coordinator, 'news', false)
+      const name = (yield* (yield* Projects).repositories(projectId))[0]?.name ?? ''
+      // Only where the work goes, with the role left as it is.
+      yield* callTool(coordinator, 'change_settings', {
+        section: 'project/code',
+        change: { repositories: { [name]: { changeTarget: null } } },
+      })
+      assert.strictEqual((yield* (yield* Projects).repositories(projectId))[0]?.role, 'other')
+      // Only a pattern, with each repository's setup left as Althar works it out.
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { section: 'project/running', change: { titlePattern: '{title}' } }),
+        /^Changed Running: Pull request titles: none → \{title\}/,
+      )
+      assert.include(yield* callTool(coordinator, 'read_settings', { section: 'project/running' }), `{"${name}":null}`)
+      // Only when folders go, with the count of agents left as Althar works it out.
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { section: 'althar/this-mac', change: { folderWait: 'never' } }),
+        /^Changed Work on this computer: When finished tasks’ folders go: smart → never/,
+      )
+      assert.match(yield* callTool(coordinator, 'read_settings', { section: 'althar/this-mac' }), /agentsAtOnce \(Agents at once\): null/)
+      // An agent Althar doesn't have has no models to turn back on.
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { section: 'althar/agents', change: { turnedOff: { nobody: [] } } }),
+        /^Changed Agents: Models turned off: /,
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('Althar’s own card, answered: made as the person’s, with no project; and kept without its line', () =>
+    Effect.gen(function* () {
+      const { coordinator, turn } = yield* opened
+      const settings = yield* SettingsTools
+      yield* turn(coordinator, 'news', false)
+      yield* callTool(coordinator, 'change_settings', { section: 'althar/this-mac', change: { automationsPaused: true } })
+      yield* callTool(coordinator, 'change_settings', { section: 'althar/this-mac', change: { automationsPaused: false } })
+      const card = (yield* lineIds(coordinator.threadId)).at(-1) ?? ''
+      yield* settings.answer(card, true)
+      assert.strictEqual((yield* lines(coordinator.threadId)).at(-1)?.state, 'done')
+      assert.match(
+        yield* callTool(coordinator, 'read_settings', { section: 'althar/this-mac' }),
+        /automationsPaused \(Pause all automations\): false/,
+      )
+      const sql = yield* SqlClient.SqlClient
+      const [record] = yield* sql<{ projectId: string | null }>`
+        SELECT project_id FROM record_events WHERE aggregate_type = 'setting' AND type = 'setting.changed' ORDER BY sequence DESC LIMIT 1`
+      assert.isNull(record?.projectId)
+
+      // A card whose line is gone from the thread is made all the same when it is pressed.
+      yield* keptChange({
+        id: 'set_unlined',
+        section: 'althar/reviews',
+        threadId: coordinator.threadId,
+        itemId: 'item_unlined',
+        before: '{"postTeamReviews":false}',
+        after: '{"postTeamReviews":true}',
+        state: 'asked',
+      })
+      yield* settings.answer('item_unlined', true)
+      assert.match(yield* callTool(coordinator, 'read_settings', { section: 'althar/reviews' }), /postTeamReviews \([^)]*\): true/)
+      const [kept] = yield* sql<{ state: string }>`SELECT state FROM setting_changes WHERE id = 'set_unlined'`
+      assert.strictEqual(kept?.state, 'done')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('Settings names a change by a lead whose task is gone, and a key no longer a setting by its key', () =>
+    Effect.gen(function* () {
+      const { coordinator } = yield* opened
+      const settings = yield* SettingsTools
+      // A lead's, its task gone: named as a lead, with no title.
+      yield* keptChange({
+        id: 'set_orphan',
+        section: 'althar/this-mac',
+        threadId: coordinator.threadId,
+        itemId: null,
+        before: '{"folderWait":"smart"}',
+        after: '{"folderWait":"smart"}',
+        state: 'done',
+        byKind: 'lead',
+      })
+      // A key the section no longer has, left as none: named by its key.
+      yield* keptChange({
+        id: 'set_oldkey',
+        section: 'althar/this-mac',
+        threadId: coordinator.threadId,
+        itemId: null,
+        before: '{"dimScreen":true}',
+        after: '{"dimScreen":null}',
+        state: 'done',
+      })
+      // A section Althar no longer has: not named at all.
+      yield* keptChange({
+        id: 'set_nosection',
+        section: 'althar/gone',
+        threadId: coordinator.threadId,
+        itemId: null,
+        before: '{}',
+        after: '{"x":1}',
+        state: 'done',
+      })
+      const changed = yield* settings.changed(null)
+      const folder = changed.find((one) => one.key === 'folderWait')
+      assert.deepStrictEqual(folder?.by, { kind: 'lead', taskId: null, title: null })
+      assert.strictEqual(changed.find((one) => one.key === 'dimScreen')?.label, 'dimScreen')
+      assert.notInclude(
+        changed.map((one) => one.section),
+        'althar/gone',
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+})
+
+/** A skills store from a local catalog, every skill in it on. */
+const skillStore = (ids: ReadonlyArray<string>) =>
+  Effect.promise(async () => {
+    const root = mkdtempSync(join(tmpdir(), 'althar-settings-skills-'))
+    const catalog = mkdtempSync(join(tmpdir(), 'althar-settings-catalog-'))
+    await writeCatalog(
+      catalog,
+      Object.fromEntries(ids.map((id) => [id, { 'SKILL.md': `---\nname: ${id}\ndescription: Use when testing ${id}.\n---\nDo ${id}.\n` }])),
+      {},
+    )
+    await Effect.runPromise(installLocalCatalog(root, catalog))
+    for (const id of ids) await Effect.runPromise(setActive(root, id, true))
+    return { root, catalog }
+  })
+
+describe('skills, as the Skills screen turns them on and off', () => {
+  it.live('turns one off and on again, each in the record as the agent’s', () =>
+    Effect.flatMap(skillStore(['alpha', 'beta']), (store) =>
+      Effect.gen(function* () {
+        const { coordinator, turn } = yield* opened
+        yield* turn(coordinator, 'news', false)
+        assert.include(yield* callTool(coordinator, 'read_settings', { section: 'althar/skills' }), '{"alpha":true,"beta":true}')
+        assert.match(
+          yield* callTool(coordinator, 'change_settings', { section: 'althar/skills', change: { skills: { alpha: false } } }),
+          /^Changed Skills: Skills on: /,
+        )
+        assert.include(yield* callTool(coordinator, 'read_settings', { section: 'althar/skills' }), '{"alpha":false,"beta":true}')
+        yield* callTool(coordinator, 'change_settings', { section: 'althar/skills', change: { skills: { alpha: true } } })
+        const sql = yield* SqlClient.SqlClient
+        const recorded = yield* sql<{ type: string; revision: number; actorId: string }>`
+          SELECT type, aggregate_revision AS revision, actor_id FROM record_events WHERE aggregate_type = 'skill' AND aggregate_id = 'alpha' ORDER BY sequence`
+        assert.deepStrictEqual(
+          recorded.map((one) => [one.type, one.revision]),
+          [
+            ['skill.turned_off', 1],
+            ['skill.turned_on', 2],
+          ],
+        )
+        assert.strictEqual(recorded[0]?.actorId, (yield* Instance).coordinatorId)
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { skills: store }))))),
+    ),
   )
 })
