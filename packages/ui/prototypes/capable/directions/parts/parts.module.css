@@ -1,0 +1,280 @@
+/* Scrappy, surfaces 5 and 6: a task's parts, behind its icons (C, chosen); and the sketches. */
+
+/* —— a part's tone: what waits on you, what failed, what runs —— */
+:is(.item, .waitRow)[data-tone='you'] .itemGlyph,
+.stackGlyph[data-tone='you'] {
+  color: var(--signal);
+}
+:is(.item, .waitRow)[data-tone='bad'] .itemGlyph,
+.stackGlyph[data-tone='bad'] {
+  color: var(--danger);
+}
+.item[data-tone='live'] .itemGlyph {
+  color: var(--live);
+}
+
+/* —— a part's list, by group, as C's popover and its drill-in use it —— */
+.list {
+  display: grid;
+  gap: 12px;
+  padding: 10px 8px 12px;
+}
+.listHead {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 0 8px;
+}
+.listTitle {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 560;
+  color: var(--t-1);
+}
+.group {
+  display: grid;
+  gap: 2px;
+}
+.groupName {
+  margin: 0;
+  padding: 0 8px 2px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--t-3);
+}
+.items {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.item:hover {
+  background: var(--line);
+}
+.itemGlyph {
+  display: grid;
+  place-items: center;
+  color: var(--t-3);
+}
+.itemName {
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--t-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.itemDetail {
+  grid-column: 2;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.item[data-tone='you'] .itemDetail {
+  color: var(--signal);
+}
+.item[data-tone='bad'] .itemDetail {
+  color: var(--danger);
+}
+
+/* —— Add, at the head of each —— */
+.add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--t-2);
+  cursor: pointer;
+}
+.add:hover {
+  background: var(--line);
+  color: var(--t-1);
+}
+
+/* —— C: what waits on you first, then what runs, then a chip each —— */
+.waitsOn {
+  display: grid;
+  gap: 4px;
+  padding: 0 4px;
+}
+.waitRow {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 8px 8px 10px;
+  border-radius: 9px;
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.waitRow[data-tone='you'] {
+  background: var(--signal-paper);
+  box-shadow: inset 0 0 0 1px var(--signal-line);
+}
+.waitText {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.waitText > .itemDetail {
+  grid-column: auto;
+}
+.waitRow[data-tone='you'] .itemDetail {
+  color: var(--signal);
+}
+.waitRow[data-tone='bad'] .itemDetail {
+  color: var(--danger);
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 8px 8px 0;
+  border-top: 1px solid var(--line);
+  list-style: none;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--n-2);
+  font: inherit;
+  font-size: 12px;
+  color: var(--t-1);
+  cursor: pointer;
+}
+.chip > svg {
+  color: var(--t-3);
+}
+.chip:hover {
+  background: var(--n-3);
+}
+
+/* —— C's button: the parts' own glyphs —— */
+.stack {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--r);
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--t-3);
+  cursor: pointer;
+}
+.stack:hover,
+.stack[aria-expanded='true'] {
+  background: var(--line);
+}
+.stackGlyph {
+  display: grid;
+  place-items: center;
+  color: var(--t-3);
+}
+.stackMore {
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+
+/* the faces, between the parts and Run, never moving */
+.faces {
+  flex: none;
+  margin: 0 8px 0 6px;
+}
+.reviewHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: var(--r);
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  font-size: 13px;
+  color: var(--t-2);
+}
+.reviewHead > span {
+  flex: 1;
+}
+.origin {
+  margin-bottom: 8px;
+}
+.link {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.selfPush {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.pushHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--t-1);
+}
+.pushHead .link {
+  margin-left: auto;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.pushHead code,
+.commits code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.commits {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.commits code {
+  margin-right: 8px;
+  color: var(--t-3);
+}
+.pushNote {
+  margin: 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
