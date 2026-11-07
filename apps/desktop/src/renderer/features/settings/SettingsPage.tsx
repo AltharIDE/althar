@@ -39,6 +39,7 @@ import {
   SkillInstall,
   SkillList,
   SkillReview,
+  Storage,
   TaskFolders,
   UpdateReady,
   UsageData,
@@ -48,7 +49,7 @@ import altharFace from '../../../../resources/faces/althar-ai.svg'
 import type { AccentSource, Appearance } from '../../../main/appPreferences'
 import { SYSTEM_SOUND } from '../../../main/notify'
 import { notesOf } from '../../../main/updates'
-import { useServices } from '../../data/services'
+import { type StoragePlace, useServices } from '../../data/services'
 import { agentLineOf, brandOf, pinnedOf } from '../../shared/agents'
 import { systemAccentState } from '../../shared/accent'
 import { appIcons } from '../../shared/appIcons'
@@ -82,6 +83,7 @@ import { useNewProjectDefaults } from './useNewProjectDefaults'
 import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
 import { usePostTeamReviews } from './usePostTeamReviews'
 import { useSkills } from './useSkills'
+import { PLACES, useStorage } from './useStorage'
 import { useTaskFolders } from './useTaskFolders'
 
 /*
@@ -117,7 +119,10 @@ export function SettingsPage({ start, section, onSection, onTask, signIn }: Sett
   // Here, and not in the agents' section, so a sign-in lasts from one section to another.
   const accounts = useAccountSignIn(start)
   // Here too, so a choice still being kept outlasts a look at another section; where Althar shows is asked again as its section opens.
-  const looks: Looks = { appIcon: useAppIcon(), edge: useEdgePlace(section === 'appearance') }
+  const looks: Looks = {
+    appIcon: useAppIcon(),
+    edge: useEdgePlace(section === 'appearance'),
+  }
   const agents = start.status?.agents ?? []
   // Asked to sign an agent in again: its tab opens with its signed-out account's sign-in started, which takes focus. Once.
   const [asked, setAsked] = useState(signIn)
@@ -305,7 +310,10 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
                 ? { kind: 'installing' }
                 : start.installFailed[chosen.id] === undefined
                   ? { kind: 'idle' }
-                  : { kind: 'failed', why: start.installFailed[chosen.id] ?? '' }
+                  : {
+                      kind: 'failed',
+                      why: start.installFailed[chosen.id] ?? '',
+                    }
             }
             onInstall={() => void start.install(chosen.id)}
             {...(chosen.guide === null ? {} : { onHelp: () => openGuide(start, chosen.id) })}
@@ -392,7 +400,11 @@ function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
             machine={atOnce.atOnce.machine}
             most={MOST_AT_ONCE}
             onChange={atOnce.set}
-            text={{ note: text.atOnceNote, mark: text.atOnceMark, value: text.atOnceValue }}
+            text={{
+              note: text.atOnceNote,
+              mark: text.atOnceMark,
+              value: text.atOnceValue,
+            }}
           />
         )}
         <SettingSwitch
@@ -533,7 +545,12 @@ const notifyChoicesOf = (preferences: PreferencesModel['preferences']): NotifyCh
   badge: preferences.badge,
 })
 
-const NOTIFY_KEYS = { calls: 'notifyCalls', ready: 'notifyReady', stopped: 'notifyStopped', badge: 'badge' } as const
+const NOTIFY_KEYS = {
+  calls: 'notifyCalls',
+  ready: 'notifyReady',
+  stopped: 'notifyStopped',
+  badge: 'badge',
+} as const
 
 function NotificationsSection() {
   const { preferences, set, failed } = usePreferences()
@@ -598,7 +615,9 @@ function AppearanceSection({ appIcon, edge }: Looks) {
         <SettingRow
           title={text.accent}
           {...(preferences.accent === 'system' && accent !== 'used'
-            ? { note: accent === 'none' ? text.accentNone : text.accentIllegible }
+            ? {
+                note: accent === 'none' ? text.accentNone : text.accentIllegible,
+              }
             : {})}
           glyph={<Icon name="theme" size={15} />}
         >
@@ -665,7 +684,11 @@ function AppearanceSection({ appIcon, edge }: Looks) {
                 <Choices
                   label={text.icon}
                   layout="tiles"
-                  options={appIcons.map((one) => ({ value: one.value, title: one.title, picture: <img src={one.picture} alt="" /> }))}
+                  options={appIcons.map((one) => ({
+                    value: one.value,
+                    title: one.title,
+                    picture: <img src={one.picture} alt="" />,
+                  }))}
                   value={appIcon.icon}
                   onChange={appIcon.choose}
                 />
@@ -718,6 +741,7 @@ function AboutSection({ start }: { start: StartModel }) {
   const update = useUpdate()
   const { preferences, set, failed } = usePreferences()
   const { host } = useServices()
+  const storage = useStorage()
   const version = start.status?.appVersion
   return (
     <>
@@ -728,6 +752,17 @@ function AboutSection({ start }: { start: StartModel }) {
           <LinkButton onClick={() => host.reportProblem?.({ kind: 'asked', from: 'settings' })}>{text.report}</LinkButton>
         )}
       </div>
+      <Storage
+        places={PLACES.map((place) => ({
+          id: place,
+          ...text.storage[place],
+          path: storage.paths[place] ?? '',
+          figure: storage.figures[place],
+        }))}
+        onShow={(id) => storage.show(id as StoragePlace)}
+        onMeasureAgain={storage.measureAgain}
+        text={{ show: text.storage.show }}
+      />
       <SettingList>
         <UsageData on={preferences.usageData} onChange={(on) => set('usageData', on)} doNotTrack={host.doNotTrack === true} />
         <CrashReports on={preferences.crashReports} onChange={(on) => set('crashReports', on)} doNotTrack={host.doNotTrack === true} />

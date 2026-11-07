@@ -22,6 +22,16 @@ export const text = {
   version: (version: string) => `Althar ${version}`,
   /** Report a problem (DEV-61), in the quick settings' foot and About Althar. */
   report: 'Report a problem',
+  /* About › Storage (DEV-147). */
+  storage: {
+    profile: { title: 'Profile', note: 'Projects, tasks and settings. ' },
+    logs: { title: 'Logs', note: 'What Althar writes as it runs. ' },
+    worktrees: {
+      title: 'Task folders',
+      note: 'A copy of each project for every task. ',
+    },
+    show: platform === 'darwin' ? 'Show in Finder' : platform === 'win32' ? 'Show in Explorer' : 'Show in Files',
+  },
   off: 'Off',
   /* The quick settings' cards. */
   awake: 'Keep awake',
@@ -69,7 +79,12 @@ export const text = {
     title: 'Retry the checkout call with backoff',
     number: '#212',
     text: 'The checkout call failed the whole order on one dropped connection. It now retries with jittered backoff, three tries at most, and only for 502, 503 and timeouts.',
-    facts: { model: 'GPT-6.1 Sol', sha: '4e1c07a', passes: 2, date: '2026-10-31' },
+    facts: {
+      model: 'GPT-6.1 Sol',
+      sha: '4e1c07a',
+      passes: 2,
+      date: '2026-10-31',
+    },
   } satisfies ReviewSealSample,
   /* Notifications. */
   badge: `Count them on ${device.count ?? 'the icon'}`,

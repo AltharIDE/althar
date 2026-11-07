@@ -1,0 +1,148 @@
+import { link, mkdir, mkdtemp, rm, symlink, writeFile, chmod } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { afterEach, describe, expect, it } from 'vitest'
+
+import { measure, storageSizes, type Size } from '../src/main/storage'
+
+/* The size walk behind About › Storage: it counts what is there, once, and never leaves the folder. */
+
+const made: string[] = []
+const folder = async () => {
+  const path = await mkdtemp(join(tmpdir(), 'althar-storage-'))
+  made.push(path)
+  return path
+}
+afterEach(async () => {
+  for (const path of made.splice(0)) {
+    await chmod(join(path, 'locked'), 0o755).catch(() => {})
+    await rm(path, { recursive: true, force: true })
+  }
+})
+
+const done = (size: Size) => {
+  if (size.state !== 'done') throw new Error(`not measured: ${size.state}`)
+  return size
+}
+const file = (path: string, length: number) => writeFile(path, Buffer.alloc(length, 1))
+
+describe('measuring a folder', () => {
+  it('counts what is in it, nested, and says a missing folder is missing', async () => {
+    const root = await folder()
+    await mkdir(join(root, 'a', 'b'), { recursive: true })
+    await file(join(root, 'one'), 100_000)
+    await file(join(root, 'a', 'b', 'two'), 100_000)
+    const size = done(await measure(root))
+    expect(size.bytes).toBeGreaterThanOrEqual(200_000)
+    expect(size.bytes).toBeLessThan(400_000)
+    expect(size.approximate).toBe(false)
+    expect(size.unreadable).toBe(0)
+    expect(await measure(join(root, 'nothing'))).toEqual({ state: 'missing' })
+  })
+
+  it('does not follow symlinks: a link to a big folder, or to its own parent, counts as a link', async () => {
+    const root = await folder()
+    const outside = await folder()
+    await file(join(outside, 'big'), 5_000_000)
+    await mkdir(join(root, 'inner'))
+    await symlink(outside, join(root, 'out'))
+    await symlink(root, join(root, 'inner', 'loop'))
+    await symlink(join(outside, 'big'), join(root, 'file-link'))
+    const size = done(await measure(root))
+    expect(size.bytes).toBeLessThan(100_000)
+    expect(size.unreadable).toBe(0)
+  })
+
+  it('counts a file with two hard links once', async () => {
+    const root = await folder()
+    await file(join(root, 'first'), 1_000_000)
+    const alone = done(await measure(root)).bytes
+    await link(join(root, 'first'), join(root, 'second'))
+    const linked = done(await measure(root)).bytes
+    expect(linked - alone).toBeLessThan(100_000)
+  })
+
+  it('leaves out a folder it is told is another’s, and the root itself is never left out', async () => {
+    const root = await folder()
+    await mkdir(join(root, 'worktrees'))
+    await file(join(root, 'worktrees', 'big'), 2_000_000)
+    await file(join(root, 'small'), 10_000)
+    expect(done(await measure(root)).bytes).toBeGreaterThan(2_000_000)
+    expect(done(await measure(root, { exclude: [join(root, 'worktrees')] })).bytes).toBeLessThan(100_000)
+    expect(done(await measure(root, { exclude: [root] })).bytes).toBeGreaterThan(2_000_000)
+  })
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('skips what it can’t read, and counts it', async () => {
+    const root = await folder()
+    await mkdir(join(root, 'locked'))
+    await file(join(root, 'locked', 'secret'), 1_000_000)
+    await file(join(root, 'open'), 10_000)
+    await chmod(join(root, 'locked'), 0o000)
+    const size = done(await measure(root))
+    expect(size.unreadable).toBe(1)
+    expect(size.bytes).toBeLessThan(1_000_000)
+  })
+
+  it('gives what it has counted, as approximate, when the time is up', async () => {
+    const root = await folder()
+    for (const name of ['a', 'b', 'c']) {
+      await mkdir(join(root, name))
+      await file(join(root, name, 'f'), 10_000)
+    }
+    let ticks = 0
+    // The first read of the clock sets the limit; every later one is past it.
+    const now = () => (ticks++ === 0 ? 0 : 1_000)
+    const size = done(await measure(root, { timeout: 500, now }))
+    expect(size.approximate).toBe(true)
+  })
+})
+
+describe('the sizes kept for a session', () => {
+  const places = () => ({
+    profile: '/data/althar',
+    logs: '/data/althar/logs',
+    worktrees: '/home/me/Althar',
+  })
+
+  it('measures once, joins what is under way, and measures again on a refresh', async () => {
+    const calls: Array<{
+      root: string
+      exclude: ReadonlyArray<string> | undefined
+    }> = []
+    const sizes = storageSizes(places, async (root, options) => {
+      calls.push({ root, exclude: options?.exclude })
+      return {
+        state: 'done',
+        bytes: calls.length,
+        approximate: false,
+        unreadable: 0,
+      }
+    })
+    const [first, second] = await Promise.all([sizes.size('worktrees'), sizes.size('worktrees')])
+    expect(first).toBe(second)
+    await sizes.size('worktrees')
+    expect(calls).toHaveLength(1)
+    expect(done(await sizes.size('worktrees', true)).bytes).toBe(2)
+    expect(calls).toHaveLength(2)
+  })
+
+  it('leaves the logs and task folders out of the profile where they sit inside it', async () => {
+    const calls: Record<string, ReadonlyArray<string> | undefined> = {}
+    const sizes = storageSizes(
+      () => ({
+        profile: '/data/althar',
+        logs: '/data/althar/logs',
+        worktrees: '/data/althar/worktrees',
+      }),
+      async (root, options) => {
+        calls[root] = options?.exclude
+        return { state: 'missing' }
+      },
+    )
+    await sizes.size('profile')
+    await sizes.size('logs')
+    expect(calls['/data/althar']).toEqual(['/data/althar/logs', '/data/althar/worktrees'])
+    expect(calls['/data/althar/logs']).toEqual([])
+  })
+})

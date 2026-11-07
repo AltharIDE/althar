@@ -844,6 +844,19 @@ describe('the Settings tab', () => {
     expect(within(screen.getByRole('main')).queryByRole('button', { name: 'Report a problem' })).toBeNull()
   })
 
+  it('shows where Althar keeps its data under About Althar, with sizes, and opens a place in the file manager', async () => {
+    const host = fakeHost()
+    withServices(<Settings at="about" />, fakeClient().client, host)
+    const main = screen.getByRole('main')
+    expect(await within(main).findByText('/home/me/Althar')).toBeTruthy()
+    expect(within(main).getByText('/home/me/.local/share/althar/logs')).toBeTruthy()
+    expect((await within(main).findAllByText('3.0 GB')).length).toBe(3)
+    await userEvent.click(within(main).getByRole('button', { name: 'Show Task folders in the file manager' }))
+    expect(host.storage.show).toHaveBeenCalledWith('worktrees')
+    await userEvent.click(within(main).getByRole('button', { name: 'Measure again' }))
+    await waitFor(() => expect(host.storage.size).toHaveBeenCalledWith('profile', true))
+  })
+
   it('sends anonymous usage data until the person turns it off under About Althar, with one line on what it sends', async () => {
     const host = fakeHost()
     withServices(<Settings at="about" />, fakeClient().client, host)
