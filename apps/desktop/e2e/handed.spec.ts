@@ -86,7 +86,7 @@ test('shows what the lead hands back: output, a screenshot, a document, a file a
       .click()
     await page.getByRole('button', { name: /Ran npm test/ }).click()
     await expect(page.getByText(/52 passed/)).toBeVisible()
-    await page.getByRole('button', { name: /Run npm run lint/ }).click()
+    await page.getByRole('button', { name: /Ran npm run lint/ }).click()
     await expect(page.getByText(/Unexpected any/)).toBeVisible()
     await expect(page.getByText('exit 1')).toBeVisible()
     await page.screenshot({ path: 'test-results/handed-output.png', fullPage: true })
