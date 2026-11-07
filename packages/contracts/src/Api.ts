@@ -614,14 +614,17 @@ export const ProjectRepository = Schema.Struct({
   host: Schema.NullOr(RepositoryHost),
   role: RepositoryRole,
   /**
-   * The fork its remotes make it (an `upstream` beside `origin`), by each one's path on its host, and where its work goes; whether
-   * its host says the person can push to the repository it was forked from, null where Althar couldn't ask; and whether Althar
-   * offers, once, to push its tasks' branches there now that they can (ADR-085).
+   * The fork it is, as its host says, else as its remotes' names say (an `upstream` beside `origin`), by each one's path on its
+   * host, and where its work goes; the clone's remote the repository it was forked from is on, by whatever name, null where none
+   * is, which AddParentRemote adds; whether its host says the person can push to the repository it was forked from, null where
+   * Althar couldn't ask; and whether Althar offers, once, to push its tasks' branches there now that they can (ADR-085).
    */
   fork: Schema.NullOr(
     Schema.Struct({
       fork: Schema.String,
       upstream: Schema.String,
+      remote: Schema.NullOr(Schema.String),
+      by: Schema.Literals(['host', 'names']),
       target: ChangeTarget,
       canPush: Schema.NullOr(Schema.Boolean),
       offer: Schema.Boolean,
@@ -3620,6 +3623,11 @@ export const Api = RpcGroup.make(
     },
     Schema.Void,
   ),
+  /**
+   * Adds the repository a fork was forked from as a remote of its clone, where its host says it is a fork and none of its remotes
+   * has that repository: as `upstream`, or `parent` where that is taken. The person's own remotes stay as they are.
+   */
+  command('AddParentRemote', { projectId: Schema.String, repositoryId: Schema.String }, Schema.Void),
   /**
    * Makes a branch on the code host, from the remote's default branch, where
    * the repository's tasks start (ADR-093): a name typed in a branch list

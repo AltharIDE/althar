@@ -111,6 +111,20 @@ describe('GitHub as a code host', () => {
     }),
   )
 
+  it.effect('says the repository a fork was forked from, that one not forked is no fork, and nothing where GitHub doesn’t say', () =>
+    Effect.gen(function* () {
+      const fork = { id: 9, full_name: 'ninemate/althar', default_branch: 'main', html_url: 'https://github.com/ninemate/althar' }
+      const { host } = github([
+        ['GET', `${API}/repos/ninemate/althar`, { json: { ...fork, fork: true, parent: { id: 1, full_name: 'AltharIDE/althar' } } }],
+        ['GET', `${API}/repos/AltharIDE/althar`, { json: { ...fork, id: 1, full_name: 'AltharIDE/althar', fork: false } }],
+        ['GET', `${API}/repos/old/one`, { json: { ...fork, id: 2, full_name: 'old/one' } }],
+      ])
+      assert.deepStrictEqual((yield* host.repository(['ninemate', 'althar'])).parent, { path: ['AltharIDE', 'althar'] })
+      assert.isNull((yield* host.repository(['AltharIDE', 'althar'])).parent)
+      assert.notProperty(yield* host.repository(['old', 'one']), 'parent')
+    }),
+  )
+
   it.effect('merges in the first way the repository allows, only the head it last saw, and says why it can’t', () =>
     Effect.gen(function* () {
       const { host, sent } = github([

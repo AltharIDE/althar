@@ -90,7 +90,7 @@ export const ChangingTarget: Story = {
   },
 }
 
-const forkWith = (fork: { target: ChangeTarget; canPush?: boolean }) =>
+const forkWith = (fork: { target: ChangeTarget; canPush?: boolean; remote?: string | null }) =>
   MAP_HALYARD.map((one) => (one.fork === undefined ? one : { ...one, fork: { ...one.fork, ...fork } }))
 
 /** The host says the person can't push to the repository it forks: there's no such choice, and it says so. */
@@ -127,6 +127,29 @@ export const ForkPushingUpstream: Story = {
     await expect(await map.findByText('pushes, pull requests')).toBeInTheDocument()
     await expect(canvasElement.querySelectorAll('svg g')).toHaveLength(1)
     await expect(map.getByText('It pushes to halyard/api on GitHub, and its pull requests open on halyard/api.')).toBeInTheDocument()
+  },
+}
+
+/** Its host says it is a fork, and its clone calls the repository it forks `base`: the map says so. */
+export const ForkParentNamedOtherwise: Story = {
+  args: { repositories: forkWith({ target: ChangeTarget.Upstream, remote: 'base' }), worktrees: '~/Althar/halyard' },
+  play: async ({ canvasElement }) => {
+    const map = within(canvasElement)
+    await expect(map.getByText('The repository it forks, as base')).toBeVisible()
+    await expect(map.queryByRole('button', { name: 'Add it as a remote' })).toBeNull()
+  },
+}
+
+/** Its host says it is a fork, and none of its clone's remotes is the repository it forks: adding it is offered there. */
+export const ForkParentNotARemote: Story = {
+  args: { repositories: forkWith({ target: ChangeTarget.Upstream, remote: null }), worktrees: '~/Althar/halyard', onAddRemote: fn() },
+  play: async ({ args, canvasElement }) => {
+    const map = within(canvasElement)
+    await expect(
+      map.getByText('Your clone has no remote for halyard/api, so tasks start from your fork, and you can’t push branches there yourself.'),
+    ).toBeVisible()
+    await userEvent.click(map.getByRole('button', { name: 'Add it as a remote' }))
+    await expect(args.onAddRemote).toHaveBeenCalledWith('halyard')
   },
 }
 

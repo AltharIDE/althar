@@ -40,6 +40,8 @@ export interface RepositoriesModel {
   readonly setRole: (repositoryId: string, role: RepositoryRole) => void
   readonly setTarget: (repositoryId: string, target: ChangeTarget) => void
   readonly leaveOut: (repositoryId: string) => Promise<void>
+  /** Adds the repository a fork was forked from as a remote of its clone. */
+  readonly addParentRemote: (repositoryId: string) => Promise<void>
   /** Asks for a folder, and adds the repositories at it. */
   readonly add: () => Promise<void>
   /** Adds the repositories at each folder dropped on the page. */
@@ -159,6 +161,7 @@ export const useRepositories = (projectId: string): RepositoriesModel => {
     setRole: (repositoryId, role) => change(repositoryId, { role }),
     setTarget: (repositoryId, target) => change(repositoryId, { target }),
     leaveOut: (repositoryId) => doing(() => client.leaveOutRepository(projectId, repositoryId)),
+    addParentRemote: (repositoryId) => doing(() => client.addParentRemote(projectId, repositoryId)),
     add: async () => addGranted(await host.pickFolder('project')),
     addDropped: async (files) => {
       for (const file of files) await addGranted(await host.grantDropped(file), file.name)

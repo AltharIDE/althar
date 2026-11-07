@@ -190,6 +190,8 @@ export interface FakeControls {
   addRepository(path: ReadonlyArray<string>, defaultBranch?: string): Repository
   /** Lets the account push to a repository, or no longer, as its owners would: it can until it is told otherwise. */
   letPush(path: ReadonlyArray<string>, can: boolean): void
+  /** Says a repository was forked from another, by its path, or, with null, that it is no fork; until then the fake doesn't say. */
+  forkFrom(path: ReadonlyArray<string>, parent: ReadonlyArray<string> | null): void
   addIssue(issue: {
     readonly ref: string
     readonly key?: string
@@ -1166,6 +1168,11 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       const key = path.join('/').toLowerCase()
       const found = repositories.get(key)
       if (found !== undefined) repositories.set(key, { ...found, canPush: can })
+    },
+    forkFrom: (path, parent) => {
+      const key = path.join('/').toLowerCase()
+      const found = repositories.get(key)
+      if (found !== undefined) repositories.set(key, { ...found, parent: parent === null ? null : { path: [...parent] } })
     },
     addIssue: (input) => {
       const container = input.ref.includes('#') ? (input.ref.split('#')[0] ?? null) : (input.ref.split('-')[0] ?? null)

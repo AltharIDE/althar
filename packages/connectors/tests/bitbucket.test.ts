@@ -27,6 +27,7 @@ const ace: Repository = {
   canPush: true,
   // The repository's own choice, a merge commit, first.
   merges: ['merge', 'squash', 'rebase'],
+  parent: null,
 }
 
 const cloud = (routes: ReadonlyArray<Route>, kind: 'basic' | 'bearer' = 'basic') => {
@@ -139,7 +140,15 @@ describe('Bitbucket Cloud as a code host', () => {
         [
           'GET',
           `${CLOUD}/repositories/meridian/empty`,
-          { json: { ...repository, full_name: 'meridian/empty', name: 'empty', mainbranch: null } },
+          {
+            json: {
+              ...repository,
+              full_name: 'meridian/empty',
+              name: 'empty',
+              mainbranch: null,
+              parent: { type: 'repository', full_name: 'atlassian/atlassian-connect-express' },
+            },
+          },
         ],
         ['GET', /\/user\/workspaces\/meridian\/permissions\/repositories/, { json: { values: [permission('meridian/empty', 'read')] } }],
       ])
@@ -151,6 +160,8 @@ describe('Bitbucket Cloud as a code host', () => {
       // Empty, it has no main branch to merge into yet; read only, it can't be pushed to.
       const empty = yield* host.repository(['meridian', 'empty'])
       assert.deepInclude(empty, { defaultBranch: 'main', canPush: false, merges: [] })
+      // A fork says the repository it was forked from.
+      assert.deepStrictEqual(empty.parent, { path: ['atlassian', 'atlassian-connect-express'] })
       // A token that may not ask for its permission reads as one that can't push, and the repository is still read.
       const unasked = cloud([
         ['GET', ACE, { json: repository }],
@@ -1072,6 +1083,7 @@ const prj: Repository = {
   canPush: true,
   // The repository's own choice, a merge commit, first.
   merges: ['merge', 'squash'],
+  parent: null,
 }
 
 const center = (routes: ReadonlyArray<Route>) => {
@@ -1246,7 +1258,17 @@ describe('Bitbucket Data Center as a code host', () => {
         [
           'GET',
           `${DC}/projects/~DANA/repos/scratch`,
-          { json: { ...repository, slug: 'scratch', id: 9, project: { key: '~DANA' }, links: {} } },
+          // A personal fork of PRJ's repository.
+          {
+            json: {
+              ...repository,
+              slug: 'scratch',
+              id: 9,
+              project: { key: '~DANA' },
+              links: {},
+              origin: { ...repository, project: { key: 'PRJ' } },
+            },
+          },
         ],
         ['GET', `${DC}/projects/~DANA/repos/scratch/default-branch`, { json: { id: 'refs/heads/main', displayId: 'main' } }],
         ['GET', /\/repos\?projectkey=~DANA/, { json: page([]) }],
@@ -1263,6 +1285,7 @@ describe('Bitbucket Data Center as a code host', () => {
         webUrl: `${SERVER}/projects/~DANA/repos/scratch`,
         canPush: false,
         merges: [],
+        parent: { path: ['PRJ', 'my-repo'] },
       })
     }),
   )

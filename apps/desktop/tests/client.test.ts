@@ -364,6 +364,7 @@ describe('the client', () => {
           GetRepositories: () => Effect.die('unused'),
           AddRepositories: () => Effect.die('unused'),
           LeaveOutRepository: () => Effect.die('unused'),
+          AddParentRemote: () => Effect.die('unused'),
           SetRepository: () => Effect.die('unused'),
           CreateBranch: () => Effect.die('unused'),
           SetProjectRules: () => Effect.die('unused'),

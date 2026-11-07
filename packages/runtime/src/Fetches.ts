@@ -3,7 +3,7 @@ import { Context, Effect, Layer, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Connections } from './Connections'
-import { forkOf } from './forks'
+import { forkOf, parentRemote } from './forks'
 import { commitOf, type FetchSource, fetchSpecs, git, gitOutcome, namedRemotes, redactUrl, remoteHeads } from './git'
 import { Instance } from './Instance'
 import { type Tool, ToolRefused, ToolServer } from './ToolServer'
@@ -241,8 +241,8 @@ export class Fetches extends Context.Service<
       const fetchPull = (repository: string, which: string) =>
         Effect.gen(function* () {
           const remotes = yield* namedRemotes(repository).pipe(Effect.orElseSucceed(() => []))
-          // A fork's pull requests open where it was forked from.
-          const remote = forkOf(remotes) === null ? 'origin' : 'upstream'
+          // A fork's pull requests open where it was forked from, by whatever name the clone has it.
+          const remote = parentRemote(forkOf(remotes)) ?? 'origin'
           const reach = yield* reachOf(repository, remote)
           if (reach === null) return yield* new FetchRefused({ message: `The repository has no remote called ${remote} to fetch from.` })
           const asked = which.trim()
@@ -361,7 +361,8 @@ export class Fetches extends Context.Service<
                   .map((head) => head.name)
                   .toSorted((a, b) => (a === base ? -1 : b === base ? 1 : a.localeCompare(b)))
                 // A fork's pull requests are where it was forked from.
-                const signed = (forkOf(remotes) === null ? origin : yield* reachOf(binding.repository, 'upstream'))?.signed ?? null
+                const parent = parentRemote(forkOf(remotes))
+                const signed = (parent === null ? origin : yield* reachOf(binding.repository, parent))?.signed ?? null
                 const listed =
                   signed === null
                     ? null

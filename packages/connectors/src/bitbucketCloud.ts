@@ -68,6 +68,8 @@ const RepositoryAnswer = Schema.Struct({
   // An empty repository has no main branch yet.
   mainbranch: Schema.optional(Schema.NullOr(Schema.Struct({ name: Schema.String }))),
   links: Schema.Struct({ html: Schema.Struct({ href: Schema.String }) }),
+  // The repository it was forked from, given only for a fork.
+  parent: Schema.optional(Schema.NullOr(Schema.Struct({ full_name: Schema.String }))),
 })
 
 const Permissions = Schema.Struct({
@@ -558,6 +560,7 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
           webUrl: answer.links.html.href,
           canPush: permission === 'write' || permission === 'admin',
           merges: mergesOf(branch.merge_strategies ?? [], branch.default_merge_strategy),
+          parent: answer.parent == null ? null : { path: answer.parent.full_name.split('/') },
         }
       }),
     findChange,

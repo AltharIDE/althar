@@ -2291,10 +2291,15 @@ export class Sessions extends Context.Service<
                       // Local, the person's own checkouts: what isn't committed there is theirs too (ADR-091).
                       shared: thread.repositories.filter((repository) => repository.local === 1).map((repository) => repository.worktree),
                       defaultBranch: thread.defaultBranch,
-                      // A fork's task bound for the repository it came from has that repository's default too.
+                      // A fork's task bound for the repository it came from has that repository's default too, by whatever name
+                      // its clone has that remote: a worktree's base is always on a remote, where it could be fetched.
                       defaultBranches: thread.repositories.flatMap((repository) => [
                         repository.defaultBranch,
-                        ...(repository.baseRef.startsWith('upstream/') ? [repository.baseRef.slice('upstream/'.length)] : []),
+                        ...(repository.baseRef.startsWith('upstream/')
+                          ? [repository.baseRef.slice('upstream/'.length)]
+                          : repository.local !== 1 && !repository.baseRef.startsWith('origin/') && repository.baseRef.includes('/')
+                            ? [repository.baseRef.slice(repository.baseRef.indexOf('/') + 1)]
+                            : []),
                         ...(repository.toward === null ? [] : [repository.toward]),
                       ]),
                       taskBranch: thread.branch,

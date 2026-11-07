@@ -89,21 +89,60 @@ describe('a project’s repositories part', () => {
 describe('a fork’s branches going upstream', () => {
   const fork = (set: Partial<NonNullable<ProjectRepository['fork']>>): ProjectRepository => ({
     ...web,
-    fork: { fork: 'you/meridian-web', upstream: 'meridian/web', target: 'upstream', canPush: true, offer: true, ...set },
+    fork: {
+      fork: 'you/meridian-web',
+      upstream: 'meridian/web',
+      remote: 'upstream',
+      by: 'names',
+      target: 'upstream',
+      canPush: true,
+      offer: true,
+      ...set,
+    },
   })
 
   function Offer() {
     return <ForkOffer offer={useForkOffer('p1', useRepositories('p1').repositories)} />
   }
 
+  function Settings() {
+    return <Repositories model={useRepositories('p1')} connections={connectionList} onConnect={() => {}} />
+  }
+
   it('tells the map what the host said, and nothing where it hasn’t', () => {
-    expect(entryOf(fork({ canPush: false })).fork).toEqual({ upstream: 'meridian/web', target: ChangeTarget.Upstream, canPush: false })
+    expect(entryOf(fork({ canPush: false })).fork).toEqual({
+      upstream: 'meridian/web',
+      target: ChangeTarget.Upstream,
+      canPush: false,
+      remote: 'upstream',
+    })
     expect(entryOf(fork({ target: 'upstream_branch' })).fork).toEqual({
       upstream: 'meridian/web',
       target: ChangeTarget.UpstreamBranch,
       canPush: true,
+      remote: 'upstream',
     })
-    expect(entryOf(fork({ canPush: null })).fork).toEqual({ upstream: 'meridian/web', target: ChangeTarget.Upstream })
+    expect(entryOf(fork({ canPush: null })).fork).toEqual({ upstream: 'meridian/web', target: ChangeTarget.Upstream, remote: 'upstream' })
+  })
+
+  it('offers to add the repository it was forked from as a remote where its host says it is one, and adds it', async () => {
+    const { client } = fakeClient({ getRepositories: vi.fn(async () => [fork({ remote: null, by: 'host', offer: false })]) })
+    withServices(<Settings />, client)
+    expect(
+      await screen.findByText(
+        'Your clone has no remote for meridian/web, so tasks start from your fork, and you can’t push branches there yourself.',
+      ),
+    ).toBeTruthy()
+    vi.mocked(client.getRepositories).mockResolvedValue([fork({ remote: 'upstream', by: 'host', offer: false })])
+    await userEvent.click(screen.getByRole('button', { name: 'Add it as a remote' }))
+    expect(client.addParentRemote).toHaveBeenCalledWith('p1', web.id)
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Add it as a remote' })).toBeNull())
+  })
+
+  it('names the remote its clone has the repository it forks as', async () => {
+    const { client } = fakeClient({ getRepositories: vi.fn(async () => [fork({ remote: 'base', by: 'host', offer: false })]) })
+    withServices(<Settings />, client)
+    expect(await screen.findByText('The repository it forks, as base')).toBeTruthy()
   })
 
   it('offers it once: accepting sets the project and takes the offer away, with no remote touched', async () => {
