@@ -628,6 +628,7 @@ export const AllStates: Story = {
         { state: 'done', node: <BoardCard {...args} status={TaskStatus.Done} word="Done" /> },
         { state: 'current', node: <BoardCard {...args} current /> },
         { state: 'from an automation', node: <BoardCard {...args} from="Nightly bump" /> },
+        { state: 'started by a lead', node: <BoardCard {...args} startedBy="Prototype the browser" /> },
         { state: 'nothing opens it', node: <BoardCard {...args} onOpen={undefined} /> },
         { state: 'hover', node: <BoardCard {...args} /> },
         { state: 'focus', node: <BoardCard {...args} /> },
@@ -635,6 +636,21 @@ export const AllStates: Story = {
       ]}
     />
   ),
+}
+
+/** A task another task's lead started (ADR-097): its foot names that task, as an automation's run names its automation. */
+export const StartedByALead: Story = {
+  args: {
+    status: TaskStatus.Running,
+    word: 'Implement',
+    kind: TaskKind.Change,
+    at: '2m',
+    title: 'Built-in browser beside the conversation',
+    startedBy: 'Prototype the browser',
+  },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('Started by Prototype the browser')).toBeVisible()
+  },
 }
 
 export const ErrandWaiting: Story = { args: { ...CHANGE_READY, errands: ['Waiting for #1187: checks at 9b50d2c.'] } }

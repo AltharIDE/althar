@@ -331,6 +331,7 @@ export function TaskView({
   onRules,
   onSignIn,
   onConnections,
+  onOpenTask,
 }: {
   model: TaskModel
   /** Back to the project, on Escape. */
@@ -341,6 +342,8 @@ export function TaskView({
   onSignIn?: (agentId: string) => void
   /** Opens the code hosts and trackers in Settings, for one to connect or sign in to again. */
   onConnections?: () => void
+  /** Opens another task, by its thread: one this task's lead started, from its thread's line. */
+  onOpenTask?: (threadId: string) => void
 }) {
   // What the person writes to the lead, kept by the task while they are elsewhere, as are its images and what they dictate.
   const kept = draftKey.task(model.snapshot?.threadId ?? '')
@@ -1136,6 +1139,7 @@ export function TaskView({
                   {...(busy || stuckOpen ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
                   {...(onSignIn === undefined || stuckOpen ? {} : { onSignIn })}
                   onPassOn={(words) => void model.send(words)}
+                  {...(onOpenTask === undefined ? {} : { onOpenTask })}
                   onAnswerQuestion={model.answerQuestion}
                   {...(asking == null ? {} : { focusQuestion: asking })}
                   run={(run) => (

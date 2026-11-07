@@ -3,6 +3,7 @@ import { type ComponentProps, Fragment, memo, type ReactNode, useCallback, useLa
 import {
   AltharLine,
   Checked,
+  LinkButton,
   Gallery,
   type GalleryShot,
   Markdown,
@@ -54,6 +55,8 @@ export interface TaskThreadProps extends Shared {
   readonly rounds: ReadonlyArray<RoundBlock>
   /** What each document was last changed by, so one handed back is read again after an edit (documentVersions). */
   readonly versionOf: (whole: string) => string
+  /** Opens another task, by its thread: one this task's lead started, from the line that says so. */
+  readonly onOpenTask?: (threadId: string) => void
 }
 
 /** One step of a round's work, in its sheet. */
@@ -246,7 +249,10 @@ const YouView = memo(
   (before, after) => before.threadId === after.threadId && same(before.block, after.block),
 )
 
-export function TaskThread({ rounds, versionOf, ...shared }: TaskThreadProps) {
+/** What the thread says of a task this task's lead started, before its title, which opens it. */
+const STARTED = 'Started'
+
+export function TaskThread({ rounds, versionOf, onOpenTask, ...shared }: TaskThreadProps) {
   const { threadId, worktree = null, openFile, session, project, onTryAgain, onCompact, onSignIn } = shared
   const named = useModelNames()
   // A round on the model its own turn ran, as the runtime recorded it; an older one without, on the thread's current
@@ -322,7 +328,13 @@ export function TaskThread({ rounds, versionOf, ...shared }: TaskThreadProps) {
       case 'althar':
         return (
           <AltharLine key={block.id} tone={block.tone}>
-            {block.text}
+            {block.task !== undefined && onOpenTask !== undefined ? (
+              <>
+                {STARTED} <LinkButton onClick={() => onOpenTask(block.task?.threadId ?? '')}>{block.task.title}</LinkButton>
+              </>
+            ) : (
+              block.text
+            )}
           </AltharLine>
         )
       case 'folder':
