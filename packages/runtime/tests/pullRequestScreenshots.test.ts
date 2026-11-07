@@ -112,18 +112,23 @@ describe('a task’s screenshots on its pull request', () => {
     fake.addRepository(['meridian', 'api'])
     const reply = fake.reply
     const editComment = fake.editComment!
+    let failEdit = false
     const github = Object.assign(fake, {
       reply: (...args: Parameters<typeof fake.reply>) =>
         reply(...args).pipe(Effect.map((comment) => ({ ...comment, at: comment.at.replace(/\.\d{3}Z$/, 'Z') }))),
       editComment: (...args: Parameters<NonNullable<typeof fake.editComment>>) =>
-        editComment(...args).pipe(Effect.map((comment) => ({ ...comment, at: comment.at.replace(/\.\d{3}Z$/, 'Z') }))),
+        failEdit
+          ? Effect.die(new Error('private database detail'))
+          : editComment(...args).pipe(Effect.map((comment) => ({ ...comment, at: comment.at.replace(/\.\d{3}Z$/, 'Z') }))),
     })
     return Effect.gen(function* () {
       const { taskId, threadId, url } = yield* opened(github, working)
       const screenshots = yield* PullRequestScreenshots
       yield* screenshots.post({ taskId, url, leftOut: [] })
-      const sql = yield* SqlClient.SqlClient
-      yield* sql`UPDATE pull_request_pictures SET failed = 'old failure'`
+      failEdit = true
+      yield* Effect.exit(screenshots.post({ taskId, url }))
+      assert.strictEqual((yield* standing(threadId))?.failed, 'Althar couldn’t post the screenshots.')
+      failEdit = false
       yield* screenshots.post({ taskId, url })
       assert.isNull((yield* standing(threadId))?.failed)
       assert.lengthOf(comments(github), 1)
