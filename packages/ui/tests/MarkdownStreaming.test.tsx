@@ -1,0 +1,272 @@
+import { act, render, type RenderResult } from '@testing-library/react'
+import { Lexer } from 'marked'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { FADE, Freshness } from '../src/thread/Markdown/fresh'
+import { blocksOf, type Lexed, lexOn } from '../src/thread/Markdown/lexed'
+import { Markdown } from '../src/thread/Markdown/Markdown'
+import { inOpenFence, streamable } from '../src/thread/Markdown/streaming'
+import { headingOf, thoughtSummary } from '../src/thread/Reasoning/summary'
+
+/*
+ * Markdown cut off mid-stream: shown without what would change its mind
+ * (streaming.ts), read on from where it settled (lexed.ts), its newest
+ * words fading in (fresh.tsx); and what a thought was about, in a line
+ * (Reasoning/summary.ts).
+ */
+
+const ANSWER = `It doesn't yet: the wait lives in memory, so a restart forgets it.
+
+The change, in short:
+
+1. A column \`reset_at\` on \`change_polls\`.
+2. **Follow.ts** writes it when GitHub refuses.
+   - and clears it after
+3. MergeLine.ts reads it back.
+
+\`\`\`ts
+const resume = (poll: ChangePoll, now: number) =>
+  poll.resetAt === null ? 0 : poll.resetAt - now
+
+\`\`\`
+
+| Case | First poll |
+| --- | --- |
+| Not limited | at once |
+| Limited | at the reset time |
+
+> A quote, with a [link](https://example.com) in it.
+
+Setext heading
+--------------
+
+- a
+
+- b
+
+The end, *with feeling*.`
+
+describe('markdown cut off mid-stream', () => {
+  it('holds back a line that is only the start of something', () => {
+    expect(streamable('Intro\n-')).toBe('Intro')
+    expect(streamable('Intro\n- ')).toBe('Intro')
+    expect(streamable('Intro\n1.')).toBe('Intro')
+    expect(streamable('Intro\n12')).toBe('Intro')
+    expect(streamable('Intro\n##')).toBe('Intro')
+    expect(streamable('Intro\n>')).toBe('Intro')
+    expect(streamable('Intro\n---')).toBe('Intro')
+    expect(streamable('Intro\n```ts')).toBe('Intro')
+    // Once it says something, it shows.
+    expect(streamable('Intro\n- a')).toBe('Intro\n- a')
+  })
+
+  it('closes a mark left open for now, and drops one with nothing after it yet', () => {
+    expect(streamable('A **bold wo')).toBe('A **bold wo**')
+    expect(streamable('A *soft wo')).toBe('A *soft wo*')
+    expect(streamable('A ~~gone')).toBe('A ~~gone~~')
+    expect(streamable('Run `bun te')).toBe('Run `bun te`')
+    expect(streamable('A **')).toBe('A ')
+    expect(streamable('**Done** and **more')).toBe('**Done** and **more**')
+    // A list's star isn't emphasis, nor is a star with space after it, nor one in code.
+    expect(streamable('- a\n* b')).toBe('- a\n* b')
+    expect(streamable('2 * 3 is')).toBe('2 * 3 is')
+    expect(streamable('`a*b` and c')).toBe('`a*b` and c')
+    expect(streamable('An \\*escaped star')).toBe('An \\*escaped star')
+  })
+
+  it('shows a link’s words until its address closes', () => {
+    expect(streamable('See [the docs](https://exa')).toBe('See the docs')
+    expect(streamable('See [the do')).toBe('See the do')
+    expect(streamable('See [the docs](https://example.com) now')).toBe('See [the docs](https://example.com) now')
+  })
+
+  it('holds a table back until the rule under its first row arrives', () => {
+    expect(streamable('Cases:\n\n| Case | First |')).toBe('Cases:\n')
+    expect(streamable('Cases:\n\n| Case | First |\n| --- | -')).toBe('Cases:\n')
+    expect(streamable('Cases:\n\n| Case | First |\n| --- | --- |\n')).toBe('Cases:\n\n| Case | First |\n| --- | --- |\n')
+    expect(streamable('Cases:\n\n| Case | First |\n| --- | --- |\n| Not lim')).toBe('Cases:\n\n| Case | First |\n| --- | --- |\n| Not lim')
+  })
+
+  it('leaves a code fence that is still open as it is, but for a line that may be its close', () => {
+    expect(inOpenFence('```ts\nconst a = 1')).toBe(true)
+    expect(inOpenFence('```ts\nconst a = 1\n```\n')).toBe(false)
+    expect(inOpenFence('~~~\n```\n')).toBe(true)
+    expect(streamable('```ts\nconst a = **b')).toBe('```ts\nconst a = **b')
+    expect(streamable('```ts\nconst a = 1\n``')).toBe('```ts\nconst a = 1\n')
+  })
+
+  it('reads a long line of brackets at once, as it reads a short one', () => {
+    expect(streamable(`See ${'[a'.repeat(20_000)}`)).toBe(`See a${'[a'.repeat(19_999)}`)
+    expect(streamable('[]('.repeat(20_000))).toBe('')
+  })
+
+  it('draws every cut of an answer without a block that turns into another: what it shows is what it will be, as far as it goes', () => {
+    const kinds = (text: string) => Lexer.lex(text).flatMap((token) => (token.type === 'space' ? [] : [token.type]))
+    const whole = kinds(ANSWER)
+    for (let cut = 1; cut <= ANSWER.length; cut++) {
+      const shown = kinds(streamable(ANSWER.slice(0, cut)))
+      // Every block but the last, which may still be growing into its kind, is the kind it will be.
+      expect(shown.slice(0, -1)).toEqual(whole.slice(0, Math.max(0, shown.length - 1)))
+    }
+  })
+})
+
+describe('markdown read as it grows', () => {
+  it('reads every cut of an answer as reading all of it would, keeping what settled', () => {
+    let read: Lexed | null = null
+    let kept = 0
+    for (let cut = 1; cut <= ANSWER.length; cut++) {
+      const text = ANSWER.slice(0, cut)
+      const before: Lexed | null = read
+      read = lexOn(text, before)
+      expect(blocksOf(read.tokens)).toEqual(blocksOf(Lexer.lex(text)))
+      if (before !== null && read.settled[0] !== undefined && read.settled[0] === before.settled[0]) kept += 1
+    }
+    // Most cuts read on from what settled, rather than all of it.
+    expect(kept).toBeGreaterThan(ANSWER.length / 2)
+  })
+
+  it('reads all of it again where it no longer begins as it did', () => {
+    const first = lexOn('One.\n\nTwo.\n\nThree', null)
+    const again = lexOn('Uno.\n\nTwo.\n\nThree', first)
+    expect(blocksOf(again.tokens).map((token) => token.raw.trim())).toEqual(['Uno.', 'Two.', 'Three'])
+  })
+
+  it('reads a link by its definition, written after it or before, as reading all of it would', () => {
+    const text =
+      '[docs][ref] first.\n\n[ref]: https://example.com\n\nThen [again][ref], and [other][two].\n\n> [two]: https://two.example\n\nEnd.'
+    let read: Lexed | null = null
+    for (let cut = 1; cut <= text.length; cut++) {
+      read = lexOn(text.slice(0, cut), read)
+      expect(blocksOf(read.tokens)).toEqual(blocksOf(Lexer.lex(text.slice(0, cut))))
+    }
+  })
+
+  it('draws a link once its definition arrives after it, and whole once it stops', () => {
+    const start = '[docs][ref] are here.\n\nAnother paragraph'
+    const view = render(<Markdown source={start} streaming />)
+    expect(view.container.querySelector('a')).toBeNull()
+    const done = `${start}\n\n[ref]: https://example.com`
+    view.rerender(<Markdown source={done} streaming />)
+    view.rerender(<Markdown source={done} />)
+    expect(view.container.querySelector('a')?.getAttribute('href')).toBe('https://example.com/')
+    expect(view.container.querySelector('a')?.textContent).toMatch(/^docs/)
+  })
+
+  it('draws a message as it streams, and whole once it stops', () => {
+    const view = render(<Markdown source="A **bold wo" streaming />)
+    expect(view.container.querySelector('strong')?.textContent).toBe('bold wo')
+    expect(view.container.firstElementChild?.getAttribute('aria-busy')).toBe('true')
+    view.rerender(<Markdown source="A **bold wo" />)
+    expect(view.container.querySelector('strong')).toBeNull()
+    expect(view.container.textContent).toBe('A **bold wo')
+  })
+})
+
+describe('the newest words of a text being written', () => {
+  it('keeps what showed lately, each stretch from where the last ended, for as long as it fades', () => {
+    const fresh = new Freshness()
+    // Its first words, drawn as they start, fade in too.
+    fresh.see(9, 0, true)
+    fresh.see(20, 100, true)
+    expect(fresh.reveals.map(({ from, to }) => [from, to])).toEqual([
+      [0, 9],
+      [9, 20],
+    ])
+    expect(fresh.since).toBe(0)
+    fresh.see(20, FADE + 50, true)
+    expect(fresh.reveals.map(({ from, to }) => [from, to])).toEqual([[9, 20]])
+    fresh.see(20, FADE + 200, true)
+    expect(fresh.reveals).toEqual([])
+    expect(fresh.since).toBe(Number.POSITIVE_INFINITY)
+    // What it shows at once as it stops fades in too; what grows after doesn't.
+    fresh.see(40, 2000, false)
+    expect(fresh.reveals.map(({ from, to }) => [from, to])).toEqual([[20, 40]])
+    fresh.see(60, 2100, false)
+    expect(fresh.reveals.map(({ from, to }) => [from, to])).toEqual([[20, 40]])
+  })
+
+  it('shows as it is what was there when it first drew: a text opened mid-stream, or one not being written', () => {
+    const opened = new Freshness()
+    opened.see(400, 0, true)
+    expect(opened.reveals).toEqual([])
+    opened.see(410, 10, true)
+    expect(opened.reveals.map(({ from, to }) => [from, to])).toEqual([[400, 410]])
+    const still = new Freshness()
+    still.see(10, 0, false)
+    still.see(20, 10, false)
+    expect(still.reveals).toEqual([])
+  })
+
+  describe('drawn', () => {
+    beforeEach(() => vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame', 'performance'] }))
+    afterEach(() => {
+      vi.useRealTimers()
+      vi.restoreAllMocks()
+    })
+    const fading = (view: RenderResult) => [...view.container.querySelectorAll('[class*="fresh"]')].map((one) => one.textContent)
+
+    it('fades in each stretch as it shows, in bold and code too, and draws it as plain text once it has', () => {
+      const view = render(<Markdown source="It starts" streaming />)
+      expect(fading(view)).toEqual(['It starts'])
+      view.rerender(<Markdown source="It starts in **Follow.ts**, at `poll()`, which" streaming />)
+      // What fades, frame by frame, as the pace shows it.
+      const seen = new Set<string>()
+      let bold = false
+      for (let frame = 0; frame < 120; frame++) {
+        act(() => void vi.advanceTimersByTime(16))
+        for (const words of fading(view)) seen.add(words ?? '')
+        bold ||= view.container.querySelector('strong [class*="fresh"]') !== null
+      }
+      expect([...seen].join(' ')).toContain('Follow.ts')
+      expect([...seen].join(' ')).toContain('poll()')
+      expect(bold).toBe(true)
+      act(() => void vi.advanceTimersByTime(2000))
+      view.rerender(<Markdown source="It starts in **Follow.ts**, at `poll()`, which polls." streaming />)
+      act(() => void vi.advanceTimersByTime(50))
+      // Only what came in since fades: what showed before stands as it is.
+      expect(fading(view).length).toBeGreaterThan(0)
+      expect(fading(view).join('')).not.toContain('Follow.ts')
+      act(() => void vi.advanceTimersByTime(1000))
+      expect(view.container.textContent).toBe('It starts in Follow.ts, at poll(), which polls.')
+    })
+
+    it('shows words as they arrive, with none fading, with reduced motion', () => {
+      vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: true } as MediaQueryList)
+      const view = render(<Markdown source="It starts" streaming />)
+      view.rerender(<Markdown source="It starts in Follow.ts" streaming />)
+      expect(view.container.textContent).toBe('It starts in Follow.ts')
+      expect(fading(view)).toEqual([])
+    })
+  })
+})
+
+describe('what a thought was about', () => {
+  const CODEX = '**Checking how the merge line starts**\n\nLooking at MergeLine.ts.\n\n**Tracing the poll to the store**\n\nThe last poll'
+
+  it('is its latest whole heading, as Codex titles each part', () => {
+    expect(headingOf(CODEX)).toBe('Tracing the poll to the store')
+    expect(thoughtSummary(CODEX)).toBe('Tracing the poll to the store')
+    // A heading still being written isn't one yet: the one before stands.
+    expect(headingOf(`${CODEX}.\n\n**Writing the mig`)).toBe('Tracing the poll to the store')
+    expect(headingOf('## Plan\n\nFirst')).toBe('Plan')
+    expect(headingOf('No heading here.')).toBeNull()
+    // A colon alone titles nothing.
+    expect(headingOf('## :')).toBeNull()
+  })
+
+  it('reads a long line of spaces at once, as it reads a short one', () => {
+    expect(headingOf(`## Plan${' '.repeat(20_000)}x`)).toBe('Plan x')
+    expect(headingOf(`**)**${' '.repeat(20_000)}x`)).toBeNull()
+  })
+
+  it('is its first sentence otherwise, plain and short, without the words it opens with', () => {
+    expect(thoughtSummary('The person wants a back-off. First I need the poll.')).toBe('The person wants a back-off')
+    expect(thoughtSummary('Okay, so `Follow.ts` schedules it.')).toBe('So Follow.ts schedules it')
+    expect(thoughtSummary('Hmm, the [docs](https://x.y) say so')).toBe('The docs say so')
+    const long = thoughtSummary(`The reviewer's first finding is right: ${'the jitter is added after the cap '.repeat(4)}`)
+    expect(long.length).toBeLessThanOrEqual(90)
+    expect(long.endsWith('…')).toBe(true)
+    expect(thoughtSummary('')).toBe('')
+  })
+})

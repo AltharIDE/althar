@@ -2679,7 +2679,13 @@ export class Changes extends Context.Service<
             decode: (kept) => (kept === true ? true : undefined),
           }).pipe(
             Effect.as(null),
-            Effect.catch((error) => Effect.succeed(error instanceof ConnectorFailed ? error.message : String(error))),
+            Effect.catch((error) =>
+              Effect.gen(function* () {
+                if (error instanceof ConnectorFailed) return error.message
+                yield* Effect.logWarning('Deleting branch failed', error)
+                return 'Althar couldn’t delete the branch. Its log has the details.'
+              }),
+            ),
           )
           return { change: summary, branch }
         })

@@ -21,6 +21,7 @@ import {
   connectionList,
   fakeClient,
   fakeHost,
+  fakePagesHost,
   githubConnection,
   installedSkill,
   models,
@@ -277,6 +278,7 @@ describe('the Settings tab', () => {
         'Notifications',
         'Appearance',
         'Editor',
+        'Browser',
         'About Althar',
       ]),
     )
@@ -314,6 +316,7 @@ describe('the Settings tab', () => {
       'notifications',
       'appearance',
       'editor',
+      'browser',
       'about',
     ])
     expect(isSection('this-mac')).toBe(true)
@@ -1141,5 +1144,24 @@ describe('the skills’ view model', () => {
       needsSubagents: true,
       removable: true,
     })
+  })
+})
+
+describe('Settings › Browser', () => {
+  it('keeps where a thread’s links open and how long pages keep cookies, and clears every page’s at once', async () => {
+    const clearAll = vi.fn(async () => {})
+    const host = fakeHost({ pages: fakePagesHost({ clearAll }) })
+    withServices(<Settings at="browser" />, fakeClient().client, host)
+    expect(await screen.findByRole('heading', { name: 'Browser', level: 1 })).toBeTruthy()
+    const links = screen.getByRole('radiogroup', { name: 'Links from threads' })
+    expect(within(links).getByRole('radio', { name: 'Beside the conversation' }).getAttribute('aria-checked')).toBe('true')
+    await userEvent.click(within(links).getByRole('radio', { name: 'In your browser' }))
+    await waitFor(() => expect(host.setPreference).toHaveBeenLastCalledWith('browserLinks', 'outside'))
+    await userEvent.click(screen.getByRole('combobox', { name: 'Keep cookies' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Until Althar quits' }))
+    await waitFor(() => expect(host.setPreference).toHaveBeenLastCalledWith('browserCookies', 'quit'))
+    await userEvent.click(screen.getByRole('button', { name: 'Clear all' }))
+    expect(clearAll).toHaveBeenCalled()
+    expect(await screen.findByText('None kept.')).toBeTruthy()
   })
 })

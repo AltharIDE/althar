@@ -22,7 +22,8 @@ import s from './BoardCard.module.css'
  * then how long. Then its title, and, where the word isn't enough, why.
  * Under them, at most, its steps, one card in the card (the pull request,
  * the branch, what it handed back) and one fact. A task an automation's run
- * started says which, quietly, at its foot. Last, what it offers to do, in
+ * started says which, quietly, at its foot, as one another task's lead
+ * started says that task. Last, what it offers to do, in
  * the same place on every card: a strip its width.
  */
 
@@ -33,6 +34,8 @@ export interface BoardCardText {
   local: (kind: string) => string
   /** The automation whose run it is. */
   from: (automation: string) => string
+  /** The task whose lead started it (ADR-097). */
+  startedBy: (task: string) => string
   /** What its work goes into, where it isn't the default branch (ADR-093), for a screen reader: the card shows an arrow. */
   toward: (branch: string) => string
 }
@@ -45,6 +48,7 @@ export const boardCardText: BoardCardText = {
   },
   local: (kind) => (kind === '' ? 'Local' : `${kind} · Local`),
   from: (automation) => `From ${automation}`,
+  startedBy: (task) => `Started by ${task}`,
   toward: (branch) => `Toward ${branch}`,
 }
 
@@ -84,6 +88,8 @@ export type BoardCardProps = RootProps<
     corner?: ReactNode
     /** The automation whose run it is, by its name: said in a small line, with the automation's mark. */
     from?: string
+    /** The task whose lead started it, by its title: said in a small line, as `from` is. */
+    startedBy?: string
     /** The branch its work goes into, where it isn't the default (ADR-093): release/0.8.0, quietly, at its foot. */
     toward?: string
     /** Open beside the board. */
@@ -125,6 +131,7 @@ export function BoardCard({
   next,
   corner,
   from,
+  startedBy,
   toward,
   current,
   onOpen,
@@ -172,6 +179,12 @@ export function BoardCard({
         <p className={s.from}>
           <Icon name="automation" size={11} />
           {t.from(from)}
+        </p>
+      )}
+      {startedBy !== undefined && startedBy !== '' && (
+        <p className={s.from}>
+          <Icon name="corner" size={11} />
+          {t.startedBy(startedBy)}
         </p>
       )}
       {next !== undefined && next !== null && next !== false && <NextSteps className={b.strip}>{next}</NextSteps>}

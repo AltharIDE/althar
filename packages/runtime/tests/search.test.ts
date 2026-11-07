@@ -351,6 +351,15 @@ describe('where a found task stands', () => {
     assert.strictEqual(phaseOf({ ...task, state: 'abandoned', waiting: 1 }, none), 'settled')
     assert.strictEqual(phaseOf({ ...task, planState: 'proposed', startsAt: '2026-10-14T09:00:00.000Z' }, none), 'planned')
     assert.strictEqual(phaseOf({ ...task, planState: 'proposed' }, none), 'held')
+    // A task only drafted waits off the board a moment for its plan; past that, it is the person's.
+    assert.strictEqual(
+      phaseOf({ ...task, state: 'draft', createdAt: '2026-10-14T09:00:00.000Z' }, none, Date.parse('2026-10-14T09:01:00.000Z')),
+      'drafting',
+    )
+    assert.strictEqual(
+      phaseOf({ ...task, state: 'draft', createdAt: '2026-10-14T08:00:00.000Z' }, none, Date.parse('2026-10-14T09:01:00.000Z')),
+      'stopped',
+    )
     assert.strictEqual(phaseOf({ ...task, waiting: 2, runState: 'succeeded' }, none), 'waiting')
     assert.strictEqual(phaseOf({ ...task, state: 'done' }, new Set(['task_1'])), 'running')
     assert.strictEqual(phaseOf({ ...task, state: 'done' }, none), 'settled')
@@ -378,6 +387,7 @@ describe('where a found task stands', () => {
     })
     assert.strictEqual(
       foundWords('retry', [
+        one('drafting', 'draft'),
         one('planned'),
         one('held'),
         one('running'),
@@ -388,6 +398,7 @@ describe('where a found task stands', () => {
         one('settled', 'abandoned'),
       ]),
       [
+        '- retry: Retry (drafted, its plan not proposed yet; id task_1)',
         '- retry: Retry (planned, starting soon; id task_1)',
         '- retry: Retry (planned, held; id task_1)',
         '- retry: Retry (running; id task_1)',

@@ -200,7 +200,7 @@ export const handedBy = (parts: ReadonlyArray<PartHanded>, worktree: string | nu
 }
 
 /** A command's output as the kit's Terminal takes it: its last lines shown, those before them a click away. */
-export const LINES_SHOWN = 12
+export const LINES_SHOWN = 8
 
 export const linesOf = (output: string): { readonly lines: ReadonlyArray<string>; readonly earlier: ReadonlyArray<string> } => {
   const all = output.split('\n')

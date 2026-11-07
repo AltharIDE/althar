@@ -6,12 +6,12 @@ import {
   CodeBlock,
   FailedLogs,
   Gallery,
+  glyphOf,
   Issue,
   IssueRef,
   LinkButton,
   Markdown,
   Plan,
-  Prose,
   Question,
   type QuestionAnswer,
   Reasoning,
@@ -23,10 +23,12 @@ import {
   ToolState,
   Turn,
   WorkedFor,
+  WorkNow,
   You,
 } from '@althar/ui'
 
 import { CommandOutput } from './CommandOutput'
+import { SettingChangeOf } from './SettingChangeOf'
 import { shotsOf } from './evidence'
 import { HandedBack } from './HandedBack'
 import { documentVersions } from './handed'
@@ -59,19 +61,22 @@ import s from './ThreadBlocks.module.css'
 
 /*
  * A thread's blocks as the kit draws them, the same in a task and in the
- * coordinator's thread. A turn's work folds under how long it worked, or is
- * working, with its last message open under it; a step's result stands open
- * under the work that led to it. Before the agent says anything, its turn
- * stands under its name, thinking, where its words will take its place. A
- * task's card is the host's to draw, since what it can do with one is the
- * host's.
+ * coordinator's thread. A turn's work folds under how long it worked, with
+ * its last message open under it; a step's result stands open under the
+ * work that led to it. Before the agent says anything, its turn stands
+ * under its name, thinking, where its words will take its place. While it
+ * works, as in Codex's app (ADR-099): how long it has worked so far, what it
+ * said on the way, one line for what it does now, and what it is writing,
+ * streaming in at an even pace, where its answer will stand; once the turn
+ * ends, the rest folds away under how long it worked. Its thinking shows
+ * only in its work, opened. A task's card is the host's to draw, since what
+ * it can do with one is the host's.
  */
 
 /** How long a command can be before its row, at the thread's width, clips it. */
 const LONG_COMMAND = 72
 
 export const text = {
-  thought: 'Thought',
   readSkill: (names: ReadonlyArray<string>) => `read skill ${names.join(', ')}`,
   shell: 'Shell',
   step: { implement: 'Implement', review: 'Review', settle: 'Settle', publish: 'Pull request' } satisfies Record<
@@ -157,14 +162,18 @@ function SetupView({ setup }: { setup: SetupContent }) {
 /**
  * A tool call. A command opens to what it printed, as the kit's Terminal:
  * open while it runs, so its output streams in view, and read from what was
- * kept only once opened. One from before Althar kept output, too long for
- * its row, opens to the whole command.
+ * kept only once opened. Its row shows the command whole once opened, so the
+ * output doesn't say it again, unless the row names something else (a label,
+ * or the file it works on). One from before Althar kept output, too long for
+ * its row, opens to show it whole.
  */
 function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; threadId: string }) {
   const [open, setOpen] = useState(part.state === ToolState.Running && part.ran !== null)
   /* once opened, what it printed stays, so it doesn't vanish as the call folds */
   const [seen, setSeen] = useState(open)
-  const long = part.command !== null && (part.command.includes('\n') || part.command.length > LONG_COMMAND || part.label !== undefined)
+  /* the row names something other than the command, so the command is said under it */
+  const named = part.command !== null && part.target !== part.command
+  const long = part.command !== null && (part.command.includes('\n') || part.command.length > LONG_COMMAND)
   const body =
     part.ran !== null ? (
       seen ? (
@@ -173,13 +182,16 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
           itemId={part.id}
           ran={part.ran}
           exit={part.exit}
-          {...(long && part.command !== null ? { command: part.command } : {})}
+          {...(named && part.command !== null ? { command: part.command } : {})}
+          {...(part.command !== null ? { printedBy: part.command } : {})}
         />
       ) : (
         <></>
       )
-    ) : long && part.command !== null ? (
+    ) : named && part.command !== null ? (
       <CodeBlock code={part.command} lang={text.shell} />
+    ) : long ? (
+      <></>
     ) : undefined
   return (
     <Tool
@@ -209,14 +221,14 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
       // Its names are read as they were when it was said.
       return (
         <SaidIn.Provider value={part.id}>
-          <Markdown source={part.text} />
+          <Markdown source={part.text} streaming={part.live === true} />
         </SaidIn.Provider>
       )
     case 'thought':
       return (
-        <Reasoning took="" text={{ thought: () => text.thought }}>
-          <Prose dim>{part.text}</Prose>
-        </Reasoning>
+        <SaidIn.Provider value={part.id}>
+          <Reasoning source={part.text} live={part.live === true} {...(part.took == null ? {} : { took: part.took })} />
+        </SaidIn.Provider>
       )
     case 'tool':
       return <ToolView part={part} threadId={threadId} />
@@ -420,6 +432,7 @@ export function ThreadBlocks({
   automation,
   taskAsk,
   queued,
+  retryable,
   onTryAgain,
   onSignIn,
   onCompact,
@@ -463,6 +476,8 @@ export function ThreadBlocks({
   taskAsk?: (ask: TaskAskContent, itemId: string) => ReactNode
   /** What a message still waiting says: who reads it next. */
   queued?: string
+  /** The runtime's retry eligibility, refreshed with the thread's head. */
+  retryable?: boolean | undefined
   /** Tries the last turn again, where it ended in an error, as on the connection: Try again under it. Without it, none. */
   onTryAgain?: () => void
   /** Opens Settings at an agent's sign-in, where the last turn failed for it being signed out: Sign in again. Without it, none. */
@@ -551,6 +566,8 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{automation?.(block.automation, block.id)}</Fragment>
       case 'task_ask':
         return <Fragment key={block.id}>{taskAsk?.(block.ask, block.id)}</Fragment>
+      case 'setting':
+        return <SettingChangeOf key={block.id} change={block.change} itemId={block.id} />
       case 'waiting':
         return (
           <Turn key={block.id} model={turnModel(session?.agentId ?? null)}>
@@ -560,6 +577,10 @@ export function ThreadBlocks({
       case 'turn': {
         // What Copy takes: what it said, open under its work.
         const said = block.said.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part.text] : [])).join('\n\n')
+        // At work, what it said on the way so far, as it said it; once it answers, that folds with the rest of its work.
+        const working = block.live && !block.answering
+        const onTheWay = working ? block.work.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part] : [])) : []
+        const doing = block.doing
         return (
           <Turn
             key={block.id}
@@ -568,7 +589,22 @@ export function ThreadBlocks({
             {...(said === '' || block.live ? {} : { copy: said })}
           >
             {block.work.length > 0 && (
-              <WorkedFor took={block.took} live={block.live} {...(block.doing === null ? {} : { summary: block.doing })}>
+              <WorkedFor
+                took={block.took}
+                live={working}
+                {...(onTheWay.length === 0
+                  ? {}
+                  : {
+                      said: onTheWay.map((part) => (
+                        <SaidIn.Provider key={part.id} value={part.id}>
+                          <Markdown source={part.text} />
+                        </SaidIn.Provider>
+                      )),
+                    })}
+                {...(doing === null
+                  ? {}
+                  : { now: <WorkNow {...(doing.tool === null ? {} : { icon: glyphOf(doing.tool) })}>{doing.text}</WorkNow> })}
+              >
                 {block.work.map((part) => (
                   <PartView key={part.id} part={part} threadId={threadId} />
                 ))}
@@ -579,7 +615,12 @@ export function ThreadBlocks({
               <PartView key={part.id} part={part} threadId={threadId} />
             ))}
             {block.id === failed && ending?.kind === 'notice' && (
-              <WayOut failure={ending.failure} onTryAgain={onTryAgain} onSignIn={signInAs(block.agentId)} onCompact={onCompact} />
+              <WayOut
+                failure={ending.failure}
+                onTryAgain={retryable === true ? onTryAgain : undefined}
+                onSignIn={signInAs(block.agentId)}
+                onCompact={onCompact}
+              />
             )}
             <HandedBack handed={block.handed} threadId={threadId} versionOf={versionOf} {...(openFile === undefined ? {} : { openFile })} />
           </Turn>

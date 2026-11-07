@@ -634,6 +634,14 @@ export const fetchRemote = (cwd: string, remote: string) =>
  */
 export const redactUrl = (url: string) => url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, '$1')
 
+/** The host a remote URL names, as `gitlab.example.com`: of `https://…`, `ssh://git@…` or `git@host:path`; null where it names none (a local path). */
+export const hostNameOf = (url: string) => {
+  const found = /^[a-z][a-z0-9+.-]*:\/\/(?:[^/@]*@)?(\[[^\]]+\]|[^/:]+)/i.exec(url) ?? /^(?:[^/@:\s]+@)?([^/@:\s]+):(?!\/\/)/.exec(url)
+  const name = found?.[1]?.toLowerCase()
+  // A single letter is a Windows drive (`C:\\code`), not a host.
+  return name === undefined || name.length < 2 ? null : name
+}
+
 /** Every remote's fetch URL, without credentials. */
 export const remoteUrls = (cwd: string) =>
   Effect.map(git(cwd, 'remote', '-v'), (output) => [

@@ -183,13 +183,15 @@ describe('a new step on an agent nearly out', () => {
   it.live('runs a review planned on an agent nearly out on one with room, other than the lead’s', () => {
     const resetsAt = second(Date.now() + HOUR)
     return Effect.gen(function* () {
+      // The notice names the selected model only once its catalog has been read.
+      yield* until((yield* Models).catalog, (catalog) => catalog.every((agent) => !agent.probing))
       const { task, start } = yield* planned([lead('claude-code'), { key: 'review', agentId: 'codex', model: null, skipped: false }])
       yield* reading(yield* first('codex'), 'codex', left(1, resetsAt))
       yield* start
       yield* until(said(task.threadId), (titles) => titles.some((title) => title.includes('takes the review instead')))
       assert.include(
         yield* said(task.threadId),
-        `Fake codex has 1% of its five-hour limit left, until ${whenWords(resetsAt, Date.now())}. Fake opencode takes the review instead.`,
+        `Fake codex has 1% of its five-hour limit left, until ${whenWords(resetsAt, Date.now())}. Fake opencode takes the review instead, on Small.`,
       )
     }).pipe(Effect.provide(withAgents()))
   })
@@ -233,6 +235,8 @@ describe('a settle step on a lead that fell nearly out since it worked', () => {
     const reviewer = holds()
     const resetsAt = second(Date.now() + HOUR)
     return Effect.gen(function* () {
+      // The notice names the selected model only once its catalog has been read.
+      yield* until((yield* Models).catalog, (catalog) => catalog.every((agent) => !agent.probing))
       const { projectId, task } = yield* reviewed(reviewer, () =>
         Effect.flatMap(first('claude-code'), (claude) => reading(claude, 'claude-code', left(3, resetsAt))),
       )
@@ -240,7 +244,7 @@ describe('a settle step on a lead that fell nearly out since it worked', () => {
       assert.strictEqual(ready?.lead, 'opencode')
       assert.include(
         yield* said(task.threadId),
-        `Fake claude-code has 3% of its five-hour limit left, until ${whenWords(resetsAt, Date.now())}. Fake opencode takes the fixes instead.`,
+        `Fake claude-code has 3% of its five-hour limit left, until ${whenWords(resetsAt, Date.now())}. Fake opencode takes the fixes instead, on Small.`,
       )
       assert.deepStrictEqual(
         (yield* sessionsOn(task.threadId)).map((session) => session.agentId),
@@ -376,6 +380,8 @@ describe('a settle step on a lead that fell nearly out since it worked', () => {
     const reviewer = holds()
     const resetsAt = second(Date.now() + HOUR)
     return Effect.gen(function* () {
+      // The notice names the selected model only once its catalog has been read.
+      yield* until((yield* Models).catalog, (catalog) => catalog.every((agent) => !agent.probing))
       const { projectId, task, usual } = yield* bothLow(reviewer, resetsAt)
       const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.strictEqual(ready?.lead, 'opencode')
@@ -389,7 +395,7 @@ describe('a settle step on a lead that fell nearly out since it worked', () => {
       assert.isTrue(
         (yield* said(task.threadId)).some((title) =>
           title.endsWith(
-            `has 3% of its five-hour limit left, until ${whenWords(resetsAt, Date.now())}. Fake opencode takes the fixes instead.`,
+            `has 3% of its five-hour limit left, until ${whenWords(resetsAt, Date.now())}. Fake opencode takes the fixes instead, on Small.`,
           ),
         ),
       )
@@ -535,10 +541,10 @@ describe('the account work starts on', () => {
       const limits = yield* Limits
       const resetsAt = new Date(Date.now() + HOUR).toISOString()
       yield* reading(yield* first('codex'), 'codex', left(2, resetsAt))
-      assert.strictEqual(yield* limits.free(['claude-code']), 'opencode')
+      assert.strictEqual((yield* limits.free({ besides: ['claude-code'] }))?.agentId, 'opencode')
       yield* reading(yield* first('opencode'), 'opencode', left(4, resetsAt))
-      assert.strictEqual(yield* limits.free(['claude-code']), 'codex')
-      assert.strictEqual(yield* limits.free(['claude-code'], [], undefined, true), undefined)
+      assert.strictEqual((yield* limits.free({ besides: ['claude-code'] }))?.agentId, 'codex')
+      assert.strictEqual(yield* limits.free({ besides: ['claude-code'], withRoom: true }), undefined)
       assert.isTrue(Option.isSome(yield* limits.nearlyOut('codex')))
       assert.isTrue(Option.isNone(yield* limits.nearlyOut('claude-code')))
     }).pipe(Effect.provide(withAgents())),

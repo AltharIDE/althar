@@ -105,13 +105,13 @@ describe('what an agent hands back, on a task', () => {
     const user = userEvent.setup()
     const { client } = fakeClient({ getThread: vi.fn(async () => handing()) })
     withServices(<Task />, client)
-    await user.click(await screen.findByRole('button', { name: /orked \d/ }))
+    await user.click(await screen.findByRole('button', { name: /orked (for )?\d/ }))
     expect(client.readOutput).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: /Ran npm test/ }))
     expect(await screen.findByText(/refunds\/router/)).toBeTruthy()
     expect(client.readOutput).toHaveBeenCalledWith('th1', expect.any(String))
     // What wasn't kept says so; its exit shows on the row, as a failure does.
-    await user.click(screen.getByRole('button', { name: /Run npm run lint/ }))
+    await user.click(screen.getByRole('button', { name: /Ran npm run lint/ }))
     expect(await screen.findByText(outputText.notKept)).toBeTruthy()
     expect(screen.getByText('exit 1')).toBeTruthy()
   })
@@ -136,8 +136,8 @@ describe('what an agent hands back, on a task', () => {
       readOutput: vi.fn(async () => ({ text: 'compiling\nwarning: unused import\n', dropped: 0 })),
     })
     withServices(<Task />, client)
-    await user.click(await screen.findByRole('button', { name: /orked \d/ }))
-    await user.click(screen.getByRole('button', { name: /Run npm run build/ }))
+    await user.click(await screen.findByRole('button', { name: /orked (for )?\d/ }))
+    await user.click(screen.getByRole('button', { name: /Ran npm run build/ }))
     expect(await screen.findByText('warning: unused import')).toBeTruthy()
     expect(screen.getByText('Tool execution aborted')).toBeTruthy()
   })
@@ -149,7 +149,7 @@ describe('what an agent hands back, on a task', () => {
       readOutput: vi.fn(async () => Promise.reject(new ApiError({ reason: 'NotFound', message: "That output isn't there any more." }))),
     })
     withServices(<Task />, client)
-    await user.click(await screen.findByRole('button', { name: /orked \d/ }))
+    await user.click(await screen.findByRole('button', { name: /orked (for )?\d/ }))
     await user.click(screen.getByRole('button', { name: /Ran npm test/ }))
     expect(await screen.findByText("That output isn't there any more.")).toBeTruthy()
   })
@@ -160,8 +160,8 @@ describe('what an agent hands back, on a task', () => {
     const live = { ...base, session: base.session === null ? null : { ...base.session, turnRunning: true } }
     const { client, emit } = fakeClient({ getThread: vi.fn(async () => live) })
     withServices(<Task />, client)
-    await screen.findByRole('button', { name: /Working · / })
-    await userEvent.click(screen.getByRole('button', { name: /Working · / }))
+    await screen.findByRole('button', { name: /Working for / })
+    await userEvent.click(screen.getByRole('button', { name: /Working for / }))
     act(() => emit({ _tag: 'Output', threadId: 'th1', itemId: run.id, text: ' ✓ charges/limit (14)\n ⋯ webhooks', dropped: 0 }))
     expect(await screen.findByText(/charges\/limit/)).toBeTruthy()
     expect(screen.getByText(/⋯ webhooks/)).toBeTruthy()
@@ -179,7 +179,7 @@ describe('what an agent hands back, on a task', () => {
       readOutput: vi.fn(async () => ({ text: 'ready in 12 ms\n', dropped: 0 })),
     })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: /Working · / }))
+    await userEvent.click(await screen.findByRole('button', { name: /Working for / }))
     expect(await screen.findByText(/ready in 12 ms/)).toBeTruthy()
     expect(client.readOutput).toHaveBeenCalledWith('th1', run.id)
     act(() => emit({ _tag: 'Output', threadId: 'th1', itemId: run.id, text: 'ready in 12 ms\nlistening on 4000\n', dropped: 0 }))
@@ -193,7 +193,7 @@ describe('what an agent hands back, on a task', () => {
     const readOutput = vi.fn().mockResolvedValue({ text: 'ready\n', dropped: 0 })
     const { client, emit, rewatch } = fakeClient({ getThread: vi.fn(async () => live), readOutput })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: /Working · / }))
+    await userEvent.click(await screen.findByRole('button', { name: /Working for / }))
     expect(await screen.findByText(/^ready$/)).toBeTruthy()
     act(() => emit({ _tag: 'Output', threadId: 'th1', itemId: run.id, text: 'ready\ncompiled\n', dropped: 0 }))
     expect(await screen.findByText(/^compiled$/)).toBeTruthy()
@@ -211,7 +211,7 @@ describe('what an agent hands back, on a task', () => {
     const readOutput = vi.fn(() => new Promise<{ text: string; dropped: number }>((resolve) => (answer = resolve)))
     const { client, emit } = fakeClient({ getThread: vi.fn(async () => live), readOutput })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: /Working · / }))
+    await userEvent.click(await screen.findByRole('button', { name: /Working for / }))
     await waitFor(() => expect(readOutput).toHaveBeenCalled())
     act(() => emit({ _tag: 'Output', threadId: 'th1', itemId: run.id, text: 'older\nnewer\n', dropped: 0 }))
     expect(await screen.findByText(/^newer$/)).toBeTruthy()
@@ -299,13 +299,15 @@ describe('what an agent hands back, on a task', () => {
       .fn()
       .mockResolvedValueOnce({ path: '/w/meridian/docs/notes.md', body: '# Notes\n\nFirst.\n', bytes: 16, lines: 3 })
       .mockResolvedValue({ path: '/w/meridian/docs/notes.md', body: '# Notes\n\nRewritten by a script.\n', bytes: 30, lines: 3 })
-    // A script rewrites the document: the command says no file it touched.
+    const thread = handing()
+    // A script rewrites the document: the command says no file it touched. It comes after the thread's last item,
+    // however far the fixtures' shared numbering has gone.
     const script = {
       ...items.tool({ title: 'python3 tidy.py', toolKind: 'execute', command: 'python3 tidy.py', status: 'completed' }),
       id: 'i-script',
-      sequence: 1_000,
+      sequence: Math.max(...thread.items.map((item) => item.sequence)) + 1,
     }
-    const { client, emit } = fakeClient({ getThread: vi.fn(async () => handing()), readDocument, getThreadItem: vi.fn(async () => script) })
+    const { client, emit } = fakeClient({ getThread: vi.fn(async () => thread), readDocument, getThreadItem: vi.fn(async () => script) })
     withServices(<Task />, client)
     const card = await screen.findByRole('article', { name: 'notes.md' })
     expect(await within(card).findByText('First.')).toBeTruthy()

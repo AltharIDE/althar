@@ -12,8 +12,25 @@ import { conflictsOf } from '../src/renderer/features/task/Outputs'
 import { elapsedOf, openingFace, statusOf, stepsOf, TaskView, tookOf } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { numberOf, reachOf, reviewedUnfurl } from '../src/renderer/features/task/ReviewCard'
-import { agents, card, change, changed, fakeClient, fakeHost, items, models, snapshot, status, streamed, usual } from './fixtures'
+import {
+  agents,
+  card,
+  change,
+  changed,
+  fakeClient,
+  fakeHost,
+  fakePagesHost,
+  items,
+  models,
+  snapshot,
+  status,
+  streamed,
+  usual,
+} from './fixtures'
 import type { ChangedFile } from '@althar/contracts'
+import type { PageState } from '../src/main/browser/page'
+import { forgetPages, pages } from '../src/renderer/features/browser/pages'
+import { forgetChosenFaces } from '../src/renderer/features/task/chosenFaces'
 import { clock } from '../src/renderer/shared/time'
 import { keys, reads } from '../src/renderer/data/reads'
 import { ServicesProvider } from '../src/renderer/data/services'
@@ -230,14 +247,16 @@ describe('a task', () => {
     // The round is over: its work is one line, under what it said; Althar's news between rounds stands alone.
     expect(screen.queryByText('src/checkout.ts')).toBeNull()
     expect(screen.getByText('Codex took over from Claude Code.')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: /^Worked 0s/ }))
+    await userEvent.click(screen.getByRole('button', { name: /^Worked for 0s/ }))
     expect(screen.getByText('src/checkout.ts')).toBeTruthy()
     expect(screen.getByText('Write the test')).toBeTruthy()
     expect(screen.getByText('Context is filling up')).toBeTruthy()
     // Its rounds are named by model, the agent said on hover.
     expect(screen.getAllByText('gpt-5.2-codex').length).toBeGreaterThan(0)
-    await userEvent.click(screen.getByRole('button', { name: 'Thought' }))
-    expect(screen.getByText('Where is the call?')).toBeTruthy()
+    // A thought folds to its line, what it was about beside it; opened, all of it.
+    expect(screen.getAllByText('Where is the call?')).toHaveLength(1)
+    await userEvent.click(screen.getByRole('button', { name: /^Thought/ }))
+    expect(screen.getAllByText('Where is the call?')).toHaveLength(2)
     // Escape, with nothing else open, goes back to the project.
     ;(document.activeElement as HTMLElement | null)?.blur()
     await userEvent.keyboard('{Escape}')
@@ -673,6 +692,10 @@ describe('a task', () => {
         .getAllByRole('listitem')
         .map((step) => step.textContent),
     ).toEqual(['Implement, done', 'Review, now'])
+    // In the thread, the review running is a line at its end, with who reviews, and nothing of its thinking.
+    const review = screen.getByText('Review', { selector: '[data-review] span' }).closest('[data-review]')
+    expect(review?.querySelector('[aria-busy="true"]')).not.toBeNull()
+    expect(within(review as HTMLElement).getByText('gpt-5.2-codex')).toBeTruthy()
     // While its plan runs, where it stands says who does each step, and how long it has run in all.
     const standing = screen.getByText('Reviewing').parentElement
     if (standing === null) throw new Error('Where it stands has no element of its own')
@@ -3028,7 +3051,8 @@ describe('a task', () => {
     // A round that said nothing is its line alone, with who worked.
     await userEvent.click(await screen.findByRole('button', { name: /worked 0s/ }))
     await userEvent.click(await screen.findByText("python3 - <<'EOF' …"))
-    expect(await screen.findByText("print('hi')")).toBeTruthy()
+    // Opened, the row shows it whole, each line under its start.
+    expect(await screen.findByText(/<<'EOF' print\('hi'\) EOF/)).toBeTruthy()
   })
 
   it('opens a long one-line command too, since its row clips it', async () => {
@@ -3046,8 +3070,12 @@ describe('a task', () => {
     })
     withServices(<Task />, client)
     await userEvent.click(await screen.findByRole('button', { name: /worked 0s/ }))
-    await userEvent.click(await screen.findByText(pipeline))
-    expect(await screen.findByRole('figure')).toBeTruthy()
+    const row = (await screen.findByText(pipeline)).closest('button')
+    if (row === null) throw new Error('the row doesn’t open')
+    await userEvent.click(row)
+    // Opened, the row shows it whole, wrapping, rather than over a copy of it.
+    expect(row.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.queryByRole('figure')).toBeNull()
     // A short one has nothing more to show, so its row doesn't open.
     expect(screen.getByText(short).closest('button')).toBeNull()
   })
@@ -3081,13 +3109,16 @@ describe('a task', () => {
     expect(screen.queryByText('Edit checkout.ts')).toBeNull()
     expect(screen.getByRole('button', { name: /^Worked/ })).toBeTruthy()
     expect(screen.getByText('Capped the retries at three.')).toBeTruthy()
-    // The reviewer: its verdict in a sentence, each finding how much it matters, where, and what; then what it said.
-    expect(screen.getByText('Needs changes: 3 findings.')).toBeTruthy()
+    // Each review is a line, its verdict in it, the lead's latest handoff open under them; opened, the reviewer says what it
+    // found in its own voice: each finding how much it matters, where, and what; then what it said.
+    expect(screen.queryByText('The retry never stops.')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: /^Review.*3 findings/ }))
+    await userEvent.click(screen.getByRole('button', { name: /^Review.*Passed/ }))
+    expect(screen.queryByText('Needs changes: 3 findings.')).toBeNull()
     expect(screen.getByText('The retry never stops.')).toBeTruthy()
     expect(screen.getByTitle('src/checkout.ts:12').textContent).toBe('checkout.ts:12')
     expect(screen.getByText('README.md')).toBeTruthy()
     expect(screen.getByText('One thing to fix.')).toBeTruthy()
-    expect(screen.getByText('Looks good to me.')).toBeTruthy()
     // A finding opens in the code, where it is now.
     await userEvent.click(screen.getByRole('button', { name: /The retry never stops\./ }))
     expect(await screen.findByRole('dialog', { name: 'Changes' })).toBeTruthy()
@@ -3483,6 +3514,71 @@ describe('the face a task opens on', () => {
     current = asking
     withServices(<Task />, client)
     expect((await screen.findByRole('radio', { name: /Conversation/ })).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('keeps the page beside the conversation only: Outputs and Graph leave it out, and it comes back as it was', async () => {
+    forgetPages()
+    forgetChosenFaces()
+    const page: PageState = {
+      owner: 't1',
+      address: 'http://localhost:5173/refunds',
+      title: 'Refunds',
+      loading: false,
+      back: false,
+      forward: false,
+      viewport: 'fit',
+      pointing: false,
+      line: null,
+    }
+    pages.known(page)
+    pages.place('t1', 'beside')
+    const graph = [
+      {
+        id: 'r1',
+        followUp: false,
+        createdAt: '2025-01-01T09:00:00.000Z',
+        endedAt: '2025-01-01T09:05:00.000Z',
+        said: null,
+        changedAt: null,
+        steps: [
+          {
+            id: 's1',
+            key: 'implement' as const,
+            iteration: 0,
+            state: 'done' as const,
+            hold: null,
+            agentId: 'claude-code',
+            model: null,
+            startedAt: '2025-01-01T09:00:00.000Z',
+            endedAt: '2025-01-01T09:05:00.000Z',
+            added: false,
+          },
+        ],
+      },
+    ]
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread({ task: { ...thread().task, graph } })) })
+    const browser = fakePagesHost({ states: async () => [page] })
+    withServices(<Task />, client, fakeHost({ pages: browser }))
+    expect(await screen.findByRole('complementary', { name: 'Page' })).toBeTruthy()
+
+    // Outputs leaves the page out, its space unreserved, and keeps the page for the conversation.
+    await userEvent.click(screen.getByRole('radio', { name: /Outputs/ }))
+    expect(screen.queryByRole('complementary', { name: 'Page' })).toBeNull()
+    expect(pages.where('t1')).toBe('beside')
+    expect(pages.state('t1')?.address).toBe(page.address)
+
+    // So does Graph.
+    await userEvent.click(screen.getByRole('radio', { name: /Graph/ }))
+    expect(screen.queryByRole('complementary', { name: 'Page' })).toBeNull()
+    expect(pages.where('t1')).toBe('beside')
+
+    // Back on the conversation, the same page shows: it never closed or opened afresh.
+    await userEvent.click(screen.getByRole('radio', { name: /Conversation/ }))
+    const panel = await screen.findByRole('complementary', { name: 'Page' })
+    expect((within(panel).getByRole('textbox', { name: 'Address' }) as HTMLInputElement).value).toBe('localhost:5173/refunds')
+    expect(pages.state('t1')?.address).toBe(page.address)
+    expect(browser.close).not.toHaveBeenCalled()
+    expect(browser.open).not.toHaveBeenCalled()
   })
 })
 

@@ -239,6 +239,16 @@ describe('what the person does on a task', () => {
     expect(client.setModel).not.toHaveBeenCalled()
   })
 
+  it('shows why Try again was refused instead of silently accepting the click', async () => {
+    const { result, client } = reading()
+    vi.mocked(client.tryAgain).mockRejectedValue(
+      new ApiError({ reason: 'RetryRefused', message: 'There is no failed turn or lost connection to try again.' }),
+    )
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull())
+    await act(() => result.current.tryAgain())
+    expect(result.current.error).toBe('There is no failed turn or lost connection to try again.')
+  })
+
   it('says a pull request it closed as the task was abandoned kept its branch on its host', async () => {
     const { result, client } = reading()
     vi.mocked(client.closePullRequest).mockResolvedValue({ branch: 'GitHub protects it.' })

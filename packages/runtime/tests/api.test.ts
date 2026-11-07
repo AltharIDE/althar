@@ -158,6 +158,17 @@ const idle = (thread: ThreadSnapshot) => thread.session !== null && !thread.sess
 const texts = (thread: ThreadSnapshot) => thread.items.map((item) => ('text' in item.content ? item.content.text : item.kind))
 
 describe('the API', () => {
+  it.live('Try again refuses visibly when there is no failed turn or ended session', () =>
+    Effect.gen(function* () {
+      const { client, grant } = yield* connected()
+      const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+      const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'A fresh task' })
+      const failure = yield* Effect.flip(client.TryAgain({ commandId: commandId(), threadId: task.threadId }))
+      assert.instanceOf(failure, ApiError)
+      assert.strictEqual(failure.message, 'There is no failed turn or lost connection to try again.')
+    }).pipe(Effect.scoped),
+  )
+
   it.live('reads what a running command has printed so far, and what it printed once its turn was stopped', () =>
     Effect.scoped(
       Effect.gen(function* () {

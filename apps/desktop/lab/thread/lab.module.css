@@ -1,0 +1,53 @@
+.lab {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  height: 100%;
+  background: var(--n-1);
+}
+.scene {
+  min-height: 0;
+  display: flex;
+}
+.face {
+  flex: 1;
+  min-width: 0;
+}
+.three {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  min-height: 0;
+}
+.three > * {
+  border-right: 1px solid var(--line);
+}
+.composer {
+  margin: 0 0 16px;
+  padding: 14px 16px 44px;
+  border: 1px solid var(--line-2);
+  border-radius: 14px;
+  background: var(--n-0);
+  color: var(--t-4);
+  font-size: 13.5px;
+}
+.bar {
+  display: flex;
+  gap: 4px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--n-2);
+  font-size: 12px;
+}
+.bar button {
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: var(--t-2);
+}
+.bar button[aria-pressed='true'] {
+  background: var(--n-0);
+  color: var(--t-1);
+}
+.bar kbd {
+  font-family: var(--mono);
+  color: var(--t-4);
+}

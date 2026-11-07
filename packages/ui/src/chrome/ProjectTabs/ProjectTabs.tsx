@@ -54,6 +54,18 @@ export interface ProjectTab {
   fixed?: boolean
 }
 
+/** A web page in a tab of its own, after the projects' (ADR-100). */
+export interface PageTab {
+  /** Whose page it is: the task or project it came from. */
+  id: string
+  /** Its page's title, or its address where it has none. */
+  title: string
+  /** It has the window: no other tab does. */
+  current: boolean
+  onSelect: () => void
+  onClose: () => void
+}
+
 /** Althar's settings, while they have a tab of their own. */
 export interface SettingsTab {
   /** It has the window: no other tab does. */
@@ -69,6 +81,8 @@ export interface ProjectTabsText {
   settings: string
   closeSettings: string
   close: (name: string) => string
+  /** The pages' tabs, as a list. */
+  pages: string
   /** Read after a tab's count. */
   yours: (n: number) => string
   running: string
@@ -91,6 +105,7 @@ export const projectTabsText: ProjectTabsText = {
   settings: 'Settings',
   closeSettings: 'Close Settings',
   close: (name) => `Close ${name}`,
+  pages: 'Pages',
   yours: (n) => (n === 1 ? '1 call waits on you' : `${n} calls wait on you`),
   running: 'work running',
   open: 'Open a project',
@@ -123,6 +138,8 @@ export type ProjectTabsProps = RootProps<
     others?: readonly ProjectTab[]
     /** Althar's settings, beside the home's tab, while they are open. */
     settings?: SettingsTab
+    /** Web pages in tabs of their own, after the projects'. */
+    pages?: readonly PageTab[]
     /** Gives one of the others a tab. Without it, the + offers none of them. */
     onOpen?: (id: string) => void
     /** Starts a new project, in a tab of its own. Without it or any others to open, there is no +. */
@@ -178,6 +195,7 @@ export function ProjectTabs({
   yours = 0,
   others = [],
   settings,
+  pages,
   onOpen,
   onNewProject,
   end,
@@ -192,8 +210,8 @@ export function ProjectTabs({
   ...rest
 }: ProjectTabsProps) {
   const t = { ...projectTabsText, ...text }
-  // While the settings' tab has the window, neither the home's nor a project's does.
-  const onSettings = settings?.current === true
+  // While the settings' tab, or a page's, has the window, neither the home's nor a project's does.
+  const onSettings = settings?.current === true || (pages ?? []).some((page) => page.current)
   const current = onSettings ? undefined : route
   const offered = onOpen ? others : []
   const list = useRef<HTMLUListElement>(null)
@@ -325,6 +343,19 @@ export function ProjectTabs({
             ))}
           </ul>
         </ListMotion>
+        {pages !== undefined && pages.length > 0 && (
+          <ul className={cx(s.pinned, s.pages)} aria-label={t.pages}>
+            {pages.map((page) => (
+              <li key={page.id} className={cx(s.tab, s.project, page.current && s.current)}>
+                <button type="button" className={s.select} aria-current={page.current ? 'page' : undefined} onClick={page.onSelect}>
+                  <Icon name="globe" size={15} className={s.logo} />
+                  <span className={s.name}>{page.title}</span>
+                </button>
+                <IconButton icon="close" label={t.close(page.title)} size="small" className={s.close} onClick={page.onClose} />
+              </li>
+            ))}
+          </ul>
+        )}
         {(more.before || more.after) && (
           <Menu label={t.all} align="end" width={260} trigger={<ChromeButton icon="list" label={t.all} compact className={s.plus} />}>
             {tabs.map((tab) => (

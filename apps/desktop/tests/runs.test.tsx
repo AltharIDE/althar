@@ -7,6 +7,7 @@ import { useBoard } from '../src/renderer/features/board/useBoard'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
+import type { RunPlace } from '@althar/ui'
 import { MAIN, mainOf, placeOfLaunch, runsAt, STARTING_FOR, targetsOf } from '../src/renderer/features/runs/Runs'
 import { askText, nameOf } from '../src/renderer/features/runs/useRuns'
 import { coordinatorSnapshot, fakeClient, repositories, runnables, scripts } from './fixtures'
@@ -19,9 +20,10 @@ import { useSettingsOf, withServices } from './render'
  * three ways; and the whole list to order, edit and remove.
  */
 
-function Project() {
+function Project({ connect }: { connect?: () => void } = {}) {
   return (
     <ProjectView
+      {...(connect === undefined ? {} : { ways: { signIn: vi.fn(), agents: vi.fn(), connections: connect } })}
       model={useProject('p1')}
       board={useBoard('p1')}
       connections={useConnections()}
@@ -44,12 +46,12 @@ const launch = (overrides: Partial<Launch>): Launch => ({
 })
 
 /** The project's front, read, with what it runs. */
-const shown = async (launches: ReadonlyArray<Launch> = [], more: Parameters<typeof fakeClient>[0] = {}) => {
+const shown = async (launches: ReadonlyArray<Launch> = [], more: Parameters<typeof fakeClient>[0] = {}, connect?: () => void) => {
   const { client, emit } = fakeClient({
     getCoordinator: vi.fn(async () => coordinatorSnapshot({ runnables, launches })),
     ...more,
   })
-  withServices(<Project />, client)
+  withServices(<Project {...(connect === undefined ? {} : { connect })} />, client)
   await screen.findByRole('button', { name: /^Coordinator: / })
   return { client, emit }
 }
@@ -225,10 +227,20 @@ describe('what the project runs, from its front', () => {
               ],
               branches: ['main', 'feature/gone'],
               note: null,
+              unconnected: null,
               more: true,
             },
           ]
-        : [{ repository: 'meridian-api', pullRequests: text === 'older' ? [older] : [], branches: [], note: null, more: false }],
+        : [
+            {
+              repository: 'meridian-api',
+              pullRequests: text === 'older' ? [older] : [],
+              branches: [],
+              note: null,
+              unconnected: null,
+              more: false,
+            },
+          ],
     )
     const runProject = vi
       .fn()
@@ -334,7 +346,7 @@ describe('where Run runs with no task, by name', () => {
       kept = kept.map((each) => (each.id === input.repositoryId ? { ...each, workToward: input.workToward ?? null } : each))
     })
     const getRunnableRefs = vi.fn(async () => [
-      { repository: 'meridian-api', pullRequests: [], branches: ['main', 'release/0.8.0'], note: null, more: false },
+      { repository: 'meridian-api', pullRequests: [], branches: ['main', 'release/0.8.0'], note: null, unconnected: null, more: false },
     ])
     const { client } = await shown([], { setRepository, getRunnableRefs, getRepositories: vi.fn(async () => kept) })
     await userEvent.click(await screen.findByRole('button', { name: 'main' }))
@@ -372,7 +384,7 @@ describe('where Run runs with no task, by name', () => {
       kept[0] = { ...kept[0]!, workToward: input.workToward ?? null }
     })
     const getRunnableRefs = vi.fn(async () => [
-      { repository: 'meridian-api', pullRequests: [], branches: ['main', 'release/0.8.0'], note: null, more: false },
+      { repository: 'meridian-api', pullRequests: [], branches: ['main', 'release/0.8.0'], note: null, unconnected: null, more: false },
     ])
     await shown([launch({ branch: 'release/0.8.0', where: 'release/0.8.0' })], {
       setRepository,
@@ -398,15 +410,103 @@ describe('where Run runs with no task, by name', () => {
     expect(await picker.findByText('bun run dev runs on main until stopped. The next run takes release/0.8.0.')).toBeTruthy()
   })
 
-  it('says the default branch where repositories go different ways, and where none says one', () => {
+  it('groups the picker by repository, naming the one moved and the host that isn’t connected, and picks a branch in one only', async () => {
+    const [api, web, infra] = repositories
+    let kept = [
+      { ...api!, defaultBranch: 'main', workToward: 'fix/redirects' as string | null },
+      { ...web!, defaultBranch: 'develop', workToward: null as string | null },
+      { ...infra!, defaultBranch: 'master', workToward: null as string | null },
+    ]
+    const setRepository = vi.fn(async (input: { repositoryId: string; workToward?: string | null }) => {
+      kept = kept.map((each) => (each.id === input.repositoryId ? { ...each, workToward: input.workToward ?? null } : each))
+    })
+    const getRunnableRefs = vi.fn(async () => [
+      { repository: 'meridian-api', pullRequests: [], branches: ['main', 'fix/redirects'], note: null, unconnected: null, more: false },
+      {
+        repository: 'meridian-web',
+        pullRequests: [],
+        branches: ['develop', 'fix/redirects'],
+        note: null,
+        unconnected: 'gitlab.fnt.example',
+        more: false,
+      },
+      { repository: 'meridian-infra', pullRequests: [], branches: ['master'], note: null, unconnected: 'gitlab.fnt.example', more: false },
+    ])
+    const connect = vi.fn()
+    await shown([], { setRepository, getRunnableRefs, getRepositories: vi.fn(async () => kept) }, connect)
+    // Not one of them is “main”: the one moved is named, the others counted.
+    await userEvent.click(await screen.findByRole('button', { name: 'meridian-api: fix/redirects · 2 on defaults' }))
+    const picker = within(await screen.findByRole('dialog', { name: 'Where Run runs' }))
+    await picker.findByRole('group', { name: 'meridian-web' })
+    // Each repository is a group with its own branches; a branch of the same name in two is two rows.
+    const web_ = within(picker.getByRole('group', { name: 'meridian-web' }))
+    expect(web_.getAllByRole('option').map((one) => one.textContent)).toEqual(['developDefault', 'fix/redirects'])
+    expect(within(picker.getByRole('group', { name: 'meridian-api' })).getAllByRole('option')).toHaveLength(2)
+    // The host is named once, with the way to connect it; there is no footer sentence about it.
+    expect(picker.getAllByText('gitlab.fnt.example')).toHaveLength(1)
+    expect(picker.queryByText(/Connect its host/)).toBeNull()
+    await userEvent.click(picker.getByRole('button', { name: 'Connect gitlab.fnt.example' }))
+    expect(connect).toHaveBeenCalledOnce()
+    // A branch picked in one repository is that repository's Work toward, and no other's.
+    await userEvent.click(within(picker.getByRole('group', { name: 'meridian-web' })).getByRole('option', { name: /fix\/redirects/ }))
+    expect(setRepository).toHaveBeenCalledOnce()
+    expect(setRepository).toHaveBeenCalledWith(expect.objectContaining({ repositoryId: 'repo_web', workToward: 'fix/redirects' }))
+    expect(await screen.findByRole('button', { name: '2 moved · 1 on default' })).toBeTruthy()
+  })
+
+  it('sums up repositories that go different ways, naming the one moved off its default', () => {
+    const one = { name: 'engine', defaultBranch: 'main', workToward: null as string | null }
+    const two = { name: 'api', defaultBranch: 'develop', workToward: null as string | null }
+    const three = { name: 'docs', defaultBranch: 'master', workToward: null as string | null }
+    // Defaults that differ, none moved.
+    expect(mainOf([one, two, three])).toEqual({ ...MAIN, label: 'Default branches', several: true })
+    // One moved: it by name, the rest counted.
+    expect(mainOf([{ ...one, workToward: 'fix/redirects' }, two, three]).label).toBe('engine: fix/redirects · 2 on defaults')
+    expect(mainOf([{ ...one, workToward: 'fix/redirects' }, two]).label).toBe('engine: fix/redirects · 1 on default')
+    // Several moved, some or all.
+    expect(mainOf([{ ...one, workToward: 'a' }, { ...two, workToward: 'b' }, three]).label).toBe('2 moved · 1 on default')
     expect(
       mainOf([
-        { defaultBranch: 'main', workToward: 'release/0.8.0' },
-        { defaultBranch: 'main', workToward: null },
+        { ...one, workToward: 'a' },
+        { ...two, workToward: 'b' },
+      ]).label,
+    ).toBe('2 repositories moved')
+    // The same branch in each is its name, however it got there; a branch worked toward that is the default's own isn't a move.
+    expect(
+      mainOf([
+        { ...one, workToward: 'release' },
+        { ...two, workToward: 'release' },
+      ]).label,
+    ).toBe('release')
+    expect(
+      mainOf([
+        { ...one, workToward: 'main' },
+        { ...one, name: 'frontend' },
       ]).label,
     ).toBe('main')
+    expect(mainOf([one, two, three]).several).toBe(true)
+  })
+
+  it('says the branch of the one repository, and the default word where none says one', () => {
     expect(mainOf([{ defaultBranch: 'trunk', workToward: null }]).label).toBe('trunk')
+    expect(mainOf([{ defaultBranch: 'main', workToward: 'release/0.8.0' }]).label).toBe('release/0.8.0')
     expect(mainOf(undefined)).toEqual(MAIN)
+  })
+
+  it('does not take a branch of the same name in another repository for the same place', () => {
+    const pull = (repository: string): RunPlace => ({
+      key: `${repository}:#41`,
+      kind: 'pull',
+      label: 'PR #41',
+      choice: { kind: 'pull', number: 41, name: 'PR #41', title: 'x', repository },
+    })
+    const run = launch({ branch: 'PR #41 · feature/x', where: 'PR #41 · feature/x' })
+    expect(runsAt(run, pull('engine'), 'engine')).toBe(true)
+    expect(runsAt(run, pull('frontend'), 'engine')).toBe(false)
+    // Not told which repository it is, a place of the project's one is as it was.
+    expect(runsAt(run, pull('engine'))).toBe(true)
+    expect(placeOfLaunch(run, 'engine').choice?.repository).toBe('engine')
+    expect(placeOfLaunch(run).choice?.repository).toBeUndefined()
   })
 })
 
