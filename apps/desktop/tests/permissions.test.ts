@@ -1,4 +1,4 @@
-import { Decision, PermissionScope } from '@althar/ui'
+import { Brand, Decision, PermissionScope } from '@althar/ui'
 import { describe, expect, it } from 'vitest'
 
 import { permissionOf, replyOf, ruleWordsOf } from '../src/renderer/shared/permissions'
@@ -20,6 +20,29 @@ const call = {
 }
 
 describe('a permission call, as the card asks it', () => {
+  it('asks what can’t be undone on its own card: the action, what stays, the words, the server, and no always', () => {
+    const merge = permissionOf({
+      ...call,
+      title: 'mcp__github__add_issue_comment',
+      irreversible: {
+        kind: 'speak',
+        verb: 'Post on #640',
+        done: 'Posted on #640.',
+        stays: 'Everyone watching it is told at once; it can’t be called back.',
+        words: 'Not needed once #635 merges.',
+        through: { server: 'github', tool: 'add_issue_comment' },
+      },
+    })
+    expect(merge.irreversible).toEqual({
+      verb: 'Post on #640',
+      done: 'Posted on #640.',
+      stays: 'Everyone watching it is told at once; it can’t be called back.',
+      words: 'Not needed once #635 merges.',
+      through: { server: 'github', brand: Brand.GitHub, tool: 'add_issue_comment' },
+    })
+    expect(merge.offers).toBeUndefined()
+  })
+
   it('offers once and deny alone where the runtime says nothing of always', () => {
     expect(permissionOf(call)).toEqual({
       id: 'a1',
