@@ -12,6 +12,7 @@ import {
   type AgentExited,
   type AgentRequestFailed,
   type AgentSession,
+  agentVersion,
   connect,
   type ConfigOption,
   inFlatpakSandbox,
@@ -46,7 +47,7 @@ import { thisDevice } from './device'
 import { type Account, Accounts } from './Accounts'
 import { Artifacts } from './Artifacts'
 import { Agents, type AgentEntry, RuntimeConfig, SIGNED_OUT_GIT_CONFIG } from './Config'
-import { refusalOf, runSkills, type RunSkills } from './Skills'
+import { refusalOf, runSkills, skillsCapabilities, type RunSkills } from './Skills'
 import { type CoordinatorFolder, coordinatorFolder } from './coordinatorFolder'
 import { coordinatorNews, type ModelNamer, modelNamer } from './coordinatorNews'
 import { CACHE_LIFE, dueForHandover, dueForLeadHandover, handoverRecord, notesSection, roomFor, shrinks } from './handover'
@@ -2202,13 +2203,34 @@ export class Sessions extends Context.Service<
           yield* accounts.prepare(account)
           // The session's own scope, from here, so whatever it is given goes with it.
           const scope = yield* Scope.fork(sessionsScope, 'sequential')
+          const externalSkillsRuntime = process.env.FLATPAK_ID !== undefined
+          const externalSkillVersion =
+            externalSkillsRuntime && definition.skills?.externalMinimumVersion !== undefined
+              ? yield* agentVersion(definition).pipe(
+                  Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? Effect.interrupt : Effect.succeed(null))),
+                  Effect.onInterrupt(() =>
+                    Effect.andThen(
+                      Scope.close(scope, Exit.void),
+                      sql.withTransaction(
+                        Effect.gen(function* () {
+                          const revision = yield* moveSession(sessionId, 'failed', { endedAt: yield* timestamp })
+                          yield* sessionFact(thread, sessionId, revision, 'provider_session.failed', {
+                            reason: 'Session startup was interrupted before the agent connected.',
+                          })
+                        }),
+                      ),
+                    ),
+                  ),
+                )
+              : null
+          const capabilities = skillsCapabilities(definition, externalSkillVersion, externalSkillsRuntime)
           // Skills Althar selected, for a task's lead only (never a reader, a reviewer or a review's lead), on any agent its registry
           // says how to give them to, in Althar's own folder for this session: nothing goes in the repository, the account's home or
           // the person's own folders. A failure here costs the session its skills, not its start: the thread says so once it has
           // started, and what Althar didn't expect is reported, by the agent (ADR-047).
           const setUp: { readonly skills: RunSkills | undefined; readonly failed?: string } =
             !reads && skillsConfig !== undefined && definition.skills !== null
-              ? yield* runSkills(skillsConfig, definition, sessionId, foldersOf(thread)).pipe(
+              ? yield* runSkills(skillsConfig, definition, sessionId, foldersOf(thread), capabilities).pipe(
                   Effect.tap((run) => (run === undefined ? Effect.void : Scope.addFinalizer(scope, run.release.pipe(Effect.ignore)))),
                   Effect.map((run) => ({ skills: run })),
                   Effect.catchCause((cause) =>
@@ -2379,7 +2401,14 @@ export class Sessions extends Context.Service<
                 ...(skills !== undefined && definition.skills?.via.kind === 'directory' ? { additionalDirectories: [skills.folder] } : {}),
                 ...(definition.sessionMeta === undefined
                   ? {}
-                  : { meta: definition.sessionMeta(reads ? 'reader' : 'lead', sessionOptions) }),
+                  : {
+                      meta: definition.sessionMeta(
+                        reads ? 'reader' : 'lead',
+                        sessionOptions === undefined && skills === undefined
+                          ? undefined
+                          : { ...sessionOptions, ...(skills === undefined ? {} : { skills: skills.folder }) },
+                      ),
+                    }),
               })
               if (model !== undefined) yield* agent.setOption(definition.options.model, model)
               // An effort the model doesn't offer is no reason not to start.
@@ -2459,6 +2488,7 @@ export class Sessions extends Context.Service<
               description: skills.omitted.map(({ id, missing }) => `${id} needs ${missing.join(', ')}`).join('; '),
             })
           }
+
           // Where its launch made it a temp folder of its own, the rules read `$TMPDIR` in its commands as that.
           const temp = connection.process?.temp
           if (temp !== undefined && held.rules.role === 'task')

@@ -10,7 +10,7 @@ import { DEFAULT_PREFERENCES } from '../src/main/appPreferences'
 import { SYSTEM_SOUND } from '../src/main/notify'
 import { soundToPutBack } from '../src/renderer/features/settings/QuickCards'
 import { QuickSettings } from '../src/renderer/features/settings/QuickSettings'
-import { isSection, type Section, SECTIONS } from '../src/renderer/features/settings/sections'
+import { isSection, type Section, sectionText, SECTIONS } from '../src/renderer/features/settings/sections'
 import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
 import { reviewOf, rowOf } from '../src/renderer/features/settings/useSkills'
 import { useStart } from '../src/renderer/features/start/useStart'
@@ -422,11 +422,12 @@ describe('the Settings tab', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Review the update to release-notes' })).toBeNull())
   })
 
-  it('keeps the Skills section named and says when its changes reach each lead', async () => {
+  it('says a change to the skills reaches each lead the next time it starts, and never speaks of the runtime', async () => {
     withServices(<Settings at="skills" />, fakeClient().client)
     expect(await screen.findByRole('heading', { name: 'Skills', level: 1 })).toBeTruthy()
     expect(await screen.findByText(/A change reaches each lead the next time it starts, in a task under way too\./)).toBeTruthy()
     expect(screen.queryByText(/keeps what it started with|runtime/)).toBeNull()
+    expect(sectionText.skills.title).toBe('Skills')
   })
 
   it('says when this Althar has no skills to give, without speaking of the runtime', async () => {

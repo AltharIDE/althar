@@ -283,19 +283,19 @@ export const words = (
           return `${remote} has commits pushed since you looked, so nothing was replaced. Look again before replacing them.`
         if (why === 'never')
           return `The project’s rules never allow force pushes, so ${remote}’s commits stay. Ask the lead to merge instead.`
-        if (why === 'protected') {
+        // A branch-protection refusal from the host has no `needs`; the local
+        // repository-files guard sets it to explain which switches would allow the push.
+        if (why === 'protected' && Array.isArray(fieldOf(error, 'needs'))) {
+          const held = text(error, 'said')
+          const many = held.includes(',')
           const needs = fieldOf(error, 'needs')
-          if (Array.isArray(needs)) {
-            const held = text(error, 'said')
-            const many = held.includes(',')
-            const named = needs
-              .map((setting) => repositorySwitches[setting as keyof typeof repositorySwitches])
-              .filter((name) => name !== undefined)
-              .map((name) => `“${name}”`)
-            const turnOn =
-              named.length === 0 ? 'what it needs' : named.length === 1 ? named[0] : `${named.slice(0, -1).join(', ')} and ${named.at(-1)}`
-            return `Nothing was pushed: ${held} ${many ? 'are skill or OpenSpec files, which stay' : 'is a skill or OpenSpec file, which stays'} on this computer. To push ${many ? 'them' : 'it'}, turn on ${turnOn} in the project’s Settings, under Repository files.`
-          }
+          const named = (Array.isArray(needs) ? needs : [])
+            .map((setting) => repositorySwitches[setting as keyof typeof repositorySwitches])
+            .filter((name) => name !== undefined)
+            .map((name) => `“${name}”`)
+          const turnOn =
+            named.length === 0 ? 'what it needs' : named.length === 1 ? named[0] : `${named.slice(0, -1).join(', ')} and ${named.at(-1)}`
+          return `Nothing was pushed: ${held} ${many ? 'are skill or OpenSpec files, which stay' : 'is a skill or OpenSpec file, which stays'} on this computer. To push ${many ? 'them' : 'it'}, turn on ${turnOn} in the project’s Settings, under Repository files.`
         }
         if (why === 'fork_gone')
           return `${remote}’s branch was on a fork that is gone, so nothing was pushed. Close it, and what’s here goes in a new pull request.`

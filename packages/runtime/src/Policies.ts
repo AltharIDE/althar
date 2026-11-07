@@ -97,6 +97,7 @@ export const ProjectRules = Schema.Struct({
    * project note (DEV-182): an earlier revision's `changeIssues` is read as
    * nothing, its migration having kept it as such a note.
    */
+  moveIssues: Schema.optional(Schema.Boolean),
   /**
    * Whether skill and OpenSpec files may be written into, committed to, or pushed from this project's repositories
    * (docs/plans/skills-across-harnesses.md, section 4). Each is off without it, and the person turns each on alone.
@@ -104,7 +105,6 @@ export const ProjectRules = Schema.Struct({
   repositoryFiles: Schema.optional(
     Schema.Struct({ writeSkills: Schema.Boolean, writeOpenSpec: Schema.Boolean, pushProtected: Schema.Boolean }),
   ),
-  moveIssues: Schema.optional(Schema.Boolean),
   /**
    * Where new tasks start (ADR-091): in a worktree of their own, or Local, in
    * each repository's own checkout here, one task at a time. The coordinator

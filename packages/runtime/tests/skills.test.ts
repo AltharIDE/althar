@@ -7,13 +7,13 @@ import { agents, type SessionEvent } from '@althar/provider-adapters'
 import { installLocalCatalog, setActive } from '@althar/skills'
 import { assert, describe, it } from '@effect/vitest'
 import { writeCatalog } from '../../skills/tests/support'
-import { Effect, Layer, Stream } from 'effect'
+import { Cause, Effect, Exit, Fiber, Layer, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Agents, type AgentEntry, type RuntimeOptions } from '../src/Config'
 import { type Failure, Failures, failuresLayer } from '../src/Failures'
 import { onlyReads, Sessions } from '../src/Sessions'
-import { listSkills, runSkills } from '../src/Skills'
+import { listSkills, runSkills, skillsCapabilities } from '../src/Skills'
 import { recorder, transcript } from '../src/threads'
 import { fakeAgents, items, launches, notices, runtime, sessionMetas, task, turns, until } from './support'
 
@@ -47,6 +47,15 @@ const skillFilesUnder = (folder: string): Array<string> =>
         .filter((path) => path.endsWith('SKILL.md'))
         .map((path) => join(folder, path))
     : []
+
+it('counts Codex as able to use subagent skills only when its external version is supported', () => {
+  const codex = { skills: { capabilities: ['subagents'], externalMinimumVersion: '0.164.0' } } as const
+  assert.deepStrictEqual(skillsCapabilities(codex, '0.164.0', true), ['subagents'])
+  assert.deepStrictEqual(skillsCapabilities(codex, '0.165.0', true), ['subagents'])
+  assert.deepStrictEqual(skillsCapabilities(codex, '0.163.9', true), [])
+  assert.deepStrictEqual(skillsCapabilities(codex, null, true), [])
+  assert.deepStrictEqual(skillsCapabilities(codex, null, false), ['subagents'])
+})
 
 /** Where the last session of an agent was given its skills, one folder per skill, as the registry lays them out for it. */
 const skillsFolderOf = (agentId: string, root: string) => {
@@ -90,11 +99,13 @@ const withStore = <A, E, R>(
   needs: Record<string, Array<string>>,
   body: (store: NonNullable<RuntimeOptions['skills']>) => Effect.Effect<A, E, R>,
   off: ReadonlyArray<string> = [],
+  agentVersions: Readonly<Record<string, string>> = {},
 ) =>
   Effect.flatMap(
     Effect.promise(() => makeStore(skills, needs, off)),
     // With failures said to a listener, as the app's are, so a test hears what is reported.
-    (store) => body(store).pipe(Effect.provide(runtime(':memory:', {}, { skills: store }).pipe(Layer.provideMerge(failuresLayer)))),
+    (store) =>
+      body(store).pipe(Effect.provide(runtime(':memory:', {}, { skills: store, agentVersions }).pipe(Layer.provideMerge(failuresLayer)))),
   )
 
 describe('skills for a task’s lead', () => {
@@ -135,7 +146,7 @@ describe('skills for a task’s lead', () => {
     ),
   )
 
-  it.live('gives a Codex lead the same skills as an added directory, less one it cannot use, and says so', () =>
+  it.live('gives a Codex lead the same skills as an added directory, including those that use subagents', () =>
     withStore({ alpha: skill('alpha'), beta: skill('beta') }, { beta: ['subagents'] }, (skills) =>
       Effect.gen(function* () {
         const sessions = yield* Sessions
@@ -144,22 +155,14 @@ describe('skills for a task’s lead', () => {
         const [run = ''] = readdirSync(join(skills.root, 'runs'))
         const folder = join(skills.root, 'runs', run, 'codex')
         assert.include(readFileSync(join(folder, '.agents', 'skills', 'alpha', 'SKILL.md'), 'utf8'), 'name: alpha')
-        // Beta needs subagents, which Codex isn't counted on for: left out, and the thread says so.
-        assert.isFalse(existsSync(join(folder, '.agents', 'skills', 'beta')))
         const said = yield* notices(created.threadId)
-        assert.isTrue(
-          said.some(
-            (notice) =>
-              notice.title?.endsWith("codex wasn't given a skill it can't use.") === true && notice.description === 'beta needs subagents',
-          ),
-          JSON.stringify(said),
-        )
-        // Its brief names only what it got.
-        assert.include(yield* briefOf(created.threadId), 'Althar has given you skills for this task: alpha.')
-        // Recorded as given: what it got, not what it couldn't use.
+        assert.isTrue(existsSync(join(folder, '.agents', 'skills', 'beta', 'SKILL.md')))
+        assert.isFalse(said.some((notice) => notice.title?.endsWith("codex wasn't given a skill it can't use.") === true))
+        // Its brief and record include the active skills it got.
+        assert.include(yield* briefOf(created.threadId), 'Althar has given you skills for this task: alpha, beta.')
         assert.deepStrictEqual(
           (yield* givenTo(created.threadId)).map(({ id }) => id),
-          ['alpha'],
+          ['alpha', 'beta'],
         )
         const worktree = yield* worktreeOf(created.threadId)
         for (const root of ['.claude', '.agents', '.opencode', 'openspec']) assert.isFalse(existsSync(join(worktree, root)), root)
@@ -168,6 +171,95 @@ describe('skills for a task’s lead', () => {
       }),
     ),
   )
+
+  it.live('leaves subagent skills out for an older host Codex in Flatpak', () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const previous = process.env.FLATPAK_ID
+        process.env.FLATPAK_ID = 'dev.althar.app.test'
+        return previous
+      }),
+      () =>
+        withStore(
+          { alpha: skill('alpha'), beta: skill('beta') },
+          { beta: ['subagents'] },
+          (skills) =>
+            Effect.gen(function* () {
+              const sessions = yield* Sessions
+              const { task: created } = yield* task()
+              yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
+              const folder = skillsFolderOf('codex', skills.root)
+              const given = yield* givenTo(created.threadId)
+              assert.isTrue(existsSync(join(folder, 'alpha', 'SKILL.md')))
+              assert.isFalse(existsSync(join(folder, 'beta', 'SKILL.md')))
+              assert.deepStrictEqual(
+                given.map(({ id }) => id),
+                ['alpha'],
+              )
+              assert.isTrue(
+                (yield* notices(created.threadId)).some(
+                  (notice) => notice.title?.endsWith("codex wasn't given a skill it can't use.") === true,
+                ),
+              )
+              yield* sessions.stop(created.threadId)
+            }),
+          [],
+          { codex: '0.163.9' },
+        ),
+      (previous) =>
+        Effect.sync(() => {
+          if (previous === undefined) delete process.env.FLATPAK_ID
+          else process.env.FLATPAK_ID = previous
+        }),
+    ),
+  )
+
+  it.live('keeps session startup interrupted while checking the host Codex version', () => {
+    const marker = join(mkdtempSync(join(tmpdir(), 'althar-codex-version-')), 'started')
+    const slowVersion = {
+      command: process.execPath,
+      args: [
+        '-e',
+        `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'started'); setTimeout(() => process.stdout.write('0.164.0'), 1000)`,
+      ],
+    }
+    return Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const previous = process.env.FLATPAK_ID
+        process.env.FLATPAK_ID = 'dev.althar.app.test'
+        return previous
+      }),
+      () =>
+        Effect.provide(
+          Effect.gen(function* () {
+            const sessions = yield* Sessions
+            const { task: created } = yield* task()
+            const launchedBefore = launches.length
+            const starting = yield* Effect.forkScoped(sessions.start({ threadId: created.threadId, agentId: 'codex' }))
+            yield* until(
+              Effect.sync(() => existsSync(marker)),
+              Boolean,
+            )
+            assert.isTrue(existsSync(marker), 'the host Codex version probe started')
+            yield* Fiber.interrupt(starting)
+            const interrupted = yield* Fiber.await(starting)
+            if (Exit.isFailure(interrupted)) assert.isTrue(Cause.hasInterruptsOnly(interrupted.cause), Cause.pretty(interrupted.cause))
+            else assert.fail('the interrupted session startup must fail')
+            assert.strictEqual(launches.length, launchedBefore, 'cancelled startup never connects the agent')
+            const sql = yield* SqlClient.SqlClient
+            const [session] = yield* sql<{ state: string }>`
+              SELECT state FROM provider_sessions WHERE thread_id = ${created.threadId} ORDER BY started_at DESC LIMIT 1`
+            assert.strictEqual(session?.state, 'failed', 'cancelled startup terminalizes its persisted session')
+          }),
+          runtime(':memory:', {}, { agentVersions: { codex: slowVersion } }),
+        ),
+      (previous) =>
+        Effect.sync(() => {
+          if (previous === undefined) delete process.env.FLATPAK_ID
+          else process.env.FLATPAK_ID = previous
+        }),
+    )
+  })
 
   it.live('gives an OpenCode lead the same skills through its environment', () =>
     withStore({ alpha: skill('alpha'), beta: skill('beta') }, { beta: ['subagents'] }, (skills) =>

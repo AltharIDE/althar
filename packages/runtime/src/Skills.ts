@@ -1,4 +1,5 @@
 import type { AgentDefinition } from '@althar/provider-adapters'
+import { atLeastVersion } from '@althar/provider-adapters'
 import {
   activeSelection,
   catalogEntries,
@@ -40,6 +41,21 @@ export interface RunSkills {
   readonly release: Effect.Effect<void, SkillStoreFailed>
 }
 
+/** The bundled harness uses its pinned capabilities; an external host CLI must meet its declared minimum. */
+export const skillsCapabilities = (
+  definition: {
+    readonly skills: { readonly capabilities: ReadonlyArray<string>; readonly externalMinimumVersion?: string } | null
+  },
+  version: string | null,
+  external: boolean,
+): ReadonlyArray<string> => {
+  const skills = definition.skills
+  if (skills === null) return []
+  return external && skills.externalMinimumVersion !== undefined && !atLeastVersion(version, skills.externalMinimumVersion)
+    ? []
+    : skills.capabilities
+}
+
 /**
  * The skills Althar selected for one run of an agent, laid out under the store's `runs/<run-id>/<agent>/` as the
  * agent's registry entry says, for that session alone; undefined for an agent with no way to be given them. Every
@@ -52,6 +68,7 @@ export const runSkills = (
   definition: Pick<AgentDefinition, 'id' | 'skills'>,
   runId: string,
   keepOutOf: ReadonlyArray<string>,
+  capabilities?: ReadonlyArray<string>,
 ): Effect.Effect<RunSkills | undefined, SkillStoreFailed> =>
   Effect.gen(function* () {
     const { skills } = definition
@@ -72,7 +89,7 @@ export const runSkills = (
       runId,
       agent: definition.id,
       selected,
-      capabilities: skills.capabilities,
+      capabilities: capabilities ?? skills.capabilities,
       keepOutOf,
       layout: skills.layout,
     })
