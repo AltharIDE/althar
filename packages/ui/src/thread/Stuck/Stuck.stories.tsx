@@ -357,6 +357,47 @@ export const FailedToStart: Story = {
   play: offers('Try again', 'Continue with another model', 'Abandon this step'),
 }
 
+/**
+ * Why its agent couldn't start, in one plain line the runtime gives (DEV-196): not installed, its servers out of reach, or
+ * else the agent's own first error line. Not signed in, or a sign-in that ended, is the signed-out card, with its button.
+ */
+export const WhyItCouldntStart: Story = {
+  render: (args) => (
+    <States
+      size="thread"
+      cells={[
+        {
+          state: 'not installed',
+          node: (
+            <HandingOn {...args} {...FailedToStart.args} what="Codex couldn't start. codex isn't installed, or isn't on this Mac's PATH." />
+          ),
+        },
+        {
+          state: 'network unreachable',
+          node: (
+            <HandingOn
+              {...args}
+              {...FailedToStart.args}
+              what="Claude Code couldn't start. The agent can’t reach its servers. Check this Mac’s connection, then try again."
+            />
+          ),
+        },
+        {
+          state: 'its own first error line',
+          node: (
+            <HandingOn
+              {...args}
+              {...FailedToStart.args}
+              what={`Codex couldn't start. The agent stopped: Error: invalid config at ~/.codex/config.toml: line 4: unknown key "modle".`}
+            />
+          ),
+        },
+        { state: 'sign-in ended', node: <HandingOn {...args} {...SignedOut.args} /> },
+      ]}
+    />
+  ),
+}
+
 /** It stopped without reporting, after a reminder: the lead is told what to do, first; reminding it again would do the same. */
 export const NoReport: Story = {
   args: {
