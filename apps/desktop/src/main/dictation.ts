@@ -49,6 +49,8 @@ export interface DictationOptions {
 
 /* The speech process goes after this long with nothing to do, and the model's memory with it. */
 const IDLE = 10 * 60_000
+/* How long Remove waits for the speech process to exit before it deletes the model anyway. */
+const EXIT_WAIT = 5_000
 
 /* The system's own settings, where it has a way to open them. */
 const SETTINGS: Partial<Record<NodeJS.Platform, Record<SettingsPane, string>>> = {
@@ -76,7 +78,12 @@ export function startDictation(options: DictationOptions) {
   let downloading = false
   /* How far the download had come, last it said: what a speech process that stopped mid-way leaves. */
   let got = 0
-  const waiting = new Map<string, { readonly resolve: (value: unknown) => void; readonly reject: (error: Error) => void }>()
+  const waiting = new Map<
+    string,
+    { readonly type: string; readonly resolve: (value: unknown) => void; readonly reject: (error: Error) => void }
+  >()
+  /* Set while the model is being removed: nothing starts a speech process or reads the model until it's done. */
+  let removing: Promise<void> | undefined
 
   const broadcast = (event: SpeechMessage) => {
     for (const window of BrowserWindow.getAllWindows())
@@ -127,13 +134,15 @@ export function startDictation(options: DictationOptions) {
     return started
   }
 
-  const ask = (type: string, extra: Record<string, unknown> = {}) =>
-    new Promise<unknown>((resolve, reject) => {
+  const ask = async (type: string, extra: Record<string, unknown> = {}) => {
+    await removing
+    return new Promise<unknown>((resolve, reject) => {
       const id = randomUUID()
-      waiting.set(id, { resolve, reject })
+      waiting.set(id, { type, resolve, reject })
       speech().postMessage({ id, type, ...extra })
       rest()
     })
+  }
 
   const microphone = (): Microphone => {
     if (options.fakeMicrophone) return 'granted'
@@ -169,6 +178,7 @@ export function startDictation(options: DictationOptions) {
 
   ipcMain.handle('althar:dictation-state', async (event) => {
     from(event)
+    await removing
     const here = await presence(join(options.models(), PARAKEET.id), PARAKEET)
     return {
       platform: process.platform,
@@ -185,6 +195,7 @@ export function startDictation(options: DictationOptions) {
   })
   ipcMain.handle('althar:dictation-download', async (event) => {
     from(event)
+    await removing
     downloading = true
     got = 0
     await ask('download')
@@ -198,19 +209,39 @@ export function startDictation(options: DictationOptions) {
   // Frees the model's space. The speech process goes first, since it holds the model open; the next dictation brings it down again.
   ipcMain.handle('althar:dictation-remove', async (event) => {
     from(event)
-    downloading = false
-    got = 0
-    clearTimeout(idle)
-    // Windows can't delete files the process still has open: wait for it to be gone.
-    const running = child
-    if (running !== undefined)
-      await new Promise<void>((done) => {
-        running.once('exit', () => done())
-        running.kill()
-      })
-    child = undefined
-    await remove(join(options.models(), PARAKEET.id))
-    broadcast({ type: 'removed' })
+    if (removing !== undefined) return removing
+    // Another window is writing down speech or getting ready to: its words would be lost.
+    for (const { type } of waiting.values())
+      if (type === 'transcribe' || type === 'prepare') throw new Error('Althar is writing down speech. Try again in a moment.')
+    const done = (async () => {
+      downloading = false
+      got = 0
+      clearTimeout(idle)
+      // Windows can't delete files the process still has open: wait for it to be gone, but not for ever.
+      const running = child
+      if (running !== undefined) {
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, EXIT_WAIT)
+          running.once('exit', () => {
+            clearTimeout(timer)
+            resolve()
+          })
+          if (!running.kill()) {
+            clearTimeout(timer)
+            resolve()
+          }
+        })
+        if (child === running) child = undefined
+      }
+      await remove(join(options.models(), PARAKEET.id))
+      broadcast({ type: 'removed' })
+    })()
+    removing = done
+    try {
+      await done
+    } finally {
+      removing = undefined
+    }
   })
   ipcMain.handle('althar:dictation-prepare', async (event) => {
     from(event)

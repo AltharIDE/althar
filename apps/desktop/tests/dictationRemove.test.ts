@@ -17,6 +17,8 @@ const electron = vi.hoisted(() => ({
   handlers: new Map<string, (event: unknown, ...args: Array<unknown>) => Promise<unknown>>(),
   children: [] as Array<unknown>,
   models: '',
+  /* Message types the fake speech process never answers. */
+  silent: new Set<string>(),
 }))
 
 vi.mock('electron', async () => {
@@ -32,7 +34,8 @@ vi.mock('electron', async () => {
         const child = Object.assign(new EventEmitter(), {
           killed: false,
           modelThere: undefined as boolean | undefined,
-          postMessage: (message: { id: string }) =>
+          postMessage: (message: { id: string; type: string }) =>
+            !electron.silent.has(message.type) &&
             queueMicrotask(() => child.emit('message', { type: 'answer', id: message.id, value: undefined })),
           kill: () => {
             child.killed = true
@@ -41,6 +44,7 @@ vi.mock('electron', async () => {
               child.modelThere = existsSync(join(electron.models, PARAKEET.id))
               child.emit('exit', 0)
             }, 20)
+            return true
           },
         })
         electron.children.push(child)
@@ -80,5 +84,41 @@ describe('removing the speech model', () => {
     await call('download')
     expect(electron.children).toHaveLength(2)
     expect(await call('state')).toMatchObject({ model: { downloading: true } })
+  })
+})
+
+describe('removing the speech model while it is in use', () => {
+  const setup = async () => {
+    const { startDictation } = await import('../src/main/dictation')
+    startDictation({ script: 'speech.js', models: () => dir, mine: () => true, fakeModel: true, fakeMicrophone: true })
+    return (name: string, ...args: Array<unknown>) => electron.handlers.get(`althar:dictation-${name}`)?.({ sender: {} }, ...args)
+  }
+
+  it('refuses while another window is writing down speech, and keeps the speech process', async () => {
+    const call = await setup()
+    const before = electron.children.length
+    electron.silent.add('transcribe')
+    const pending = call('transcribe', new Float32Array(1), 16_000)
+    await Promise.resolve()
+    await expect(call('remove')).rejects.toThrow(/writing down speech/)
+    expect((electron.children[before] as { killed: boolean }).killed).toBe(false)
+    electron.silent.delete('transcribe')
+    void pending
+  })
+
+  it('holds a new speech request until the removal is done', async () => {
+    const call = await setup()
+    mkdirSync(join(dir, PARAKEET.id), { recursive: true })
+    await call('prepare')
+    const spawned = electron.children.length
+    const removal = call('remove')
+    const prepare = call('prepare')
+    await new Promise((done) => setTimeout(done, 5))
+    // The old process is still going: nothing has started a new one yet.
+    expect(electron.children).toHaveLength(spawned)
+    await removal
+    await prepare
+    expect(electron.children).toHaveLength(spawned + 1)
+    expect(existsSync(join(dir, PARAKEET.id))).toBe(false)
   })
 })

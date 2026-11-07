@@ -41,6 +41,7 @@ const fakeDictation = (initial: DictationState, overrides: Partial<DictationHost
     cancel: vi.fn(async () => {}),
     remove: vi.fn(async () => {
       now = { ...now, model: { ...now.model, ...gone } }
+      listeners.forEach((listener) => listener({ type: 'removed' }))
     }),
     prepare: vi.fn(async () => {}),
     transcribe: vi.fn(async () => ''),
@@ -183,7 +184,7 @@ describe('Settings, Dictation: the speech model', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Remove' }))
     expect(host.dictation.remove).toHaveBeenCalledTimes(1)
-    expect(await screen.findByText(/isn’t on this computer. Dictating downloads it first/)).toBeTruthy()
+    expect(await screen.findByText(/isn’t on this Mac. Dictating downloads it first/)).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull()
   })
 
@@ -226,7 +227,7 @@ describe('Settings, Dictation: the speech model', () => {
     await screen.findByRole('button', { name: 'Remove' })
     await host.dictation.remove()
     host.send({ type: 'removed' })
-    expect(await screen.findByText(/isn’t on this computer/)).toBeTruthy()
+    expect(await screen.findByText(/isn’t on this Mac/)).toBeTruthy()
     within(document.body)
   })
 })
@@ -235,7 +236,7 @@ describe('Settings, Dictation: a download from another window', () => {
   it('shows a download that starts while Settings is open', async () => {
     const host = fakeDictation(state({}, gone))
     show(host.dictation)
-    expect(await screen.findByText(/isn’t on this computer/)).toBeTruthy()
+    expect(await screen.findByText(/isn’t on this Mac/)).toBeTruthy()
     host.set(state({}, { ...gone, got: 100_000_000, downloading: true }))
     host.send({ type: 'progress', got: 100_000_000, size: SIZE })
     expect(await screen.findByText(/Downloading Parakeet TDT 0.6B v3: 100 MB of 670 MB/)).toBeTruthy()
@@ -243,6 +244,49 @@ describe('Settings, Dictation: a download from another window', () => {
     expect(await screen.findByText(/Downloading Parakeet TDT 0.6B v3: 300 MB of 670 MB/)).toBeTruthy()
     host.send({ type: 'progress', got: 500_000_000, size: SIZE })
     expect(await screen.findByText(/Downloading Parakeet TDT 0.6B v3: 500 MB of 670 MB/)).toBeTruthy()
+  })
+})
+
+describe('Settings, Dictation: partial, loading, unreadable, and each system’s words', () => {
+  it('offers Remove for a download that stopped part-way', async () => {
+    const host = fakeDictation(state({}, { ready: false, got: 240_000_000 }))
+    show(host.dictation)
+    expect(await screen.findByText(/only partly on this Mac: 240 MB of 670 MB on disk/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    expect(host.dictation.remove).toHaveBeenCalledTimes(1)
+    expect(await screen.findByText(/isn’t on this Mac/)).toBeTruthy()
+  })
+
+  it('says nothing is unavailable while it loads', async () => {
+    const host = fakeDictation(state(), { state: vi.fn(() => new Promise<DictationState>(() => {})) })
+    show(host.dictation)
+    await Promise.resolve()
+    expect(screen.queryByText('Dictation isn’t available on this system.')).toBeNull()
+  })
+
+  it('says it could not be read, and tries again', async () => {
+    const host = fakeDictation(state(), {
+      state: vi.fn<DictationHost['state']>().mockRejectedValueOnce(new Error('no')).mockResolvedValue(state()),
+    })
+    show(host.dictation)
+    await userEvent.click(await screen.findByRole('button', { name: 'Try again' }))
+    expect(await screen.findByRole('button', { name: 'Remove' })).toBeTruthy()
+  })
+
+  it('does not call a Remove that worked a failure when the next read fails', async () => {
+    const host = fakeDictation(state())
+    show(host.dictation)
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove' }))
+    await screen.findByText(/isn’t on this Mac/)
+    expect(screen.queryByText('The speech model couldn’t be removed. Try again.')).toBeNull()
+  })
+
+  it('words Windows its own way', async () => {
+    const host = fakeDictation(state({ platform: 'win32', microphone: 'denied' }, gone))
+    show(host.dictation)
+    expect(await screen.findByRole('button', { name: 'Open Settings' })).toBeTruthy()
+    expect(screen.getByText(/isn’t on this PC/)).toBeTruthy()
+    expect(screen.getByText(/access for desktop apps/)).toBeTruthy()
   })
 })
 

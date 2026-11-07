@@ -719,7 +719,14 @@ function EditorSection() {
 /** Which microphone dictation hears, whether the system lets it, and the speech model on disk, with Remove. */
 function DictationSection() {
   const dictation = useDictationSettings()
-  if (dictation === null) return <p className={s.quiet}>{text.noDictation}</p>
+  if (dictation.kind === 'none') return <p className={s.quiet}>{text.noDictation}</p>
+  if (dictation.kind === 'loading') return null
+  if (dictation.kind === 'unreadable')
+    return (
+      <p className={s.quiet}>
+        {text.dictationUnreadable} <LinkButton onClick={dictation.retry}>{text.tryAgain}</LinkButton>
+      </p>
+    )
   return (
     <>
       <DictationSettings
@@ -731,6 +738,7 @@ function DictationSection() {
         model={dictation.model}
         onRemove={dictation.remove}
         removing={dictation.removing}
+        text={dictation.text}
       />
       <Failed when={dictation.failed}>{text.removeFailed}</Failed>
     </>

@@ -91,6 +91,8 @@ export const text = {
   noEditors: `No editor found on ${device.this}. Files open in ${device.files}.`,
   /* Dictation. */
   noDictation: 'Dictation isn’t available on this system.',
+  dictationUnreadable: 'Dictation’s settings couldn’t be read.',
+  tryAgain: 'Try again',
   removeFailed: 'The speech model couldn’t be removed. Try again.',
   /* What couldn't be kept. */
   failed: 'That couldn’t be kept. Try again.',

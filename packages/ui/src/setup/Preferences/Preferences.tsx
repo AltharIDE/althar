@@ -451,6 +451,8 @@ export interface DictationSettingsText {
   /** Where the model isn't on the computer: what dictating does. */
   absent: (name: string, size: string) => string
   present: (name: string, onDisk: string) => string
+  /** A download that stopped part-way left some of it on disk. */
+  partial: (name: string, onDisk: string, size: string) => string
   downloading: (name: string, got: string, size: string) => string
 }
 
@@ -470,6 +472,7 @@ export const dictationSettingsText: DictationSettingsText = {
   removeNote: 'Removing it frees the space. The next time you dictate, Althar downloads it again.',
   absent: (name, size) => `${name} isn’t on this computer. Dictating downloads it first (${size}).`,
   present: (name, onDisk) => `${name}, ${onDisk} on disk.`,
+  partial: (name, onDisk, size) => `${name} is only partly here: ${onDisk} of ${size} on disk.`,
   downloading: (name, got, size) => `Downloading ${name}: ${got} of ${size}.`,
 }
 
@@ -486,7 +489,7 @@ export interface DictationSettingsProps {
   onOpenSettings?: () => void
   model: {
     name: string
-    state: 'present' | 'absent' | 'downloading'
+    state: 'present' | 'partial' | 'absent' | 'downloading'
     /** What it takes on disk, as words: 670 MB. */
     onDisk: string
     /** What the whole model is, as words. */
@@ -519,9 +522,11 @@ export function DictationSettings({
   const modelNote =
     model.state === 'present'
       ? t.present(model.name, model.onDisk)
-      : model.state === 'downloading'
-        ? t.downloading(model.name, model.got ?? model.onDisk, model.size)
-        : t.absent(model.name, model.size)
+      : model.state === 'partial'
+        ? t.partial(model.name, model.onDisk, model.size)
+        : model.state === 'downloading'
+          ? t.downloading(model.name, model.got ?? model.onDisk, model.size)
+          : t.absent(model.name, model.size)
   return (
     <SettingList>
       <SettingRow title={t.microphone} note={t.microphoneNote} glyph={<Icon name="mic" size={15} />}>
@@ -556,9 +561,12 @@ export function DictationSettings({
           </span>
         )}
       </SettingRow>
-      <SettingRow title={t.model} note={model.state === 'present' ? `${modelNote} ${t.removeNote}` : modelNote}>
+      <SettingRow
+        title={t.model}
+        note={model.state === 'present' || model.state === 'partial' ? `${modelNote} ${t.removeNote}` : modelNote}
+      >
         {() =>
-          model.state === 'present' ? (
+          model.state === 'present' || model.state === 'partial' ? (
             <Button size="small" variant="danger" busy={removing} onClick={onRemove}>
               {t.remove}
             </Button>
