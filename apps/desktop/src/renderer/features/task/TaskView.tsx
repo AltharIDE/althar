@@ -1,6 +1,7 @@
 import { EarlierTurns } from '../../shared/EarlierTurns'
+import { ThreadWaysContext } from '../../shared/ThreadBlocks'
 import { useNavigate } from '@tanstack/react-router'
-import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import type { AttentionRequest, TaskAction, ThreadSnapshot } from '@althar/contracts'
 import {
@@ -448,6 +449,10 @@ export function TaskView({
   // The page belongs to the conversation: Outputs and Graph leave it out, and coming back brings it as it was (ADR-100).
   const conversation = face === null || face === 'talk' || (face === 'graph' && (model.snapshot?.task.graph?.length ?? 0) === 0)
   // What the thread's parts open: a picture in the lightbox, a document or a file the lead names, or a page, beside the thread.
+  const ways = useMemo(
+    () => ({ ...(onRules === undefined ? {} : { onRules }), ...(onSignIn === undefined ? {} : { onSignIn }) }),
+    [onRules, onSignIn],
+  )
   const host = useThreadHost(
     true,
     { threadId: model.snapshot?.threadId ?? null, taskId: model.snapshot?.task.id ?? null },
@@ -1208,90 +1213,92 @@ export function TaskView({
                   loading={model.loadingEarlier}
                 />
                 <ThreadShellProvider value={host.shell}>
-                  <TaskThread
-                    rounds={blocks}
-                    versionOf={versionOf}
-                    settledOf={settledOf}
-                    reviewing={reviewing}
-                    threadId={snapshot.threadId}
-                    worktree={snapshot.task.worktree}
-                    {...(openFile === undefined ? {} : { openFile })}
-                    session={session}
-                    retryable={snapshot.retryable}
-                    project={snapshot.project.name}
-                    // A failed turn is tried again here, unless its step waits on the person, whose call has its ways on.
-                    {...(busy || stuckOpen ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
-                    {...(onSignIn === undefined || stuckOpen ? {} : { onSignIn })}
-                    onPassOn={(words) => void model.send(words)}
-                    {...(onOpenTask === undefined ? {} : { onOpenTask })}
-                    onAnswerQuestion={model.answerQuestion}
-                    {...(asking == null ? {} : { focusQuestion: asking })}
-                    run={(run) => (
-                      <RunOf
-                        run={run}
-                        now={now}
-                        onStop={(id) => void model.stopLaunch(id)}
-                        onRunAgain={(_taskId, runnableId) => void model.runProject(runnableId)}
-                      />
-                    )}
-                    // An issue the lead drafted is filed from its card, only when the person says.
-                    draft={(draft) => (
-                      <DraftCard
-                        draft={draft}
-                        actions={{
-                          onFile: (draftId) => void model.fileIssueDraft(draftId),
-                          onChange: model.changeIssueDraft,
-                          onDiscard: (draftId) => void model.discardIssueDraft(draftId),
-                          onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
-                        }}
-                      />
-                    )}
-                    // Changes to its issue its lead or Althar proposed apply from their card, only when the person says.
-                    changes={(changes) => (
-                      <ChangesCard
-                        changes={changes}
-                        actions={{
-                          onApply: (changesId) => void model.applyIssueChanges(changesId),
-                          onDiscard: (changesId) => void model.discardIssueChanges(changesId),
-                          onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
-                        }}
-                      />
-                    )}
-                    // A review the lead drafted is posted from its card, only when the person says.
-                    review={(draft) => (
-                      <ReviewCard
-                        draft={draft}
-                        actions={{
-                          onChange: model.changeReview,
-                          onPost: (draftId) => void model.postReview(draftId),
-                          onPostFromNow: (draftId, automationId) => void model.postReviewsFromNow(draftId, automationId),
-                          onDiscard: (draftId) => void model.discardReview(draftId),
-                        }}
-                      />
-                    )}
-                    // A small change's card: Merge as the header's, and Make it a full task (README section 6).
-                    smallChange={(card) => (
-                      <SmallChangeOf
-                        card={card}
-                        named={named}
-                        busy={model.pending}
-                        onMerge={(change) => void model.accept([change])}
-                        {...(onOpenTask === undefined ? {} : { onOpen: onOpenTask })}
-                      />
-                    )}
-                    // Auto's line on moving the lead to a lighter model, with Keep and Undo (README section 7).
-                    modelMove={(move, itemId) => <ModelMoveOf move={move} itemId={itemId} named={named} />}
-                    // A push the lead asked for is pushed as the outputs push: up to the head it shows.
-                    push={(request, at) => (
-                      <PushRequestOf
-                        request={request}
-                        at={at}
-                        {...(lead.name === '' ? {} : { by: lead.name })}
-                        pushing={model.pending}
-                        onPush={(head, url) => void model.push(head, url)}
-                      />
-                    )}
-                  />
+                  <ThreadWaysContext.Provider value={ways}>
+                    <TaskThread
+                      rounds={blocks}
+                      versionOf={versionOf}
+                      settledOf={settledOf}
+                      reviewing={reviewing}
+                      threadId={snapshot.threadId}
+                      worktree={snapshot.task.worktree}
+                      {...(openFile === undefined ? {} : { openFile })}
+                      session={session}
+                      retryable={snapshot.retryable}
+                      project={snapshot.project.name}
+                      // A failed turn is tried again here, unless its step waits on the person, whose call has its ways on.
+                      {...(busy || stuckOpen ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
+                      {...(onSignIn === undefined || stuckOpen ? {} : { onSignIn })}
+                      onPassOn={(words) => void model.send(words)}
+                      {...(onOpenTask === undefined ? {} : { onOpenTask })}
+                      onAnswerQuestion={model.answerQuestion}
+                      {...(asking == null ? {} : { focusQuestion: asking })}
+                      run={(run) => (
+                        <RunOf
+                          run={run}
+                          now={now}
+                          onStop={(id) => void model.stopLaunch(id)}
+                          onRunAgain={(_taskId, runnableId) => void model.runProject(runnableId)}
+                        />
+                      )}
+                      // An issue the lead drafted is filed from its card, only when the person says.
+                      draft={(draft) => (
+                        <DraftCard
+                          draft={draft}
+                          actions={{
+                            onFile: (draftId) => void model.fileIssueDraft(draftId),
+                            onChange: model.changeIssueDraft,
+                            onDiscard: (draftId) => void model.discardIssueDraft(draftId),
+                            onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
+                          }}
+                        />
+                      )}
+                      // Changes to its issue its lead or Althar proposed apply from their card, only when the person says.
+                      changes={(changes) => (
+                        <ChangesCard
+                          changes={changes}
+                          actions={{
+                            onApply: (changesId) => void model.applyIssueChanges(changesId),
+                            onDiscard: (changesId) => void model.discardIssueChanges(changesId),
+                            onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
+                          }}
+                        />
+                      )}
+                      // A review the lead drafted is posted from its card, only when the person says.
+                      review={(draft) => (
+                        <ReviewCard
+                          draft={draft}
+                          actions={{
+                            onChange: model.changeReview,
+                            onPost: (draftId) => void model.postReview(draftId),
+                            onPostFromNow: (draftId, automationId) => void model.postReviewsFromNow(draftId, automationId),
+                            onDiscard: (draftId) => void model.discardReview(draftId),
+                          }}
+                        />
+                      )}
+                      // A small change's card: Merge as the header's, and Make it a full task (README section 6).
+                      smallChange={(card) => (
+                        <SmallChangeOf
+                          card={card}
+                          named={named}
+                          busy={model.pending}
+                          onMerge={(change) => void model.accept([change])}
+                          {...(onOpenTask === undefined ? {} : { onOpen: onOpenTask })}
+                        />
+                      )}
+                      // Auto's line on moving the lead to a lighter model, with Keep and Undo (README section 7).
+                      modelMove={(move, itemId) => <ModelMoveOf move={move} itemId={itemId} named={named} />}
+                      // A push the lead asked for is pushed as the outputs push: up to the head it shows.
+                      push={(request, at) => (
+                        <PushRequestOf
+                          request={request}
+                          at={at}
+                          {...(lead.name === '' ? {} : { by: lead.name })}
+                          pushing={model.pending}
+                          onPush={(head, url) => void model.push(head, url)}
+                        />
+                      )}
+                    />
+                  </ThreadWaysContext.Provider>
                 </ThreadShellProvider>
                 {waitingIssues.length > 1 && (
                   <div className={s.fileAll}>

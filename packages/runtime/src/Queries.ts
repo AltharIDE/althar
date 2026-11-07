@@ -364,6 +364,17 @@ const checkoutTitle = (payload: unknown) =>
     ? `${text(payload, 'repository') || 'Local'} is on another branch`
     : `${text(payload, 'repository') || 'Local'} has uncommitted changes`
 
+/** Where a call that waited reached the person besides the window, and whether its lead was set aside to go on (docs/decisions/097). */
+const reachedOf = (payload: unknown) => {
+  const reached = field(payload, 'reached')
+  const device = text(reached, 'device')
+  const at = text(reached, 'at')
+  return {
+    ...(device === '' || at === '' ? {} : { reached: { device, at } }),
+    ...(field(payload, 'setAside') === true ? { setAside: true } : {}),
+  }
+}
+
 /** A call that waits on the person, as a screen shows it: what was asked, why it waits, and, for a step that needs them, which and why. */
 const callOf = (request: {
   readonly id: string
@@ -397,6 +408,7 @@ const callOf = (request: {
     ...(command === null ? {} : { label: shortCommand(command) }),
     // A permission the rules keep for the person whatever they let through: no "always allow" can answer it.
     ...(request.kind === 'permission' && field(payload, 'held') === true ? { held: true } : {}),
+    ...reachedOf(payload),
     stuck: request.kind === 'stuck' ? stuckOf(payload) : null,
     // What Althar asks before a Local task takes a checkout (ADR-091).
     ...Option.match(request.kind === 'checkout' ? Schema.decodeUnknownOption(CheckoutAsk)(payload) : Option.none(), {
