@@ -6,7 +6,7 @@ import { agentServers } from '@althar/provider-adapters'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { commandEnv, runIn } from '../src/agentTools'
-import { readRecord, type SyncIo, turnOn } from '../src/mcpSync'
+import { readRecord, type SyncIo, turnOff, turnOn } from '../src/mcpSync'
 import { homeWith } from './agentHome'
 
 /*
@@ -24,10 +24,12 @@ const fakeBin = () => {
   writeFileSync(
     join(bin, 'claude'),
     script(`
-const [, , , , , , name, json] = process.argv
+const [, , , verb, , , name, json] = process.argv
 const file = process.env.CLAUDE_CONFIG_DIR ? path.join(process.env.CLAUDE_CONFIG_DIR, '.claude.json') : path.join(process.env.HOME, '.claude.json')
 const config = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {}
-config.mcpServers = { ...config.mcpServers, [name]: JSON.parse(json) }
+config.mcpServers = { ...config.mcpServers }
+if (verb === 'remove') delete config.mcpServers[name]
+else config.mcpServers[name] = JSON.parse(json)
 fs.mkdirSync(path.dirname(file), { recursive: true })
 fs.writeFileSync(file, JSON.stringify(config))`),
   )
@@ -110,5 +112,35 @@ describe('an agent’s command, as sync runs it', () => {
     expect(readdirSync(elsewhere).sort()).toEqual(['codex'])
     expect(readdirSync(join(elsewhere, 'codex'))).toEqual([])
     expect(existsSync(join(elsewhere, 'claude'))).toBe(false)
+  })
+  it('reads, backs up and takes back Claude Code’s servers where a configured CLAUDE_CONFIG_DIR keeps them, as its command writes', async () => {
+    const home = homeWith({ codex: { mcp_servers: { fromcodex: { command: 'two', args: [] } } } })
+    const claudeDir = join(home, 'claude-config')
+    mkdirSync(claudeDir)
+    writeFileSync(
+      join(claudeDir, '.claude.json'),
+      JSON.stringify({ mcpServers: { fromclaude: { type: 'stdio', command: 'one', args: [] } } }),
+    )
+    const env = { PATH: fakeBin(), CLAUDE_CONFIG_DIR: claudeDir }
+    const io: SyncIo = {
+      home: { homeDir: home, env },
+      folder: join(home, 'profile'),
+      run: runIn(home, env),
+      now: () => '2026-11-07T18:00:00.000Z',
+    }
+    expect(agentServers('claude', { homeDir: home, env }).servers.map((one) => one.name)).toEqual(['fromclaude'])
+    const { errors } = await turnOn(io)
+    expect(errors).toEqual([])
+    expect(
+      agentServers('claude', { homeDir: home, env })
+        .servers.map((one) => one.name)
+        .sort(),
+    ).toEqual(['fromclaude', 'fromcodex'])
+    // Nothing in the home's own file, and the copy kept is of the configured one.
+    expect(existsSync(join(home, '.claude.json'))).toBe(false)
+    expect(readRecord(io).backups.claude).toMatch(/claude-/)
+    const off = await turnOff(io, true)
+    expect(off.errors).toEqual([])
+    expect(agentServers('claude', { homeDir: home, env }).servers.map((one) => one.name)).toEqual(['fromclaude'])
   })
 })
