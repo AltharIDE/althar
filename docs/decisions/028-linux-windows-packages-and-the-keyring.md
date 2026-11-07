@@ -3,6 +3,9 @@
 - **Status:** Accepted
 - **Date:** 2026-10-10
 - **Owner:** Repository maintainers
+- **Proposed amendment:** [ADR-101](101-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
+  adds service-managed sealing for a headless host without Electron or a
+  desktop keyring. The desktop's safeStorage and keyring rules stay.
 - **Context:** Althar was a Mac app. Off a Mac it has no system title bar and
   no system menu bar, several ways to install exist, Linux sign-ins need a
   keyring Electron does not always find, and a Flatpak grants the app a broad

@@ -2,6 +2,10 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-07
+- **Proposed amendment:** [ADR-101](101-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
+  forwards remote runs into the client-side page and sends comments back
+  with their logical run and snapshot. Page isolation stays; this does not
+  share the worker's browser session.
 - **Owner:** Desktop app maintainers
 - **Reopens:** [ADR-023](023-althar-runs-the-project.md)'s passed-over
   alternative, a browser of Althar's own for what runs. It places it as
