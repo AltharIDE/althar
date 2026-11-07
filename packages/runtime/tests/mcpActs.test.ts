@@ -115,4 +115,17 @@ describe('MCP calls', () => {
     assert.deepStrictEqual(irreversibleOf(forced, everything)?.through, { command: 'git push --force origin main' })
     assert.isUndefined(irreversibleOf(call('mcp__github__get_pull_request', { pull_number: 1 }), everything))
   })
+
+  it('says each kind of command that can’t be undone in its own words, and a merge through a server with no words to post', () => {
+    const card = (command: string) => {
+      const found = irreversibleOf({ ...call(command, { command }), kind: 'execute' }, everything)
+      return found === undefined ? undefined : `${found.kind}: ${found.verb}`
+    }
+    assert.strictEqual(card('git push origin main'), 'history: Push to main')
+    assert.strictEqual(card('git push origin --delete feature/other'), 'history: Delete it')
+    const merge = irreversibleOf(call('mcp__github__merge_pull_request', { pull_number: 635 }), everything)
+    assert.strictEqual(merge?.kind, 'publish')
+    assert.isUndefined(merge?.words)
+    assert.deepStrictEqual(merge?.through, { server: 'github', tool: 'merge_pull_request' })
+  })
 })
