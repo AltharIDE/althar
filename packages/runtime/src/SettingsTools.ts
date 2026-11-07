@@ -792,9 +792,9 @@ export class SettingsTools extends Context.Service<
               if (change['reviewSealStyle'] !== undefined) yield* setReviewSealStyle(change['reviewSealStyle'] as typeof SealStyle.Type)
             }),
         },
-        ...(['notifications', 'appearance', 'editor'] as const).map((id): Section => ({
+        ...(['notifications', 'appearance', 'editor', 'browser'] as const).map((id): Section => ({
           id: `althar/${id}`,
-          title: { notifications: 'Notifications', appearance: 'Appearance', editor: 'Editor' }[id],
+          title: { notifications: 'Notifications', appearance: 'Appearance', editor: 'Editor', browser: 'Browser' }[id],
           scope: 'althar',
           note: 'Kept in the window on this computer: the person sets these there.',
           fields: {},
@@ -1328,7 +1328,7 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   setCoAuthor: 'althar/reviews.coAuthor',
   setReviewSeal: 'althar/reviews.reviewSeal',
   setReviewSealStyle: 'althar/reviews.reviewSealStyle',
-  // althar/notifications, althar/appearance, althar/editor, althar/about
+  // althar/notifications, althar/appearance, althar/editor, althar/browser, althar/about
   notifyCalls: 'window: kept in the window on this computer',
   notifyReady: 'window: kept in the window on this computer',
   notifyStopped: 'window: kept in the window on this computer',
@@ -1338,6 +1338,8 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   appearance: 'window: kept in the window on this computer',
   accent: 'window: kept in the window on this computer',
   editor: 'window: kept in the window on this computer',
+  browserLinks: 'window: kept in the window on this computer',
+  browserCookies: 'window: kept in the window on this computer',
   usageData: 'window: kept in the window on this computer',
   crashReports: 'window: kept in the window on this computer',
   openInEditor: 'window: opens a file in the person’s editor; no setting',

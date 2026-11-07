@@ -24,6 +24,7 @@ import { addressOf } from '../../shared/running'
 import { useWorkToward } from '../../shared/useWorkToward'
 import { ago, running } from '../../shared/time'
 import { type RunsModel, useRuns } from './useRuns'
+import { usePageOpener } from '../browser/opener'
 
 /*
  * What a project runs, from the top of its screen or a task's bar (ADR-090):
@@ -557,6 +558,7 @@ export function Runs({
         )
       : text.picks)
 
+  const opener = usePageOpener()
   const live = (runnableId: string) =>
     launches.find((launch) => launch.runnableId === runnableId && runsAt(launch, place) && launch.ended === null)
   const ended = (runnableId: string) =>
@@ -611,7 +613,8 @@ export function Runs({
         }}
         onOpen={(id) => {
           const url = live(id)?.url
-          if (url != null) window.open(url, '_blank')
+          // Beside the conversation on screen, where it has one; else in the person's browser.
+          if (url != null) opener.run(url)
         }}
         onClear={(id) => {
           const key = attemptKey(place, id)

@@ -425,9 +425,9 @@ describe('a project’s rules', () => {
     expect(says('Finished')).toContain(
       'A finished task pushes its branch alone, named althar/MER-128-fix-login. A pull request opened from it is titled Fix login',
     )
-    await userEvent.click(screen.getByRole('button', { name: 'moves to the next agent free' }))
+    await userEvent.click(screen.getByRole('button', { name: 'moves to the strongest model with usage left' }))
     expect(screen.getAllByRole('menuitemradio').map((item) => item.textContent)).toEqual([
-      expect.stringContaining('Move the work to the next agent free'),
+      expect.stringContaining('Move to the strongest model with usage left'),
       expect.stringContaining('Wait for the reset'),
       expect.stringContaining('Ask me'),
     ])
@@ -439,7 +439,7 @@ describe('a project’s rules', () => {
     await choose(screen.getByRole('button', { name: 'waits for the reset' }), 'Ask me')
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', usageLimit: 'ask' }))
     expect(says('Limits')).toBe(
-      'When an account runs out, the work waits for you to move it to a model that’s free, or to wait for the reset.',
+      'When an account runs out, the work waits for you to move it to a model with usage left, or to wait for the reset.',
     )
   })
 
@@ -454,13 +454,13 @@ describe('a project’s rules', () => {
     })
     withServices(<Rules />, client)
     await waitFor(() =>
-      expect(says('Limits')).toBe('When an account runs out, the work moves to the next agent free. Codex works on main.'),
+      expect(says('Limits')).toBe('When an account runs out, the work moves to the strongest model with usage left. Codex works on main.'),
     )
     await userEvent.click(within(sentence('Limits')).getByRole('button', { name: 'main' }))
     await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Go on with the next' }))
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', rotateAccounts: true }))
     expect(says('Limits')).toBe(
-      'When an account runs out, the work goes on with the agent’s next account, then moves to the next agent free. Codex works on main, then work.',
+      'When an account runs out, the work goes on with the agent’s next account, then moves to the strongest model with usage left. Codex works on main, then work.',
     )
     await userEvent.click(within(sentence('Limits')).getByRole('button', { name: 'main, then work' }))
     await userEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'main' }))

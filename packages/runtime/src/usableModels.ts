@@ -7,6 +7,7 @@ import { Installs, isInstalled } from './Installs'
 import { Limits, NEARLY_OUT, type Room, roomWords } from './Limits'
 import { type ModelFact, ModelFacts } from './ModelFacts'
 import { Models } from './Models'
+import { makerOf } from './modelMaker'
 import { SignIns } from './SignIns'
 
 /*
@@ -48,30 +49,6 @@ export interface UsableModel {
   readonly fact: ModelFact | null
   /** The ways to it, the best first. */
   readonly routes: ReadonlyArray<Route>
-}
-
-/** Makers by the first part of the list's ids. */
-const MAKERS: Readonly<Record<string, string>> = {
-  anthropic: 'Anthropic',
-  openai: 'OpenAI',
-  google: 'Google',
-  'z-ai': 'Z.ai',
-  deepseek: 'DeepSeek',
-  'x-ai': 'xAI',
-  moonshotai: 'Moonshot',
-  qwen: 'Alibaba',
-  mistralai: 'Mistral',
-  minimax: 'MiniMax',
-  'meta-llama': 'Meta',
-}
-
-/** An agent's own maker, for a model the list doesn't know. */
-const AGENT_MAKERS: Readonly<Record<string, string>> = { 'claude-code': 'Anthropic', codex: 'OpenAI' }
-
-const makerOf = (fact: ModelFact | null, agentId: string): string | null => {
-  if (fact === null) return AGENT_MAKERS[agentId] ?? null
-  const prefix = fact.slug.slice(0, fact.slug.indexOf('/'))
-  return MAKERS[prefix] ?? (prefix === '' ? null : `${prefix.charAt(0).toUpperCase()}${prefix.slice(1)}`)
 }
 
 /** The models usable now, by maker, the highest scoring first in each. */
@@ -129,7 +106,7 @@ export const usableModels = (projectId?: string) =>
           ...(refusedProvider === undefined ? {} : { refusedProvider }),
         }
         const found = byKey.get(key)
-        if (found === undefined) byKey.set(key, { name, maker: makerOf(fact, agent.id), fact, routes: [route] })
+        if (found === undefined) byKey.set(key, { name, maker: makerOf(fact, agent.id, model), fact, routes: [route] })
         else found.routes.push(route)
       }
     }

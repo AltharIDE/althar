@@ -284,7 +284,7 @@ where no sandbox holds (its install runs outside its sandbox, through
 reviewer running tests and builds, which phase 4 now lists with the review
 steps; the per-task Allow everything switch, which stays the person's
 (it loosens what asks); the settings the window keeps on this computer
-(Notifications, Appearance, Editor, About's usage data and crash reports,
+(Notifications, Appearance, Editor, Browser, About's usage data and crash reports,
 and This Mac's keep-awake, load and login switches), which `read_settings`
 names as the person's. `SettingsTools.SCREEN_CHANGES` names every change a
 Settings screen makes with the setting or tool agents use for it, or why it

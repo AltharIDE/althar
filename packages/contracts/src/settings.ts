@@ -19,6 +19,7 @@ export const SETTINGS_SECTIONS = [
   'notifications',
   'appearance',
   'editor',
+  'browser',
   'about',
 ] as const
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]

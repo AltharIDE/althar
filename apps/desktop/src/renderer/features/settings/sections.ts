@@ -8,7 +8,7 @@ import { device } from '../../shared/device'
  * down its side and its address names them: the agents and the code hosts
  * Althar works with, and the skills the agents are given; then its own ways (work on this computer, how long it
  * goes on alone, what a new project starts with, reviews and pull requests,
- * notifications, how it looks, the editor); then which
+ * notifications, how it looks, the editor, the pages beside conversations); then which
  * Althar this is. A setting to come goes in the section it is about, and a
  * section to come between those it sits among.
  */
@@ -27,7 +27,7 @@ export const FIRST_SECTION: Section = 'agents'
 /** The sections in their groups, a little apart down the side. */
 export const GROUPS: ReadonlyArray<ReadonlyArray<Section>> = [
   ['agents', 'skills', 'code-hosts'],
-  ['this-mac', 'plans-and-reviews', 'new-projects', 'reviews', 'notifications', 'appearance', 'editor'],
+  ['this-mac', 'plans-and-reviews', 'new-projects', 'reviews', 'notifications', 'appearance', 'editor', 'browser'],
   ['about'],
 ]
 
@@ -42,5 +42,6 @@ export const sectionText: Readonly<Record<Section, { readonly title: string; rea
   notifications: { title: 'Notifications', icon: 'bell' },
   appearance: { title: 'Appearance', icon: 'image' },
   editor: { title: 'Editor', icon: 'file' },
+  browser: { title: 'Browser', icon: 'globe' },
   about: { title: 'About Althar', icon: 'down' },
 }
