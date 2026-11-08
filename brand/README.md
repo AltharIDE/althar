@@ -16,8 +16,9 @@ The mark is the section through an architect's triangular scale ruler, bored thr
 | [`export/app-icon`](export/app-icon) | The six icons Settings offers, and the `.icns` the packaged app wears | SVG; PNG at 1024; `.icns` |
 | [`export/emoji`](export/emoji) | The mark on its cobalt tile, and the two signals as dots: cobalt for work running now, violet for something that needs a person | SVG; PNG at 128, for Slack and Discord |
 | [`export/web`](export/web) | The favicon kit: SVG, `.ico`, Apple touch icon, and the 192 and 512 icons | |
-| [`export/screenshots`](export/screenshots) | Screens of the app on the demo projects, at twice their size: four whole screens at 2880 × 1800, and the coordinator's plan and a review cut to their own box. In [`framed/`](export/screenshots/framed), each as a window on the Aurora wallpaper at night, for the README and posts | PNG; JPEG framed |
+| [`export/screenshots`](export/screenshots) | Screens of the app on the demo projects, at twice their size: whole screens (a project's home, the home, the board, project rules, the first run), and pieces cut to their own box (the coordinator's plan, a task's graph, dictation in a composer, a review). In [`framed/`](export/screenshots/framed), each as a window on the Aurora wallpaper at night, for the README and posts | PNG; JPEG framed |
 | [`export/reels`](export/reels) | Short loops of the app on the demo projects, for the README: the island dropping open, and its details (the launch, agents and accounts, the app icon, the home at rest) | GIF |
+| [`export/drawings`](export/drawings) | The landing page's feature drawings (accounts in turn, work that starts itself, conflicts settled, worktrees, workspaces), each still, at 1600 × 1000, light and `-dark`, for the README | JPEG |
 | [`export/crew`](export/crew) | The crew, one figure each: project, coordinator, task, lead and a step (the reviewer). They blink and fidget, in an `<img>` too. The `-dark` copies stand in a pool of paper light, for dark pages. Drawn by the site's docs figures, not this package: `bun apps/site/scripts/figures-svg.ts brand/export/crew` | SVG |
 | [`export/palette`](export/palette) | The colours, with what each is for | JSON |
 
@@ -34,11 +35,12 @@ Use the 1024 square wherever a place takes one, and the smaller sizes where it a
 
 ### Banners
 
-All six, and the printed avatar, are the README's printed look: two inks on paper stock, the mark as a halftone, the name off the bottom edge. They differ in how they arrange it for their shape.
+All seven, and the printed avatar, are the README's printed look: two inks on paper stock, the mark as a halftone, the name off the bottom edge. They differ in how they arrange it for their shape.
 
 | File | Size | Where |
 | --- | --- | --- |
-| `readme-header.png` | 2560 × 800 | The repository README |
+| `readme-header.png` | 2560 × 800 | The repository README, on a light page. Its lines are the site's hero |
+| `readme-header-ink.png` | 2560 × 800 | The same on a dark page: light inks on a dark stock |
 | `github-social-preview.png` | 1280 × 640 | GitHub's social preview, in the repository's settings |
 | `og-default.png` | 1200 × 630 | Open Graph and Twitter card, for any page without a card of its own |
 | `x-header.png` | 1500 × 500 | X profile header |
@@ -85,10 +87,11 @@ bun --filter @althar/brand export:banners     # just the banners and the printed
 bun --filter @althar/brand export:wallpapers  # just the wallpapers
 bun --filter @althar/brand export:screenshots # the screenshots (builds the UI package's Storybook first if it isn't built)
 bun --filter @althar/brand export:reels       # the reels, recorded from the same Storybook; needs ffmpeg
+bun --filter @althar/brand export:drawings    # the landing page's feature drawings, from apps/site, light and dark
 ```
 
 Change the drawing, run the export, and commit what it writes: `bun run test` fails while `export/` doesn't match the code. It also fails if a copy of the mark elsewhere in the repository (the UI package's Logo, a favicon) stops matching [`src/geometry.ts`](src/geometry.ts), if the colours stop matching the interface's, or if the app icons differ from the desktop app's.
 
-The banners, the printed avatar, the wallpapers and the screenshots are drawn in a browser, so they are not byte-for-byte reproducible between machines; the rest is. Draw the wallpapers again when the launch's light or dots change.
+The banners, the printed avatar, the wallpapers, the screenshots, the reels and the landing page's drawings are drawn in a browser, so they are not byte-for-byte reproducible between machines; the rest is. Draw the wallpapers again when the launch's light or dots change.
 
-Screenshots and reels show the app as it is when they are taken. Take them again when a screen changes, and before a launch.
+No test checks the screenshots, the reels or the drawings against what they show: they show the app, and the landing page's drawings, as they were when taken. Take the screenshots and reels again when a screen changes, and before a launch, and draw the drawings again (`export:drawings`) when one in `apps/site` changes.

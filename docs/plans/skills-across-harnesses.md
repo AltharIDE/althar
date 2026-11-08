@@ -1,6 +1,6 @@
 # Skills across harnesses: shared defaults, installs, and repository boundaries
 
-**Status:** Partly built; what landed and what didn't is under [Implementation status](#implementation-status). Decisions: [ADR-094](../decisions/094-skills-one-store-a-curated-catalog.md), [ADR-095](../decisions/095-skill-and-openspec-files-stay-off-the-repository.md)
+**Status:** Partly built; what landed and what didn't is under [Implementation status](#implementation-status). Decisions: [ADR-094](../decisions/the-persons-setup.md#skills), [ADR-095](../decisions/the-persons-setup.md#skill-and-openspec-files-in-a-change)
 **Research checked:** 2026-10-14
 **Upstream baseline:** `upstream/main` at `818df85e35ce4aa704334ffd846878750a30702c`
 
@@ -556,7 +556,7 @@ checks and the harness permission rules remain the enforcement.
      reject-by-default frontmatter and subtree-only install rules, and the
      repository boundary (default-off write, OpenSpec and push settings).
      Possibly a second ADR for the repository boundary alone, since it
-     amends [ADR-013](../decisions/013-project-rules.md) project rules.
+     amends [ADR-013](../decisions/what-agents-may-do.md#the-persons-rules) project rules.
    - **Docs:** update `docs/architecture/06-integrations-and-skills.md` (the
      skills section) and `docs/architecture/07-persistence-security-and-cloud.md`
      (store, trust, the update-check data); the `docs/decisions/README.md`
@@ -656,9 +656,9 @@ checks and the harness permission rules remain the enforcement.
   each a new revision of the project's rules (`SetProjectRules`'s
   `repositoryFiles`). A push held back for them names the switches there
   that are off for what it held back.
-- **ADRs (2026-10-18).** [ADR-094](../decisions/094-skills-one-store-a-curated-catalog.md)
+- **ADRs (2026-10-18).** [ADR-094](../decisions/the-persons-setup.md#skills)
   (the store, the catalog, delivery per session) and
-  [ADR-095](../decisions/095-skill-and-openspec-files-stay-off-the-repository.md)
+  [ADR-095](../decisions/the-persons-setup.md#skill-and-openspec-files-in-a-change)
   (the repository boundary, amending ADR-013 and ADR-016).
 
 **Not yet:**
