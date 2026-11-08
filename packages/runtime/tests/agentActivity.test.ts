@@ -150,7 +150,10 @@ describe('what an agent does beyond the repository, in the thread', () => {
       yield* record.record({ _tag: 'Compaction', compactionId: 'c2', status: 'in_progress' })
       yield* record.record({ _tag: 'Compaction', compactionId: 'c2', status: 'completed', summary: 'x'.repeat(SUMMARY_KEPT + 10) })
       const second = (yield* compacted())[1]
-      assert.strictEqual(String((read('notice', second)?.['compaction'] as Record<string, unknown>)['summary']).length, SUMMARY_KEPT)
+      assert.strictEqual(
+        String((read('notice', second)?.['compaction'] as Record<string, unknown> | undefined)?.['summary']).length,
+        SUMMARY_KEPT,
+      )
 
       yield* record.record({ _tag: 'Compaction', compactionId: 'c3', status: 'failed', error: 'Prompt too long' })
       const third = (yield* compacted())[2]
