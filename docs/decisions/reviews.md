@@ -7,16 +7,16 @@ comment, and Outputs. How review steps run is in
 [05](../architecture/05-workflow-engine.md); reviewing someone else's pull
 request is in [06](../architecture/06-integrations-and-skills.md).
 
-**Replaces:** [ADR-076](archive/076-a-pull-request-shows-the-review-its-change-had.md),
-[ADR-077](archive/077-a-task-s-screenshots-go-in-one-comment-on-its-pull-request.md),
-[ADR-079](archive/079-outputs-show-the-change-as-built.md). It also holds the
+**Replaces:** ADR-076,
+ADR-077,
+ADR-079. It also holds the
 review parts of
-[ADR-034](archive/034-a-task-goes-back-to-work-and-ships-again.md),
-[ADR-035](archive/035-a-task-s-kind-is-read-from-what-it-has.md),
-[ADR-050](archive/050-an-agent-joins-where-althar-can-hold-it-to-asking.md),
-[ADR-097](archive/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md)
+ADR-034,
+ADR-035,
+ADR-050,
+ADR-097
 and
-[ADR-102](archive/102-a-small-change-is-one-step-reviewed-after-merge-and-auto-moves-to-a-lighter-model.md),
+ADR-102,
 which live in [tasks](tasks.md), [agents](agents.md) and
 [what agents may do](what-agents-may-do.md).
 

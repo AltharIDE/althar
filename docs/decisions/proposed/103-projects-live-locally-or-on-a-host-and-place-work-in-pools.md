@@ -5,16 +5,16 @@
 - **Status:** Proposed
 - **Date:** 2026-11-07
 - **Owner:** Runtime and desktop maintainers
-- **Amends:** [ADR-048](../archive/048-where-the-runtime-runs-and-who-may-reach-it.md),
+- **Amends:** [ADR-048](../foundations.md#where-the-runtime-runs-and-who-may-reach-it),
   not replaces it: the local utility process, one writer per profile and
   separation of clients from agents stay. The headless host becomes a
   persistent service; remote project ownership need not wait for multiplayer;
   SSH joins the relay; provider support decides which sign-ins a host can use.
-  Also amends [ADR-003](../archive/003-electron-shell.md) (remote project connections),
-  [ADR-028](../archive/028-linux-windows-packages-and-the-keyring.md) (headless sealing),
-  [ADR-091](../archive/091-a-task-works-local-in-the-person-s-checkout-or-in-a-worktree.md)
+  Also amends [ADR-003](../foundations.md#the-shell-and-the-runtime) (remote project connections),
+  [ADR-028](../packaging.md#off-a-mac-windows-and-the-keyring) (headless sealing),
+  [ADR-091](../workspaces-and-runs.md#local)
   (Local belongs to a particular computer), and
-  [ADR-100](../archive/100-a-web-page-opens-beside-the-conversation-in-a-session-of-its-own.md)
+  [ADR-100](../desktop-app.md#a-web-page-beside-the-conversation)
   (forwarded previews). These are proposed amendments until this ADR is accepted.
 - **Context:** Several leads, worktrees and builds exhaust the person's
   laptop. They want agents on their own VPS, controlled from Althar, with

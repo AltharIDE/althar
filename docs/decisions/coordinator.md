@@ -4,11 +4,11 @@ What the coordinator is, what it may do, where it reads the code, how its
 conversation survives a full context, and how it moves tasks and clears its
 chat. How it is built is in [04](../architecture/04-coordinator.md).
 
-**Replaces:** [ADR-004](archive/004-coordinator-is-an-agent-session.md),
-[ADR-031](archive/031-coordinator-handed-over-before-it-fills.md),
-[ADR-058](archive/058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md),
-[ADR-086](archive/086-the-coordinator-moves-a-task-on-the-person-s-word-or-asks-on-a-card.md),
-[ADR-101](archive/101-clearing-a-coordinator-chat-clears-the-view-or-forgets-the-conversation.md)
+**Replaces:** ADR-004,
+ADR-031,
+ADR-058,
+ADR-086,
+ADR-101
 
 ## Always on
 

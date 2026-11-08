@@ -2,7 +2,7 @@
 
 How Althar is put together: the shell and the runtime, the code's style on each side, how failures are kept small, what CI gates, and the rule that a feature ships for every service that can have it.
 
-**Replaces:** [ADR-003](archive/003-electron-shell.md), [ADR-008](archive/008-shortcuts-in-behaviour-not-in-records.md), [ADR-009](archive/009-effect-on-the-runtime-side.md), [ADR-010](archive/010-desktop-app-mvvm.md), [ADR-047](archive/047-failures-kept-where-they-belong-and-reported-at-the-edge.md), [ADR-048](archive/048-where-the-runtime-runs-and-who-may-reach-it.md), [ADR-074](archive/074-ci-gates-a-merge-on-linux-and-a-release-on-everything.md), [ADR-082](archive/082-a-feature-for-one-host-tracker-or-agent-ships-for-all.md)
+**Replaces:** ADR-003, ADR-008, ADR-009, ADR-010, ADR-047, ADR-048, ADR-074, ADR-082
 
 ADR-001, the repository's engineering target, is in [`ARCHITECTURE.md`](../../ARCHITECTURE.md).
 

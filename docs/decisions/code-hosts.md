@@ -5,19 +5,19 @@ Trello: connecting, pushing a task's work, following its pull request,
 seeing its checks and conflicts through, acting on the host as the person's
 account can, merging, releases and issues.
 
-**Replaces:** [ADR-011](archive/011-own-connectors-for-hosts-and-trackers.md),
-[ADR-016](archive/016-push-without-a-connection.md),
-[ADR-026](archive/026-connecting-walks-the-person-in.md),
-[ADR-030](archive/030-the-lead-resolves-conflicts-and-althar-pushes-the-merge.md),
-[ADR-040](archive/040-a-change-reaches-the-person-green.md),
-[ADR-041](archive/041-what-failed-said-in-full.md),
-[ADR-052](archive/052-a-task-attaches-to-a-pull-request-it-didn-t-open.md),
-[ADR-059](archive/059-a-tracker-s-workspaces-side-by-side-and-a-project-bound-to-one.md),
-[ADR-070](archive/070-failing-checks-go-to-the-lead-whoever-has-looked.md),
-[ADR-072](archive/072-a-lead-s-commits-push-as-its-turn-ends.md),
-[ADR-081](archive/081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md),
-[ADR-085](archive/085-a-fork-s-branches-go-upstream-by-a-per-project-choice.md),
-[ADR-092](archive/092-conflicts-and-failed-checks-send-a-task-back-to-work.md)
+**Replaces:** ADR-011,
+ADR-016,
+ADR-026,
+ADR-030,
+ADR-040,
+ADR-041,
+ADR-052,
+ADR-059,
+ADR-070,
+ADR-072,
+ADR-081,
+ADR-085,
+ADR-092
 
 How the connectors are built, their models and their contract suites, is in
 [06](../architecture/06-integrations-and-skills.md).

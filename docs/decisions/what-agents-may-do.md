@@ -6,17 +6,17 @@ review's lead, the coordinator and a lead's helpers. It also covers the
 project's rules, the sandbox, git's guard, the web, Althar's own tools outside
 the sandbox, and the settings agents change.
 
-**Replaces:** [ADR-007](archive/007-permission-requests-reach-althar.md),
-[ADR-013](archive/013-project-rules.md),
-[ADR-018](archive/018-allow-always-keeps-a-rule.md),
-[ADR-019](archive/019-coordinator-judges-permissions.md),
-[ADR-043](archive/043-allow-everything-is-one-switch-for-a-project-or-a-task.md),
-[ADR-057](archive/057-a-lead-works-outside-its-sandbox-through-althar-s-tools.md),
-[ADR-067](archive/067-allow-everything-asks-only-before-what-can-t-be-undone.md),
-[ADR-071](archive/071-the-sandbox-is-the-boundary-anything-inside-it-runs.md),
-[ADR-078](archive/078-project-leads-can-read-the-web.md),
-[ADR-089](archive/089-the-asks-and-refusals-left-are-what-can-t-be-undone.md),
-[ADR-097](archive/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md)
+**Replaces:** ADR-007,
+ADR-013,
+ADR-018,
+ADR-019,
+ADR-043,
+ADR-057,
+ADR-067,
+ADR-071,
+ADR-078,
+ADR-089,
+ADR-097
 (apart from its MCP servers, skills and sign-in, which are in
 [the person's setup](the-persons-setup.md)).
 

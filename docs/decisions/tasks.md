@@ -6,13 +6,13 @@ the fast lane when it's small; the plan and review settings; and what agents
 hand back. Reviews have their own document, [reviews.md](reviews.md), and
 where a task works has [workspaces-and-runs.md](workspaces-and-runs.md).
 
-**Replaces:** [ADR-020](archive/020-what-agents-hand-back.md),
-[ADR-021](archive/021-a-question-outlives-its-session.md),
-[ADR-034](archive/034-a-task-goes-back-to-work-and-ships-again.md),
-[ADR-035](archive/035-a-task-s-kind-is-read-from-what-it-has.md),
-[ADR-051](archive/051-a-finished-task-waits-for-the-person-to-settle-it.md),
-[ADR-088](archive/088-plan-countdown-review-rounds-and-new-project-defaults-are-settings.md),
-[ADR-102](archive/102-a-small-change-is-one-step-reviewed-after-merge-and-auto-moves-to-a-lighter-model.md).
+**Replaces:** ADR-020,
+ADR-021,
+ADR-034,
+ADR-035,
+ADR-051,
+ADR-088,
+ADR-102.
 Proposed and not built:
 [ADR-087](proposed/087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md) (helpers).
 

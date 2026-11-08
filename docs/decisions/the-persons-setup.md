@@ -5,10 +5,10 @@ servers, their skills and Althar's skill catalog, and their code host
 sign-in. What these may then do, and what asks, is in
 [what agents may do](what-agents-may-do.md).
 
-**Replaces:** [ADR-094](archive/094-skills-one-store-a-curated-catalog.md),
-[ADR-095](archive/095-skill-and-openspec-files-stay-off-the-repository.md),
+**Replaces:** ADR-094,
+ADR-095,
 and the MCP servers, skills and sign-in parts of
-[ADR-097](archive/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md).
+ADR-097.
 
 ## In every role
 
