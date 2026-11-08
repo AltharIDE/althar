@@ -3,13 +3,13 @@
 > A proposal, not built. Where it would fold in: [tasks.md § Helpers (proposed)](../tasks.md#helpers-proposed).
 
 - **Status:** Proposed, to build from the list below ([Build](#build));
-  amended by [ADR-097](../archive/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06): a helper gets the person's
+  amended by [ADR-097](../what-agents-may-do.md#what-asks) (2026-11-06): a helper gets the person's
   MCP servers and skills as its lead does, and ADR-081's mark no longer
   follows it; its caps stay, as cost caps, and it still pushes nothing
 - **Date:** 2026-11-02
-- **Amends:** [ADR-015](../archive/015-coordinator-picks-models.md) (a lead picks its
-  helpers' models), [ADR-022](../archive/022-what-agents-leave-running.md) (the Running
-  list holds helpers too), [ADR-032](../archive/032-agents-at-once-on-this-machine.md)
+- **Amends:** [ADR-015](../agents.md#how-models-are-picked) (a lead picks its
+  helpers' models), [ADR-022](../workspaces-and-runs.md#what-agents-leave-running) (the Running
+  list holds helpers too), [ADR-032](../scheduling.md#how-many-agents-work-at-once)
   (a helper takes a place of its own)
 - **Owner:** Repository maintainers
 - **Context:** DEV-181 asks that a task's lead can start a helper in the

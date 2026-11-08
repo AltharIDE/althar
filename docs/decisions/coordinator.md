@@ -4,11 +4,11 @@ What the coordinator is, what it may do, where it reads the code, how its
 conversation survives a full context, and how it moves tasks and clears its
 chat. How it is built is in [04](../architecture/04-coordinator.md).
 
-**Replaces:** [ADR-004](archive/004-coordinator-is-an-agent-session.md),
-[ADR-031](archive/031-coordinator-handed-over-before-it-fills.md),
-[ADR-058](archive/058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md),
-[ADR-086](archive/086-the-coordinator-moves-a-task-on-the-person-s-word-or-asks-on-a-card.md),
-[ADR-101](archive/101-clearing-a-coordinator-chat-clears-the-view-or-forgets-the-conversation.md)
+**Replaces:** ADR-004,
+ADR-031,
+ADR-058,
+ADR-086,
+ADR-101
 
 ## Always on
 
@@ -82,34 +82,27 @@ checkout or a task's folder.
   copy's place are removed, never followed.
 - A project with no repositories gets an empty folder.
 
-**Where its agent has a sandbox Althar can hold to that folder** (Claude
-Code, on macOS and on Linux outside a Flatpak), its commands run in the
-sandbox without asking. There they write only to its folder and to temporary
-files, and they read none of the home folder, the person's checkouts or the
-task folders, apart from what Althar gives back: toolchains, git's config
-files one by one, the mirrors and the borrowed objects. It loads no settings
-file and runs no hook from the repository. A command Claude Code can't read
-itself still runs in the sandbox, unread ([what-agents-may-do.md](what-agents-may-do.md)).
-Codex keeps its own read-only sandbox.
+**Its commands go by the project's rules,** the person's Never and Ask
+included, as a lead's do, and a visible irreversible one asks the person.
+It reads ordinary files anywhere; secret files and the keychain stay
+refused.
 
-**Where no sandbox holds it** (OpenCode, and Windows), Althar's reader rules
-read each command, and the copy is the boundary. The coordinator's reader
-rules allow a little more than a review's lead gets:
+- **Where Claude Code's sandbox starts** (macOS, and Linux outside a
+  Flatpak), its commands run in it, writing only to its folder and temporary
+  files, with the network open and localhost bindable; of the Unix sockets
+  only the SSH agent's is let through. It loads the skills the person picked,
+  but no settings file or hook from the repository. macOS's sandbox refuses
+  the pipes `<(…)` opens, so any command may ask to run outside it, and the
+  same rules decide: a read runs, a visible write outside its folder is
+  refused.
+- **Codex** runs in its ordinary workspace sandbox.
+- **Where no sandbox holds it** (OpenCode, and Windows), a command runs
+  unless it visibly writes outside its folder. Scripts, variables, loops and
+  process substitutions aren't refused for being unreadable.
 
-- substitutions whose commands only look;
-- loops, branches and its own variables;
-- `uptime`, `uname` and `df`;
-- `git tag` listing.
-
-A review of an outside author's pull request keeps the strict list, because
-it reads code whose author may be aiming it at those rules.
-
-**Not built yet:** the coordinator's sandbox reaches no network on main (an
-empty allowlist), so an install in a copy can't download, and its reader
-rules still refuse what doesn't look. Its sandbox is meant to reach the
-network as a lead's does, and its commands are meant to go by the project's
-rules, so it can install and run tests in its copies. "Remove every limit
-beyond what can't be undone" builds this.
+A refusal is explained in the same turn, with the command and its reason,
+never held for the next message. It may install and run tests in its
+copies; a change to code is still a task.
 
 ## Handover before its context fills
 
@@ -229,3 +222,4 @@ isn't being extended to more agents ([what-agents-may-do.md](what-agents-may-do.
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 8 Nov 2026: the limits sweep (#696) built: the coordinator's commands go by the project's rules, reach the network and read ordinary files anywhere.

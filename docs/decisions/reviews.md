@@ -7,16 +7,16 @@ comment, and Outputs. How review steps run is in
 [05](../architecture/05-workflow-engine.md); reviewing someone else's pull
 request is in [06](../architecture/06-integrations-and-skills.md).
 
-**Replaces:** [ADR-076](archive/076-a-pull-request-shows-the-review-its-change-had.md),
-[ADR-077](archive/077-a-task-s-screenshots-go-in-one-comment-on-its-pull-request.md),
-[ADR-079](archive/079-outputs-show-the-change-as-built.md). It also holds the
+**Replaces:** ADR-076,
+ADR-077,
+ADR-079. It also holds the
 review parts of
-[ADR-034](archive/034-a-task-goes-back-to-work-and-ships-again.md),
-[ADR-035](archive/035-a-task-s-kind-is-read-from-what-it-has.md),
-[ADR-050](archive/050-an-agent-joins-where-althar-can-hold-it-to-asking.md),
-[ADR-097](archive/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md)
+ADR-034,
+ADR-035,
+ADR-050,
+ADR-097
 and
-[ADR-102](archive/102-a-small-change-is-one-step-reviewed-after-merge-and-auto-moves-to-a-lighter-model.md),
+ADR-102,
 which live in [tasks](tasks.md), [agents](agents.md) and
 [what agents may do](what-agents-may-do.md).
 
@@ -95,6 +95,9 @@ its own kind.
   fetched: detached, on no branch, with git running with none of the person's
   config (`addReadCopy`). It runs in reader mode under the reader rules and
   runs nothing of the pull request's code. No setup or run touches the copy.
+- **A review of the repository's own people** gets every lead tool, and its
+  commands reach the network as a lead's do. **An outside author's** gets
+  the six reading tools.
 - **Only an agent its session can hold to reading leads one.** One that runs
   whatever its sandbox contains without asking, such as Codex, could run the
   pull request's code, so it is refused with the names of those that can.
@@ -121,9 +124,10 @@ its own kind.
 
 Not built yet:
 
-- A pull request by the repository's own people getting what a task's lead
-  gets: a worktree at its head with the setup replayed, its code run in the
-  sandbox, and the network.
+- A pull request by the repository's own people getting a worktree at its
+  head with the setup replayed, and its code run in the sandbox. This, and
+  the in-task reviewer's tool list, wait on the work that makes a task a
+  conversation plus parts.
 - "Run it", the person's word in the thread that turns an outside author's
   review into the team's kind, still offline for its commands.
 - Posting on the person's word in the thread (`post_review`), as well as
@@ -210,3 +214,4 @@ A round that forgets `kept_views` shows less, never something stale.
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 8 Nov 2026: the limits sweep (#696) built: a review of the repository's own people gets every lead tool and the network.

@@ -6,18 +6,18 @@ stops what was left running. How the pieces are built is in
 [01](../architecture/01-concepts-and-project-model.md) and
 [03](../architecture/03-agent-runtime-and-auth.md#setting-up-a-worktree).
 
-**Replaces:** [ADR-006](archive/006-worktree-per-task.md),
-[ADR-022](archive/022-what-agents-leave-running.md),
-[ADR-023](archive/023-althar-runs-the-project.md),
-[ADR-044](archive/044-a-project-runs-many-things.md),
-[ADR-056](archive/056-a-finished-task-s-folder-goes-after-a-wait-and-comes-back-when-needed.md),
-[ADR-066](archive/066-althar-runs-any-branch-or-pull-request-and-fetches-for-leads.md),
-[ADR-068](archive/068-a-settled-task-stops-everything-it-left-running.md),
-[ADR-080](archive/080-a-task-folder-s-setup-is-recorded-by-a-lead-and-replayed.md),
-[ADR-090](archive/090-run-opens-its-list-and-runs-where-it-is-picked.md),
-[ADR-091](archive/091-a-task-works-local-in-the-person-s-checkout-or-in-a-worktree.md),
-[ADR-093](archive/093-a-task-works-toward-the-project-s-branch-or-its-own.md),
-[ADR-096](archive/096-runs-show-in-the-pill-over-the-composer-again.md)
+**Replaces:** ADR-006,
+ADR-022,
+ADR-023,
+ADR-044,
+ADR-056,
+ADR-066,
+ADR-068,
+ADR-080,
+ADR-090,
+ADR-091,
+ADR-093,
+ADR-096
 
 ## Where a task works
 
@@ -171,11 +171,9 @@ first lead in a repository works it out, and Althar replays it.
   (`toolPlaces.ts`) holds each tool's caches on a Mac and on Linux, never
   where keys and sign-ins are kept.
 
-No host list limits where a lead's commands reach. Not built yet: main still
-hands Claude Code's sandbox the tools' download hosts as its allowed domains
-(`toolPlaces.ts`, `registry.ts`), and Codex's and OpenCode's leads get
-neither the caches nor the hosts. The "Remove every limit beyond what can't
-be undone" task opens the network.
+No host list limits where a lead's commands reach: Claude Code's and
+Codex's sandboxes reach every host. Not built yet: Codex's leads don't get
+the tools' caches as places to write.
 
 A setup runs repository code unasked, outside any sandbox, as a run of the
 project does. That is the trade for a folder that gets ready with nobody
@@ -397,3 +395,4 @@ sweep finds the rest.
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 8 Nov 2026: the limits sweep (#696) opened every sandbox's network.

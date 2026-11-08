@@ -6,14 +6,14 @@ lanes read, what happens when the connection or a service fails, the
 automations that start work on a schedule, and how the window shows Althar's
 share of the computer's load.
 
-**Replaces:** [ADR-029](archive/029-the-load-read-when-asked.md),
-[ADR-032](archive/032-agents-at-once-on-this-machine.md),
-[ADR-037](archive/037-what-the-person-does-goes-first.md),
-[ADR-049](archive/049-the-line-up-next-is-in-the-person-s-order.md),
-[ADR-060](archive/060-a-lost-connection-is-waited-out-and-a-failing-service-tried-again.md),
-[ADR-061](archive/061-automations-start-ordinary-tasks-on-a-schedule.md),
-[ADR-063](archive/063-althar-s-part-is-all-its-work-started-and-itself.md),
-[ADR-065](archive/065-running-is-what-an-agent-works-on-and-up-next-is-everything-that-waits.md)
+**Replaces:** ADR-029,
+ADR-032,
+ADR-037,
+ADR-049,
+ADR-060,
+ADR-061,
+ADR-063,
+ADR-065
 
 ## How many agents work at once
 

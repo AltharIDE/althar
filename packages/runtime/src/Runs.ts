@@ -57,6 +57,7 @@ import { DESCRIPTION_SHAPE, descriptionAsk, filesLine, type Undescribed } from '
 import { evidenceFolderOf, reviewCopyOf, snapshotForReview } from './reviewCopy'
 import { change, fact, timestamp } from './records'
 import { envelope } from './envelope'
+import { RESTATE_START, restateWords, type RoundItem, toRestate } from './lastMessage'
 import { type Answered, Questions, touchQuestion } from './Questions'
 import {
   builtAsk,
@@ -1666,6 +1667,59 @@ export class Runs extends Context.Service<
       }
 
       /**
+       * A lead's turn that ends with what stands open of its round, its last
+       * message or its report where nothing follows it, only pointing back at
+       * what folded ("the proposal is above") is told once to say it again in
+       * full (lastMessage.ts, ADR-099); a turn that answered that isn't told
+       * again. Nothing for another thread, a turn more input waits behind, or
+       * a round with nothing said before what stands open.
+       */
+      const restate = (event: Extract<LiveEvent, { readonly _tag: 'TurnEnded' }>) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ kind: string }>`SELECT kind FROM threads WHERE id = ${event.threadId}`
+          if (thread?.kind !== 'task') return false
+          const [queued] = yield* sql<{ id: string }>`
+            SELECT id FROM user_inputs WHERE thread_id = ${event.threadId} AND state = 'queued' LIMIT 1`
+          if (queued !== undefined) return false
+          const [answering] = yield* sql<{ id: string }>`
+            SELECT u.id FROM turn_delivery_inputs d JOIN user_inputs u ON u.id = d.user_input_id
+            WHERE d.delivery_id = ${event.turnId} AND substr(u.body, 1, ${RESTATE_START.length}) = ${RESTATE_START} LIMIT 1`
+          if (answering !== undefined) return false
+          const [turn] = yield* sql<{ first: number | null }>`
+            SELECT min(sequence) AS first FROM thread_items WHERE delivery_id = ${event.turnId}`
+          if (turn?.first == null) return false
+          // The round, since what was last said to the lead: what it said, and its reports on its work.
+          const [ask] = yield* sql<{ at: number | null }>`
+            SELECT max(sequence) AS at FROM thread_items WHERE thread_id = ${event.threadId} AND kind = 'user_message'`
+          const said = yield* sql<{ kind: string; sequence: number; content: string }>`
+            SELECT kind, sequence, content FROM thread_items
+            WHERE thread_id = ${event.threadId} AND sequence > ${ask?.at ?? 0}
+              AND (kind = 'agent_message' OR (kind = 'step_result' AND json_extract(content, '$.step') IN ('implement', 'settle')))
+            ORDER BY sequence`
+          const first = turn.first
+          const round = said.map((item): RoundItem => {
+            const content = JSON.parse(item.content) as { text?: string; built?: string | null; summary?: string }
+            return item.kind === 'agent_message'
+              ? { kind: 'message', text: content.text ?? '', thisTurn: item.sequence >= first }
+              : { kind: 'report', text: content.built ?? content.summary ?? '', thisTurn: item.sequence >= first }
+          })
+          const pointing = toRestate(round)
+          if (pointing === undefined) return false
+          yield* sessions.send({
+            envelope: yield* envelope('thread.send', { threadId: event.threadId, restate: event.turnId }),
+            threadId: event.threadId,
+            body: restateWords(pointing),
+            quiet: true,
+          })
+          return true
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.as(Effect.logWarning('Could not read whether a turn’s last message stands alone', cause), false),
+          ),
+        )
+
+      /**
        * When a step's agent ends a turn without reporting, it is reminded once,
        * and then the step needs the person. When it goes (and no other agent
        * took the thread over), the step needs the person at once. A turn the
@@ -1676,6 +1730,11 @@ export class Runs extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           // Back online, or offline: what waits for the connection looks again.
           if (event._tag === 'Connection') return yield* Queue.offer(holdsChanged, undefined)
+          // A fresh reading of a plan, or a turn that went through, may have ended an account's out-of-usage state (Limits): what
+          // waits for its reset looks again, and goes on if it is not out any more.
+          if (event._tag === 'PlanUsage') return yield* Queue.offer(holdsChanged, undefined)
+          if (event._tag === 'TurnEnded' && event.errorClass === undefined && event.state === 'completed')
+            yield* Queue.offer(holdsChanged, undefined)
           // An agent that says it is trying its service again may be waiting on a dead connection, its turn never ending (Codex).
           if (
             event._tag === 'Agent' &&
@@ -1687,6 +1746,15 @@ export class Runs extends Context.Service<
           if (event._tag !== 'TurnEnded' && event._tag !== 'SessionEnded') return
           // A quick task whose lead changed the repository in the turn that ended has its work on a branch of its own now.
           yield* firstWriteOn(event.threadId)
+          // A lead whose last message only points back at what folded says it again first: its next turn is what's read.
+          if (
+            event._tag === 'TurnEnded' &&
+            event.state === 'completed' &&
+            event.errorClass === undefined &&
+            (event.stopReason === undefined || event.stopReason === 'end_turn') &&
+            (yield* restate(event))
+          )
+            return
           const on = yield* stepOn(event.threadId)
           // A turn the person interrupted is theirs to carry on; a round of work it left with nothing new goes back where it was.
           if (event._tag === 'TurnEnded' && event.state === 'interrupted') {
@@ -4044,7 +4112,11 @@ export class Runs extends Context.Service<
           {
             type: 'object',
             properties: {
-              summary: { type: 'string' },
+              summary: {
+                type: 'string',
+                description:
+                  'What the person reads of your step, in a few lines: what you changed, how you checked it, and anything left open. What you said along the way folds out of sight. Where you write nothing after this report, it and `built` are what stays open, so they carry everything the person needs in full: the proposal, every question, the decisions you need from them, and what was built or not. Where you write after it, your last message stays open instead, and carries all of that. Never point at something said earlier in your turn ("see above").',
+              },
               built: {
                 type: 'string',
                 description:
@@ -4174,7 +4246,11 @@ export class Runs extends Context.Service<
             type: 'object',
             properties: {
               verdict: { type: 'string', enum: ['pass', 'changes_requested'] },
-              summary: { type: 'string' },
+              summary: {
+                type: 'string',
+                description:
+                  'Your review in a few lines. With your findings, it is what the person and the lead read: what you said along the way folds out of sight, so never point at it ("see above"); say it here.',
+              },
               findings: {
                 type: 'array',
                 items: {
@@ -4280,7 +4356,69 @@ export class Runs extends Context.Service<
           if (current === undefined) return
           const info = JSON.parse(call.payload) as StuckInfo
           if (answer.kind === 'wait') return yield* waitForReset(current, call.attemptId, info, input.envelope)
-          yield* carryOnPlaced(current, call.attemptId, info, answer, input.envelope, input.sender)
+          // Not half applied: where carrying on fails before the step is under way, the call is open again, to answer anew.
+          yield* carryOnPlaced(current, call.attemptId, info, answer, input.envelope, input.sender).pipe(
+            Effect.tapCause(() =>
+              reopenStuck(current, call.attemptId, input.attentionId, info).pipe(
+                Effect.catchCause((cause) => Effect.logWarning('Could not reopen a stuck call whose answer failed', cause)),
+              ),
+            ),
+          )
+        })
+
+      /**
+       * A stuck call whose answer failed to carry on, open again with its step waiting on it, and the window told: a
+       * review the hand-over had ended is waiting again. Left alone where the step is under way, or its run stopped.
+       */
+      const reopenStuck = (run: RunRow, attemptId: string | null, attentionId: string, info: StuckInfo) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const reopened = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              if (!(yield* going(run))) return false
+              const [call] = yield* sql<{ state: string }>`SELECT state FROM attention_requests WHERE id = ${attentionId}`
+              if (call?.state !== 'answered') return false
+              if (attemptId !== null) {
+                const [attempt] = yield* sql<{ nodeId: string; state: string }>`
+                  SELECT node_id, state FROM node_attempts WHERE id = ${attemptId}`
+                if (attempt === undefined) return false
+                if (attempt.state === 'failed') {
+                  // Ended by the hand-over; no other attempt of its step took its place.
+                  const [other] = yield* sql<{ id: string }>`
+                    SELECT id FROM node_attempts WHERE node_id = ${attempt.nodeId} AND id != ${attemptId}
+                      AND state NOT IN ('failed', 'cancelled', 'succeeded') LIMIT 1`
+                  if (other !== undefined) return false
+                  const revision = yield* change('node_attempts', attemptId, {
+                    state: 'waiting_attention',
+                    holdReason: null,
+                    endedAt: null,
+                  })
+                  yield* change('nodes', attempt.nodeId, { state: 'running' })
+                  yield* fact({
+                    projectId: run.projectId,
+                    aggregateType: 'node_attempt',
+                    aggregateId: attemptId,
+                    revision,
+                    type: 'node_attempt.waiting_attention',
+                    payload: info,
+                    actorId: instance.systemId,
+                  })
+                } else if (attempt.state !== 'waiting_attention') return false
+              }
+              const revision = yield* change('attention_requests', attentionId, { state: 'open', answeredAt: null })
+              yield* fact({
+                projectId: run.projectId,
+                aggregateType: 'attention_request',
+                aggregateId: attentionId,
+                revision,
+                type: 'attention_request.opened',
+                payload: info,
+                actorId: instance.systemId,
+              })
+              return true
+            }),
+          )
+          if (reopened) yield* touchCard(run.taskId)
         })
 
       /**
@@ -5239,13 +5377,14 @@ export class Runs extends Context.Service<
         for (;;) {
           const held = yield* sql<{
             taskId: string
+            projectId: string
             attemptId: string
             nodeKey: string
             iteration: number
             output: string
             holdReason: string
           }>`
-            SELECT r.task_id, a.id AS attempt_id, n.node_key, n.iteration, a.output, a.hold_reason
+            SELECT r.task_id, r.project_id, a.id AS attempt_id, n.node_key, n.iteration, a.output, a.hold_reason
             FROM runs r JOIN workflow_executions e ON e.run_id = r.id JOIN nodes n ON n.execution_id = e.id
             JOIN node_attempts a ON a.node_id = n.id
             WHERE r.state = 'running' AND a.state = 'held' AND a.hold_reason IN ('usage_limit', 'agent_unavailable')`
@@ -5267,9 +5406,26 @@ export class Runs extends Context.Service<
             if (hold === undefined) continue
             const connection = step.holdReason === 'agent_unavailable'
             if (connection && !online) continue
+            // Waiting for a reset, it goes on at once if its agent's account is not out of usage any more: the person reset it,
+            // or a fresh reading shows room (Limits). A new step held for being nearly out, or handed over, waits for its time.
+            const back =
+              !connection &&
+              hold.why !== undefined &&
+              hold.left === undefined &&
+              Option.isNone(
+                yield* (
+                  hold.account != null
+                    ? limits.outAccount(hold.account)
+                    : limits.out(hold.heldFor, step.projectId, undefined, hold.model ?? undefined)
+                ).pipe(
+                  contained('Runs.held', () =>
+                    Option.some<Out>({ agentId: hold.heldFor, accountId: '', resetsAt: null, until: hold.until }),
+                  ),
+                ),
+              )
             due.push({
               key: step.attemptId,
-              at: Date.parse(hold.until),
+              at: back ? 0 : Date.parse(hold.until),
               run: connection
                 ? backOnline(step, hold)
                 : resumeHeld({ ...step, agentId: hold.heldFor, accountId: hold.account ?? null, model: hold.model ?? null }),

@@ -2,7 +2,7 @@
 
 How Althar runs coding agents: the protocol it speaks to them, which agents join, the accounts they run on, how a session is briefed, how a model is picked, how context is kept small, and how plan usage and a task's cost are read.
 
-**Replaces:** [ADR-002](archive/002-acp-for-every-agent.md), [ADR-005](archive/005-althar-briefs-every-agent.md), [ADR-012](archive/012-several-accounts-per-agent.md), [ADR-015](archive/015-coordinator-picks-models.md), [ADR-033](archive/033-adapters-on-a-node-of-their-own.md), [ADR-038](archive/038-a-lead-starts-afresh-at-a-break.md), [ADR-039](archive/039-the-person-compacts-an-agent-s-context.md), [ADR-050](archive/050-an-agent-joins-where-althar-can-hold-it-to-asking.md), [ADR-062](archive/062-a-usage-read-may-use-an-account-s-own-sign-in-once.md), [ADR-084](archive/084-what-a-task-used-of-each-plan-and-credit.md)
+**Replaces:** ADR-002, ADR-005, ADR-012, ADR-015, ADR-033, ADR-038, ADR-039, ADR-050, ADR-062, ADR-084
 
 ## ACP for every agent
 

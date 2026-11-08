@@ -5,19 +5,19 @@ Trello: connecting, pushing a task's work, following its pull request,
 seeing its checks and conflicts through, acting on the host as the person's
 account can, merging, releases and issues.
 
-**Replaces:** [ADR-011](archive/011-own-connectors-for-hosts-and-trackers.md),
-[ADR-016](archive/016-push-without-a-connection.md),
-[ADR-026](archive/026-connecting-walks-the-person-in.md),
-[ADR-030](archive/030-the-lead-resolves-conflicts-and-althar-pushes-the-merge.md),
-[ADR-040](archive/040-a-change-reaches-the-person-green.md),
-[ADR-041](archive/041-what-failed-said-in-full.md),
-[ADR-052](archive/052-a-task-attaches-to-a-pull-request-it-didn-t-open.md),
-[ADR-059](archive/059-a-tracker-s-workspaces-side-by-side-and-a-project-bound-to-one.md),
-[ADR-070](archive/070-failing-checks-go-to-the-lead-whoever-has-looked.md),
-[ADR-072](archive/072-a-lead-s-commits-push-as-its-turn-ends.md),
-[ADR-081](archive/081-the-coordinator-acts-on-the-code-host-as-the-person-s-account-can.md),
-[ADR-085](archive/085-a-fork-s-branches-go-upstream-by-a-per-project-choice.md),
-[ADR-092](archive/092-conflicts-and-failed-checks-send-a-task-back-to-work.md)
+**Replaces:** ADR-011,
+ADR-016,
+ADR-026,
+ADR-030,
+ADR-040,
+ADR-041,
+ADR-052,
+ADR-059,
+ADR-070,
+ADR-072,
+ADR-081,
+ADR-085,
+ADR-092
 
 How the connectors are built, their models and their contract suites, is in
 [06](../architecture/06-integrations-and-skills.md).
@@ -62,18 +62,19 @@ cloud, so nothing is heard while the app is closed.
 Althar's tools, which carry the connection's sign-in without showing it.
 That is the preferred way, and the recorded one: Althar keeps a receipt,
 holds a push someone else would be overtaken by, and knows where a fork's
-branch goes. Agents may also use the person's own `gh`, `glab` and git
-sign-in where it is set up, under the project's switch "Agents use my code
-host sign-in", on by default. The rules read `gh` and `glab` as they read
-git, so only [what can't be undone](what-agents-may-do.md) asks. Althar
-notices a push it didn't make by reading the branch after each of the
-lead's turns. A head that is a commit of the task's worktree is taken as
-the task's own; any other head is someone else's push. A pull request
-opened with `gh` on the task's branch is adopted, not duplicated.
+branch goes. Agents also carry the person's own `gh`, `glab` and git
+sign-in where it is set up ([the person's setup](the-persons-setup.md#the-persons-own-sign-in)).
+The rules read `gh` and `glab` as they read git, so only
+[what can't be undone](what-agents-may-do.md#what-asks) asks: a merge, a
+release, a post. Approving the agent's own work, or widening what the host
+lets agents do, is refused.
 
-Not built yet: on main, agents still run signed out of the host (`gh` and
-`glab` signed out, git's credential helpers reset, no SSH agent), and the
-rules refuse `gh` and `glab` commands that change a host.
+Not built yet: Althar noticing a push it didn't make, by reading the branch
+after each of the lead's turns. A head that is a commit of the task's
+worktree would be taken as the task's own, any other head as someone else's
+push, and a pull request opened with `gh` on the task's branch adopted, not
+duplicated. There is no project switch to keep agents off the person's
+sign-in.
 
 ## Connecting
 
@@ -586,8 +587,8 @@ Each connection says its workspace and is disconnected on its own.
 
 The decisions above are current. These parts of them aren't built on main:
 
-- **The person's own sign-in for agents:** agents still run signed out of
-  the host, and the rules refuse `gh` and `glab` writes.
+- **Noticing an agent's own push,** and adopting a pull request it opened
+  with `gh`.
 - **A gated call to the host's API** (`code_host_api`) and to a tracker's
   (`tracker_api`), for whatever no typed tool covers: reads in any turn,
   writes asked-for, with the never list, the repository's content and what
@@ -622,3 +623,4 @@ The decisions above are current. These parts of them aren't built on main:
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 8 Nov 2026: the limits sweep (#696) built: agents carry the person's own sign-in, and `gh` and `glab` are read as git is.

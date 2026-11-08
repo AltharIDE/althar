@@ -5,14 +5,14 @@ signed releases and the updater, the two Mac builds, the Linux and Windows
 packages and the keyring, the Flatpak and its git over SSH, and the three
 things the app sends home (usage data, problem reports and crash reports).
 
-**Replaces:** [ADR-024](archive/024-signed-releases-and-updates.md),
-[ADR-027](archive/027-what-the-flatpak-reaches.md),
-[ADR-028](archive/028-linux-windows-packages-and-the-keyring.md),
-[ADR-036](archive/036-usage-data-from-the-main-process.md),
-[ADR-045](archive/045-problem-reports.md),
-[ADR-046](archive/046-crash-reports-to-posthog-from-main.md),
-[ADR-073](archive/073-git-over-ssh-in-the-flatpak-goes-through-the-device.md),
-[ADR-075](archive/075-an-intel-mac-build-beside-apple-silicon.md)
+**Replaces:** ADR-024,
+ADR-027,
+ADR-028,
+ADR-036,
+ADR-045,
+ADR-046,
+ADR-073,
+ADR-075
 
 ## Releases
 
@@ -195,10 +195,10 @@ inside it, while the agents Althar bundles are.
 - **The profile is the app's own,** at `~/.var/app/dev.althar.app/data/althar`,
   with the worktrees beside it. Projects reach the app through the document
   portal.
-- **Agents can't use the device bridge.** The rules refuse a command that
-  runs `flatpak-spawn` or `althar-host-ssh`, or sets either for git to run
-  later. Running a command on the device is a way out of the sandbox, and the
-  sandbox is the boundary ([what-agents-may-do.md](what-agents-may-do.md)).
+- **The device bridge is an ordinary command for agents.** The rules read
+  `flatpak-spawn` as a wrapper and read the command it runs, which meets the
+  irreversible list as any other does
+  ([what-agents-may-do.md](what-agents-may-do.md#what-asks)).
 
 Not built yet: agents using the person's own sign-in inside the Flatpak (their
 SSH agent, `gh` and `glab`), as [what-agents-may-do.md](what-agents-may-do.md)
@@ -321,3 +321,4 @@ its minified stacks read by name.
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 8 Nov 2026: the limits sweep (#696) made the device bridge an ordinary command.

@@ -8,19 +8,19 @@ feel) is in [DESIGN.md](../../DESIGN.md) and
 window, the main process and the runtime fit together is in
 [02, the desktop runtime](../architecture/02-desktop-runtime.md).
 
-**Replaces:** [ADR-014](archive/014-window-keeps-what-it-read.md),
-[ADR-017](archive/017-dictation-on-this-machine.md),
-[ADR-025](archive/025-new-project-in-its-own-tab.md),
-[ADR-042](archive/042-a-task-s-thread-reads-in-rounds.md),
-[ADR-053](archive/053-the-code-an-agent-names-opens-beside-the-conversation.md),
-[ADR-054](archive/054-a-task-s-steps-are-a-graph-in-a-lane-for-each-agent.md),
-[ADR-055](archive/055-light-dark-or-as-the-system-is.md),
-[ADR-064](archive/064-a-file-sent-with-a-message-is-copied-where-the-agent-reads-and-linked.md),
-[ADR-069](archive/069-motion-is-one-system-named-by-what-happens.md),
-[ADR-083](archive/083-a-welcome-on-first-launch.md),
-[ADR-098](archive/098-the-window-is-dressed-for-the-desktop-it-sits-on.md),
-[ADR-099](archive/099-a-turn-s-work-is-one-live-line-then-folds-reviews-are-a-line.md),
-[ADR-100](archive/100-a-web-page-opens-beside-the-conversation-in-a-session-of-its-own.md)
+**Replaces:** ADR-014,
+ADR-017,
+ADR-025,
+ADR-042,
+ADR-053,
+ADR-054,
+ADR-055,
+ADR-064,
+ADR-069,
+ADR-083,
+ADR-098,
+ADR-099,
+ADR-100
 
 ## How the window reads
 
@@ -156,6 +156,13 @@ agent's words, and one live line (`WorkedFor`).
   code, is taken for the answer; a short one folds as the turn ends.
 - **What needs the person never folds:** a stuck step, a question, a
   permission, an error and its way out.
+- **What stands open carries the whole turn.** A lead's last message (or its
+  report, where nothing follows it) and the coordinator's answer hold
+  everything the person needs from the turn in full: the proposal, every
+  question, the findings, the decisions needed, what was built or not. They
+  never point back at what folded ("see above"). Each role's brief says so,
+  and a lead whose last message, shorter than what folded before it, only
+  points back is told once to say it again (`runtime/src/lastMessage.ts`).
 
 The person wanted something to watch while an agent works, without the
 thinking spilling into the thread. Codex's app was the reference.
@@ -474,3 +481,4 @@ way of what is done often. The tokens and their values are in
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 8 Nov 2026: what stands open after a turn folds carries everything the person needs, never "see above" (#699).

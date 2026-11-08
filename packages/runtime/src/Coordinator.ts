@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 
 import { type CommandEnvelope, type ProjectId, type WorksIn } from '@althar/domain'
 import type { Commands, Ledger } from '@althar/persistence-sqlite'
-import { AUTOMATION_DEFAULTS, type AutomationDefinition, knownModelName, Schedule, scheduleInLine } from '@althar/contracts'
+import { AUTOMATION_DEFAULTS, type AutomationDefinition, Schedule, scheduleInLine } from '@althar/contracts'
 import { Priority, StatusCategory } from '@althar/connectors'
 import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema, Semaphore, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -38,6 +38,7 @@ import { DRAFTING_MS } from './needsYou'
 import { Installs } from './Installs'
 import { Models } from './Models'
 import { Plans } from './Plans'
+import { PlanUsage } from './PlanUsage'
 import {
   closePullRequest,
   editPullRequest,
@@ -65,7 +66,6 @@ import { fact } from './records'
 import { PlanParameters, type PlanStep, Runs, type StuckInfo } from './Runs'
 import { smallChangeSteps } from './smallChange'
 import { type Disposition, passedOn, Sessions } from './Sessions'
-import { blockedModelsOf } from './preferences'
 import type { InputFile } from './sentFiles'
 import type { InputImage } from './sentImages'
 import { SignIns } from './SignIns'
@@ -76,7 +76,8 @@ import { setToward } from './towards'
 import { addItem, transcript } from './threads'
 import { personsWords, quoted } from './TaskActions'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
-import { describeModels, type Route, routeTo, usableModels } from './usableModels'
+import { stepOf, StepPick } from './stepPick'
+import { describeModels, usableModels } from './usableModels'
 
 /**
  * How many tasks a lead may start (ADR-097): in one turn, and from its task in all. Beyond them it says what else it would
@@ -132,6 +133,7 @@ type Store =
   | Installs
   | ModelFacts
   | Limits
+  | PlanUsage
   | Busy
   | Accounts
   | Reviews
@@ -201,15 +203,6 @@ const SoughtIssues = Schema.Struct({
   keys: Schema.optional(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
   cursor: Schema.optional(Schema.String),
   limit: Schema.optional(Schema.Number),
-})
-/*
- * A step's model, as list_models names it; or, as plans once did, an agent and its own id for the model. And how hard it
- * thinks, where named: one of the model's efforts as list_models writes them.
- */
-const StepPick = Schema.Struct({
-  model: Schema.optional(Schema.String),
-  agent: Schema.optional(Schema.String),
-  effort: Schema.optional(Schema.NullOr(Schema.String)),
 })
 const Proposed = Schema.Struct({
   task: Schema.String,
@@ -513,15 +506,6 @@ export class Coordinator extends Context.Service<
           const [own] = yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${access.taskId}`
           return own?.title
         })
-
-      const agentOf = (agentId: string) =>
-        agents.list.some((entry) => entry.definition.id === agentId)
-          ? Effect.succeed(agentId)
-          : Effect.fail(
-              new ToolRefused({
-                message: `Althar has no agent ${agentId}. It has: ${agents.list.map((entry) => entry.definition.id).join(', ')}.`,
-              }),
-            )
 
       /** The project, as project_overview gives it: its repositories, its tasks, its rules, and its notes. */
       const overview = (access: ToolAccess) =>
@@ -1373,83 +1357,6 @@ export class Coordinator extends Context.Service<
       /** The models the coordinator can give work to in the project, as it reads them. */
       const listModels = (access: ToolAccess) =>
         Effect.zipWith(usableModels(access.projectId), Clock.currentTimeMillis, (usable, now) => describeModels(usable, now))
-
-      /**
-       * A step's effort, where the plan names one: one of the levels its model
-       * takes the way it goes, by its id or its name, kept as its id. Any other
-       * is refused, with the ones it takes. Left out, the step starts at the
-       * person's default for the model, or else at the model's own.
-       */
-      const effortOf = (
-        named: string,
-        levels: ReadonlyArray<{ readonly id: string; readonly name: string }>,
-        asked: string | null | undefined,
-      ): Effect.Effect<string | null, ToolRefused> => {
-        if (asked == null) return Effect.succeed(null)
-        const wanted = asked.trim().toLowerCase()
-        const level = levels.find((one) => one.id.toLowerCase() === wanted || one.name.toLowerCase() === wanted)
-        if (level !== undefined) return Effect.succeed(level.id)
-        return Effect.fail(
-          new ToolRefused({
-            message:
-              levels.length === 0
-                ? `${named} has no effort to set. Leave effort out.`
-                : `${named} has no effort ${asked}. Name one of its efforts, as list_models writes them: ${levels.map((one) => one.id).join(', ')}; or leave effort out.`,
-          }),
-        )
-      }
-
-      /**
-       * A step's agent, model and effort, from what the plan names (ADR-015):
-       * a model as list_models writes it, taken the best way there is; or an
-       * agent, on its own id for a model or on its own default.
-       */
-      const stepOf = (projectId: string, pick: typeof StepPick.Type, use?: string) =>
-        Effect.gen(function* () {
-          // On the way it goes, at an effort that model takes there; named as the plan names it.
-          const on = (route: Route, named: string) =>
-            Effect.map(effortOf(named, route.efforts, pick.effort), (effort) => ({
-              agentId: route.agentId,
-              model: route.model,
-              ...(effort === null ? {} : { effort }),
-            }))
-          if (pick.model !== undefined) {
-            const route = routeTo(yield* usableModels(projectId), pick.model, pick.agent)
-            if (route !== null) return yield* on(route, pick.model)
-            if (pick.agent === undefined)
-              return yield* new ToolRefused({
-                message: `No model called ${pick.model} can be used now. ${describeModels(yield* usableModels(projectId), yield* Clock.currentTimeMillis, use)}`,
-              })
-          }
-          if (pick.agent === undefined)
-            return yield* new ToolRefused({
-              message: use === undefined ? 'Name the model, as list_models writes it.' : `Name the model, for ${use}.`,
-            })
-          const agentId = yield* agentOf(pick.agent)
-          // Named the old way, by agent, a model the person switched off is still off: the same model another way, by the name people know it by, or none.
-          if (pick.model !== undefined && (yield* blockedModelsOf(agentId)).includes(pick.model)) {
-            const offered = (yield* (yield* Models).catalog)
-              .find((one) => one.agentId === agentId)
-              ?.models.find((model) => model.id === pick.model)
-            const agentName = agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId
-            const elsewhere =
-              offered === undefined
-                ? null
-                : routeTo(yield* usableModels(projectId), knownModelName({ id: agentId, name: agentName }, offered))
-            if (elsewhere !== null) return yield* on(elsewhere, pick.model)
-            return yield* new ToolRefused({
-              message: `The person switched ${pick.model} off. ${describeModels(yield* usableModels(projectId), yield* Clock.currentTimeMillis, use)}`,
-            })
-          }
-          // Its efforts as the agent offers that model; on its own default, they aren't known, so none is taken.
-          const levels =
-            pick.effort == null || pick.model === undefined
-              ? []
-              : ((yield* (yield* Models).catalog).find((one) => one.agentId === agentId)?.models.find((model) => model.id === pick.model)
-                  ?.efforts ?? [])
-          const effort = yield* effortOf(pick.model ?? `${nameOf(agentId)}'s default model`, levels, pick.effort)
-          return { agentId, model: pick.model ?? null, ...(effort === null ? {} : { effort }) }
-        })
 
       /**
        * A task is planned one call at a time, from looking for the plan this call already made to making one: a call repeated

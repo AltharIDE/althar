@@ -16,22 +16,23 @@
 - **Date:** 2026-11-08
 - **Owner:** Runtime and desktop maintainers
 - **Amends:**
-  - [ADR-035](../archive/035-a-task-s-kind-is-read-from-what-it-has.md):
-    a task's kind is still read, never stored, but from its parts. This
-    overturns its rejection of a temporary chat and a shelf for it, as does
-    [`plans/task-as-container.md`](../../plans/task-as-container.md).
-  - [ADR-091](../archive/091-a-task-works-local-in-the-person-s-checkout-or-in-a-worktree.md)
-    and [ADR-093](../archive/093-a-task-works-toward-the-project-s-branch-or-its-own.md):
-    a task's place and the branch it works toward change at any time, not only
-    until its first step.
-  - [ADR-102](../archive/102-a-small-change-is-one-step-reviewed-after-merge-and-auto-moves-to-a-lighter-model.md):
-    the review after a small change merges runs in the same task, not in a
-    review task of its own.
-  - [ADR-050](../archive/050-an-agent-joins-where-althar-can-hold-it-to-asking.md)
-    and [ADR-097](../archive/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md)
-    on an outside author's code: "Run it" asks how far to trust it.
-  - [ADR-052](../archive/052-a-task-attaches-to-a-pull-request-it-didn-t-open.md)
-    and the change sets model only where a task reviews several pull requests.
+  - [tasks § Kinds, read from what a task has](../tasks.md#kinds-read-from-what-a-task-has)
+    (ADR-035): a task's kind is still read, never stored, but from its parts.
+    This overturns ADR-035's rejection of a temporary chat and a shelf for it,
+    as it does [`plans/task-as-container.md`](../../plans/task-as-container.md)'s.
+  - [workspaces-and-runs § Local](../workspaces-and-runs.md#local) (ADR-091)
+    and [§ The branch a task works toward](../workspaces-and-runs.md#the-branch-a-task-works-toward)
+    (ADR-093): a task's place and the branch it works toward change at any
+    time, not only until its first step.
+  - [reviews § A small change is reviewed after it merges](../reviews.md#a-small-change-is-reviewed-after-it-merges)
+    (ADR-102): the review after a small change merges runs in the same task,
+    not in a review task of its own.
+  - [reviews § Reviewing someone else's pull request](../reviews.md#reviewing-someone-elses-pull-request)
+    (ADR-050, ADR-097) on an outside author's code: "Run it" asks how far to
+    trust it.
+  - [code-hosts § Attaching a pull request a task didn't open](../code-hosts.md#attaching-a-pull-request-a-task-didnt-open)
+    (ADR-052) and the change sets model, only where a task reviews several
+    pull requests.
 - **Context:** On 13 October the person set the direction: a task is a loose
   container, a conversation with an agent plus parts that attach and change at
   any time. The lightest form is a temporary chat on a Scratch shelf off the
@@ -164,8 +165,8 @@ of a task's repositories, as it is now.
 ### Moving between a worktree and Local
 
 This is the Handoff that
-[ADR-091](../archive/091-a-task-works-local-in-the-person-s-checkout-or-in-a-worktree.md)
-left unbuilt. A running task moves between turns, with its branch and its
+[workspaces-and-runs § Local](../workspaces-and-runs.md#local) leaves
+unbuilt. A running task moves between turns, with its branch and its
 conversation.
 
 - **To Local:** the worktree's uncommitted work is committed to the task's
@@ -210,11 +211,12 @@ A review that runs code is a review whose workspace moved up, or whose
 Access did. There is no separate path.
 
 - **A pull request by the repository's own people** is a member's or a
-  collaborator's, on a branch in the repository. Its review starts with a
-  worktree at its head, with the recorded setup replayed. Its lead gets what
-  any lead gets: the sandbox, the network, `run_project`, `screenshot`, the
-  person's skills and MCP servers, and every tool. That includes Codex and
-  the agents ADR-050 kept from reviews. The design review becomes this, run
+  collaborator's, on a branch in the repository. Its lead already gets every
+  lead tool and the network (the limits sweep, #696). What this adds is the
+  workspace: its review starts with a worktree at its head, with the
+  recorded setup replayed, so `run_project`, `screenshot` and its tests run
+  its code in the sandbox. Any agent may lead it, Codex and the others
+  ADR-050 kept from reviews included. The design review becomes this, run
   with the person's skill.
 - **An outside author's pull request** starts as a copy, Read only, as it is
   now. None of the repository's settings, hooks or MCP config load, its

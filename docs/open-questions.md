@@ -82,7 +82,9 @@ was decided. These are what they leave open.
 - [ ] **Handing a running task between Local and a worktree** isn't built.
 - [ ] **Reviews of the team's own pull requests.** ADR-097 gives them a
   worktree with setup, their code run in the sandbox, and the network. On
-  main every review of someone else's pull request is a read-only copy
+  main their lead has every lead tool and the network, but still reads a
+  read-only copy and runs nothing of it; the rest waits on the
+  task-as-parts work
   ([reviews](decisions/reviews.md#reviewing-someone-elses-pull-request)).
 - [ ] **Posting a review on the person's word in the thread.** Today it is
   posted from its card, or by the project's setting for the team's reviews.

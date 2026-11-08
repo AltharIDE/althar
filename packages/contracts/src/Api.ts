@@ -220,6 +220,8 @@ export const ModelRoom = Schema.Struct({
   resetsAt: Schema.NullOr(Schema.String),
   kind: UsageWindowKind,
   label: Schema.NullOr(Schema.String),
+  /** The account is marked out of usage, as steering sees it (no fresh reading since shows room): until when. The room above is its last read. */
+  outUntil: Schema.optional(Schema.String),
 })
 export type ModelRoom = typeof ModelRoom.Type
 
