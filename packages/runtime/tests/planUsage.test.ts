@@ -613,6 +613,32 @@ describe('a window as it resets, and what a restart reads back', () => {
     }).pipe(Effect.provide(withUsage({}))),
   )
 
+  it.effect('sends each account only its own reset windows, where two accounts of an agent are in different states', () =>
+    Effect.gen(function* () {
+      const usage = yield* PlanUsage
+      const accounts = yield* Accounts
+      const [first] = yield* accounts.of('claude-code')
+      const second = yield* accounts.add({ agentId: 'claude-code', name: 'Second' })
+      // The first has its five hours reset and its week not; the second has nothing reset.
+      yield* usage.heard(first!.id, 'claude-code', [
+        used(95, { resetsAt: new Date(1000).toISOString() }),
+        { kind: 'weekly', usedPercent: 46, resetsAt: RESET },
+      ])
+      yield* usage.heard(second.id, 'claude-code', [used(10, { resetsAt: RESET })])
+      yield* TestClock.adjust(Duration.seconds(2))
+      const view = yield* usage.now(false)
+      const own = (id: string) => view.accounts.find((account) => account.accountId === id)!
+      assert.deepStrictEqual(
+        [
+          own(first!.id).resetWindows.map((window) => [window.kind, window.usedPercent]),
+          own(first!.id).windows.map((window) => window.kind),
+        ],
+        [[['five_hour', 95]], ['weekly']],
+      )
+      assert.deepStrictEqual([own(second.id).resetWindows, own(second.id).windows.map((window) => window.kind)], [[], ['five_hour']])
+    }).pipe(Effect.provide(withUsage({}))),
+  )
+
   it.effect('says an account all of whose windows have reset since was read, with how old that reading is and why it is no newer', () =>
     Effect.gen(function* () {
       const layer = withUsage({
