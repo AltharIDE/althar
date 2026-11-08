@@ -7,7 +7,6 @@ import { ContextRing } from '../src/composer/ContextRing/ContextRing'
 import { Button } from '../src/primitives/Button/Button'
 import { ClearChatDialog, type ClearKind } from '../src/thread/ClearChat/ClearChatDialog'
 import { ClearedLine } from '../src/thread/ClearChat/ClearedLine'
-import { ThreadHead } from '../src/thread/ThreadHead/ThreadHead'
 
 /*
  * Clearing the coordinator's chat: one question with two kinds, the one to
@@ -177,21 +176,6 @@ describe('the line where a cleared view begins', () => {
   it('keeps its dots out of what a screen reader says', () => {
     const { container } = render(<ClearedLine earlierOpen={false} onShowEarlier={() => {}} onBackToNow={() => {}} onUndo={() => {}} />)
     expect([...container.querySelectorAll('[aria-hidden="true"]')].filter((one) => one.textContent?.includes('·'))).toHaveLength(2)
-  })
-})
-
-describe('the bar above the thread', () => {
-  it('names the conversation and holds its actions', async () => {
-    const onClear = vi.fn()
-    render(
-      <ThreadHead title="Coordinator">
-        <Button onClick={onClear}>Clear</Button>
-      </ThreadHead>,
-    )
-    const bar = screen.getByRole('region', { name: 'Coordinator' })
-    expect(bar).toContainElement(screen.getByRole('button', { name: 'Clear' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Clear' }))
-    expect(onClear).toHaveBeenCalledOnce()
   })
 })
 

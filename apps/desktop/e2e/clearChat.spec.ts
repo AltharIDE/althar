@@ -9,9 +9,8 @@ import { launch, openFirstProject, planTask, say, still } from './support'
 
 /*
  * Clearing the coordinator's chat in a real project, against the real
- * runtime and the fake agent. Clearing the view: the bar's Clear, then Show
- * earlier, Back to now and Undo, and /clear as the fast path to the same
- * question; the task planned meanwhile stays in the view. Forgetting: the
+ * runtime and the fake agent. Clearing the view: /clear, then Show
+ * earlier, Back to now and Undo; the task planned meanwhile stays in the view. Forgetting: the
  * context ring's Clear chat…, which opens the question on the warning; the
  * conversation goes and the task stays; the next message is answered by a
  * session that has nothing of the conversation but the project's records.
@@ -53,14 +52,11 @@ const shoot = async (page: Page, name: string, area: Locator) => {
   await area.screenshot({ path: `test-results/clear-chat-${name}.png`, animations: 'disabled' })
 }
 
-test('clears the view from the bar and /clear, reads the earlier conversation, and undoes it', async () => {
+test('clears the view with /clear, reads the earlier conversation, and undoes it', async () => {
   const { electronApp, page } = await opened()
   try {
     const conversation = await talked(page)
-    const bar = page.getByRole('region', { name: 'Coordinator' })
-    await shoot(page, 'bar', bar)
-
-    await bar.getByRole('button', { name: 'Clear', exact: true }).click()
+    await say(page, '/clear')
     const dialog = page.getByRole('dialog', { name: 'Clear chat' })
     await expect(dialog.getByRole('radio', { name: /Clear only the view/ })).toBeChecked()
     await shoot(page, 'dialog-view', dialog)
@@ -70,7 +66,7 @@ test('clears the view from the bar and /clear, reads the earlier conversation, a
     await expect(page.getByText(/^Cleared/)).toBeVisible()
     await expect(conversation.getByText(ANSWER)).toHaveCount(0)
     await expect(conversation.getByText('Add a retry to checkout', { exact: true })).toBeVisible()
-    await expect(bar.getByRole('button', { name: 'Clear', exact: true })).toBeFocused()
+    await expect(page.getByRole('textbox', { name: /^Tell .* something/ })).toBeFocused()
     await shoot(page, 'cleared', conversation)
 
     // Nothing was said by the coordinator on its own; its next word answers what it is asked, and shows from the clear.
@@ -97,7 +93,7 @@ test('clears the view from the bar and /clear, reads the earlier conversation, a
     await expect(page.getByText(/^Cleared/)).toHaveCount(0)
     await expect(conversation.getByRole('article', { name: /^You/ })).toHaveCount(4)
 
-    // /clear asks the same question, on the same kind, and is not said to the coordinator.
+    // /clear is not said to the coordinator: the question closes on Escape and nothing changes.
     await say(page, '/clear')
     await expect(dialog.getByRole('radio', { name: /Clear only the view/ })).toBeChecked()
     await page.keyboard.press('Escape')
@@ -106,10 +102,10 @@ test('clears the view from the bar and /clear, reads the earlier conversation, a
     await expect(page.getByRole('textbox', { name: /^Tell .* something/ })).toBeFocused()
 
     // Cleared again, the view is clear: the question says so and has forgetting ready.
-    await bar.getByRole('button', { name: 'Clear', exact: true }).click()
+    await say(page, '/clear')
     await dialog.getByRole('button', { name: 'Clear the view' }).click()
     await expect(page.getByText(/^Cleared/)).toBeVisible()
-    await bar.getByRole('button', { name: 'Clear', exact: true }).click()
+    await say(page, '/clear')
     await expect(dialog.getByRole('radio', { name: /Clear only the view\s*The view is already clear\./ })).toBeDisabled()
     await expect(dialog.getByRole('radio', { name: /Forget the conversation too/ })).toBeChecked()
     await shoot(page, 'dialog-already-clear', dialog)
