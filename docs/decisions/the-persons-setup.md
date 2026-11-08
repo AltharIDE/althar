@@ -138,9 +138,10 @@ push or merge. The irreversible list and git's guard are what hold.
 
 **Not built yet:**
 
-- Each catalog skill is off until the person turns it on, and skills go only
-  to a task's lead (`skills/src/local.ts`, `Sessions.ts`). They should be on
-  by default, for every role.
+- Each catalog skill is off until the person turns it on
+  (`skills/src/local.ts`); it should be on by default. The skills the person
+  turns on already load in every ordinary role, the coordinator included; an
+  outside author's review loads no skill plugin that runs code.
 - `allowed-tools` frontmatter is refused at install (`skills/src/validate.ts`).
   It should be accepted, since nothing it would allow asks now.
 - All catalog skills on is more than Codex may list in its fallback budget,
@@ -152,15 +153,18 @@ Skill and OpenSpec files an agent writes (`.claude/skills/`,
 `.agents/skills/`, `.opencode/skills/`, `openspec/`) are ordinary files of the
 change. They go up with the rest of its diff, which its review reads.
 
-**Not built yet:** the project's Repository files switches (`writeSkills`,
-`writeOpenSpec`, `pushProtected`, all off) still hold a push that carries such
-files the task brought in (`repositoryGuard.ts`). The switches and the hold go.
+No consent of their own is asked to push them. The project's old Repository
+files switches (`writeSkills`, `writeOpenSpec`, `pushProtected`) are still in
+its settings but hold nothing back (`repositoryGuard.ts`).
 
 ## The person's own sign-in
 
-Agents may use the person's own `gh`, `glab` and git sign-in where it is set
-up: their `gh` and `glab` config, git's credential helpers and their SSH
-agent. Why: Claude Code, Orca and T3 Code all manage pull requests with the
+Agents use the person's own `gh`, `glab` and git sign-in where it is set
+up: their `gh` and `glab` config and tokens, git's credential helpers and
+their SSH agent are left in the agent's environment (`Config.ts`,
+`process.ts`). Inside Claude Code's sandbox `~/.config/gh` and `~/.npmrc`
+stay secret places, so there only a token in the environment carries the
+`gh` sign-in. An outside author's review runs signed out. Why: Claude Code, Orca and T3 Code all manage pull requests with the
 person's own sign-in, and Althar shouldn't be the one place that can't.
 Althar's sealed connection secrets and provider API keys never reach agents.
 
@@ -184,10 +188,8 @@ environment crosses.
 
 **Not built yet:**
 
-- Agents still run signed out of the code host: their `gh` and `glab` config,
-  credential helpers and SSH agent are taken out of their environment
-  (`withoutSignIns`, `Config.ts`).
-- The project switch "Agents use my code host sign-in" isn't built.
+- A project switch to turn the person's sign-in off for agents. The
+  inherited sign-in is the default, with no switch.
 - Althar doesn't yet notice an agent's own push. The plan is to read the
   task's branch on the remote after each turn. A head that is a commit of the
   worktree would then be taken as the task's own push, with a line in the
@@ -206,3 +208,4 @@ goes on is open.
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 8 Nov 2026: the limits sweep (#696) built: agents carry the person's own code-host sign-in, picked skills load in every ordinary role, and skill and OpenSpec files push like any other.

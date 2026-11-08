@@ -95,6 +95,9 @@ its own kind.
   fetched: detached, on no branch, with git running with none of the person's
   config (`addReadCopy`). It runs in reader mode under the reader rules and
   runs nothing of the pull request's code. No setup or run touches the copy.
+- **A review of the repository's own people** gets every lead tool, and its
+  commands reach the network as a lead's do. **An outside author's** gets
+  the six reading tools.
 - **Only an agent its session can hold to reading leads one.** One that runs
   whatever its sandbox contains without asking, such as Codex, could run the
   pull request's code, so it is refused with the names of those that can.
@@ -121,9 +124,10 @@ its own kind.
 
 Not built yet:
 
-- A pull request by the repository's own people getting what a task's lead
-  gets: a worktree at its head with the setup replayed, its code run in the
-  sandbox, and the network.
+- A pull request by the repository's own people getting a worktree at its
+  head with the setup replayed, and its code run in the sandbox. This, and
+  the in-task reviewer's tool list, wait on the work that makes a task a
+  conversation plus parts.
 - "Run it", the person's word in the thread that turns an outside author's
   review into the team's kind, still offline for its commands.
 - Posting on the person's word in the thread (`post_review`), as well as
@@ -210,3 +214,4 @@ A round that forgets `kept_views` shows less, never something stale.
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 8 Nov 2026: the limits sweep (#696) built: a review of the repository's own people gets every lead tool and the network.

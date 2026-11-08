@@ -171,11 +171,9 @@ first lead in a repository works it out, and Althar replays it.
   (`toolPlaces.ts`) holds each tool's caches on a Mac and on Linux, never
   where keys and sign-ins are kept.
 
-No host list limits where a lead's commands reach. Not built yet: main still
-hands Claude Code's sandbox the tools' download hosts as its allowed domains
-(`toolPlaces.ts`, `registry.ts`), and Codex's and OpenCode's leads get
-neither the caches nor the hosts. The "Remove every limit beyond what can't
-be undone" task opens the network.
+No host list limits where a lead's commands reach: Claude Code's and
+Codex's sandboxes reach every host. Not built yet: Codex's leads don't get
+the tools' caches as places to write.
 
 A setup runs repository code unasked, outside any sandbox, as a run of the
 project does. That is the trade for a folder that gets ready with nobody
@@ -397,3 +395,4 @@ sweep finds the rest.
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 8 Nov 2026: the limits sweep (#696) opened every sandbox's network.

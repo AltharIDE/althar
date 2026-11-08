@@ -195,10 +195,10 @@ inside it, while the agents Althar bundles are.
 - **The profile is the app's own,** at `~/.var/app/dev.althar.app/data/althar`,
   with the worktrees beside it. Projects reach the app through the document
   portal.
-- **Agents can't use the device bridge.** The rules refuse a command that
-  runs `flatpak-spawn` or `althar-host-ssh`, or sets either for git to run
-  later. Running a command on the device is a way out of the sandbox, and the
-  sandbox is the boundary ([what-agents-may-do.md](what-agents-may-do.md)).
+- **The device bridge is an ordinary command for agents.** The rules read
+  `flatpak-spawn` as a wrapper and read the command it runs, which meets the
+  irreversible list as any other does
+  ([what-agents-may-do.md](what-agents-may-do.md#what-asks)).
 
 Not built yet: agents using the person's own sign-in inside the Flatpak (their
 SSH agent, `gh` and `glab`), as [what-agents-may-do.md](what-agents-may-do.md)
@@ -321,3 +321,4 @@ its minified stacks read by name.
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 8 Nov 2026: the limits sweep (#696) made the device bridge an ordinary command.

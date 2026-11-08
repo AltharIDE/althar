@@ -9,7 +9,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Fiber, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { Agents, Connectors, readingUntrusted, withoutSignIns } from '../src/Config'
+import { agentGit, Agents, Connectors, readingUntrusted, withoutSignIns } from '../src/Config'
 import { Connections, NotConnected, pageOf, SignInUnavailable } from '../src/Connections'
 import { CliUnanswered, NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
@@ -1149,22 +1149,17 @@ describe('where sign-ins are kept', () => {
 })
 
 describe('the agents', () => {
-  it.effect('run without the person’s sign-ins to gh, glab, or git', () =>
+  it.effect('keep the person’s code-host sign-ins and git credential helpers', () =>
     Effect.gen(function* () {
       const agents = yield* Agents
-      const transport = agents.list[0]?.transport('/w')
-      const env = transport?._tag === 'Process' ? (transport.spec.env ?? {}) : {}
-      assert.isTrue(existsSync(env.GH_CONFIG_DIR ?? ''))
-      assert.strictEqual(env.GLAB_CONFIG_DIR, env.GH_CONFIG_DIR)
-      assert.deepInclude(env, {
-        GIT_CONFIG_COUNT: '2',
-        GIT_CONFIG_KEY_0: 'credential.helper',
-        GIT_CONFIG_VALUE_0: '',
-        // A branch made from a remote's follows nothing, so making one never writes the repository's config.
-        GIT_CONFIG_KEY_1: 'branch.autoSetupMerge',
-        GIT_CONFIG_VALUE_1: 'false',
-        GIT_TERMINAL_PROMPT: '0',
-      })
+      for (const entry of agents.list) {
+        const transport = entry.transport('/w')
+        const env = transport._tag === 'Process' ? (transport.spec.env ?? {}) : {}
+        assert.isUndefined(env.GH_CONFIG_DIR)
+        assert.isUndefined(env.GLAB_CONFIG_DIR)
+        assert.deepInclude(env, agentGit)
+        assert.notInclude(Object.values(env), 'credential.helper')
+      }
     }).pipe(Effect.provide(Layer.sync(Agents, () => Agents.fromRegistry()))),
   )
 
@@ -1179,6 +1174,7 @@ describe('the agents', () => {
       assert.deepStrictEqual(JSON.parse(env.CODEX_CONFIG ?? '{}'), {
         'mcp_servers.github.command': 'npx',
         'mcp_servers.github.enabled': false,
+        'sandbox_workspace_write.network_access': true,
       })
       assert.strictEqual(env.CODEX_HOME, home)
     }).pipe(Effect.provide(Layer.sync(Agents, () => Agents.fromRegistry()))),
@@ -1202,10 +1198,14 @@ describe('the agents', () => {
           GIT_CONFIG_VALUE_0: '',
           GIT_CONFIG_KEY_1: 'branch.autoSetupMerge',
         })
-        assert.strictEqual(envOf(agentId, false).GIT_CONFIG_COUNT, '2')
+        assert.strictEqual(envOf(agentId, false).GIT_CONFIG_COUNT, '1')
       }
-      assert.deepStrictEqual(JSON.parse(envOf('codex', true).CODEX_CONFIG ?? '{}'), { web_search: 'disabled', 'features.hooks': false })
-      assert.isUndefined(envOf('codex', false).CODEX_CONFIG)
+      assert.deepStrictEqual(JSON.parse(envOf('codex', true).CODEX_CONFIG ?? '{}'), {
+        web_search: 'disabled',
+        'features.hooks': false,
+        'sandbox_workspace_write.network_access': true,
+      })
+      assert.isTrue(JSON.parse(envOf('codex', false).CODEX_CONFIG ?? '{}')['sandbox_workspace_write.network_access'])
       assert.strictEqual(envOf('opencode', true).OPENCODE_DISABLE_PROJECT_CONFIG, '1')
       assert.isFalse(JSON.parse(envOf('opencode', true).OPENCODE_CONFIG_CONTENT ?? '{}').lsp)
       assert.isUndefined(envOf('opencode', false).OPENCODE_DISABLE_PROJECT_CONFIG)
@@ -1264,7 +1264,7 @@ describe('the agents', () => {
         input: 'protocol=https\nhost=github.com\n\n',
         env: { PATH: process.env.PATH ?? '', HOME: home, GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0', ...env },
       }).stdout.toString()
-    assert.include(fill({}), 'password=leaked')
+    assert.include(fill(agentGit), 'password=leaked')
     assert.notInclude(fill(withoutSignIns(home)), 'leaked')
   })
 })

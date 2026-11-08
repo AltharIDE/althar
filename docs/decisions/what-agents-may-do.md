@@ -100,16 +100,21 @@ flowchart TB
     W -->|"no: a command, an MCP call,<br/>or another turn"| C["A card for the person"]
 ```
 
-**Not built yet:** main still asks or refuses beyond this list. These all go:
+- **Beside a Never, an unreadable command runs.** Never refuses only what a
+  line's words plainly show; the agent is trusted with what the rules can't
+  see.
+- **`gh` and `glab` are read as git is.** An edit that can be undone goes
+  ahead; a merge, a release, a post and a credential export are on the list.
+  Approving the agent's own work, or widening what the host lets agents do,
+  through `gh api`, `glab` or GraphQL, is refused, not asked. A host API call
+  the rules don't know goes ahead rather than being read as irreversible.
+- **There is no floor beyond this list** in any mode, and the Flatpak's
+  device bridge is an ordinary command.
 
-- In the modes under "Ask about more", the old floor still asks: the stash,
-  `reflog expire` and `gc --prune`, a `.env` outside the worktree
-  (`rules.ts`).
-- While Never lists anything other than what git's guard stops, a command
-  Althar can't read is refused, with how to spell it out.
-- `gh` and `glab` writes are refused ("Merging is the person's to do",
-  `rules.ts`), rather than read as git is: `gh pr merge`, a release or a
-  comment on someone else's pull request should ask, and the rest go ahead.
+Why "when unsure, allow": every ask or refusal beyond the list cost the
+person time and agents kept working around them. An agent that is refused is
+told the command and the reason in the same turn; a refusal that leaves it
+silent is followed up with both (`AgentConnection.ts`).
 
 ## Asking is the person's word
 
@@ -155,32 +160,35 @@ follows every open one.
 
 ## The sandbox is the boundary
 
-The OS sandbox is the boundary, not the command reader. Where a session's
-sandbox holds its shell commands, what it holds runs without Althar reading
-it, loops, `$(…)`, heredocs and scripts included. Reading a command the
-sandbox already holds says nothing the sandbox doesn't.
+The OS sandbox holds what a command can write; the rules hold the
+irreversible list, inside the sandbox and outside it. Every shell command
+reaches Althar's rules, which answer it at once: a visible irreversible one,
+or one the person asks about, asks; everything else runs, loops, `$(…)`,
+heredocs and scripts included.
 
 - **Where it holds:** Claude Code's lead and the coordinator, on macOS, and
   on Linux where bubblewrap and socat start a namespace, outside a Flatpak.
   There the session doesn't start without it (`failIfUnavailable`). A lead
   writes only its worktree, its temp folder and the tool caches
-  (`TOOL_PLACES`); the coordinator only its copies.
-- **What still holds inside:** the project's own words. A command or kind
-  the person never allows is refused where the line plainly is one, and a
-  command they ask about asks. Keys and sign-ins stay unreadable by the
-  sandbox's deny list.
-- **What crosses meets the rules:** a command that runs, or asks to run,
-  outside the sandbox, an edit outside the worktree, a host it asks for. With
-  everything allowed, only the irreversible list asks, and a crossing Althar
-  can't read goes ahead unread. On macOS, Electron and Chromium can't start
-  inside Claude Code's or Codex's sandbox at all, so an end-to-end run has to
-  cross. The commands a project runs anyway (its tests, its build, dev
-  servers) run outside from the start (`excludedCommands`), worked out from
-  the project (`sandboxReach.ts`).
+  (`TOOL_PLACES`); the coordinator only its folder and temp files. Its
+  network reaches any host and may bind localhost; of the Unix sockets only
+  the SSH agent's is let through, so Docker's or the session bus's is not a
+  way out. Keys and sign-ins stay unreadable by the sandbox's deny list.
+- **Codex** runs in `workspace-write` with the network open, set in its
+  session and on every turn by Althar's patch of codex-acp. Its turn takes
+  the `untrusted` approval policy, so every command its own safe list doesn't
+  cover, a merge, a release or a post among them, reaches Althar and meets
+  the list; what its safe list covers runs unasked.
+- **What runs outside:** on macOS, Electron and Chromium can't start inside
+  Claude Code's or Codex's sandbox at all, so an end-to-end run has to cross.
+  The commands a project runs anyway (its tests, its build, dev servers) run
+  outside from the start (`excludedCommands`), worked out from the project,
+  and so do common dev servers and test runners started by hand
+  (`sandboxReach.ts`). They still meet the irreversible list.
 - **Where no sandbox holds:** Windows, a Flatpak, Linux without bubblewrap
-  and socat, Codex (which asks only to go beyond its own sandbox), OpenCode
-  and the other agents. There the rules read each request, let what they
-  can't read go ahead, and ask only before the irreversible list.
+  and socat, OpenCode and the other agents. There the rules read each
+  request, let what they can't read go ahead, and ask only before the
+  irreversible list.
 - **A line is read from where the lead's shell is.** Claude Code writes its
   shell's folder into its transcript; Althar reads the newest and starts the
   line there, where it is in the worktree or a temp folder. Otherwise the
@@ -340,8 +348,9 @@ any sandbox, as tools, so the agent asks Althar rather than stepping out:
   Running pill. A lead stops only its task's runs.
 - **`screenshot`** has the desktop app draw a page offscreen, in a session
   of its own that keeps and grants nothing, and gives it back at 1×: the
-  viewport, the whole page or one element. Where nothing draws pages, as on
-  the command line, it says so.
+  viewport, the whole page or one element. Any page over http or https, on
+  this computer or elsewhere, redirects followed; a `file:` address is
+  refused. Where nothing draws pages, as on the command line, it says so.
 - **`rerun_check`** runs a task's failing checks again: an Actions job on
   GitHub, a pipeline's job on GitLab. A check another service reports, and
   every Bitbucket check, can't be run again from Althar, and the lead is told
@@ -351,20 +360,16 @@ A review's lead of the repository's own people gets these as a task's lead
 does, and so does the coordinator, from the same pool
 ([coordinator](coordinator.md)).
 
-**Not built yet:** `screenshot` draws only a page served on this computer
-(loopback, or where one of Althar's runs answers). It should draw any
-address, since agents reach the web already.
-
 ## The web
 
 "Leads can reach the web" is a project switch in Rules, on by default. With
 it on, leads and reviewers get their agent's own web tools (Claude Code's
 WebSearch and WebFetch, Codex's live search, OpenCode's websearch and
 webfetch) without asking. It applies when a session starts. There is no host
-allowlist: with everything allowed, a host a command asks for goes ahead. A
-lead's sandbox also lets through, without the round trip, the hosts worked
-out from the project (its code hosts, its registries, its trackers, the tool
-caches' download hosts) and those the person adds in Rules.
+allowlist: sandboxed commands reach every host, for leads, reviewers and the
+coordinator alike. A host the person puts under Never is refused, and so is
+every host under it: Claude Code's sandbox gets it as a denied domain, and
+the rules refuse a command that names it.
 
 Why the switch stays: a lead that reads a private repository and fetches any
 URL can be steered by a page or a comment into sending code out in a URL. The
@@ -379,13 +384,8 @@ lead's. Why: the stranger's words could steer the agent into sending private
 code out, and a host list wouldn't stop that, since a leak can ride on an
 allowed host.
 
-**Not built yet:**
-
-- The coordinator's commands reach no network (an empty allowlist), and its
-  WebFetch asks. They should reach what a lead's do.
-- Codex's shell has no network (`network_access: false`).
-- "Run it", the person's word that makes an outside author's review the
-  team's kind, running its code in the sandbox, isn't built.
+**Not built yet:** "Run it", the person's word that makes an outside
+author's review the team's kind, running its code in the sandbox.
 
 ## Settings agents change
 
@@ -438,3 +438,4 @@ Anything else that blocks, refuses or asks is a bug.
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 8 Nov 2026: the limits sweep (#696) built: every command reaches the rules inside the sandbox too, the network is open to every role, `gh` and `glab` are read as git is, an unreadable command runs beside a Never, and screenshots draw any http or https page.

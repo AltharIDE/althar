@@ -19,9 +19,9 @@ import { task, runtime, turns, until } from './support'
  * Allow everything on one task (ADR-043), with the fake agent running real
  * commands: turned on, what waits on the person is decided again and goes
  * ahead, and so does what the task asks next, while the project's other
- * tasks still ask; what Althar can't read is refused rather than let
- * through while the project never allows something; and turned off, the
- * task asks again. A call a kind always asks about says it is held. A
+ * tasks still ask; what Althar can't read goes ahead too, with the task's
+ * switch on, and what git's guard cannot stop still asks; and turned off,
+ * the task asks again. A call a kind always asks about says it is held. A
  * burst, several calls waiting at once, clears whole: a task's by its
  * switch, and every task's in the project by the project's.
  */
@@ -197,32 +197,30 @@ describe('allow everything on a task (ADR-043)', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('refuses what Althar can’t read, with how to run it, while the project never allows something', () =>
+  it.live('runs what Althar can’t read once everything is allowed, beside a Never it cannot see into', () =>
     Effect.gen(function* () {
       const policies = yield* Policies
       const instance = yield* Instance
       const sql = yield* SqlClient.SqlClient
       const { project, task: created } = yield* working('ask')
       yield* policies.set(project.projectId as ProjectId, { never: ['deploy'] }, instance.personId)
-      // A command that could deploy, by words Althar can't read until it runs.
+      // A command that could deploy, by words Althar can't read until it runs: once the task allows everything, it goes ahead.
       yield* say(created.threadId, `${scenarios.run}echo $(echo deploy)`)
       yield* waitingCall(created.threadId)
       yield* allow(created.taskId, true)
       yield* ended(created.threadId, 1)
-      // The rule's refusal is rejected to the agent, then said as Althar's.
-      assert.deepStrictEqual(yield* said(created.threadId), ['chosen=declinecarrying on without it'])
+      assert.deepStrictEqual(yield* said(created.threadId), ['chosen=allow_once'])
       const [decision] = yield* sql<{ outcome: string; reason: string }>`
         SELECT d.outcome, d.reason FROM decisions d JOIN permission_requests r ON r.id = d.permission_request_id
         JOIN provider_sessions s ON s.id = r.provider_session_id JOIN threads t ON t.id = s.thread_id
         WHERE t.id = ${created.threadId} ORDER BY d.decided_at DESC LIMIT 1`
-      assert.strictEqual(decision?.outcome, 'reject')
-      assert.include(decision?.reason ?? '', 'spelled out')
+      assert.strictEqual(decision?.outcome, 'allow')
       // Where the project never allows only what git's guard stops, whatever runs it, the lead's session says the guard holds, and
       // what Althar can't read goes ahead (ADR-089); where no guard holds (Windows), it is refused as before.
       yield* policies.set(project.projectId as ProjectId, { never: ['delete-branch'] }, instance.personId)
       yield* say(created.threadId, `${scenarios.run}echo $(echo deploy)`)
       yield* ended(created.threadId, 2)
-      assert.deepStrictEqual((yield* said(created.threadId)).slice(1), [
+      assert.deepStrictEqual((yield* said(created.threadId)).slice(-1), [
         guardHolds ? 'chosen=allow_once' : 'chosen=declinecarrying on without it',
       ])
     }).pipe(Effect.provide(withQueries())),

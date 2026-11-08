@@ -62,18 +62,19 @@ cloud, so nothing is heard while the app is closed.
 Althar's tools, which carry the connection's sign-in without showing it.
 That is the preferred way, and the recorded one: Althar keeps a receipt,
 holds a push someone else would be overtaken by, and knows where a fork's
-branch goes. Agents may also use the person's own `gh`, `glab` and git
-sign-in where it is set up, under the project's switch "Agents use my code
-host sign-in", on by default. The rules read `gh` and `glab` as they read
-git, so only [what can't be undone](what-agents-may-do.md) asks. Althar
-notices a push it didn't make by reading the branch after each of the
-lead's turns. A head that is a commit of the task's worktree is taken as
-the task's own; any other head is someone else's push. A pull request
-opened with `gh` on the task's branch is adopted, not duplicated.
+branch goes. Agents also carry the person's own `gh`, `glab` and git
+sign-in where it is set up ([the person's setup](the-persons-setup.md#the-persons-own-sign-in)).
+The rules read `gh` and `glab` as they read git, so only
+[what can't be undone](what-agents-may-do.md#what-asks) asks: a merge, a
+release, a post. Approving the agent's own work, or widening what the host
+lets agents do, is refused.
 
-Not built yet: on main, agents still run signed out of the host (`gh` and
-`glab` signed out, git's credential helpers reset, no SSH agent), and the
-rules refuse `gh` and `glab` commands that change a host.
+Not built yet: Althar noticing a push it didn't make, by reading the branch
+after each of the lead's turns. A head that is a commit of the task's
+worktree would be taken as the task's own, any other head as someone else's
+push, and a pull request opened with `gh` on the task's branch adopted, not
+duplicated. There is no project switch to keep agents off the person's
+sign-in.
 
 ## Connecting
 
@@ -586,8 +587,8 @@ Each connection says its workspace and is disconnected on its own.
 
 The decisions above are current. These parts of them aren't built on main:
 
-- **The person's own sign-in for agents:** agents still run signed out of
-  the host, and the rules refuse `gh` and `glab` writes.
+- **Noticing an agent's own push,** and adopting a pull request it opened
+  with `gh`.
 - **A gated call to the host's API** (`code_host_api`) and to a tracker's
   (`tracker_api`), for whatever no typed tool covers: reads in any turn,
   writes asked-for, with the never list, the repository's content and what
@@ -622,3 +623,4 @@ The decisions above are current. These parts of them aren't built on main:
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 8 Nov 2026: the limits sweep (#696) built: agents carry the person's own sign-in, and `gh` and `glab` are read as git is.
