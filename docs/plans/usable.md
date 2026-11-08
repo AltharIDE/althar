@@ -172,8 +172,9 @@ Next, decided with the user on 3 October 2026, as designed in docs 03 and 05.
     and a step runs again on it, as when the person hands a step over. The
     thread says it in one line: who is out, when it resets, who took over
     and on which model. With no agent free, it waits.
-  - **Wait.** A step is held until the reset, then runs again on the same
-    agent; its card says what it waits for and until when. Without a reset
+  - **Wait.** A step is held until the reset (or until a fresh reading of
+    its plan, or a turn that completed on the account, shows it is back), then
+    runs again on the same agent; its card says what it waits for and until when. Without a reset
     time, the step needs the person, who hands it over or abandons it.
 - **Outside a step,** the coordinator or a lead the person is talking to
   moves on the same way, and the person's message goes to the agent that

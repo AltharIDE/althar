@@ -114,7 +114,10 @@ const reviewersOf = (taskId: string) =>
       WHERE t.task_id = ${taskId} AND t.kind = 'step' AND t.node_key = 'review' ORDER BY s.started_at, s.rowid`
   })
 
-/** A task whose lead is done, and whose reviewer, Codex, never reports: its review needs the person. */
+/** Agents Althar won't hand a step on to by itself, as it spends on a key only where the person picks: Codex alone is free. */
+const NOT_FREE = ['claude-code', 'opencode']
+
+/** A task whose lead is done, and whose reviewer, Codex, never reports: with no other agent free, its review needs the person. */
 const unreported = Effect.gen(function* () {
   const task = yield* planned('Fix the heading. [lead:finish]', [
     { key: 'implement', agentId: 'claude-code' },
@@ -258,7 +261,7 @@ describe('a review that needs the person, handed back to its own reviewer', () =
         (yield* reviewersOf(task.taskId)).map((session) => session.state),
         ['completed', 'failed'],
       )
-    }).pipe(Effect.provide(withQueries(':memory:', {}, { each: { codex: { failsOnce: ['large'] } } }))),
+    }).pipe(Effect.provide(withQueries(':memory:', {}, { each: { codex: { failsOnce: ['large'] } }, perUse: NOT_FREE }))),
   )
 
   it.live('starts it afresh on the account picked, where it ran on another', () => {
@@ -278,7 +281,7 @@ describe('a review that needs the person, handed back to its own reviewer', () =
           ['codex', work.id],
         ],
       )
-    }).pipe(Effect.provide(withQueries()))
+    }).pipe(Effect.provide(withQueries(':memory:', {}, { perUse: NOT_FREE })))
   })
 })
 
@@ -303,7 +306,7 @@ describe('a review that needs the person, handed on to a model', () => {
       assert.deepStrictEqual([on?.agentId, on?.model, on?.effort], ['claude-code', 'large', 'high'])
       // The call it raises names the model that was on the step, for the next hand on to leave out.
       assert.deepStrictEqual([again.model, again.effort], ['large', 'high'])
-    }).pipe(Effect.provide(withQueries())),
+    }).pipe(Effect.provide(withQueries(':memory:', {}, { perUse: [...NOT_FREE, 'codex'] }))),
   )
 
   it.live('runs on another model of the agent it had, at the model’s own effort where none is picked', () =>
@@ -313,7 +316,7 @@ describe('a review that needs the person, handed on to a model', () => {
       // The session it had moves to Large, or another starts there; either way the review runs on it.
       const on = yield* until(reviewerOn(task.taskId), (now) => now?.model === 'large')
       assert.strictEqual(on?.agentId, 'codex')
-    }).pipe(Effect.provide(withQueries())),
+    }).pipe(Effect.provide(withQueries(':memory:', {}, { perUse: NOT_FREE }))),
   )
 
   it.live('keeps answers that name no model working: the agent’s own model and effort', () =>
@@ -324,7 +327,7 @@ describe('a review that needs the person, handed on to a model', () => {
       const on = yield* reviewerOn(task.taskId)
       // What the agent starts on by itself, not the plan's effort for another reviewer.
       assert.deepStrictEqual([on?.agentId, on?.model, on?.effort], ['claude-code', 'small', 'medium'])
-    }).pipe(Effect.provide(withQueries())),
+    }).pipe(Effect.provide(withQueries(':memory:', {}, { perUse: [...NOT_FREE, 'codex'] }))),
   )
 })
 
@@ -453,7 +456,7 @@ describe('a settling an earlier Althar kept waiting for a place', () => {
         // It settles quietly again: the step needs the person once more.
         const again = yield* stuckCall(task.taskId, call.id)
         assert.deepStrictEqual([again.step, again.why], ['settle', 'no_report'])
-      }).pipe(Effect.provide(withQueries())),
+      }).pipe(Effect.provide(withQueries(':memory:', {}, { perUse: ['codex', 'opencode'] }))),
     )
 })
 

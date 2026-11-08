@@ -1002,24 +1002,26 @@ describe('the coordinator’s edges', () => {
 })
 
 describe('a step that needs the person', () => {
-  it.live('reminds a lead that ends its turn without reporting once, then needs the person, and carries on when told', () =>
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const { projectId, task } = yield* planned('Quietly', 'Nothing to say.', [{ key: 'implement', agentId: 'claude-code' }])
-      const call = yield* stuckCall(task.taskId)
-      assert.deepStrictEqual([call.step, call.why, call.agentId], ['implement', 'no_report', 'claude-code'])
-      const turns = yield* sql<{
-        prompt: string
-      }>`SELECT prompt FROM turn_deliveries WHERE thread_id = ${task.threadId} ORDER BY requested_at`
-      assert.match(turns[1]?.prompt ?? '', /isn't done until you call Althar's finish_step tool/)
-      assert.strictEqual((yield* cardsOf(projectId))[0]?.phase, 'waiting')
-      // Told what to do, the lead reports, and with no review the task is ready.
-      yield* answer(call.id, { kind: 'tell', note: 'You are done: report it. [lead:finish]' })
-      const [card] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
-      assert.strictEqual(card?.summary, 'Did the task.')
-      const [answered] = yield* sql<{ state: string }>`SELECT state FROM attention_requests WHERE id = ${call.id}`
-      assert.strictEqual(answered?.state, 'answered')
-    }).pipe(Effect.provide(withQueries())),
+  it.live(
+    'reminds a lead that ends its turn without reporting once, then, with no other agent free, needs the person, and carries on when told',
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const { projectId, task } = yield* planned('Quietly', 'Nothing to say.', [{ key: 'implement', agentId: 'claude-code' }])
+        const call = yield* stuckCall(task.taskId)
+        assert.deepStrictEqual([call.step, call.why, call.agentId], ['implement', 'no_report', 'claude-code'])
+        const turns = yield* sql<{
+          prompt: string
+        }>`SELECT prompt FROM turn_deliveries WHERE thread_id = ${task.threadId} ORDER BY requested_at`
+        assert.match(turns[1]?.prompt ?? '', /isn't done until you call Althar's finish_step tool/)
+        assert.strictEqual((yield* cardsOf(projectId))[0]?.phase, 'waiting')
+        // Told what to do, the lead reports, and with no review the task is ready.
+        yield* answer(call.id, { kind: 'tell', note: 'You are done: report it. [lead:finish]' })
+        const [card] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
+        assert.strictEqual(card?.summary, 'Did the task.')
+        const [answered] = yield* sql<{ state: string }>`SELECT state FROM attention_requests WHERE id = ${call.id}`
+        assert.strictEqual(answered?.state, 'answered')
+      }).pipe(Effect.provide(withQueries(undefined, undefined, { perUse: ['codex', 'opencode'] }))),
   )
 
   it.live('needs the person when the lead goes in the middle of its step, and stops when they abandon it', () =>
@@ -1095,7 +1097,7 @@ describe('a step that needs the person', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live("reminds a reviewer that doesn't report, then needs the person, who tells it to", () =>
+  it.live("reminds a reviewer that doesn't report, then, with no other agent free, needs the person, who tells it to", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const { projectId, task } = yield* planned('Looked at', '[lead:finish]', [
@@ -1113,7 +1115,7 @@ describe('a step that needs the person', () => {
         attempts.map((attempt) => attempt.state),
         ['failed', 'succeeded'],
       )
-    }).pipe(Effect.provide(withQueries())),
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { perUse: ['claude-code', 'opencode'] }))),
   )
 
   it.live('starts afresh, each round, a reviewer that says yes to its step’s model but stays on another', () =>
@@ -1157,7 +1159,7 @@ describe('a step that needs the person', () => {
         reviewers.map((reviewer) => reviewer.agentId),
         ['codex', 'claude-code'],
       )
-    }).pipe(Effect.provide(withQueries())),
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { perUse: ['claude-code', 'opencode'] }))),
   )
 
   it.live('hands a settling that never reports to another agent, with the findings still open', () =>

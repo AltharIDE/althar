@@ -298,6 +298,12 @@ describe('trying a step again', () => {
     expect(screen.getByText('Implement, after 3 tries')).toBeTruthy()
   })
 
+  it('says Althar handed a step without its report on before it asked, where it did', async () => {
+    show(stuck({ why: 'no_report', tried: ['handed_on'] }))
+    expect(await screen.findByText(/Reminded it to report/)).toBeTruthy()
+    expect(screen.getByText(/Handed it to another model/)).toBeTruthy()
+  })
+
   it('runs a review again on its reviewer, or hands it to another', async () => {
     const onAnswer = show(stuck({ step: 'review', why: 'stalled' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Review again' }))

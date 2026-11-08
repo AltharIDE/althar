@@ -433,6 +433,19 @@ every running turn instead, every 30 seconds.
 - **The agent's own limits.** A turn cut off at the agent's output or step
   limit carries on where it was, a few times, before the step is reminded to
   report. A refusal goes to the person at once.
+- **A step without its report.** A turn that ends without the step's report
+  (`finish_step`, or a review's `report_review`) gets the agent reminded once:
+  report, or say what blocks it, and say so where the tool isn't among its
+  tools. Ending again without it, the step goes by itself to the best model
+  of another agent that is free, by the rules a usage limit hands work on by
+  (room, a plan, a review away from the lead's maker), briefed from the
+  thread so far; the thread says who missed and who takes over, and the
+  home counts it as something Althar dealt with. Only with no other agent
+  free, or handed on for this once already in the step's round, is the
+  person asked, the call saying it was handed on. An automation's run goes
+  the same way. Each miss is in the record (`node_attempt.no_report`, by
+  agent and model), and a week's count is beside each model in list_models
+  and in the pickers, so a model that keeps missing can be left out.
 - **A turn that did nothing.** A turn that ended having used no tokens and
   said nothing never reached the agent's model: Claude Code's turns end so
   while another of its processes renews the sign-in they share, as an agent
@@ -668,7 +681,13 @@ agent, model and reason; a same-maker review fallback is said as such, not
 as an agent reviewing its own work. The replacement finishes the current
 step even if the original account resets meanwhile. At the next step the
 planned lead returns if it has room. Under the wait rule, or where nothing else was free to move it to, the
-work is held until the reset, and the thread says which it was. A held step
+work is held until the reset, and the thread says which it was. An account
+marked out is back before its reset when it shows it works: a reading of its
+plan taken after the limit with room in every window, or a turn that completed
+on it after (`Limits.outOf`, the one rule the model list, picking an account,
+the pickers and the cards go by); a step held for it goes on at once then, not
+at the reset, and the model list asks an out account's plan again before it
+leaves its models out. A held step
 keeps who could take it over, so the task offers them while it waits, without
 asking: the person can move it to one (as answering the call below would; a
 lead's step waits its turn for a place among the agents at work, as work

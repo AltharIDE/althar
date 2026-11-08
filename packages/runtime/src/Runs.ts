@@ -45,7 +45,8 @@ import { Issues } from './Issues'
 import { makeKeyedLock } from './keyedLock'
 import { type CheckoutConsent, type CheckoutSeen, checkoutsHeld, giveBackSpot, place, settledHolding, type Spot } from './local'
 import { quickIn } from './kinds'
-import { capitalized, Limits, lowWords, NEARLY_OUT, type Out, outStep, outWords, type Room, whenWords } from './Limits'
+import { capitalized, Limits, lowWords, NEARLY_OUT, noReportWords, type Out, outStep, outWords, type Room, whenWords } from './Limits'
+import { NO_REPORT } from './missedReports'
 import { AutoModels } from './modelMoves'
 import { Live, type LiveEvent } from './Live'
 import { roundsNow, roundsOutNow } from './plansAndReviews'
@@ -1700,13 +1701,13 @@ export class Runs extends Context.Service<
           if (thread !== undefined) yield* changes.exclusive(thread.taskId, branchOnFirstWrite(thread.taskId))
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not look for a plain task’s first change', cause)))
 
-      /** Told once when its turn ends without the report its step needs. */
+      /** Told once when its turn ends without the report its step needs: report, or say what blocks it; ended again without, the step is handed on. */
       const reminders = {
-        lead: "Your step isn't done until you call Althar's finish_step tool. If you have done it, call finish_step now with your summary. If you can't go on without the person, call wait_for_person with your question and end your turn; don't call finish_step for work that waits on them.",
+        lead: "Your step isn't done until you call Althar's finish_step tool. If you have done it, call finish_step now with your summary. If you can't go on without the person, call wait_for_person with your question and end your turn; don't call finish_step for work that waits on them. If finish_step isn't among your tools, say so in a line, with the tools you have, and end your turn.",
         round:
-          "Your step isn't done until you call Althar's finish_step tool: you changed the task's work since the person last wrote to you. If you have done what they asked, call finish_step now with your summary and your evidence. If you can't go on without the person, call wait_for_person with your question and end your turn; don't call finish_step for work that waits on them.",
+          "Your step isn't done until you call Althar's finish_step tool: you changed the task's work since the person last wrote to you. If you have done what they asked, call finish_step now with your summary and your evidence. If you can't go on without the person, call wait_for_person with your question and end your turn; don't call finish_step for work that waits on them. If finish_step isn't among your tools, say so in a line, with the tools you have, and end your turn.",
         reviewer:
-          "Your review isn't done until you call Althar's report_review tool. Call it now with your verdict, a summary and your findings.",
+          "Your review isn't done until you call Althar's report_review tool. Call it now with your verdict, a summary and your findings. If report_review isn't among your tools, say so in a line, with the tools you have, and end your turn.",
       }
 
       /**
@@ -1763,8 +1764,112 @@ export class Runs extends Context.Service<
         )
 
       /**
+       * The best model to hand a step on to whose agent ended twice without its
+       * report, by the rules a usage limit hands one on by (`limits.free`):
+       * another agent, as the trouble is most often its agent's session rather
+       * than its model (OpenCode's, that lost Althar's tools), with room and on
+       * a plan, a review away from the lead's maker where it can be, the
+       * person's models before others. None where no other agent is free.
+       */
+      const takerFor = (on: LimitedStep, failed: { readonly agentId: string; readonly model: string | null }) =>
+        Effect.gen(function* () {
+          const { implement, review: plannedReview } = yield* stepsOf(on.run)
+          const planned = on.step === 'review' ? plannedReview : implement
+          const other = yield* otherStepOf(on.run, on.step === 'review' ? 'review' : 'implement')
+          return yield* limits.free({
+            besides: [failed.agentId],
+            projectId: on.run.projectId,
+            from: failed,
+            ...(planned === undefined ? {} : { planned }),
+            ...(other === undefined ? {} : { other }),
+          })
+        })
+
+      /**
+       * A step's agent ended its turn without its report after it was reminded.
+       * The record notes which model it was (`missedReports`), and the step
+       * goes to the best model free (`takerFor`) on its own: the thread says who
+       * failed and who takes it over, and the new agent starts briefed with the
+       * thread so far, as for any handover. Handed on for this once already in
+       * the step's round, so it can't go round, or with no other model free, it
+       * needs the person, as before; and so does one whose task was settled
+       * meanwhile. An automation's run goes the same way: nothing here waits
+       * on the person while another model can take it.
+       */
+      const noReport = (
+        on: LimitedStep,
+        turnId: string,
+        output: Readonly<Record<string, unknown>>,
+        info: (why: StuckWhy, detail: string | null) => StuckInfo,
+        detail: string | null,
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const asked = info('no_report', detail)
+          const [turn] = yield* sql<{ agentId: string; model: string | null }>`
+            SELECT s.agent_id, coalesce(t.model, s.model) AS model FROM turn_deliveries t
+            JOIN provider_sessions s ON s.id = t.provider_session_id WHERE t.id = ${turnId}`
+          const agentId = turn?.agentId ?? asked.agentId
+          const model = turn?.model ?? null
+          const [before] = yield* sql<{ one: number }>`
+            SELECT 1 AS one FROM record_events WHERE aggregate_type = 'node_attempt'
+              AND aggregate_id IN (SELECT id FROM node_attempts WHERE node_id = ${on.nodeId})
+              AND type = ${NO_REPORT} AND json_extract(payload, '$.handedTo') IS NOT NULL LIMIT 1`
+          // A task settled meanwhile, its change merged as its lead worked on, has nothing left to hand on: its lead stops as it does.
+          const [settled] = yield* sql<{ one: number }>`SELECT 1 AS one FROM tasks WHERE id = ${on.run.taskId} AND settled_at IS NOT NULL`
+          const next =
+            before !== undefined || agentId === null || settled !== undefined
+              ? undefined
+              : yield* takerFor(on, { agentId, model }).pipe(Effect.orElseSucceed(() => undefined))
+          if (agentId !== null) {
+            const revision = yield* change('node_attempts', on.attemptId, {
+              output: JSON.stringify({ ...output, reminded: true, missed: true }),
+            })
+            yield* fact({
+              projectId: on.run.projectId,
+              aggregateType: 'node_attempt',
+              aggregateId: on.attemptId,
+              revision,
+              type: NO_REPORT,
+              payload: { agentId, model, step: on.step, handedTo: next?.agentId ?? null, handedModel: next?.model ?? null },
+              actorId: instance.systemId,
+            })
+          }
+          if (next === undefined)
+            return yield* stuck(on.run, { id: on.attemptId }, before === undefined ? asked : { ...asked, tried: ['handed_on'] })
+          const step = on.step === 'publish' ? undefined : on.step
+          const said = noReportWords({
+            from: yield* limits.named(agentId ?? next.agentId, model),
+            to: yield* limits.named(next.agentId, next.model),
+            ...(step === undefined ? {} : { step }),
+          })
+          const handing = yield* envelope('thread.send', { threadId: on.run.threadId, noReport: on.attemptId })
+          const carried = yield* Effect.exit(
+            carryOn(
+              on.run,
+              on.attemptId,
+              asked,
+              { kind: 'retry', agentId: next.agentId, accountId: next.accountId },
+              handing,
+              next.model,
+              said,
+              undefined,
+              'underway',
+              undefined,
+              'stall',
+            ),
+          )
+          if (carried._tag === 'Failure')
+            yield* stuck(
+              on.run,
+              { id: on.attemptId },
+              { ...asked, why: 'failed_to_start', agentId: next.agentId, detail: summarize(carried.cause) || null },
+            )
+        })
+
+      /**
        * When a step's agent ends a turn without reporting, it is reminded once,
-       * and then the step needs the person. When it goes (and no other agent
+       * and then the step is handed on (`noReport`). When it goes (and no other agent
        * took the thread over), the step needs the person at once. A turn the
        * person interrupted is theirs to carry on.
        */
@@ -1773,6 +1878,11 @@ export class Runs extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           // Back online, or offline: what waits for the connection looks again.
           if (event._tag === 'Connection') return yield* Queue.offer(holdsChanged, undefined)
+          // A fresh reading of a plan, or a turn that went through, may have ended an account's out-of-usage state (Limits): what
+          // waits for its reset looks again, and goes on if it is not out any more.
+          if (event._tag === 'PlanUsage') return yield* Queue.offer(holdsChanged, undefined)
+          if (event._tag === 'TurnEnded' && event.errorClass === undefined && event.state === 'completed')
+            yield* Queue.offer(holdsChanged, undefined)
           // An agent that says it is trying its service again may be waiting on a dead connection, its turn never ending (Codex).
           if (
             event._tag === 'Agent' &&
@@ -1939,7 +2049,8 @@ export class Runs extends Context.Service<
                 Effect.catchCause((cause) => stuck(on.run, { id: on.attemptId }, info('no_report', summarize(cause) || null))),
               )
           }
-          if (output.reminded === true) return yield* stuck(on.run, { id: on.attemptId }, info('no_report', event.errorClass ?? null))
+          // Reminded already, it ended again without its report: the step goes to another model, or needs the person.
+          if (output.reminded === true) return yield* noReport(on, event.turnId, output, info, event.errorClass ?? null)
           yield* change('node_attempts', on.attemptId, { output: JSON.stringify({ ...output, reminded: true }) })
           yield* sessions
             .send({
@@ -2655,7 +2766,16 @@ export class Runs extends Context.Service<
         })
 
       /** The lead's session: the one running, or the plan's lead (or another the person picked, on the account they picked) started. */
-      const leadOn = (run: RunRow, agentId?: string, model?: string | null, said?: string, effort?: string | null, accountId?: string) =>
+      const leadOn = (
+        run: RunRow,
+        agentId?: string,
+        model?: string | null,
+        said?: string,
+        effort?: string | null,
+        accountId?: string,
+        /** What the thread's line says Althar dealt with: a usage limit, or a step gone quiet or without its report. */
+        about: 'limit' | 'stall' = 'limit',
+      ) =>
         Effect.gen(function* () {
           const { implement } = yield* stepsOf(run)
           const wanted = agentId ?? implement?.agentId ?? 'claude-code'
@@ -2692,10 +2812,10 @@ export class Runs extends Context.Service<
               agentId: wanted,
               ...(model == null ? {} : { model }),
               ...(effort == null ? {} : { effort }),
-              ...(said === undefined ? {} : { said, about: 'limit' as const }),
+              ...(said === undefined ? {} : { said, about }),
               ...(accountId === undefined ? {} : { accountId }),
             })
-          if (said !== undefined) yield* sayOut(run.threadId, run.projectId, said)
+          if (said !== undefined) yield* sayOut(run.threadId, run.projectId, said, about)
           // The plan's lead, unless it is out of usage and the project moves on: the next free agent instead.
           const instead = agentId === undefined && implement !== undefined ? yield* insteadOf(run, implement) : undefined
           // The plan's model and effort are for the plan's lead; another starts on the model chosen for it, or its own.
@@ -2726,8 +2846,8 @@ export class Runs extends Context.Service<
         })
 
       /** Says in the task's thread what a usage limit did; the home reads it as the loop's doing. */
-      const sayOut = (threadId: string, projectId: ProjectId, title: string) =>
-        addItem({ projectId, threadId }, 'notice', { source: 'runtime', severity: 'warning', title, about: 'limit' })
+      const sayOut = (threadId: string, projectId: ProjectId, title: string, about: 'limit' | 'stall' = 'limit') =>
+        addItem({ projectId, threadId }, 'notice', { source: 'runtime', severity: 'warning', title, about })
 
       /**
        * Auto's lighter model (README section 7): where the plan is nearly out,
@@ -4815,6 +4935,8 @@ export class Runs extends Context.Service<
         /** Whose doing it is: the person's (their answer, their resume), or Althar's own, as for a usage limit or a restart (ADR-037). */
         by: Order = 'underway',
         sender?: MessageSender,
+        /** What the thread's line for `said` says Althar dealt with: a usage limit, or a step without its report. */
+        about: 'limit' | 'stall' = 'limit',
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -4889,7 +5011,7 @@ export class Runs extends Context.Service<
             }
             yield* endAttempt('failed', { handedTo: answer.kind === 'retry' ? answer.agentId : info.agentId })
             // A review starts on its own thread, so why it moved is said in the task's.
-            if (said !== undefined) yield* sayOut(current.threadId, current.projectId, said)
+            if (said !== undefined) yield* sayOut(current.threadId, current.projectId, said, about)
             const [last] = yield* sql<{ summary: string }>`
               SELECT json_extract(content, '$.summary') AS summary FROM thread_items
               WHERE thread_id = ${current.threadId} AND kind = 'step_result' AND json_extract(content, '$.step') = 'settle'
@@ -4939,6 +5061,7 @@ export class Runs extends Context.Service<
             said,
             effort ?? (answer.kind === 'retry' ? answer.effort : undefined),
             accountId,
+            about,
           )
           if (!(yield* resume(sessionId))) return
           if (answer.kind === 'tell')
@@ -5579,13 +5702,14 @@ export class Runs extends Context.Service<
         for (;;) {
           const held = yield* sql<{
             taskId: string
+            projectId: string
             attemptId: string
             nodeKey: string
             iteration: number
             output: string
             holdReason: string
           }>`
-            SELECT r.task_id, a.id AS attempt_id, n.node_key, n.iteration, a.output, a.hold_reason
+            SELECT r.task_id, r.project_id, a.id AS attempt_id, n.node_key, n.iteration, a.output, a.hold_reason
             FROM runs r JOIN workflow_executions e ON e.run_id = r.id JOIN nodes n ON n.execution_id = e.id
             JOIN node_attempts a ON a.node_id = n.id
             WHERE r.state = 'running' AND a.state = 'held' AND a.hold_reason IN ('usage_limit', 'agent_unavailable')`
@@ -5607,9 +5731,26 @@ export class Runs extends Context.Service<
             if (hold === undefined) continue
             const connection = step.holdReason === 'agent_unavailable'
             if (connection && !online) continue
+            // Waiting for a reset, it goes on at once if its agent's account is not out of usage any more: the person reset it,
+            // or a fresh reading shows room (Limits). A new step held for being nearly out, or handed over, waits for its time.
+            const back =
+              !connection &&
+              hold.why !== undefined &&
+              hold.left === undefined &&
+              Option.isNone(
+                yield* (
+                  hold.account != null
+                    ? limits.outAccount(hold.account)
+                    : limits.out(hold.heldFor, step.projectId, undefined, hold.model ?? undefined)
+                ).pipe(
+                  contained('Runs.held', () =>
+                    Option.some<Out>({ agentId: hold.heldFor, accountId: '', resetsAt: null, until: hold.until }),
+                  ),
+                ),
+              )
             due.push({
               key: step.attemptId,
-              at: Date.parse(hold.until),
+              at: back ? 0 : Date.parse(hold.until),
               run: connection
                 ? backOnline(step, hold)
                 : resumeHeld({ ...step, agentId: hold.heldFor, accountId: hold.account ?? null, model: hold.model ?? null }),

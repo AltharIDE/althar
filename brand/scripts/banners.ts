@@ -17,7 +17,10 @@ export async function exportBanners(names: readonly string[] = []): Promise<void
     for (const b of BANNERS.filter((b) => names.length === 0 || names.includes(b.file))) {
       const tab = await browser.newPage({ viewport: { width: b.width, height: b.height }, deviceScaleFactor: b.scale })
       await tab.addInitScript((mark) => Object.assign(window, { ALTHAR_MARK: mark }), { SECTION, BORE })
-      await tab.goto(`${pathToFileURL(page).href}?w=${b.width}&h=${b.height}&layout=${b.layout}&scale=${b.scale}`)
+      const address = new URLSearchParams({ w: `${b.width}`, h: `${b.height}`, layout: b.layout, scale: `${b.scale}` })
+      if (b.words) for (const [k, v] of Object.entries(b.words)) address.set(k, v)
+      if (b.print) address.set('print', b.print)
+      await tab.goto(`${pathToFileURL(page).href}?${address}`)
       /* it draws on canvases once its fonts are in, and says when it's done */
       await tab.waitForFunction(() => document.body.dataset['ready'] === '1', undefined, { timeout: 60_000 })
       const shot = await tab.screenshot({ type: 'png' })

@@ -37,8 +37,19 @@ import { callTool, fakeConnectors, HOST, hosted, items, notices, repository, run
  * go in a new pull request on a new branch once the last one merged.
  */
 
-const runtimeWith = (github: FakeService, file = ':memory:', agents: FakeAgentOptions = {}) =>
-  Queries.layer.pipe(Layer.provideMerge(runtime(file, agents, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) })))
+const runtimeWith = (github: FakeService, file = ':memory:', agents: FakeAgentOptions = {}, perUse?: ReadonlyArray<string>) =>
+  Queries.layer.pipe(
+    Layer.provideMerge(
+      runtime(file, agents, {
+        connectors: fakeConnectors({ github }),
+        listenEvery: Duration.hours(1),
+        ...(perUse === undefined ? {} : { perUse }),
+      }),
+    ),
+  )
+
+/** Agents Althar won't hand a step on to by itself, as it spends on a key only where the person picks: the lead's alone is free. */
+const NOT_FREE = ['codex', 'opencode']
 
 const git = (cwd: string, ...args: Array<string>) => execFileSync('git', args, { cwd }).toString().trim()
 
@@ -299,7 +310,7 @@ describe('a task that goes back to work', () => {
       const [call] = yield* sql<{ payload: string }>`
           SELECT payload FROM attention_requests WHERE task_id = ${task.taskId} AND kind = 'stuck' AND state = 'open'`
       assert.include(call?.payload, '"why":"no_report"')
-    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow }, NOT_FREE)))
   })
 
   it.live('is ready on the home as on the board when a merged task has commits after its pull request', () => {
@@ -370,7 +381,7 @@ describe('a task that goes back to work', () => {
       assert.deepStrictEqual(yield* taskRow(task.taskId), { state: 'open', settledAt: null })
       const [, round] = yield* runsOf(task.taskId)
       assert.deepStrictEqual([round?.state, round?.endReason], ['succeeded', 'abandoned'])
-    }).pipe(Effect.provide(runtimeWith(github)))
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', {}, NOT_FREE)))
   })
 
   it.live('lets the person skip a round’s review', () => {
@@ -1125,7 +1136,7 @@ describe('a merged task with commits after its pull request', () => {
       yield* tasks.leaveOut({ envelope: yield* Runtime.envelope('task.leave_out', {}), taskId: task.taskId })
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'settled')
       assert.strictEqual((yield* taskRow(task.taskId))?.state, 'done')
-    }).pipe(Effect.provide(runtimeWith(github)))
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', {}, NOT_FREE)))
   })
 
   it.live('never ships what the person left out in its next pull request: after a merge its lead brought in, and after a close', () => {
