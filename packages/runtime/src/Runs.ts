@@ -1723,24 +1723,23 @@ export class Runs extends Context.Service<
       /**
        * The best model to hand a step on to whose agent ended twice without its
        * report, by the rules a usage limit hands one on by (`limits.free`):
-       * another agent first, with room, a review away from the lead's maker
-       * where it can be, the person's models before others; else another model
-       * of the same agent. None where nothing else can take it.
+       * another agent, as the trouble is most often its agent's session rather
+       * than its model (OpenCode's, that lost Althar's tools), with room and on
+       * a plan, a review away from the lead's maker where it can be, the
+       * person's models before others. None where no other agent is free.
        */
       const takerFor = (on: LimitedStep, failed: { readonly agentId: string; readonly model: string | null }) =>
         Effect.gen(function* () {
           const { implement, review: plannedReview } = yield* stepsOf(on.run)
           const planned = on.step === 'review' ? plannedReview : implement
           const other = yield* otherStepOf(on.run, on.step === 'review' ? 'review' : 'implement')
-          const rules = {
+          return yield* limits.free({
+            besides: [failed.agentId],
             projectId: on.run.projectId,
             from: failed,
             ...(planned === undefined ? {} : { planned }),
             ...(other === undefined ? {} : { other }),
-          }
-          return (
-            (yield* limits.free({ besides: [failed.agentId], ...rules })) ?? (yield* limits.free({ besides: [], except: failed, ...rules }))
-          )
+          })
         })
 
       /**

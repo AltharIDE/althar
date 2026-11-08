@@ -81,11 +81,16 @@ describe('a step that ends without its report', () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const { projectId, task } = yield* planned('Fix the heading. [lead:finish]', [{ key: 'implement', agentId: 'claude-code' }])
-      const [card] = yield* until(Effect.map((yield* Queries).board(projectId), (board) => board.tasks), (cards) => cards[0]?.phase === 'ready')
+      const [card] = yield* until(
+        Effect.map((yield* Queries).board(projectId), (board) => board.tasks),
+        (cards) => cards[0]?.phase === 'ready',
+      )
       assert.strictEqual(card?.summary, 'Did the task.')
       assert.lengthOf(yield* sql`SELECT id FROM attention_requests WHERE kind = 'stuck'`, 0)
       // Reminded once first, naming the tool and what to do without it.
-      const prompts = yield* sql<{ prompt: string }>`SELECT prompt FROM turn_deliveries WHERE thread_id = ${task.threadId} ORDER BY requested_at`
+      const prompts = yield* sql<{
+        prompt: string
+      }>`SELECT prompt FROM turn_deliveries WHERE thread_id = ${task.threadId} ORDER BY requested_at`
       const reminders = prompts.filter((turn) => turn.prompt.startsWith("Your step isn't done until you call Althar's finish_step tool"))
       assert.lengthOf(reminders, 1)
       assert.include(reminders[0]?.prompt, "If finish_step isn't among your tools, say so in a line")
@@ -118,7 +123,10 @@ describe('a step that ends without its report', () => {
         { key: 'implement', agentId: 'claude-code' },
         { key: 'review', agentId: 'codex' },
       ])
-      yield* until(Effect.map((yield* Queries).board(projectId), (board) => board.tasks), (cards) => cards[0]?.phase === 'ready')
+      yield* until(
+        Effect.map((yield* Queries).board(projectId), (board) => board.tasks),
+        (cards) => cards[0]?.phase === 'ready',
+      )
       assert.lengthOf(yield* sql`SELECT id FROM attention_requests WHERE kind = 'stuck'`, 0)
       const reviewers = yield* sql<{ agentId: string }>`
         SELECT s.agent_id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
@@ -149,7 +157,7 @@ describe('a step that ends without its report', () => {
           {},
           {
             signedOut: ['codex', 'opencode'],
-            each: { 'claude-code': { noReport: true, models: [{ id: 'small', name: 'Small' }] } },
+            each: { 'claude-code': { noReport: true } },
           },
         ),
       ),
@@ -204,7 +212,10 @@ describe('a step that ends without its report', () => {
       })
       yield* automations.runNow(automationId, instance.personId)
       const [ran] = yield* until(
-        sql<{ state: string; taskId: string | null }>`SELECT state, task_id FROM automation_occurrences WHERE automation_id = ${automationId}`,
+        sql<{
+          state: string
+          taskId: string | null
+        }>`SELECT state, task_id FROM automation_occurrences WHERE automation_id = ${automationId}`,
         (rows) => rows[0]?.state === 'made',
       )
       const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${ran?.taskId ?? ''} AND kind = 'task'`

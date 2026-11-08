@@ -248,8 +248,6 @@ export class Limits extends Context.Service<
       readonly planned?: ModelChoice
       readonly from?: ModelChoice
       readonly other?: ModelChoice
-      /** A model of an agent left out, where its agent's other models may still take the work. */
-      readonly except?: ModelChoice
     }): Effect.Effect<Takeover | undefined, Failure>
     /**
      * Who could take over work a usage limit stopped, as the person picks
@@ -470,7 +468,6 @@ export class Limits extends Context.Service<
         readonly besides?: ReadonlyArray<string>
         readonly only?: string
         readonly withRoom?: boolean
-        readonly except?: ModelChoice
       }) =>
         Effect.gen(function* () {
           const catalog = yield* models.catalog
@@ -513,11 +510,6 @@ export class Limits extends Context.Service<
                     ? []
                     : [{ id: preferred, name: preferred ?? entry.definition.name }]
             for (const model of candidates) {
-              if (
-                input.except?.agentId === agentId &&
-                (input.except.model ?? offered?.model ?? null) === (model.id ?? offered?.model ?? null)
-              )
-                continue
               const fact = model.id === null ? null : facts.of(entry.definition, { id: model.id, name: model.name })
               const maker = makerOf(fact, agentId, model.id === null ? undefined : { id: model.id, name: model.name })
               const ownWork =
