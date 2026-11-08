@@ -120,7 +120,7 @@ export const takeScreenshot = async (
     ).catch((error: unknown) => {
       const strayed = window.strayed()
       if (strayed === null) throw error
-      throw new Error(`the page went on to ${strayed}, which isn't served on this computer, so Althar didn't follow it`)
+      throw new Error(`the page went on to ${strayed}, which isn't an HTTP web page, so Althar didn't follow it`)
     })
     if (picture.isEmpty()) throw new Error('the page drew nothing')
     // At 1×: a screen at 2× draws twice as many pixels, which the agent would read for nothing.

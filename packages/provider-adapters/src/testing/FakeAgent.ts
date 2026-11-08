@@ -101,6 +101,7 @@ export const scenarios = {
   silentForever: 'silent-forever',
   /** Like `silentAfterRefusal`, but asked to carry on it ends its turn normally, with nothing said. */
   silentThenEnds: 'silent-then-ends',
+  silentEndTurn: 'silent-end-turn',
   /** Like `fileEdit`, but it asks again every time the turn is resumed. */
   stubborn: 'stubborn',
   /** Asks the person a plain question, as an MCP server's form does, and repeats the answer. */
@@ -1915,6 +1916,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             : text
 
       switch (scenario) {
+        case scenarios.silentEndTurn:
         case scenarios.silentThenEnds:
         case scenarios.silentForever:
         case scenarios.silentAfterRefusal: {
@@ -1927,7 +1929,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             status: chosen.startsWith('allow') ? 'completed' : 'failed',
           })
           if (chosen.startsWith('allow')) await say('ran it')
-          return chosen.startsWith('allow') ? ended() : { stopReason: 'cancelled' }
+          return chosen.startsWith('allow') || scenario === scenarios.silentEndTurn ? ended() : { stopReason: 'cancelled' }
         }
         case scenarios.commandChoices:
         case scenarios.deniedThenWait:

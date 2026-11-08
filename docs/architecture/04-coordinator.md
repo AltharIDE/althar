@@ -85,56 +85,40 @@ The coordinator runs on the same adapter as every other agent
 ([03](03-agent-runtime-and-auth.md)). What makes it the coordinator is its
 role: its brief, its tools, and its read-only rule.
 
-## Read-only by construction
+## Its folder and permissions
 
-Read-only is enforced by what the coordinator can reach, not by its prompt,
-in three layers ([ADR-004](../decisions/004-coordinator-is-an-agent-session.md)).
-Since ADR-097 that keeps it tidy rather than safe: a change in a throwaway
-copy has no branch, review or record. Its second phase lets the coordinator
-install and run tests in its copies and gives its sandbox a lead's hosts; a
-review of an outside author's code keeps all three layers.
-A reviewer, the other role that only reads, gets the same, but for what the
-coordinator may run in copies of its own
-([ADR-058](../decisions/058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md)).
+The coordinator leaves implementation to task leads for tidiness, not safety.
+It works in disposable copies, refreshed before each turn. Ordinary files may
+be read anywhere; secret files and the keychain remain protected.
 
-- It reads throwaway copies. Its working directory is an Althar-owned
-  folder holding one copy per bound repository, detached at the default
-  branch. Each is a repository of its own, whose git folder is made again
-  for every turn: it borrows the person's repository's objects, and fetches
-  only from a mirror of that repository's refs Althar keeps beside the
-  folder, after Althar fetched the remote there. So its `git fetch`
-  and `git tag` write only the copy, and nothing written there survives or
-  reaches a task, nor is read by Althar's own git. A project with no
-  repositories gets an empty folder. A reviewer reads a copy of the lead's
-  worktree, snapshotted when its round begins, so it reads what the round is
-  about even if the lead moves on, and the record keeps which code it was.
-- The agent's own sandbox is read-only where it has one that still lets it
-  call Althar's tools: Codex's `read-only` sandbox, and Claude Code with its
-  edit tools denied and every shell command asking. The coordinator's Claude
-  Code, where its sandbox can start, runs its commands in it without asking,
-  held to its folder: writes only there, no network, no socket, reads none
-  of the home folder, the person's checkouts or the task folders but its
-  folder, the mirrors, the objects its copies borrow, the toolchains and
-  git's config files (never its credential store), and never outside it;
-  it loads no settings file and runs no hook. A command Claude Code can't
-  read itself (a `for` loop, `$((…))`, `f=$(…)`, a heredoc) still asks, and
-  Althar lets it run there without reading it
-  ([ADR-071](../decisions/071-the-sandbox-is-the-boundary-anything-inside-it-runs.md));
-  what it can't do the sandbox refuses, with its own error. The reader rules
-  hold its own read and search tools to the same places. Claude
-  Code's plan mode
-  and OpenCode's plan agent would be simpler, but both refuse MCP tools.
-  OpenCode has no sandbox yet, so for it the copy is the boundary.
-- Where no sandbox holds it, Althar's reader rules are the backstop. They allow reads, searches and
-  fetches, and commands that only look, each with the flags it may take (no
-  `rg --pre`, `git -c`, `sort -o`). For the coordinator they also take
-  `$(…)` whose commands only look, `uptime` and the like, and `git tag`
-  listing. They refuse everything else with a reason, and never ask you.
-  The reason reaches it in the refused call's own result, so no turn of its
-  own follows its reply.
-- Its only way to change anything is its tools. They issue the same commands
-  the interface does: validated, recorded, idempotent, and never beyond your
-  own authority.
+Where Claude Code's OS sandbox starts, commands run in it with writes held to
+its folder and temporary files, and every command reaches Althar's rules, which
+answer it at once. Network and localhost are open; only the SSH agent's own
+socket is allowed. It loads selected skills, but no repository settings or
+hooks, and its edit tools stay denied. Claude's native sandbox still refuses
+opening process-substitution pipes under `/dev/fd`; the coordinator may run any
+command outside the sandbox when it asks to, and the same read-only rules
+decide it: a read runs, a visible write outside its folder is refused. Codex uses
+its ordinary workspace sandbox. Without an OS sandbox, commands run unless they
+visibly write outside the coordinator's folder. Scripts, variables, loops and
+process substitutions are not refused for being unreadable.
+
+The coordinator uses the project's rules, including the person's Never and Ask
+rules. Visible irreversible crossings ask as for a lead. A refusal is explained
+in the same turn, with the command and its reason; it is never held silently
+for the next message.
+
+```mermaid
+flowchart LR
+  C[Coordinator command] --> S{OS sandbox holds it?}
+  S -->|yes| R[Run inside its folder boundary]
+  S -->|no| W{Visible write outside its folder?}
+  W -->|yes| D[Refuse and explain why]
+  W -->|no| P[Project rules and irreversible asks]
+```
+
+Review workspaces and review-only tool lists remain with the task-as-parts work.
+An outside author's code still does not run without the person's word.
 
 ## Althar tools
 
@@ -142,7 +126,7 @@ Althar gives the coordinator an MCP server at `session/new`. Names are
 provisional. From ADR-097's second phase leads get the same tools, the
 commands to start and move tasks included, and the coordinator gets the
 leads' (below): one pool, with only a lead's own task and worktree, and the
-coordinator's denied edit tools, apart.
+coordinator's disposable folder, apart.
 
 | Tool | What it does | Kind |
 |---|---|---|

@@ -34,11 +34,9 @@
     process draw a page offscreen, in a session of its own that keeps and
     grants nothing, and gives it back to the agent as a picture, at 1×: the
     viewport asked (1280×800 without), the whole page (cut at 16,000 pixels)
-    or one element by a CSS selector. Only a page served on this computer, on
-    a loopback address or where one of Althar's runs answers, over http;
-    never one on the internet, which would be a way out of the sandbox
-    (since ADR-097, any address: agents reach the web already). The
-    window holds the page there: a redirect or the page's own navigation
+    or one element by a CSS selector. Any page over http or https, on this
+    computer or elsewhere (since ADR-097: agents reach the web already). The
+    window holds the page to HTTP: a redirect or the page's own navigation
     anywhere else ends the shot with where it went, and a frame that would
     go elsewhere stays empty. Where
     nothing draws pages, as on the command line, the tool says so.

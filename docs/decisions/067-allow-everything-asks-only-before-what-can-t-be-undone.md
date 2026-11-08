@@ -131,13 +131,13 @@
   doesn't know: a path in it is read as in a temp folder, the task's own
   whichever it is, and one that climbs out of it as worked out only when
   it runs.
-- **What holds as before:** while Never lists anything, a command the
-  rules can't read is still refused, with how to spell it out. No one
-  reads keys and sign-ins. In every other mode what the rules can't read
-  asks as it did, and the coordinator still never judges it, so ADR-019
-  doesn't change. The lead's brief doesn't change either: different
-  models use different tools, and Althar doesn't tell leads how to write
-  their commands.
+- **What holds as before:** no one reads keys and sign-ins. In every other
+  mode what the rules can't read asks as it did, and the coordinator still
+  never judges it, so ADR-019 doesn't change. Since ADR-097's amendment, a
+  command the rules can't read runs even while Never lists something; only
+  what its words show is refused. The lead's brief doesn't change either:
+  different models use different tools, and Althar doesn't tell leads how
+  to write their commands.
 - **Trade-off:** a script or line the rules can't read could, in
   principle, push to main, force push or delete the person's checkout,
   and with everything allowed it now runs without asking. The person

@@ -293,6 +293,10 @@ stays the person's; a test reads the screens' calls against it.
 
 ### 3. Host tools
 
+The environment part (gh, glab, git credential helpers and the SSH agent)
+is implemented in the [7 November limits sweep](no-arbitrary-limits-audit.md).
+The remaining host-tool changes below build on it.
+
 - **The person's own sign-in.** Stop taking `gh`, `glab`, git's credential
   helpers and the SSH agent out of agents' environment (`Config.ts:329-386`,
   `process.ts`'s allowlist), behind a project switch, on by default. The
