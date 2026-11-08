@@ -463,14 +463,19 @@ and signs what it does. So:
     (`Stalls.ts:71-72`), counted the same way;
   - runs a day, capped for each automation and for all of them together,
     Run now and catch-ups included;
-  - on a usage limit, an automation never moves to another account or agent
-    (the project's rule may `move` a task's work): it stops, and says so.
+  - on a usage limit, a run moves on as any task's work does, by the project's
+    rule (`move`, `wait` or `ask`).
 - **Per-use models (an API key, OpenRouter):** an automation's run picks its
-  agent, account and model as any step does: the person's preferences first,
-  a plan before a key where both would do the work, and a key where that is
-  the way to the model. Nothing about a run is held to plans only (the
-  person called that rule dumb, on 8 November). The caps that hold for any
-  task hold for it; it has none of its own.
+  agent, account and model as any step does, per use included. The caps that
+  hold for any task hold for it; it has none of its own.
+- **When its agent can't take a run** (signed out, out of usage, or its
+  model's provider refused the sign-in): the run goes to another agent and
+  model a plan pays for, chosen as for any step, and its history line says so.
+  Where no plan anywhere can take it, it is skipped, the line saying why and
+  what would make it run ("OpenCode Go refused its sign-in, and no other plan
+  had room. Sign in to OpenCode Go in Settings."). A second such skip in a row
+  is one question in Needs you, not one a night; "Run it now" on it runs the
+  automation, and the question goes once a run starts.
 - **Each run's worktree is its task's,** as for any task
   ([ADR-006](../decisions/006-worktree-per-task.md), call 13): a new task
   makes a worktree and runs its setup, installing what the lockfile names

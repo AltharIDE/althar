@@ -32,14 +32,31 @@ import { Installs, isInstalled } from './Installs'
  * already running is never stopped for it.
  */
 
-/** Why an agent can't take work now, and no other agent could take it over either. */
+/** Why an agent can't take work now. */
 export interface Unable {
   /** The agent's name. */
   readonly agent: string
-  readonly why: 'signed_out' | 'out'
+  readonly why: 'signed_out' | 'out' | 'refused'
   /** For `out`: when it is tried again. */
   readonly until?: string
+  /** For `refused`: the provider whose sign-in the agent was refused, as the person knows it. */
+  readonly provider?: string
 }
+
+/**
+ * Where work planned for an agent stands: it can run there, another agent on a plan takes it instead (and why the planned one
+ * can't), or none can.
+ */
+export type Standing =
+  | { readonly kind: 'ok' }
+  | {
+      readonly kind: 'instead'
+      readonly agentId: string
+      readonly model: string | null
+      readonly accountId: string
+      readonly because: Unable
+    }
+  | { readonly kind: 'unable'; readonly unable: Unable }
 
 /** How long an agent whose limit gave no reset time counts as out. */
 const UNKNOWN_RESET = Duration.hours(1)
@@ -171,12 +188,16 @@ export class Limits extends Context.Service<
   Limits,
   {
     /**
-     * Whether work on the agent can't start at all: its accounts are signed
-     * out, or out of usage, and no other agent could take it over (a plan
-     * or per use, as for any step). None where it can run, or where
-     * another could.
+     * Where work planned for the agent, on the model given (or its default), stands now: its accounts are signed out or
+     * out of usage, or its model's provider refused the sign-in, and another agent on a plan can take it, as for any
+     * step (`free`), or none can. `other` is the other step's, as `free` takes it.
      */
-    unable(agentId: string, projectId: string): Effect.Effect<Option.Option<Unable>, Failure>
+    standing(input: {
+      readonly agentId: string
+      readonly model: string | null
+      readonly projectId: string
+      readonly other?: ModelChoice
+    }): Effect.Effect<Standing, Failure>
     /**
      * Whether the agent is out now, and until when: every account work could
      * run on (in the project, where given: its first, unless it rotates),
@@ -484,10 +505,12 @@ export class Limits extends Context.Service<
               for (const account of yield* byRoom(yield* runnable(agentId, input.projectId), model.id ?? undefined)) {
                 if (Option.isSome(yield* outOf(account))) continue
                 const status = yield* signIns.account(account)
-                const through = model.id === null ? undefined : entry.definition.signIn.providers?.of(model.id)
+                // A model the agent picks itself goes through the provider of its default.
+                const named = model.id ?? offered?.model ?? undefined
+                const through = named === undefined ? undefined : entry.definition.signIn.providers?.of(named)
                 const providers = through === undefined ? [] : ((yield* signIns.providers(account, status)) ?? [])
                 if (providers.some((one) => one.id === through && one.refusedAt !== null)) continue
-                if (!(yield* planPays(account, model.id ?? undefined))) continue
+                if (!(yield* planPays(account, named))) continue
                 const reading = yield* roomOf(account, model.id === null ? undefined : `${model.id} ${model.name}`)
                 if (Option.isSome(reading) && reading.value.leftPercent <= 0) continue
                 const low = nearly(reading)
@@ -588,25 +611,51 @@ export class Limits extends Context.Service<
           return false
         })
 
-      const unable = (agentId: string, projectId: string) =>
+      /** Why the agent can't take work on the model now; undefined where it can, or has no account to say. */
+      const trouble = (agentId: string, projectId: string, model: string | null) =>
         Effect.gen(function* () {
-          const agent = agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId
-          const own = yield* allowed(agentId, projectId)
-          if (own.length === 0) return Option.none<Unable>()
-          const stuck: Unable | undefined =
-            (yield* runnable(agentId, projectId)).length === 0
-              ? { agent, why: 'signed_out' }
-              : yield* Effect.map(out(agentId, projectId), (found) =>
-                  Option.isSome(found) ? ({ agent, why: 'out', until: found.value.until } as const) : undefined,
-                )
-          if (stuck === undefined) return Option.none<Unable>()
-          const others = (yield* choices({ accountId: null, projectId })).filter((one) => one.agentId !== agentId)
-          return (yield* canTakeOver(others)) ? Option.none<Unable>() : Option.some(stuck)
+          const definition = agents.list.find((entry) => entry.definition.id === agentId)?.definition
+          const agent = definition?.name ?? agentId
+          if ((yield* allowed(agentId, projectId)).length === 0) return undefined
+          const open = yield* runnable(agentId, projectId)
+          if (open.length === 0) return { agent, why: 'signed_out' } as Unable
+          const found = yield* out(agentId, projectId)
+          if (Option.isSome(found)) return { agent, why: 'out', until: found.value.until } as Unable
+          const named = model ?? (yield* models.catalog).find((one) => one.agentId === agentId)?.model ?? null
+          const through = named === null ? undefined : definition?.signIn.providers?.of(named)
+          if (through === undefined) return undefined
+          let provider: string | undefined
+          for (const account of open) {
+            const row = ((yield* signIns.providers(account, yield* signIns.account(account))) ?? []).find((one) => one.id === through)
+            if (row === undefined || row.refusedAt === null) return undefined
+            provider = row.name
+          }
+          return provider === undefined ? undefined : ({ agent, why: 'refused', provider } as Unable)
+        })
+
+      const standing = (input: {
+        readonly agentId: string
+        readonly model: string | null
+        readonly projectId: string
+        readonly other?: ModelChoice
+      }) =>
+        Effect.gen(function* () {
+          const stuck = yield* trouble(input.agentId, input.projectId, input.model)
+          if (stuck === undefined) return { kind: 'ok' } as Standing
+          const [first] = yield* ranked({
+            besides: [input.agentId],
+            projectId: input.projectId,
+            planned: { agentId: input.agentId, model: input.model },
+            ...(input.other === undefined ? {} : { other: input.other }),
+          })
+          return first === undefined
+            ? ({ kind: 'unable', unable: stuck } as Standing)
+            : ({ kind: 'instead', agentId: first.agentId, model: first.model, accountId: first.accountId, because: stuck } as Standing)
         })
 
       return Limits.of({
         out,
-        unable,
+        standing,
         nearlyOut,
         room: (accountId, model) =>
           accounts.get(accountId).pipe(

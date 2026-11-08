@@ -48,7 +48,13 @@ writeFileSync(
   }),
 )
 
-const withAgents = (each: Readonly<Record<string, FakeAgentOptions>> = {}, perUse: ReadonlyArray<string> = [], providerPlans = false) => {
+const withAgents = (
+  each: Readonly<Record<string, FakeAgentOptions>> = {},
+  perUse: ReadonlyArray<string> = [],
+  providerPlans = false,
+  /** OpenCode Go refused its sign-in, and the agents named are signed out. */
+  trouble: { readonly goRefused?: boolean; readonly signedOut?: ReadonlyArray<string> } = {},
+) => {
   const options = {
     'claude-code': { models: [claude], ...each['claude-code'] },
     codex: { models: [weak, sol], ...each.codex },
@@ -69,7 +75,12 @@ const withAgents = (each: Readonly<Record<string, FakeAgentOptions>> = {}, perUs
                   ...entry.definition.signIn,
                   providers: {
                     read: () => [
-                      { id: 'opencode-go', name: 'OpenCode Go', connections: 'subscription' },
+                      {
+                        id: 'opencode-go',
+                        name: 'OpenCode Go',
+                        connections: 'subscription',
+                        ...(trouble.goRefused === true ? { needsSignIn: true } : {}),
+                      },
                       { id: 'opencode-zen', name: 'OpenCode Zen', connections: 'key' },
                     ],
                     of: (model: string) => model.split('/')[0],
@@ -81,7 +92,7 @@ const withAgents = (each: Readonly<Record<string, FakeAgentOptions>> = {}, perUs
       )
       return Agents.of({ list, get: (id) => Effect.succeed(list.find((entry) => entry.definition.id === id)!) })
     }),
-  ).pipe(Layer.provide(fakeAgents({}, [], options, perUse)))
+  ).pipe(Layer.provide(fakeAgents({}, trouble.signedOut ?? [], options, perUse)))
   return Queries.layer.pipe(
     Layer.provideMerge(
       runtime(
@@ -97,6 +108,7 @@ const withAgents = (each: Readonly<Record<string, FakeAgentOptions>> = {}, perUs
           },
           perUse,
           each: options,
+          ...(trouble.signedOut === undefined ? {} : { signedOut: trouble.signedOut }),
           ...(providerPlans ? { agents } : {}),
         },
       ),
@@ -468,6 +480,52 @@ describe('automatic usage takeover by model', () => {
       ),
     )
   })
+  const reasonOf = (automationId: string) =>
+    Effect.flatMap(
+      SqlClient.SqlClient,
+      (sql) =>
+        sql<{ state: string; reason: string | null; taskId: string | null }>`
+          SELECT state, reason, task_id FROM automation_occurrences WHERE automation_id = ${automationId} ORDER BY fired_at, rowid`,
+    )
+  const agentsOf = (taskId: string) =>
+    Effect.flatMap(SqlClient.SqlClient, (sql) =>
+      Effect.map(
+        sql<{ agentId: string }>`
+          SELECT s.agent_id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id WHERE t.task_id = ${taskId} AND t.kind = 'task'`,
+        (rows) => rows.map((row) => row.agentId),
+      ),
+    )
+
+  it.live('moves an automation whose Go sign-in was refused to another agent a plan pays for, saying so', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* startTask()
+      const instance = yield* Instance
+      const automations = yield* Automations
+      const id = yield* automationFor(projectId, { agentId: 'opencode', model: third.id })
+      yield* automations.runNow(id, instance.personId)
+      const [run] = yield* until(reasonOf(id), (all) => all[0]?.state === 'made')
+      assert.match(run?.reason ?? '', /^OpenCode Go refused its sign-in, so its lead ran on Fake (claude-code|codex)/)
+      const used = yield* agentsOf(run!.taskId!)
+      assert.isAbove(used.length, 0)
+      assert.notInclude(used, 'opencode')
+      yield* noCall
+    }).pipe(Effect.provide(withAgents({}, ['opencode'], true, { goRefused: true }))),
+  )
+
+  it.live('skips an automation whose Go sign-in was refused when no other plan has room, and says what would make it run', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* startTask()
+      const instance = yield* Instance
+      const automations = yield* Automations
+      const id = yield* automationFor(projectId, { agentId: 'opencode', model: third.id })
+      const refused = yield* Effect.flip(automations.runNow(id, instance.personId))
+      assert.strictEqual(
+        (refused as { readonly message?: string }).message,
+        'OpenCode Go refused its sign-in, and no other plan had room. Sign in to OpenCode Go in Settings.',
+      )
+    }).pipe(Effect.provide(withAgents({}, ['opencode'], true, { goRefused: true, signedOut: ['claude-code', 'codex'] }))),
+  )
+
   for (const step of ['lead', 'review'] as const) {
     for (const route of ['subscription-backed', 'per-use'] as const) {
       it.live(`starts an automation with a ${route} ${step}`, () => {

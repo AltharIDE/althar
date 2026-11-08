@@ -679,7 +679,7 @@ describe('automations', () => {
 
   it.live('are skipped saying why when no agent is signed in, and two skips in a row make one call in Needs you', () => {
     const clock = clockAt('2026-10-21T07:59:00Z')
-    const why = 'Fake codex is signed out, and no other agent could take its place. Sign in to Fake codex in Settings.'
+    const why = 'Fake codex is signed out, and no other plan had room. Sign in to Fake codex in Settings.'
     return Effect.gen(function* () {
       const automations = yield* Automations
       const instance = yield* Instance
@@ -721,8 +721,18 @@ describe('automations', () => {
       const projectId = yield* opened
       const automationId = yield* automations.make({ projectId, definition: NOTES, on: true, actorId: instance.personId })
       yield* automations.runNow(automationId, instance.personId)
-      const [ran] = yield* until(occurrencesOf(automationId), (rows) => rows.length === 1)
-      assert.notStrictEqual(ran?.state, 'skipped')
+      const [ran] = yield* until(occurrencesOf(automationId), (rows) => rows.length === 1 && rows[0]?.state === 'made')
+      assert.match(ran?.reason ?? '', /^Fake codex is signed out, so its lead ran on Fake (claude-code|opencode)/)
+      // Its lead really started on the other agent, not on the signed-out one.
+      const sql = yield* SqlClient.SqlClient
+      const sessions = yield* sql<{ agentId: string }>`
+        SELECT s.agent_id FROM provider_sessions s JOIN threads h ON h.id = s.thread_id
+        WHERE h.task_id = ${ran?.taskId ?? ''} AND h.kind = 'task'`
+      assert.isAbove(sessions.length, 0)
+      assert.notInclude(
+        sessions.map((one) => one.agentId),
+        'codex',
+      )
     }).pipe(Effect.provide(clock.on(runtime(':memory:', {}, { automations: clock.options, signedOut: ['codex'] }))))
   })
 
