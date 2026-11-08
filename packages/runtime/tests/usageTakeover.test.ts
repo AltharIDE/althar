@@ -449,9 +449,10 @@ describe('automatic usage takeover by model', () => {
         account!.id,
       )
       assert.strictEqual((yield* limits.pick({ agentId: 'opencode', threadId: run!.threadId, model: third.id })).id, account!.id)
+      // A per-use route is picked like any other: nothing refuses it for the run it belongs to.
       assert.strictEqual(
-        (yield* Effect.flip(limits.pick({ agentId: 'opencode', threadId: run!.threadId, model: 'opencode-zen/gpt-strong' })))._tag,
-        'PlanOnly',
+        (yield* limits.pick({ agentId: 'opencode', threadId: run!.threadId, model: 'opencode-zen/gpt-strong' })).id,
+        account!.id,
       )
       yield* noCall
     }).pipe(
@@ -468,34 +469,37 @@ describe('automatic usage takeover by model', () => {
     )
   })
   for (const step of ['lead', 'review'] as const) {
-    it.live(`starts an automation with a subscription-backed ${step}, and refuses its per-use route`, () =>
-      Effect.gen(function* () {
-        const { projectId } = yield* startTask()
-        const instance = yield* Instance
-        const automations = yield* Automations
-        const choices = (model: string) =>
-          step === 'lead'
-            ? { lead: { agentId: 'opencode', model }, review: null }
-            : { lead: { agentId: 'claude-code', model: claude.id }, review: { agentId: 'opencode', model } }
-        const paid = choices(third.id)
-        const id = yield* automationFor(projectId, paid.lead, paid.review)
-        yield* automations.runNow(id, instance.personId)
-        const [run] = yield* until(automationRuns(id), (all) => all[0]?.state === 'made')
-        const sql = yield* SqlClient.SqlClient
-        const sessions = yield* sql<{ agentId: string; model: string | null }>`
-          SELECT s.agent_id, s.model FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
-          WHERE t.task_id = ${run!.taskId} AND t.kind = ${step === 'lead' ? 'task' : 'step'}`
-        assert.deepInclude(sessions, { agentId: 'opencode', model: third.id })
-        const perUse = choices('opencode-zen/gpt-strong')
-        const refusedId = yield* automationFor(projectId, perUse.lead, perUse.review)
-        const refused = yield* Effect.flip(automations.runNow(refusedId, instance.personId))
-        assert.deepInclude(refused, {
-          _tag: 'AutomationRefused',
-          message: 'Automations run only on a plan for now, and its agent pays per use.',
-        })
-        yield* noCall
-      }).pipe(Effect.provide(withAgents({}, ['opencode'], true))),
-    )
+    for (const route of ['subscription-backed', 'per-use'] as const) {
+      it.live(`starts an automation with a ${route} ${step}`, () => {
+        const model = route === 'per-use' ? 'opencode-zen/gpt-strong' : third.id
+        return Effect.gen(function* () {
+          const { projectId } = yield* startTask()
+          const instance = yield* Instance
+          const automations = yield* Automations
+          const choice =
+            step === 'lead'
+              ? { lead: { agentId: 'opencode', model }, review: null }
+              : { lead: { agentId: 'claude-code', model: claude.id }, review: { agentId: 'opencode', model } }
+          const id = yield* automationFor(projectId, choice.lead, choice.review)
+          yield* automations.runNow(id, instance.personId)
+          const [run] = yield* until(automationRuns(id), (all) => all[0]?.state === 'made')
+          const sql = yield* SqlClient.SqlClient
+          const sessions = yield* sql<{ agentId: string; model: string | null }>`
+            SELECT s.agent_id, s.model FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
+            WHERE t.task_id = ${run!.taskId} AND t.kind = ${step === 'lead' ? 'task' : 'step'}`
+          assert.deepInclude(sessions, { agentId: 'opencode', model })
+          yield* noCall
+        }).pipe(
+          Effect.provide(
+            withAgents(
+              { opencode: { models: [third, { id: 'opencode-zen/gpt-strong', name: 'OpenCode Zen/GPT Strong' }] } },
+              ['opencode'],
+              true,
+            ),
+          ),
+        )
+      })
+    }
   }
 
   for (const fallback of ['move', 'wait'] as const) {
@@ -525,7 +529,7 @@ describe('automatic usage takeover by model', () => {
             assert.deepStrictEqual(yield* agentsOn(run!.threadId), [{ agentId: 'opencode', model: third.id }])
           }
           assert.strictEqual(failures, 1)
-          const out = yield* (yield* Limits).out('opencode', projectId, run!.threadId, third.id)
+          const out = yield* (yield* Limits).out('opencode', projectId)
           assert.isTrue(Option.isSome(out))
           const notices = (yield* items(run!.threadId)).filter((item) => item.kind === 'notice' && item.content.about === 'limit')
           assert.lengthOf(notices, 1)

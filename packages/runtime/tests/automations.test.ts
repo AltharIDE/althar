@@ -450,18 +450,16 @@ describe('automations', () => {
     },
   )
 
-  it.live('run on a plan only for now: one whose agent pays per use is refused, and skipped on its schedule', () => {
+  it.live('run on an agent that pays per use, as on any other', () => {
     const clock = clockAt('2026-10-21T07:59:00Z')
     return Effect.gen(function* () {
       const automations = yield* Automations
       const instance = yield* Instance
       const projectId = yield* opened
       const automationId = yield* automations.make({ projectId, definition: NOTES, on: true, actorId: instance.personId })
-      const refused = yield* Effect.flip(automations.runNow(automationId, instance.personId))
-      assert.strictEqual((refused as AutomationRefused).message, 'Automations run only on a plan for now, and its agent pays per use.')
-      clock.set('2026-10-21T08:00:05Z')
-      const [skipped] = yield* until(occurrencesOf(automationId), (rows) => rows.length === 1)
-      assert.deepInclude(skipped, { state: 'skipped', reason: 'Automations run only on a plan for now, and its agent pays per use.' })
+      yield* automations.runNow(automationId, instance.personId)
+      const [ran] = yield* until(occurrencesOf(automationId), (all) => all[0]?.state === 'made')
+      assert.isNull(ran?.reason)
     }).pipe(Effect.provide(clock.on(runtime(':memory:', {}, { automations: clock.options, perUse: ['codex'] }))))
   })
 
@@ -667,23 +665,68 @@ describe('automations', () => {
     },
   )
 
-  it.live('run on a plan only where the agent’s status says so: one that can’t tell is refused, and skipped on its schedule', () => {
+  it.live('run where the agent’s status can’t tell a plan from a key', () => {
     const clock = clockAt('2026-10-21T07:59:00Z')
-    const unsure = 'Automations run only on a plan for now, and its agent’s plan isn’t known.'
     return Effect.gen(function* () {
       const automations = yield* Automations
       const instance = yield* Instance
       const projectId = yield* opened
       const automationId = yield* automations.make({ projectId, definition: NOTES, on: true, actorId: instance.personId })
-      const refused = yield* Effect.flip(automations.runNow(automationId, instance.personId))
-      assert.strictEqual((refused as AutomationRefused).message, unsure)
-      clock.set('2026-10-21T08:00:05Z')
-      const [skipped] = yield* until(occurrencesOf(automationId), (rows) => rows.length === 1)
-      assert.deepInclude(skipped, { state: 'skipped', reason: unsure })
+      yield* automations.runNow(automationId, instance.personId)
+      yield* until(occurrencesOf(automationId), (rows) => rows.length === 1 && rows[0]?.state === 'made')
     }).pipe(Effect.provide(clock.on(runtime(':memory:', {}, { automations: clock.options, unsure: ['codex'] }))))
   })
 
-  it.live('keep a run on a plan when its account runs out: another agent on a plan takes it over, never the account paid per use', () => {
+  it.live('are skipped saying why when no agent is signed in, and two skips in a row make one call in Needs you', () => {
+    const clock = clockAt('2026-10-21T07:59:00Z')
+    const why = 'Fake codex is signed out, and no other agent could take its place. Sign in to Fake codex in Settings.'
+    return Effect.gen(function* () {
+      const automations = yield* Automations
+      const instance = yield* Instance
+      const queries = yield* Queries
+      const projectId = yield* opened
+      const automationId = yield* automations.make({ projectId, definition: NOTES, on: true, actorId: instance.personId })
+      // Run now is refused with the same words.
+      assert.strictEqual(((yield* Effect.flip(automations.runNow(automationId, instance.personId))) as AutomationRefused).message, why)
+      clock.set('2026-10-21T08:00:05Z')
+      const [first] = yield* until(occurrencesOf(automationId), (rows) => rows.length === 1)
+      assert.deepInclude(first, { state: 'skipped', reason: why })
+      // One skip is no call yet.
+      assert.lengthOf((yield* queries.board(projectId)).calls, 0)
+      clock.set('2026-10-22T08:00:05Z')
+      yield* until(occurrencesOf(automationId), (rows) => rows.length === 2)
+      const [call] = (yield* queries.board(projectId)).calls
+      assert.deepInclude(call, { kind: 'question' })
+      assert.match(call?.title ?? '', /^Sign in to Fake codex, then run “Release notes” again\?$/)
+      // Another night is no second call.
+      clock.set('2026-10-23T08:00:05Z')
+      yield* until(occurrencesOf(automationId), (rows) => rows.length === 3)
+      assert.lengthOf((yield* queries.board(projectId)).calls, 1)
+    }).pipe(
+      Effect.provide(
+        clock.on(
+          Queries.layer.pipe(
+            Layer.provideMerge(runtime(':memory:', {}, { automations: clock.options, signedOut: ['claude-code', 'codex', 'opencode'] })),
+          ),
+        ),
+      ),
+    )
+  })
+
+  it.live('run on another agent when theirs is signed out but one could take its place', () => {
+    const clock = clockAt('2026-10-21T07:59:00Z')
+    return Effect.gen(function* () {
+      const automations = yield* Automations
+      const instance = yield* Instance
+      const projectId = yield* opened
+      const automationId = yield* automations.make({ projectId, definition: NOTES, on: true, actorId: instance.personId })
+      yield* automations.runNow(automationId, instance.personId)
+      const [ran] = yield* until(occurrencesOf(automationId), (rows) => rows.length === 1)
+      assert.notStrictEqual(ran?.state, 'skipped')
+    }).pipe(Effect.provide(clock.on(runtime(':memory:', {}, { automations: clock.options, signedOut: ['codex'] }))))
+  })
+
+  it.live('move a run to the agent’s next account when its account runs out, though that one pays per use', () => {
     const clock = clockAt('2026-10-21T07:59:00Z')
     const back = Date.now() + 60 * 60 * 1000
     const work = join(mkdtempSync(join(tmpdir(), 'althar-home-')), 'work')
@@ -706,19 +749,11 @@ describe('automations', () => {
       const sessions = yield* sql<{ agentId: string; accountId: string }>`
         SELECT agent_id, account_id FROM provider_sessions WHERE thread_id = ${thread?.id ?? ''} ORDER BY started_at`
       assert.deepStrictEqual(
-        sessions.map((one) => one.agentId),
-        ['codex', 'claude-code'],
-      )
-      assert.strictEqual(sessions[0]?.accountId, usual?.id)
-      assert.notInclude(
         sessions.map((one) => one.accountId),
-        key.id,
+        [usual?.id, key.id],
       )
-      // Nor does a session of its run start on that account when it is named.
-      const refused = yield* Effect.flip(limits.pick({ agentId: 'codex', projectId, threadId: thread?.id ?? '', accountId: key.id }))
-      assert.deepInclude(refused, { _tag: 'PlanOnly', message: 'Automations run only on a plan for now, and its agent pays per use.' })
-      // Outside an automation's run, the project's work still moves to it.
-      assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId })).id, key.id)
+      // A session of its run is picked as any other's is.
+      assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId, threadId: thread?.id ?? '' })).id, key.id)
     }).pipe(
       Effect.provide(
         clock.on(

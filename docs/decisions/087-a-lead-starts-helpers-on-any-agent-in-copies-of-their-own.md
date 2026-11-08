@@ -411,8 +411,7 @@ threads bring work back the same way, on purpose.
 - **The lead names the model; Althar takes the best way to it,** as it does a
   step's: a plan before a key, within the project's accounts rule
   (`accounts.only`), steering clear of an account nearly out as a new step
-  does (`NEARLY_OUT`); an automation's task, only what a plan pays for
-  (`PlanOnly`). A model the lead may not use is refused, naming those it may.
+  does (`NEARLY_OUT`). A model the lead may not use is refused, naming those it may.
 - **Without a model, the lead's own,** on the same account and effort. The
   lead can name another model and effort for each helper: "Haiku on medium"
   for a search, the strongest on high for a hard question. Claude Code's

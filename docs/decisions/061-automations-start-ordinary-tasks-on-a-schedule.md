@@ -52,11 +52,11 @@
     and only one automation's task is at work at once (`Busy.ts`). It is
     skipped, and says why, while its last run still goes, while every
     automation is paused, with five of its pull requests open, past 24 runs
-    a day, or where none of its agent's accounts is on a plan, as the
-    agent's own status says: per use, or where it can't tell (plans only,
-    until cost is counted). Every session of a run is held to the same
-    wherever it starts (`Limits.pick`), so a usage limit moves it to another
-    agent on a plan, never to an account paid per use. A run starts one at
+    a day, or where its agent is signed out or out of usage and no other
+    agent could take its place; the line says which and what would make it
+    run, and a second such skip in a row is one call in Needs you, not one
+    a night. A run picks its agent, account and model as any step does,
+    per use included (`Limits.pick`), under the caps any task has. A run starts one at
     a time, its limits checked and its occurrence kept together, so a slot
     and Run now never both pass. It works at most its minutes, counted over
     its turns, and is stopped past them. Three failures in a row pause it,
@@ -98,4 +98,4 @@
   run is skipped, and says why, rather than piling up.
 - **Revisit when:** events (a review asked, checks failing on main, a label)
   join schedules; a run should carry on its open pull request rather than
-  open another; per-use models get caps; or runs move to the cloud.
+  open another; or runs move to the cloud.
