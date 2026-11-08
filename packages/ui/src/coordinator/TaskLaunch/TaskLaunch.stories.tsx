@@ -367,14 +367,16 @@ const PLAN_ASKED: LaunchStep[] = [
 export const InTheConversation: Story = {
   render: () => (
     <>
-      <You at="11:01">
-        Refunds created before PR 1184 have no idempotency key. Backfill them, and dry-run it on a copy before anything writes.
-      </You>
+      <You at="11:01">EU customers are seeing the wrong VAT rate on their invoice PDFs since Monday. Can you fix it?</You>
       <Turn voice="Coordinator" at="11:01">
-        One task. Opus 5 writes the backfill and its dry run, and Codex reviews it, since it writes to money records. It starts on its own
-        unless you change it.
+        One task. Opus 5 fixes the rate lookup and adds a test for each EU country, and Codex reviews it.
       </Turn>
-      <Launch plan={PLAN_ASKED} from={undefined} estimate="About 30 min · about $1 on your subscriptions" />
+      <Launch
+        plan={PLAN_ASKED}
+        from={undefined}
+        title="Fix the VAT rate on EU invoice PDFs"
+        estimate="About 25 min · about $1 on your subscriptions"
+      />
     </>
   ),
 }

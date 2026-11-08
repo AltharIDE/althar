@@ -4,7 +4,7 @@ import { fn } from 'storybook/test'
 
 import { Board, BoardColumn, BoardList, type BoardFolds } from '../../board/Board/Board'
 import { BoardCard, type BoardCardProps } from '../../board/BoardCard/BoardCard'
-import { BranchChip, Fact, FactLine, PullChip } from '../../board/BoardCard/Chips'
+import { BranchChip, Fact, PullChip } from '../../board/BoardCard/Chips'
 import { NextRow } from '../../board/NextRow/NextRow'
 import { ProjectHeader, type ProjectPart } from '../../chrome/ProjectHeader/ProjectHeader'
 import { ProjectTabs } from '../../chrome/ProjectTabs/ProjectTabs'
@@ -31,7 +31,7 @@ import s from './ProjectHome.stories.module.css'
 /*
  * A project's home, as the desktop opens it (apps/desktop's ProjectView): its
  * tabs and header, the coordinator's conversation, and the board beside it.
- * Meridian on a Tuesday morning: two tasks the coordinator started earlier,
+ * Meridian on an ordinary morning: two tasks the coordinator started earlier,
  * a third the person started from the board, one that needs them, and a new
  * ask answered with a plan on its countdown. Drawn from the kit's own pieces,
  * for the README's main picture (brand/src/screenshots.ts, project-home).
@@ -51,9 +51,9 @@ const RUNNING: Card[] = [
     word: 'Review',
     kind: TaskKind.Change,
     at: '38m',
-    title: 'Repair token refresh on privilege change',
-    track: trackOf(['Implement', 'Review', 'Security review'], 1),
-    object: <BranchChip name="meridian/repair-token-refresh" add={126} del={31} />,
+    title: 'Fix the login redirect loop in Safari',
+    track: trackOf(['Implement', 'Review'], 1),
+    object: <BranchChip name="meridian/safari-login-loop" add={42} del={11} />,
     foot: <Fact>{OPUS.short} leads</Fact>,
   },
   {
@@ -61,25 +61,20 @@ const RUNNING: Card[] = [
     word: 'Implement',
     kind: TaskKind.Change,
     at: '21m',
-    title: 'Sign webhook v2 payloads with rotating keys',
+    title: 'Export invoices as CSV',
     track: trackOf(['Implement', 'Review'], 0),
-    object: <BranchChip name="meridian/sign-webhook-v2-payloads" add={212} del={18} />,
+    object: <BranchChip name="meridian/invoice-csv-export" add={186} del={4} />,
     foot: <Fact>{SONNET.short} leads</Fact>,
   },
   {
     status: TaskStatus.Running,
-    word: 'Follow-up',
+    word: 'Review',
     kind: TaskKind.Change,
     at: '9m',
-    title: 'Return 409 when a refund idempotency key is reused',
-    track: trackOf(['Follow-up', 'Review'], 0),
-    object: <PullChip host={GITHUB} repo="meridian-api" number={1191} add={48} del={9} />,
-    foot: (
-      <FactLine>
-        <Fact>{CODEX.short} leads</Fact>
-        <Fact>6 of 8 checks passed</Fact>
-      </FactLine>
-    ),
+    title: 'Paginate the customers endpoint',
+    track: trackOf(['Implement', 'Review'], 1),
+    object: <PullChip host={GITHUB} repo="meridian-api" number={1191} add={74} del={22} />,
+    foot: <Fact>{CODEX.short} leads</Fact>,
   },
 ]
 
@@ -88,19 +83,17 @@ const YOURS: Card = {
   word: 'Question',
   kind: TaskKind.Change,
   at: '4m',
-  title: 'Queue refunds that hit the rate limit',
-  why: 'Which database should the refund queue live in?',
+  title: 'Rate-limit the public API',
+  why: 'Per API key, or per account?',
 }
 
 const NEXT = [
-  { title: 'Backfill idempotency keys on refunds created before PR 1184', reason: 'Starts in 24s' },
-  { title: 'Which partners still call the v1 webhook endpoint?', kind: 'Question', reason: 'Starts when an agent is free' },
-  { title: 'Move partner webhooks to the new queue', reason: 'Starts when 429 merges' },
+  { title: 'Fix the VAT rate on EU invoice PDFs', reason: 'Starts in 24s' },
+  { title: 'Upgrade the Stripe SDK to v18', reason: 'Starts when an agent is free' },
 ]
 
 const PLAN: LaunchStep[] = [
   { id: 'impl', label: 'Implement', agents: [OPUS], fixed: 'the lead' },
-  { id: 'dry', label: 'Dry run on a copy', agents: [CODEX], optional: true },
   { id: 'review', label: 'Review', agents: [CODEX], optional: true },
 ]
 
@@ -167,12 +160,9 @@ function ProjectHome() {
             }
           >
             <Thread label="Conversation">
-              <You at="10:12">
-                Token refresh keeps admin rights after a downgrade. Fix that, and sign the v2 webhooks with rotating keys.
-              </You>
+              <You at="10:12">Fix the Safari login loop, and add CSV export to invoices.</You>
               <Turn voice="Coordinator" at="10:13">
-                <WorkedFor took="11s" />
-                <Prose>Two tasks, side by side. Token refresh touches sessions, so your security review runs after the code review.</Prose>
+                <Prose>Two tasks, side by side.</Prose>
               </Turn>
               {/* Each task it started, folded to the line it posted then: who leads it. */}
               <TaskMark
@@ -180,7 +170,7 @@ function ProjectHome() {
                 verb="started"
                 detail={`${OPUS.short} leads`}
                 at="10:13"
-                steps={['Implement', 'Review', 'Security review']}
+                steps={['Implement', 'Review']}
                 step={0}
                 now="Review"
                 onJump={fn()}
@@ -189,39 +179,24 @@ function ProjectHome() {
                 task="429"
                 verb="started"
                 detail={`${SONNET.short} leads`}
-                at="10:30"
+                at="10:13"
                 steps={['Implement', 'Review']}
                 step={0}
                 now="Implement"
-                onJump={fn()}
-              />
-              <TaskMark
-                task="416"
-                verb="started a follow-up"
-                detail={`${CODEX.short} leads`}
-                at="10:42"
-                steps={['Follow-up', 'Review']}
-                step={0}
-                now="Follow-up"
                 last
                 onJump={fn()}
               />
-              <You at="10:51">
-                Refunds created before PR 1184 have no idempotency key. Backfill them, and dry-run it on a copy before anything writes.
-              </You>
+              <You at="10:51">EU customers are seeing the wrong VAT rate on their invoice PDFs since Monday. Can you fix it?</You>
               <Turn voice="Coordinator" at="10:51">
                 <WorkedFor took="14s" />
-                <Prose>
-                  One task. Opus 5 writes the backfill, Codex dry-runs it on last night’s snapshot and reviews it, since it writes to money
-                  records.
-                </Prose>
+                <Prose>One task. Opus 5 fixes the rate lookup and adds a test for each EU country, and Codex reviews it.</Prose>
               </Turn>
               <TaskLaunch
                 task="432"
-                title="Backfill idempotency keys on refunds created before PR 1184"
+                title="Fix the VAT rate on EU invoice PDFs"
                 from={FROM_231}
                 project="Meridian"
-                estimate="About 40 min · about $2 on your subscriptions"
+                estimate="About 25 min · about $1 on your subscriptions"
                 steps={steps}
                 onStepsChange={setSteps}
                 picker={picker}
@@ -241,9 +216,8 @@ function ProjectHome() {
                     place={i + 1}
                     task=""
                     text={{ task: () => '' }}
-                    {...(row.kind === undefined ? {} : { kind: row.kind })}
                     title={row.title}
-                    wait={i === 2 ? Wait.After : Wait.Workers}
+                    wait={Wait.Workers}
                     reason={row.reason}
                     onOpen={fn()}
                   />
@@ -274,5 +248,5 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** Meridian at work: the coordinator's plan counting down, three tasks running, one question for you, three up next. */
+/** Meridian at work: the coordinator's plan counting down, three tasks running, one question for you, two up next. */
 export const Busy: Story = {}

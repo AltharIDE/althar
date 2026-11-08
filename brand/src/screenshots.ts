@@ -57,10 +57,11 @@ export const SCREENSHOTS: readonly Screenshot[] = [
   {
     file: 'first-run',
     bar: true,
-    story: 'screens-welcome--agents',
-    width: 1440,
-    height: 900,
-    shows: 'First run: the agents on this computer, and which are signed in',
+    story: 'screens-welcome--signed-in',
+    /* A smaller window, so the card holds its agents without room to spare. */
+    width: 1040,
+    height: 720,
+    shows: 'First run: the agents you already pay for, each signed in on its own plan',
   },
   {
     file: 'plan',

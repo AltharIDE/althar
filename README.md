@@ -25,7 +25,7 @@
 
 <br />
 
-<img src="brand/export/screenshots/framed/project-home.jpg" width="100%" alt="A project's home: you ask for a backfill and the coordinator answers with a plan, Opus 5 implementing and Codex dry-running and reviewing, starting in 23 seconds. Beside it, the board: three tasks up next, three running, one question that needs you." />
+<img src="brand/export/screenshots/framed/project-home.jpg" width="100%" alt="A project's home: you ask for a fix to the VAT rate on EU invoices and the coordinator answers with a plan, Opus 5 implementing and Codex reviewing, starting in 23 seconds. Beside it, the board: two tasks up next, three running, one question that needs you." />
 
 <br />
 
@@ -166,7 +166,7 @@ Every project has a manager. Say what you want done; it turns that into tasks an
       <p><b>Builds the team.</b> A lead to implement, other models to review and audit. Swap anyone before it starts.</p>
     </td>
     <td width="56%" valign="top">
-      <img src="brand/export/screenshots/framed/plan.jpg" width="100%" alt="You ask for a backfill; the coordinator answers with one task: Opus 5 implements, Codex reviews, then a draft pull request. It starts in 29 seconds unless changed or held." />
+      <img src="brand/export/screenshots/framed/plan.jpg" width="100%" alt="You ask for a fix to the VAT rate on EU invoices; the coordinator answers with one task: Opus 5 implements, Codex reviews, then a draft pull request. It starts in 29 seconds unless changed or held." />
     </td>
   </tr>
 </table>
@@ -229,7 +229,7 @@ brew install --cask altharide/tap/althar
 
 Open it. The first screen finds the agents on your computer and shows which are signed in; then you pick the repositories your first project works in.
 
-<img src="brand/export/screenshots/framed/first-run.jpg" width="100%" alt="The first screen: Your agents. Claude Code is signed in, Codex is signed out with a Sign in button, and Gemini CLI isn't on this computer." />
+<img src="brand/export/screenshots/framed/first-run.jpg" width="100%" alt="The first screen: Your agents. Claude Code, Codex, GitHub Copilot and OpenCode are signed in, each on its own plan, and Kimi Code and Junie aren't on this computer yet." />
 
 Claude Code, Codex and Google Antigravity sign in from inside Althar. The others sign in with their own tools:
 
