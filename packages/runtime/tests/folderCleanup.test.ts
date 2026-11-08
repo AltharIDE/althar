@@ -380,6 +380,25 @@ describe('finished tasks’ folders', () => {
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { disk, device })))))
   })
 
+  it.live('does not sweep early a folder on another device than the disk that ran low; its wait still applies', () => {
+    let elsewhere = ''
+    // The root's disk is low; the other device, read on its own, is roomy.
+    const disk = (path: string) =>
+      Effect.succeed(
+        elsewhere !== '' && path.startsWith(elsewhere) ? { total: 1000, free: 600, used: 400 } : { total: 1000, free: 50, used: 950 },
+      )
+    const device = (path: string) => Effect.succeed(elsewhere !== '' && path.startsWith(elsewhere) ? 2 : 1)
+    return Effect.gen(function* () {
+      const older = yield* finished('done', 2, 'Older')
+      const newer = yield* finished('done', 1, 'Newer')
+      elsewhere = older.worktree
+      yield* (yield* FolderCleanup).sweep
+      assert.isTrue(existsSync(older.worktree), 'a folder on another disk went early')
+      assert.isFalse(existsSync(newer.worktree), 'the folder on the disk that ran low stayed')
+      assert.deepStrictEqual(yield* folderLines(older.threadId), [])
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { disk, device })))))
+  })
+
   it.live('keeps the person’s choice of wait, and with Only when I clean up removes nothing by itself', () =>
     Effect.gen(function* () {
       const task = yield* finished('done', 40)
