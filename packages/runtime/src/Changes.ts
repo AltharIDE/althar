@@ -4248,6 +4248,8 @@ export class Changes extends Context.Service<
           for (const review of activity.reviews) {
             const voice = voiceOf(review, account, replies)
             const bot = voice === 'bot' ? yield* botOf(review) : null
+            // A trusted bot's bare approval asks nothing: it isn't passed on, and its card doesn't say it was.
+            const passes = bot?.trusted === true && (review.verdict !== 'approved' || review.body.trim() !== '')
             if (
               voice === 'althar' ||
               !(yield* heard(link, 'review', `review:${review.id}`, {
@@ -4266,13 +4268,15 @@ export class Changes extends Context.Service<
               text: review.body,
               url: review.url,
               outsider: voice === 'outsider',
-              ...(bot === null || !(bot.trusted || bot.first) ? {} : { bot: { login: bot.login, name: bot.name, trusted: bot.trusted } }),
+              ...(bot === null || !(passes || (!bot.trusted && bot.first))
+                ? {}
+                : { bot: { login: bot.login, name: bot.name, trusted: bot.trusted } }),
             })
             if ((voice === 'person' || voice === 'member') && review.verdict !== 'approved') {
               addressed = true
               forLead.push(reviewForLead(review, name))
             }
-            if (bot?.trusted === true && (review.verdict !== 'approved' || review.body.trim() !== '')) fromBot(bot, review)
+            if (bot !== null && passes) fromBot(bot, review)
           }
           for (const comment of activity.comments) {
             const voice = voiceOf(comment, account, replies)
