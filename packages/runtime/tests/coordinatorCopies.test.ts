@@ -172,7 +172,8 @@ describe("the coordinator's copies", () => {
       folder: join(projectFolder, '.coordinator'),
       mirrors: join(projectFolder, '.coordinator-mirrors'),
     }
-    const within = (path: string, places: ReadonlyArray<string>) => places.some((given) => path === given || path.startsWith(`${given}/`))
+    const within = (path: string, places: ReadonlyArray<string>) =>
+      places.some((given) => path === given || path.startsWith(`${given}${sep}`))
     const holds = (gitConfig: string, xdgConfig?: string) => {
       mkdirSync(gitConfig, { recursive: true })
       writeFileSync(join(gitConfig, 'config'), '[core]\n')

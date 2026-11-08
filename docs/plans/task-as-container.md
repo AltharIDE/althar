@@ -1,7 +1,7 @@
 # Tasks whose kind follows what they make, and cards with nothing to press
 
 > **Temporary.** The build plan for DEV-96, not architecture. The lasting
-> model is [ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md);
+> model is [ADR-035](../decisions/tasks.md#kinds-read-from-what-a-task-has);
 > delete this file when the last step ships, and move anything else that
 > lasted into the architecture docs.
 
@@ -11,8 +11,10 @@ locally, in `packages/ui/src/prototypes/task-as-container/`, not committed).
 
 ## The model
 
-- **One primitive, the task.** No temporary chats, no prototype primitive,
-  no shelf. The coordinator starts each task configured; it can reshape
+- **One primitive, the task.** Overtaken on 13 October: a task is a loose
+  container, and the lightest form, a temporary chat, is kept on a Scratch
+  shelf off the board ([Tasks § What a task is](../decisions/tasks.md#what-a-task-is)).
+  The rest of this point predates that: no prototype primitive. The coordinator starts each task configured; it can reshape
   itself later; everything is on the board.
 - **A task's kind is read from what it has, never stored.**
   - **Plain:** a quick task, one the coordinator starts at once with
@@ -50,7 +52,7 @@ Then, at most, one card in the card and one fact under it:
 - **Finished, then Done:** a plain task that finished waits as `Finished`
   in Needs you, until the person presses Done or Keep for later, or tells
   its lead; opening it moves nothing
-  ([ADR-051](../decisions/051-a-finished-task-waits-for-the-person-to-settle-it.md)).
+  ([ADR-051](../decisions/tasks.md#needs-you-and-settling)).
 - Up next and Settled stay rows, with the kind's word where there is one.
 
 ## Reviews

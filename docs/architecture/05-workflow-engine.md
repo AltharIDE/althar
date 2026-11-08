@@ -273,7 +273,7 @@ stateDiagram-v2
   place of `abandon` for a `done` task, and for an open one merged in
   every repository, as settling it asks (a repository with no pull request
   merged where its branch is in its default branch)
-  ([ADR-034](../decisions/034-a-task-goes-back-to-work-and-ships-again.md)).
+  ([ADR-034](../decisions/tasks.md#rounds-back-to-work-and-shipping-again)).
   The menu says Abandon for both, and the dialog that it stays merged.
   Where each worktree is is kept in a ref of Althar's, and only what is
   committed after counts again; the task settles as a merge does, `done`,
@@ -284,7 +284,7 @@ stateDiagram-v2
 ### Rounds of work after the plan
 
 A task is a conversation that outlives its plan
-([ADR-034](../decisions/034-a-task-goes-back-to-work-and-ships-again.md)).
+([ADR-034](../decisions/tasks.md#rounds-back-to-work-and-shipping-again)).
 When a turn of its lead delivers the person's own words and its latest run is
 over, Althar opens a **round**: a run with no plan, whose steps and ending
 are the plan's run's, its Implement step under way on the lead's session as
@@ -300,7 +300,7 @@ pushes it, or, once the last merged or closed, into a **new pull request**
 the person opens from the task, on a new branch from the default branch as
 the host has it, its new commits cherry-picked onto it, never forced. A
 quick task's round offers none. Between turns a round takes no place among the agents at work
-([ADR-032](../decisions/032-agents-at-once-on-this-machine.md)). Whenever an
+([ADR-032](../decisions/scheduling.md#how-many-agents-work-at-once)). Whenever an
 agent on a task is in a turn, starting, or waiting for a place, its card says
 Running, whatever the task was.
 
@@ -309,7 +309,7 @@ Running, whatever the task was.
 A task the coordinator starts with `start_task` is a quick task: its plan
 stays on this Mac (`here`) and ends in nothing, and its worktree has no
 branch, detached where it started
-([ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md)).
+([ADR-035](../decisions/tasks.md#kinds-read-from-what-a-task-has)).
 Whenever its lead's turn ends, or its session goes, and when it calls
 `finish_step`, Althar looks at what it has: new commits, or changes not
 committed that aren't evidence it handed (its scratch folder git ignores).
@@ -602,11 +602,11 @@ person ([03](03-agent-runtime-and-auth.md), Permission routing).
 With **The coordinator decides** selected, the coordinator answers requests
 outside the explicit always-ask and never rules in a fresh session, after
 routine reads, searches and own-file edits pass through without a judgment
-([ADR-019](../decisions/019-coordinator-judges-permissions.md)). The project's
+([ADR-019](../decisions/what-agents-may-do.md#ask-about-more-and-the-coordinator-decides)). The project's
 allow rules answer before it: what one covers is let through by the rule,
 with no judgment, and a call the coordinator leaves to the person offers Allow
 always, so the next one needs no judgment either
-([ADR-018](../decisions/018-allow-always-keeps-a-rule.md)). It uses the
+([ADR-018](../decisions/what-agents-may-do.md#the-persons-rules)). It uses the
 coordinator's agent and model, with the task's recent context, only where the
 registry has verified settings that remove its tools (currently Claude Code).
 Other agents fall back to the person. At most two judgments run at once, and
@@ -616,13 +616,13 @@ person. Each answer records its reason, cost when reported, token usage and
 latency; the thread shows who decided, and the home counts coordinator answers.
 
 Existing modes remain: allow what no rule keeps, ask the person, or allow
-everything subject to never rules ([ADR-013](../decisions/013-project-rules.md)).
+everything subject to never rules ([ADR-013](../decisions/what-agents-may-do.md#the-persons-rules)).
 Existing projects keep their mode. The project's rules are checked again before
 a coordinator decision is committed, so a rule changed while it thinks wins,
 an allow rule kept meanwhile included.
 
 **Usage limits pause an account, not an agent.** A limit belongs to one of an
-agent's accounts ([ADR-012](../decisions/012-several-accounts-per-agent.md)),
+agent's accounts ([ADR-012](../decisions/agents.md#accounts)),
 so it pauses every node running on that account at once: the lead, any steps,
 and their sub-agents. The agent's other accounts carry on. How Althar
 detects a limit is in [03](03-agent-runtime-and-auth.md), Usage limits.
@@ -711,7 +711,7 @@ explicit merge or select step.
 
 **Lead recommendation.** The coordinator ([04](04-coordinator.md)) recommends
 a lead model per task, never an agent: an agent is only a way to a model
-([ADR-015](../decisions/015-coordinator-picks-models.md)). It
+([ADR-015](../decisions/agents.md#how-models-are-picked)). It
 weighs the kind of work, each model's scores, past outcomes on similar tasks,
 runtime availability and usage limits, and cost. The user can override it. The recommendation and
 its reasons are recorded on the task.
@@ -750,9 +750,11 @@ run only read-only commands (diff, search, log). Running tests belongs to
 verification: tests write caches and snapshots into the workspace, and would
 duplicate it.
 
-**The default reviewer** runs on a model from a different maker than the
-lead's when one can be used, picked by what the review needs
-([ADR-015](../decisions/015-coordinator-picks-models.md)). The plan shows the
+**The default reviewer** follows the person's preferences first (GPT-6.1
+Sol or Terra, with DeepSeek V4.1 Flash on OpenCode Go as the backup, never
+Luna); within them, a model from a different maker than the lead's when one
+can be used, picked by what the review needs
+([how models are picked](../decisions/agents.md#how-models-are-picked)). The plan shows the
 choice, and it can be changed. If the lead and reviewer end up the same model,
 the thread says so quietly.
 

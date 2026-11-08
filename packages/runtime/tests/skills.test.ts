@@ -273,7 +273,7 @@ describe('skills for a task’s lead', () => {
             assert.isString(sessionMetas.at(-1)?.options?.skills)
           }
           assert.isTrue(
-            skillFilesUnder(skillsFolderOf(agentId, skills.root)).some((path) => path.endsWith('alpha/SKILL.md')),
+            skillFilesUnder(skillsFolderOf(agentId, skills.root)).some((path) => path.endsWith(join('alpha', 'SKILL.md'))),
             agentId,
           )
           assert.deepStrictEqual(
@@ -424,6 +424,7 @@ describe('what a lead could see', () => {
           source: 'runtime',
           severity: 'info',
           role: 'skills',
+          lead: 'Codex',
           title: 'Codex could see 2 skills',
           skills: [
             { name: 'mine', path: '/h/.agents/skills/mine/SKILL.md', from: 'person' },
@@ -475,6 +476,84 @@ describe('what a lead could see', () => {
         (yield* lines(where.threadId)).map((line) => line.title),
         ['Codex could see a skill', 'OpenCode could see no skills'],
       )
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('says what a lead could see once across sessions, and later only which names changed', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const sql = yield* SqlClient.SqlClient
+      const session = (n: number) =>
+        Effect.gen(function* () {
+          const id = `sess_${String(n).repeat(32)}`
+          yield* sql`INSERT INTO provider_sessions (id, project_id, thread_id, agent_id, account_id, controller_generation, state, started_at)
+            SELECT ${id}, project_id, thread_id, agent_id, account_id, controller_generation, 'lost', started_at FROM provider_sessions WHERE id = ${where.sessionId}`
+          return { ...where, sessionId: id }
+        })
+      yield* recorder(where).record(seen('a', 'b'))
+      const second = yield* session(1)
+      yield* recorder(second).record(seen('a', 'b'))
+      const third = yield* session(2)
+      yield* recorder(third).record(seen('b', 'a'))
+      assert.deepStrictEqual(
+        (yield* lines(where.threadId)).map((line) => line.title),
+        ['Codex could see 2 skills'],
+      )
+      // A fourth hears of one more, after a shorter list at first: one short line, naming it.
+      const fourth = yield* session(3)
+      yield* recorder(fourth).record(seen('a'))
+      yield* recorder(fourth).record(seen('a', 'b', 'deploy'))
+      assert.deepStrictEqual(
+        (yield* lines(where.threadId)).map((line) => line.title),
+        ['Codex could see 2 skills', 'Codex can now also see deploy'],
+      )
+      // The same names, spelled with another path, give no line but the marks follow the newest spelling.
+      const spelled = yield* session(7)
+      yield* recorder(spelled).record({
+        _tag: 'SkillsSeen',
+        skills: ['a', 'b', 'deploy'].map((name) => ({ name, path: `/other/${name}/SKILL.md` })),
+      })
+      yield* recorder(spelled).record({
+        _tag: 'ToolCall',
+        toolCallId: 'moved',
+        title: 'moved',
+        kind: 'read',
+        status: 'completed',
+        locations: [{ path: '/other/a/SKILL.md' }],
+      })
+      assert.deepStrictEqual((yield* toolContent(where.threadId, 'moved'))?.skill, { names: ['a'], reported: false })
+      // One that hears of less says what it no longer sees; its own line is changed, not added to, as it hears more.
+      const fifth = yield* session(4)
+      yield* recorder(fifth).record(seen('a'))
+      yield* recorder(fifth).record(seen('a', 'b'))
+      assert.deepStrictEqual(
+        (yield* lines(where.threadId)).map((line) => [line.title, line.hidden === true]),
+        [
+          ['Codex could see 2 skills', false],
+          ['Codex can now also see deploy', false],
+          ['Codex no longer sees deploy', false],
+        ],
+      )
+      // And one that lets it go again, ending where the thread said, leaves no line to show.
+      const sixth = yield* session(5)
+      yield* recorder(sixth).record(seen('a', 'b', 'deploy'))
+      yield* recorder(sixth).record(seen('a', 'b'))
+      assert.strictEqual((yield* lines(where.threadId)).filter((line) => line.hidden !== true).length, 3)
+      // After that hidden line, a session spelling the same names with other paths still gets its marks.
+      const seventh = yield* session(8)
+      yield* recorder(seventh).record({
+        _tag: 'SkillsSeen',
+        skills: ['a', 'b'].map((name) => ({ name, path: `/moved/${name}/SKILL.md` })),
+      })
+      yield* recorder(seventh).record({
+        _tag: 'ToolCall',
+        toolCallId: 'moved-again',
+        title: 'moved again',
+        kind: 'read',
+        status: 'completed',
+        locations: [{ path: '/moved/a/SKILL.md' }],
+      })
+      assert.deepStrictEqual((yield* toolContent(where.threadId, 'moved-again'))?.skill, { names: ['a'], reported: false })
     }).pipe(Effect.provide(runtime())),
   )
 

@@ -42,7 +42,7 @@ the runtime behind it and the app wiring it up.
      ready. A notification only while the person looks elsewhere, never for
      progress; the badge counts calls and tasks ready, across projects.
    - **Several accounts per agent**
-     ([ADR-012](../decisions/012-several-accounts-per-agent.md)). They form a
+     ([ADR-012](../decisions/agents.md#accounts)). They form a
      pool, which a project's rules can narrow, and switchers people already
      use are supported. A usage limit moves work to the agent's next account
      first.
@@ -95,7 +95,7 @@ One pull request each:
      Settings (⌘,). Not yet: a card for an agent that is signed out.
 
    Added on 2026-10-10: the coordinator answers permission requests in its
-   opt-in mode, with recorded reasons and human fallback ([ADR-019](../decisions/019-coordinator-judges-permissions.md)).
+   opt-in mode, with recorded reasons and human fallback ([ADR-019](../decisions/what-agents-may-do.md#ask-about-more-and-the-coordinator-decides)).
 
    Decided on 2026-10-04:
    - **No "send back" step.** The task's chat is how the person sends work
@@ -103,7 +103,7 @@ One pull request each:
      dock's note goes into that same chat.
    - **Later: always push.** A choice next to Push, per project, for people
      who want follow-ups pushed as the lead commits them. Built, on by
-     default, as [ADR-072](../decisions/072-a-lead-s-commits-push-as-its-turn-ends.md).
+     default, as [ADR-072](../decisions/code-hosts.md#a-leads-commits-go-up-as-its-turn-ends).
 4. **Conversations.**
 
 Brought forward from step 4, after the board: **the model picker.** Every
@@ -128,8 +128,9 @@ Confirmed with the user on 1 October 2026:
   per project).~~ Reversed on 13 October 2026, after six test runs at once
   rebooted a MacBook: each machine runs as many tasks' agents at once as its
   cores and memory allow, or the person's own number, and the rest wait
-  their turn, first come, first served
-  ([ADR-032](../decisions/032-agents-at-once-on-this-machine.md), DEV-58).
+  their turn, in four orders: the person's work first, then work under way, new
+  work and automations ([what goes first](../decisions/scheduling.md#what-goes-first))
+  ([ADR-032](../decisions/scheduling.md#how-many-agents-work-at-once), DEV-58).
 - **Permission asks** are the lead's to answer within the project's rules;
   only the "always ask me" list reaches the person.
 - **A usage limit is handled as configured:** stop and wait for the reset, or

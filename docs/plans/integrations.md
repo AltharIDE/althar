@@ -2,7 +2,7 @@
 
 > **Temporary.** The plan for building code hosts and trackers, not
 > architecture: that is [06](../architecture/06-integrations-and-skills.md)
-> and [ADR-011](../decisions/011-own-connectors-for-hosts-and-trackers.md).
+> and [ADR-011](../decisions/code-hosts.md#connectors).
 > Delete this file when the last step ships, and move anything that lasted
 > into the architecture docs.
 
@@ -24,7 +24,7 @@ From the desktop app:
    ready and merging stay with you.
 
 Built to the product standard
-([ADR-008](../decisions/008-shortcuts-in-behaviour-not-in-records.md)).
+([ADR-008](../decisions/foundations.md#recorded-facts-are-complete-behaviour-may-start-simple)).
 
 ## Order
 
