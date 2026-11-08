@@ -64,18 +64,20 @@ export interface RunSkills {
  * agent's registry entry says, for that session alone; undefined for an agent with no way to be given them. Every
  * agent is given the same active set, less what it can't do. `keepOutOf` lists the run's repositories and worktrees:
  * the store is refused inside any of them, so a misplaced profile cannot put skill files in a checkout. Nothing is
- * written to the agent's home or the person's own folders.
+ * written to the agent's home or the person's own folders. `held` names those the person turned off for the run's
+ * role or project (`heldSkillsFor`): left out, so neither the folder nor the brief has them.
  */
 export const runSkills = (
   config: SkillsConfig,
   definition: Pick<AgentDefinition, 'id' | 'skills'>,
   runId: string,
   keepOutOf: ReadonlyArray<string>,
+  held: ReadonlySet<string> = new Set(),
 ): Effect.Effect<RunSkills | undefined, SkillStoreFailed> =>
   Effect.gen(function* () {
     const { skills } = definition
     if (skills === null) return undefined
-    const selected = yield* activeSelection(config.root)
+    const selected = (yield* activeSelection(config.root)).filter(({ id }) => !held.has(id))
     const projected = yield* projectRun({
       root: config.root,
       runId,

@@ -629,7 +629,6 @@ describe('the API', () => {
               ApproveSkill: () => Effect.die('unused'),
               CheckSkillUpdates: () => Effect.die('unused'),
               RollBackSkill: () => Effect.die('unused'),
-              SetSkillActive: () => Effect.die('unused'),
               UninstallSkill: () => Effect.die('unused'),
               ListConnections: () => Effect.succeed({ cursor: 0, connections: [], products: [], places: [] }),
               StartSignIn: ({ commandId: id }) =>

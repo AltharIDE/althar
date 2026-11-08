@@ -3155,17 +3155,24 @@ describe('the skills page', () => {
         )
         assert.strictEqual(listed.skills[0]?.description, 'Use when testing alpha.')
         const on = commandId()
-        const alpha = yield* client.SetSkillActive({ commandId: on, id: 'alpha', active: true })
-        assert.isTrue(alpha.active)
-        const off = yield* client.SetSkillActive({ commandId: commandId(), id: 'alpha', active: false })
-        assert.isFalse(off.active)
+        // A skill is on while any role gets it: the round switch gives it to every role, or none.
+        yield* client.SetToolRoles({
+          commandId: on,
+          kind: 'skill',
+          name: 'alpha',
+          roles: ['lead', 'reviewer', 'coordinator'],
+          projectId: null,
+        })
+        assert.isTrue((yield* client.ListSkills({})).skills[0]?.active)
+        yield* client.SetToolRoles({ commandId: commandId(), kind: 'skill', name: 'alpha', roles: [], projectId: null })
+        assert.isFalse((yield* client.ListSkills({})).skills[0]?.active)
         // Each switch is the person's act, recorded under the window's command with the version it was at.
         const acts = yield* record(skillActs)
         assert.deepStrictEqual(
           acts.map(({ id, revision, type, payload }) => [id, revision, type, payload]),
           [
-            ['alpha', 1, 'skill.turned_on', { treeHash: alpha.treeHash }],
-            ['alpha', 2, 'skill.turned_off', { treeHash: alpha.treeHash }],
+            ['alpha', 1, 'skill.turned_on', { treeHash: listed.skills[0]?.treeHash }],
+            ['alpha', 2, 'skill.turned_off', { treeHash: listed.skills[0]?.treeHash }],
           ],
         )
         assert.strictEqual(acts[0]?.commandId, on)

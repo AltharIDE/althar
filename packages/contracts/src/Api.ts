@@ -4943,8 +4943,6 @@ export const Api = RpcGroup.make(
   call('CheckSkillUpdates', {}, Schema.Array(SkillUpdate)),
   /** Puts a skill back to the version before its last update. */
   command('RollBackSkill', { id: Schema.String }, InstalledSkill),
-  /** Turns a skill on or off for later runs. */
-  command('SetSkillActive', { id: Schema.String, active: Schema.Boolean }, InstalledSkill),
   /** Removes a skill the person installed; one Althar ships can only be turned off. */
   command('UninstallSkill', { id: Schema.String }, Schema.Void),
   /** What changes after `since`, or from now without it. */

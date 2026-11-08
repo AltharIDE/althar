@@ -1349,7 +1349,6 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   // althar/mcp-servers and althar/skills: the person's own agents' settings (ADR-097)
   setToolRoles: "person: which roles get the person's own servers and skills is theirs (althar/mcp-servers says so)",
   setToolInProject: "person: which projects get the person's own servers and skills is theirs (althar/mcp-servers says so)",
-  checkServers: "window: asks each of the person's agents how its servers stand; changes nothing",
   addServer: "person: adding a server writes into the person's own agents' files",
   removeServer: "person: removing a server takes it out of the person's own agents' files",
   setToolSync: "person: keeping their agents the same writes into the person's own files",
@@ -1385,7 +1384,6 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   orderAccounts: 'person: an agent’s accounts and their sign-ins',
   removeAccount: 'person: an agent’s accounts and their sign-ins',
   // althar/skills
-  setSkillActive: 'althar/skills.skills',
   stageSkill: 'person: installing a skill is the person’s',
   approveSkill: 'person: installing a skill is the person’s',
   rollBackSkill: 'person: installing a skill is the person’s',
