@@ -7,6 +7,7 @@ import { type ElectronApplication, expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
 import {
+  askAboutMore,
   backToWork,
   launch,
   openFirstProject,
@@ -58,6 +59,9 @@ test('makes the first project of a repository it found, starts a task, and talks
 
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await page.screenshot({ path: 'test-results/project.png' })
+    // Asking about more than what can't be undone, as a person may: a deploy is kept for them, as the call below shows.
+    // Allowing everything, which lets a deploy run unasked, is its own test.
+    await askAboutMore(page)
     // Told what should change, the coordinator plans it. Its lead reports Implement done at once, with no review, so what follows is talking to it.
     await startTask(page, 'Add a retry to the checkout call')
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
@@ -95,8 +99,9 @@ test('makes the first project of a repository it found, starts a task, and talks
       .click()
     await expect(page.getByText('hello.txt', { exact: true })).toBeVisible()
 
-    // A deploy is kept for the person: it waits in the thread as a call until it is answered.
-    await say(page, 'command-choices')
+    // A deploy needs the network, so it asks to run outside the lead's sandbox; the project asks about it, and it waits in the
+    // thread as a call until it is answered.
+    await say(page, 'run env -i make deploy')
     await expect(shown(page, 'Needs you', { exact: true })).toBeVisible()
     await expect(shown(page, 'Needs your permission')).toBeVisible()
     await page.screenshot({ path: 'test-results/call.png' })
