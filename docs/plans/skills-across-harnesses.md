@@ -1,6 +1,6 @@
 # Skills across harnesses: shared defaults, installs, and repository boundaries
 
-**Status:** Partly built; what landed and what didn't is under [Implementation status](#implementation-status). Decisions: [ADR-094](../decisions/094-skills-one-store-a-curated-catalog.md), [ADR-095](../decisions/095-skill-and-openspec-files-stay-off-the-repository.md)
+**Status:** Partly built; what landed and what didn't is under [Implementation status](#implementation-status). Decisions: [ADR-094](../decisions/the-persons-setup.md#skills), [ADR-095](../decisions/the-persons-setup.md#skill-and-openspec-files-in-a-change)
 **Research checked:** 2026-10-14
 **Upstream baseline:** `upstream/main` at `818df85e35ce4aa704334ffd846878750a30702c`
 
@@ -556,7 +556,7 @@ checks and the harness permission rules remain the enforcement.
      reject-by-default frontmatter and subtree-only install rules, and the
      repository boundary (default-off write, OpenSpec and push settings).
      Possibly a second ADR for the repository boundary alone, since it
-     amends [ADR-013](../decisions/013-project-rules.md) project rules.
+     amends [ADR-013](../decisions/what-agents-may-do.md#the-persons-rules) project rules.
    - **Docs:** update `docs/architecture/06-integrations-and-skills.md` (the
      skills section) and `docs/architecture/07-persistence-security-and-cloud.md`
      (store, trust, the update-check data); the `docs/decisions/README.md`
@@ -650,15 +650,32 @@ checks and the harness permission rules remain the enforcement.
 - **Checked live (2026-10-18), without a model call:** OpenCode 1.19.0's
   `debug skill` lists all 33 from `skills.paths` with an isolated home; Codex
   0.160.1's app server lists all 33 from the extra root codex-acp sets.
+- **Checked on every run of `test:agents` (DEV-187), without a sign-in or a
+  model call:** a run's folder, laid out by `@althar/skills`' `projectRun` for
+  each registry entry's layout and handed over as Althar hands it, is found by
+  the real agent: Claude Code (through claude-agent-acp 0.101.0) lists its
+  plugin's skills as `althar:<skill>` commands, Codex (codex-acp 2.5.0) lists
+  the folder added to its session, and OpenCode lists it from `skills.paths`:
+  1.x in `debug skill` (seen with 1.18.31), 2.x, which has no `debug skill`,
+  from its own server's `GET /api/skill` (seen with 2.2.6). Althar runs the
+  person's OpenCode where they have one, of either major, and downloads 2.x
+  where they don't; `ALTHAR_TEST_OPENCODE` names the copy to check. Claude Code
+  skips where its adapter or the program it starts can't be found, OpenCode
+  where it isn't installed. No workflow runs `test:agents` yet. On every pull
+  request, the runtime's tests check the other half: that the plugin and the
+  added directory reach the session the fake agent opens, and that the launch
+  `Agents.fromRegistry` composes for OpenCode carries the run's folder in
+  `skills.paths` (the fake runs in the test's process, so that is the
+  composed environment, not one a process received).
 - **Repository files in the project's settings (2026-10-18).** The project's
   Settings panel has a Repository files module that says where they stand and
   opens out to the three switches of section 4, each off until turned on and
   each a new revision of the project's rules (`SetProjectRules`'s
   `repositoryFiles`). A push held back for them names the switches there
   that are off for what it held back.
-- **ADRs (2026-10-18).** [ADR-094](../decisions/094-skills-one-store-a-curated-catalog.md)
+- **ADRs (2026-10-18).** [ADR-094](../decisions/the-persons-setup.md#skills)
   (the store, the catalog, delivery per session) and
-  [ADR-095](../decisions/095-skill-and-openspec-files-stay-off-the-repository.md)
+  [ADR-095](../decisions/the-persons-setup.md#skill-and-openspec-files-in-a-change)
   (the repository boundary, amending ADR-013 and ADR-016).
 
 **Not yet:**
@@ -703,7 +720,8 @@ checks and the harness permission rules remain the enforcement.
 - Where Codex and OpenCode read skills from was probed (Implementation
   status, "Checked live"): Codex 0.160.1 through codex-acp's extra roots,
   OpenCode 1.19.0 through `skills.paths`. Each new version needs the probe
-  again. Codex may still truncate its initial list under its context budget;
+  again: `test:agents` repeats it for Althar's own folder, by hand until a
+  workflow runs it. Codex may still truncate its initial list under its context budget;
   reporting that is not built.
 - Native repo skills can differ by harness and may be automatically loaded.
   Althar must surface this extra context and prove any attempt to suppress it;

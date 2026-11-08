@@ -116,7 +116,7 @@ Three records, three lifetimes:
   indexes, Kubernetes' "jobs should be idempotent").
 - **The task** is unchanged, and carries the occurrence that started it.
   Its kind is read from what it has
-  ([ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md)): a
+  ([ADR-035](../decisions/tasks.md#kinds-read-from-what-a-task-has)): a
   review automation makes review tasks, a nightly bump makes changes, a sweep
   that only reports makes plain tasks.
 
@@ -283,11 +283,11 @@ If the computer is asleep at 2:00, it runs when it wakes, until 14:00."
   bot updates its one pull request. Carrying on comes after the first
   version. It is new: today Althar's own messages to a lead don't open a round,
   and a round never publishes by itself
-  ([ADR-034](../decisions/034-a-task-goes-back-to-work-and-ships-again.md)).
+  ([ADR-034](../decisions/tasks.md#rounds-back-to-work-and-shipping-again)).
   It takes a round Althar opens for the automation, carrying the new
   occurrence, whose commits go up to the open pull request as a check fix's
   do while the change is in Althar's hands
-  ([ADR-040](../decisions/040-a-change-reaches-the-person-green.md)). A
+  ([ADR-040](../decisions/code-hosts.md#checks-althar-sees-them-through)). A
   task the person took over or stopped isn't carried on: the run is
   skipped, saying it's theirs now.
 - **Catch-ups at launch go one at a time,** after the person's own work, so
@@ -374,7 +374,7 @@ again. Only a tighter limit doesn't: fewer runs a day, a shorter time.
 The person's call (5 and 6) is that a run goes ahead on its own, mostly,
 and signs what it does. So:
 
-- **Its task allows everything** ([ADR-043](../decisions/043-allow-everything-is-one-switch-for-a-project-or-a-task.md)'s
+- **Its task allows everything** ([ADR-043](../decisions/what-agents-may-do.md#what-asks)'s
   switch for a task, on from the start), and no permission ask stops a run
   at night. The automation's page has the switch, on by default; off, the
   project's rules apply, and an ask waits in Needs you, its place going
@@ -382,11 +382,12 @@ and signs what it does. So:
 - **Pushing to the default branch is never allowed** in a run, whatever the
   switches say: the run's rules add it to what they never allow, which
   allow everything doesn't go past
-  ([ADR-013](../decisions/013-project-rules.md)'s order). Then, as for any
-  rules that never allow something, a command the rules can't read (`eval`,
-  `$(…)`) is refused with how to spell it out. Merging was never an
-  agent's: `gh pr merge` and every other write to the code host are refused
-  in any mode (`hostReason` in `rules.ts`).
+  ([ADR-013](../decisions/what-agents-may-do.md#the-persons-rules)'s order). A command the
+  rules can't read (`eval`, `$(…)`) runs, as ADR-097 amended it to, unless
+  its words show the push. Merging is not an agent's by default: `gh pr
+  merge` and other writes that can't be undone ask the person, and self-
+  approval is refused, in any mode (`hostKinds`, `hostRefusedReason` in
+  `rules.ts`).
 - **Outward steps stay Althar's,** as today. Althar pushes and opens the
   pull request at the end of a run, as the automation's ending says: ready
   for review, or a draft. It replies on the pull request when the lead asks
@@ -396,7 +397,7 @@ and signs what it does. So:
   mostly has it. One tool ordinary leads have is taken away:
   `set_run_command`, since what it keeps runs in every next task's setup as
   Althar's own process, outside the sandbox
-  ([ADR-023](../decisions/023-althar-runs-the-project.md)).
+  ([ADR-023](../decisions/workspaces-and-runs.md#running-the-project)).
 - **Signed, with the automation's name.** Althar already signs the reviews
   and replies it posts ("From Althar, by Claude Code", `signed` in
   `pullRequestWords.ts`). An automation's say whose: "From Althar's morning
@@ -427,7 +428,9 @@ and signs what it does. So:
   connector can't say who, nothing fires. A review is a reader whoever opened
   the pull request, and its review waits for the person, so the morning
   review can take outside pull requests as it is.
-- **A run can't make automations.** Leads get no automation tools. Codex's
+- **A run can't make automations unasked.** Leads share the coordinator's
+  tools, automation tools included, but resuming and Run now go on a card,
+  as for the coordinator ([what stays](../decisions/what-agents-may-do.md#what-stays-and-why)). Codex's
   runaway was a heartbeat an agent made for itself, re-sending a 4.36M-token
   thread every 10 minutes. Nor can what the coordinator reads: a lead's
   report or a pull request's text can't get it to resume one or run it now,
@@ -436,7 +439,7 @@ and signs what it does. So:
 ## Capacity, cost and the morning after
 
 - **Places:** a new order, `automation`, after `new`
-  ([ADR-037](../decisions/037-what-the-person-does-goes-first.md),
+  ([ADR-037](../decisions/scheduling.md#what-goes-first),
   `Busy.ts:76-82`), so nothing of the person's waits behind an automation.
   It holds for every step of the task, not only its first: today the step
   after another, a step carried on after a restart and one back from a
@@ -455,7 +458,7 @@ and signs what it does. So:
   - a time limit for each run (45 minutes of its agents' work by default),
     counted on the occurrence over all its steps, its review and its check
     fixes (up to three,
-    [ADR-040](../decisions/040-a-change-reaches-the-person-green.md)), since
+    [ADR-040](../decisions/code-hosts.md#checks-althar-sees-them-through)), since
     the stall watch starts its budget whole at each step (`fresh` in
     `Stalls.ts`);
   - a turn budget lower than the stall watch's 6 hours and 40 turns
@@ -467,7 +470,7 @@ and signs what it does. So:
 - **Per-use models (an API key, OpenRouter):** today work never moves to
   another agent's paid account unasked (`Limits.ts:97`), but an agent's own
   accounts take over whatever pays for them
-  ([ADR-012](../decisions/012-several-accounts-per-agent.md)), and the
+  ([ADR-012](../decisions/agents.md#accounts)), and the
   permission judge spends the coordinator's account. An automation on one
   needs a cap per run and per month, and that needs cost accounting Althar
   doesn't have: tokens are kept per turn (`turn_deliveries.usage`), money
@@ -478,9 +481,9 @@ and signs what it does. So:
   automation at first. Per-use comes with cost accounting (`runs.budget` is
   already in the schema, unused).
 - **Each run's worktree is its task's,** as for any task
-  ([ADR-006](../decisions/006-worktree-per-task.md), call 13): a new task
+  ([ADR-006](../decisions/workspaces-and-runs.md#worktree), call 13): a new task
   makes a worktree and runs its setup, installing what the lockfile names
-  ([ADR-023](../decisions/023-althar-runs-the-project.md)), which takes
+  ([ADR-023](../decisions/workspaces-and-runs.md#running-the-project)), which takes
   minutes and gigabytes for a JavaScript project. Thirty nightly runs make
   thirty worktrees. No rule of automations' own removes them: the clean-up
   of finished task folders that is coming (DEV-143) does, for every task
@@ -580,7 +583,7 @@ on again), `list_automations`, `read_automation`, `pause_automation`,
 `resume_automation`, `run_automation_now`. Pausing needs no card, since it
 only stops. Resuming and Run now go on a small card (call 9): both spend,
 and the coordinator reads what leads report and what pull requests say. Run
-now keeps every limit a fire has. Leads get none of them.
+now keeps every limit a fire has. Leads have the same tools, and the same cards.
 
 ## The cloud
 
@@ -663,7 +666,7 @@ version waits on either.
    release notes, the nightly bump, the weekly polish and flaky sweeps, and
    the morning review, a schedule with a pull request query.
 
-   **Built** ([ADR-061](../decisions/061-automations-start-ordinary-tasks-on-a-schedule.md)):
+   **Built** ([ADR-061](../decisions/scheduling.md#automations)):
    schedules (days at a time, or hourly), the three tables, the clock with
    catching up once and missing past the window, one place after the
    person's work for every step, a run's minutes over its turns, the skips

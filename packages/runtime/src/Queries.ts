@@ -82,6 +82,7 @@ import { Instance } from './Instance'
 import { Launches } from './Launches'
 import type { ChangeTarget } from '@althar/domain'
 import { commitOf, commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRemotes, PUSHED, branchRemoteIn } from './git'
+import { reachedRemote } from './sshHosts'
 import { commandIn, shortCommand } from './rules'
 import { reviewBriefOf } from './Reviews'
 import { Sessions } from './Sessions'
@@ -351,7 +352,8 @@ export const stuckOf = (payload: unknown): StuckStep => {
       why === 'over_budget' ||
       why === 'refused' ||
       why === 'transient' ||
-      why === 'signed_out'
+      why === 'signed_out' ||
+      why === 'waiting_on_person'
         ? why
         : 'failed_to_start',
     detail: typeof detail === 'string' ? detail : null,
@@ -631,6 +633,8 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       // Older threads kept the agent's explanation of a refusal as a notice; the refused call's own row says it now.
       const title = text(content, 'title')
       if (title === 'Resumed after a rejection.') return undefined
+      // A session's line of skills that said nothing new, kept for its list only: it never reaches the window.
+      if (role === 'skills' && field(content, 'hidden') === true) return undefined
       // Likewise the coordinator's receipt of a denial, kept by older threads.
       if (title?.startsWith('Denied ') && description?.startsWith('By the coordinator:') && text(content, 'about') === 'permission')
         return undefined
@@ -1370,7 +1374,9 @@ export class Queries extends Context.Service<
             branch,
             pushed: there !== null || pushed !== null,
             ahead,
-            newPullRequest: url === undefined ? null : newPullRequestLink(url, branch, base, HOSTED),
+            // An SSH alias of a known host (github.com-work) opens its page on that host.
+            newPullRequest:
+              url === undefined ? null : newPullRequestLink(yield* reachedRemote(url, (host) => HOSTED.has(host)), branch, base, HOSTED),
           }
         }).pipe(Effect.orElseSucceed(() => null))
 
