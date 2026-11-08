@@ -425,7 +425,7 @@ export type ToolRole = typeof ToolRole.Type
 export const SyncedAgent = Schema.Literals(['claude', 'codex', 'opencode'])
 export type SyncedAgent = typeof SyncedAgent.Type
 
-/** Where a server or a skill was found: one of the person's agents, a repository of the project, a plugin, or Althar's catalog. */
+/** Where a server or a skill was found: one of the person's agents, a repository of the project, a plugin, or Althar's store (a skill added from GitHub). */
 export const ToolSource = Schema.Struct({
   from: Schema.Literals(['claude', 'codex', 'opencode', 'repository', 'plugin', 'althar']),
   /** The file or folder, as the person names it: ~/.claude.json, .mcp.json. */
@@ -3714,8 +3714,8 @@ export const Load = Schema.Struct({
 })
 export type Load = typeof Load.Type
 
-/** Where an installed skill came from: the catalog Althar ships, GitHub, or a folder the person imported. */
-export const SkillSource = Schema.Literals(['althar-default', 'github', 'local'])
+/** Where an installed skill came from: GitHub, or a folder the person imported. Althar ships none of its own. */
+export const SkillSource = Schema.Literals(['github', 'local'])
 
 /** One installed skill, as the skills page lists it. */
 export const InstalledSkill = Schema.Struct({
@@ -3729,11 +3729,9 @@ export const InstalledSkill = Schema.Struct({
   ref: Schema.NullOr(Schema.String),
   sha: Schema.NullOr(Schema.String),
   treeHash: Schema.String,
-  review: Schema.Literals(['not-reviewed', 'reviewed', 'default']),
+  review: Schema.Literals(['not-reviewed', 'reviewed']),
   /** Whether later runs are given it. */
   active: Schema.Boolean,
-  /** What a harness must be able to do to be given it: `subagents`. */
-  needs: Schema.Array(Schema.String),
   /** Whether it has an earlier version to go back to. */
   canRollBack: Schema.Boolean,
   /**
@@ -3744,10 +3742,9 @@ export const InstalledSkill = Schema.Struct({
 })
 export type InstalledSkill = typeof InstalledSkill.Type
 
-/** The skills store: off where the runtime has none; the catalog revision it was seeded from. */
+/** The skills store: off where the runtime has none. */
 export const SkillList = Schema.Struct({
   enabled: Schema.Boolean,
-  catalogRevision: Schema.NullOr(Schema.String),
   skills: Schema.Array(InstalledSkill),
 })
 export type SkillList = typeof SkillList.Type
@@ -3781,7 +3778,7 @@ export const SkillReviewCard = Schema.Struct({
     Schema.Struct({
       source: SkillSource,
       treeHash: Schema.String,
-      review: Schema.Literals(['not-reviewed', 'reviewed', 'default']),
+      review: Schema.Literals(['not-reviewed', 'reviewed']),
       active: Schema.Boolean,
       repo: Schema.optional(Schema.String),
       subpath: Schema.optional(Schema.String),
@@ -4805,7 +4802,7 @@ export const Api = RpcGroup.make(
   command('StopLaunch', { id: Schema.String }, Schema.Void),
   /** Clears a run that ended by itself from the list. */
   command('ClearLaunch', { id: Schema.String }, Schema.Void),
-  /** The skills a task's lead is given, from the catalog Althar ships and what the person installed. */
+  /** The skills a task's lead is given: what the person added from GitHub and turned on. */
   call('ListSkills', {}, SkillList),
   /** The skill folders in a GitHub repository (a URL or `owner/name`), at the ref given or its default branch. */
   call('FindSkills', { source: Schema.String, ref: Schema.optional(Schema.String) }, SkillsFound),

@@ -423,7 +423,6 @@ function SkillsSection() {
         onRollBack={skills.rollBack}
         onRemove={skills.remove}
       />
-      {skills.catalogRevision !== null && <p className={s.quiet}>{text.skillsCatalog(skills.catalogRevision)}</p>}
     </div>
   )
 }

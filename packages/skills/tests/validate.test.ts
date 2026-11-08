@@ -83,7 +83,7 @@ describe('validateSkill', () => {
     expect(codes(files as Record<string, string>)).toContain(code)
   })
 
-  it('flags push text by default and rejects it when the catalog asks', () => {
+  it('flags push text by default and rejects it when asked to', () => {
     const files = tree({ ...good(), 'references/a.md': 'then git push origin main' })
     expect(validateSkill('my-skill', files).ok).toBe(true)
     const strict = validateSkill('my-skill', files, undefined, 'reject')

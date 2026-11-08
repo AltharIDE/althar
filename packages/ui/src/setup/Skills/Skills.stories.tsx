@@ -9,38 +9,30 @@ const SKILLS: SkillRowModel[] = [
     id: 'brainstorming',
     description:
       'Use before building a new feature or change whose intent or design is not settled yet: draws out what the person wants and agrees a design before any code.',
-    from: 'Althar',
+    from: 'acme/agent-skills',
     on: true,
-    needsSubagents: false,
     canRollBack: false,
-    removable: false,
   },
   {
     id: 'subagent-driven-development',
     description: 'Use when executing implementation plans with independent tasks in the current session.',
-    from: 'Althar',
+    from: 'acme/agent-skills',
     on: true,
-    needsSubagents: true,
     canRollBack: false,
-    removable: false,
   },
   {
     id: 'systematic-debugging',
     description: 'Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes.',
-    from: 'Althar',
+    from: 'acme/agent-skills',
     on: false,
-    needsSubagents: false,
     canRollBack: false,
-    removable: false,
   },
   {
     id: 'release-notes',
     description: 'Use when writing the notes for a release from the merged pull requests.',
     from: 'acme/agent-skills',
     on: true,
-    needsSubagents: false,
     canRollBack: true,
-    removable: true,
   },
 ]
 
@@ -107,7 +99,7 @@ function Kept(args: SkillListProps) {
   )
 }
 
-/** Each skill on or off, where it is from, and what only some agents are given. */
+/** Each skill on or off, and where it is from. */
 export const List: Story = {
   render: (args) => <Kept {...args} />,
   play: async ({ canvasElement, args }) => {
@@ -116,11 +108,10 @@ export const List: Story = {
     await userEvent.click(canvas.getByRole('switch', { name: 'systematic-debugging' }))
     await expect(args.onToggle).toHaveBeenCalledWith('systematic-debugging', true)
     await expect(canvas.getByText('all 4 on')).toBeVisible()
-    await expect(canvas.getByText('Only for agents that dispatch subagents')).toBeVisible()
-    // Only the one the person installed can go back or be removed.
+    // Only the one with an earlier version can go back; each can be removed.
     await userEvent.click(canvas.getByRole('button', { name: 'Previous version' }))
     await expect(args.onRollBack).toHaveBeenCalledWith('release-notes')
-    await expect(canvas.getAllByRole('button', { name: 'Remove' })).toHaveLength(1)
+    await expect(canvas.getAllByRole('button', { name: 'Remove' })).toHaveLength(4)
   },
 }
 
@@ -147,9 +138,7 @@ export const Broken: Story = {
         description: 'Use when writing the notes for a release from the merged pull requests.',
         from: 'acme/agent-skills',
         on: false,
-        needsSubagents: false,
         canRollBack: false,
-        removable: true,
         problem: "Althar can't read this skill's stored files, so runs aren't given it. Install it again to put it right.",
       },
       ...SKILLS.slice(0, 1),

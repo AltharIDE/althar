@@ -20,7 +20,7 @@ import { Cause, Context, Duration, Effect, Fiber, Layer, Option, Queue, Stream }
 import { RpcClient } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
-import { fakeGitHub, writeCatalog } from '../../skills/tests/support'
+import { fakeGitHub, install } from '../../skills/tests/support'
 import { ToolServer } from '../src/ToolServer'
 import { thisDevice } from '../src/device'
 import { connection, isInside, services } from '../src/Api'
@@ -76,7 +76,7 @@ const connected = (
     readonly editors?: RuntimeOptions['editors']
     /** The machine how many agents are at work at once comes from: a large one unless a test says. */
     readonly machine?: { readonly cores: number; readonly memory: number }
-    /** A skills store and the catalog it is seeded from, and how GitHub is reached. */
+    /** A skills store, and how GitHub is reached. */
     readonly skills?: RuntimeOptions['skills']
     readonly fetch?: RuntimeOptions['fetch']
     /** The agents, where a test changes one: the fake ones otherwise. */
@@ -3099,10 +3099,11 @@ describe('the skills page', () => {
   const A = 'a'.repeat(40)
   const B = 'b'.repeat(40)
   const skill = (name: string, body: string) => `---\nname: ${name}\ndescription: Use when testing ${name}.\nlicense: MIT\n---\n${body}`
+  /** A store with one skill of the person's own, off. */
   const store = async () => {
-    const catalog = mkdtempSync(join(tmpdir(), 'althar-skills-catalog-'))
-    await writeCatalog(catalog, { alpha: { 'SKILL.md': skill('alpha', 'Default.\n') } }, { alpha: ['subagents'] })
-    return { root: mkdtempSync(join(tmpdir(), 'althar-skills-store-')), catalog }
+    const root = mkdtempSync(join(tmpdir(), 'althar-skills-store-'))
+    await install(root, 'alpha', { 'SKILL.md': skill('alpha', 'Mine.\n') }, false)
+    return { root }
   }
   /** What the record keeps of the person's changes to skills, in order: each skill's revision, the act, its payload and command. */
   const skillActs = Effect.gen(function* () {
@@ -3121,20 +3122,20 @@ describe('the skills page', () => {
     Effect.scoped(
       Effect.gen(function* () {
         const { client } = yield* connected()
-        assert.deepStrictEqual(yield* client.ListSkills({}), { enabled: false, catalogRevision: null, skills: [] })
+        assert.deepStrictEqual(yield* client.ListSkills({}), { enabled: false, skills: [] })
         assert.strictEqual((yield* Effect.flip(client.CheckSkillUpdates({}))).message, 'Skills are off in this runtime.')
       }),
     ),
   )
 
-  it.live('lists the catalog’s skills off, turns one on and off, and keeps one Althar ships from being removed', () =>
+  it.live('lists the person’s skills, turns one on and off, and removes it', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const { client, store: record } = yield* connected({ skills: yield* Effect.promise(store) })
         const listed = yield* client.ListSkills({})
         assert.deepStrictEqual(
-          [listed.enabled, listed.catalogRevision, listed.skills.map((one) => [one.id, one.source, one.active, one.needs, one.license])],
-          [true, 'fixture-1', [['alpha', 'althar-default', false, ['subagents'], 'MIT']]],
+          [listed.enabled, listed.skills.map((one) => [one.id, one.source, one.active, one.license])],
+          [true, [['alpha', 'local', false, 'MIT']]],
         )
         assert.strictEqual(listed.skills[0]?.description, 'Use when testing alpha.')
         const on = commandId()
@@ -3152,10 +3153,9 @@ describe('the skills page', () => {
           ],
         )
         assert.strictEqual(acts[0]?.commandId, on)
-        const refused = yield* Effect.flip(client.UninstallSkill({ commandId: commandId(), id: 'alpha' }))
-        assert.deepStrictEqual([refused.reason, refused.message], ['SkillRefused', 'alpha comes with Althar; turn it off instead.'])
-        // A refused change records nothing.
-        assert.lengthOf(yield* record(skillActs), 2)
+        yield* client.UninstallSkill({ commandId: commandId(), id: 'alpha' })
+        assert.deepStrictEqual((yield* client.ListSkills({})).skills, [])
+        assert.lengthOf(yield* record(skillActs), 3)
       }),
     ),
   )

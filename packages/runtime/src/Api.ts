@@ -1918,9 +1918,7 @@ export const handlers = Api.toLayer(
         once(commandId, api(launches.orderRunnables({ projectId, ids, actorId: instance.personId }))),
       GetRepositoryScripts: ({ projectId }) => api(launches.scripts(projectId)),
       ListSkills: () =>
-        config.skills === undefined
-          ? Effect.succeed({ enabled: false, catalogRevision: null, skills: [] })
-          : skills((store) => listSkills(store)),
+        config.skills === undefined ? Effect.succeed({ enabled: false, skills: [] }) : skills((store) => listSkills(store)),
       FindSkills: ({ source, ref }) =>
         skills(() =>
           Effect.gen(function* () {

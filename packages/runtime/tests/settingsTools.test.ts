@@ -5,13 +5,12 @@ import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 
 import { Ids, newId, type ProjectId } from '@althar/domain'
-import { installLocalCatalog, setActive } from '@althar/skills'
 import { PROJECT_SETTINGS_SECTIONS, SETTINGS_SECTIONS, type SettingChangeCard } from '@althar/contracts'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { writeCatalog } from '../../skills/tests/support'
+import { install } from '../../skills/tests/support'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { plansAndReviewsOf } from '../src/plansAndReviews'
@@ -980,19 +979,13 @@ describe('settings, at their edges', () => {
   )
 })
 
-/** A skills store from a local catalog, every skill in it on. */
+/** A skills store of the person's own, every skill in it on. */
 const skillStore = (ids: ReadonlyArray<string>) =>
   Effect.promise(async () => {
     const root = mkdtempSync(join(tmpdir(), 'althar-settings-skills-'))
-    const catalog = mkdtempSync(join(tmpdir(), 'althar-settings-catalog-'))
-    await writeCatalog(
-      catalog,
-      Object.fromEntries(ids.map((id) => [id, { 'SKILL.md': `---\nname: ${id}\ndescription: Use when testing ${id}.\n---\nDo ${id}.\n` }])),
-      {},
-    )
-    await Effect.runPromise(installLocalCatalog(root, catalog))
-    for (const id of ids) await Effect.runPromise(setActive(root, id, true))
-    return { root, catalog }
+    for (const id of ids)
+      await install(root, id, { 'SKILL.md': `---\nname: ${id}\ndescription: Use when testing ${id}.\n---\nDo ${id}.\n` }, true)
+    return { root }
   })
 
 describe('skills, as the Skills screen turns them on and off', () => {

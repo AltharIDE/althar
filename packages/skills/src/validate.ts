@@ -56,7 +56,7 @@ export const validateSkill = (
   directory: string,
   files: Files,
   limits: Limits = DEFAULT_LIMITS,
-  /** How serious push instructions in the text are: `reject` for the default catalog, `flag` for a person's own install. */
+  /** How serious push instructions in the text are: `flag` for an install, which the person reads before it is added; `reject` where a caller wants none. */
   pushes: Finding['level'] = 'flag',
 ): Checked => {
   const findings: Finding[] = []

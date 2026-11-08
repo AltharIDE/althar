@@ -21,14 +21,10 @@ import s from './Skills.module.css'
 export interface SkillRowModel {
   id: string
   description: string | null
-  /** Where it is from, as the person reads it: "Althar", or the repository. */
+  /** Where it is from, as the person reads it: the repository, or "A folder". */
   from: string
   on: boolean
-  /** It needs an agent that dispatches subagents; the others aren't given it. */
-  needsSubagents: boolean
   canRollBack: boolean
-  /** One the person installed, which can go; one Althar ships can only be off. */
-  removable: boolean
   /** Why it is broken and how to put it right, where Althar can't read what it keeps of it; no run is given it. */
   problem?: string | undefined
 }
@@ -36,7 +32,6 @@ export interface SkillRowModel {
 export interface SkillListText {
   find: string
   none: string
-  needsSubagents: string
   rollBack: string
   remove: string
   count: (on: number, all: number) => string
@@ -47,7 +42,6 @@ export interface SkillListText {
 export const skillListText: SkillListText = {
   find: 'Find a skill',
   none: 'No skill matches',
-  needsSubagents: 'Only for agents that dispatch subagents',
   rollBack: 'Previous version',
   remove: 'Remove',
   count: (on, all) => (on === all ? `all ${all} on` : `${on} of ${all} on`),
@@ -111,17 +105,14 @@ export function SkillList({ skills, onToggle, onRollBack, onRemove, onToggleAll,
               {skill.problem !== undefined && <span className={s.problem}>{skill.problem}</span>}
               <span className={s.meta}>
                 <span>{skill.from}</span>
-                {skill.needsSubagents && <span>{t.needsSubagents}</span>}
                 {skill.canRollBack && (
                   <LinkButton className={s.action} onClick={() => onRollBack(skill.id)}>
                     {t.rollBack}
                   </LinkButton>
                 )}
-                {skill.removable && (
-                  <LinkButton className={s.action} onClick={() => onRemove(skill.id)}>
-                    {t.remove}
-                  </LinkButton>
-                )}
+                <LinkButton className={s.action} onClick={() => onRemove(skill.id)}>
+                  {t.remove}
+                </LinkButton>
               </span>
             </span>
             <Switch checked={skill.on} onChange={(on) => onToggle(skill.id, on)} labelledBy={`skill-${skill.id}`} />

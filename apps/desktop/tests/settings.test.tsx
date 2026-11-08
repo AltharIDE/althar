@@ -332,7 +332,7 @@ describe('the Settings tab', () => {
     const { client } = fakeClient()
     withServices(<Settings at="skills" />, client)
     expect(await screen.findByRole('switch', { name: 'brainstorming' })).toBeTruthy()
-    expect(screen.getByText(/agent-skills \(Addy Osmani\) and superpowers \(Jesse Vincent\), both MIT/)).toBeTruthy()
+    expect(screen.queryByText(/agent-skills|superpowers|catalog/)).toBeNull()
     await userEvent.click(screen.getByRole('switch', { name: 'brainstorming' }))
     expect(client.setSkillActive).toHaveBeenCalledWith('brainstorming', false)
 
@@ -369,7 +369,6 @@ describe('the Settings tab', () => {
     const { client } = fakeClient({
       listSkills: vi.fn(async () => ({
         enabled: true,
-        catalogRevision: 'fixture-1',
         skills: [installedSkill, { ...installedSkill, id: 'systematic-debugging', active: false }],
       })),
     })
@@ -392,7 +391,6 @@ describe('the Settings tab', () => {
     expect(brainstorming.getAttribute('aria-checked')).toBe('true')
     vi.mocked(client.listSkills).mockResolvedValue({
       enabled: true,
-      catalogRevision: 'fixture-1',
       skills: [{ ...installedSkill, active: false }],
     })
     emit(changed('skill', 'brainstorming', null, null))
@@ -426,15 +424,14 @@ describe('the Settings tab', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Review the update to release-notes' })).toBeNull())
   })
 
-  it('keeps the Skills section named and says when its changes reach each lead', async () => {
+  it('keeps the Skills section named', async () => {
     withServices(<Settings at="skills" />, fakeClient().client)
     expect(await screen.findByRole('heading', { name: 'Skills', level: 1 })).toBeTruthy()
-    expect(await screen.findByText(/A change reaches each lead the next time it starts, in a task under way too\./)).toBeTruthy()
     expect(screen.queryByText(/keeps what it started with|runtime/)).toBeNull()
   })
 
   it('says when this Althar has no skills to give, without speaking of the runtime', async () => {
-    const { client } = fakeClient({ listSkills: vi.fn(async () => ({ enabled: false, catalogRevision: null, skills: [] })) })
+    const { client } = fakeClient({ listSkills: vi.fn(async () => ({ enabled: false, skills: [] })) })
     withServices(<Settings at="skills" />, client)
     expect(await screen.findByText('Skills aren’t set up in this copy of Althar, so each lead starts without them.')).toBeTruthy()
   })
@@ -1127,27 +1124,21 @@ describe('the skills’ view model', () => {
       update: false,
       replaces: 'other/skills',
     })
-    expect(reviewOf({ ...skillCard, installed: { ...installed, source: 'althar-default' as const } })).toMatchObject({
+    expect(reviewOf({ ...skillCard, installed: { ...installed, source: 'local' as const } })).toMatchObject({
       update: false,
-      replaces: 'Althar',
+      replaces: 'A folder you imported',
     })
   })
 
-  it('shows each skill with where it is from, and lets only the ones the person installed go', () => {
+  it('shows each skill with where it is from', () => {
     expect(rowOf(installedSkill)).toEqual({
       id: 'brainstorming',
       description: installedSkill.description,
-      from: 'Althar',
+      from: 'A folder you imported',
       on: true,
-      needsSubagents: false,
       canRollBack: false,
-      removable: false,
     })
-    expect(rowOf({ ...installedSkill, source: 'github', repo: 'acme/agent-skills', needs: ['subagents'] })).toMatchObject({
-      from: 'acme/agent-skills',
-      needsSubagents: true,
-      removable: true,
-    })
+    expect(rowOf({ ...installedSkill, source: 'github', repo: 'acme/agent-skills' })).toMatchObject({ from: 'acme/agent-skills' })
   })
 })
 

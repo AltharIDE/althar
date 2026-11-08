@@ -31,8 +31,6 @@ export interface SkillsModel {
   readonly rows: ReadonlyArray<SkillRowModel> | undefined
   /** Whether Althar has skills to give at all; when it hasn't, the page says so and nothing else. */
   readonly enabled: boolean
-  /** Which revision of Althar's own catalog is installed, where there is one. */
-  readonly catalogRevision: string | null
   readonly loadFailed: boolean
   readonly found: SkillsFound | null
   /** The card open for review, as it shows: whether installing it updates or replaces what is installed. */
@@ -62,16 +60,14 @@ const said = (error: unknown) => (error instanceof Error ? error.message : Strin
 
 /** Where an install is from, as the person reads it. */
 const fromOf = (skill: { readonly source: InstalledSkill['source']; readonly repo?: string | null | undefined }) =>
-  skill.source === 'althar-default' ? text.skillsFromAlthar : skill.source === 'github' ? (skill.repo ?? 'GitHub') : text.skillsFromFolder
+  skill.source === 'github' ? (skill.repo ?? 'GitHub') : text.skillsFromFolder
 
 export const rowOf = (skill: InstalledSkill): SkillRowModel => ({
   id: skill.id,
   description: skill.description,
   from: fromOf(skill),
   on: skill.active,
-  needsSubagents: skill.needs.includes('subagents'),
   canRollBack: skill.canRollBack,
-  removable: skill.source !== 'althar-default',
   problem: skill.problem,
 })
 
@@ -136,7 +132,6 @@ export const useSkills = (): SkillsModel => {
   return {
     rows: query.data?.skills.map(rowOf),
     enabled: query.data?.enabled ?? false,
-    catalogRevision: query.data?.catalogRevision ?? null,
     loadFailed: query.isError,
     found,
     card: card === null ? null : reviewOf(card),

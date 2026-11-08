@@ -1012,10 +1012,10 @@ export const githubCheck: ConnectionCheck = {
   settings: 'https://github.com/settings/personal-access-tokens',
 }
 
-/** A skill the catalog ships, and one from GitHub to review. */
+/** A skill the person has installed, and one from GitHub to review. */
 export const installedSkill: InstalledSkill = {
   id: 'brainstorming',
-  source: 'althar-default',
+  source: 'local',
   description: 'Use before building a new feature or change whose intent or design is not settled yet.',
   license: 'MIT',
   repo: null,
@@ -1023,9 +1023,8 @@ export const installedSkill: InstalledSkill = {
   ref: null,
   sha: null,
   treeHash: 'b'.repeat(64),
-  review: 'default',
+  review: 'reviewed',
   active: true,
-  needs: [],
   canRollBack: false,
 }
 
@@ -1170,7 +1169,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getSettingChanges: vi.fn(async () => []),
     setAutomationPostsReviews: vi.fn(async () => {}),
     setAutomationsPaused: vi.fn(async () => {}),
-    listSkills: vi.fn(async () => ({ enabled: true, catalogRevision: 'fixture-1', skills: [installedSkill] })),
+    listSkills: vi.fn(async () => ({ enabled: true, skills: [installedSkill] })),
     findSkills: vi.fn(async ({ source }) => ({ repo: source, ref: 'HEAD', sha: 'a'.repeat(40), paths: ['skills/release-notes'] })),
     stageSkill: vi.fn(async () => skillCard),
     approveSkill: vi.fn(async () => ({ ...installedSkill, id: skillCard.id, source: 'github' as const, repo: skillCard.source.repo })),

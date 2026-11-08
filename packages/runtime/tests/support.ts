@@ -359,7 +359,7 @@ export const runtime = (
     readonly idle?: IdleOptions
     /** The device outside a sandbox, as for a Flatpak. */
     readonly onDevice?: RuntimeOptions['onDevice']
-    /** The skills store and local catalog; no run has Althar-selected skills without it. */
+    /** The skills store; no run has Althar-selected skills without it. */
     readonly skills?: RuntimeOptions['skills']
     /** The person's agents' settings, in a home of the test's own: none is read without it. */
     readonly agentConfigs?: RuntimeOptions['agentConfigs']

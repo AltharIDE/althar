@@ -368,8 +368,7 @@ export const setActive = (root: string, id: string, active: boolean): Effect.Eff
   )
 
 /**
- * Removes a person's own install from later runs, and says what it was; nothing where none is installed. A default
- * can only be turned off: the catalog would put it back. Its stored versions are kept.
+ * Removes an install from later runs, and says what it was; nothing where none is installed. Its stored versions are kept.
  */
 export const uninstall = (root: string, id: string): Effect.Effect<Install | undefined, SkillError> =>
   serialized(
@@ -377,7 +376,6 @@ export const uninstall = (root: string, id: string): Effect.Effect<Install | und
     Effect.gen(function* () {
       const { all, was } = yield* installOf(root, id)
       if (was === undefined) return undefined
-      if (was.source === 'althar-default') return yield* refused(`${id} comes with Althar; turn it off instead`)
       yield* writeInstalls(root, { ...all, installs: all.installs.filter((install) => install.id !== id) })
       return was
     }),
