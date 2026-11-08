@@ -4280,7 +4280,22 @@ export class Runs extends Context.Service<
           if (current === undefined) return
           const info = JSON.parse(call.payload) as StuckInfo
           if (answer.kind === 'wait') return yield* waitForReset(current, call.attemptId, info, input.envelope)
-          yield* carryOnPlaced(current, call.attemptId, info, answer, input.envelope, input.sender)
+          // Not half applied: where carrying on fails before it moved the step, the card is open again, to answer anew.
+          yield* carryOnPlaced(current, call.attemptId, info, answer, input.envelope, input.sender).pipe(
+            Effect.tapCause(() =>
+              sql
+                .withTransaction(
+                  Effect.gen(function* () {
+                    if (call.attemptId !== null) {
+                      const [attempt] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${call.attemptId}`
+                      if (attempt?.state !== 'waiting_attention') return
+                    }
+                    yield* change('attention_requests', input.attentionId, { state: 'open', answeredAt: null })
+                  }),
+                )
+                .pipe(Effect.ignore),
+            ),
+          )
         })
 
       /**

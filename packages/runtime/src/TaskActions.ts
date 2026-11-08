@@ -5,6 +5,12 @@ import { SqlClient } from 'effect/sql'
 
 import { Busy } from './Busy'
 import { Changes } from './Changes'
+import { Installs } from './Installs'
+import { Limits } from './Limits'
+import { ModelFacts } from './ModelFacts'
+import { Models } from './Models'
+import { SignIns } from './SignIns'
+import { stepOf } from './stepPick'
 import { Agents } from './Config'
 import { envelope } from './envelope'
 import { Errands } from './Errands'
@@ -123,7 +129,24 @@ const TOOL_OF: Partial<Record<TaskMove, string>> = {
 /** Done, or nothing to do and why: the task already stands so, or the move doesn't apply where it stands. */
 type Outcome = { readonly done: true; readonly said: string } | { readonly done: false; readonly said: string }
 
-type Store = SqlClient.SqlClient | Ledger | Instance | Crypto.Crypto | Tasks | Plans | Changes | Sessions | Runs | Errands | Busy
+type Store =
+  | SqlClient.SqlClient
+  | Ledger
+  | Instance
+  | Crypto.Crypto
+  | Tasks
+  | Plans
+  | Changes
+  | Sessions
+  | Runs
+  | Errands
+  | Busy
+  | Agents
+  | Models
+  | Installs
+  | ModelFacts
+  | Limits
+  | SignIns
 
 /** What each move did, as a line says it of the task. */
 const DID: Readonly<Record<TaskMove, (task: string) => string>> = {
@@ -235,7 +258,6 @@ export class TaskActions extends Context.Service<
       const sessions = yield* Sessions
       const runs = yield* Runs
       const errands = yield* Errands
-      const agents = yield* Agents
       const busy = yield* Busy
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
 
@@ -793,15 +815,17 @@ export class TaskActions extends Context.Service<
             case 'hand_on': {
               if (info.step === 'publish') return yield* cant('Althar opens the pull request itself: try it again instead.')
               if (asked.agent === undefined) return yield* cant('name the agent to hand it to (agent), and its model where it has several.')
-              if (!agents.list.some((entry) => entry.definition.id === asked.agent))
-                return yield* new ToolRefused({
-                  message: `Althar has no agent ${asked.agent}. It has: ${agents.list.map((entry) => entry.definition.id).join(', ')}.`,
-                })
-              return yield* on('hand_on', {
-                kind: 'retry',
-                agentId: asked.agent,
+              // The agent by its name or its id, and its model as list_models writes it or by the agent's id: refused here, not on a card.
+              const handed = yield* stepOf(access.projectId, {
+                agent: asked.agent,
                 ...(asked.model === undefined ? {} : { model: asked.model }),
                 ...(asked.effort === undefined ? {} : { effort: asked.effort }),
+              })
+              return yield* on('hand_on', {
+                kind: 'retry',
+                agentId: handed.agentId,
+                ...(handed.model === null ? {} : { model: handed.model }),
+                ...('effort' in handed ? { effort: handed.effort } : {}),
               })
             }
           }
@@ -1087,8 +1111,15 @@ export class TaskActions extends Context.Service<
               task,
               why,
               answer: { type: 'string', enum: ['as_is', 'skip_review', 'again', 'hand_on'] },
-              agent: { type: 'string', description: 'For hand_on: the agent it goes to.' },
-              model: { type: 'string', description: 'For hand_on: its model.' },
+              agent: {
+                type: 'string',
+                description: 'For hand_on: the agent it goes to, by its name or its id (Claude Code, claude-code).',
+              },
+              model: {
+                type: 'string',
+                description:
+                  'For hand_on: its model, as list_models writes it or by the agent’s own id for it. One the agent doesn’t offer is refused, with the ones it does.',
+              },
               effort: { type: 'string', description: 'For hand_on: how hard it thinks, where the model offers it.' },
             },
             required: ['task', 'answer'],

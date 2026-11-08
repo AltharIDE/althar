@@ -388,6 +388,59 @@ const cardsOf = (projectId: string) =>
 /** A task's latest card, by its slug. */
 const cardOf = (projectId: string, slug: string) => Effect.map(cardsOf(projectId), (cards) => cards.findLast((card) => card.slug === slug))
 
+describe('every tool that names an agent or a model', () => {
+  const unknown = /^Fake codex doesn't offer GPT-9\. It offers: Small \(small\), Large \(large\)\./
+
+  it.live('takes a model by its name or its id, and an agent by its name or its id, and refuses an unknown one at the call', () =>
+    Effect.gen(function* () {
+      const { projectId, threadId } = yield* opened
+      yield* known
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      const planned = (slug: string) => stepsOf(slug).pipe(Effect.map((steps) => steps.map((step) => [step.agentId, step.model])))
+      // propose_plan: the agent by its name, the model by its name; then by ids.
+      for (const [slug, lead] of [
+        ['by-names', { agent: 'Fake codex', model: 'Small' }],
+        ['by-ids', { agent: 'codex', model: 'small' }],
+      ] as const) {
+        yield* callTool(access, 'draft_task', { title: slug })
+        assert.match(yield* callTool(access, 'propose_plan', { task: slug, lead }), /^Planned/)
+        assert.deepStrictEqual(yield* planned(slug), [['codex', 'small']])
+      }
+      yield* callTool(access, 'draft_task', { title: 'by-nothing' })
+      assert.match(yield* callTool(access, 'propose_plan', { task: 'by-nothing', lead: { agent: 'codex', model: 'GPT-9' } }), unknown)
+      assert.match(
+        yield* callTool(access, 'propose_plan', { task: 'by-nothing', lead: { agent: 'Nobody', model: 'small' } }),
+        /^Althar has no agent Nobody\. It has: Fake claude-code \(claude-code\)/,
+      )
+      // The model another agent offers isn't a way on this one: it is refused there, not handed to the wrong agent.
+      assert.match(
+        yield* callTool(access, 'propose_plan', {
+          task: 'by-nothing',
+          review: { agent: 'codex', model: 'GPT-9' },
+          lead: { model: 'large' },
+        }),
+        unknown,
+      )
+      // start_task drafts nothing for one that doesn't resolve, and starts the one that does by name.
+      assert.match(yield* callTool(access, 'start_task', { title: 'Quick one', lead: { agent: 'codex', model: 'GPT-9' } }), unknown)
+      assert.match(
+        yield* callTool(access, 'start_task', { title: 'Quick two', lead: { agent: 'Fake codex', model: 'Large' } }),
+        /^(?!.*doesn't offer)/s,
+      )
+      // change_lead and review_pull_request: the same.
+      yield* callTool(access, 'draft_task', { title: 'Hand me on' })
+      assert.match(yield* callTool(access, 'change_lead', { task: 'hand-me-on', lead: { agent: 'codex', model: 'GPT-9' } }), unknown)
+      assert.match(
+        yield* callTool(access, 'review_pull_request', {
+          pull_request: 'https://github.com/a/b/pull/1',
+          lead: { agent: 'codex', model: 'GPT-9' },
+        }),
+        unknown,
+      )
+    }).pipe(Effect.provide(runtime(':memory:', {}, { perUse: ['codex'] }))),
+  )
+})
+
 describe('a plan that names models', () => {
   it.live('takes each model the best way there is, refuses one that can’t be used, and still takes an agent', () =>
     Effect.gen(function* () {
@@ -443,12 +496,17 @@ describe('a plan that names models', () => {
         yield* callTool(access, 'propose_plan', { task: 'tidy-last', lead: { agent: 'codex', effort: 'high' } }),
         "Fake codex's default model has no effort to set. Leave effort out.",
       )
-      // Named by agent and an id the agent doesn't offer: none known there either.
+      // Named by agent and a model the agent doesn't offer: refused at the call, with the ones it does.
+      const offers =
+        "Fake codex doesn't offer mystery-9. It offers: Small (small), Large (large). Name one as list_models writes it, or its id."
       assert.strictEqual(
         yield* callTool(access, 'propose_plan', { task: 'tidy-last', lead: { agent: 'codex', model: 'mystery-9', effort: 'high' } }),
-        'mystery-9 has no effort to set. Leave effort out.',
+        offers,
       )
-      assert.match(yield* callTool(access, 'propose_plan', { task: 'tidy-last', lead: { agent: 'codex', model: 'mystery-9' } }), /^Planned/)
+      assert.strictEqual(
+        yield* callTool(access, 'propose_plan', { task: 'tidy-last', lead: { agent: 'codex', model: 'mystery-9' } }),
+        offers,
+      )
     }).pipe(Effect.provide(runtime(':memory:', {}, { perUse: ['codex'] }))),
   )
 
