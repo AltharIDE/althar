@@ -468,8 +468,8 @@ and signs what it does. So:
 - **Per-use models (an API key, OpenRouter):** an automation's run picks its
   agent, account and model as any step does, per use included. The caps that
   hold for any task hold for it; it has none of its own.
-- **When its agent can't take a run** (signed out, out of usage, or its
-  model's provider refused the sign-in): the run goes to another agent and
+- **When its agent can't take a run** (signed out, out of usage where the
+  project's rule is `move`, or its model's provider refused the sign-in): the run goes to another agent and
   model a plan pays for, chosen as for any step, and its history line says so.
   Where no plan anywhere can take it, it is skipped, the line saying why and
   what would make it run ("OpenCode Go refused its sign-in, and no other plan

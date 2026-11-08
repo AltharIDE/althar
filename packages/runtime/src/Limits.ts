@@ -7,7 +7,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import { type Account, Accounts } from './Accounts'
 import { Agents } from './Config'
 import { NotFound } from './errors'
-import { accountsOf, Policies } from './Policies'
+import { accountsOf, Policies, usageLimitOf } from './Policies'
 import { timestamp } from './records'
 import { SignIns } from './SignIns'
 import { Models } from './Models'
@@ -642,6 +642,10 @@ export class Limits extends Context.Service<
         Effect.gen(function* () {
           const stuck = yield* trouble(input.agentId, input.projectId, input.model)
           if (stuck === undefined) return { kind: 'ok' } as Standing
+          // Out of usage, the project's rule says what happens: only `move` takes the work elsewhere; `wait` and `ask` leave it
+          // to the run, which holds for the reset or asks the person, as for any task.
+          if (stuck.why === 'out' && usageLimitOf((yield* policies.current(input.projectId as ProjectId)).rules) !== 'move')
+            return { kind: 'ok' } as Standing
           const [first] = yield* ranked({
             besides: [input.agentId],
             projectId: input.projectId,

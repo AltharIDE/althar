@@ -78,6 +78,13 @@ const LATE = Duration.minutes(5)
 /** What a skipped run says where no agent could take it: the reason's end, which says it was this and not another skip. */
 const NO_OTHER = 'no other plan had room'
 
+/** Where a run's steps stand: why it can't start (and what stops its agent), the definition it starts as on another plan, or neither. */
+type Placed =
+  | { readonly why: string; readonly unable?: Unable; readonly instead?: undefined; readonly line?: undefined }
+  | { readonly why?: undefined; readonly unable?: undefined; readonly instead: AutomationDefinition; readonly line: string }
+  | null
+const stop = (why: string, unable?: Unable): Placed => ({ why, ...(unable === undefined ? {} : { unable }) })
+
 /** A refusal in words the person or the coordinator reads: why an automation can't do that now. */
 export class AutomationRefused extends Schema.TaggedError<AutomationRefused>()('AutomationRefused', { message: Schema.String }) {}
 
@@ -559,29 +566,38 @@ export class Automations extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [going] = yield* sql<{ one: number }>`
             SELECT 1 AS one FROM automation_occurrences WHERE automation_id = ${row.id} AND state IN ('starting', 'running') LIMIT 1`
-          if (going !== undefined) return { why: 'Its last run was still going.' }
-          if (cause === 'schedule' && (yield* allPaused)) return { why: 'Every automation was paused.' }
+          if (going !== undefined) return stop('Its last run was still going.')
+          if (cause === 'schedule' && (yield* allPaused)) return stop('Every automation was paused.')
           if (definition.work.kind === 'task' && definition.work.end !== null) {
             const [open] = yield* sql<{ count: number }>`
               SELECT count(DISTINCT x.id) AS count FROM automation_occurrences o
               JOIN tasks k ON k.id = o.task_id JOIN external_links x ON x.task_id = k.id AND x.kind = 'change'
               WHERE o.automation_id = ${row.id} AND k.state = 'open' AND json_extract(x.snapshot, '$.state') = 'open'`
-            if ((open?.count ?? 0) >= OPEN_AT_ONCE) return { why: `${OPEN_AT_ONCE} of its pull requests were open.` }
+            if ((open?.count ?? 0) >= OPEN_AT_ONCE) return stop(`${OPEN_AT_ONCE} of its pull requests were open.`)
           }
           const midnight = new Date(instantOf(`${localOf(nowOf(), zoneOf()).slice(0, 10)}T00:00`, zoneOf())).toISOString()
           const [today] = yield* sql<{ count: number }>`
             SELECT count(*) AS count FROM automation_occurrences
             WHERE subject = '' AND fired_at >= ${midnight} AND state NOT IN ('skipped', 'missed')`
-          if ((today?.count ?? 0) >= RUNS_A_DAY) return { why: `Automations had run ${RUNS_A_DAY} times today.` }
+          if ((today?.count ?? 0) >= RUNS_A_DAY) return stop(`Automations had run ${RUNS_A_DAY} times today.`)
+          return yield* placed(row, definition)
+        })
+
+      /**
+       * Where a run's lead and reviewer stand: why no plan could take the run and what would make it run; or, where another
+       * plan takes a step, the definition it runs as and a line saying so; or null where both run as planned.
+       */
+      const placed = (row: Row, definition: AutomationDefinition) =>
+        Effect.gen(function* () {
           const lead = yield* stepStands(row.projectId, definition.lead, 'lead')
-          if (lead.kind === 'unable') return { why: unableWords(lead.unable), unable: lead.unable }
+          if (lead.kind === 'unable') return stop(unableWords(lead.unable), lead.unable)
           const leading = lead.kind === 'instead' ? lead.step : definition.lead
           const reviewing = definition.work.kind === 'task' ? definition.work.review : null
           const review =
             reviewing === null
               ? ({ kind: 'ok' } as const)
               : yield* stepStands(row.projectId, reviewing, 'review', { agentId: leading.agentId, model: leading.model })
-          if (review.kind === 'unable') return { why: unableWords(review.unable), unable: review.unable }
+          if (review.kind === 'unable') return stop(unableWords(review.unable), review.unable)
           const lines = [lead, review].flatMap((one) => (one.kind === 'instead' ? [one.line] : []))
           if (lines.length === 0) return null
           return {
@@ -597,6 +613,20 @@ export class Automations extends Context.Service<
           }
         })
 
+      /** Keeps the line saying a run went to another plan, which its ending adds to. */
+      const keepLine = (occurrenceId: string, line: string) =>
+        Effect.flatMap(SqlClient.SqlClient, (sql) =>
+          sql.withTransaction(
+            Effect.gen(function* () {
+              const [row] = yield* sql<{ reason: string | null }>`SELECT reason FROM automation_occurrences WHERE id = ${occurrenceId}`
+              if (row !== undefined && row.reason !== line)
+                yield* change('automation_occurrences', occurrenceId, {
+                  reason: [row.reason, line].filter((one) => one !== null).join(' '),
+                })
+            }),
+          ),
+        )
+
       /** Ends an occurrence: how it went, and why, in a sentence. */
       const end = (occurrenceId: string, state: 'made' | 'nothing' | 'failed' | 'skipped' | 'missed', reason: string | null) =>
         Effect.gen(function* () {
@@ -606,10 +636,10 @@ export class Automations extends Context.Service<
               const [row] = yield* sql<{ projectId: ProjectId; automationId: string; state: string; reason: string | null }>`
                 SELECT project_id, automation_id, state, reason FROM automation_occurrences WHERE id = ${occurrenceId}`
               if (row === undefined || (row.state !== 'starting' && row.state !== 'running')) return undefined
-              // A run that went to another plan keeps the line saying so.
+              // A run that went to another plan keeps the line saying so, however it ends.
               const revision = yield* change('automation_occurrences', occurrenceId, {
                 state,
-                reason: state === 'made' ? [row.reason, reason].filter((one) => one !== null).join(' ') || null : reason,
+                reason: [row.reason, reason].filter((one) => one !== null).join(' ') || null,
                 endedAt: yield* timestamp,
               })
               yield* fact({
@@ -746,7 +776,7 @@ export class Automations extends Context.Service<
        * One whose plan was kept, held, but Althar stopped before it started,
        * or before its run was made, starts that plan.
        */
-      const planned = (projectId: ProjectId, taskId: string, definition: AutomationDefinition) =>
+      const planned = (projectId: ProjectId, taskId: string, definition: AutomationDefinition, fresh = false) =>
         Effect.gen(function* () {
           if (definition.work.kind !== 'task') return
           const sql = yield* SqlClient.SqlClient
@@ -755,7 +785,8 @@ export class Automations extends Context.Service<
             LEFT JOIN task_plans p ON p.id = (SELECT id FROM task_plans WHERE task_id = k.id ORDER BY proposed_at DESC, rowid DESC LIMIT 1)
             WHERE k.id = ${taskId}`
           if (task === undefined || task.state !== 'draft') return
-          if (task.planId !== null) {
+          // A kept plan's steps were chosen before; where the run was placed again since (`fresh`), a new plan replaces it.
+          if (task.planId !== null && !fresh) {
             if (task.planState === 'proposed' || task.planState === 'accepted') yield* plans.start(task.planId, instance.systemId)
             return
           }
@@ -1252,7 +1283,21 @@ export class Automations extends Context.Service<
                 // Made, but stopped before its plan started: it starts now.
                 const definition = Option.getOrUndefined(definitionOf(one))
                 const [task] = yield* sql<{ projectId: ProjectId }>`SELECT project_id FROM tasks WHERE id = ${one.taskId}`
-                if (definition !== undefined && task !== undefined) yield* admitted(planned(task.projectId, one.taskId, definition))
+                const row = yield* load(one.automationId).pipe(Effect.option)
+                if (definition !== undefined && task !== undefined && Option.isSome(row)) {
+                  const found = yield* placed(row.value, definition)
+                  if (found?.why !== undefined) {
+                    yield* tasks
+                      .stop({
+                        envelope: yield* envelope('task.stop', { taskId: one.taskId }, undefined, instance.systemId),
+                        taskId: one.taskId,
+                      })
+                      .pipe(Effect.ignore)
+                    return yield* end(one.id, 'skipped', found.why)
+                  }
+                  if (found?.instead !== undefined) yield* keepLine(one.id, found.line)
+                  yield* admitted(planned(task.projectId, one.taskId, found?.instead ?? definition, found?.instead !== undefined))
+                } else if (definition !== undefined && task !== undefined) yield* admitted(planned(task.projectId, one.taskId, definition))
                 return
               }
             }
@@ -1300,7 +1345,11 @@ export class Automations extends Context.Service<
             if (Option.isNone(row) || row.value.state !== 'on' || one.subject !== '')
               return yield* end(one.id, 'failed', 'Althar stopped before its task started.')
             const definition = yield* definitionIn(row.value)
-            yield* admitted(work(row.value, definition, one.id, one.cause, one.slot, Date.parse(one.dueAt)))
+            // Where its agent can't take it now, it starts on another plan, or is skipped, as when it fired.
+            const found = yield* placed(row.value, definition)
+            if (found?.why !== undefined) return yield* end(one.id, 'skipped', found.why)
+            if (found?.instead !== undefined) yield* keepLine(one.id, found.line)
+            yield* admitted(work(row.value, found?.instead ?? definition, one.id, one.cause, one.slot, Date.parse(one.dueAt)))
           }).pipe(contained('Automations.recover', () => undefined))
       })
 

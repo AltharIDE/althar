@@ -56,7 +56,9 @@
     model's provider and no other agent on a plan could take its place; the
     line says which and what would make it run, and a second such skip in a
     row is one call in Needs you, not one a night. Where another plan could
-    take it, the run starts there, its line saying so. A run picks its agent, account and model as any step does,
+    take it, the run starts there, its line saying so; out of usage, only where
+    the project's rule is `move`: under `wait` or `ask` it starts on its own
+    agent and holds for the reset or asks, as any task does. A run picks its agent, account and model as any step does,
     per use included (`Limits.pick`), under the caps any task has. A run starts one at
     a time, its limits checked and its occurrence kept together, so a slot
     and Run now never both pass. It works at most its minutes, counted over
