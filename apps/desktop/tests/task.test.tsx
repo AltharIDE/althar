@@ -12,8 +12,25 @@ import { conflictsOf } from '../src/renderer/features/task/Outputs'
 import { elapsedOf, openingFace, statusOf, stepsOf, TaskView, tookOf } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { numberOf, reachOf, reviewedUnfurl } from '../src/renderer/features/task/ReviewCard'
-import { agents, card, change, changed, fakeClient, fakeHost, items, models, snapshot, status, streamed, usual } from './fixtures'
+import {
+  agents,
+  card,
+  change,
+  changed,
+  fakeClient,
+  fakeHost,
+  fakePagesHost,
+  items,
+  models,
+  snapshot,
+  status,
+  streamed,
+  usual,
+} from './fixtures'
 import type { ChangedFile } from '@althar/contracts'
+import type { PageState } from '../src/main/browser/page'
+import { forgetPages, pages } from '../src/renderer/features/browser/pages'
+import { forgetChosenFaces } from '../src/renderer/features/task/chosenFaces'
 import { clock } from '../src/renderer/shared/time'
 import { keys, reads } from '../src/renderer/data/reads'
 import { ServicesProvider } from '../src/renderer/data/services'
@@ -230,7 +247,7 @@ describe('a task', () => {
     // The round is over: its work is one line, under what it said; Althar's news between rounds stands alone.
     expect(screen.queryByText('src/checkout.ts')).toBeNull()
     expect(screen.getByText('Codex took over from Claude Code.')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: /^Worked 0s/ }))
+    await userEvent.click(screen.getByRole('button', { name: /^Worked for 0s/ }))
     expect(screen.getByText('src/checkout.ts')).toBeTruthy()
     expect(screen.getByText('Write the test')).toBeTruthy()
     expect(screen.getByText('Context is filling up')).toBeTruthy()
@@ -759,6 +776,49 @@ describe('a task', () => {
     expect(await within(panel).findByRole('group', { name: 'Ways to connect GitHub' })).toBeTruthy()
     await userEvent.click(within(panel).getByRole('button', { name: /Close/ }))
     expect(screen.queryByRole('complementary', { name: 'Connect GitHub' })).toBeNull()
+  })
+
+  it('says there is no code host where Althar can tell none, rather than leave merging here as all there is', async () => {
+    const file: ChangedFile = { path: 'src/checkout.ts', from: null, status: 'modified', add: 4, del: 1, binary: false, uncommitted: false }
+    const at = (remote: { name: string; newPullRequest: null; pushed: boolean; ahead: number } | null) => {
+      const base = thread({ session: null })
+      return {
+        ...base,
+        host: null,
+        task: {
+          ...base.task,
+          phase: 'ready' as const,
+          files: [file],
+          commits: 2,
+          here: [
+            {
+              repository: 'meridian',
+              name: 'meridian',
+              branch: 'main',
+              head: 'abc111',
+              remote: remote === null ? null : { ...remote, branch: 'althar/add-a-retry' },
+            },
+          ],
+        },
+      }
+    }
+    // No remote at all.
+    const none = withServices(<Task />, fakeClient({ getThread: vi.fn(async () => at(null)) }).client)
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    const alone = within(await screen.findByRole('article', { name: 'Add a retry' }))
+    expect(alone.getByText('No code host: this repository has no remote Althar can open a pull request on.')).toBeTruthy()
+    expect(alone.getByRole('button', { name: 'Merge into main on this Mac' })).toBeTruthy()
+    expect(alone.queryByRole('button', { name: /Connect|pull request/ })).toBeNull()
+    none.unmount()
+
+    // A remote on a host Althar doesn't know.
+    withServices(
+      <Task />,
+      fakeClient({ getThread: vi.fn(async () => at({ name: 'origin', newPullRequest: null, pushed: false, ahead: 2 })) }).client,
+    )
+    const elsewhere = within(await screen.findByRole('article', { name: 'Add a retry' }))
+    expect(elsewhere.getByText('No code host: origin isn’t on a host Althar can open a pull request on.')).toBeTruthy()
+    expect(elsewhere.getByRole('button', { name: 'Push to origin' })).toBeTruthy()
   })
 
   it('says why a push of its branch didn’t go, in the remote’s words', async () => {
@@ -1825,9 +1885,40 @@ describe('a task', () => {
     expect(screen.queryByRole('button', { name: 'All models' })).toBeNull()
   })
 
-  it('offers no change of team once its plan has begun', async () => {
-    const begun = {
-      ...card({ taskId: 't1', threadId: 'th1', phase: 'running', step: 'implement' }),
+  it('offers a change of team while it is at work, and not once it is settled or abandoned', async () => {
+    const onBoard = (phase: 'running' | 'ready' | 'settled') => ({
+      ...card({ taskId: 't1', threadId: 'th1', phase, step: phase === 'running' ? 'implement' : null }),
+      state: phase === 'settled' ? 'done' : 'open',
+      createdAt: '',
+      settledAt: null,
+      changed: null,
+      here: [],
+    })
+    const opened = async (phase: 'running' | 'ready' | 'settled') => {
+      const { client } = fakeClient({
+        getThread: vi.fn(async () =>
+          thread({ task: { ...thread().task, phase, actions: phase === 'running' ? ['stop', 'abandon'] : [] } }),
+        ),
+        getBoard: vi.fn(async () => ({ cursor: 1, tasks: [onBoard(phase)], calls: [], settledTotal: 0 })),
+      })
+      const view = withServices(<Task />, client)
+      await waitFor(() => expect(client.getBoard).toHaveBeenCalled())
+      await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+      await screen.findAllByRole('menuitem')
+      return view
+    }
+    for (const phase of ['running', 'ready'] as const) {
+      const view = await opened(phase)
+      expect(await screen.findByRole('menuitem', { name: /Change the team…/ })).toBeTruthy()
+      view.unmount()
+    }
+    await opened('settled')
+    expect(screen.queryByRole('menuitem', { name: /Change the team…/ })).toBeNull()
+  })
+
+  it('changes the team of a task at work from its menu, saving through the task', async () => {
+    const running = {
+      ...card({ taskId: 't1', threadId: 'th1', phase: 'running', step: 'implement', reviewerChange: 'now' }),
       state: 'open',
       createdAt: '',
       settledAt: null,
@@ -1836,13 +1927,17 @@ describe('a task', () => {
     }
     const { client } = fakeClient({
       getThread: vi.fn(async () => thread({ task: { ...thread().task, phase: 'running', actions: ['stop', 'abandon'] } })),
-      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [begun], calls: [], settledTotal: 0 })),
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [running], calls: [], settledTotal: 0 })),
     })
     withServices(<Task />, client)
-    await waitFor(() => expect(client.getBoard).toHaveBeenCalled())
     await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
-    expect(await screen.findByRole('menuitem', { name: /Stop the task/ })).toBeTruthy()
-    expect(screen.queryByRole('menuitem', { name: /Change the team…/ })).toBeNull()
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Change the team…/ }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    expect(dialog.getByText('From its next turn.')).toBeTruthy()
+    expect(dialog.queryByRole('button', { name: 'Start' })).toBeNull()
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(client.changeTeam).toHaveBeenCalledWith('t1', running.plan!.steps))
+    expect(client.changePlan).not.toHaveBeenCalled()
   })
 
   it('marks each of its draft pull requests ready from its menu, in turn', async () => {
@@ -3497,6 +3592,71 @@ describe('the face a task opens on', () => {
     current = asking
     withServices(<Task />, client)
     expect((await screen.findByRole('radio', { name: /Conversation/ })).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('keeps the page beside the conversation only: Outputs and Graph leave it out, and it comes back as it was', async () => {
+    forgetPages()
+    forgetChosenFaces()
+    const page: PageState = {
+      owner: 't1',
+      address: 'http://localhost:5173/refunds',
+      title: 'Refunds',
+      loading: false,
+      back: false,
+      forward: false,
+      viewport: 'fit',
+      pointing: false,
+      line: null,
+    }
+    pages.known(page)
+    pages.place('t1', 'beside')
+    const graph = [
+      {
+        id: 'r1',
+        followUp: false,
+        createdAt: '2025-01-01T09:00:00.000Z',
+        endedAt: '2025-01-01T09:05:00.000Z',
+        said: null,
+        changedAt: null,
+        steps: [
+          {
+            id: 's1',
+            key: 'implement' as const,
+            iteration: 0,
+            state: 'done' as const,
+            hold: null,
+            agentId: 'claude-code',
+            model: null,
+            startedAt: '2025-01-01T09:00:00.000Z',
+            endedAt: '2025-01-01T09:05:00.000Z',
+            added: false,
+          },
+        ],
+      },
+    ]
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread({ task: { ...thread().task, graph } })) })
+    const browser = fakePagesHost({ states: async () => [page] })
+    withServices(<Task />, client, fakeHost({ pages: browser }))
+    expect(await screen.findByRole('complementary', { name: 'Page' })).toBeTruthy()
+
+    // Outputs leaves the page out, its space unreserved, and keeps the page for the conversation.
+    await userEvent.click(screen.getByRole('radio', { name: /Outputs/ }))
+    expect(screen.queryByRole('complementary', { name: 'Page' })).toBeNull()
+    expect(pages.where('t1')).toBe('beside')
+    expect(pages.state('t1')?.address).toBe(page.address)
+
+    // So does Graph.
+    await userEvent.click(screen.getByRole('radio', { name: /Graph/ }))
+    expect(screen.queryByRole('complementary', { name: 'Page' })).toBeNull()
+    expect(pages.where('t1')).toBe('beside')
+
+    // Back on the conversation, the same page shows: it never closed or opened afresh.
+    await userEvent.click(screen.getByRole('radio', { name: /Conversation/ }))
+    const panel = await screen.findByRole('complementary', { name: 'Page' })
+    expect((within(panel).getByRole('textbox', { name: 'Address' }) as HTMLInputElement).value).toBe('localhost:5173/refunds')
+    expect(pages.state('t1')?.address).toBe(page.address)
+    expect(browser.close).not.toHaveBeenCalled()
+    expect(browser.open).not.toHaveBeenCalled()
   })
 })
 

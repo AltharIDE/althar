@@ -174,6 +174,19 @@ const buttonsOf = async (step: StuckStep) => {
   return names
 }
 
+describe('a lead waiting on the person', () => {
+  it('says it is waiting, with its question, and only takes the answer', async () => {
+    const onAnswer = show(stuck({ why: 'waiting_on_person', detail: 'Which ADRs should the compaction keep?' }))
+    expect(await screen.findByText('Waiting on you')).toBeTruthy()
+    expect(screen.getByText('Which ADRs should the compaction keep?')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Tell the lead' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Answer the lead' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'What should it do?' }), 'Keep the dozen current-state decisions.')
+    await userEvent.click(screen.getByRole('button', { name: 'Send the answer' }))
+    expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'tell', note: 'Keep the dozen current-state decisions.' })
+  })
+})
+
 describe('the ways on each card offers', () => {
   const report = 'Report this'
 
@@ -323,6 +336,12 @@ describe('trying a step again', () => {
     expect(await screen.findByText(/Tried again 3 times/)).toBeTruthy()
     expect(screen.queryByText(/Tried again after/)).toBeNull()
     expect(screen.getByText('Implement, after 3 tries')).toBeTruthy()
+  })
+
+  it('says Althar handed a step without its report on before it asked, where it did', async () => {
+    show(stuck({ why: 'no_report', tried: ['handed_on'] }))
+    expect(await screen.findByText(/Reminded it to report/)).toBeTruthy()
+    expect(screen.getByText(/Handed it to another model/)).toBeTruthy()
   })
 
   it('runs a review again on its reviewer, or hands it to another', async () => {

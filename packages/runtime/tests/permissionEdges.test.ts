@@ -33,7 +33,7 @@ const setup = Effect.gen(function* () {
   const instance = yield* Instance
   const sessions = yield* Sessions
   const sql = yield* SqlClient.SqlClient
-  yield* policies.set(project.projectId, { permissions: 'coordinator', alwaysAsk: [] }, instance.personId)
+  yield* policies.set(project.projectId, { permissions: 'coordinator', allowEverything: false, alwaysAsk: [] }, instance.personId)
   yield* sessions.start({ threadId: project.coordinatorThreadId, agentId: 'claude-code', model: 'large' })
   const sessionId = yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
   yield* until(turns(created.threadId), (rows) => rows.length > 0 && rows.every((row) => row.state === 'completed'))
@@ -68,7 +68,7 @@ describe('a permission request', () => {
       const { context, policies } = yield* setup
       const instance = yield* Instance
       // The person decides every request here: the request would wait on them, for a session that isn't there.
-      yield* policies.set(context.projectId, { permissions: 'ask', alwaysAsk: [] }, instance.personId)
+      yield* policies.set(context.projectId, { permissions: 'ask', allowEverything: false, alwaysAsk: [] }, instance.personId)
       const permissions = yield* Permissions
       const decision = yield* permissions.decide({ ...context, sessionId: 'sess_00000000000000000000000000000000' }, request('npm test'))
       assert.deepStrictEqual(decision, { decision: 'reject', reason: 'Althar could not decide.' })
@@ -103,7 +103,7 @@ describe('a coordinator out of usage, where its project waits for resets', () =>
       const limits = yield* Limits
       const sql = yield* SqlClient.SqlClient
       const { project, task: created } = yield* task('Run the checkout tests')
-      yield* policies.set(project.projectId, { permissions: 'coordinator', alwaysAsk: [] }, instance.personId)
+      yield* policies.set(project.projectId, { permissions: 'coordinator', allowEverything: false, alwaysAsk: [] }, instance.personId)
       yield* policies.setUsageLimit(project.projectId, 'wait', instance.personId)
       const coordinator = yield* Coordinator
       yield* coordinator.say({
@@ -149,7 +149,7 @@ const judging = (description: string) =>
       title: 'Run the checkout tests',
       description,
     })
-    yield* policies.set(project.projectId, { permissions: 'coordinator', alwaysAsk: [] }, instance.personId)
+    yield* policies.set(project.projectId, { permissions: 'coordinator', allowEverything: false, alwaysAsk: [] }, instance.personId)
     yield* sessions.start({ threadId: project.coordinatorThreadId, agentId: 'claude-code' })
     const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${created.taskId}`
     const projectId = Schema.decodeUnknownSync(Ids.project.schema)(project.projectId)

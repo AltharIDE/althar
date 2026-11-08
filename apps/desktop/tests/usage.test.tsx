@@ -61,6 +61,7 @@ const show = (snap: ThreadSnapshot) =>
       onOpenChange={vi.fn()}
       onPush={vi.fn()}
       onMarkReady={vi.fn()}
+      onMarkAllReady={vi.fn()}
       onOpenFile={vi.fn()}
       onPushBranch={vi.fn()}
       onConnect={vi.fn()}

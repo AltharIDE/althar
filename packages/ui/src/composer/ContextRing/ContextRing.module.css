@@ -69,9 +69,14 @@
 }
 .foot {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
   padding-top: 6px;
   border-top: 1px solid var(--line);
+}
+/* Compact stays at the end whether or not Clear chat… stands before it */
+.foot > :last-child {
+  margin-left: auto;
 }
 /* what the task, or the day, used of each account: its own part, under the context */
 .usage {

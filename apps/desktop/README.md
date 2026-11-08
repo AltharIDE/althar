@@ -65,7 +65,7 @@ is hidden on every window, as Electron would otherwise draw it above the
 app's own chrome. Sign-ins are sealed in the desktop's keyring;
 where Electron wouldn't find one, the app asks for libsecret, which
 gnome-keyring, KeePassXC and KWallet all serve — see
-[ADR-028](../../docs/decisions/028-linux-windows-packages-and-the-keyring.md).
+[ADR-028](../../docs/decisions/packaging.md#off-a-mac-windows-and-the-keyring).
 
 The packaged app is checked on a real desktop, not under CI's Xvfb:
 `scripts/x11-smoke.sh` needs `xdotool`, `xprop` and `wmctrl` on a running X11
@@ -107,7 +107,7 @@ and its permissions). The permission to talk to `org.freedesktop.Flatpak` is
 broad: it lets the app run commands on the device, which is how the app
 reaches the person's tools. The other permissions cover network, display,
 GPU and the keyring. What the Flatpak reaches and what it does not is in
-[ADR-027](../../docs/decisions/027-what-the-flatpak-reaches.md). In short:
+[ADR-027](../../docs/decisions/packaging.md#the-flatpak). In short:
 
 - The person's own OpenCode and Codex, and editors, are found and run on the
   device through `flatpak-spawn`, with the environment an agent should have
@@ -127,12 +127,12 @@ GPU and the keyring. What the Flatpak reaches and what it does not is in
 
 ### The packaged app
 
-The app is packaged for macOS on Apple silicon and on Intel, x86_64 Linux and x64 Windows (unsigned for now). Releases are made and published by CI alone, from a version tag on main ([ADR-024](../../docs/decisions/024-signed-releases-and-updates.md)).
+The app is packaged for macOS on Apple silicon and on Intel, x86_64 Linux and x64 Windows (unsigned for now). Releases are made and published by CI alone, from a version tag on main ([ADR-024](../../docs/decisions/packaging.md#releases)).
 
 - **Signing.** `bun run package` signs every executable in the app on its own, deepest first, with the hardened runtime and a secure timestamp, each with only the entitlements it needs (`scripts/entitlements.ts`, ADR-033). It signs with `ALTHAR_MAC_IDENTITY` where that names a certificate; else with the Developer ID in `CSC_LINK` and `CSC_KEY_PASSWORD` (the certificate and its key as a base64 `.p12`), where they're set; else with Althar's Developer ID where a keychain has it. CI puts the release environment's certificate in a keychain of the job's own and points electron-builder at it (`CSC_KEYCHAIN`). Without any, or with `ALTHAR_MAC_IDENTITY=-`, the app is signed ad hoc, still hardened, and opens only on the Mac that built it. In CI that fails instead. On a Mac, the first time codesign uses the key, macOS asks for the login password: choose Always Allow, or signing waits for an answer.
 - **Notarizing.** With Apple's credentials in the environment, the signed app is sent to Apple's notary service and stapled before the dmg and the zip are made of it, then the dmg is too. Every submission's log is kept in `out/notary/`; a rejected one names each file it found wrong. The credentials are an App Store Connect API key (`APPLE_API_KEY`, the path to its `.p8`, with `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`), or a profile notarytool keeps in the keychain (`APPLE_KEYCHAIN_PROFILE`). Without them nothing is notarized, macOS refuses the app on any other Mac, and in CI the run fails.
 - **Updates.** The macOS app, the Windows app and the Linux AppImage check the latest published release ten seconds after they start and every four hours. On macOS, Check for Updates… in the app menu checks on demand. A newer version downloads in the background and is offered in the window's bar and Settings. The `.deb` and `.rpm` are updated by their package managers.
-- **Intel Macs.** Each Mac build holds only its own processor's Electron, Node, agents and speech engine, and packaging fails where any program in it is for the other one (every Mach-O file is read with `lipo`). Apple silicon builds Intel's too. To check it with no Intel Mac at hand, `node scripts/mac-smoke.ts --arch=x64` runs its programs and opens it under Rosetta until its first screen finds the agents, and leaves a picture of that screen in `out/smoke`; the release run does this for both builds. One `latest-mac.yml` lists both, and the updater takes its own Mac's zip from it by name ([ADR-075](../../docs/decisions/075-an-intel-mac-build-beside-apple-silicon.md)).
+- **Intel Macs.** Each Mac build holds only its own processor's Electron, Node, agents and speech engine, and packaging fails where any program in it is for the other one (every Mach-O file is read with `lipo`). Apple silicon builds Intel's too. To check it with no Intel Mac at hand, `node scripts/mac-smoke.ts --arch=x64` runs its programs and opens it under Rosetta until its first screen finds the agents, and leaves a picture of that screen in `out/smoke`; the release run does this for both builds. One `latest-mac.yml` lists both, and the updater takes its own Mac's zip from it by name ([ADR-075](../../docs/decisions/packaging.md#two-mac-builds-not-one-universal-app)).
 - **Trying an update.** Package one version and keep its app; package a newer one, serve its zip and `latest-mac.yml` from a folder (`python3 -m http.server 8765 --bind 127.0.0.1`), and open the older app with `ALTHAR_UPDATE_FEED=http://127.0.0.1:8765/`. Both must be signed by the same Developer ID.
 - **Node.** The packaged app ships Node for the agent adapters, at Electron's Node version, in `Contents/Resources/node/bin/node` (ADR-033), and `resources\node\bin\node.exe` on Windows. `bun run package` fetches it from nodejs.org once, into `node_modules/.cache/althar-node`, and checks it against the digests in `scripts/node.ts`; raise those with Electron, and for Node's security releases. Electron's `runAsNode` fuse is off, with `NODE_OPTIONS` and the inspector's flags, so nothing can run Althar's binary as Node: `ELECTRON_RUN_AS_NODE=1` starts the app instead. In dev the adapters run on Electron's binary as Node.
 

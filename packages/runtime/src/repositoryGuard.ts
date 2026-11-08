@@ -1,9 +1,7 @@
-import { blockedBeforeCommit, blockedBeforePush, parseNulPaths, protectedRoot } from '@althar/skills'
+import { parseNulPaths } from '@althar/skills'
 import { Effect } from 'effect'
 
-import { PushRefused } from './errors'
 import { gitExactly, gitOutcome } from './git'
-import { Policies, repositoryFilesOf } from './Policies'
 
 /** Where commits come from that are already off the machine, or came onto it from elsewhere: not the task's to answer for. */
 const ELSEWHERE = ['--remotes', '--glob=refs/althar/base/*', '--glob=refs/althar/pushed/*', '--glob=refs/althar/pull-request/*']
@@ -49,35 +47,11 @@ const stopsOf = (cwd: string, base: string | null, ref?: string) =>
   })
 
 /**
- * The paths that are below a protected directory the repository already tracked where the task started (or on its
- * default branch): a repository that versions its own skills or OpenSpec specs keeps doing so, and only a protected
- * directory the task brought in is held back.
+ * Legacy call boundary for pushes. Skill and OpenSpec paths have no special
+ * permission: they are ordinary repository files (ADR-097). Git's separate
+ * irreversible guard still holds force pushes and protected branch moves.
  */
-const ownedByRepository = (cwd: string, base: string | null, ref: string | undefined, paths: ReadonlyArray<string>) =>
-  Effect.gen(function* () {
-    const stops = yield* stopsOf(cwd, base, ref)
-    const directories = [...new Set(paths.flatMap((path) => protectedRoot(path)?.directory ?? []))]
-    const tracked = new Set<string>()
-    for (const directory of directories)
-      for (const stop of stops) {
-        // A directory only: a file of that name the task replaced with one is not the repository's skills or specs.
-        const found = yield* gitOutcome(cwd, 'cat-file', '-t', `${stop}:${directory}`)
-        if (found.code === 0 && found.stdout === 'tree') {
-          tracked.add(directory)
-          break
-        }
-      }
-    return new Set(paths.filter((path) => tracked.has(protectedRoot(path)?.directory ?? '')))
-  })
-
-/**
- * Refuses a push that would send skill or OpenSpec files off the machine unless the project's rules allow it
- * (docs/plans/skills-across-harnesses.md, section 4), where the repository did not already track their directory. Both consents are needed: writing the class of file into the
- * repository (`writeSkills`, `writeOpenSpec`) and pushing it (`pushProtected`). A harness commits in the worktree
- * by itself, where Althar cannot check its staging, so this is the first point Althar controls: the commits are
- * checked by path, whoever wrote them, before they leave. Called before every push Althar makes for a task.
- */
-export const guardPush = (input: {
+export const guardPush = (_input: {
   readonly projectId: string
   readonly taskId: string
   readonly remote: string
@@ -86,25 +60,4 @@ export const guardPush = (input: {
   /** The repository's default branch, for a workspace with no recorded base commit. */
   readonly ref?: string
   readonly head: string
-}) =>
-  Effect.gen(function* () {
-    const { rules } = yield* (yield* Policies).current(input.projectId as Parameters<Policies['Service']['current']>[0])
-    const settings = repositoryFilesOf(rules)
-    const pushed = yield* pathsPushed(input.cwd, input.base, input.head, input.ref)
-    const owned = yield* ownedByRepository(input.cwd, input.base, input.ref, pushed)
-    const paths = pushed.filter((path) => !owned.has(path))
-    const held = [...blockedBeforeCommit(paths, settings), ...blockedBeforePush(paths, settings)]
-    const blocked = [...new Set(held.map(({ path }) => path))]
-    if (blocked.length === 0) return
-    // Which switches are off for what was held back, so the person is told the ones that would let it go.
-    const needs = (['writeSkills', 'writeOpenSpec', 'pushProtected'] as const).filter((setting) =>
-      held.some(({ kind, reason }) =>
-        setting === 'pushProtected'
-          ? reason === 'push-off'
-          : reason === 'write-off' && kind === (setting === 'writeSkills' ? 'skills' : 'openspec'),
-      ),
-    )
-    const shown = blocked.slice(0, 5)
-    const said = `${shown.join(', ')}${blocked.length > shown.length ? ` and ${blocked.length - shown.length} more` : ''}`
-    return yield* new PushRefused({ taskId: input.taskId, why: 'protected', remote: input.remote, said, needs })
-  })
+}) => Effect.void

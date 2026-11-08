@@ -10,7 +10,7 @@
 Researched on 15 October 2026 against upstream `main` (`af3023a`), and again
 on 21 October for the agents #266 added. Built (see Stages): every source in
 the table below, the usage read and its exception to rule 3
-([ADR-062](../decisions/062-a-usage-read-may-use-an-account-s-own-sign-in-once.md)),
+([ADR-062](../decisions/agents.md#reading-plan-usage)),
 the limits recognised in each agent's own words, new work steered by the
 windows, and how the window shows them: the design the person picked on a
 prototype (direction A, 22 October 2026), a plan gauge in the bar and each
@@ -68,7 +68,7 @@ Per agent and provider, today:
 
 ### The exception to rule 3
 
-Decided in [ADR-062](../decisions/062-a-usage-read-may-use-an-account-s-own-sign-in-once.md)
+Decided in [ADR-062](../decisions/agents.md#reading-plan-usage)
 (21 October 2026), from ninemate's draft in #218 (`59955fe`), with Anthropic's
 endpoint on the allowlist, as the person decided: Orca reads it the same way.
 The reader is `packages/provider-adapters/src/usageRead.ts`; the one module
@@ -174,7 +174,7 @@ under 5% it is nearly out. Work starts on the account with the most room
 where the project rotates, for the model it runs where that model has a
 window of its own; a new step on an agent nearly out on every account goes
 by the project's rule as if out (moved to an agent with room, or started on
-what is left; held until the reset; or asked, with the agent itself a way
+what is left; held until the reset, or until a fresh reading shows room; or asked, with the agent itself a way
 on), and the thread says why. The lead's fixes after a review are a new
 step, and so are a review that waited for a place and a later round of
 review: a lead or reviewer kept from before goes on on another of its

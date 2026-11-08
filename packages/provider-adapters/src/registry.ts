@@ -442,6 +442,8 @@ export interface Contained {
 export interface UpFront {
   readonly commands: ReadonlyArray<string>
   readonly hosts: ReadonlyArray<string>
+  /** Hosts the person explicitly put in Never; these hold over the open network. */
+  readonly deniedHosts?: ReadonlyArray<string>
   /**
    * Folders outside its own it writes to without asking, from the home
    * folder as `~/…`: the caches of the tools its project installs with, as
@@ -657,12 +659,19 @@ const loggedInField = (output: string): boolean | undefined => {
  *
  * OpenCode also stops its loop when a request is rejected, unless told to
  * carry on, so a rejection works as it does for the other agents.
+ *
+ * And OpenCode 2.2 unloads a folder's services after an hour with no session
+ * activity, and loads them again at the next prompt with only the MCP servers
+ * its config names: Althar's, given over ACP as the session started, never
+ * comes back, so a lead left idle an hour, or a reviewer between rounds, has
+ * no finish_step or report_review and can't report (#692). It keeps them
+ * loaded (`location_idle_timeout`, which older versions leave out).
  */
 const asks = { edit: 'ask', bash: 'ask', webfetch: 'ask' }
 const openCodeBase = {
   permission: asks,
   agent: { build: { permission: asks }, plan: { permission: asks } },
-  experimental: { continue_loop_on_deny: true },
+  experimental: { continue_loop_on_deny: true, location_idle_timeout: false },
 }
 const openCodeConfig = JSON.stringify(openCodeBase)
 
@@ -753,8 +762,8 @@ const codexReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<
  * prototype can serve a showcase page without leaving the sandbox. On macOS
  * Claude documents that this setting is broader than listening: commands may
  * also connect to any localhost port, including services outside the sandbox,
- * and listen on non-loopback addresses. The domain allowlist and writable
- * paths are unchanged. Where the sandbox can start (`claudeSandboxStarts`),
+ * and listen on non-loopback addresses. Networking and Unix sockets are
+ * open; writable paths and secret-file exclusions remain. Where the sandbox can start (`claudeSandboxStarts`),
  * the session doesn't start without it, so a command it holds can run without
  * Althar reading it (ADR-071); elsewhere commands run without it and every
  * one asks, and meets the rules.
@@ -773,10 +782,9 @@ const codexReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<
  * (`excludedCommands`), so a browser, Electron or a test runner, which its
  * sandbox stops on a Mac, doesn't fail once first: Claude Code's settings
  * say an excluded command still goes through its permission flow, so it
- * asks, and meets Althar's rules, as it would on its second try. Known hosts
- * (`network.allowedDomains`) a command in the sandbox reaches without
- * asking: the project's code hosts, registries and trackers, only where its
- * rules would let them through anyway. Known caches
+ * asks, and meets Althar's rules, as it would on its second try. Sandboxed
+ * commands reach any host: no project host discovery or allowlist gates the
+ * network (ADR-097). Known caches
  * (`filesystem.allowWrite`) its commands write to without asking, outside
  * the worktree: those of the tools its project installs with, so Electron's
  * build and Playwright's browsers download inside the sandbox, never where
@@ -784,6 +792,12 @@ const codexReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<
  * takes only from trusted sources, which these, given as the session's own,
  * are.
  */
+/** The person's own SSH agent socket, the one inherited sign-in sandboxed commands need; never every socket. */
+const sshSockets = (): ReadonlyArray<string> => {
+  const socket = process.env.SSH_AUTH_SOCK
+  return socket === undefined || socket === '' ? [] : [socket]
+}
+
 const claudeAsks = (
   sandbox: UpFront = { commands: [], hosts: [] },
   skills?: string,
@@ -805,11 +819,17 @@ const claudeAsks = (
         },
         sandbox: {
           enabled: true,
-          autoAllowBashIfSandboxed: true,
+          // Every command reaches Althar's rules, so a visible irreversible act still asks; nothing else asks the person.
+          autoAllowBashIfSandboxed: false,
           allowUnsandboxedCommands: true,
           failIfUnavailable: starts,
           ...(sandbox.commands.length === 0 ? {} : { excludedCommands: excludedCommandsOf(sandbox.commands) }),
-          network: { allowLocalBinding: true, ...(sandbox.hosts.length === 0 ? {} : { allowedDomains: [...sandbox.hosts] }) },
+          network: {
+            allowLocalBinding: true,
+            allowedDomains: ['*'],
+            ...(sshSockets().length === 0 ? {} : { allowUnixSockets: [...sshSockets()] }),
+            ...(sandbox.deniedHosts?.length ? { deniedDomains: [...sandbox.deniedHosts] } : {}),
+          },
           ...(writes.length === 0 ? {} : { filesystem: { allowWrite: [...writes] } }),
         },
       },
@@ -838,11 +858,12 @@ const claudeAsks = (
  * permission judge. Its rules and sandbox below are the programmatic
  * settings, which load whatever the sources.
  */
-const claudeReads = (flatpak: boolean, offline: boolean, untrusted: boolean, web?: boolean) => ({
+const claudeReads = (flatpak: boolean, offline: boolean, untrusted: boolean, web?: boolean, skills?: string) => ({
   claudeCode: {
     options: {
       allowDangerouslySkipPermissions: false,
       strictMcpConfig: true,
+      ...(skills === undefined ? {} : { plugins: [{ type: 'local', path: skills }] }),
       ...(untrusted ? { settingSources: [] } : {}),
       settings: {
         permissions: offline
@@ -887,7 +908,8 @@ export const claudeSandboxStarts = (): boolean => {
  * What holds a Claude Code session's shell commands (ADR-071): a lead's
  * sandbox, where it starts, but for the commands it runs outside from the
  * start and those it asks to run outside; the coordinator's, which runs
- * nothing outside. A review's lead, which reads someone else's code, and a
+ * nothing outside from the start but may ask to, decided by its read-only
+ * rules. A review's lead, which reads someone else's code, and a
  * session whose sandbox can't start, aren't held: the rules read every
  * command.
  */
@@ -895,7 +917,7 @@ const claudeHolds = (role: 'lead' | 'reader' = 'lead', options: SessionOptions =
   if (!claudeSandboxStarts()) return undefined
   if (role === 'lead') return { outside: options.sandbox?.commands ?? [], unsandboxed: true }
   return options.contained !== undefined && options.untrusted !== true && options.offline !== true
-    ? { outside: [], unsandboxed: false }
+    ? { outside: [], unsandboxed: true }
     : undefined
 }
 
@@ -903,36 +925,50 @@ const claudeHolds = (role: 'lead' | 'reader' = 'lead', options: SessionOptions =
  * Claude Code for the coordinator, a trusted reader in its own copies of the
  * project's repositories (ADR-058): its shell commands run in its sandbox
  * without asking, held to the coordinator's folder. They write only there
- * (and in the sandbox's own temporary folder); read none of the home
- * folder, the person's checkouts or the project's task folders but what
- * Althar gives back (the folder, the mirrors its copies fetch from, the
- * objects they borrow, the toolchains in the home folder), and nothing
- * where the person keeps keys and sign-ins; reach no network
- * (`strictAllowlist` with no domain refuses every host without asking) and
- * no socket; and never run outside it (`allowUnsandboxedCommands: false`).
- * It loads no settings file (`settingSources: []`) and runs no hook, as a
- * review's lead: no allow rule or sandbox exemption of the person's or the
- * repository's lets a command out, and no hook of theirs runs beside it. Its
- * edit tools stay denied: a change is a task. Where the sandbox can't start,
- * the session doesn't either (`failIfUnavailable`), so it is asked for only
- * where it can (`claudeSandboxStarts`); elsewhere the coordinator is started
- * as any reader.
+ * (and in the sandbox's own temporary folder), and may read ordinary files
+ * anywhere, with secret files and sign-ins still denied. Commands reach any host and may
+ * listen locally, and every one asks, so a visible irreversible act still
+ * asks the person. Any command may run outside it when the agent asks to, which
+ * is what a read the sandbox cannot run (process substitution on macOS) does:
+ * Althar's read-only rules decide it, refusing a visible write outside the
+ * coordinator's folder. It loads no
+ * settings file (`settingSources: []`) and runs no hook, as a review's lead:
+ * no allow rule or sandbox exemption of the person's or the repository's
+ * lets a command out, and no hook of theirs runs beside it. Its edit tools
+ * stay denied, as ADR-097 keeps them: a change is a task.
  */
-const claudeContains = ({ folder, reads }: Contained) => ({
+const claudeContains = (
+  { folder, reads }: Contained,
+  skills?: string,
+  deniedHosts?: ReadonlyArray<string>,
+  starts = claudeSandboxStarts(),
+) => ({
   claudeCode: {
     options: {
       allowDangerouslySkipPermissions: false,
       strictMcpConfig: true,
+      ...(skills === undefined ? {} : { plugins: [{ type: 'local', path: skills }] }),
       settingSources: [],
       settings: {
         disableAllHooks: true,
-        permissions: { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', ...secretReadRules()], ask: ['WebFetch'] },
+        permissions: {
+          deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', ...secretReadRules()],
+          ask: ['Bash', 'WebFetch'],
+        },
         sandbox: {
-          enabled: true,
-          autoAllowBashIfSandboxed: true,
-          allowUnsandboxedCommands: false,
-          failIfUnavailable: true,
-          network: { allowedDomains: [], strictAllowlist: true, allowLocalBinding: false, allowAllUnixSockets: false },
+          enabled: starts,
+          // Every command asks Althar's rules: a visible irreversible act still asks the person, nothing else does.
+          autoAllowBashIfSandboxed: false,
+          // Any command may ask to run outside, which is how `<(…)` works where macOS refuses its pipes; the read-only
+          // rules refuse a visible write outside its folder, and an unreadable command runs, as where no sandbox holds.
+          allowUnsandboxedCommands: true,
+          failIfUnavailable: starts,
+          network: {
+            allowedDomains: ['*'],
+            allowLocalBinding: true,
+            ...(sshSockets().length === 0 ? {} : { allowUnixSockets: [...sshSockets()] }),
+            ...(deniedHosts?.length ? { deniedDomains: [...deniedHosts] } : {}),
+          },
           filesystem: { allowWrite: [folder], denyRead: [...reads.denied], allowRead: [...reads.allowed] },
         },
       },
@@ -1019,9 +1055,15 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     sessionMeta: (role = 'lead', options = {}) =>
       role !== 'reader'
         ? claudeAsks(options.sandbox, options.skills, claudeSandboxStarts(), options.web === true && options.offline !== true)
-        : options.contained !== undefined && options.untrusted !== true && options.offline !== true && claudeSandboxStarts()
-          ? claudeContains(options.contained)
-          : claudeReads(process.env.FLATPAK_ID !== undefined, options.offline === true, options.untrusted === true, options.web),
+        : options.contained !== undefined && options.untrusted !== true && options.offline !== true
+          ? claudeContains(options.contained, options.skills, options.sandbox?.deniedHosts)
+          : claudeReads(
+              process.env.FLATPAK_ID !== undefined,
+              options.offline === true,
+              options.untrusted === true,
+              options.web,
+              options.skills,
+            ),
     contains: claudeSandboxStarts,
     upFront: true,
     /* A local plugin its session loads (claudeAsks); it dispatches subagents. */
@@ -1104,17 +1146,18 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     version: () => ({ command: 'codex', args: ['--version'] }),
     withoutOwnTools: codexWithoutOwnTools,
     reviewing: { outside: false, env: codexReviewing },
-    sessionEnv: (own, options) =>
-      options.web === undefined && options.offline !== true
-        ? {}
-        : {
-            CODEX_CONFIG: JSON.stringify({
-              ...JSON.parse(own.CODEX_CONFIG ?? '{}'),
-              web_search: options.web === true && options.offline !== true ? 'live' : 'disabled',
-              // Opening this would also allow uploads and POSTs without the rules.
-              'sandbox_workspace_write.network_access': false,
-            }),
-          },
+    sessionEnv: (own, options) => ({
+      // Every command Codex doesn't read as safe reaches Althar, so the irreversible list holds inside its sandbox too
+      // (ADR-097); everything else is answered at once. The adapter's patch puts it on the turn's approval policy.
+      ALTHAR_APPROVAL_POLICY: 'untrusted',
+      CODEX_CONFIG: JSON.stringify({
+        ...JSON.parse(own.CODEX_CONFIG ?? '{}'),
+        ...(options.web === undefined && options.offline !== true
+          ? {}
+          : { web_search: options.web === true && options.offline !== true ? 'live' : 'disabled' }),
+        'sandbox_workspace_write.network_access': options.offline !== true,
+      }),
+    }),
     /*
      * codex-acp 2.2.2 sets Codex's extra skill roots to `<dir>/.agents/skills` of each of a session's added directories
      * (`skills/extraRoots/set`, Codex 0.160). That also makes the folder writable in its sandbox: only the run's own
@@ -1132,18 +1175,13 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       allowScopes: { allow_once: 'once', allow_permissions_turn: 'turn', allow_permissions_turn_strict_auto_review: 'turn' },
     },
     /*
-     * A project's known commands and hosts (`UpFront`) aren't passed: its
-     * `workspace-write` sandbox has no list of commands that run outside it,
-     * and its network is one switch (`sandbox_workspace_write.network_access`).
-     * Codex 0.160's list of allowed domains belongs to its permission
-     * profiles' network proxy, experimental, which codex-acp's modes don't
-     * use. Network stays off: enabling it would also let POSTs and uploads
-     * bypass the rules. Native web_search is live with the project switch
-     * on; clear HTTP reads that reach the rules may be allowed there.
+     * Codex has no per-command sandbox exclusions. Shell networking is open
+     * unless the session is explicitly offline (an outside review). The web
+     * switch controls native search separately, not a shell's network.
      */
     knownGaps: [
-      'It works inside its sandbox without asking: it edits the workspace and runs commands there, and asks only to go beyond it, such as for the network. As a reader too, so it never leads a review of a pull request from outside.',
-      "Shell network stays off because its sandbox cannot allow only GETs. Native web search and page opening are live when the project's web switch is on.",
+      'Its shell carries the person’s code-host sign-in, so a command Codex reads as safe runs without reaching Althar; a command it does not (a merge, a release, a post) asks Althar first. Commands Althar’s own rules can’t read still run, as ADR-097 allows.',
+      "Shell networking is open. The project's web switch controls native search and page opening separately.",
       "codex-acp marks every session folder trusted, so a repository's own `.codex` config and hooks apply; a review's lead has hooks off.",
       'The adapter holds usage limits but sends them nowhere over ACP (/status prints text); Althar asks the Codex app-server for them (`usage.ts`).',
       "Beside Althar's skills it loads the person's own from the shared `skills` folder and `~/.agents/skills`, as it always does.",
@@ -1339,7 +1377,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     /*
      * The version it was installed as, not one it downloaded since
      * (`--no-auto-update`); none of the GitHub tools it would reach with the
-     * person's sign-in (`--disable-builtin-mcps`), as Althar pushes for agents;
+     * person's sign-in are available too (ADR-097);
      * and not the person's login-shell environment, which it otherwise gives
      * every command it runs, past Althar's allowlist.
      */
@@ -1347,7 +1385,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     failsInText: 'Error: ',
     launch: () => ({
       command: 'copilot',
-      args: ['--acp', '--no-auto-update', '--disable-builtin-mcps'],
+      args: ['--acp', '--no-auto-update'],
       env: { COPILOT_AUTO_UPDATE: 'false', COPILOT_DISABLE_LOGIN_SHELL_ENV: '1' },
       // GH_HOST names a GHE.com tenant (`yourorg.ghe.com`) for those whose Copilot is there, as `copilot login --host` does.
       inheritEnv: ['COPILOT_HOME', 'GH_HOST'],

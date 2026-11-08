@@ -159,6 +159,11 @@ describe('a lead that finishes with nothing in its summary', () => {
         sessionId: session?.id ?? '',
         taskId: created.taskId,
       }
+      // The lead's work, committed as it would be: a review is for what it built.
+      const [worktree] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${created.taskId}`
+      writeFileSync(join(worktree?.path ?? '', 'retry.ts'), 'export const retry = 1\n')
+      git(worktree?.path ?? '', 'add', 'retry.ts')
+      git(worktree?.path ?? '', 'commit', '-q', '-m', 'Retry once')
       assert.strictEqual(
         yield* callTool(access, 'finish_step', { summary: '', built: 'Checkout retries once.' }),
         'Althar has your summary. A review starts now; wait for its findings.',

@@ -257,8 +257,9 @@ specific workflow grants them. Repository-local binaries and configuration are
 not trusted as runtime dependencies. Two of Althar's own workflows do run
 repository code, outside any agent's sandbox: running the project when the
 person asks, and setting up each new task's worktree before its lead starts,
-which installs what its lockfile names, install scripts included
-([ADR-023](../decisions/023-althar-runs-the-project.md)).
+which replays the setup a lead recorded for it, or installs what its
+lockfile names, install scripts included
+([setting up a task's folder](../decisions/workspaces-and-runs.md#setting-up-a-tasks-folder)).
 
 ### Provider, connector, MCP, and skill boundaries
 
@@ -394,11 +395,19 @@ Do not market file synchronization of SQLite/artifacts as collaboration.
 
 ## Cloud authority
 
+[ADR-103](../decisions/proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
+proposes an earlier step: the same runtime and single-writer SQLite profile
+can live on a personal host or a managed single-player home, with leased
+workers. The local deployment stays. Its SSH/relay paths, leases and
+provider-support policy amend the laptop-first sequence and blanket
+subscription restriction below if accepted. Multiplayer Postgres authority
+remains a later option, not a prerequisite for a remote project.
+
 The cloud is introduced when sharing or cross-device continuity is actually
 valuable.
 
 It comes first as a relay, not an authority
-([ADR-048](../decisions/048-where-the-runtime-runs-and-who-may-reach-it.md)):
+([ADR-048](../decisions/foundations.md#where-the-runtime-runs-and-who-may-reach-it)):
 the laptop's runtime dials out to it, a paired phone talks to the runtime
 through it, encrypted end to end, and it keeps no project state. The laptop
 stays canonical. Cloud authority, as below, comes when a project is shared by

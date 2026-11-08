@@ -1,6 +1,7 @@
 import { EarlierTurns } from '../../shared/EarlierTurns'
+import { ThreadWaysContext } from '../../shared/ThreadBlocks'
 import { useNavigate } from '@tanstack/react-router'
-import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import type { AttentionRequest, TaskAction, ThreadSnapshot } from '@althar/contracts'
 import {
@@ -37,6 +38,7 @@ import {
   ThreadSkeleton,
   TitleBar,
   SettleWays,
+  TaskParts,
 } from '@althar/ui'
 
 import { isAnswered, isSettleable, takesDone } from '../../shared/calls'
@@ -63,6 +65,7 @@ import { ago, clock, running, useNow } from '../../shared/time'
 import { shortFolder } from '../../shared/folders'
 import { documentVersions, editorPath, wholePath } from '../../shared/handed'
 import { roundsOf } from '../../shared/rounds'
+import { kindsOf, type PartsActions, partsOf } from './parts'
 import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
 import { type Outgoing, outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
 import { pillOf, runIdOf } from '../../shared/running'
@@ -81,6 +84,8 @@ import { usePostTeamReviews } from '../settings/usePostTeamReviews'
 import { HeldLimit } from './LimitCall'
 import { StuckCall } from './StuckCall'
 import { TaskThread } from './TaskThread'
+import { SmallChangeOf } from './SmallChangeOf'
+import { ModelMoveOf } from './ModelMoveOf'
 import { latestReport, reviewsIn, useReviewOutcomes } from './reviewOutcomes'
 import { ConnectPanel } from '../connections/ConnectPanel'
 import { serviceOfProduct } from '../connections/ways'
@@ -377,8 +382,9 @@ export function TaskView({
             take: text.carriedTake,
           },
   })
+  const { client, host: servicesHost } = useServices()
   // Images and files to send with what the person says, and which agents take images.
-  const images = useAttachments(kept, useServices().host)
+  const images = useAttachments(kept, servicesHost)
   const models = useModels()
   // Whether the person has their team's reviews posted once drafted: what a review's reach says it posts.
   const postsTeamReviews = usePostTeamReviews()?.on === true
@@ -446,7 +452,13 @@ export function TaskView({
   const opener = useOpener(taskId ?? null, showTalk)
   const navigate = useNavigate()
   const comments = useComments(kept)
+  // The page belongs to the conversation: Outputs and Graph leave it out, and coming back brings it as it was (ADR-100).
+  const conversation = face === null || face === 'talk' || (face === 'graph' && (model.snapshot?.task.graph?.length ?? 0) === 0)
   // What the thread's parts open: a picture in the lightbox, a document or a file the lead names, or a page, beside the thread.
+  const ways = useMemo(
+    () => ({ ...(onRules === undefined ? {} : { onRules }), ...(onSignIn === undefined ? {} : { onSignIn }) }),
+    [onRules, onSignIn],
+  )
   const host = useThreadHost(
     true,
     { threadId: model.snapshot?.threadId ?? null, taskId: model.snapshot?.task.id ?? null },
@@ -462,6 +474,7 @@ export function TaskView({
             void navigate({ to: '/pages/$owner', params: { owner: taskId } })
           },
         },
+    conversation,
   )
   // Report this, on a stuck step: Report a problem, with this task (DEV-61).
   const { reportProblem } = useServices().host
@@ -678,7 +691,17 @@ export function TaskView({
         ? null
         : { agentId: resume.id, model: null, effort: null })
   const waiting = session === null || !session.held || handover?.agentId === session.agentId ? null : handover
-  const choice = session === null || !session.held ? chosen : (waiting ?? runningOn(session))
+  // Its lead changed from its next turn, by the team dialog or a tool: the picker shows who leads it then.
+  const upcoming = session?.held === true ? session.nextLead : null
+  const pending: Choice | null =
+    session === null || upcoming == null
+      ? null
+      : {
+          agentId: upcoming.agentId,
+          model: upcoming.model ?? (upcoming.agentId === session.agentId ? session.model : null),
+          effort: upcoming.effort ?? (upcoming.agentId === session.agentId ? session.effort : null),
+        }
+  const choice = session === null || !session.held ? chosen : (waiting ?? pending ?? runningOn(session))
 
   // The agent what the person says goes to: one picked to take over, else the lead on it, else the one it would start; and whether it takes images.
   const receiving = waiting?.agentId ?? (session?.held ? session.agentId : undefined) ?? chosen?.agentId ?? null
@@ -784,18 +807,29 @@ export function TaskView({
       {...(model.doing === doing.markDone ? { busy: 'done' as const } : model.doing === doing.keep ? { busy: 'keep' as const } : {})}
     />
   ) : null
-  // What it changed opens over the window; what else it can do is in its menu.
+  // Its parts, just before the faces: what it changed is in its worktree's, which opens the changes over the window (ADR-097).
+  const partsActions: PartsActions = {
+    seeChanges: () => changes.show(),
+    changesKey: text.diffKey,
+    ...(snapshot.task.worktree === null || editor === undefined
+      ? {}
+      : { openInEditor: { name: editor.name, open: () => editors.open(editor.id) } }),
+    ...(snapshot.task.phase === 'settled' && snapshot.task.worktree !== null
+      ? { removeFolder: () => void client.removeTaskFolder(snapshot.task.id, null) }
+      : {}),
+    merge: (change) => (change.head === null ? undefined : void model.accept([{ head: change.head, url: change.url }])),
+    postReview: (draftId) => void model.postReview(draftId),
+    stopLaunch: (id) => void model.stopLaunch(id),
+    openUrl: (url) => void window.open(url, '_blank'),
+    toOutputs: () => setFace('out'),
+    askLead: (words) => void model.send(words),
+    ...(snapshot.task.changes.length === 0 && snapshot.host?.connected === true ? { openChange: () => void model.openChange() } : {}),
+    ...(can('abandon') && snapshot.task.review == null ? { attach: (pullRequest: string) => void model.attach(pullRequest, false) } : {}),
+  }
+  const parts = <TaskParts parts={partsOf(snapshot, partsActions)} kinds={kindsOf(snapshot, partsActions)} />
+  // What else it can do is in its menu.
   const actions = (
     <>
-      {files.length > 0 && (
-        <ChromeButton
-          icon="file"
-          label={text.files(files.length)}
-          kbd={text.diffKey}
-          expanded={changes.open}
-          onClick={() => changes.show()}
-        />
-      )}
       {/* What it built runs with no agent, in its worktree (ADR-044); a review runs nothing of what it reads. */}
       {snapshot.task.worktree !== null && snapshot.task.review == null && (
         <Runs
@@ -1071,6 +1105,7 @@ export function TaskView({
                 onFace={setFace}
                 // Finished and the person's to settle: Done and Keep for later, inside where it stands.
                 {...(settle === null ? {} : { beside: settle })}
+                parts={parts}
                 actions={actions}
               />
             }
@@ -1131,6 +1166,9 @@ export function TaskView({
                     })
                   }
                   onMarkReady={(url) => void model.markReady(url)}
+                  onMarkAllReady={(urls) => void model.markAllReady(urls)}
+                  merging={model.merging}
+                  mergeRefused={model.mergeRefused}
                   onPostScreenshots={model.postScreenshots}
                   onOpenFile={changes.show}
                   conflict={model.conflict}
@@ -1204,79 +1242,92 @@ export function TaskView({
                   loading={model.loadingEarlier}
                 />
                 <ThreadShellProvider value={host.shell}>
-                  <TaskThread
-                    rounds={blocks}
-                    versionOf={versionOf}
-                    settledOf={settledOf}
-                    reviewing={reviewing}
-                    // Settling a review, its lead works quietly.
-                    settling={snapshot.task.step === 'settle'}
-                    threadId={snapshot.threadId}
-                    worktree={snapshot.task.worktree}
-                    {...(openFile === undefined ? {} : { openFile })}
-                    session={session}
-                    project={snapshot.project.name}
-                    // A failed turn is tried again here, unless its step waits on the person, whose call has its ways on.
-                    {...(busy || stuckOpen ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
-                    {...(onSignIn === undefined || stuckOpen ? {} : { onSignIn })}
-                    onPassOn={(words) => void model.send(words)}
-                    {...(onOpenTask === undefined ? {} : { onOpenTask })}
-                    onAnswerQuestion={model.answerQuestion}
-                    {...(asking == null ? {} : { focusQuestion: asking })}
-                    run={(run) => (
-                      <RunOf
-                        run={run}
-                        now={now}
-                        onStop={(id) => void model.stopLaunch(id)}
-                        onRunAgain={(_taskId, runnableId) => void model.runProject(runnableId)}
-                      />
-                    )}
-                    // An issue the lead drafted is filed from its card, only when the person says.
-                    draft={(draft) => (
-                      <DraftCard
-                        draft={draft}
-                        actions={{
-                          onFile: (draftId) => void model.fileIssueDraft(draftId),
-                          onChange: model.changeIssueDraft,
-                          onDiscard: (draftId) => void model.discardIssueDraft(draftId),
-                          onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
-                        }}
-                      />
-                    )}
-                    // Changes to its issue its lead or Althar proposed apply from their card, only when the person says.
-                    changes={(changes) => (
-                      <ChangesCard
-                        changes={changes}
-                        actions={{
-                          onApply: (changesId) => void model.applyIssueChanges(changesId),
-                          onDiscard: (changesId) => void model.discardIssueChanges(changesId),
-                          onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
-                        }}
-                      />
-                    )}
-                    // A review the lead drafted is posted from its card, only when the person says.
-                    review={(draft) => (
-                      <ReviewCard
-                        draft={draft}
-                        actions={{
-                          onChange: model.changeReview,
-                          onPost: (draftId) => void model.postReview(draftId),
-                          onPostFromNow: (draftId, automationId) => void model.postReviewsFromNow(draftId, automationId),
-                          onDiscard: (draftId) => void model.discardReview(draftId),
-                        }}
-                      />
-                    )}
-                    // A push the lead asked for is pushed as the outputs push: up to the head it shows.
-                    push={(request, at) => (
-                      <PushRequestOf
-                        request={request}
-                        at={at}
-                        {...(lead.name === '' ? {} : { by: lead.name })}
-                        pushing={model.pending}
-                        onPush={(head, url) => void model.push(head, url)}
-                      />
-                    )}
-                  />
+                  <ThreadWaysContext.Provider value={ways}>
+                    <TaskThread
+                      rounds={blocks}
+                      versionOf={versionOf}
+                      settledOf={settledOf}
+                      reviewing={reviewing}
+                      threadId={snapshot.threadId}
+                      worktree={snapshot.task.worktree}
+                      {...(openFile === undefined ? {} : { openFile })}
+                      session={session}
+                      retryable={snapshot.retryable}
+                      project={snapshot.project.name}
+                      // A failed turn is tried again here, unless its step waits on the person, whose call has its ways on.
+                      {...(busy || stuckOpen ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
+                      {...(onSignIn === undefined || stuckOpen ? {} : { onSignIn })}
+                      onPassOn={(words) => void model.send(words)}
+                      {...(onOpenTask === undefined ? {} : { onOpenTask })}
+                      onAnswerQuestion={model.answerQuestion}
+                      {...(asking == null ? {} : { focusQuestion: asking })}
+                      run={(run) => (
+                        <RunOf
+                          run={run}
+                          now={now}
+                          onStop={(id) => void model.stopLaunch(id)}
+                          onRunAgain={(_taskId, runnableId) => void model.runProject(runnableId)}
+                        />
+                      )}
+                      // An issue the lead drafted is filed from its card, only when the person says.
+                      draft={(draft) => (
+                        <DraftCard
+                          draft={draft}
+                          actions={{
+                            onFile: (draftId) => void model.fileIssueDraft(draftId),
+                            onChange: model.changeIssueDraft,
+                            onDiscard: (draftId) => void model.discardIssueDraft(draftId),
+                            onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
+                          }}
+                        />
+                      )}
+                      // Changes to its issue its lead or Althar proposed apply from their card, only when the person says.
+                      changes={(changes) => (
+                        <ChangesCard
+                          changes={changes}
+                          actions={{
+                            onApply: (changesId) => void model.applyIssueChanges(changesId),
+                            onDiscard: (changesId) => void model.discardIssueChanges(changesId),
+                            onPrefer: (atOnce) => void model.preferIssueCards(atOnce),
+                          }}
+                        />
+                      )}
+                      // A review the lead drafted is posted from its card, only when the person says.
+                      review={(draft) => (
+                        <ReviewCard
+                          draft={draft}
+                          actions={{
+                            onChange: model.changeReview,
+                            onPost: (draftId) => void model.postReview(draftId),
+                            onPostFromNow: (draftId, automationId) => void model.postReviewsFromNow(draftId, automationId),
+                            onDiscard: (draftId) => void model.discardReview(draftId),
+                          }}
+                        />
+                      )}
+                      // A small change's card: Merge as the header's, and Make it a full task (README section 6).
+                      smallChange={(card) => (
+                        <SmallChangeOf
+                          card={card}
+                          named={named}
+                          busy={model.pending}
+                          onMerge={(change) => void model.accept([change])}
+                          {...(onOpenTask === undefined ? {} : { onOpen: onOpenTask })}
+                        />
+                      )}
+                      // Auto's line on moving the lead to a lighter model, with Keep and Undo (README section 7).
+                      modelMove={(move, itemId) => <ModelMoveOf move={move} itemId={itemId} named={named} />}
+                      // A push the lead asked for is pushed as the outputs push: up to the head it shows.
+                      push={(request, at) => (
+                        <PushRequestOf
+                          request={request}
+                          at={at}
+                          {...(lead.name === '' ? {} : { by: lead.name })}
+                          pushing={model.pending}
+                          onPush={(head, url) => void model.push(head, url)}
+                        />
+                      )}
+                    />
+                  </ThreadWaysContext.Provider>
                 </ThreadShellProvider>
                 {waitingIssues.length > 1 && (
                   <div className={s.fileAll}>

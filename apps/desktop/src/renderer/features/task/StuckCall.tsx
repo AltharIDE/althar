@@ -67,6 +67,8 @@ export const waysOn: Record<Why, { readonly lead: Ways; readonly review: Ways }>
   sign_in_ended: { lead: { ...againFirst, fix: 'signIn' }, review: { ...againFirst, fix: 'signIn' } },
   // Installed in Settings first, then tried again; or handed to an agent that is here.
   not_installed: { lead: { ...againFirst, fix: 'install' }, review: { ...anotherFirst, fix: 'install' } },
+  // The lead stopped to wait for the person's answer: they give it, and it starts again.
+  waiting_on_person: { lead: { ways: ['tell'], primary: 'tell' }, review: { ways: ['tell'], primary: 'tell' } },
 }
 
 /** The pull request, which Althar opens itself: tried again as it was, or gone on without; its host connected first, where it isn't. */
@@ -87,7 +89,7 @@ export const text = {
       case 'no_report':
         return `${agent} stopped without saying whether the step is done.`
       case 'session_ended':
-        return `${agent} closed before finishing the step.`
+        return stuck.detail === null ? `${agent} closed before finishing the step.` : `${stuck.detail} It waits for you to start it again.`
       case 'transient':
         return `${stuck.service ?? agent}'s service kept failing.`
       case 'failed_to_start':
@@ -114,6 +116,8 @@ export const text = {
         return `${agent}'s sign-in has ended.`
       case 'not_installed':
         return `${agent} isn't installed, or isn't on ${device.this}'s PATH.`
+      case 'waiting_on_person':
+        return stuck.detail ?? 'It needs your answer before it can go on.'
     }
   },
   /** How many rounds of review the task ran, not today's setting; its last settle changed code no review has seen. */
@@ -126,6 +130,7 @@ export const text = {
     carried_on: { what: 'Told it to carry on', result: 'it stopped again' },
     restarted: { what: `Started ${agent} again from the start`, result: 'it stopped again' },
     redirected: { what: 'Told it to try another way', result: 'it did the same again' },
+    handed_on: { what: 'Handed it to another model', result: 'that one stopped without a report too' },
   }),
   /** Althar crashed on the step twice in a row; quitting or restarting it never pauses a step. */
   crashed: 'Althar stopped unexpectedly twice while this step ran.',
@@ -296,7 +301,11 @@ function StuckCard({
     )
   const tried: ReadonlyArray<StuckAttempt> =
     stuck.why === 'no_report'
-      ? [{ id: 'reminded', ...text.reminded }]
+      ? [
+          { id: 'reminded', ...text.reminded },
+          // Handed on by Althar after the first agent missed too, so the card's agent is the second.
+          ...(stuck.tried?.includes('handed_on') === true ? [{ id: 'handed_on', ...text.tried(agent).handed_on }] : []),
+        ]
       : stuck.why === 'transient'
         ? [{ id: 'waited', what: text.waited.what, result: text.waited.result }]
         : (stuck.tried ?? []).map((each) => ({ id: each, ...text.tried(agent)[each] }))
@@ -336,6 +345,22 @@ function StuckCard({
   // Started again, let carry on, or tried once back, a lead's agent says so in its own words; any other tries again.
   const again = review ? undefined : out ? text.out : (text.again as Partial<Record<Why, typeof text.out>>)[stuck.why]
   const lastRound = stuck.why === 'round_limit'
+  const waiting = stuck.why === 'waiting_on_person'
+  const words = waiting
+    ? { kicker: 'Waiting on you', tell: 'Answer the lead', tellPlaceholder: 'What should it do?', send: 'Send the answer' }
+    : again !== undefined
+      ? { again: again.again(agent), tryingAgain: again.tryingAgain(agent) }
+      : review
+        ? {
+            again: text.review.again,
+            tryingAgain: text.review.tryingAgain,
+            retry: text.review.retry,
+            retryLabel: text.review.retryLabel,
+            retried: text.review.retried,
+            abandon: lastRound ? text.review.accept : text.review.skip,
+            abandoned: lastRound ? text.review.accepted : text.review.skipped,
+          }
+        : undefined
   return (
     <>
       <Stuck
@@ -357,21 +382,7 @@ function StuckCard({
         {...fixing}
         {...(offers('abandon') ? { onAbandon: () => onAnswer(request.id, { kind: 'abandon' }) } : {})}
         {...reporting(text.step[stuck.step])}
-        {...(again !== undefined
-          ? { text: { again: again.again(agent), tryingAgain: again.tryingAgain(agent) } }
-          : review
-            ? {
-                text: {
-                  again: text.review.again,
-                  tryingAgain: text.review.tryingAgain,
-                  retry: text.review.retry,
-                  retryLabel: text.review.retryLabel,
-                  retried: text.review.retried,
-                  abandon: lastRound ? text.review.accept : text.review.skip,
-                  abandoned: lastRound ? text.review.accepted : text.review.skipped,
-                },
-              }
-            : {})}
+        {...(words === undefined ? {} : { text: words })}
       />
       {browser}
     </>

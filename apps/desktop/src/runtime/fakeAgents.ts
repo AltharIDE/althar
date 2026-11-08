@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
@@ -36,7 +36,7 @@ const connection =
     : () => {
         try {
           const said = readFileSync(connectionFile, 'utf8').trim()
-          return said === 'offline' || said === 'server' || said === 'waits' ? said : undefined
+          return said === 'offline' || said === 'server' || said === 'waits' || said === 'lost' ? said : undefined
         } catch {
           return undefined
         }
@@ -118,6 +118,13 @@ export const fakeAgents = Layer.succeed(
               ...(own === undefined ? {} : { outOfUsage: own }),
               ...(slowStart === undefined ? {} : { slowStart }),
               ...(connection === undefined ? {} : { connection }),
+              ...(connectionFile === undefined
+                ? {}
+                : {
+                    closed: () => {
+                      if (connection?.() === 'lost') writeFileSync(`${connectionFile}.closed`, '')
+                    },
+                  }),
             }),
           }
         },

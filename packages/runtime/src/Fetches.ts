@@ -4,8 +4,9 @@ import { SqlClient } from 'effect/sql'
 
 import { Connections } from './Connections'
 import { forkOf } from './forks'
-import { commitOf, type FetchSource, fetchSpecs, git, gitOutcome, namedRemotes, redactUrl, remoteHeads } from './git'
+import { commitOf, type FetchSource, fetchSpecs, git, gitOutcome, hostNameOf, namedRemotes, redactUrl, remoteHeads } from './git'
 import { Instance } from './Instance'
+import { canonicalHost } from './sshHosts'
 import { type Tool, ToolRefused, ToolServer } from './ToolServer'
 
 /*
@@ -67,6 +68,8 @@ export interface Offered {
   readonly branches: ReadonlyArray<string>
   /** Why it lists less than it might: its remote couldn't be reached, or no connection lists its pull requests; null where it lists all. */
   readonly note: string | null
+  /** The host of its remote, by name, where no connection reaches it: its pull requests aren't listed until one does. */
+  readonly unconnected: string | null
   /** The host has more open pull requests than it listed: words find them, searched there. */
   readonly more: boolean
 }
@@ -105,10 +108,6 @@ const numberOf = (which: string) => {
 }
 
 const sameRepository = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) => a.join('/').toLowerCase() === b.join('/').toLowerCase()
-
-/** A host by its name, the hosts' own SSH names read as the host they are. */
-const hostName = (host: string) =>
-  ({ 'ssh.github.com': 'github.com', 'altssh.gitlab.com': 'gitlab.com' })[host.toLowerCase()] ?? host.toLowerCase()
 
 export class Fetches extends Context.Service<
   Fetches,
@@ -252,12 +251,12 @@ export class Fetches extends Context.Service<
             const ref = resolved?.ref ?? parseLink(asked)
             if (ref?.kind !== 'change') return yield* new FetchRefused({ message: 'That link isn’t to a pull request.' })
             // Its host and its repository both the remote's: a link elsewhere with the same number is another change.
-            const here = parseRemote(reach.url)
+            const here = parseRemote(yield* connections.reached(reach.url).pipe(Effect.orElseSucceed(() => reach.url)))
             if (here === null)
               return yield* new FetchRefused({
                 message: `That link is to ${ref.host}, and ${remote} isn't on a code host Althar can tell. Give the pull request's number.`,
               })
-            if (hostName(here.host) !== hostName(ref.host) || !sameRepository(here.path, ref.path))
+            if (canonicalHost(here.host) !== canonicalHost(ref.host) || !sameRepository(here.path, ref.path))
               return yield* new FetchRefused({
                 message: `That pull request is on ${ref.host}/${ref.path.join('/')}, not ${here.host}/${here.path.join('/')}.`,
               })
@@ -368,6 +367,8 @@ export class Fetches extends Context.Service<
                     : yield* signed.host
                         .listChanges(signed.repository, { state: 'open', limit: LISTED, ...(words === '' ? {} : { text: words }) })
                         .pipe(Effect.orElseSucceed(() => null))
+                // A host Althar has no connection to is named, to connect; a listing that failed on a connected one is only said.
+                const unconnected = origin !== null && signed === null ? hostNameOf(origin.url) : null
                 return {
                   repository: binding.name,
                   pullRequests: (listed?.changes ?? []).map((change) => ({
@@ -383,9 +384,10 @@ export class Fetches extends Context.Service<
                   note:
                     heads === null
                       ? `Althar couldn't reach ${binding.name}'s remote: this computer may be offline, or its host isn't connected.`
-                      : listed === null
-                        ? 'Connect its host in Settings to see its pull requests here. A number, as #12, runs one still.'
+                      : listed === null && unconnected === null
+                        ? `${binding.name}'s pull requests couldn't be listed just now.`
                         : null,
+                  unconnected,
                   more: listed?.more ?? false,
                 } satisfies Offered
               }),

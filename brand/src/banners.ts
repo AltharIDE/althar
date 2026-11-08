@@ -17,12 +17,43 @@ export interface Banner {
   scale: number
   /** Where it is used, for the README table. */
   use: string
+  /** Its two lines and the tag, where they aren't the printed look's own. */
+  words?: { line1: string; line2: string; tag: string }
+  /** `ink` prints light inks on a dark stock, for a page in dark mode. */
+  print?: 'paper' | 'ink'
   /** Written at these widths instead, as `<file>-<width>.png`, each made from the one drawing. */
   sizes?: readonly number[]
 }
 
+/** The README's header says what the site's hero does. */
+const README_WORDS = {
+  line1: 'Building software has',
+  line2: 'never felt so fast.',
+  tag: 'OPEN SOURCE · THE AGENTS YOU ALREADY PAY FOR',
+} as const
+
 export const BANNERS: readonly Banner[] = [
-  { folder: 'banner', file: 'readme-header', width: 1280, height: 400, layout: 'wide', scale: 2, use: "The repository README's header" },
+  {
+    folder: 'banner',
+    file: 'readme-header',
+    width: 1280,
+    height: 400,
+    layout: 'wide',
+    scale: 2,
+    words: README_WORDS,
+    use: "The repository README's header, on a light page",
+  },
+  {
+    folder: 'banner',
+    file: 'readme-header-ink',
+    width: 1280,
+    height: 400,
+    layout: 'wide',
+    scale: 2,
+    words: README_WORDS,
+    print: 'ink',
+    use: "The repository README's header, on a dark page",
+  },
   {
     folder: 'banner',
     file: 'github-social-preview',

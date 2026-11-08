@@ -10,6 +10,17 @@ describe('normalize', () => {
       text: 'Hi',
       messageId: 'm1',
     })
+    // Codex says whether a message is its answer or a word on the way, to an AIR client; the others say nothing of it.
+    const phased = (phase: string) =>
+      normalize({
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 'Done.' },
+        messageId: 'm3',
+        _meta: { jetbrains: { air: { version: 1, phase } } },
+      })
+    assert.deepStrictEqual(phased('final_answer'), { _tag: 'AgentMessage', text: 'Done.', messageId: 'm3', answer: true })
+    assert.deepStrictEqual(phased('commentary'), { _tag: 'AgentMessage', text: 'Done.', messageId: 'm3', answer: false })
+    assert.deepStrictEqual(phased('other'), { _tag: 'AgentMessage', text: 'Done.', messageId: 'm3' })
     const image: acp.SessionUpdate = {
       sessionUpdate: 'agent_message_chunk',
       content: { type: 'image', data: 'AAAA', mimeType: 'image/png' },

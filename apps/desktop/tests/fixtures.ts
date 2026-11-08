@@ -2,6 +2,7 @@ import type {
   AccountSignInState,
   AgentModels,
   AgentStatus,
+  AgentTools,
   AutomationCard,
   AutomationDefinition,
   AutomationRun,
@@ -827,6 +828,7 @@ export const coordinatorSnapshot = (overrides: Partial<CoordinatorSnapshot> = {}
   suggested: { agentId: 'claude-code', agentName: 'Claude Code', model: null, effort: null, available: true },
   items: [],
   earlier: false,
+  view: { cleared: false, earlierOpen: false, from: null, clearable: false, forgettable: false, version: 1 },
   host: null,
   runnables: [],
   launches: [],
@@ -1043,6 +1045,15 @@ export const skillCard: SkillReviewCard = {
 }
 
 /** A client whose every call resolves with the fixtures, and whose watch the test drives with `emit`. */
+/** The person's MCP servers and skills, as a profile that reads none has them. */
+export const agentTools: AgentTools = {
+  enabled: true,
+  servers: [],
+  skills: [],
+  serverSync: { on: false, settle: [], since: [], targets: [], errors: [] },
+  skillSync: { on: false, settle: [], since: [], targets: [], errors: [] },
+}
+
 export const fakeClient = (overrides: Partial<Client> = {}) => {
   const listeners = new Set<(event: WatchEvent) => void>()
   const watching: Array<number | undefined> = []
@@ -1094,6 +1105,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getPlanUsage: vi.fn(async () => ({ accounts: [] })),
     dismissSignInEnding: vi.fn(async () => undefined),
     getModelRooms: vi.fn(async () => []),
+    getMissedReports: vi.fn(async () => []),
     openInEditor: vi.fn(async () => true),
     openCode: vi.fn(async () => true),
     // Names no code, unless a test says what they name.
@@ -1120,6 +1132,13 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getModels: vi.fn(async () => models),
     setDefaultEffort: vi.fn(async () => {}),
     setModelBlocked: vi.fn(async () => {}),
+    getAgentTools: vi.fn(async () => agentTools),
+    setToolRoles: vi.fn(async () => {}),
+    setToolSync: vi.fn(async () => {}),
+    setToolKeptOut: vi.fn(async () => {}),
+    pickToolWay: vi.fn(async () => {}),
+    undoToolSync: vi.fn(async () => {}),
+    signInToolServer: vi.fn(async () => {}),
     getSettings: vi.fn(async () => ({
       coAuthor: { on: true, line: 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>' },
       reviewSeal: { on: true, style: 'ring' as const },
@@ -1142,6 +1161,9 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     pauseAutomation: vi.fn(async () => {}),
     runAutomationNow: vi.fn(async () => {}),
     answerTaskAsk: vi.fn(async () => {}),
+    makeItAFullTask: vi.fn(async () => {}),
+    keepTheModel: vi.fn(async () => {}),
+    undoTheModelMove: vi.fn(async () => {}),
     deleteAutomation: vi.fn(async () => {}),
     undoAutomationChange: vi.fn(async () => {}),
     answerSettingChange: vi.fn(async () => {}),
@@ -1169,6 +1191,10 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     interrupt: vi.fn(async () => {}),
     tryAgain: vi.fn(async () => {}),
     compact: vi.fn(async () => {}),
+    clearView: vi.fn(async () => {}),
+    showEarlier: vi.fn(async () => {}),
+    undoClearView: vi.fn(async () => {}),
+    forgetConversation: vi.fn(async () => {}),
     stopTask: vi.fn(async () => {}),
     setTaskResolveConflicts: vi.fn(async () => {}),
     resolveConflictsNow: vi.fn(async () => {}),
@@ -1190,6 +1216,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     startPlan: vi.fn(async () => {}),
     holdPlan: vi.fn(async () => {}),
     changePlan: vi.fn(async () => {}),
+    changeTeam: vi.fn(async () => {}),
     changeIssueDraft: vi.fn(async () => {}),
     fileIssueDraft: vi.fn(async () => {}),
     discardIssueDraft: vi.fn(async () => {}),
@@ -1432,10 +1459,12 @@ export const streamed = (
   threadId = 'th1',
   kind: 'agent_message' | 'agent_thought' = 'agent_message',
   agentId = 'claude-code',
+  sequence = 1,
 ): WatchEvent => ({
   _tag: 'Streaming',
   threadId,
   itemId,
+  sequence,
   kind,
   agentId,
   text,

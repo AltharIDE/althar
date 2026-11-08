@@ -69,6 +69,22 @@ export const Simple: Story = {}
 /** The review loop: the lead and the reviewer hand the work back and forth; the lead settles the second review. */
 export const ReviewLoop: Story = { args: { steps: LOOP } }
 
+/** A whole task as the README shows it: implemented, reviewed, settled, reviewed again until it passes, then its draft pull request. */
+export const RoundUntilClean: Story = {
+  args: {
+    rounds: [
+      { id: 'r1', by: 'You asked', said: 'EU customers are seeing the wrong VAT rate on their invoice PDFs since Monday. Can you fix it?' },
+    ],
+    steps: [
+      step('implement', 'lead', 'Implement', GraphNodeState.Done, { corner: '21m' }),
+      step('review-1', 'reviewer', 'Review 1', GraphNodeState.Done, { corner: '3m', outcome: '2 findings', warn: true }),
+      step('settle-1', 'lead', 'Settle', GraphNodeState.Done, { corner: '8m', outcome: '2 settled' }),
+      step('review-2', 'reviewer', 'Review 2', GraphNodeState.Done, { corner: '2m', outcome: 'Passed' }),
+      step('publish', 'althar', 'Pull request', GraphNodeState.Done, { corner: '9s', outcome: 'Draft #1214' }),
+    ],
+  },
+}
+
 /** A command waits for the person to allow it, mid-step: the step, and the line into it, in their colour. */
 export const AsksYou: Story = {
   args: {

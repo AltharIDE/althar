@@ -283,7 +283,7 @@ describe('questions an agent asks the person', () => {
           envelope: yield* Runtime.envelope('task.create', {}),
           projectId: project.projectId,
           title: 'Looked at',
-          description: '[lead:finish]',
+          description: '[lead:edit] [lead:finish]',
           draft: true,
         })
         const planId = yield* plans.propose({

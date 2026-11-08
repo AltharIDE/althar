@@ -41,12 +41,15 @@ export const keys = {
   planUsage: ['planUsage'] as const,
   /** Each model's room where work on it would start, in a project or (null) anywhere: read again as plan usage changes. */
   modelRooms: (projectId: string | null) => ['modelRooms', projectId] as const,
+  missedReports: ['missedReports'] as const,
   /** A project's automations, for its Automations tab and the dot on it. */
   automations: (projectId: string) => ['automations', projectId] as const,
   /** One automation, for its own page. */
   automation: (automationId: string) => ['automation', automationId] as const,
   /** The skills store: read before the skills show, and again as a skill changes, in this window or another (feed.ts). */
   skills: ['skills'] as const,
+  /** The person's MCP servers and skills, for every project (null) or one: read again after each change from Settings. */
+  agentTools: (projectId: string | null) => ['agentTools', projectId] as const,
   /** Finished tasks' folders on this computer, and the disk they are on: read again as the feed says they changed. */
   folders: ['folders'] as const,
   /** Tasks found by words, in a project or (null) in every one. */
@@ -85,6 +88,8 @@ export const continued = <S extends ThreadSnapshot | CoordinatorSnapshot>(was: S
   const last = was?.items.at(-1)
   if (was === undefined || first === undefined || last === undefined || first.sequence > last.sequence + 1) return fresh
   if (was.items.some((item) => item.sequence < first.sequence && !settled(item))) return fresh
+  // The view was cleared, opened or restored, or the conversation forgotten, since the pages held were read: they are of another thread.
+  if ('view' in was && 'view' in fresh && was.view.version !== fresh.view.version) return fresh
   return { ...fresh, items: mergeItems(was.items, fresh.items), earlier: was.earlier }
 }
 
@@ -151,11 +156,15 @@ export const reads = (client: Client) => ({
       queryFn: () => client.getModelRooms(projectId),
       staleTime: 30_000,
     }),
+  // Shared by every picker in the window: a week's count, which a step without its report adds to now and then.
+  missedReports: () => queryOptions({ queryKey: keys.missedReports, queryFn: () => client.getMissedReports(), staleTime: 60_000 }),
   automations: (projectId: string) =>
     queryOptions({ queryKey: keys.automations(projectId), queryFn: () => client.getAutomations(projectId) }),
   automation: (automationId: string) =>
     queryOptions({ queryKey: keys.automation(automationId), queryFn: () => client.getAutomation(automationId), gcTime: 5 * 60_000 }),
   skills: () => queryOptions({ queryKey: keys.skills, queryFn: () => client.listSkills() }),
+  agentTools: (projectId: string | null) =>
+    queryOptions({ queryKey: keys.agentTools(projectId), queryFn: () => client.getAgentTools(projectId) }),
   // Read again every second or so while their sizes are still being measured; after that, as the feed says.
   folders: () =>
     queryOptions({

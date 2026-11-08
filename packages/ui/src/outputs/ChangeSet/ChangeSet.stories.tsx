@@ -241,6 +241,24 @@ export const NotConnected: Story = {
   parameters: { width: ALONE },
 }
 
+/** Althar can tell no code host for it, its remote on a host it doesn't know: the card says so, beside merging it here. */
+export const NoCodeHost: Story = {
+  args: {
+    ...CHANGE_NIGHTLY,
+    checks: undefined,
+    review: undefined,
+    remote: { name: 'origin', pushed: false, ahead: 11 },
+    note: 'No code host: origin isn’t on a host Althar can open a pull request on.',
+    push: (
+      <Button variant="quiet" size="small">
+        Push to origin
+      </Button>
+    ),
+    actions: <Button variant="signal">Merge into main on this Mac</Button>,
+  },
+  parameters: { width: ALONE },
+}
+
 /**
  * All of it pushed and committed: nothing said of it. With no connection, connecting is the button, and the host's own page for its
  * pull request is a press away.

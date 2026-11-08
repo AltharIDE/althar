@@ -49,7 +49,7 @@ const READ_COPY = 'althar-read-copy'
 export const isReadCopy = (cwd: string) => existsSync(join(cwd, '.git', READ_COPY))
 
 /** Where the Flatpak keeps the bridge that runs Althar's own ssh on the device (flatpak/host-ssh.sh). */
-const HOST_SSH = '/app/bin/althar-host-ssh'
+export const HOST_SSH = '/app/bin/althar-host-ssh'
 
 /**
  * The ssh Althar's own git runs, by its environment: inside a Flatpak, the
@@ -626,6 +626,14 @@ export const fetchBranch = (cwd: string, branch: string, remote = 'origin') =>
  * becomes `https://host/…`. The record never holds a secret (docs/architecture/07).
  */
 export const redactUrl = (url: string) => url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, '$1')
+
+/** The host a remote URL names, as `gitlab.example.com`: of `https://…`, `ssh://git@…` or `git@host:path`; null where it names none (a local path). */
+export const hostNameOf = (url: string) => {
+  const found = /^[a-z][a-z0-9+.-]*:\/\/(?:[^/@]*@)?(\[[^\]]+\]|[^/:]+)/i.exec(url) ?? /^(?:[^/@:\s]+@)?([^/@:\s]+):(?!\/\/)/.exec(url)
+  const name = found?.[1]?.toLowerCase()
+  // A single letter is a Windows drive (`C:\\code`), not a host.
+  return name === undefined || name.length < 2 ? null : name
+}
 
 /** Every remote's fetch URL, without credentials. */
 export const remoteUrls = (cwd: string) =>

@@ -28,6 +28,8 @@ export type Where =
 
 /** What a window keeps between launches: its projects' tabs in order, where in each it was, the view each was last on, and the settings' tab. */
 export interface Kept {
+  /** Home is visible unless explicitly dismissed. */
+  readonly home?: boolean
   readonly open: ReadonlyArray<string>
   readonly places: Readonly<Record<string, Place>>
   readonly rooms?: Readonly<Record<string, Room>>
@@ -53,7 +55,11 @@ export const whereOf = (pathname: string): Where => {
   return { kind: 'home' }
 }
 
-/** What waits on the person in a project, as its board counts it: its calls, and its tasks ready for them. */
+/**
+ * What the projects list says waits on the person there, for choosing the tabs
+ * a window opens with before the home is read. A tab's dot is the board's own
+ * count (`yoursByProject`), never this: it is a quick reading, not the rule.
+ */
 export const yoursIn = (project: ProjectSummary): number => project.waiting + project.ready
 
 /**
@@ -77,23 +83,27 @@ export const afterClosing = (open: ReadonlyArray<string>, id: string): string | 
 }
 
 /** The tab ⌘ and a number goes to: 1 is the home, 2 to 8 the projects in order, 9 the last; undefined where there's none. */
-export const byNumber = (open: ReadonlyArray<string>, n: number): string | null | undefined => {
-  if (n === 1) return null
+export const byNumber = (open: ReadonlyArray<string>, n: number, home = true): string | null | undefined => {
+  if (home && n === 1) return null
   if (n === 9) return open.at(-1)
-  return open[n - 2]
+  return open[n - (home ? 2 : 1)]
 }
 
 /** The tab before or after the one with the window, round the ends, the home among them. */
-export const beside = (open: ReadonlyArray<string>, current: string | null, step: 1 | -1): string | null => {
-  const all = [null, ...open]
+export const beside = (open: ReadonlyArray<string>, current: string | null, step: 1 | -1, home = true): string | null => {
+  const all: ReadonlyArray<string | null> = home ? [null, ...open] : open
   const at = all.indexOf(current)
   return all[(at + step + all.length) % all.length] ?? null
 }
 
-/** A project as its tab shows it: its mark, its name, whether a task is under way, and what waits on the person. */
-export const tabOf = (project: ProjectSummary): ProjectTab => {
+/**
+ * A project as its tab shows it: its mark, its name, whether a task is under
+ * way, and what waits on the person there, as its board counts it
+ * (`yoursByProject`).
+ */
+export const tabOf = (project: ProjectSummary, yours: number): ProjectTab => {
   const { seed, ink, name } = refOf(project)
-  return { id: project.id, name, seed, ink, running: project.working > 0, yours: yoursIn(project) }
+  return { id: project.id, name, seed, ink, running: project.working > 0, yours }
 }
 
 const isRoom = (value: unknown): value is Room => Object.values(Room).some((room) => room === value)
@@ -119,7 +129,8 @@ export const keptFrom = (raw: string | null): Kept | null => {
     if ('rooms' in parsed && typeof parsed.rooms === 'object' && parsed.rooms !== null)
       for (const [id, room] of Object.entries(parsed.rooms)) if (isRoom(room)) rooms[id] = room
     const settings = 'settings' in parsed && isSection(parsed.settings) ? { settings: parsed.settings } : {}
-    return { open, places, ...(Object.keys(rooms).length === 0 ? {} : { rooms }), ...settings }
+    const home = 'home' in parsed && typeof parsed.home === 'boolean' ? { home: parsed.home } : {}
+    return { open, places, ...home, ...(Object.keys(rooms).length === 0 ? {} : { rooms }), ...settings }
   } catch {
     return null
   }

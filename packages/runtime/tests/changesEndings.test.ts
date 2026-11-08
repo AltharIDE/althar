@@ -5,7 +5,7 @@ import { makeFakeService } from '@althar/connectors/testing'
 import { BUILT, BUILT_SETTLED, DESCRIBED } from '@althar/provider-adapters/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect } from 'effect'
+import { Duration, Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Artifacts } from '../src/Artifacts'
@@ -17,6 +17,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
+import { Sessions } from '../src/Sessions'
 import { HOST, hosted, items, pushLog, repository, until } from './support'
 
 import { runtimeWith, connect, ask, cards, git, withoutReview } from './changesSupport'
@@ -141,6 +142,58 @@ describe('a task that ends in a pull request', () => {
       const published = (yield* items(ready?.threadId ?? '')).find((item) => item.kind === 'step_result' && item.content.step === 'publish')
       assert.strictEqual(published?.content.summary, "Opened draft pull request #1. Left out what the lead didn't commit: `notes.txt`.")
       assert.notInclude(git(bare, 'ls-tree', '--name-only', created.branch), 'notes.txt')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('keeps the reviewer once a real review passed and the ending waits on the person, and still changes the lead', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const projects = yield* Projects
+      const plans = yield* Plans
+      const runs = yield* Runs
+      const instance = yield* Instance
+      const queries = yield* Queries
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      const created = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'Add a retry',
+        description: '[lead:finish] [lead:edit] [review:pass]',
+        draft: true,
+      })
+      const team = (lead: string, review: string) => [
+        { key: 'implement' as const, agentId: lead, model: null, skipped: false },
+        { key: 'review' as const, agentId: review, model: null, skipped: false },
+      ]
+      const planId = yield* plans.propose({
+        projectId: project.projectId as ProjectId,
+        taskId: created.taskId,
+        steps: team('claude-code', 'codex'),
+        reason: null,
+        actorId: instance.personId,
+        startsIn: Duration.zero,
+        end: 'draft',
+      })
+      yield* plans.start(planId, instance.personId)
+      // The review runs and passes; then nothing reaches the host, so the ending (a real publish step) waits on the person.
+      const [call] = yield* until(
+        Effect.map(queries.thread(created.threadId), (snapshot) => snapshot.attention),
+        (attention) => attention.length === 1,
+      )
+      assert.deepInclude(call?.stuck, { step: 'publish', why: 'not_connected' })
+      const thread = yield* items(created.threadId)
+      assert.isTrue(thread.some((item) => item.kind === 'step_result' && item.content.step === 'review' && item.content.verdict === 'pass'))
+      // The run isn't over, yet its review is done: the reviewer stays, and the lead still changes.
+      assert.strictEqual((yield* cards(project.projectId))[0]?.reviewerChange, 'never')
+      const refused = yield* Effect.flip(
+        runs.changeTeam({ taskId: created.taskId, steps: team('claude-code', 'claude-code'), actorId: instance.personId }),
+      )
+      assert.strictEqual((refused as { why?: string }).why, 'review_done')
+      // The review stays codex's; only the lead changes.
+      const lead = yield* runs.changeTeam({ taskId: created.taskId, steps: team('codex', 'codex'), actorId: instance.personId })
+      assert.deepStrictEqual([lead.lead?.step.agentId, lead.review], ['codex', undefined])
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
@@ -461,6 +514,61 @@ describe('a task that ends in a pull request', () => {
       })
       const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready')
       assert.isNull(ready?.change)
+    }).pipe(Effect.provide(runtimeWith({})))
+  })
+
+  it.live('leaves a task whose lead is at work open when the person goes on without its pull request', () => {
+    const { working } = hosted()
+    return Effect.gen(function* () {
+      const projects = yield* Projects
+      const plans = yield* Plans
+      const runs = yield* Runs
+      const sessions = yield* Sessions
+      const instance = yield* Instance
+      const queries = yield* Queries
+      const sql = yield* SqlClient.SqlClient
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      const created = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'Add a retry',
+        description: '[lead:finish] [lead:edit]',
+        draft: true,
+      })
+      const planId = yield* plans.propose({
+        projectId: project.projectId as ProjectId,
+        taskId: created.taskId,
+        steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+        reason: null,
+        actorId: instance.personId,
+        startsIn: Duration.zero,
+        end: 'draft',
+      })
+      yield* plans.start(planId, instance.personId)
+      const [call] = yield* until(
+        Effect.map(queries.thread(created.threadId), (snapshot) => snapshot.attention),
+        (attention) => attention.length === 1,
+      )
+      // The person writes again, and the lead starts another round before the pull request opens.
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', { threadId: created.threadId }),
+        threadId: created.threadId,
+        body: 'Log each retry too. [lead:hang]',
+      })
+      yield* until(
+        Effect.map(sessions.running(created.threadId), (one) => Option.exists(one, (running) => running.turnRunning)),
+        (running) => running,
+      )
+      const refused = yield* Effect.flip(
+        runs.answerStuck({
+          envelope: yield* Runtime.envelope('attention.answer_stuck', {}),
+          attentionId: call?.id ?? '',
+          answer: { kind: 'abandon' },
+        }),
+      )
+      assert.deepInclude(refused, { _tag: 'ToolRefused' })
+      const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${created.taskId}`
+      assert.strictEqual(task?.state, 'open')
     }).pipe(Effect.provide(runtimeWith({})))
   })
 })

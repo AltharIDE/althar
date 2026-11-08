@@ -66,6 +66,8 @@ export interface TaskHeaderProps<F extends string> {
   onFace?: (face: F) => void
   /** What the person does to it next, inside where it stands: a finished task's Done and Keep for later (SettleWays, place="header"). */
   beside?: ReactNode
+  /** Its parts (TaskParts), just before the faces: the faces, Run and the menu never move. */
+  parts?: ReactNode
   /** What else it opens, at the end: ChromeButtons. */
   actions?: ReactNode
   className?: string
@@ -84,6 +86,7 @@ export function TaskHeader<F extends string>({
   face,
   onFace,
   beside,
+  parts,
   actions,
   className,
   text,
@@ -118,6 +121,7 @@ export function TaskHeader<F extends string>({
           {beside}
         </span>
       )}
+      {parts != null && <span className={s.parts}>{parts}</span>}
       {faces && faces.length > 1 && face !== undefined && onFace && (
         <Segmented label={t.faces} options={[...faces]} value={face} onChange={onFace} className={s.faces} />
       )}

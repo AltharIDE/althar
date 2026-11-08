@@ -69,4 +69,7 @@ export const checksums: Readonly<Record<string, string>> = {
   '0063_skills': 'ac2b8ba12660d4a876e22c87ae030f75ab3c93dcd6596ed57835feb4a2923ae2',
   '0064_task_parents': 'd81581dbe588087a153167ffafcf7f6734dc643212099c2db1e44b76884675d8',
   '0065_setting_changes': '665482826650ab9f0ede11173c55fd6dc49ac26dd2252c259f8feea6f8164ff6',
+  '0066_cleared_view': '5efc4e4410fb19c19521c65ba7db8bd4b514effd9e341e1226fc3d5db09417e1',
+  '0067_fast_lane': '40aea3565549b777401c1bd8a8b34d2fc806ecffb6253fea5fa7320469eb5111',
+  '0068_reviews_after_merge': 'a57cffdcbf9d31a4263dde84ed6243fd16db5d42c45ac447d0cde27397431f2a',
 }

@@ -44,6 +44,7 @@ import {
 import { NotConnected } from '../src/Connections'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
+import { ALWAYS } from '../src/sandboxReach'
 import { Folders } from '../src/Folders'
 import { listProcesses, marksOf, WORK } from '../src/machine'
 import { itemOf, stuckOf } from '../src/Queries'
@@ -156,6 +157,17 @@ const idle = (thread: ThreadSnapshot) => thread.session !== null && !thread.sess
 const texts = (thread: ThreadSnapshot) => thread.items.map((item) => ('text' in item.content ? item.content.text : item.kind))
 
 describe('the API', () => {
+  it.live('Try again refuses visibly when there is no failed turn or ended session', () =>
+    Effect.gen(function* () {
+      const { client, grant } = yield* connected()
+      const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+      const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'A fresh task' })
+      const failure = yield* Effect.flip(client.TryAgain({ commandId: commandId(), threadId: task.threadId }))
+      assert.instanceOf(failure, ApiError)
+      assert.strictEqual(failure.message, 'There is no failed turn or lost connection to try again.')
+    }).pipe(Effect.scoped),
+  )
+
   it.live('reads what a running command has printed so far, and what it printed once its turn was stopped', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -349,6 +361,8 @@ describe('the API', () => {
         assert.isAbove(change?._tag === 'Changed' ? change.cursor : 0, listed.cursor)
         const [live] = (yield* Fiber.join(streamed)) as ReadonlyArray<WatchEvent>
         assert.strictEqual(live?._tag === 'Streaming' ? live.threadId : undefined, task.threadId)
+        // It says where the thread places the item, which a window with a cleared view reads against the mark.
+        assert.isAbove(live?._tag === 'Streaming' ? live.sequence : 0, 0)
 
         // A page of the newest, reaching back to the start of its round, what the person said; then the one before it, and one item by id.
         const newest = yield* client.GetThread({ threadId: task.threadId, limit: 1 })
@@ -661,6 +675,8 @@ describe('the API', () => {
       Effect.gen(function* () {
         const { client, grant } = yield* connected()
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        // Asking about more than what can't be undone, as the person may: a deploy asks (ADR-097).
+        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, allowEverything: false })
         const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Deploy' })
         yield* client.SwitchAgent({ commandId: commandId(), threadId: task.threadId, agentId: 'codex', model: 'large' })
         yield* until(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
@@ -766,7 +782,7 @@ describe('the API', () => {
       Effect.gen(function* () {
         const { client, grant } = yield* connected()
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
-        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, permissions: 'ask' })
+        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, permissions: 'ask', allowEverything: false })
         const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Look' })
         yield* client.SwitchAgent({ commandId: commandId(), threadId: task.threadId, agentId: 'codex', model: 'large' })
         yield* until(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
@@ -1182,8 +1198,8 @@ describe('project rules, through the API', () => {
           projectId: project.id,
           revision: 1,
           permissions: 'rules',
-          allowEverything: false,
-          alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'],
+          allowEverything: true,
+          alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside', 'speak'],
           never: [],
           alwaysAllow: [],
           commands: [],
@@ -1201,9 +1217,10 @@ describe('project rules, through the API', () => {
           moveIssues: true,
           // Skill and OpenSpec files stay out of the repositories, and off the remote, until the person says.
           repositoryFiles: { writeSkills: false, writeOpenSpec: false, pushProtected: false },
-          // A repository with no packages, on no host: only what every lead runs outside its sandbox.
+          // A repository with no packages, on no host: only what every lead runs outside its sandbox, plus the dev servers and
+          // test runners ADR-097 lets leave it by hand as the project’s run command does.
           sandbox: {
-            commands: ['ps', 'env -i'],
+            commands: [...ALWAYS],
             hosts: [],
             edits: { commands: { added: [], removed: [] }, hosts: { added: [], removed: [] } },
           },
@@ -1265,7 +1282,10 @@ describe('project rules, through the API', () => {
           projectId: project.id,
           sandbox: { commands: { added: ['bunx  playwright *'], removed: ['env -i'] } },
         })
-        assert.deepStrictEqual([trimmed.sandbox.commands, trimmed.sandbox.hosts], [['ps', 'bunx playwright'], ['registry.acme.dev']])
+        assert.deepStrictEqual(
+          [trimmed.sandbox.commands, trimmed.sandbox.hosts],
+          [ALWAYS.filter((command) => command !== 'env -i'), ['registry.acme.dev']],
+        )
         // Back to deciding the ending by the host, and every account; the rest stays.
         const back = yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, end: null, onlyAccounts: null })
         assert.deepStrictEqual(
@@ -1930,6 +1950,65 @@ describe('the coordinator, through the API', () => {
     ),
   )
 
+  it.live('changes the team of a task at work, and says in its thread who changed what', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const steps = (lead: string, review: string, model: string | null = null) => [
+          { key: 'implement' as const, agentId: lead, model: null, skipped: false },
+          { key: 'review' as const, agentId: review, model, skipped: false },
+        ]
+        const task = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'Tidy the README',
+          description: 'Short. [lead:wait]',
+          steps: steps('claude-code', 'codex'),
+        })
+        const threadId = (yield* until(client.GetCoordinator({ projectId: project.id }), (snapshot) =>
+          snapshot.items.some((item) => item.kind === 'task' && item.content.phase === 'running'),
+        )).items.flatMap((item) => (item.kind === 'task' ? [item.content.threadId] : []))[0]!
+        const titles = () =>
+          Effect.map(client.GetThread({ threadId, limit: 100 }), (thread) =>
+            thread.items.flatMap((item) => (item.kind === 'notice' && item.content.title.startsWith('You ') ? [item.content.title] : [])),
+          )
+        // A change of nothing is no line; the lead and the reviewer each get one, and the card has the reviewer's standing.
+        yield* client.ChangeTeam({ commandId: commandId(), taskId: task.id, steps: steps('claude-code', 'codex') })
+        assert.deepStrictEqual(yield* titles(), [])
+        yield* client.ChangeTeam({ commandId: commandId(), taskId: task.id, steps: steps('codex', 'claude-code', 'large') })
+        assert.deepStrictEqual(yield* titles(), [
+          "You changed the lead to Fake codex's default model. It takes over from its next turn.",
+          'You changed the review to Claude Large',
+        ])
+        // The review taken off is said too, and the card reads as the team now stands.
+        yield* client.ChangeTeam({
+          commandId: commandId(),
+          taskId: task.id,
+          steps: [steps('codex', 'claude-code')[0]!, { ...steps('codex', 'claude-code')[1]!, skipped: true }],
+        })
+        assert.strictEqual((yield* titles()).at(-1), 'You removed the review')
+        const card = (yield* client.GetBoard({ projectId: project.id })).tasks.find((one) => one.taskId === task.id)
+        assert.deepStrictEqual(
+          [card?.plan?.steps.map((step) => [step.agentId, step.skipped]), card?.reviewerChange],
+          [
+            [
+              ['codex', false],
+              ['claude-code', true],
+            ],
+            'now',
+          ],
+        )
+        // A task that isn't there, and a settled one, are refused in words.
+        assert.strictEqual(
+          (yield* Effect.flip(client.ChangeTeam({ commandId: commandId(), taskId: 'tsk_missing', steps: steps('codex', 'codex') })))
+            .message,
+          "That task isn't there any more.",
+        )
+      }),
+    ),
+  )
+
   it.live('starts a task the person plans themselves, and shows it as a card', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -1939,7 +2018,7 @@ describe('the coordinator, through the API', () => {
           commandId: commandId(),
           projectId: project.id,
           title: 'Tidy the README',
-          description: 'Short. [lead:finish] [review:pass]',
+          description: 'Short. [lead:finish] [lead:edit] [review:pass]',
           steps: [
             { key: 'implement' as const, agentId: 'codex', model: null, skipped: false },
             { key: 'review' as const, agentId: 'claude-code', model: 'large', skipped: false },
@@ -2865,6 +2944,12 @@ describe('thread items', () => {
     disposition: input?.disposition ?? null,
     decision,
     createdAt: '2026-09-29T12:00:00.000Z',
+  })
+
+  it('keeps a session’s skills line that said nothing new from the window', () => {
+    const line = { source: 'runtime', role: 'skills', title: 'Codex could see 2 skills', skills: [] }
+    assert.strictEqual(itemOf(row('notice', { ...line, hidden: true })), undefined)
+    assert.strictEqual(itemOf(row('notice', line))?.kind, 'notice')
   })
 
   it('gives each kind its own content, and leaves out kinds the window has no use for yet', () => {

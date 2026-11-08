@@ -131,7 +131,7 @@ const reviewing = (file: string, out?: string, later = false) =>
       projectId: project.projectId,
       title: 'Review after a restart',
       // Later, its first round finds something, the lead settles it, and the second reviews until it is stopped.
-      description: later ? '[lead:finish] [review:findings] [review:wait-later]' : '[lead:finish] [review:wait]',
+      description: later ? '[lead:finish] [lead:edit] [review:findings] [review:wait-later]' : '[lead:finish] [lead:edit] [review:wait]',
       draft: true,
     })
     const planId = yield* plans.propose({
