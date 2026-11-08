@@ -145,7 +145,7 @@ import { LeftBehind } from './LeftBehind'
 import { spanOf } from './stallWatch'
 import { addItem, updateItem } from './threads'
 import { readReviewed, reviewOf } from './reviewing'
-import { refreshRemotes } from './recordedRemotes'
+import { RECENT, refreshRemotes } from './recordedRemotes'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
 import { summarize, words } from './words'
 import { BETWEEN_AGENTS_MS, betweenAgents } from './needsYou'
@@ -1158,6 +1158,8 @@ export class Changes extends Context.Service<
       const hostsFor = (projectId: string, taskId?: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // Its repositories' remotes as their clones have them: one added while Althar runs is found here too.
+          yield* refreshRemotes(instance.deviceId, taskId === undefined ? { projectId } : { taskId }, RECENT)
           const bindings =
             taskId === undefined
               ? yield* sql<{ remotes: string }>`
@@ -6350,7 +6352,7 @@ export class Changes extends Context.Service<
       )
       yield* Effect.forkScoped(afterOpen(startup('settled-pull-requests', readSettled)))
 
-      // Each repository's remotes as its clone has them, once a launch: a remote added since, or an SSH alias read now, is known.
+      // Each repository's remotes as its clone has them, once a launch: a remote added since is known.
       yield* Effect.forkScoped(afterOpen(startup('repository-remotes', provide(refreshRemotes(instance.deviceId, 'all')))))
 
       // A review after a merge that didn't start is tried again, at once and with each listening turn, until it does.
