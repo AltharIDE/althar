@@ -15,6 +15,7 @@
     "test": "vp test run",
     "verify": "bun run check && bun run test",
     "export:reels": "bun scripts/reels.ts",
+    "export:drawings": "bun scripts/drawings.ts",
     "seal-glyphs": "bun scripts/seal-glyphs.ts"
   },
   "devDependencies": {

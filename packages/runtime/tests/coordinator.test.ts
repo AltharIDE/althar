@@ -1208,7 +1208,7 @@ describe('a step that needs the person', () => {
 
 /** Calls one of Althar's tools as a session with this access would. */
 describe('the coordinator', () => {
-  it.live('speaks when spoken to, in its read-only copies, and is refused a write', () =>
+  it.live('speaks when spoken to and may write in its own disposable copies', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const sessions = yield* Sessions
@@ -1225,13 +1225,13 @@ describe('the coordinator', () => {
       )
       // It works in its copy of the repository, detached at the default branch.
       const [session] = yield* sql<{ config: string }>`SELECT config FROM provider_sessions WHERE thread_id = ${threadId}`
-      assert.strictEqual(JSON.parse(session?.config ?? '{}').mode, 'read-only')
+      assert.strictEqual(JSON.parse(session?.config ?? '{}').mode, 'ask')
       yield* say(threadId, scenarios.fileEdit)
       const [decision] = yield* until(
         sql<{ outcome: string; reason: string }>`SELECT outcome, reason FROM decisions`,
         (rows) => rows.length === 1,
       )
-      assert.deepStrictEqual({ ...decision }, { outcome: 'reject', reason: 'This role only reads: a change is a task.' })
+      assert.deepStrictEqual({ ...decision }, { outcome: 'allow', reason: 'Allowed by the project rules.' })
       // Nothing it asked reached the person.
       const [calls] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM attention_requests`
       assert.strictEqual(calls?.n, 0)
@@ -1776,20 +1776,20 @@ describe('the coordinator, a trusted reader in its own copies (ADR-058)', () => 
       assert.strictEqual((yield* ran('git log --oneline "$(git describe --tags --abbrev=0)..HEAD"'))?.outcome, 'allow')
       assert.strictEqual((yield* ran('uptime'))?.outcome, 'allow')
       const fetched = yield* ran('git fetch origin')
-      assert.strictEqual(fetched?.outcome, 'reject')
-      assert.include(fetched?.reason ?? '', 'this role only reads')
+      assert.strictEqual(fetched?.outcome, 'allow')
+      assert.strictEqual((yield* ran('diff <(printf a) <(printf b)'))?.outcome, 'allow')
       // Its session's, not the one Althar lists models with.
       const contained = sessionMetas.findLast((meta) => meta.options?.contained !== undefined)?.options?.contained
       const folder = join(config.worktreeRoot, project?.slug ?? '', '.coordinator')
       assert.strictEqual(contained?.folder, folder)
       const real = (path: string) => realpathSync(path)
       const { allowed = [], denied = [] } = contained?.reads ?? {}
-      // None of the home folder, the person's checkout or the task folders' root (every project's), but its own folder and what it fetches from.
-      assert.includeMembers([...denied], [real(homedir()), real(config.worktreeRoot)])
+      // Ordinary files are readable; only secret paths and the task folders' root (every project's) are denied.
+      assert.notInclude(denied, real(homedir()))
+      assert.include(denied, real(config.worktreeRoot))
       const [checkout] = yield* sql<{ path: string }>`SELECT path FROM repository_locations`
-      assert.include(denied, real(checkout?.path ?? ''))
-      assert.includeMembers([...allowed], [real(folder), real(join(config.worktreeRoot, project?.slug ?? '', '.coordinator-mirrors'))])
-      assert.notInclude(allowed, real(checkout?.path ?? ''))
+      assert.notInclude(denied, real(checkout?.path ?? ''))
+      assert.include(denied, join(homedir(), '.ssh'))
       // Nothing it is given back holds a key: no place of the person's keys is in one, nor one in a place of keys.
       for (const place of SECRET_PLACES) {
         const secret = join(homedir(), place)
@@ -1821,13 +1821,13 @@ describe('the coordinator, a trusted reader in its own copies (ADR-058)', () => 
       yield* settled(2)
       // Refused, the agent carries on past it in the same turn, and no turn of its own follows to explain it.
       const before = (yield* said).length
-      yield* say(threadId, `${scenarios.run}git fetch origin`)
-      assert.strictEqual((yield* decided('git fetch origin'))[0]?.outcome, 'reject')
+      yield* say(threadId, `${scenarios.run}touch /another-folder/file`)
+      assert.strictEqual((yield* decided('touch /another-folder/file'))[0]?.outcome, 'reject')
       yield* settled(3)
       const refused = (yield* said).slice(before)
       assert.deepStrictEqual(
         refused.filter((item) => item.kind === 'agent_message').map((item) => item.text),
-        ['chosen=decline'],
+        ['chosen=declinecarrying on without it'],
       )
       assert.notInclude(JSON.stringify(refused), 'Carry on without it')
       // Nor does the person's next message carry it: the agent worked around it already.

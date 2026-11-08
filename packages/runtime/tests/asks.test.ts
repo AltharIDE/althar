@@ -3,14 +3,16 @@ import { holds, scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
+import { TestClock } from 'effect/testing'
 
 import { Coordinator } from '../src/Coordinator'
+import { Models } from '../src/Models'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { addItem } from '../src/threads'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, items, notices, task, turns, until, runtime } from './support'
+import { callTool, items, notices, onTestClock, task, turns, until, runtime } from './support'
 
 /*
  * A task's thread reads in rounds: each starts with an ask (what the person
@@ -130,13 +132,18 @@ describe('what the lead is given shows where it reads it', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('leaves what an agent cut short by its usage limit was given where it read it, when the next agent takes it', () =>
+  it.effect('leaves what an agent cut short by its usage limit was given where it read it, when the next agent takes it', () =>
     Effect.gen(function* () {
+      // Takeover names the model once discovery has finished; do not race that discovery.
+      const models = yield* Models
+      yield* until(models.catalog, (catalog) => catalog.every((agent) => !agent.probing))
       const { task: created } = yield* task()
       yield* begin(created.threadId, 'claude-code')
       yield* say(created.threadId, scenarios.quota)
       // Out of usage, the work moves to another agent, which is given what the person said again.
-      yield* until(turns(created.threadId), (rows) => rows.length >= 3 && rows.every(done))
+      yield* until(turns(created.threadId), (rows) =>
+        rows.some((row) => row.state === 'completed' && row.prompt?.startsWith('You are taking over a task')),
+      )
       const shown = (yield* said(created.threadId)).map(([kind, text]) => [kind, text.split('\n')[0]])
       // What the person said stays before what the first agent made of it, not after the agent that carried on.
       assert.deepStrictEqual(shown.slice(0, 3), [
@@ -144,11 +151,18 @@ describe('what the lead is given shows where it reads it', () => {
         ['notice', 'The Claude account has no available quota. Resets at 2026-09-29T05:00:00Z'],
         ['agent_message', 'Claude AI usage limit reached|1759075200'],
       ])
-      assert.deepStrictEqual(shown.slice(3, 5), [
-        ['notice', 'Fake claude-code ran out of usage. Fake codex takes over.'],
-        ['agent_message', 'echo: You are taking over a task from Fake claude-code, in the same worktree. Its record so far is below.'],
+      assert.strictEqual(shown[3]?.[0], 'notice')
+      assert.match(shown[3]?.[1] ?? '', /^Fake claude-code ran out of usage, until .+\. Fake codex takes over, on Small\.$/)
+      assert.deepStrictEqual(shown[4], [
+        'agent_message',
+        'echo: You are taking over a task from Fake claude-code, in the same worktree. Its record so far is below.',
       ])
-    }).pipe(Effect.provide(withQueries())),
+    }).pipe(
+      Effect.provide(withQueries()),
+      // The recorded quota error resets on 2025-09-28: it must still be out of usage while the replacement starts.
+      (test) => Effect.andThen(TestClock.setTime(Date.parse('2025-09-27T12:00:00Z')), test),
+      onTestClock,
+    ),
   )
 
   it.live('says what the coordinator passed on once the lead has it: after the turn it was sent during, or the turn it stopped', () =>

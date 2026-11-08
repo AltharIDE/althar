@@ -1437,7 +1437,7 @@ export class Launches extends Context.Service<
        */
       const screenshotTool: Tool = {
         name: 'screenshot',
-        description: `Takes a screenshot of a web page served on this computer, such as what run_project runs or a dev server or Storybook on localhost, and gives it back to you as a picture, at 1×. Althar draws it itself, headless, outside your sandbox, so use it rather than starting a browser yourself. The viewport is ${VIEWPORT.width}×${VIEWPORT.height} without width and height; full_page takes the whole page, as tall as it is; selector takes only the first element a CSS selector finds. It waits for the page to load, not for what it fetches after: for a page that fills in later, take it again. Pages on the internet aren't taken. Each picture stays in your context, so take only what you need to see.`,
+        description: `Takes a screenshot of any HTTP or HTTPS web page, including a dev server or Storybook on localhost, and gives it back to you as a picture, at 1×. Althar draws it itself, headless, outside your sandbox, so use it rather than starting a browser yourself. The viewport is ${VIEWPORT.width}×${VIEWPORT.height} without width and height; full_page takes the whole page, as tall as it is; selector takes only the first element a CSS selector finds. It waits for the page to load, not for what it fetches after: for a page that fills in later, take it again. Each picture stays in your context, so take only what you need to see.`,
         input: {
           type: 'object',
           properties: {

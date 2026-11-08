@@ -172,7 +172,8 @@ describe("the coordinator's copies", () => {
       folder: join(projectFolder, '.coordinator'),
       mirrors: join(projectFolder, '.coordinator-mirrors'),
     }
-    const within = (path: string, places: ReadonlyArray<string>) => places.some((given) => path === given || path.startsWith(`${given}/`))
+    const within = (path: string, places: ReadonlyArray<string>) =>
+      places.some((given) => path === given || path.startsWith(`${given}${sep}`))
     const holds = (gitConfig: string, xdgConfig?: string) => {
       mkdirSync(gitConfig, { recursive: true })
       writeFileSync(join(gitConfig, 'config'), '[core]\n')
@@ -181,6 +182,10 @@ describe("the coordinator's copies", () => {
       assert.isFalse(within(join(gitConfig, 'credentials'), allowed), 'the credential store is given back')
       assert.isTrue(within(join(gitConfig, 'credentials'), denied), 'the credential store isn’t held from it')
       assert.isTrue(within(join(gitConfig, 'config'), allowed), 'git’s config isn’t given back')
+      for (const ordinary of [join(home, 'Documents'), join(home, 'Projects', 'meridian')])
+        assert.isFalse(within(ordinary, denied), 'ordinary files are readable')
+      assert.isTrue(within(join(home, '.ssh', 'id_ed25519'), denied), 'secret files remain blocked')
+      assert.isTrue(within(projectFolder, denied), 'the task folders’ root isn’t held from it')
     }
     holds(join(home, '.config', 'git'))
     // Where XDG_CONFIG_HOME is set, outside the home folder, as git reads it.

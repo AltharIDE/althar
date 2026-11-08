@@ -44,6 +44,7 @@ import {
 import { NotConnected } from '../src/Connections'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
+import { ALWAYS } from '../src/sandboxReach'
 import { Folders } from '../src/Folders'
 import { listProcesses, marksOf, WORK } from '../src/machine'
 import { itemOf, stuckOf } from '../src/Queries'
@@ -1217,9 +1218,10 @@ describe('project rules, through the API', () => {
           moveIssues: true,
           // Skill and OpenSpec files stay out of the repositories, and off the remote, until the person says.
           repositoryFiles: { writeSkills: false, writeOpenSpec: false, pushProtected: false },
-          // A repository with no packages, on no host: only what every lead runs outside its sandbox.
+          // A repository with no packages, on no host: only what every lead runs outside its sandbox, plus the dev servers and
+          // test runners ADR-097 lets leave it by hand as the project’s run command does.
           sandbox: {
-            commands: ['ps', 'env -i'],
+            commands: [...ALWAYS],
             hosts: [],
             edits: { commands: { added: [], removed: [] }, hosts: { added: [], removed: [] } },
           },
@@ -1281,7 +1283,10 @@ describe('project rules, through the API', () => {
           projectId: project.id,
           sandbox: { commands: { added: ['bunx  playwright *'], removed: ['env -i'] } },
         })
-        assert.deepStrictEqual([trimmed.sandbox.commands, trimmed.sandbox.hosts], [['ps', 'bunx playwright'], ['registry.acme.dev']])
+        assert.deepStrictEqual(
+          [trimmed.sandbox.commands, trimmed.sandbox.hosts],
+          [ALWAYS.filter((command) => command !== 'env -i'), ['registry.acme.dev']],
+        )
         // Back to deciding the ending by the host, and every account; the rest stays.
         const back = yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, end: null, onlyAccounts: null })
         assert.deepStrictEqual(
@@ -2940,6 +2945,12 @@ describe('thread items', () => {
     disposition: input?.disposition ?? null,
     decision,
     createdAt: '2026-09-29T12:00:00.000Z',
+  })
+
+  it('keeps a session’s skills line that said nothing new from the window', () => {
+    const line = { source: 'runtime', role: 'skills', title: 'Codex could see 2 skills', skills: [] }
+    assert.strictEqual(itemOf(row('notice', { ...line, hidden: true })), undefined)
+    assert.strictEqual(itemOf(row('notice', line))?.kind, 'notice')
   })
 
   it('gives each kind its own content, and leaves out kinds the window has no use for yet', () => {

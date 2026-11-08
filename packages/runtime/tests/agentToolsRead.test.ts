@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
@@ -155,8 +155,8 @@ describe('what Settings reads', () => {
           kind: 'differs',
           name: 'notes',
           ways: [
-            { agent: 'claude', runs: '~/.claude/skills/notes' },
-            { agent: 'codex', runs: '~/.agents/skills/notes' },
+            { agent: 'claude', runs: join('~', '.claude', 'skills', 'notes') },
+            { agent: 'codex', runs: join('~', '.agents', 'skills', 'notes') },
           ],
         },
       ])
@@ -200,7 +200,7 @@ describe('an agent’s command, as sync runs it', () => {
     const missing = await runIn(home, { PATH: empty })('codex', ['mcp', 'list'])
     assert.strictEqual(missing.code, 127)
     assert.strictEqual(missing.output, 'Its `codex` command isn’t on this computer, so Codex wasn’t changed.')
-    const failing = await runIn(home, { PATH: '/bin:/usr/bin' })('sh', ['-c', 'echo nope >&2; exit 3'])
+    const failing = await runIn(home, { PATH: empty })(process.execPath, ['-e', 'process.stderr.write("nope\\n"); process.exit(3)'])
     assert.deepStrictEqual(failing, { code: 3, output: 'nope\n' })
   })
 
@@ -209,7 +209,7 @@ describe('an agent’s command, as sync runs it', () => {
     assert.strictEqual(env['CODEX_HOME'], '/elsewhere/codex')
     assert.strictEqual(env['HOME'], '/home/someone')
     assert.strictEqual(env['LANG'], 'en_GB.UTF-8')
-    assert.include(env['PATH'], '/home/someone/.local/bin')
-    assert.isFalse(env['PATH']!.startsWith(':'))
+    assert.include(env['PATH']!.split(delimiter), join('/home/someone', '.local', 'bin'))
+    assert.isFalse(env['PATH']!.startsWith(delimiter))
   })
 })
