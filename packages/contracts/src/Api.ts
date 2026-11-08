@@ -2871,8 +2871,8 @@ export const StuckStep = Schema.Struct({
   round: Schema.Number,
   /** Review findings the lead hasn't settled. */
   open: Schema.Number,
-  /** What Althar did before asking: told the agent to carry on, started it afresh, or told it to try another way. */
-  tried: Schema.optional(Schema.Array(Schema.Literals(['carried_on', 'restarted', 'redirected']))),
+  /** What Althar did before asking: told the agent to carry on, started it afresh, told it to try another way, or handed the step to another model. */
+  tried: Schema.optional(Schema.Array(Schema.Literals(['carried_on', 'restarted', 'redirected', 'handed_on']))),
   /** For a usage limit: the account that reached it, and when it resets, where it said, and who could take the step over. */
   limit: Schema.optional(LimitCall),
   /** For a service that kept failing: its name. */

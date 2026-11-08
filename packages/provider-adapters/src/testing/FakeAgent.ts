@@ -296,6 +296,12 @@ export interface FakeAgentOptions {
   /** Leave a permission request open when the turn is cancelled, for Althar to answer. */
   readonly keepsRequests?: boolean
   /**
+   * Never reports a step: a lead or a reviewer says it is done in words and
+   * ends its turn without Althar's tools, every turn, as an agent whose
+   * session lacks them does (OpenCode Go's, #692). The coordinator plays on.
+   */
+  readonly noReport?: true
+  /**
    * Out of usage: every prompt fails with Claude Code's usage-limit message,
    * until `until` (in milliseconds, which the message gives as its reset), or
    * for good, saying no reset time.
@@ -1917,6 +1923,11 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         /(^|\n\n)(Checks failed on |Your agent stopped)/.test(text)
       ) {
         connections.get(shared(client))?.close()
+        return ended()
+      }
+      // One that never reports says its work is done in words, without Althar's tools.
+      if (options.noReport === true && !session.coordinator) {
+        await say("Done. Althar's finish_step and report_review aren't among my tools.")
         return ended()
       }
       // With Althar's tools, a marker in the prompt says which role to play; but what the person names as a scenario is played
