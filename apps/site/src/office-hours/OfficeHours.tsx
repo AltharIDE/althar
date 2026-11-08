@@ -12,21 +12,25 @@ import s from './OfficeHours.module.css'
  * The night window the other pages open on, with the call's length, the
  * time where Balazs is and the price along its top, and the invitation and
  * the booking in it. Bugs go to the issues, by a quiet link beside the
- * booking, so a call doesn't become triage. Under it, on paper, how the
- * twenty minutes usually go, as a rail, beside the few things worth knowing.
+ * booking, so a call doesn't become triage. Under it, on paper, the
+ * things people bring, then the few things worth knowing.
  */
 
 /** Where Balazs is: his clock in the window's readout. */
 const ZONE = 'Europe/London'
 
-const MINUTES = [
-  { at: '0′', name: 'Hello', note: 'Who you are, and what you’re building.' },
-  {
-    at: '5′',
-    name: 'Your setup, or your question',
-    note: 'Althar on your machine with your agents signed in, or whatever’s on your mind.',
-  },
-  { at: '18′', name: 'What to try next', note: 'Something you can do on your own the same day.' },
+/** What people bring: anything about building with agents, and Althar's own. */
+const TOPICS = [
+  'Getting Althar running on your repository',
+  'Which agent or model for which job',
+  'Using the plans you already pay for',
+  'A second agent reviewing the first',
+  'Leaving agents working while you’re away',
+  'Running into usage limits',
+  'Agents that drift, loop or go quiet',
+  'Bringing agents into how your team works',
+  'Something you wish Althar did',
+  'Anything else about coding with agents',
 ]
 
 const GOOD_TO_KNOW = [
@@ -61,10 +65,10 @@ export function OfficeHours() {
             className={s.window}
             deck={
               <>
-                <Readout label="Length" href="#how">
+                <Readout label="Length" href="#topics">
                   <b>20 min</b>
                 </Readout>
-                <Readout label="For me, in London" href="#how" at="mid">
+                <Readout label="For me, in London" href="#topics" at="mid">
                   <b>{time ?? 'London'}</b>
                 </Readout>
                 <Readout label="Price" href={LINKS.officeHours} at="end">
@@ -98,22 +102,15 @@ export function OfficeHours() {
         </Night>
 
         <div className={s.sheet}>
-          <section id="how" className={s.part} aria-labelledby="how-h">
-            <h2 id="how-h" className={s.h2}>
-              How the twenty minutes go
+          <section id="topics" className={s.part} aria-labelledby="topics-h">
+            <h2 id="topics-h" className={s.h2}>
+              Things to bring
             </h2>
-            <ol className={s.rail}>
-              {MINUTES.map((m) => (
-                <li key={m.at}>
-                  <span className={s.at}>{m.at}</span>
-                  <span className={s.dot} aria-hidden="true" />
-                  <span className={s.stop}>
-                    <b>{m.name}</b>
-                    <span>{m.note}</span>
-                  </span>
-                </li>
+            <ul className={s.topics}>
+              {TOPICS.map((topic) => (
+                <li key={topic}>{topic}</li>
               ))}
-            </ol>
+            </ul>
           </section>
 
           <section id="good-to-know" className={s.part} aria-labelledby="good-to-know-h">

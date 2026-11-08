@@ -1,7 +1,7 @@
 /* Office hours: the night window with the invitation and the booking in it;
-   on paper under it, how the call goes as a rail beside the few things worth
+   on paper under it, the things people bring, then the few things worth
    knowing. The buttons are the changelog's on the dark: white with the
-   light's cobalt, and a hairline. The rail is the thesis's: dots on a line. */
+   light's cobalt, and a hairline. */
 
 .page { min-height: 100vh; background: var(--n-2); color: var(--t-1); }
 .page :focus-visible { outline: 2px solid var(--live); outline-offset: 3px; }
@@ -21,29 +21,21 @@
 
 /* ---- on paper ---- */
 
-.sheet { box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: clamp(48px, 7vw, 96px); max-width: calc(980px + 2 * var(--gut)); margin: 0 auto; padding: 88px var(--gut) 128px; }
+.sheet { box-sizing: border-box; display: grid; gap: 72px; max-width: calc(860px + 2 * var(--gut)); margin: 0 auto; padding: 88px var(--gut) 128px; }
 .part { scroll-margin-top: 72px; }
 .h2 { margin: 0 0 22px; font-family: 'Inter Display', var(--display); font-size: 28px; line-height: 1.1; letter-spacing: -0.035em; font-weight: 640; }
 
-/* The rail: the minute in mono, a dot on one line through them all, the stop beside it. */
-.rail { --dot: 13px; margin: 0; padding: 0; list-style: none; }
-.rail li { position: relative; display: grid; grid-template-columns: 34px var(--dot) minmax(0, 1fr); column-gap: 14px; padding-bottom: 26px; }
-.rail li:last-child { padding-bottom: 0; }
-.rail li::before { content: ''; position: absolute; left: calc(34px + 14px + (var(--dot) - 1.5px) / 2); top: 0.55em; bottom: -0.55em; width: 1.5px; background: var(--n-5); }
-.rail li:last-child::before { display: none; }
-.at { font: 500 12px/1.9 var(--mono); color: var(--t-3); text-align: right; }
-.dot { position: relative; z-index: 1; width: var(--dot); height: var(--dot); margin-top: 0.3em; border-radius: 50%; background: var(--n-1); box-shadow: inset 0 0 0 1.5px var(--t-4); }
-.rail li:first-child .dot { background: var(--live); box-shadow: none; }
-.stop { display: grid; gap: 3px; }
-.stop b { font-weight: 600; font-size: 16.5px; line-height: 1.35; letter-spacing: -0.015em; }
-.stop span { font-size: 15px; line-height: 1.45; color: var(--t-3); text-wrap: pretty; }
+/* The topics: two columns of lines on hairlines, read down the left then the right; one column on a phone. */
+.topics { columns: 2; column-gap: 40px; margin: 0; padding: 0; list-style: none; font-size: 15.5px; line-height: 1.4; }
+.topics li { break-inside: avoid; padding: 11px 0; border-top: 1px solid var(--line-2); text-wrap: pretty; }
 
 .list { margin: 0; padding: 0; list-style: none; font-size: 16px; line-height: 1.45; }
 .list li { position: relative; padding-left: 22px; margin: 0 0 12px; }
 .list li::before { content: ''; position: absolute; left: 4px; top: 0.62em; width: 5px; height: 5px; border-radius: 50%; background: var(--live); }
 
 @media (max-width: 760px) {
-  .sheet { grid-template-columns: minmax(0, 1fr); gap: 56px; padding: 56px var(--gut) 96px; }
+  .topics { columns: 1; }
+  .sheet { gap: 56px; padding: 56px var(--gut) 96px; }
 }
 
 @media (max-width: 640px) {
