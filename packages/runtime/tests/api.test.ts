@@ -1896,12 +1896,16 @@ describe('a fork as its host says, through the API', () => {
   afterEach(() => forgetTold())
 
   /** A clone of you/site with these remotes besides origin, opened with GitHub connected, its host saying what it was forked from. */
-  const siteOpened = (remotes: ReadonlyArray<string>, parent: ReadonlyArray<string> | null | undefined) =>
+  const siteOpened = (
+    remotes: ReadonlyArray<string>,
+    parent: ReadonlyArray<string> | null | undefined,
+    more?: { readonly source?: ReadonlyArray<string> },
+  ) =>
     Effect.gen(function* () {
       const github = makeFakeService()
       github.addRepository(['you', 'site'])
       github.addRepository(['meridian', 'site'])
-      if (parent !== undefined) github.forkFrom(['you', 'site'], parent)
+      if (parent !== undefined) github.forkFrom(['you', 'site'], parent, more)
       const { client, grant } = yield* connected({ connectors: fakeConnectors({ github }) })
       yield* client.ConnectToken({ commandId: commandId(), product: 'github', webUrl: HOST, token: 'ghp_x' })
       const folder = folderWith({ site: [`origin=${HOST}/you/site.git`, ...remotes] })
@@ -1949,7 +1953,10 @@ describe('a fork as its host says, through the API', () => {
   it.live('takes `parent` for it where `upstream` names another repository', () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const { client, projectId, path, read } = yield* siteOpened([`upstream=${HOST}/someone/site.git`], ['meridian', 'site'])
+        // GitHub says the root of its forks: meridian/site, so someone/site is neither its parent nor its root.
+        const { client, projectId, path, read } = yield* siteOpened([`upstream=${HOST}/someone/site.git`], ['meridian', 'site'], {
+          source: ['meridian', 'site'],
+        })
         const before = yield* read
         assert.deepInclude(before?.fork, { upstream: 'meridian/site', remote: null })
         yield* client.AddParentRemote({ commandId: commandId(), projectId, repositoryId: before?.id ?? '' })
@@ -1972,18 +1979,49 @@ describe('a fork as its host says, through the API', () => {
     ),
   )
 
-  it.live('goes by its remotes’ names where its host can’t be reached, and asks again only once its answer is old', () =>
+  it.live('goes by its remotes’ names where its host can’t be reached, and doesn’t ask it again on every read', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const { github, read } = yield* siteOpened([`upstream=${HOST}/meridian/site.git`], undefined)
+        const asks = () => github.calls.filter((call) => call === 'repository').length
         github.failNext('repository', 'unreachable')
         assert.deepInclude((yield* read)?.fork, { upstream: 'meridian/site', remote: 'upstream', by: 'names' })
-        // Reached, it says; said, it isn't asked again on every read.
+        // One that failed, or hung until it was given up on, holds up the next reads no more: it is asked again only later.
+        const asked = asks()
         github.forkFrom(['you', 'site'], ['meridian', 'site'])
+        assert.deepInclude((yield* read)?.fork, { remote: 'upstream', by: 'names' })
+        assert.strictEqual(asks(), asked)
+      }),
+    ),
+  )
+
+  it.live('asks its host once, and goes by what it said until its answer is old', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { github, read } = yield* siteOpened([`upstream=${HOST}/meridian/site.git`], ['meridian', 'site'])
         assert.deepInclude((yield* read)?.fork, { remote: 'upstream', by: 'host' })
         const asked = github.calls.filter((call) => call === 'repository').length
         yield* read
         assert.strictEqual(github.calls.filter((call) => call === 'repository').length, asked)
+      }),
+    ),
+  )
+
+  it.live('as a fork of a fork, takes its `upstream` at the root of its forks for the repository it goes to', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // GitHub says you/site is a fork of ninemate/site, itself forked from meridian/site, which the clone has as upstream.
+        const { read } = yield* siteOpened([`upstream=${HOST}/meridian/site.git`], ['ninemate', 'site'], { source: ['meridian', 'site'] })
+        assert.deepInclude((yield* read)?.fork, { upstream: 'meridian/site', remote: 'upstream', by: 'host' })
+      }),
+    ),
+  )
+
+  it.live('as a fork of a fork whose root its host doesn’t say, takes its `upstream` as its remotes’ names do', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { read } = yield* siteOpened([`upstream=${HOST}/meridian/site.git`], ['ninemate', 'site'])
+        assert.deepInclude((yield* read)?.fork, { upstream: 'meridian/site', remote: 'upstream', by: 'names' })
       }),
     ),
   )

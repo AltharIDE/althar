@@ -162,6 +162,9 @@ const PUSHABLE_KEPT = 5 * 60_000
 /** How long a repository's page waits for a host to say who can push: it reads on without. */
 const PUSHABLE_WAIT = Duration.seconds(5)
 
+/** How long a host that didn't say whether a repository is a fork (it failed, took too long, or doesn't say) isn't asked again. */
+const PARENT_RETRY = 5 * 60_000
+
 /** A path as the file system has it, without symbolic links; as given, where it can't be read. */
 /** What an issue card's Always file at once and Always ask first say: to the coordinator, as the person, and to a task's lead. */
 export const text = {
@@ -443,13 +446,17 @@ export const handlers = Api.toLayer(
         return can
       })
 
+    /** When each `origin` last had no answer from its host, by its address: asked again only after PARENT_RETRY. */
+    const unanswered = new Map<string, number>()
+
     /**
      * Asks the host of a repository's `origin` whether it is a fork, and of
      * which repository, through the connection that reaches it, and keeps the
      * answer (forks.ts) for PARENT_KEPT, so reading the project again doesn't
      * ask again. A host that can't be reached, or doesn't say, leaves what was
-     * known: the remotes' names, or what a host said before. True where the
-     * answer is new.
+     * known: the remotes' names, or what a host said before; and isn't asked
+     * again for PARENT_RETRY, so one that hangs holds up reading a project's
+     * repositories once, not every time. True where the answer is new.
      */
     const askParent = (path: string | null) =>
       Effect.gen(function* () {
@@ -459,13 +466,18 @@ export const handlers = Api.toLayer(
         const now = yield* Clock.currentTimeMillis
         const kept = toldOf(origin.url)
         if (kept !== undefined && now - kept.at < PARENT_KEPT) return false
+        const missed = unanswered.get(origin.url)
+        if (missed !== undefined && now - missed < PARENT_RETRY) return false
         const found = yield* Effect.orElseSucceed(connections.hostOf([origin.url]), () => null)
         if (found === null) return false
         const read = yield* found.host.repository(found.path).pipe(
           Effect.timeout(PUSHABLE_WAIT),
           Effect.orElseSucceed(() => null),
         )
-        return read !== null && tellOf(origin.url, read, now, found.host.product)
+        const changed = read !== null && tellOf(origin.url, read, now, found.host.product)
+        if (toldOf(origin.url)?.at === now) unanswered.delete(origin.url)
+        else unanswered.set(origin.url, now)
+        return changed
       })
 
     /**
