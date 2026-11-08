@@ -406,7 +406,9 @@ model (`change_sets`, `repository_changes`), so it gets an ADR of its own:
 proposed on 8 November. It takes in phase 4: a review that runs code is a
 review whose workspace moved up. It also makes talking to a lead quick: a
 message is a turn with no review, and a tweak is reviewed once, when the
-person ships it. Once that ADR is accepted, all of it is built together.
+person ships it. And a task holds as many changes as it needs, each with
+its own branch, worktree and pull request. Once that ADR is accepted, all
+of it is built together.
 
 ## What stays, and why
 

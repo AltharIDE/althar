@@ -12,7 +12,8 @@
 - **Owner:** Runtime and desktop maintainers
 - **Amends:** the sections in
   [What this changes](#what-this-changes-in-the-decision-documents), among
-  them ADR-035, 072, 091, 093 and 102. It builds the Scratch shelf, presets
+  them ADR-035, 072, 091, 093 and 102, and the proposed ADR-087's helpers,
+  which can be handed a change. It builds the Scratch shelf, presets
   and moving a running task, which [tasks § What a task is](../tasks.md#what-a-task-is)
   records as the 13 October direction and lists as not built. Only the old
   ADR-035 rejected a shelf, and that direction overtook it, as it did
@@ -43,6 +44,12 @@
   fixed step, the parts model answers that too. The person answered the
   questions behind both on 8 November.
 
+  Later that day the person asked whether one chat could open several pull
+  requests, in parallel even, as Claude Code can. A task then held one per
+  repository at a time. Offered several changes in one task, a task for
+  each, or no change, they chose the first: "As hard as it is, it has to be
+  A. People's asks are not always clear cut."
+
 ## Decision
 
 - **A task is a conversation with its lead, plus five parts:** Workspace,
@@ -51,6 +58,9 @@
 - **Every part changes at any time, at once,** by the person, the lead or the
   coordinator, with a line in the thread. Only two moves wait for the person:
   running an outside author's code, and a removal that would lose something.
+- **A task holds as many changes as it needs, at once,** in one repository
+  or several. Each has its own branch, worktree and pull request, and ships
+  and is reviewed on its own.
 - **The workspace moves up a step at a time:** none, a copy, a worktree,
   Local. It moves back between a worktree and Local, and down only where
   nothing would be lost. A review that runs code comes from this move.
@@ -93,8 +103,8 @@
 
 | Part | What it holds | When a task has it | In the parts row |
 |---|---|---|---|
-| **Workspace** | Where the work happens on disk: one of the task's own per repository, a copy, a worktree or Local, with its branch and the branch it works toward; and one at each pull request it reviews | Every task but one with nothing to read yet | Always, with what runs there |
-| **Checked by** | Who reviews this task's own work, and when: before it ships, or after it merges | A change, unless its plan named no reviewer | Where there is a reviewer |
+| **Workspace** | Where the work happens on disk: a copy, a worktree or Local, with its branch and the branch it works toward. One for each of the task's changes in each repository it touches, or a copy before there is a change; and one at each pull request it reviews | Every task but one with nothing to read yet | Always, with what runs there |
+| **Checked by** | Who reviews this task's own work, and when: before it ships, or after it merges. Each change is reviewed on its own | A change, unless its plan named no reviewer | Where there is a reviewer |
 | **Reviewing** | Pull requests this task reviews, each with its drafted review | A review, or any task asked to look at a related pull request | Each pull request reviewed |
 | **Outputs** | Pull requests it opened or attached, in any repository; the issue it came from or filed; its pictures and files | As soon as there is one | Each one |
 | **Access** | What the lead may run and reach in that code, read from who wrote it | Every task, read from its code's author | Only for an outside author's code |
@@ -138,6 +148,143 @@ adding a worktree, adding Checked by and giving the task an ending, one
 part at a time or through a preset. The card's kind label stays, read from
 the parts.
 
+## A task holds as many changes as it needs
+
+People's asks aren't always clear cut. One conversation can turn into two
+fixes, or a fix and a refactor that should go up apart. So a task holds any
+number of changes at once, in one repository or several (the person, 8
+November).
+
+```mermaid
+flowchart LR
+  T["One task:<br/>the conversation with its lead"] --> A["Change 1<br/>branch, worktree, #712"]
+  T --> B["Change 2<br/>branch, worktree, #714"]
+  T --> C["Change 3, stacked on 2<br/>branch, worktree, #715"]
+  T -.-> R["Reviewing #698<br/>a copy at its head"]
+```
+
+How others do it is in
+[several pull requests from one conversation](../../research/several-pull-requests-from-one-conversation.md).
+T3 Code, Orca, Agent Orchestrator and Claude Code all let one conversation
+hold several pull requests now, T3 Code and Orca only since September and
+October, and Paradev's users ask for it. Their bugs come from the same few
+places, and the rules below keep clear of each.
+
+Where the rest of this proposal says "the task's branch", it means each
+change's. A move between a worktree and Local, a new target, the hold for
+Ship and the review's mark each belong to one change.
+
+### What a change is
+
+- **A change is one line of work:** a branch in each repository it touches,
+  a worktree for each, the branch it works toward, and its pull requests.
+  It is today's change set, which already holds a branch and a pull request
+  per repository. A task held one at a time. Now it holds as many as it
+  needs, and a task that never splits has one, as now.
+- **Each change has its own worktree,** since git lets only one folder have
+  a branch checked out. The first keeps today's path,
+  `~/Althar/<project>/<task>/<repository>`. The others sit beside it, named
+  for their branches, so the task's folder holds them all. The lead's
+  sandbox and "Open in editor" already take the whole task's folder.
+- **The lead works in all of them,** from the task's folder, as a lead across
+  several repositories does now. Its brief names each change, with its
+  folder, branch, pull request and what waits. A commit belongs to the
+  change whose branch it is on, and the turn's line says which.
+- **A change's worktree stays on its branch.** The lead starts a change
+  rather than switch branches in one. Where a worktree's branch changed
+  anyway, Althar reads it from git as the turn ends and says so, and the
+  lead switches back or makes it a change of its own. A worktree that
+  carries several branches in turn is where Orca, Paradev and Agent
+  Orchestrator showed the wrong pull request.
+- **Each pull request is recorded as it is made:** by Ship or
+  `open_pull_request`, or by attaching one. Where the lead ran `gh pr
+  create` itself, Althar reads the address from the command's output, as T3
+  Code does. Althar never finds a task's pull requests by branch name, which
+  is Agent Orchestrator's longest-running family of bugs.
+
+### Starting and splitting
+
+- **A change starts at once,** on the word of the person, the lead or the
+  coordinator, with a line in the thread: "Started a second change,
+  `althar/rename-setting`, toward main, to keep the rename apart." The person
+  asks for one ("split this into two pull requests", "fix that too, but
+  separately"), or the lead starts one when the work falls apart into two.
+- **It branches from what it works toward:** the default branch, or another
+  of the task's changes, which stacks it on that one. Its pull request then
+  targets the change below. When that one merges, Althar retargets the one
+  above to what the merged one worked toward, as changing the target does
+  ([below](#changing-the-branch-a-task-works-toward)). Keeping a stack
+  current brings the target into its bottom change, and each change above
+  takes the one below it.
+- **Splitting work already made** moves only what hasn't shipped. The lead
+  makes the new change and carries the commits or files across, with git,
+  as it would by hand. A pull request's pushed history is never rewritten,
+  as now.
+
+### Each change ships and is followed on its own
+
+- **Each change has its own hold for Ship, its own review mark, and its own
+  pull request, checks and seal.** Ship on a change ships that one. "Ship
+  it" in the thread ships what the person was just working on, and the lead
+  asks which in a line where that isn't plain. "Ship them all" ships every
+  change waiting, each with its own review.
+- **Each pull request is followed on its own:** the checks of its head, what
+  people say on it, and its conflicts. What Althar's course brings for
+  several at once, such as failing checks on two, reaches the lead as one
+  turn that names each change and pull request. It is never a turn for each
+  pull request, as T3 Code's was, and never "your pull request", as Agent
+  Orchestrator's was.
+- **Every line in the thread, card and message to the lead names the change
+  it is about,** and every push, review and merge names its pull request.
+
+### Working on several at once
+
+- **The lead hands a change to a helper**
+  ([ADR-087](087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md),
+  proposed) to work on in the background, while the person keeps talking to
+  the lead. The helper works in that change's worktree, and is the only one
+  writing there until it reports. So its commits are on the change's branch
+  when it's done, and nothing needs bringing back. It still pushes nothing:
+  the change ships with Ship, after its review.
+- **Why there:** every product read runs parallel branches as children with
+  a worktree each, and none of them brings the work back by itself. Giving
+  the helper the change's own worktree does the same, without a second
+  conversation for the person to follow.
+- **This amends ADR-087,** whose helpers each work in a copy of their own,
+  with commits the lead takes in. That stays for a helper given no change.
+- **Until ADR-087 is built,** the lead works on its changes one turn at a
+  time, or starts a task for one, as leads can now.
+
+### When one merges
+
+- **A change is done when its pull request merges or closes,** or all of
+  them, for a change across repositories. Its worktree goes after the usual
+  wait for finished folders, and the task, its session and its other
+  changes carry on. A merge never ends a turn, a helper or what runs. Claude
+  Code removed a session's worktree when its first pull request merged, and
+  Agent Orchestrator stopped following a worker's other pull requests.
+- **Before each push, Althar reads the pull request's state.** Where it
+  merged a moment ago, the commits go to a new change, "After #N", as a
+  round after a merge does now, rather than to the merged branch.
+- **The task settles once all its changes are done,** and no draft review of
+  its waits. T3 Code and Agent Orchestrator settle the same way.
+
+### Local, attaching and the card
+
+- **Local holds one change.** The person's checkout has one branch, so at
+  most one of a task's changes works there, and the others in worktrees.
+  Moving a change to Local is how the person tries it in their own checkout,
+  and it follows the rules of the move ([below](#moving-between-a-worktree-and-local)).
+- **Attaching a pull request adds a change** that follows it. The task no
+  longer stops following the one before.
+- **The card keeps one fact.** With one change it is as now. With several,
+  it names the pull request that most needs the person, with its state, and
+  says how many more there are: "#714 checks failing · 2 more". The count
+  stands apart from the state: T3 Code's "+6" beside a green icon read as
+  six open pull requests. Its Ship offers each change waiting. The header
+  lists every change, with its branch, pull request, checks and commits
+  waiting.
+
 ## The workspace moves up
 
 ```mermaid
@@ -171,7 +318,8 @@ one repository and fixes something in another has a copy in the first and a
 worktree in the second. One that fixes something and reviews a related pull
 request in the same repository has both there, side by side: its own
 worktree, and a copy at the pull request's head. Place, a worktree or Local,
-stays the same for all of a task's own workspaces, as it is now.
+is one choice for each change, across its repositories, as it is for a task
+now. At most one of a task's changes is Local.
 
 ### Moving between a worktree and Local
 
@@ -443,9 +591,11 @@ the review runs:
 or "review it" in the thread. It reads everything since the last review, and
 ships nothing.
 
-**One review covers everything since the last.** Althar keeps, per
-repository, the commit each review read up to, and the next one reads from
-there: every tweak since, in one pass.
+**One review covers everything since the last.** Althar keeps, for each
+change in each repository, the commit its last review read up to, and the
+next one reads from there: every tweak since, in one pass. A task with
+several changes waiting gets one review for each, which run at once where
+there are places.
 
 "Make it a full task" on a small change moves its review to before it ships.
 Removing Checked by stops a review under way, as Skip the review does.
@@ -530,9 +680,9 @@ This covers a small change, and what Merge now merged on any task.
   word in the thread, or by the team-review setting. An outside author's
   draft always waits for them.
 - **A task whose only parts are its reviews settles once its drafts are
-  posted,** as a review does now. A task with a change of its own settles
-  when that merges. A draft still unposted then keeps the task in Needs you
-  until the person posts it or drops it.
+  posted,** as a review does now. A task with changes of its own settles
+  once all of them are done. A draft still unposted then keeps the task in
+  Needs you until the person posts it or drops it.
 
 ## Removing a part loses nothing
 
@@ -622,7 +772,9 @@ One saved from a task can be kept to that project.
   - **nothing:** anything else, such as a prototype.
 
   "Local" and "→ release/0.8.0" show where they apply, as now. A card with
-  commits not shipped says how many.
+  commits not shipped says how many. One with several changes names the
+  pull request that most needs the person, and counts the rest
+  ([above](#local-attaching-and-the-card)).
 - **Needs you** is unchanged, but for three things: a chat doesn't wait
   there for being finished, a reply the person hasn't seen waits there until
   they open it, and a settled task comes back when its after-merge review
@@ -654,17 +806,25 @@ What is new:
   and for Save as preset. Nothing reads it for behaviour.
 - **`when` on the review step and `trust` on a reviewed pull request,** as
   the table says.
+- **Several open change sets per task.** Each is a change, and its
+  `repository_changes` rows hold its branch and pull request in each
+  repository, as now: `UNIQUE (change_set_id, binding_id)` stays. Today a
+  task's change sets follow one another. Now several are open at once. The
+  branch each works toward is its workspace row's `base_ref`, as now, and
+  can be another change's branch.
 - **`workspaces.reviewing` and a new key.** Today's key,
   `UNIQUE (task_id, binding_id, device_id)`, allows one workspace per task
-  and repository on a computer, so two reviewed pull requests in one
-  repository couldn't both have one. It becomes two unique indexes, one
-  for the task's own (`reviewing` is null) and one per reviewed pull
-  request, since a null never clashes in a plain unique key.
-- **The commit the last review read up to,** per task and repository. The
-  next review reads from it.
-- **The hold for Ship,** per task and repository: the head as the last turn
-  ended, and whether the branch is held. Commits not shipped are those past
-  where Althar last pushed, which it already keeps, while the branch is held.
+  and repository on a computer, so neither a second change nor two reviewed
+  pull requests in one repository could have one. It becomes two unique
+  indexes: one for the task's own workspaces (`reviewing` is null), which
+  adds the branch, so each change has its row; and one per reviewed pull
+  request. Two indexes, since a null never clashes in a plain unique key.
+- **The commit the last review read up to,** on each `repository_changes`
+  row. The next review of that change reads from it.
+- **The hold for Ship,** on each `repository_changes` row: the head as the
+  last turn ended, and whether the branch is held. Commits not shipped are
+  those past where Althar last pushed, which it already keeps, while the
+  branch is held.
 - **`workspaces.moving_to`,** `worktree` or `checkout`: a move between them
   that waits for the person's checkout, until it is made or called off. A
   Local start waits as `preparing` does now, but a running task's row is
@@ -681,6 +841,8 @@ What is new:
 
 - Today's kinds need none, since they are already read from these rows.
   Every existing task sits on the board.
+- Each task's latest change set becomes its one change, and nothing moves on
+  disk. The review's mark and the hold below go on its rows.
 - Rows that are copies today get `kind = 'copy'`: a review's (`access` is
   `read`), and a quick task's that hasn't branched (`kind` and `branched_at`
   both null). Without that, a null `kind` reads as a worktree, and every
@@ -702,7 +864,14 @@ What is new:
   `toward` stay, and `change_part` changes them later.
 - `review_pull_request` starts a task from the Review a PR preset. Any other
   task adds a review with `add_part`.
-- `ship_task` ships on the person's word, as Ship does.
+- `add_part` with a worktree on a new branch starts a change, with what it
+  works toward and a line on why. `change_part` and `remove_part` name the
+  change they act on, where a task has several.
+- `ship_task` ships on the person's word, as Ship does: one change, or every
+  change waiting.
+- `create_branch` and `open_pull_request` go at once for a lead and the
+  coordinator, with no ask. Neither is on the irreversible list, and the
+  person's note of 7 November makes an ask beyond that list a bug.
 - "Run it" is not a tool. It is only ever the person's.
 
 ## Building it
@@ -716,6 +885,12 @@ It is done when:
 
 - a question to a finished task's lead is answered in the same session, with
   no step, review or handover, and its turn's line shows where the time went;
+- one chat opens two pull requests in one repository, each reviewed and
+  shipped on its own, with a helper working on one while the person talks
+  to the lead about the other;
+- the first of a task's pull requests merges, and its other change, its
+  session and what runs carry on;
+- a `gh pr create` the lead ran itself shows as a change of the task's;
 - a tweak, tried in the person's running project, ships with one review of
   only what changed since the last;
 - while a tweak waits, failing checks and a comment on the pull request
@@ -741,7 +916,7 @@ It is done when:
 |---|---|---|
 | [tasks § What a task is](../tasks.md#what-a-task-is) | Four parts: a workspace, a review, outputs and access. The Scratch shelf, presets and moving a running task are not built | Five, with the review split into Checked by and Reviewing. All three are built |
 | [tasks § Kinds](../tasks.md#kinds-read-from-what-a-task-has) (ADR-035) | Plain, review or change, read from a task's plan, pull requests and review. A quick task becomes a change through `make_it_a_change` | Change, review or none, read from its parts. A chat sits on Scratch, and adding parts replaces `make_it_a_change` |
-| [tasks § Rounds](../tasks.md#rounds-back-to-work-and-shipping-again) | The person's words to a finished lead open a round with the plan's steps and review. No report means a reminder, then the person | A turn, with no step, report or review. Its commits wait for Ship |
+| [tasks § Rounds](../tasks.md#rounds-back-to-work-and-shipping-again) | The person's words to a finished lead open a round with the plan's steps and review. No report means a reminder, then the person. A task has as many pull requests as it needs, one per repository at a time | A turn, with no step, report or review. Its commits wait for Ship. A task has a pull request for each of its changes, several in one repository at once included |
 | [tasks § Needs you and settling](../tasks.md#needs-you-and-settling) | A finished task that isn't a change waits there. A merged change is done, and only another round brings a settled task back | A chat doesn't wait there for being finished. A reply the person hasn't seen waits there until they open it, and a settled task comes back when its after-merge review finds something |
 | [tasks § The small-change lane](../tasks.md#the-small-change-lane) and [reviews § A small change is reviewed after it merges](../reviews.md#a-small-change-is-reviewed-after-it-merges) (ADR-102) | A merged small change is reviewed in a task of its own, which posts what it finds as any review of a pull request does | Reviewed in the same task, which settles as it merges, and nothing is posted on the merged pull request. So is what Merge now merges |
 | [tasks § Plan and review settings](../tasks.md#plan-and-review-settings) | Rounds of review: 1, 2, 3 or 5, and what happens when they run out | The rounds setting goes. "When rounds run out" stays, for a finding the check reopened |
@@ -749,7 +924,11 @@ It is done when:
 | [reviews § What a pull request shows of its review](../reviews.md#what-a-pull-request-shows-of-its-review) | No seal where the code changed after the last pass | A seal where every fix since the last pass or check was tiny, and the folded review names them |
 | [reviews § Reviewing someone else's pull request](../reviews.md#reviewing-someone-elses-pull-request) (ADR-050, ADR-097) | An outside author's code is only read, and a team's is read in a copy | "Run it" asks Run safely or Trust fully, and a team's runs in a worktree |
 | [code-hosts § A lead's commits go up as its turn ends](../code-hosts.md#a-leads-commits-go-up-as-its-turn-ends) (ADR-072) | Every turn's commits push as it ends, and commits the person made by hand go up with the lead's | What the person's turns or hands commit holds the branch, and only Ship pushes it until then. Otherwise Althar's own course pushes as now |
-| [code-hosts § Attaching a pull request a task didn't open](../code-hosts.md#attaching-a-pull-request-a-task-didnt-open) (ADR-052) | One change set per repository | Unchanged, but where a task reviews several pull requests |
+| [tasks § Helpers (proposed)](../tasks.md#helpers-proposed) (ADR-087) | A helper works in a copy of its own, and the lead takes its commits in | It can also be handed one of the task's changes, and works in that change's worktree |
+| [tasks § The board card](../tasks.md#the-board-card) | One fact: a change's branch, pull request, checks or conflict | With several changes, how many pull requests, and the state of the one that most needs the person |
+| [workspaces-and-runs § Worktree](../workspaces-and-runs.md#worktree) | One worktree per repository | One for each change in each repository, all in the task's folder |
+| [code-hosts § Attaching a pull request a task didn't open](../code-hosts.md#attaching-a-pull-request-a-task-didnt-open) (ADR-052) | A task follows one pull request per repository, and attaching another stops following the one before | Attaching adds a change, and the task follows every one |
+| [code-hosts § Not built yet](../code-hosts.md#not-built-yet) and [what-agents-may-do § Asking is the person's word](../what-agents-may-do.md#asking-is-the-persons-word) | `create_branch` and `open_pull_request` go only on the person's word | At once, for a lead and the coordinator |
 | [workspaces-and-runs § Local](../workspaces-and-runs.md#local) (ADR-091) and [§ The branch a task works toward](../workspaces-and-runs.md#the-branch-a-task-works-toward) (ADR-093) | Fixed at the first step | Change at any time |
 | [workspaces-and-runs § Settling stops everything](../workspaces-and-runs.md#settling-stops-everything) | Everything the task ran | All but an after-merge review |
 | [agents § Keeping context small](../agents.md#keeping-context-small) | A lead starts afresh at a break past 80,000 tokens | Only when its context is full |
@@ -764,6 +943,16 @@ It is done when:
   the task carries on in Local meanwhile. Althar never commits, stashes,
   resets or cleans the person's work, and switches their checkout only as
   the Local rule allows.
+- **Several changes in one task touch nearly everything** that took one per
+  repository for granted: the workspace key, the hold, the review's mark,
+  the card, settling, and every tool that names a task's branch. Every
+  product read hit bugs there when it made the same move. The rules above
+  name the change in everything, and record each pull request as it is made.
+- **A lead can lose track of which folder it's in,** and commit to the wrong
+  change. Its brief names each change's folder, and each turn's line says
+  which change a commit went to, so the person sees it at once.
+- **Each worktree takes disk and a setup.** Several changes in one task
+  multiply that. A change's folder goes after the usual wait once it's done.
 - **A changed target can conflict.** The rebase and the cherry-picks stop
   and hand the conflict to the lead, as a conflict with the default branch
   does now.
@@ -786,14 +975,30 @@ It is done when:
   Parts changing at any time makes that cheap to fix from the header.
 - **Scratch grows** until the person clears it. Whether it offers to clear
   chats untouched for a while is left to the prototype.
-- **Open:** whether a task should ever have a workspace in one repository at
-  Local and in another in a worktree. For now place stays one choice for the
-  whole task.
+- **Open:** whether a change should ever have a workspace in one repository
+  at Local and in another in a worktree. For now place stays one choice for
+  the whole change.
 
 ## Alternatives turned down
 
 - **A `task_parts` table.** One read instead of several, but it stores
   something that can disagree with the rows, which is what ADR-035 avoided.
+- **One pull request per repository at a time,** as now. It's the simplest
+  model, and Paradev keeps it, but its users then split one conversation
+  across workspaces to get several pull requests (Paradev #8473). The
+  person chose several (8 November).
+- **A task for each pull request, started from the chat.** It is mostly
+  built already, and Claude Code's Projects work this way. But each one's
+  detail lives in a thread of its own, and steering them goes through
+  another lead. It stays the way for unrelated work.
+- **One worktree that switches between a task's branches.** Two changes
+  couldn't be worked on at once, and the project running there would
+  change under the person. Every product that does this shows the wrong
+  pull request at times.
+- **Helpers that bring their work back for the lead to take in,** as
+  ADR-087 has it, for a helper given a change. No product read brings a
+  child's branch back by itself, and the change's own worktree makes it
+  unnecessary.
 - **A separate path for reviews that run code.** It would be a second
   mechanism for what a workspace's move already does, and two places to keep
   an outside author's code from running.
