@@ -74,11 +74,14 @@ export type RoundItem =
  * folded, and with which words: its last message, or its report where
  * nothing follows it (rounds.ts reads it so), written in the turn that just
  * ended, after something said earlier in the round that it may mean.
+ * Only one shorter than what was said before it stands in for it: a long
+ * one is what the person reads, whatever words it uses on the way (a brief
+ * it quotes, a full report that says "as noted above").
  */
 export const toRestate = (round: ReadonlyArray<RoundItem>): string | undefined => {
   const open = round.findLastIndex((item) => item.text.trim() !== '')
   const last = round[open]
   if (last === undefined || !last.thisTurn) return undefined
-  const earlier = round.slice(0, open).some((item) => item.kind === 'message' && item.text.trim() !== '')
-  return earlier ? pointsBack(last.text) : undefined
+  const longest = Math.max(0, ...round.slice(0, open).map((item) => (item.kind === 'message' ? item.text.trim().length : 0)))
+  return last.text.trim().length < longest ? pointsBack(last.text) : undefined
 }

@@ -79,6 +79,13 @@ describe('what stands open of a round', () => {
     assert.isUndefined(toRestate([said('The proposal is above.')]))
     assert.isUndefined(toRestate([said(POINTED_PROPOSAL, false), said('The proposal is above.', false)]))
   })
+
+  it('asks nothing where the last message is longer than anything said before it, whatever words it uses', () => {
+    // Such as a brief quoted back whole, with its "never point at anything said earlier in the turn".
+    const full = `${POINTED_PROPOSAL}\n\n${POINTED_QUESTIONS}\n\nAs noted above, the old ADRs stay in git; nothing said earlier in the turn is left out here.`
+    assert.isDefined(pointsBack(full))
+    assert.isUndefined(toRestate([said('Reading the ADRs first.'), said(POINTED_PROPOSAL), said(full)]))
+  })
 })
 
 describe('each role’s brief', () => {
