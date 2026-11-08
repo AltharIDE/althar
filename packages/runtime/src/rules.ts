@@ -495,7 +495,9 @@ const hostRefusedReason = (words: ReadonlyArray<string>): string | undefined => 
   const [command, action] = args
   const line = words.join(' ')
   if (['pr', 'mr'].includes(command ?? '') && action === 'review' && /(?:^|\s)--approve(?:=|\s|$)/.test(line)) return SELF_APPROVAL_REFUSED
-  if (command === 'secret' && action === 'set') return SELF_APPROVAL_REFUSED
+  // GitLab approves with a command of its own, and a merge request's approval is the same self-approval.
+  if (command === 'mr' && action === 'approve') return SELF_APPROVAL_REFUSED
+  if ((command === 'secret' || command === 'variable') && action === 'set') return SELF_APPROVAL_REFUSED
   if (command === 'repo' && action === 'edit' && /(?:^|\s)--visibility(?:=|\s+)public(?:\s|$)/.test(line)) return SELF_APPROVAL_REFUSED
   if (command !== 'api') return undefined
   const value = (flag: string) =>
@@ -507,18 +509,107 @@ const hostRefusedReason = (words: ReadonlyArray<string>): string | undefined => 
   const writes = words.some((word) => /^(-[fF]|--field|--raw-field|--input)(=|$)/.test(word))
   const method = (explicit ?? (writes ? 'POST' : 'GET')).toUpperCase()
   if (method === 'GET' || method === 'HEAD') return undefined
-  // An approval, a commit status or a check run is the agent vouching for its own work.
+  // An approval, a commit status or a check run is the agent vouching for its own work, by REST, `glab`'s own path or GraphQL.
   if (/\bpulls\/[^/\s]+\/reviews\b/.test(line) && /APPROVE|--approve/.test(line)) return SELF_APPROVAL_REFUSED
-  if (/\b(statuses|check-runs|check-suites)\b/.test(line)) return SELF_APPROVAL_REFUSED
+  if (/\b(addPullRequestReview|mergeRequestApprove|mergeRequestAccept)\b/.test(line) && /approve/i.test(line)) return SELF_APPROVAL_REFUSED
+  if (/\bmerge_requests\/[^/\s]+\/approve\b/.test(line)) return SELF_APPROVAL_REFUSED
+  if (/\b(statuses|check-runs|check-suites|createCommitStatus|createCheckRun|commitStatusCreate)\b/.test(line)) return SELF_APPROVAL_REFUSED
   // Protection, collaborators, secrets and a public visibility widen what the host lets agents do.
   if (
-    /\bbranches\/[^/\s]+\/protection\b|\bcollaborators\b|\bactions\/(permissions|secrets)\b|\bdependabot\/secrets\b|\bcodespaces\/secrets\b/.test(
+    /\bbranches\/[^/\s]+\/protection\b|BranchProtectionRule|\bprotected_(branches|tags|environments)\b/.test(line) ||
+    /\bcollaborators\b|\bmembers\b|\bdeploy_(tokens|keys)\b|\baccess_tokens\b|\bvariables\b|\bactions\/(permissions|secrets)\b|\bdependabot\/secrets\b|\bcodespaces\/secrets\b|\bci\/variables\b/.test(
       line,
     ) ||
-    /"visibility"\s*:\s*"public"|--visibility(?:=|\s+)public/.test(line)
+    /"visibility"\s*:\s*"public"|visibility(?:=|":\s*"?)public|--visibility(?:=|\s+)public/.test(line)
   )
     return SELF_APPROVAL_REFUSED
   return undefined
+}
+
+/**
+ * A rule's pattern as a host, where it is one: a URL's host, a name with a
+ * wildcard for the hosts under it (`*.example.com`), or a bare host. A word
+ * that reads as a file a command runs (`deploy.sh`, `release.yml`) is a
+ * command, not a host, though `hostOf` can read either as a name.
+ */
+const hostPatternOf = (pattern: string): { readonly host: string; readonly under: boolean } | undefined => {
+  const typed = pattern.trim().toLowerCase()
+  const under = typed.startsWith('*.')
+  const name = under ? typed.slice(2) : typed
+  const host = hostOf(name)
+  if (host === null) return undefined
+  // A file name is what a command rule names more often than a host: its last label is an extension.
+  const extension = name.slice(name.lastIndexOf('.') + 1)
+  if (!typed.includes('://') && FILE_EXTENSIONS.has(extension)) return undefined
+  return { host, under }
+}
+
+/** The last labels of names that are files a command runs, not hosts. */
+const FILE_EXTENSIONS = new Set([
+  'bash',
+  'c',
+  'cfg',
+  'conf',
+  'cpp',
+  'cs',
+  'css',
+  'csv',
+  'cts',
+  'env',
+  'fish',
+  'go',
+  'h',
+  'html',
+  'ini',
+  'java',
+  'js',
+  'json',
+  'jsx',
+  'kt',
+  'less',
+  'lock',
+  'log',
+  'lua',
+  'md',
+  'mjs',
+  'mts',
+  'php',
+  'pl',
+  'py',
+  'rb',
+  'rs',
+  'sass',
+  'scss',
+  'sh',
+  'sql',
+  'svelte',
+  'swift',
+  'toml',
+  'ts',
+  'tsv',
+  'tsx',
+  'txt',
+  'vue',
+  'xml',
+  'yaml',
+  'yml',
+  'zsh',
+])
+
+/** Whether a host is the one a rule names, or one under it: its own name, or a name that ends in `.` and it. */
+const hostMatches = (rule: { readonly host: string }, host: string): boolean => host === rule.host || host.endsWith(`.${rule.host}`)
+
+/** The host a command's word names, where it names one: a URL's host, or a bare host that isn't a file name. */
+const namedHostOf = (word: string): string | undefined => {
+  const typed = word.trim()
+  if (typed === '') return undefined
+  const url = typed.includes('://')
+  const host = hostOf(url ? typed : typed.replace(/^['"]|['"]$/g, ''))
+  if (host === null) return undefined
+  // A path, an option or a file a command names isn't a host: `./deploy.sh`, `--host=x`, `cat deploy.sh`.
+  if (!url && (typed.startsWith('-') || /[/\\]/.test(typed) || typed.startsWith('.'))) return undefined
+  if (!url && FILE_EXTENSIONS.has(typed.slice(typed.lastIndexOf('.') + 1).toLowerCase())) return undefined
+  return host
 }
 
 /** The host a command names, where one of the person's own host rules matches it. */
@@ -527,13 +618,13 @@ const hostRuleOf = (text: string, rules: ProjectRuleSet['commands'], system: Sys
   for (const line of lineReadings(text, system))
     for (const words of line.commands.flatMap((words) => [words, ...commandsIn(words)]))
       for (const word of words) {
-        const host = hostOf(word)
-        if (host !== null) named.add(host)
+        const host = namedHostOf(word)
+        if (host !== undefined) named.add(host)
       }
   if (named.size === 0) return undefined
   const met = rules.filter((rule) => {
-    const host = hostOf(rule.pattern.trim())
-    return host !== null && named.has(host)
+    const pattern = hostPatternOf(rule.pattern)
+    return pattern !== undefined && [...named].some((host) => hostMatches(pattern, host))
   })
   return met.find((rule) => rule.decision === 'never') ?? met[0]
 }

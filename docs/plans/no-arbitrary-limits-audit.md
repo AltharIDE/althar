@@ -26,20 +26,21 @@ This table also records work deliberately moved out of this task by the coordina
 | Non-irreversible permission floor and opaque-command refusals (`rules.ts`) | Removed | `rules.test.ts`, `sandboxBoundary.test.ts`: extra floor and opaque-command refusals removed; explicit Never and Ask still hold |
 | Sandboxed commands skipped the irreversible list once sign-ins and the network were open (`rules.ts`) | Removed | `decideInside` now asks for what `lastingOf` reads as irreversible; `sandboxBoundary.test.ts` covers merge, release, comment, publish and force push inside the sandbox |
 | `gh api` with no leading slash, ref moves and tags, approvals, statuses, branch protection, collaborators, secrets and public visibility (`rules.ts`) | Removed where they were missed; self-approval and widening refused | `rules.test.ts` covers each: ref writes and deletions ask; approvals, statuses, protection, access, secrets and visibility are refused |
-| Claude's coordinator could not run a shell command with `<(…)` (`registry.ts`) | Removed | The coordinator may retry a read outside the sandbox, against its read-only rules; live `agents/network.test.ts` shows `diff <(…) <(…)` passing and `registry.test.ts` keeps `allowUnsandboxedCommands` on |
+| `glab mr approve`, GitLab's `merge_requests/:iid/approve` API path, and GraphQL approval, status and protection mutations (`rules.ts`) | Refused as self-approval or widening | `sandboxBoundary.test.ts`: `glab mr approve`, `glab api …/approve`, `mergeRequestApprove`, `addPullRequestReview` with APPROVE, `createCommitStatus`, `updateBranchProtectionRule`, protected branches, members and variables refuse |
+| Claude's coordinator could not run a shell command with `<(…)` (`registry.ts`) | Removed | Any coordinator command may run outside the sandbox when it asks to, decided by the same read-only rules; live `agents/network.test.ts` shows `diff <(…) <(…)` passing and `registry.test.ts` keeps `allowUnsandboxedCommands` on |
 | Session brief says agents carry no host sign-in and imposes Althar's tools (`Sessions.ts`) | Removed | Session briefs describe inherited identity and prefer Althar tools; coordinator/skills session tests |
 | Selected skills restricted to task leads (`Sessions.ts`) | Removed | `skills.test.ts`, `registry.test.ts`: enabled skills load in ordinary roles; outside reviews omit executable plugins |
-| Claude native sandbox refuses process-substitution pipes under `/dev/fd` | Removed by running the read outside the sandbox | The native sandbox still refuses the pipes, and no fd allowance changes that; the coordinator retries such a read outside, where Althar's read-only rules allow it. Live `agents/network.test.ts` |
+| Claude native sandbox refuses process-substitution pipes under `/dev/fd` | Removed by running the read outside the sandbox | The native sandbox still refuses the pipes, and no fd allowance changes that; the coordinator may run a command outside, where Althar's read-only rules refuse a visible outside write. Live `agents/network.test.ts` |
 | Review lead's six-tool list for a review of the repository's own people (`Reviews.ts`) | Removed | `reviews.test.ts`: a team's review lead lists and calls every lead tool, not only the reading six |
 | An outside author's review keeps the six reading tools (`Reviews.ts`) | Kept | What stays: “An outside author’s code doesn’t run without the person’s word”; `reviews.test.ts` |
 | Read-only review copies, the in-task reviewer's tool list, running the reviewed code | Moved to the task-as-parts work | Explicit coordination decision; `Reviews.ts` and the reviewer role are #686's and a later task's to change |
-| Codex's sandboxed commands never reach Althar (`registry.ts`) | Unresolved gap | Codex 0.165 has no policy that asks about every sandboxed command, so a visible irreversible host command can run unasked on that agent. Recorded in its `knownGaps`; its shell carries the person's sign-in, and Althar's tools are the reliable route for merges, releases and comments |
+| Codex's sandboxed commands never reached Althar (`registry.ts`) | Removed | Its turn takes the `untrusted` approval policy through the codex-acp patch: any command not on Codex's safe list reaches Althar, so a merge, release or post asks. `codexNetwork.test.ts` checks the turn, `registry.test.ts` the session's env; live `agents/network.test.ts` sees `gh pr merge` request permission |
 | The OS sandbox's writable roots and protected hook/config locations | Kept | What stays: “The OS sandbox writes only the worktree, the temp folder and the tools' caches”; `sandboxBoundary.test.ts`, `registry.test.ts` |
 | Force pushes, default/integration branch pushes, deleting another branch, discarding another person's changes, deleting outside the worktree | Kept | Irreversible list: Lost work or history; `rules.test.ts`, `permissionEdges.test.ts`, `pushGuard.test.ts`, `workToward.test.ts` |
 | Git pre-push and reference-transaction guards, approval pass bound to one git invocation | Kept | What stays: “git's guard hooks on pushes and branch moves”; `pushGuard.test.ts` |
 | Publishing, releases, teardown and merging | Kept | Irreversible list: Publishing and merging; `rules.test.ts`, `sandboxBoundary.test.ts` (inside the sandbox too), `permissionEdges.test.ts`, #684 MCP act tests |
 | Speaking for the person through a command, MCP call or Althar tool | Kept | Irreversible list: Speaking for the person; #684's `speak` kind and MCP act tests; `coordinatorTools.test.ts` |
-| Person's host Never rules under the open network | Kept | Person's own Never: `Permissions.upFront` forwards them as Claude denied domains, and `hostRuleOf` refuses a command that names the host wherever it runs; `sandboxBoundary.test.ts`, `registry.test.ts` cover precedence over the wildcard |
+| Person's host Never rules under the open network | Kept | Person's own Never: `Permissions.upFront` forwards them as Claude denied domains, and `hostRuleOf` refuses a command that names the host or any host under it, whichever way the rule is typed (`example.com` or `*.example.com`) and wherever it runs; a rule naming a script (`deploy.sh`) is read as a command, not a host. `rules.test.ts`, `sandboxBoundary.test.ts`, `registry.test.ts` cover precedence over the wildcard |
 | Person's explicit Never and Ask rules, switches disabling a server, and explicit Ask about more | Kept | ADR-097 What asks: “The person's own Never and Ask me rules … stay”; `rules.test.ts`, `sandboxBoundary.test.ts`, #684 policy/MCP tests |
 | Reading secret files, exporting credentials, keychain operations that read or change secrets | Kept | What stays: “Secret files and the keychain are refused”; `rules.test.ts`, `registry.test.ts`, `coordinatorCopies.test.ts` |
 | Provider modes/options that would auto-approve requests; judge has no tools; native slash commands cannot enable bypass | Kept | What stays: “No agent answers its own permission request”; `registry.test.ts`, `connection.test.ts`, `permissionJudge.test.ts` |
@@ -91,17 +92,24 @@ its old and new sandbox settings; OpenCode passed. That is a machine/provider
 flake rather than a permission path, and is recorded with the completion.
 OpenCode has no OS sandbox; its check covers its real shell and permission path.
 A coordinator's `diff <(printf same) <(printf same)` now runs on Codex inside
-its sandbox and on Claude by retrying the read outside it; Althar's read-only
-rules allow that and refuse a visible outside write.
+its sandbox and on Claude by asking to run outside it; Althar's read-only
+rules decide such a command: a visible write outside its folder is refused.
 
 Review's round 1 findings are settled: `decideInside` asks for the visible
 irreversible kinds; `gh api` ref writes, tags, approvals, statuses, protection,
 collaborators, secrets and visibility changes are held or refused; Claude's
 sandbox allows only the SSH agent's socket; the coordinator's edits are denied
 again and its git-in-another-folder read list is positive; its brief describes
-the open network. One gap is recorded, not hidden: Codex 0.165 has no policy
-that makes every sandboxed command ask, so its shell is the one agent whose
-commands Althar does not see. Its `knownGaps` say so.
+the open network. Review's later rounds closed the rest: `glab mr approve` and
+GitLab's approval, status and protection paths and GraphQL mutations refuse;
+a Never host rule covers the hosts under it and a script rule is no longer read
+as a host; the coordinator's outside-the-sandbox retry is documented as any
+command, decided by the read-only rules; and Codex's turn now takes the
+`untrusted` approval policy, so the commands it doesn't read as safe reach
+Althar. That is a turn setting in Codex 0.165: its config parser refuses the
+name, so the patch reads it from the session's environment. Live probes show
+Codex asking before `gh pr merge` and Claude's sandboxed Google Fonts `curl`
+passing inside the sandbox with the current settings.
 
 A Never host is covered at the rules and registry level rather than by a live
 `curl`: `Permissions.upFront` forwards the host to Claude as a denied domain,

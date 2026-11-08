@@ -835,18 +835,20 @@ rather than the strict reader whitelist. Without a sandbox only visible writes
 outside its folder are refused; unreadable commands run. Its edit tools stay
 denied, as the What stays table keeps them. A silent refusal is recovered in
 the same turn. Claude's native sandbox still refuses opening pipe descriptors
-under `/dev/fd`; the coordinator now retries such a read outside the sandbox,
-where its read-only rules run it, so `<(…)` works. Althar no longer refuses
-process substitution itself.
+under `/dev/fd`; the coordinator may run any command outside the sandbox when it
+asks to, and the same read-only rules decide it: a read such as `<(…)` runs, a
+visible write outside its folder is refused. Althar no longer refuses process
+substitution itself.
 
 Sandboxed commands reach Althar's rules so the list holds inside the sandbox
 too: each command is answered at once, a visible irreversible one asks the
 person, and an unreadable one runs. Approving an agent's own work or widening
 host access through `gh api` is refused, not asked. Claude Code's sandbox opens
-the network and the SSH agent's socket only. Codex is the one gap: its 0.165
-approval policy has no form that asks about every sandboxed command, so its
-shell runs unseen; its `knownGaps` and the limits audit say so, and Althar's
-tools are the route for merges, releases and comments there.
+the network and the SSH agent's socket only. Codex's turn takes the `untrusted`
+approval policy through a patch to codex-acp, so the commands it doesn't read as
+safe, a merge, a release or a post among them, reach Althar and the irreversible
+list holds there too; commands its own safe list covers run unasked. Nothing of
+the network, the sign-in or the sandbox is left outside the list.
 
 The non-irreversible floor is gone in every mode. Code-host CLI changes and the
 Flatpak bridge are ordinary commands. Visible merges, releases, posts and

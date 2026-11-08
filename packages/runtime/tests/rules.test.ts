@@ -427,6 +427,33 @@ describe('the always-ask list', () => {
     })
   })
 
+  it('matches a host rule on its own host and the hosts under it, as typed or as a wildcard', () => {
+    for (const pattern of ['*.example.com', 'example.com']) {
+      const project: ProjectRuleSet = { ...MVP_RULES, commands: [{ pattern, decision: 'never' }] }
+      for (const line of [
+        'curl https://example.com/x',
+        'curl https://api.example.com/x',
+        'curl api.example.com',
+        'gh api https://ci.example.com/runs',
+      ])
+        assert.strictEqual(run(line, { project }).verdict, 'deny', `${pattern}: ${line}`)
+      // Not a lookalike, and not a host outside it.
+      assert.strictEqual(run('curl https://notexample.com/x', { project }).verdict, 'allow', pattern)
+      assert.strictEqual(run('curl https://example.com.evil.test/x', { project }).verdict, 'allow', pattern)
+    }
+  })
+
+  it('reads a command rule naming a script as a command, not as a host a command names', () => {
+    for (const pattern of ['deploy.sh', 'release.yml']) {
+      const project: ProjectRuleSet = { ...MVP_RULES, commands: [{ pattern, decision: 'never' }] }
+      // How a command starts still meets it, as any command rule does.
+      assert.strictEqual(run(`${pattern} --now`, { project }).verdict, 'deny', pattern)
+      // Naming the file elsewhere does not.
+      assert.strictEqual(run(`cat ${pattern}`, { project }).verdict, 'allow', pattern)
+      assert.strictEqual(run(`git add ${pattern}`, { project }).verdict, 'allow', pattern)
+    }
+  })
+
   it('still reads a real command that publishes or releases, even where it names a host', () => {
     assert.deepStrictEqual(run('npm publish'), {
       verdict: 'ask',

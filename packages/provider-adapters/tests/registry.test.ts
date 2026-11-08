@@ -555,6 +555,8 @@ describe('project web tools', () => {
       assert.strictEqual(config.web_search, search)
       assert.strictEqual(config['sandbox_workspace_write.network_access'], !('offline' in options && options.offline))
       assert.strictEqual(config['mcp_servers.test.enabled'], false)
+      // Every command Codex doesn't read as safe asks Althar, so the irreversible list holds inside its sandbox (ADR-097).
+      assert.strictEqual(agents.codex.sessionEnv?.(own, options).ALTHAR_APPROVAL_POLICY, 'untrusted')
     }
     assert.isTrue(JSON.parse(agents.codex.sessionEnv?.({}, {}).CODEX_CONFIG ?? '{}')['sandbox_workspace_write.network_access'])
     assert.isFalse(agents.codex.reviewing?.outside)

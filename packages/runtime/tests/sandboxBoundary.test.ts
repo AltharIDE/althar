@@ -161,12 +161,24 @@ describe('a command its sandbox holds', () => {
     for (const line of [
       'gh pr review 12 --approve',
       'gh api -X POST repos/o/r/pulls/12/reviews -f event=APPROVE',
+      'glab mr approve 4',
+      'glab api -X POST projects/1/merge_requests/4/approve',
+      'gh api graphql -f query=mutation{addPullRequestReview(input:{pullRequestId:"x",event:APPROVE}){clientMutationId}}',
+      'glab api graphql -f query=mutation{mergeRequestApprove(input:{iid:"4"}){clientMutationId}}',
       'gh api -X POST repos/o/r/statuses/abc -f state=success',
+      'glab api -X POST projects/1/statuses/abc -f state=success',
+      'gh api graphql -f query=mutation{createCommitStatus(input:{}){clientMutationId}}',
       'gh api -X PUT repos/o/r/branches/main/protection',
+      'glab api -X POST projects/1/protected_branches -f name=main',
+      'gh api graphql -f query=mutation{updateBranchProtectionRule(input:{}){clientMutationId}}',
       'gh api -X PUT repos/o/r/collaborators/mallory',
+      'glab api -X POST projects/1/members -f user_id=2',
       'gh api -X PUT repos/o/r/actions/permissions -f enabled=true',
+      'glab api -X POST projects/1/variables -f key=X -f value=y',
       'gh secret set DEPLOY_KEY',
+      'glab variable set DEPLOY_KEY',
       'gh repo edit --visibility public',
+      'glab api -X PUT projects/1 -f visibility=public',
     ])
       for (const verdict of [decideInside(command(line), context('allow')), decide(command(line), context('allow'))])
         assert.strictEqual(verdict.verdict, 'deny', line)

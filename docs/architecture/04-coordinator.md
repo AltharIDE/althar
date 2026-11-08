@@ -96,8 +96,9 @@ its folder and temporary files, and every command reaches Althar's rules, which
 answer it at once. Network and localhost are open; only the SSH agent's own
 socket is allowed. It loads selected skills, but no repository settings or
 hooks, and its edit tools stay denied. Claude's native sandbox still refuses
-opening process-substitution pipes under `/dev/fd`; the coordinator retries
-such a read outside the sandbox, where its read-only rules run it. Codex uses
+opening process-substitution pipes under `/dev/fd`; the coordinator may run any
+command outside the sandbox when it asks to, and the same read-only rules
+decide it: a read runs, a visible write outside its folder is refused. Codex uses
 its ordinary workspace sandbox. Without an OS sandbox, commands run unless they
 visibly write outside the coordinator's folder. Scripts, variables, loops and
 process substitutions are not refused for being unreadable.

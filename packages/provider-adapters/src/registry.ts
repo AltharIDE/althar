@@ -877,7 +877,8 @@ export const claudeSandboxStarts = (): boolean => {
  * What holds a Claude Code session's shell commands (ADR-071): a lead's
  * sandbox, where it starts, but for the commands it runs outside from the
  * start and those it asks to run outside; the coordinator's, which runs
- * nothing outside. A review's lead, which reads someone else's code, and a
+ * nothing outside from the start but may ask to, decided by its read-only
+ * rules. A review's lead, which reads someone else's code, and a
  * session whose sandbox can't start, aren't held: the rules read every
  * command.
  */
@@ -896,8 +897,10 @@ const claudeHolds = (role: 'lead' | 'reader' = 'lead', options: SessionOptions =
  * (and in the sandbox's own temporary folder), and may read ordinary files
  * anywhere, with secret files and sign-ins still denied. Commands reach any host and may
  * listen locally, and every one asks, so a visible irreversible act still
- * asks the person. A read the sandbox cannot run (process substitution on
- * macOS) may run outside it, against the same read-only rules. It loads no
+ * asks the person. Any command may run outside it when the agent asks to, which
+ * is what a read the sandbox cannot run (process substitution on macOS) does:
+ * Althar's read-only rules decide it, refusing a visible write outside the
+ * coordinator's folder. It loads no
  * settings file (`settingSources: []`) and runs no hook, as a review's lead:
  * no allow rule or sandbox exemption of the person's or the repository's
  * lets a command out, and no hook of theirs runs beside it. Its edit tools
@@ -925,6 +928,8 @@ const claudeContains = (
           enabled: starts,
           // Every command asks Althar's rules: a visible irreversible act still asks the person, nothing else does.
           autoAllowBashIfSandboxed: false,
+          // Any command may ask to run outside, which is how `<(…)` works where macOS refuses its pipes; the read-only
+          // rules refuse a visible write outside its folder, and an unreadable command runs, as where no sandbox holds.
           allowUnsandboxedCommands: true,
           failIfUnavailable: starts,
           network: {
@@ -1110,6 +1115,9 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     withoutOwnTools: codexWithoutOwnTools,
     reviewing: { outside: false, env: codexReviewing },
     sessionEnv: (own, options) => ({
+      // Every command Codex doesn't read as safe reaches Althar, so the irreversible list holds inside its sandbox too
+      // (ADR-097); everything else is answered at once. The adapter's patch puts it on the turn's approval policy.
+      ALTHAR_APPROVAL_POLICY: 'untrusted',
       CODEX_CONFIG: JSON.stringify({
         ...JSON.parse(own.CODEX_CONFIG ?? '{}'),
         ...(options.web === undefined && options.offline !== true
@@ -1140,7 +1148,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      * switch controls native search separately, not a shell's network.
      */
     knownGaps: [
-      'It works inside its sandbox without asking: commands there never reach Althar, so a visible irreversible host command (such as `gh pr merge` or `gh release create`) can run unasked. Its shell carries the person’s sign-in; Althar’s tools are the reliable route for code-host work. The limits audit records this gap.',
+      'Its shell carries the person’s code-host sign-in, so a command Codex reads as safe runs without reaching Althar; a command it does not (a merge, a release, a post) asks Althar first. Commands Althar’s own rules can’t read still run, as ADR-097 allows.',
       "Shell networking is open. The project's web switch controls native search and page opening separately.",
       "codex-acp marks every session folder trusted, so a repository's own `.codex` config and hooks apply; a review's lead has hooks off.",
       'The adapter holds usage limits but sends them nowhere over ACP (/status prints text); Althar asks the Codex app-server for them (`usage.ts`).',

@@ -152,6 +152,93 @@ it.live('a sandboxed Codex coordinator runs process substitution', () =>
   ),
 )
 
+it.live('a Codex lead asks Althar before an irreversible command inside its sandbox', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const definition = agents.codex
+      const options = { web: true }
+      const spec = definition.launch(process.execPath)
+      const own = definition.withoutOwnTools?.({ env: process.env, homeDir: homedir(), cwd }) ?? {}
+      const asked = yield* Ref.make<string[]>([])
+      const connection = yield* connect({
+        transport: {
+          _tag: 'Process',
+          cwd,
+          spec: { ...spec, env: { ...spec.env, ...own, ...definition.sessionEnv?.({ ...spec.env, ...own }, options) } },
+        },
+        permissions: definition.permissions,
+        onPermission: (request) =>
+          Ref.update(asked, (calls) => [...calls, `${request.title} ${JSON.stringify(request.rawInput ?? {})}`]).pipe(
+            Effect.as({ decision: 'reject' as const, reason: 'An irreversible command: the person has not asked for this.' }),
+          ),
+      })
+      const session = yield* connection.newSession({
+        cwd,
+        mode: definition.modes.ask,
+        modeOptionId: definition.options.mode,
+        ...(definition.sessionMeta === undefined ? {} : { meta: definition.sessionMeta('lead', options) }),
+      })
+      yield* Stream.runCollect(
+        session.prompt(
+          'Run exactly this shell command in the sandbox, with no escalation and no alternatives: gh pr merge 999999 --repo althar/does-not-exist. Report what happens.',
+        ),
+      )
+      const permissions = yield* Ref.get(asked)
+      process.stdout.write(`Codex permissions: ${JSON.stringify(permissions)}\n`)
+      assert.isTrue(
+        permissions.some((call) => call.includes('gh pr merge 999999') || call.includes('gh pr merge')),
+        JSON.stringify(permissions),
+      )
+    }),
+  ),
+)
+
+it.live('a Claude Code lead reaches Google Fonts inside its sandbox', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const definition = agents['claude-code']
+      const options = { web: true }
+      const spec = definition.launch(process.execPath)
+      const own = definition.withoutOwnTools?.({ env: process.env, homeDir: homedir(), cwd }) ?? {}
+      const asked = yield* Ref.make<Array<{ readonly title: string; readonly outside: boolean }>>([])
+      const connection = yield* connect({
+        transport: {
+          _tag: 'Process',
+          cwd,
+          spec: { ...spec, env: { ...spec.env, ...own, ...definition.sessionEnv?.({ ...spec.env, ...own }, options) } },
+        },
+        permissions: definition.permissions,
+        onPermission: (request) =>
+          Ref.update(asked, (calls) => [
+            ...calls,
+            { title: request.title, outside: JSON.stringify(request.rawInput ?? {}).includes('"dangerouslyDisableSandbox":true') },
+          ]).pipe(Effect.as({ decision: 'allow' as const, reason: 'Public-network probe, inside the sandbox.' })),
+      })
+      const session = yield* connection.newSession({
+        cwd,
+        mode: definition.modes.ask,
+        modeOptionId: definition.options.mode,
+        ...(definition.sessionMeta === undefined ? {} : { meta: definition.sessionMeta('lead', options) }),
+      })
+      const events = yield* Stream.runCollect(
+        session.prompt(
+          "Run exactly this shell command in your sandbox, with no escalation and no alternatives: curl --max-time 30 -fsSL -o fonts.css 'https://fonts.googleapis.com/css2?family=Inter' && grep -q 'font-family' fonts.css && echo CURL_INSIDE_PASSED. Do not retry outside the sandbox.",
+        ),
+      )
+      const permissions = yield* Ref.get(asked)
+      process.stdout.write(`Claude curl permissions: ${JSON.stringify(permissions)}\n`)
+      assert.isTrue(
+        events.some(
+          (event) =>
+            event._tag === 'ToolCallUpdate' && 'terminal' in event && JSON.stringify(event.terminal).includes('CURL_INSIDE_PASSED'),
+        ),
+        JSON.stringify(events.filter((event) => event._tag === 'ToolCallUpdate')),
+      )
+      assert.isFalse(permissions.some((call) => call.outside))
+    }),
+  ),
+)
+
 it.live('a Claude Code coordinator runs process substitution, retrying outside the sandbox where its pipes are refused', () =>
   Effect.scoped(
     Effect.gen(function* () {

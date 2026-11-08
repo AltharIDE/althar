@@ -885,7 +885,7 @@ What keeps each agent asking, whatever its own settings say:
 | Agent | How | Checked against |
 |---|---|---|
 | Claude Code | Every session gets ask rules for Bash, Edit, Write, MultiEdit, NotebookEdit, with WebFetch/WebSearch allowed for project leads when web access is on (otherwise asking), has bypass mode turned off for its whole life, loads only the MCP servers Althar gives it (`strictMcpConfig`; from ADR-097's first phase, the person's servers too, each with an ask rule so its calls reach Althar), and runs its shell in Claude's sandbox, all through the adapter's `_meta.claudeCode.options`. Ask rules win over allow rules from any settings file, and over a hook that approves | A repository whose `.claude/settings.json` allows those tools, defaults to `bypassPermissions`, and has a hook that approves every tool call |
-| Codex | Mode `workspace-write`, whose reviewer is the person. The default `agent` mode sends requests to an automatic reviewer instead, and was seen to write outside the workspace without asking | Writing outside the workspace, which it asks for |
+| Codex | Mode `workspace-write`, whose reviewer is the person, and each turn's approval policy `untrusted` through the adapter's patch, so every command its own safe list doesn't cover reaches Althar. The default `agent` mode sends requests to an automatic reviewer instead, and was seen to write outside the workspace without asking | Writing outside the workspace, which it asks for; `gh pr merge`, which now gets a permission request |
 | OpenCode | Inline config (`OPENCODE_CONFIG_CONTENT`) that sets edits and commands to ask, and webfetch/websearch to allow for project leads when web access is on (otherwise asking), for its built-in agents too, and lets it carry on after a rejection (`experimental.continue_loop_on_deny`) | A repository whose `opencode.json` allows everything |
 
 **Sandboxes are the boundary for commands.** A permission request for a shell
@@ -895,9 +895,10 @@ So where an agent has a sandbox, it keeps commands inside the worktree:
 - Codex's `workspace-write` sandbox has open networking. Its ACP adapter
   also applies that setting on every turn, instead of overriding it with a
   network-off policy. Ordinary readers get network access too; outside
-  reviews remain offline. Codex 0.165's approval policy has no form that
-  makes every sandboxed command ask, so its commands do not reach Althar:
-  that one gap is recorded in its `knownGaps` and the limits audit.
+  reviews remain offline. Its turn takes the `untrusted` approval policy
+  through the same patch, so the commands its safe list doesn't cover, a
+  merge or release among them, reach Althar and meet the irreversible list;
+  ordinary reads run unasked.
 - Claude Code's sandbox is on wherever it can start (macOS; Linux with
   working bubblewrap and socat, outside a Flatpak). Every command reaches
   Althar's rules, which answer it at once; a visible irreversible one asks
@@ -931,12 +932,11 @@ credential denials and the rules for irreversible operations remain.
 ADR-097 drops the coordinator's web mark (ADR-081) and leaves this switch
 as the person's control for that leak.
 
-**Known commands and hosts, from the start.** Some commands can't work inside
-Claude's sandbox on a Mac (a browser, Electron, a test runner, `ps`), and
-some hosts every lead reaches (the code host, the package registry). Each
+**Known commands, and the open network.** Some commands can't work inside
+Claude's sandbox on a Mac (a browser, Electron, a test runner, `ps`). Each
 used to cost a failed try inside the sandbox, then a retry outside it that
-the rules allowed anyway. A lead's Claude Code session now starts with both
-in its settings (`sandboxReach.ts`, `Permissions.upFront`):
+the rules allowed anyway. A lead's Claude Code session now starts with them
+in its settings (`sandboxReach.ts`):
 
 - commands that run outside the sandbox from the start
   (`sandbox.excludedCommands`). Each still goes through Claude Code's
@@ -946,15 +946,12 @@ in its settings (`sandboxReach.ts`, `Permissions.upFront`):
   (`bunx` it does), so a lead is told to run them on a line of their own,
   and a Bun script is listed by what it runs (`node scripts/e2e.ts`, not
   `bun run test:e2e`);
-- hosts its sandboxed commands reach without asking
-  (`sandbox.network.allowedDomains`), only those the rules would let a
-  request for them through without anyone: none while the rest asks the
-  person or the coordinator decides it, none the project never allows. A
-  host is named on its own, never `*.` for every host under one: the rules
-  judge a request by the host it names, and a wildcard would let through
-  hosts under it that they ask about or refuse. A request is read as a
-  host, never as a command: `release-assets.githubusercontent.com`, where
-  Electron's build downloads from, is no release script;
+- every host, with no list (`sandbox.network.allowedDomains: ['*']`). The
+  one exception is a host the person put in Never, which is passed as a
+  denied domain and refused with its name, so a blocked request says what
+  blocked it. A request is read as a host, never as a command:
+  `release-assets.githubusercontent.com`, where Electron's build downloads
+  from, is no release script;
 - the caches of the tools the project installs with, which its sandboxed
   commands write to without asking (`sandbox.filesystem.allowWrite`): what
   fails in a fresh task folder is rarely the install, but a tool that
@@ -973,16 +970,18 @@ in its settings (`sandboxReach.ts`, `Permissions.upFront`):
   something there that a later install of theirs picks up: the trade made
   so a task's folder gets ready without anyone.
 
-All three are worked out from the project: the tools its packages bring, its
-test and end-to-end scripts, what is kept for how it runs and is set up,
-its repositories' code hosts, its package managers' registries and what
-its packages download, and the trackers Althar is connected to (Linear's
-hosts, for one). The person adds to the commands and hosts and takes from
-them in the project's rules, under Sandbox, and those edits hold over what
-is worked out later; the caches follow the tools. A change applies from a lead's next session. Codex's
+All the commands and caches are worked out from the project: the tools its
+packages bring, its test and end-to-end scripts, what is kept for how it runs
+and is set up, and the caches those tools use. The person adds to the commands
+and takes from them in the project's rules, under Sandbox, and those edits hold
+over what is worked out later; the caches follow the tools. Hosts are no longer
+worked out or listed: every host is reachable but for the person's Never rules.
+A change applies from a lead's next session. Codex's
 `workspace-write` has no list of commands to run outside it, and its list
 of hosts belongs to its experimental permission profiles, which codex-acp's
-modes don't use, so its leads are given none of them; OpenCode has no sandbox.
+modes don't use, so its leads are given none of them; its shell network is open
+and its turn takes the `untrusted` approval policy, so a command its safe list
+doesn't cover reaches Althar. OpenCode has no sandbox.
 Every sandbox network request keeps its host on the record. Native web tools
 allowed by the session do not reach Althar’s permission record.
 
