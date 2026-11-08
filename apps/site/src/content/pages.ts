@@ -71,6 +71,24 @@ export const PAGE_META = {
     image: '/og/home.jpg',
     index: false,
   },
+  '/office-hours': {
+    path: '/office-hours',
+    name: 'Office hours',
+    title: 'Office hours · Althar',
+    description:
+      'Twenty minutes on video with Balazs, who makes Althar: get it set up together, or talk through working with coding agents. Free.',
+    image: '/og/home.jpg',
+    index: true,
+  },
+  '/privacy': {
+    path: '/privacy',
+    name: 'Privacy',
+    title: 'Privacy · Althar',
+    description:
+      'What Althar sends and to whom: anonymous usage data and crash reports you can turn off, problem reports only when you send one, no cookies.',
+    image: '/og/home.jpg',
+    index: true,
+  },
   /** The earlier page, kept for the company version: linked from nowhere, and kept out of search until then. */
   '/enterprise': {
     path: '/enterprise',

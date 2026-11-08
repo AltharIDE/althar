@@ -3,7 +3,9 @@ import { defineConfig } from 'vite-plus'
 /*
  * The contract against the real agents: Claude Code, Codex and OpenCode, as
  * installed and signed in on this machine. It sends a few short prompts, so it
- * costs a little usage, and never runs in CI.
+ * costs a little usage, and never runs in CI. Its skills checks
+ * (`skills.test.ts`) need no sign-in and call no model: each skips where its
+ * agent isn't installed.
  */
 export default defineConfig({
   test: {

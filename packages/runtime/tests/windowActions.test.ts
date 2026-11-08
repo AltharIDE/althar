@@ -28,6 +28,7 @@ const OWN = [
   'push_to_pull_request',
   'read_checks',
   'record_setup',
+  'wait_for_person',
 ]
 
 const toolOf = (action: WindowAction) => ('tool' in action ? action.tool : 'word' in action ? action.word : null)

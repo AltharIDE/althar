@@ -261,6 +261,8 @@ export interface FakeAgentOptions {
 
   /** Hold `session/new` open to exercise startup timeout cleanup. */
   readonly beforeNewSession?: () => Promise<void>
+  /** Called with what each `session/new` asked for, as the agent received it: its added directories and `_meta` among it. */
+  readonly sessionAsked?: (params: acp.NewSessionRequest) => void
   /** Hold `initialize` open, the first thing a connection asks, to exercise the same cleanup. */
   readonly beforeInitialize?: () => Promise<void>
   /** A scripted response to a permission judgment, with the actual session settings exposed to the test. */
@@ -662,7 +664,9 @@ const playStall = async (
  * proposes the release notes automation, every Friday at 16:00; a review's lead, `[lead:review]`, drafts asking for changes with a
  * comment on each of its first two changed lines, or, `[lead:review-approve]`, approves it;
  * `[lead:finish]` finishes the step, and so does being told to carry on with
- * it after, with `[lead:answered]` saying it only answered the person; asked to, `[lead:make-change]` makes its quick task a change
+ * it after, with `[lead:answered]` saying it only answered the person; asked to,
+ * `[lead:wait-for-person]` asks the person a question with `wait_for_person`
+ * and ends its turn, then finishes once their answer comes; asked to, `[lead:make-change]` makes its quick task a change
  * first, reviewed by Codex and ending in a draft pull request, or with no
  * review (`[lead:make-change-alone]`), and without `[lead:finish]` ends its
  * turn there; `[review:pass]` and `[review:findings]`
@@ -676,7 +680,8 @@ const playStall = async (
  * `[lead:settle-quietly]` settles without reporting; `[lead:fix-elsewhere]` names a commit from before the round as its fix. `[lead:slowly]` takes some
  * seconds over what it was asked before it plays its part. Either takes until a test opens its hold instead, where
  * the test holds it (`FakeAgentOptions.holds`).
- * `[lead:edit]` commits a change when it finishes, as a lead is asked to;
+ * `[lead:edit]` commits a change when it finishes, as a lead is asked to; `[lead:nothing]` says it built
+ * nothing, so a task with a review runs none;
  * `[lead:scratch]` leaves a scratch file lying about too, and deletes it when
  * Althar says it isn't committed; `[lead:evidence]` saves a screenshot in
  * the worktree, uncommitted, and finishes with it, a test run and something
@@ -1115,6 +1120,14 @@ const playRole = async (
         const descriptions = names === undefined ? [{ text: described }] : names.map((repository) => ({ repository, text: described }))
         return await call('finish_step', { summary: 'Did the task.', built: BUILT, descriptions, ...evidence() })
       }
+      // Asked to wait on the person's answer (`[lead:wait-for-person]`), it asks in a line and ends its turn; told the
+      // answer, it carries on and finishes as it would have.
+      if (available.has('wait_for_person') && session.markers.has('[lead:wait-for-person]')) {
+        if (text.includes('[lead:wait-for-person]'))
+          return await call('wait_for_person', { question: 'Which ADRs should the compaction keep?' })
+        if (session.markers.has('[lead:edit]')) await commitIn(session.cwd, 'change.txt', 'Change it')
+        return await finish()
+      }
       // Shaped like the lead that compacted the ADRs, `[lead:points-back]`: progress lines, its whole proposal on the way,
       // finish_step, then a short last message that only points at the proposal above. Told to say it again, it does, in full.
       if (session.markers.has('[lead:points-back]') && available.has('finish_step')) {
@@ -1126,6 +1139,8 @@ const playRole = async (
           await aloud.step('Read docs/architecture')
           await aloud.say(`${POINTED_PROPOSAL}\n\n${POINTED_QUESTIONS}`)
           await aloud.step('Write the proposal')
+          // It built something, so its step has a review: nothing built runs none.
+          await commitIn(session.cwd, 'compact.md', 'Compact the ADRs')
           await call('finish_step', { summary: 'Proposed a dozen current-state decisions; waiting on the answers.', built: BUILT })
           return 'The proposal is above: answer the questions and I’ll compact the ADRs.'
         }
@@ -1487,6 +1502,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
     .onRequest(acp.methods.agent.session.new, async ({ params, client }) => {
       if (options.slowStart !== undefined) await pause(options.slowStart)
       await options.beforeNewSession?.()
+      options.sessionAsked?.(params)
       created += 1
       const sessionId = `fake-${created}`
       const session: SessionState = {

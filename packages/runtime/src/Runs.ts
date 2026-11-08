@@ -140,7 +140,7 @@ const blankAgain = (step: StuckInfo['step'], round: boolean) =>
     ? "Your last turn ended before you could do anything. Carry on with the review; when it's done, call Althar's report_review tool with your verdict, a summary and your findings."
     : round
       ? 'Your last turn ended before you could do anything. Carry on with what you were last asked.'
-      : "Your last turn ended before you could do anything. Carry on with the task from where it stands. When it's done, call Althar's finish_step tool with your summary."
+      : "Your last turn ended before you could do anything. Carry on with the task from where it stands. When it's done, call Althar's finish_step tool with your summary. If it waits on the person, call wait_for_person with your question and end your turn."
 
 export const PlanStep = Schema.Struct({
   key: Schema.Literals(['implement', 'review']),
@@ -252,6 +252,8 @@ const Finished = Schema.Struct({
     ),
   ),
 })
+/** A lead stopping to wait for the person: the question it needs answered before it can go on. */
+const WaitingForPerson = Schema.Struct({ question: Schema.String })
 const Shown = Schema.Struct({ pictures: Schema.Array(PictureGiven) })
 /** The longest a finding's title is kept: past it, a reviewer wrote its claim there, cut at a word with an ellipsis. */
 const TITLE_LONGEST = 120
@@ -424,6 +426,8 @@ export type StuckWhy =
   | 'transient'
   /** Its agent's account is signed out: reminding it can't help; signing it in again can. */
   | 'signed_out'
+  /** The lead stopped to wait for the person's answer, which starts it again. */
+  | 'waiting_on_person'
 
 /** What a stuck step's call says: the step, why, what went wrong in words, who was on it, the round, and the findings still open. */
 export interface StuckInfo {
@@ -1476,12 +1480,51 @@ export class Runs extends Context.Service<
       const asking = (threadId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ taskId: string }>`
+            SELECT task_id AS taskId FROM threads WHERE id = ${threadId} AND kind = 'task'`
           const [open] = yield* sql<{ id: string }>`
             SELECT id FROM attention_requests
-            WHERE kind = 'question' AND json_extract(payload, '$.threadId') = ${threadId}
-              AND (state = 'open' OR (state = 'answered' AND json_extract(payload, '$.waitsForPlace') IS NOT NULL)) LIMIT 1`
+            WHERE ((kind = 'question' AND json_extract(payload, '$.threadId') = ${threadId}
+                AND (state = 'open' OR (state = 'answered' AND json_extract(payload, '$.waitsForPlace') IS NOT NULL)))
+              OR (${thread?.taskId ?? ''} <> '' AND kind = 'stuck' AND state = 'open' AND task_id = ${thread?.taskId ?? ''}
+                AND json_extract(payload, '$.why') = 'waiting_on_person')) LIMIT 1`
           return open !== undefined
         })
+
+      /**
+       * The person wrote in the task's thread: a lead waiting on them has its
+       * call answered, and its step runs again on that turn. The call doesn't
+       * stay open, so `finish_step` no longer refuses once the work is done.
+       */
+      const answerWaiting = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ taskId: string }>`
+            SELECT task_id AS taskId FROM threads WHERE id = ${threadId} AND kind = 'task'`
+          if (thread === undefined) return
+          const calls = yield* sql<{ id: string; projectId: ProjectId; attemptId: string | null }>`
+            SELECT id, project_id AS projectId, node_attempt_id AS attemptId FROM attention_requests
+            WHERE task_id = ${thread.taskId} AND kind = 'stuck' AND state = 'open'
+              AND json_extract(payload, '$.why') = 'waiting_on_person'`
+          for (const call of calls) {
+            const at = yield* timestamp
+            const revision = yield* change('attention_requests', call.id, { state: 'answered', answeredAt: at })
+            yield* fact({
+              projectId: call.projectId,
+              aggregateType: 'attention_request',
+              aggregateId: call.id,
+              revision,
+              type: 'attention_request.answered',
+              payload: { kind: 'tell' },
+              actorId: instance.personId,
+            })
+            if (call.attemptId === null) continue
+            const [attempt] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${call.attemptId}`
+            if (attempt?.state !== 'waiting_attention') continue
+            yield* change('node_attempts', call.attemptId, { state: 'running' })
+          }
+          if (calls.length > 0) yield* touchCard(thread.taskId)
+        }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not answer a lead waiting on the person', cause)))
 
       /** The answers kept on the task's threads while there was no place to tell them, oldest first. */
       const keptAnswers = (taskId: string) =>
@@ -1661,9 +1704,9 @@ export class Runs extends Context.Service<
 
       /** Told once when its turn ends without the report its step needs: report, or say what blocks it; ended again without, the step is handed on. */
       const reminders = {
-        lead: "Your step isn't done until you call Althar's finish_step tool. If you have done it, call finish_step now with your summary. If you can't go on without the person, call it saying what you need from them. If finish_step isn't among your tools, say so in a line, with the tools you have, and end your turn.",
+        lead: "Your step isn't done until you call Althar's finish_step tool. If you have done it, call finish_step now with your summary. If you can't go on without the person, call wait_for_person with your question and end your turn; don't call finish_step for work that waits on them. If finish_step isn't among your tools, say so in a line, with the tools you have, and end your turn.",
         round:
-          "Your step isn't done until you call Althar's finish_step tool: you changed the task's work since the person last wrote to you. If you have done what they asked, call finish_step now with your summary and your evidence. If you can't go on without the person, call it saying what you need from them. If finish_step isn't among your tools, say so in a line, with the tools you have, and end your turn.",
+          "Your step isn't done until you call Althar's finish_step tool: you changed the task's work since the person last wrote to you. If you have done what they asked, call finish_step now with your summary and your evidence. If you can't go on without the person, call wait_for_person with your question and end your turn; don't call finish_step for work that waits on them. If finish_step isn't among your tools, say so in a line, with the tools you have, and end your turn.",
         reviewer:
           "Your review isn't done until you call Althar's report_review tool. Call it now with your verdict, a summary and your findings. If report_review isn't among your tools, say so in a line, with the tools you have, and end your turn.",
       }
@@ -1849,7 +1892,11 @@ export class Runs extends Context.Service<
             event.event.classified.failure === 'transient'
           )
             return yield* reconnecting(event.threadId, event.event.classified.message)
-          if (event._tag !== 'TurnEnded' && event._tag !== 'SessionEnded') return
+          if (event._tag !== 'TurnEnded' && event._tag !== 'SessionEnded') {
+            // The person wrote in the thread: a lead waiting on their answer goes on with that turn.
+            if (event._tag === 'TurnStarted' && event.byPerson === true) yield* answerWaiting(event.threadId)
+            return
+          }
           // A quick task whose lead changed the repository in the turn that ended has its work on a branch of its own now.
           yield* firstWriteOn(event.threadId)
           // A lead whose last message only points back at what folded says it again first: its next turn is what's read.
@@ -1864,6 +1911,36 @@ export class Runs extends Context.Service<
           const on = yield* stepOn(event.threadId)
           // A turn the person interrupted is theirs to carry on; a round of work it left with nothing new goes back where it was.
           if (event._tag === 'TurnEnded' && event.state === 'interrupted') {
+            // Another agent is taking the thread over: its own session ending says so, and the step carries on there.
+            const [ended] = yield* sql<{ sessionId: string | null }>`
+              SELECT provider_session_id AS sessionId FROM turn_deliveries WHERE id = ${event.turnId}`
+            const [newer] = yield* sql<{ id: string }>`
+              SELECT id FROM provider_sessions WHERE thread_id = ${event.threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
+            if (ended?.sessionId != null && newer !== undefined && newer.id !== ended.sessionId) return
+            // A person's message waiting in the queue interrupts the turn only to carry on: the review reads it next.
+            const [waiting] = yield* sql<{ id: string }>`
+              SELECT id FROM user_inputs WHERE thread_id = ${event.threadId} AND state = 'queued' LIMIT 1`
+            if (on !== undefined && on.step === 'review') {
+              if (waiting !== undefined) return
+              yield* addItem({ projectId: on.run.projectId, threadId: on.run.threadId }, 'notice', {
+                source: 'runtime',
+                severity: 'info',
+                title: 'The review stopped: you interrupted it. It waits for you to start it again.',
+              })
+              yield* stuck(
+                on.run,
+                { id: on.attemptId },
+                {
+                  step: 'review',
+                  why: 'session_ended',
+                  detail: 'You interrupted it.',
+                  agentId: null,
+                  round: on.iteration,
+                  open: 0,
+                },
+              )
+              return
+            }
             if (on !== undefined) yield* quietly(on.run, { id: on.attemptId, nodeId: on.nodeId, nodeKey: on.nodeKey, input: on.input })
             return
           }
@@ -1899,8 +1976,17 @@ export class Runs extends Context.Service<
             open: 0,
           })
           if (event._tag === 'SessionEnded') {
-            // Another agent took the thread over: the step carries on there.
-            if (event.state === 'superseded' || Option.isSome(yield* sessions.running(event.threadId))) return
+            // Another agent took the thread over: the step carries on there, and the thread says the review didn't vanish.
+            if (event.state === 'superseded') {
+              if (on.step === 'review')
+                yield* addItem({ projectId: on.run.projectId, threadId: on.run.threadId }, 'notice', {
+                  source: 'runtime',
+                  severity: 'info',
+                  title: 'The review stopped: another agent took it over. It starts again there.',
+                })
+              return
+            }
+            if (Option.isSome(yield* sessions.running(event.threadId))) return
             // It went while it asked the person something: their answer starts it again, so the question is the call.
             if (yield* asking(event.threadId)) return
             // A round that made nothing new ends with its lead (ADR-034).
@@ -2056,6 +2142,24 @@ export class Runs extends Context.Service<
       /** A round of review admitted, under way on its reviewer; one that can't start needs the person. */
       const reviewOn = (run: RunRow, round: number, settled: string | undefined, step: PlanStep, attemptId: string, accountId?: string) =>
         Effect.gen(function* () {
+          // Nothing of the task's own on its branch: no review runs, and its thread says so rather than the line vanishing.
+          if (yield* changes.nothingBuilt(run.taskId).pipe(Effect.orElseSucceed(() => false))) {
+            const sql = yield* SqlClient.SqlClient
+            const [attempt] = yield* sql<{ nodeId: string }>`SELECT node_id AS nodeId FROM node_attempts WHERE id = ${attemptId}`
+            const at = yield* timestamp
+            yield* change('node_attempts', attemptId, {
+              state: 'cancelled',
+              output: JSON.stringify({ nothingBuilt: true }),
+              endedAt: at,
+            })
+            if (attempt !== undefined) yield* change('nodes', attempt.nodeId, { state: 'cancelled' })
+            yield* addItem({ projectId: run.projectId, threadId: run.threadId }, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: 'The review didn’t run: the branch has nothing built yet.',
+            })
+            return yield* finish(run, 'succeeded')
+          }
           const begun = yield* Effect.exit(reviewRound(run, round, settled, step, attemptId, accountId))
           if (begun._tag === 'Failure')
             yield* stuck(
@@ -3812,6 +3916,48 @@ export class Runs extends Context.Service<
         })
 
       /**
+       * The lead ends its turn waiting on the person's answer, its step still
+       * open: the call says what it asks, the task waits in Needs you, and the
+       * person's answer starts the lead again where it stopped. Never a step
+       * done, so no review runs and the task isn't ready.
+       */
+      const waitForPerson = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const { question } = yield* read(WaitingForPerson, input)
+          const asked = question.replace(/\s+/g, ' ').trim()
+          if (asked === '')
+            return yield* new ToolRefused({
+              message: 'Ask the person a question in a line, so they know what you need before you end your turn.',
+            })
+          if (access.taskId === null)
+            return yield* new ToolRefused({
+              message: 'Only a task’s lead waits on the person: the coordinator talks with them in its thread.',
+            })
+          const current = yield* currentRun(access.taskId)
+          const attempt = current === undefined ? undefined : yield* running(current, ['implement', 'settle'])
+          if (current === undefined || attempt === undefined)
+            return yield* new ToolRefused({ message: 'No step is waiting on you, so there is nothing to wait on the person for.' })
+          const step = attempt.nodeKey === 'settle' ? 'settle' : 'implement'
+          const [agent] = yield* sql<{ agentId: string }>`
+            SELECT agent_id FROM provider_sessions WHERE thread_id = ${access.threadId}
+            ORDER BY started_at DESC, rowid DESC LIMIT 1`
+          yield* stuck(
+            current,
+            { id: attempt.id },
+            {
+              step,
+              why: 'waiting_on_person',
+              detail: asked,
+              agentId: agent?.agentId ?? null,
+              round: attempt.iteration,
+              open: 0,
+            },
+          )
+          return `Althar has your question. Your step waits in the person’s Needs you; their answer starts you again. End your turn now.`
+        })
+
+      /**
        * The lead says its step is done: Implement, or a round of settling. A
        * description it gives reaches the task's pull requests open already,
        * which opened with an earlier one; what became of each is said after.
@@ -3903,6 +4049,15 @@ export class Runs extends Context.Service<
           if (current === undefined || attempt === undefined)
             return yield* new ToolRefused({ message: 'No step is waiting on you, so Althar keeps no summary now.' })
           const step = attempt.nodeKey === 'settle' ? 'settle' : 'implement'
+          // A step waiting on the person's answer isn't done: their answer starts it again.
+          const [waitingOnPerson] = yield* sql<{ id: string }>`
+            SELECT id FROM attention_requests WHERE task_id = ${current.taskId} AND kind = 'stuck' AND state = 'open'
+              AND json_extract(payload, '$.why') = 'waiting_on_person' LIMIT 1`
+          if (waitingOnPerson !== undefined)
+            return yield* new ToolRefused({
+              message:
+                'You are waiting on the person’s answer: end your turn. Their answer starts you again; don’t call finish_step until the work is done.',
+            })
           // A round of work that made nothing new ends with its summary, and the task is back where it was.
           const round = current.planId === null && step === 'implement' ? roundOf(attempt.input) : undefined
           const quiet = round !== undefined && !(yield* madeSince(current.taskId, round.start))
@@ -3993,6 +4148,11 @@ export class Runs extends Context.Service<
             return `Althar has your summary. Nothing ${plain ? 'in the repository' : 'on the branch'} changed this round, so the task is back where it was.`
           }
           if (step === 'implement') {
+            // Nothing on its branch to read: no review runs, and the task goes on to its ending as it is.
+            if (yield* changes.nothingBuilt(current.taskId).pipe(Effect.orElseSucceed(() => false))) {
+              yield* conclude(current)
+              return reply('Althar has your summary. Nothing was built, so there is nothing to review; the task is ready for the person.')
+            }
             const next = yield* review(current, 0)
             return reply(
               next === undefined
@@ -4215,7 +4375,7 @@ export class Runs extends Context.Service<
       yield* toolServer.serve('lead', [
         tool(
           'finish_step',
-          "Tells Althar you have done your step: the task, or settling a review's findings. The summary is what the person reads instead of your whole turn: a few lines on what you changed, how you checked it, and anything left open. In `built`, what the task has built as it stands now, which the person reads at its end. Where the task ends in a pull request, its description in `descriptions`, for whoever reviews it on the code host. With it, the evidence you gathered that the change does what it should, and in `unverified` what you couldn't show.",
+          "Tells Althar you have done your step: the task, or settling a review's findings. Don't call it while the work isn't done because it waits on the person: call wait_for_person with your question instead. The summary is what the person reads instead of your whole turn: a few lines on what you changed, how you checked it, and anything left open. In `built`, what the task has built as it stands now, which the person reads at its end. Where the task ends in a pull request, its description in `descriptions`, for whoever reviews it on the code host. With it, the evidence you gathered that the change does what it should, and in `unverified` what you couldn't show.",
           {
             type: 'object',
             properties: {
@@ -4319,6 +4479,22 @@ export class Runs extends Context.Service<
           },
           finishStep,
         ),
+        tool(
+          'wait_for_person',
+          "Ends your turn waiting on the person's answer, without finishing your step: ask your question in a line, and the task waits in their Needs you until they answer, when their answer starts you again. Use this instead of finish_step when the work isn't done because it waits on the person. Don't call finish_step while you wait.",
+          {
+            type: 'object',
+            properties: {
+              question: {
+                type: 'string',
+                description:
+                  'The question, in one line, the decision in a few words, with the options where there are any. Put the background in what you write just before it, which stays in the thread.',
+              },
+            },
+            required: ['question'],
+          },
+          waitForPerson,
+        ),
       ])
       // Showing pictures is in the shared set (ADR-097): a lead's from its worktree, the coordinator's from its copies.
       yield* toolServer.serve(POOL, [
@@ -4408,6 +4584,11 @@ export class Runs extends Context.Service<
                 WHERE id = ${input.attentionId} AND kind = 'stuck'`
               if (row === undefined) return yield* new NotFound({ kind: 'attention_request', id: input.attentionId })
               if (row.state !== 'open') return yield* new AttentionClosed({ attentionId: input.attentionId })
+              // Going on without opening the pull request doesn't finish a task whose lead is still at work.
+              if (answer.kind === 'abandon' && (JSON.parse(row.payload) as StuckInfo).step === 'publish' && (yield* atWork(row.taskId)))
+                return yield* new ToolRefused({
+                  message: 'Its lead is still at work, so the task isn’t finished: the pull request opens when the lead’s work is done.',
+                })
               // Only a reset that is known can be waited for.
               if (answer.kind === 'wait' && (JSON.parse(row.payload) as StuckInfo).limit?.resetsAt == null)
                 return yield* new NothingToWaitFor({ attentionId: input.attentionId })
@@ -4791,9 +4972,19 @@ export class Runs extends Context.Service<
                   }),
                 )
           if (info.step === 'publish') {
-            // Gone on without its ending, the task is ready on its branch; otherwise Althar tries again.
+            // Gone on without its ending, the task is ready on its branch; otherwise Althar tries again. Not while its lead is still
+            // at work: that would finish a task whose work hasn't stopped.
             if (answer.kind === 'abandon') {
+              if (yield* atWork(current.taskId))
+                return yield* new ToolRefused({
+                  message: 'Its lead is still at work, so the task isn’t finished: the pull request opens when the lead’s work is done.',
+                })
               yield* endAttempt('cancelled', { skipped: true })
+              yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
+                source: 'runtime',
+                severity: 'info',
+                title: 'Gone on without opening the pull request: the task is ready on its branch.',
+              })
               return yield* finish(current, 'succeeded')
             }
             yield* endAttempt('failed', { again: true })
@@ -4803,6 +4994,11 @@ export class Runs extends Context.Service<
             if (answer.kind === 'abandon') {
               // Gone on without the review, the task is ready, with what was found left open.
               yield* endAttempt('cancelled', { skipped: true })
+              yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
+                source: 'runtime',
+                severity: 'info',
+                title: 'The review stopped: gone on without it, with what it found left open.',
+              })
               return yield* conclude(current)
             }
             yield* endAttempt('failed', { handedTo: answer.kind === 'retry' ? answer.agentId : info.agentId })
@@ -5024,7 +5220,17 @@ export class Runs extends Context.Service<
           const cut = latest !== undefined && latest.state === 'cancelled' && latest.stopped === 1 ? latest : undefined
           const step = cut === undefined ? undefined : stepOf(cut.nodeKey)
           const config = JSON.parse(cut?.config ?? '{}') as { agentId?: string; model?: string | null }
-          if (cut !== undefined && step === 'review') {
+          // A review a stop cut short on a branch with nothing built isn't carried on: its lead does the work instead, and the
+          // thread says why the review didn't start.
+          const empty =
+            cut !== undefined && step === 'review' && (yield* changes.nothingBuilt(current.taskId).pipe(Effect.orElseSucceed(() => false)))
+          if (empty)
+            yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: 'The review waits: the branch has nothing built yet. Its lead carries on with the work.',
+            })
+          if (cut !== undefined && step === 'review' && !empty) {
             // Its round again, on its reviewer, with what the lead settled before it, after the first: once it has a place.
             const settled = cut.iteration > 0 ? yield* settledBefore(current) : undefined
             const reviewer =
@@ -5033,13 +5239,14 @@ export class Runs extends Context.Service<
           } else if (cut !== undefined && step === 'publish') yield* conclude(current)
           else {
             // The lead's step: the one cut short, else the lead's latest, else Implement.
+            const leadCut = empty ? undefined : cut
             const [own] =
-              cut === undefined
+              leadCut === undefined
                 ? yield* sql<{ nodeKey: string; iteration: number; config: string; input: string }>`
                     SELECT n.node_key, n.iteration, n.config, a.input FROM node_attempts a JOIN nodes n ON n.id = a.node_id
                     WHERE n.execution_id = ${current.executionId} AND n.node_key IN ('implement', 'settle')
                     ORDER BY a.admitted_at DESC, a.rowid DESC LIMIT 1`
-                : [cut]
+                : [leadCut]
             const { implement } = yield* stepsOf(current)
             const key = own?.nodeKey === 'settle' ? 'settle' : 'implement'
             const iteration = own?.iteration ?? 0
@@ -6136,6 +6343,11 @@ export class Runs extends Context.Service<
               id: string
             }>`SELECT id FROM threads WHERE task_id = ${input.taskId} AND kind = 'step' AND node_key = 'review'`
             if (thread !== undefined) yield* Effect.ignore(sessions.stop(thread.id))
+            yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: 'The review stopped: skipped, with what it found left open.',
+            })
             yield* conclude(current)
           }
           yield* touchCard(input.taskId)

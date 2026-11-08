@@ -45,11 +45,16 @@ const planned = (
     const instance = yield* Instance
     const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
     if (waits) yield* (yield* Policies).setUsageLimit(project.projectId, 'wait', instance.personId)
+    // A task with a review builds something first, unless the test says it built nothing: nothing built has no review.
+    const described =
+      steps.some((step) => step.key === 'review') && !description.includes('[lead:edit]') && !description.includes('[lead:nothing]')
+        ? `${description} [lead:edit]`
+        : description
     const task = yield* projects.createTask({
       envelope: yield* Runtime.envelope('task.create', {}),
       projectId: project.projectId,
       title: 'Retry the checkout',
-      description,
+      description: described,
       draft: true,
     })
     const planId = yield* plans.propose({
@@ -338,7 +343,7 @@ describe('a review whose copy of the work can’t be made', () => {
         envelope: yield* Runtime.envelope('task.create', {}),
         projectId: project.projectId,
         title: 'Retry the checkout',
-        description: 'Fix the heading. [lead:finish]',
+        description: 'Fix the heading. [lead:finish] [lead:edit]',
         draft: true,
       })
       // Where its reviewer's copy goes is a folder git doesn't know: the copy can't be made there.

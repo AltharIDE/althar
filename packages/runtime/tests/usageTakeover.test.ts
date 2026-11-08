@@ -21,7 +21,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { atReset, fakeAgents, items, later, onTestClock, repository, runtime, turns, until } from './support'
+import { atReset, fakeAgents, items, later, onTestClock, repository, runtime, turns, until, withWork } from './support'
 
 const claude = { id: 'claude-strong', name: 'Claude Strong' }
 const weak = { id: 'gpt-weak', name: 'GPT Weak' }
@@ -128,6 +128,7 @@ const startTask = (title = 'Continue the work [lead:finish]', reviewer?: string)
       envelope: yield* Runtime.envelope('task.create', {}),
       projectId: project.projectId,
       title,
+      description: withWork(title, reviewer !== undefined),
       draft: true,
     })
     const id = yield* plans.propose({
@@ -175,7 +176,7 @@ const automationFor = (projectId: string, lead: ModelChoice, review: ModelChoice
       actorId: instance.personId,
       definition: {
         name: 'Subscription run',
-        prompt: 'Finish this run [lead:finish] [review:pass]',
+        prompt: 'Finish this run [lead:finish] [lead:edit] [review:pass]',
         schedule: { every: 'week', days: [1], at: '09:00' },
         zone: 'Europe/London',
         lead,

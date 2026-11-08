@@ -2018,7 +2018,7 @@ describe('the coordinator, through the API', () => {
           commandId: commandId(),
           projectId: project.id,
           title: 'Tidy the README',
-          description: 'Short. [lead:finish] [review:pass]',
+          description: 'Short. [lead:finish] [lead:edit] [review:pass]',
           steps: [
             { key: 'implement' as const, agentId: 'codex', model: null, skipped: false },
             { key: 'review' as const, agentId: 'claude-code', model: 'large', skipped: false },
