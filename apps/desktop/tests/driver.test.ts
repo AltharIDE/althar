@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Driver, Found, Located, Scrolled } from '../src/main/browser/driving'
 import { installDriver } from '../src/overlay/driver'
-import { MARK, markIn } from '../src/overlay/marks'
+import { MARK, markIn, unmarkIn } from '../src/overlay/marks'
 
 /*
  * The lead's eyes and hands in a page beside the conversation (ADR-100): the
@@ -19,7 +19,7 @@ let driver: Driver
 beforeEach(() => {
   marks.length = 0
   document.body.innerHTML = ''
-  driver = installDriver({ mark: (rect) => marks.push(rect) })
+  driver = installDriver({ mark: (rect) => marks.push(rect), unmark: () => marks.splice(0).length })
 })
 
 afterEach(() => {
@@ -223,8 +223,8 @@ describe('the snapshot of a page', () => {
   it('lists a frame without entering it', () => {
     expect(read('<iframe src="https://acme.test/embed" title="Pay"></iframe><iframe></iframe>')).toBe(
       [
-        '- iframe "Pay" [ref=e1] -> https://acme.test/embed (its contents aren\'t read)',
-        "- iframe [ref=e2] (its contents aren't read)",
+        '- iframe "Pay" [ref=e1] -> https://acme.test/embed (its contents aren’t read)',
+        '- iframe [ref=e2] (its contents aren’t read)',
       ].join('\n'),
     )
   })
@@ -314,9 +314,9 @@ describe('references to elements', () => {
     page('<button id="a">A</button>')
     driver.snapshot(null, 100)
     document.getElementById('a')!.remove()
-    expect(driver.locate({ ref: 'e1' }, false)).toEqual({ ok: false, why: "e1 isn't on the page any more. Take a new snapshot." })
-    expect(driver.describe({ ref: 'e1' })).toEqual({ ok: false, why: "e1 isn't on the page any more. Take a new snapshot." })
-    expect(driver.focus({ ref: 'e1' })).toEqual({ ok: false, why: "e1 isn't on the page any more. Take a new snapshot." })
+    expect(driver.locate({ ref: 'e1' }, false)).toEqual({ ok: false, why: 'e1 isn’t on the page any more. Take a new snapshot.' })
+    expect(driver.describe({ ref: 'e1' })).toEqual({ ok: false, why: 'e1 isn’t on the page any more. Take a new snapshot.' })
+    expect(driver.focus({ ref: 'e1' })).toEqual({ ok: false, why: 'e1 isn’t on the page any more. Take a new snapshot.' })
   })
 
   it('say when what was given was never a reference', () => {
@@ -325,7 +325,7 @@ describe('references to elements', () => {
     for (const ref of ['e99', 'x1', 'button', 'e0'])
       expect(driver.locate({ ref }, false)).toEqual({
         ok: false,
-        why: `${ref} isn't a reference from a snapshot. Take a snapshot and use a ref from it, or give a selector.`,
+        why: `${ref} isn’t a reference from a snapshot. Take a snapshot and use a ref from it, or give a selector.`,
       })
   })
 
@@ -350,7 +350,7 @@ describe('references to elements', () => {
     page('<p>x</p>')
     const bad = driver.locate({ selector: 'p[' }, false)
     expect(bad.ok).toBe(false)
-    expect(!bad.ok && bad.why).toMatch(/^`p\[` isn't a selector the page can read: /)
+    expect(!bad.ok && bad.why).toMatch(/^`p\[` isn’t a selector the page can read: /)
     expect(driver.locate({ selector: '#missing' }, false)).toEqual({ ok: false, why: 'Nothing on the page matches `#missing`.' })
   })
 
@@ -449,7 +449,7 @@ describe('where an element is and what it is like', () => {
     page('<button id="save">Save</button>')
     expect(driver.locate({ selector: '#save' }, false)).toEqual({
       ok: false,
-      why: "`#save` takes up no space on the page, so it can't be pressed. It may be hidden: take a new snapshot.",
+      why: '`#save` takes up no space on the page, so it can’t be pressed. It may be hidden: take a new snapshot.',
     })
   })
 
@@ -471,7 +471,7 @@ describe('focus, fields and choices', () => {
     expect(document.activeElement?.id).toBe('b')
     expect(driver.focus({ selector: 'label' })).toEqual({ ok: true })
     expect(document.activeElement?.id).toBe('q')
-    expect(driver.focus({ selector: '#p' })).toEqual({ ok: false, why: "`#p` can't take the page's focus. Click it instead." })
+    expect(driver.focus({ selector: '#p' })).toEqual({ ok: false, why: '`#p` can’t take the page’s focus. Click it instead.' })
   })
 
   it('selects what a field holds, so text typed replaces it', () => {
@@ -481,7 +481,7 @@ describe('focus, fields and choices', () => {
     expect(select).toHaveBeenCalled()
     expect(driver.selectAll({ selector: '#b' })).toEqual({ ok: true })
     expect(window.getSelection()?.toString()).toBe('world')
-    expect(driver.selectAll({ selector: '#c' })).toEqual({ ok: false, why: "`#c` isn't a field that holds text." })
+    expect(driver.selectAll({ selector: '#c' })).toEqual({ ok: false, why: '`#c` isn’t a field that holds text.' })
   })
 
   it('reads what a field holds', () => {
@@ -543,10 +543,10 @@ describe('focus, fields and choices', () => {
 
   it('refuses to fill what a person can’t type in, saying why', () => {
     page('<input id="a" disabled><input id="b" readonly><input id="c" type="checkbox"><p id="d">x</p>')
-    expect(driver.fill({ selector: '#a' }, 'x', true)).toEqual({ ok: false, why: "`#a` isn't a field that takes text: it is disabled." })
+    expect(driver.fill({ selector: '#a' }, 'x', true)).toEqual({ ok: false, why: '`#a` isn’t a field that takes text: it is disabled.' })
     expect(driver.fill({ selector: '#b' }, 'x', true)).toEqual({ ok: false, why: '`#b` is read-only.' })
-    expect(driver.fill({ selector: '#c' }, 'x', true)).toEqual({ ok: false, why: "`#c` isn't a field that takes text." })
-    expect(driver.fill({ selector: '#d' }, 'x', true)).toEqual({ ok: false, why: "`#d` isn't a field that takes text." })
+    expect(driver.fill({ selector: '#c' }, 'x', true)).toEqual({ ok: false, why: '`#c` isn’t a field that takes text.' })
+    expect(driver.fill({ selector: '#d' }, 'x', true)).toEqual({ ok: false, why: '`#d` isn’t a field that takes text.' })
     expect(driver.fill({ selector: '#e' }, 'x', true)).toEqual({ ok: false, why: 'Nothing on the page matches `#e`.' })
   })
 
@@ -585,7 +585,7 @@ describe('focus, fields and choices', () => {
     const menu = driver.select({ selector: '#menu' }, ['x'])
     expect(menu).toEqual({
       ok: false,
-      why: "`#menu` isn't a select list. If it is a menu the page draws, click it, then click its option.",
+      why: '`#menu` isn’t a select list. If it is a menu the page draws, click it, then click its option.',
     })
   })
 })
@@ -712,7 +712,7 @@ describe('what a real device did', () => {
   })
 
   it('counts presses, keys and wheel turns that are, and nothing else', () => {
-    const counting = installDriver({ mark: () => undefined }, () => true)
+    const counting = installDriver({ mark: () => undefined, unmark: () => 0 }, () => true)
     expect(counting.input()).toBe(0)
     dispatch()
     expect(counting.input()).toBe(3)
@@ -723,7 +723,7 @@ describe('what a real device did', () => {
   })
 
   it('hears them first, whatever the page does to them below', () => {
-    const counting = installDriver({ mark: () => undefined }, () => true)
+    const counting = installDriver({ mark: () => undefined, unmark: () => 0 }, () => true)
     document.body.innerHTML = '<button id="b">x</button>'
     document.getElementById('b')!.addEventListener('pointerdown', (event) => event.stopPropagation())
     document.getElementById('b')!.dispatchEvent(new Event('pointerdown', { bubbles: true }))
@@ -732,7 +732,10 @@ describe('what a real device did', () => {
 
   it('asks the event itself whether it is trusted', () => {
     const asked: Array<boolean> = []
-    const counting = installDriver({ mark: () => undefined }, (event) => asked.push(event.isTrusted) > 0 && event.isTrusted)
+    const counting = installDriver(
+      { mark: () => undefined, unmark: () => 0 },
+      (event) => asked.push(event.isTrusted) > 0 && event.isTrusted,
+    )
     dispatch()
     expect(asked).toEqual([false, false, false])
     expect(counting.input()).toBe(0)
@@ -771,6 +774,21 @@ describe('the lead’s outline', () => {
     for (let i = 0; i < MARK.most + 3; i += 1) mark({ x: i, y: 0, width: 10, height: 10 })
     expect(layer.children).toHaveLength(MARK.most)
     expect((layer.firstElementChild as HTMLElement).style.left).toBe('3px')
+    vi.advanceTimersByTime(MARK.holdMs + MARK.fadeMs)
+    expect(layer.children).toHaveLength(0)
+  })
+
+  it('takes every outline away at once for a picture of the page alone, saying how many there were', () => {
+    vi.useFakeTimers()
+    const layer = document.createElement('div')
+    const mark = markIn(layer, () => undefined)
+    const unmark = unmarkIn(layer)
+    mark({ x: 0, y: 0, width: 10, height: 10 })
+    mark({ x: 20, y: 0, width: 10, height: 10 })
+    expect(unmark()).toBe(2)
+    expect(layer.children).toHaveLength(0)
+    expect(unmark()).toBe(0)
+    // Their timers find nothing left to fade or take away.
     vi.advanceTimersByTime(MARK.holdMs + MARK.fadeMs)
     expect(layer.children).toHaveLength(0)
   })

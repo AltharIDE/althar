@@ -125,6 +125,8 @@ export interface Driver {
   layout(): Layout
   /** Outlines a box for a moment, for the person to see where the lead is. Nothing in the page changes or hears of it. */
   mark(rect: Box): void
+  /** Takes the lead's outlines away at once, so a picture of the page shows the page alone; how many there were. */
+  unmark(): number
 }
 
 export const isDriving = (value: unknown): value is Driver => typeof value === 'object' && value !== null

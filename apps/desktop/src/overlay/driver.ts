@@ -32,6 +32,8 @@ import { labelOf } from './selector'
 /** What the driver needs of the overlay it is installed beside: drawing the lead's outline. */
 export interface DriverHooks {
   readonly mark: (rect: Box) => void
+  /** Takes the outlines away at once; how many there were. */
+  readonly unmark: () => number
 }
 
 /** The most elements a snapshot holds, and the longest a name or a run of text in it is. */
@@ -591,8 +593,8 @@ export const installDriver = (hooks: DriverHooks, trusted: (event: Event) => boo
       const element = known.get(ref)?.deref()
       if (element !== undefined && element.isConnected) return element
       if (/^e\d+$/.test(ref) && Number(ref.slice(1)) <= counter && Number(ref.slice(1)) > 0)
-        return { ok: false, why: `${ref} isn't on the page any more. Take a new snapshot.` }
-      return { ok: false, why: `${ref} isn't a reference from a snapshot. Take a snapshot and use a ref from it, or give a selector.` }
+        return { ok: false, why: `${ref} isn’t on the page any more. Take a new snapshot.` }
+      return { ok: false, why: `${ref} isn’t a reference from a snapshot. Take a snapshot and use a ref from it, or give a selector.` }
     }
     const selector = target.selector?.trim() ?? ''
     if (selector === '') return { ok: false, why: 'Say which element: a ref from the snapshot, or a CSS selector.' }
@@ -602,7 +604,7 @@ export const installDriver = (hooks: DriverHooks, trusted: (event: Event) => boo
     } catch (error) {
       return {
         ok: false,
-        why: `\`${selector}\` isn't a selector the page can read: ${error instanceof Error ? error.message : String(error)}`,
+        why: `\`${selector}\` isn’t a selector the page can read: ${error instanceof Error ? error.message : String(error)}`,
       }
     }
     return found ?? { ok: false, why: `Nothing on the page matches \`${selector}\`.` }
@@ -818,7 +820,7 @@ export const installDriver = (hooks: DriverHooks, trusted: (event: Event) => boo
       }
       if (role === 'iframe') {
         const source = attribute(element, 'src')
-        after += `${source === null || source === '' ? '' : ` -> ${cut(source, LONGEST_HREF)}`} (its contents aren't read)`
+        after += `${source === null || source === '' ? '' : ` -> ${cut(source, LONGEST_HREF)}`} (its contents aren’t read)`
       }
       const value = shownValue(element, role)
       if (value !== null && value !== '' && role !== 'img') after += ` value=${quote(cut(value, LONGEST_VALUE))}`
@@ -885,7 +887,7 @@ export const installDriver = (hooks: DriverHooks, trusted: (event: Event) => boo
     if (rect.width < 1 || rect.height < 1)
       return {
         ok: false,
-        why: `${nameTarget(target)} takes up no space on the page, so it can't be pressed. It may be hidden: take a new snapshot.`,
+        why: `${nameTarget(target)} takes up no space on the page, so it can’t be pressed. It may be hidden: take a new snapshot.`,
       }
     const { width, height } = viewport()
     const left = Math.max(0, rect.x)
@@ -935,14 +937,14 @@ export const installDriver = (hooks: DriverHooks, trusted: (event: Event) => boo
     ;(found as HTMLElement).focus?.()
     const active = focusedElement()
     if (active === null || !(active === found || within(active, found) || within(found, active)) || active === document.body)
-      return { ok: false, why: `${nameTarget(target)} can't take the page's focus. Click it instead.` }
+      return { ok: false, why: `${nameTarget(target)} can’t take the page’s focus. Click it instead.` }
     return { ok: true }
   }
 
   const selectAll = (target: Target): Done | Failed => {
     const found = aField(target)
     if (failed(found)) return found
-    if (!isTextField(found)) return { ok: false, why: `${nameTarget(target)} isn't a field that holds text.` }
+    if (!isTextField(found)) return { ok: false, why: `${nameTarget(target)} isn’t a field that holds text.` }
     ;(found as HTMLElement).focus?.()
     if (found.localName === 'input' || found.localName === 'textarea') {
       const field = found as HTMLInputElement
@@ -982,7 +984,7 @@ export const installDriver = (hooks: DriverHooks, trusted: (event: Event) => boo
     const found = aField(target)
     if (failed(found)) return found
     if (!isTextField(found) || isDisabled(found))
-      return { ok: false, why: `${nameTarget(target)} isn't a field that takes text${isDisabled(found) ? ': it is disabled' : ''}.` }
+      return { ok: false, why: `${nameTarget(target)} isn’t a field that takes text${isDisabled(found) ? ': it is disabled' : ''}.` }
     if (found.localName === 'input' || found.localName === 'textarea') {
       const field = found as HTMLInputElement | HTMLTextAreaElement
       if (field.readOnly) return { ok: false, why: `${nameTarget(target)} is read-only.` }
@@ -1013,7 +1015,7 @@ export const installDriver = (hooks: DriverHooks, trusted: (event: Event) => boo
     if (list === null || list.localName !== 'select')
       return {
         ok: false,
-        why: `${nameTarget(target)} isn't a select list. If it is a menu the page draws, click it, then click its option.`,
+        why: `${nameTarget(target)} isn’t a select list. If it is a menu the page draws, click it, then click its option.`,
       }
     const field = list as HTMLSelectElement
     if (isDisabled(field)) return { ok: false, why: `${nameTarget(target)} is disabled.` }
@@ -1142,5 +1144,6 @@ export const installDriver = (hooks: DriverHooks, trusted: (event: Event) => boo
     input: () => input,
     layout,
     mark: (rect) => hooks.mark(rect),
+    unmark: () => hooks.unmark(),
   }
 }

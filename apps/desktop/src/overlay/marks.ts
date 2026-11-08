@@ -15,6 +15,13 @@ export const MARK = { holdMs: 1_000, fadeMs: 400, most: 8 } as const
 export const MARK_CLASS = 'lead'
 export const MARK_FADING = 'fading'
 
+/** Takes every outline out of `layer` at once, for a picture of the page alone; how many there were. */
+export const unmarkIn = (layer: Element) => (): number => {
+  const count = layer.children.length
+  layer.replaceChildren()
+  return count
+}
+
 /** Outlines a box in `layer`; `mounted` makes sure the layer is in the page first. */
 export const markIn = (layer: Element, mounted: () => void) => {
   return (rect: Box): void => {

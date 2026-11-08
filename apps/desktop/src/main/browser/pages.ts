@@ -89,6 +89,13 @@ import { cropOf, type Picked, pickedOf, scaled } from './picked'
 /** The isolated world the overlay runs in: neither the page's (0) nor Electron's for a preload (999). */
 const WORLD = 7_301
 
+/** The longest one call into a page or its debugger is waited for before the lead hears it didn't answer. */
+const ANSWER_MS = 15_000
+
+/** Waits for the page to draw twice more, or a moment where it draws nothing (a page out of sight isn't drawn). */
+const REPAINTED =
+  'new Promise((done) => { requestAnimationFrame(() => requestAnimationFrame(() => done(true))); setTimeout(() => done(true), 150) })'
+
 /** Pages kept alive while no conversation shows them; the oldest past this is closed, and opens again where it was when next shown. */
 const KEPT_HIDDEN = 3
 
@@ -662,6 +669,28 @@ export const startPages = (options: PagesOptions) => {
 
   const pause = (ms: number) => new Promise<void>((resolve) => void setTimeout(resolve, ms))
 
+  /**
+   * What one call into the page or its debugger gives, or a failure in words where it doesn't answer in time: a page
+   * busy in a loop, or an input the page never acknowledges, never holds the lead (or the calls queued behind it) up.
+   */
+  const answered = <T>(work: Promise<T>, what: string): Promise<T> =>
+    new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`it didn’t answer ${what} within ${Math.round(ANSWER_MS / 1000)} seconds`)),
+        ANSWER_MS,
+      )
+      work.then(
+        (value) => {
+          clearTimeout(timer)
+          resolve(value)
+        },
+        (error: unknown) => {
+          clearTimeout(timer)
+          reject(error instanceof Error ? error : new Error(String(error)))
+        },
+      )
+    })
+
   /** What a promise gives, or undefined where it took longer than `ms`. */
   const within = <T>(work: Promise<T>, ms: number): Promise<T | undefined> =>
     new Promise((resolve, reject) => {
@@ -727,10 +756,15 @@ export const startPages = (options: PagesOptions) => {
   }
 
   /** The in-page driver (src/overlay/driver.ts), in the page's isolated world: asked for something, answers with plain data to be read as untrusted. */
-  const ask = async (page: Page, method: string, ...args: ReadonlyArray<unknown>): Promise<unknown> => {
-    await overlaid(page)
-    return run<unknown>(page, `globalThis.__altharDriver.${method}(${args.map((one) => JSON.stringify(one ?? null)).join(', ')})`)
-  }
+  const ask = (page: Page, method: string, ...args: ReadonlyArray<unknown>): Promise<unknown> =>
+    answered(
+      overlaid(page).then(() =>
+        run<unknown>(page, `globalThis.__altharDriver.${method}(${args.map((one) => JSON.stringify(one ?? null)).join(', ')})`),
+      ),
+      'Althar’s reading of it',
+    )
+  /** Real input through the debugger, as Chromium takes a device's. */
+  const input = (page: Page, method: string, params: Record<string, unknown>) => answered(cdp(page, method, params), 'the input sent to it')
   const targetOf = (target: PageTarget) => ({
     ...(target.ref === undefined ? {} : { ref: target.ref }),
     ...(target.selector === undefined ? {} : { selector: target.selector }),
@@ -763,7 +797,7 @@ export const startPages = (options: PagesOptions) => {
     button: 'none' | 'left' | 'right' | 'middle',
     clickCount: number,
   ) =>
-    cdp(page, 'Input.dispatchMouseEvent', {
+    input(page, 'Input.dispatchMouseEvent', {
       type,
       x: point.x,
       y: point.y,
@@ -773,7 +807,7 @@ export const startPages = (options: PagesOptions) => {
       pointerType: 'mouse',
     })
   const strike = async (page: Page, strokes: ReadonlyArray<KeyStroke>) => {
-    for (const event of keyEvents(strokes, mac)) await cdp(page, 'Input.dispatchKeyEvent', event as Record<string, unknown>)
+    for (const event of keyEvents(strokes, mac)) await input(page, 'Input.dispatchKeyEvent', event as Record<string, unknown>)
   }
 
   /** What an action starts from: how many real inputs the page had, where it was, what its line said, and where its log stood. */
@@ -793,12 +827,20 @@ export const startPages = (options: PagesOptions) => {
   const doing = async (page: Page, body: (run: Run) => Promise<PageDone>): Promise<PageDone> => {
     busy(page)
     debugging(page)
-    await cdp(page, 'Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => undefined)
+    await answered(cdp(page, 'Emulation.setFocusEmulationEnabled', { enabled: true }), 'for its focus').catch(() => undefined)
+    // On a touch screen's viewport the person's mouse is made a finger; the lead's presses go in as they are, as pointing's do.
+    const touch = page.mobile
+    if (touch) await answered(cdp(page, 'Emulation.setEmitTouchEventsForMouse', { enabled: false }), 'for its touch').catch(() => undefined)
     try {
       const baseline = (await inputNow(page)) ?? 0
       return await body({ hand: { baseline, injected: 0 }, address: page.contents.getURL(), line: page.line, mark: page.logs.mark() })
     } finally {
-      await cdp(page, 'Emulation.setFocusEmulationEnabled', { enabled: false }).catch(() => undefined)
+      await answered(cdp(page, 'Emulation.setFocusEmulationEnabled', { enabled: false }), 'for its focus').catch(() => undefined)
+      if (touch && page.mobile && page.pointing === null)
+        await answered(
+          cdp(page, 'Emulation.setEmitTouchEventsForMouse', { enabled: true, configuration: 'mobile' }),
+          'for its touch',
+        ).catch(() => undefined)
       if (page.working) fade(page)
     }
   }
@@ -851,6 +893,16 @@ export const startPages = (options: PagesOptions) => {
     return { ...base, ...none, open: false, address: '', title: '', viewport: 'fit', place: 'waiting' }
   }
 
+  /**
+   * Tells the windows of a page a lead opened or woke that none shows, so they place it beside its conversation, and
+   * gives the one on screen a moment to lay it out: where its conversation isn't on screen, it stays out of sight.
+   */
+  const offer = async (page: Page) => {
+    if (page.panel !== null) return
+    options.opened(page.owner.id)
+    for (let waited = 0; page.panel === null && waited < pace.settle * 6; waited += pace.poll) await pause(pace.poll)
+  }
+
   /** The page an agent works on: alive, or woken where it was; null where nothing is open. A page woken is shown beside its conversation by the windows. */
   const forAgent = async (owner: Owner): Promise<Page | null> => {
     const found = live(owner.id)
@@ -858,7 +910,7 @@ export const startPages = (options: PagesOptions) => {
     if (!asleep.has(owner.id)) return null
     const woke = pageOf(owner)
     await settled(woke, pace.load)
-    if (woke.panel === null) options.opened(owner.id)
+    await offer(woke)
     return woke
   }
 
@@ -896,7 +948,9 @@ export const startPages = (options: PagesOptions) => {
           page.contents.loadURL(typed).catch(() => undefined),
           pace.load,
         )
-        if (page.panel === null) options.opened(owner.id)
+        // What the page loads after its document (its frames, what it fetches) is waited for as long as a load is.
+        await settled(page, pace.load)
+        await offer(page)
         const line = page.line as PageLine | null
         if (line !== null && (line.kind === 'failed' || line.kind === 'gone'))
           return { error: `${lineWords(line)} Check that it is running (run_project starts the project), then open it again.` }
@@ -998,19 +1052,25 @@ export const startPages = (options: PagesOptions) => {
     if (page.scale !== 1) return null
     try {
       debugging(page)
-      const metrics = await cdp<{ cssContentSize?: { width: number; height: number }; contentSize: { width: number; height: number } }>(
-        page,
-        'Page.getLayoutMetrics',
+      const metrics = await answered(
+        cdp<{ cssContentSize?: { width: number; height: number }; contentSize: { width: number; height: number } }>(
+          page,
+          'Page.getLayoutMetrics',
+        ),
+        'for its size',
       )
       const size = metrics.cssContentSize ?? metrics.contentSize
       const width = Math.max(1, Math.ceil(size.width))
       const height = Math.max(1, Math.min(TALLEST, Math.ceil(size.height)))
-      const shot = await cdp<{ data: string }>(page, 'Page.captureScreenshot', {
-        format: 'png',
-        captureBeyondViewport: true,
-        fromSurface: true,
-        clip: { x: 0, y: 0, width, height, scale: 1 },
-      })
+      const shot = await answered(
+        cdp<{ data: string }>(page, 'Page.captureScreenshot', {
+          format: 'png',
+          captureBeyondViewport: true,
+          fromSurface: true,
+          clip: { x: 0, y: 0, width, height, scale: 1 },
+        }),
+        'for a picture of it',
+      )
       const dimensions = pngSize(shot.data)
       return dimensions === null ? null : { png: shot.data, ...dimensions }
     } catch {
@@ -1025,6 +1085,9 @@ export const startPages = (options: PagesOptions) => {
       unseen(page)
       await pause(pace.settle)
     }
+    // The lead's own outlines aren't the page: they go first, and the page is drawn again without them.
+    const outlines = await ask(page, 'unmark').catch(() => 0)
+    if (typeof outlines === 'number' && outlines > 0) await run(page, REPAINTED).catch(() => undefined)
     const state = stateOf(page)
     const where = page.panel === null ? 'off screen' : 'beside the conversation'
     const head = `A screenshot of ${shownOf(state.address, state.title)}, as drawn ${where}`
@@ -1128,7 +1191,7 @@ export const startPages = (options: PagesOptions) => {
       if (early !== null) return early
       let notes: ReadonlyArray<string> = []
       if (call.text !== '') {
-        await cdp(page, 'Input.insertText', { text: call.text })
+        await input(page, 'Input.insertText', { text: call.text })
         const stopped = await yielded(page, started, 'some of it was typed')
         if (stopped !== null) return stopped
         // Typing that didn't take (a field that ignores inserted text) is set the way typing sets it, and said.

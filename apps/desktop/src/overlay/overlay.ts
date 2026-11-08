@@ -2,7 +2,7 @@ import type { Driver } from '../main/browser/driving'
 import type { Box, Picked } from '../main/browser/picked'
 import { describe } from './describe'
 import { installDriver } from './driver'
-import { MARK_CLASS, MARK_FADING, markIn } from './marks'
+import { MARK_CLASS, MARK_FADING, markIn, unmarkIn } from './marks'
 
 /*
  * Point and comment, in a page beside the conversation (ADR-100). The main
@@ -65,7 +65,7 @@ const STYLE = `
   [hidden] { display: none !important; }
 `
 
-const install = (): { readonly overlay: Overlay; readonly mark: (rect: Box) => void } => {
+const install = (): { readonly overlay: Overlay; readonly mark: (rect: Box) => void; readonly unmark: () => number } => {
   const host = document.createElement('althar-overlay')
   const root = host.attachShadow({ mode: 'closed' })
   const style = document.createElement('style')
@@ -220,7 +220,7 @@ const install = (): { readonly overlay: Overlay; readonly mark: (rect: Box) => v
       return describe(element, window)
     },
   }
-  return { overlay, mark: markIn(markLayer, mounted) }
+  return { overlay, mark: markIn(markLayer, mounted), unmark: unmarkIn(markLayer) }
 }
 
 declare global {
@@ -233,4 +233,4 @@ declare global {
 /* Both are made once a world: the first run installs them, and a later run in the same world finds them there. */
 const installed = globalThis.__altharOverlay === undefined ? install() : null
 if (installed !== null) globalThis.__altharOverlay = installed.overlay
-globalThis.__altharDriver ??= installDriver({ mark: installed?.mark ?? (() => undefined) })
+globalThis.__altharDriver ??= installDriver({ mark: installed?.mark ?? (() => undefined), unmark: installed?.unmark ?? (() => 0) })
