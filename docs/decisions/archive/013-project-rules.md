@@ -1,0 +1,168 @@
+# ADR-013: Project rules: a mode, always ask, never, and command rules
+
+> Archived on 8 Nov 2026. What holds now is in [what-agents-may-do.md § The person's rules](../what-agents-may-do.md#the-persons-rules); this is the record as it was.
+
+- **Status:** Accepted; amended by [ADR-018](018-allow-always-keeps-a-rule.md)
+  (2026-10-10), which adds allow rules after what always asks; its defaults
+  partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06): allowing
+  everything is every project's default, the built-in Ask me list is
+  ADR-097's irreversible list, and changing the code host is no longer
+  beyond what a project can change; and agents change the rules too,
+  tightening at once and loosening only on the person's own message
+- **Date:** 2026-10-04
+- **Amended:** 2026-10-10: the usage limit row offers "Ask me". The step
+  waits for the person, with each account that could take it over and when
+  the agent is back.
+  2026-10-12: the rules keep whether the project's leads resolve merge
+  conflicts on their own ([ADR-030](030-the-lead-resolves-conflicts-and-althar-pushes-the-merge.md)),
+  switched in the project's settings. Off unless the person turns it on.
+  2026-10-15 (DEV-69, the safety pass): reading
+  credentials covers the files people keep keys and sign-ins in under their
+  home folder (`~/.ssh`, `~/.aws`, `~/.npmrc` and the like), refused for
+  every role. Deleting a branch that isn't the task's counts locally too, as
+  does moving one by force; installing for the whole computer counts as
+  writing outside the worktree. What could lose work asks the person even
+  with everything allowed ([ADR-043](043-allow-everything-is-one-switch-for-a-project-or-a-task.md)),
+  and is never the coordinator's to judge.
+  2026-10-18: the rules keep the project's Repository files switches
+  ([ADR-095](095-skill-and-openspec-files-stay-off-the-repository.md)):
+  whether skill and OpenSpec files may be in its repository and be pushed.
+  Each off unless the person turns it on.
+- **Owner:** Repository maintainers
+- **Context:** Every permission request reaches Althar
+  ([ADR-007](007-permission-requests-reach-althar.md)), which answers it
+  from its own rules. In the MVP those were fixed in code: everything
+  allowed, except a list of risky kinds that always asked. A project needs
+  to set this for itself. As of October 2026 the agent tools have converged
+  on the same shape:
+  - **A ladder of modes.**
+    - Claude Code: Manual, accept edits, plan, auto with a classifier,
+      bypass.
+    - Codex: Read only, Auto, Full access, with an automatic reviewer as an
+      option.
+    - VS Code: Manual, Assisted with a model as judge, Allow all.
+    - Goose: Manual, Smart, Autonomous, Chat only.
+    - Cursor: an allowlist in the sandbox, auto-review, run everything.
+  - **Rule lists that allow, ask or refuse, with refusal winning.**
+    - Claude Code: deny, then ask, then allow.
+    - Codex's rules: forbidden over prompt over allow, by command prefix.
+    - Gemini CLI's policy engine: allow, ask the user, or deny, by priority.
+    - Others: OpenCode's patterns per tool, Roo's allowed and denied
+      commands, Amp's allow, ask, reject or delegate, and VS Code's terminal
+      auto-approve, where a "no" wins.
+  - **Commands matched by how they start**, a prefix with wildcards, and
+    each command of a shell line on its own. Claude Code and VS Code do
+    this. Tools that matched the whole line naively have been bypassed (Roo
+    through a pipe, Cursor through shell builtins).
+  - **Scopes:** the user's, the project's (in the repository), local, and an
+    organisation's, managed.
+- **Decision:**
+  - **What a project's rules hold** (`Policies.ts`, read by `rules.ts`):
+    - **A mode**, for what no rule keeps:
+      - `rules` (the default, until ADR-097 made allowing everything
+        every project's): allowed;
+      - `ask`: it waits for the person, except reads;
+      - `allow`: everything is allowed, short of what is never allowed.
+    - **The kinds that always ask the person:**
+      - pushing to the default branch;
+      - force pushes;
+      - pushing every branch, tags, or a pattern of branches;
+      - deleting branches that aren't the task's;
+      - deploying and publishing;
+      - writing outside the task's worktree.
+
+      Since ADR-097 the built-in list is its irreversible one: a push to
+      the default branch, a force push, deleting another branch, deleting
+      outside the worktree or discarding another checkout's changes,
+      publishing, releases, teardown and merging, and speaking for the
+      person. Pushing many branches, deploying and writing outside go
+      ahead.
+    - **The kinds that are never allowed.**
+    - **Commands the person names** by how they start (`npm publish`,
+      `terraform *`), to ask about or refuse.
+    - **How a task ends** when its plan doesn't say.
+    - **How its branches and pull requests' titles are named,** by a
+      pattern (`{key}`, `{slug}`, `{title}`), over what each repository's
+      docs say.
+  - **Precedence.** A request can be several kinds at once: `git push
+    --force origin main` is a force push and a push to the default branch.
+    Every kind counts.
+    1. What no project can change: reading credentials, and changing the
+       code host
+       ([ADR-011](011-own-connectors-for-hosts-and-trackers.md)). Since
+       ADR-097, reading credentials; the code host is read as the rest is.
+    2. What is never allowed, any kind of it or a command.
+    3. Allowing everything. While Never lists anything, a request the rules
+       can't read (`eval`, `$(…)`) is refused, saying how to spell it out:
+       there is no one to ask.
+    4. What asks: a kind on the always-ask list, a request the rules can't
+       tell, or a command the project asks about.
+    5. Asking about everything beyond the task's own files: reads and
+       changes inside the worktree are let through, as every agent's
+       sandbox would.
+    6. Otherwise, allowed.
+  - **How command rules match:**
+    - Each command of a line is read as the shell would run it, with
+      environment assignments and wrappers such as `sudo` and `timeout`
+      taken off.
+    - It is also read as what a package runner (`npx`, `pnpm exec`, `bunx`)
+      or an interpreter (`bash script.sh`) runs for it.
+    - The program is matched by its name, wherever it lives. `*` matches
+      anything, and a lone `*` also matches nothing (`psql *` matches
+      `psql`).
+    - A line whose commands only show when it runs (`eval`, `$(…)`) meets a
+      rule whose program it names as a word of its own.
+  - **Deploying is read where a command says it:** in a tool's subcommand
+    (`fly deploy`, `terraform apply`), a script named for it
+    (`./deploy.sh`), or a runner's target (`make deploy`, `npm run
+    deploy`). It is never read from arguments or quoted text, so `grep
+    deploy` and `git commit -m "Fix the deploy script"` aren't deploys.
+  - **A task's ending is worked out once, when its plan is made:** the
+    plan's own, else the project's, else a draft where the host is
+    connected. A project that wants a pull request but whose repository
+    names no host Althar knows ends on its branch.
+  - **Names follow the team, the person's pattern first** (DEV-42). As a
+    task starts, each repository's branch is named by the project's
+    pattern, else by what its CONTRIBUTING.md, AGENTS.md, CLAUDE.md or
+    README spells out, read from its default branch each time, else
+    Althar's own (`althar/<key>-<slug>`); a title the same way as the pull
+    request opens. A doc that offers several patterns is a judgement left
+    to the person. The rules screen says, for each repository, where its
+    names come from.
+  - **They hold for what reaches Althar:** what an agent asks to do beyond
+    its sandbox, which is the network or outside the task. The screen says
+    so.
+  - **Each change is a revision, recorded as the person's.** The rules as
+    they are decide the next request; a run cites the revision it started
+    under. (Since [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md#settings), recorded as whoever
+    made it: an agent may change the rules too, tightening at once and
+    loosening only on the person's own message, which the revision quotes.)
+  - **The screen offers only what Althar does.**
+    - "The lead decides", the modes with a model as judge in other tools,
+      comes when the lead answers requests.
+    - The review findings row comes later. Asking about a usage limit came
+      with the amendment above.
+- **Alternatives considered:**
+  - **Each agent's own rule files** (`.claude/settings.json`, Codex's rules,
+    `opencode.json`). Each agent's differ in shape and reach. Althar's
+    reading of a request is the one that holds across agents.
+  - **An allowlist** (Cursor's). Althar is permissive by default, and the
+    person keeps the exceptions; an allowlist inverts that. One could serve
+    the `ask` mode later.
+  - **A model as judge now.** It comes as the lead deciding, which has its
+    own step.
+  - **Regular expressions** (VS Code). They are harder to read and to get
+    right. A prefix with `*` is what most tools offer.
+- **Trade-off:**
+  - **Rules don't see what an agent does inside its sandbox.** Codex's
+    `workspace-write` and Claude Code's sandboxed commands run without
+    asking, so a rule for a command that stays in the worktree never fires.
+    Giving each agent the project's command rules in its own form would
+    close that gap: Claude Code's ask rules, OpenCode's bash patterns, and
+    Codex's rules.
+  - **The rules live in Althar's store, not the repository**, so a team
+    can't share them yet.
+- **Revisit when:**
+  - The lead answers requests.
+  - Althar has a cloud, for shared or managed rules.
+  - An agent's sandbox stops asking about what the rules need to see.

@@ -1,7 +1,7 @@
 # Agents work as the person's own, and only what can't be undone asks
 
 > **Decided, 6 November 2026,** and recorded in
-> [ADR-097](../decisions/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md),
+> [ADR-097](../decisions/what-agents-may-do.md#what-asks),
 > which supersedes the restrictive parts of the ADRs it lists. This is the
 > phased plan to build it, not architecture. Delete this file when the last
 > phase ships.
@@ -220,7 +220,7 @@ lasted of it).
   defaults. Its session starts when the person talks to it, or news it acts
   on wakes it. With the task "Small changes finish in minutes, not 40".
 - **Settings, as the person changes them** (ADR-097's
-  [Settings](../decisions/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md#settings)).
+  [Settings](../decisions/what-agents-may-do.md#what-asks)).
   One pair, `read_settings` and `change_settings`, in both roles, beside
   `keep_note`, `set_run_command`, `keep_run` and the automation tools
   (`Launches.ts:1151-1183`, `Coordinator.ts`), which stay.
@@ -387,17 +387,11 @@ once phases 1 to 4 have shown what it needs.
 
 ## What stays, and why
 
-| Kept | Why |
-|---|---|
-| The OS sandbox writes only the worktree, temp and tool caches | It's why commands needn't ask |
-| The irreversible list asks in every mode, never judged | Lost work, a merge, a publish or a word to others can't be taken back |
-| Git guard hooks on pushes | A script can hide a force push |
-| Asked-for tools only on the person's own message (ADR-081); a command or an MCP call on the list on a card | News and PR text can't merge, publish or post, as far as Althar sees the call |
-| Secret files and the keychain are refused | Leaked credentials can't be taken back |
-| No agent answers its own permission request, approves its own work, or loosens what asks without the person's words | Otherwise none of the above holds |
-| An outside author's code doesn't run without the person's word, and none of its repository's settings or hooks load | A stranger's code on the person's machine |
-| Cost caps (40 turns, 6 hours, review rounds, helpers' counts) | Money, not safety |
-| The coordinator changes no code | Tidiness: a change is a task, with a branch, a review and a record |
+The table of what stays, and why, is kept in
+[What agents may do § What stays, and why](../decisions/what-agents-may-do.md#what-stays-and-why),
+where it is the current list. It adds two rows by name: running or
+resuming an automation goes on the person's word, and a lead's helpers push
+nothing.
 
 ## The docs this changed
 
