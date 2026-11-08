@@ -327,7 +327,11 @@ export function Diff({ lines, label, path, oldNumbers = false, fold, notes, onPi
     const to = Number(next.dataset.at)
     setFocusAt(to)
     next.focus()
-    if (event.shiftKey) onPick?.(to, true)
+    // Shift with nothing picked yet starts from the line it moves from.
+    if (event.shiftKey) {
+      if (picked == null) onPick?.(at, false)
+      onPick?.(to, true)
+    }
   }
   const rows: readonly Row[] = useMemo(
     () => (fold === undefined ? lines.map((line, at) => ({ line, at })) : folded(lines, fold, opened, kept)),

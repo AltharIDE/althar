@@ -212,6 +212,8 @@ export const queuedOf = (
   readonly pictures: ReadonlyArray<Picture>
   readonly files: ReadonlyArray<AttachedFile>
   readonly dictated?: boolean
+  /** Its comments on lines of the diff, as they went (ADR-105). */
+  readonly comments?: ReadonlyArray<LineComment>
 }> =>
   !shown
     ? []
@@ -227,6 +229,9 @@ export const queuedOf = (
                 pictures: item.content.pictures,
                 files: item.content.files,
                 ...(item.input.dictated === true ? { dictated: true } : {}),
+                ...(item.content.comments === undefined || item.content.comments.length === 0
+                  ? {}
+                  : { comments: item.content.comments.map(({ id: _id, ...comment }) => comment) }),
               },
             ]
           : [],

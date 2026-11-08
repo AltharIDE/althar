@@ -262,14 +262,17 @@ export const lineCommentsOf = (taskId: string, worktrees: ReadonlyArray<Commente
           // And as committed, its lines aren't as they were when it was made.
           const sinceCommitted =
             head === null || committed === null || committed.length === 0 ? null : yield* between(cwd, tree, head, found.inside)
-          if (sinceCommitted !== null)
-            addressed =
-              comment.side === 'new'
-                ? touches(sinceCommitted, comment.start, comment.end)
-                : touchesAt(sinceCommitted, comment.under ?? Math.max(0, comment.start - 1))
+          // What changed in its file since, as it is now: committed or not.
+          const since = now === null ? null : yield* between(cwd, tree, now, found.inside)
+          const touched = (hunks: NonNullable<typeof since>) =>
+            comment.side === 'new'
+              ? touches(hunks, comment.start, comment.end)
+              : touchesAt(hunks, comment.under ?? Math.max(0, comment.start - 1))
+          // Its lines changed as committed, and still as the files are: a commit of another part of the file, its lines left
+          // uncommitted as they were, doesn't address it.
+          if (sinceCommitted !== null && since !== null) addressed = touched(sinceCommitted) && touched(since)
           if (comment.side === 'new') {
             // Its file gone since, it has no line to be under.
-            const since = now === null ? null : yield* between(cwd, tree, now, found.inside)
             if (!existsSync(join(cwd, found.inside))) at = null
             else if (since !== null) at = { path: comment.path, line: carriedLine(since, comment.start).line }
           }

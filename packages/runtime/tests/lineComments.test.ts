@@ -248,6 +248,16 @@ describe('comments on the diff, from the window', () => {
           assert.strictEqual(first?.itemId, itemId)
           assert.strictEqual(first?.sentAt, message?.createdAt)
 
+          // Another part of the file committed alone, their lines still not committed as they were: not addressed.
+          writeFileSync(join(worktree, 'notes.md'), 'four\n')
+          git(worktree, 'add', '-A')
+          git(worktree, 'commit', '-q', '-m', 'Four first')
+          writeFileSync(join(worktree, 'notes.md'), 'one\ntwo\nthree\nfour\n')
+          assert.deepStrictEqual(
+            (yield* standing()).map(([, , addressed]) => addressed),
+            [false, false],
+          )
+
           // What it wrote committed as it was: nothing of them changed.
           git(worktree, 'add', '-A')
           git(worktree, 'commit', '-q', '-m', 'Notes')

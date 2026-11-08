@@ -488,7 +488,11 @@ export function TaskView({
   const lineComments = useLineComments(
     model.snapshot?.task.id ?? null,
     changes.open,
-    files.map((file) => `${file.path}:${file.add}:${file.del}`).join('\n'),
+    // A commit moves no line against the base, but its files are no longer uncommitted: a comment it addressed is read again.
+    [
+      ...files.map((file) => `${file.path}:${file.add}:${file.del}:${file.uncommitted}`),
+      ...(model.snapshot?.reports ?? []).map((report) => report.id),
+    ].join('\n'),
   )
   const [commentShown, setCommentShown] = useState<string | null>(null)
   const [sendingComments, setSendingComments] = useState(false)
@@ -788,6 +792,8 @@ export function TaskView({
       setDraft((current) => withQueued(current, said.text))
       if (said.dictated === true) setDraftDictated(kept, true)
       images.restore(said)
+      // Its comments on the diff wait there again, to be sent with the next.
+      if (said.comments !== undefined) lineComments.giveBack(said.comments)
     }
   }
 

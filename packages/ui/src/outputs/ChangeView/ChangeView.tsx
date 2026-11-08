@@ -499,23 +499,30 @@ function FileBody({
   onEditComment?: (id: string, note: string) => void
   onRemoveComment?: (id: string) => void
 }) {
-  // The lines picked to comment on, by their place in the diff; and the comment waiting to go that is open again in its box.
-  const [pick, setPick] = useState<DiffPick | null>(null)
-  const [editing, setEditing] = useState<string | null>(null)
+  // The lines picked to comment on, by their place in the lines they were picked in: from the line first picked to the
+  // one last picked, Shift moving the last. Lines read again, as the change moves, leave nothing picked, so a comment is
+  // never made on lines other than those it showed. And the comment waiting to go that is open again in its box.
   const lines = view.state === 'ready' ? view.lines : []
+  const [picking, setPicking] = useState<{ readonly lines: readonly DiffLine[]; readonly anchor: number; readonly focus: number } | null>(
+    null,
+  )
+  const [editing, setEditing] = useState<string | null>(null)
+  const pick: DiffPick | null =
+    picking === null || picking.lines !== lines
+      ? null
+      : { from: Math.min(picking.anchor, picking.focus), to: Math.max(picking.anchor, picking.focus) }
+  const setPick = (next: null) => setPicking(next)
   const picked = pick === null ? null : pickedLines(lines, pick)
   const onPick =
     onComment === undefined
       ? undefined
       : (at: number, extend: boolean) => {
           setEditing(null)
-          setPick((now) =>
-            extend && now !== null
-              ? { from: Math.min(now.from, at), to: Math.max(now.to, at) }
-              : now?.from === at && now.to === at
-                ? null
-                : { from: at, to: at },
-          )
+          setPicking((now) => {
+            const current = now !== null && now.lines === lines ? now : null
+            if (extend && current !== null) return { ...current, focus: at }
+            return current?.anchor === at && current.focus === at ? null : { lines, anchor: at, focus: at }
+          })
         }
   const ct = { ...lineCommentsText, ...t.comments }
   const said: DiffNote[] = comments.flatMap((one) =>

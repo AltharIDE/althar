@@ -75,6 +75,7 @@ export interface Said {
   readonly pictures: ReadonlyArray<Picture>
   readonly files: ReadonlyArray<AttachedFile>
   readonly dictated?: boolean
+  readonly comments?: ReadonlyArray<LineComment>
 }
 
 /** What goes again with a queued message: its images by their digests and its files by their copies, which Althar keeps, and its being dictated. */
@@ -88,6 +89,7 @@ export const outgoingOf = (said: Said): Outgoing => {
     files: said.files.map((file) => ({ kept: file.id })),
     attached: said.files,
     ...(said.dictated === true ? { dictated: true } : {}),
+    ...(said.comments === undefined ? {} : { comments: said.comments }),
   }
 }
 

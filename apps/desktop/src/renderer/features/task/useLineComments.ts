@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import type { LineComment, LineCommentNow } from '@althar/contracts'
+import { LINE_COMMENTS, type LineComment, type LineCommentNow } from '@althar/contracts'
 import type { NewComment, ViewedComment } from '@althar/ui'
 
 import { useServices } from '../../data/services'
@@ -27,7 +27,7 @@ export interface LineCommentsModel {
   readonly add: (comment: NewComment) => void
   readonly edit: (id: string, note: string) => void
   readonly remove: (id: string) => void
-  /** Takes those waiting, as they go: given back with `giveBack` where Althar doesn't take them. */
+  /** Takes those waiting, as many as a message takes, as they go: given back with `giveBack` where Althar doesn't take them. */
   readonly take: () => ReadonlyArray<LineComment>
   readonly giveBack: (comments: ReadonlyArray<LineComment>) => void
   /** Reads the sent ones again: once a message with some is accepted. */
@@ -128,9 +128,10 @@ export const useLineComments = (taskId: string | null, open: boolean, moved = ''
       [setDrafts],
     ),
     remove: useCallback((id: string) => setDrafts((now) => now.filter((one) => one.id !== id)), [setDrafts]),
+    // As many as one message takes: any more wait for the next Send.
     take: () => {
-      setDrafts(() => [])
-      return drafts.map(sentOf)
+      setDrafts((now) => now.slice(LINE_COMMENTS.count))
+      return drafts.slice(0, LINE_COMMENTS.count).map(sentOf)
     },
     giveBack: (comments) =>
       setDrafts((now) => [

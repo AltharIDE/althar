@@ -49,7 +49,7 @@ export interface ViewedComment extends CommentedLines {
   readonly state: CommentState
   /** For one waiting to go, its number among them: its chip's in the composer. */
   readonly n?: number
-  /** The line it goes under now, in `side`'s numbers; null where its lines are gone from the change. */
+  /** The line it goes under now, the last of its lines, in `side`'s numbers; null where its lines are gone from the change. */
   readonly line: number | null
   /** When it was sent: `2m`. */
   readonly sentAt?: string
@@ -64,6 +64,10 @@ export interface ShownComment extends CommentedLines {
 
 /** The most lines a comment quotes; a longer stretch quotes its first. */
 export const QUOTED_LINES = 80
+/** The most characters of a line a comment quotes: a minified line is cut. */
+export const QUOTED_LINE_TEXT = 2000
+/** The most characters a comment says. */
+export const COMMENT_NOTE = 8000
 
 const KIND_OF: Partial<Record<DiffLineKind, QuotedDiffLine['kind']>> = {
   [DiffLineKind.Context]: 'context',
@@ -82,7 +86,9 @@ export const pickedLines = (lines: readonly DiffLine[], pick: DiffPick): Comment
   const to = Math.max(pick.from, pick.to)
   const picked = lines.slice(from, to + 1).filter((line) => line.kind !== DiffLineKind.Hunk)
   if (picked.length === 0) return null
-  const code = picked.slice(0, QUOTED_LINES).map((line) => ({ kind: KIND_OF[line.kind] ?? 'context', text: line.text }))
+  const code = picked
+    .slice(0, QUOTED_LINES)
+    .map((line) => ({ kind: KIND_OF[line.kind] ?? 'context', text: line.text.slice(0, QUOTED_LINE_TEXT) }))
   const news = picked.flatMap((line) => (line.kind === DiffLineKind.Context || line.kind === DiffLineKind.Added ? [line.new] : []))
   if (news.length > 0) return { side: 'new', start: Math.min(...news), end: Math.max(...news), code }
   const olds = picked.flatMap((line) => (line.kind === DiffLineKind.Removed ? [line.old] : []))
@@ -191,6 +197,7 @@ export function LineCommentBox({ lines, n, defaultValue = '', existing = false, 
         className={s.field}
         value={note}
         rows={2}
+        maxLength={COMMENT_NOTE}
         placeholder={t.placeholder}
         aria-label={t.label(lines)}
         data-own-escape=""

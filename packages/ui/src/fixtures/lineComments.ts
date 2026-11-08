@@ -15,7 +15,7 @@ export const ON_BUCKET: ViewedComment = {
   note: 'Read the bucket from the partner’s config rather than naming it here, so charges and refunds can’t drift apart.',
   state: 'draft',
   n: 1,
-  line: 22,
+  line: 23,
 }
 
 export const ON_OUTERMOST: ViewedComment = {

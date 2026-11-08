@@ -31,7 +31,7 @@ const Commenting = (args: ChangeViewProps) => {
       comments={comments}
       onComment={(made) => {
         args.onComment?.(made)
-        setComments((now) => renumber([...now, { ...made, id: `comment-${now.length + 1}`, state: 'draft', line: made.start }]))
+        setComments((now) => renumber([...now, { ...made, id: `comment-${now.length + 1}`, state: 'draft', line: made.end }]))
       }}
       onEditComment={(id, note) => {
         args.onEditComment?.(id, note)

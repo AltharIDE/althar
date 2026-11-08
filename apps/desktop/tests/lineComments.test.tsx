@@ -7,6 +7,8 @@ import type { ChangedFile, LineCommentNow, ThreadItem, ThreadSnapshot } from '@a
 import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { viewedSent } from '../src/renderer/features/task/useLineComments'
+import { queuedOf } from '../src/renderer/shared/items'
+import { outgoingOf } from '../src/renderer/shared/useAttachments'
 import { fakeClient, items, snapshot } from './fixtures'
 import { withServices } from './render'
 
@@ -143,6 +145,15 @@ describe('comments on the diff', () => {
     expect((await within(view).findByText('Addressed')).closest('article')?.textContent).toContain('Cap the retries.')
     // Addressed, it no longer counts on its file.
     expect(within(view).queryByText('1 comment')).toBeNull()
+  })
+
+  it('keeps a queued message’s comments when it is taken back to edit or sent now', () => {
+    const you = items.you('', { state: 'queued', interrupting: false }) as Extract<ThreadItem, { kind: 'user_message' }>
+    const { id: _id, itemId: _item, sentAt: _at, at: _where, addressed: _done, ...comment } = sentComment
+    const queued = { ...you, content: { ...you.content, comments: [{ id: `${you.id}:0`, ...comment }] } }
+    const [said] = queuedOf([queued], true)
+    expect(said?.comments).toEqual([comment])
+    expect(said === undefined ? undefined : outgoingOf(said).comments).toEqual([comment])
   })
 
   it('places a sent comment under the last of its lines where they are now', () => {
