@@ -339,6 +339,12 @@ The remaining host-tool changes below build on it.
 
 ### 4. Reviews that run things
 
+> **Taken into phase 5** by
+> [a task is a conversation plus parts](../decisions/proposed/a-task-is-a-conversation-plus-parts.md#running-someone-elses-pull-request),
+> which supersedes this list where they differ. There, "run it" asks how
+> far to trust the code: Run safely, offline in the sandbox as below, or
+> Trust fully, with the recorded setup and the network on.
+
 - **A task's own review step** (ADR-071), moved here from phase 2: its
   reviewer gets a copy it can install in, with the project's setup
   replayed, and `install_dependencies` and `run_project`, to run the task's
@@ -365,6 +371,15 @@ The remaining host-tool changes below build on it.
   request.
 
 ### 5. The task as parts
+
+> **Superseded** by
+> [a task is a conversation plus parts](../decisions/proposed/a-task-is-a-conversation-plus-parts.md#the-parts)
+> where they differ. It has five parts, not three: Workspace, Checked by
+> (who reviews the task's own work), Reviewing (the pull requests it
+> reviews, which this list puts in Outputs), Outputs and Access. Each
+> changes at any time, by the person, the lead or the coordinator, and
+> only running an outside author's code and a removal that would lose
+> something wait for the person's word.
 
 ADR-035 already reads a task's kind from what it has. The next step is
 letting it have any mix of parts, each added or dropped on the person's
