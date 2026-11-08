@@ -199,6 +199,10 @@ describe('run_project and stop_project, for a lead', () => {
       const projectId = project.projectId
 
       assert.strictEqual(yield* callTool(lead, 'stop_project', {}), 'Nothing runs in your worktree, so there was nothing to stop.')
+      assert.strictEqual(
+        yield* callTool(lead, 'stop_project', { task: 'no-such-task' }),
+        'This project has no task no-such-task. list_tasks shows them.',
+      )
       // Its default, in its worktree, once it says where it answers.
       const ran = yield* callTool(lead, 'run_project', {})
       assert.match(ran, /^Running `npm run dev` in your worktree, at http:\/\/localhost:5199\/\. Read it there, or take a screenshot of it/)

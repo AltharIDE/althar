@@ -360,6 +360,19 @@ describe('a lead’s session', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('never reaches a host under a wildcard the project never allows, and leaves a Never that names no host alone', () =>
+    Effect.gen(function* () {
+      const sandbox = yield* leading({
+        allowEverything: true,
+        commands: [
+          { pattern: '*.example.com', decision: 'never' },
+          { pattern: 'npm publish', decision: 'never' },
+        ],
+      })
+      assert.deepStrictEqual(sandbox?.deniedHosts, ['*.example.com'])
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('never reaches every host under a name, which would pass one the project never allows', () =>
     Effect.gen(function* () {
       // The rules allow `*.example.com` as written, and refuse `private.example.com`, which it would let through.
