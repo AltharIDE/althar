@@ -242,22 +242,35 @@ it.live('a Claude Code lead reaches Google Fonts inside its sandbox', () =>
 // A hand-started dev server is one of the commands a project's reach lists
 // (sandboxReach's ALWAYS), so Claude runs it outside its sandbox, where Next
 // compiles; inside, its native sandbox stalls on the same compile.
+const freePort = (): number => {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const port = 45000 + Math.floor(Math.random() * 2000)
+    try {
+      execFileSync('lsof', ['-ti', `tcp:${port}`], { stdio: 'pipe' })
+    } catch {
+      return port
+    }
+  }
+  return 45000 + Math.floor(Math.random() * 2000)
+}
+
+// A hand-started dev server is a command the project's reach lists
+// (sandboxReach's ALWAYS holds `npx next dev`, and its test says so), so
+// Claude runs it outside its sandbox, where Next compiles; inside, its
+// native sandbox stalls on the same compile. Nothing here asks to leave the
+// sandbox: the command is one the session's settings exclude.
 it.live('a hand-started Next dev server runs outside Claude Code’s sandbox and serves next/font', () =>
   Effect.scoped(
     Effect.gen(function* () {
       const definition = agents['claude-code']
-      const port = 45000 + Math.floor(Math.random() * 1000)
-      writeFileSync(
-        join(cwd, 'package.json'),
-        JSON.stringify({
-          private: true,
-          scripts: { dev: `next dev --webpack -p ${port}` },
-          dependencies: { next: '^16.0.0', react: '^19.0.0', 'react-dom': '^19.0.0' },
-        }),
-      )
-      const options = { web: true, sandbox: { commands: ['bun run dev'], hosts: [] as string[], writes: [] as string[] } }
+      const port = freePort()
+      const options = {
+        web: true,
+        sandbox: { commands: ['npx next dev'], hosts: [] as string[], writes: [] as string[] },
+      }
       const spec = definition.launch(process.execPath)
       const own = definition.withoutOwnTools?.({ env: process.env, homeDir: homedir(), cwd }) ?? {}
+      const asked = yield* Ref.make<Array<{ readonly title: string; readonly outside: boolean }>>([])
       const connection = yield* connect({
         transport: {
           _tag: 'Process',
@@ -273,7 +286,14 @@ it.live('a hand-started Next dev server runs outside Claude Code’s sandbox and
           },
         },
         permissions: definition.permissions,
-        onPermission: () => Effect.succeed({ decision: 'allow' as const, reason: 'Public dev-server probe.' }),
+        onPermission: (request) =>
+          Ref.update(asked, (calls) => [
+            ...calls,
+            {
+              title: request.title,
+              outside: JSON.stringify(request.rawInput ?? {}).includes('"dangerouslyDisableSandbox":true'),
+            },
+          ]).pipe(Effect.as({ decision: 'allow' as const, reason: 'Public dev-server probe.' })),
       })
       const session = yield* connection.newSession({
         cwd,
@@ -281,13 +301,10 @@ it.live('a hand-started Next dev server runs outside Claude Code’s sandbox and
         modeOptionId: definition.options.mode,
         ...(definition.sessionMeta === undefined ? {} : { meta: definition.sessionMeta('lead', options) }),
       })
-      const events = yield* Stream.runCollect(
+      yield* Stream.runCollect(
         session.prompt(
-          `Start the project's dev server exactly as it is kept, as a background command, with no escalation and no edits: bun run dev. Do not stop it or run anything else.`,
+          `Start the project's dev server exactly as it is kept, as a background command, with no escalation and no edits: npx next dev --webpack -p ${port}. Do not stop it or run anything else.`,
         ),
-      )
-      process.stdout.write(
-        `Claude dev server started: ${JSON.stringify(events.filter((event) => event._tag === 'ToolCallUpdate')).slice(0, 1500)}\n`,
       )
       let page = ''
       try {
@@ -303,14 +320,20 @@ it.live('a hand-started Next dev server runs outside Claude Code’s sandbox and
           }
         }
       } finally {
+        // Only a Next server on the probe's port: nothing else that happens to hold it.
         try {
-          execFileSync('sh', ['-c', `lsof -ti tcp:${port} | xargs kill 2>/dev/null || true`])
+          execFileSync('sh', [
+            '-c',
+            `for pid in $(lsof -ti tcp:${port} 2>/dev/null); do ps -o command= -p "$pid" | grep -q next && kill "$pid"; done`,
+          ])
         } catch {
           // Already gone.
         }
       }
-      process.stdout.write(`Claude dev server page: ${page.slice(0, 200)}\n`)
+      const permissions = yield* Ref.get(asked)
+      process.stdout.write(`Claude dev server page: ${page.slice(0, 160)}; permissions: ${JSON.stringify(permissions)}\n`)
       assert.include(page, 'Font network probe')
+      assert.isFalse(permissions.some((call) => call.outside))
     }),
   ),
 )

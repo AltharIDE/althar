@@ -13,7 +13,7 @@ This table also records work deliberately moved out of this task by the coordina
 | Claude sandbox refuses Unix sockets, including the inherited SSH agent (`registry.ts`) | Removed, but only the SSH agent's socket is allowed | `registry.test.ts`: `allowUnixSockets` names `SSH_AUTH_SOCK` and `allowAllUnixSockets` stays off, so Docker's or the session bus's socket is not a way out |
 | Coordinator sandbox offline and unable to bind localhost (`registry.ts`) | Removed | `registry.test.ts` |
 | Coordinator cannot read ordinary home, checkout or task files (`coordinatorFolder.ts`) | Removed | `coordinatorCopies.test.ts` keeps credential-store and SSH-file exclusions |
-| Hand-started dev servers and test runners missing sandbox exclusions (`sandboxReach.ts`) | Removed | `sandboxReach.test.ts`: direct commands, package runners and dev/test scripts; live `agents/network.test.ts` has Claude start `bun run dev` outside its sandbox and serve a Next/font page |
+| Hand-started dev servers and test runners missing sandbox exclusions (`sandboxReach.ts`) | Removed | `sandboxReach.test.ts`: direct commands, package runners and dev/test scripts; live `agents/network.test.ts` has Claude start `npx next dev`, a command `ALWAYS` lists, as a background command outside its sandbox and serve a Next/font page |
 | `gh` and `glab` signed out, credential helpers reset (`Config.ts`) | Removed for ordinary sessions | `connections.test.ts`: transports retain sign-ins; real git credential helper in temporary home still works. Inside a Claude sandbox `.config/gh` and `.npmrc` stay secret places, so only an environment token carries that sign-in there |
 | SSH agent and code-host tokens/config locations stripped (`process.ts`) | Removed | `process.test.ts`: child inherits code-host identity; provider API keys and Althar's database remain excluded |
 | Skill/OpenSpec files held back from a task branch (`repositoryGuard.ts`) | Removed | `repositoryGuard.test.ts`: real git push includes both even with legacy switches off |
@@ -73,7 +73,8 @@ The live network probe installs Next in a temporary folder and uses filesystem
 polling to avoid this Mac's native watcher limit. Codex and OpenCode run a
 script there that fetches Google Fonts and serves a Next/font page. Claude Code
 runs the sandboxed fetch alone, and starts its Next/font dev server the way a
-project keeps it (a background `bun run dev`, which its sandbox runs outside).
+project keeps it (a background `npx next dev`, which `ALWAYS` lists and its
+sandbox runs outside).
 OpenCode currently has no OS sandbox; its probe verifies its actual shell and
 permission path, not a sandbox it does not have. Provider results and any
 unavailable live checks are recorded with the task's completion.
@@ -89,8 +90,9 @@ The public-network probe fetches Google Fonts and serves a Next/font page with
 HTTP 200 through Codex and OpenCode, inside their sandboxes. Claude Code's
 sandboxed `curl https://fonts.googleapis.com/css2?family=Inter` passes as well,
 inside its sandbox with no escalation. Its Next/font dev server is started the
-way a project keeps one (`bun run dev`), which runs outside its sandbox: the
-live test starts it in the background and fetches the page, which serves. A
+way a project keeps one (`npx next dev`, which `ALWAYS` lists), which runs
+outside its sandbox: the live test starts it in the background and fetches the
+page, which serves. A
 script that starts Next itself, inside Claude's native sandbox rather than as
 the excluded dev-server command, still stalls at `Compiling /` on this Mac now
 and then; the fixture uses one webpack worker and filesystem polling to avoid
