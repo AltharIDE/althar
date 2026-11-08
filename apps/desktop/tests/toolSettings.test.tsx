@@ -359,4 +359,16 @@ describe('Settings › Skills', () => {
     await userEvent.click(main().getByRole('button', { name: 'Try again' }))
     expect(await main().findByRole('heading', { name: 'No skills yet' })).toBeTruthy()
   })
+
+  it('says in words where the store itself couldn’t be read at first, not staying on its loading state, and reads it again on request', async () => {
+    const own = row('impeccable', { about: 'Design that holds up.', home: '~/.claude/skills/impeccable' })
+    const { client } = fakeClient({
+      getAgentTools: vi.fn(async () => tools({ skills: [own] })),
+      listSkills: vi.fn().mockRejectedValueOnce(new Error('installs.json is unreadable')).mockResolvedValue({ enabled: true, skills: [] }),
+    })
+    withServices(<Settings at="skills" />, client)
+    expect(await main().findByText('Your skills couldn’t be read.')).toBeTruthy()
+    await userEvent.click(main().getByRole('button', { name: 'Try again' }))
+    expect(await main().findByRole('button', { name: /^impeccable/ })).toBeTruthy()
+  })
 })

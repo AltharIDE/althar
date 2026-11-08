@@ -197,7 +197,7 @@ export function SkillsSection({ start }: { start: StartModel }) {
         agents={people.agents}
         projects={people.projects}
         sync={tools === undefined ? { on: false, targets: [] } : syncOf(tools.skillSync)}
-        loading={(tools === undefined && !model.loadFailed) || !skills.loaded}
+        loading={(tools === undefined && !model.loadFailed) || (!skills.loaded && !skills.loadFailed)}
         error={model.loadFailed || skills.loadFailed ? text.skillsUnread : null}
         onRetry={() => {
           model.reload()
