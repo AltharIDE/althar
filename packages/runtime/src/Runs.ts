@@ -1730,6 +1730,11 @@ export class Runs extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           // Back online, or offline: what waits for the connection looks again.
           if (event._tag === 'Connection') return yield* Queue.offer(holdsChanged, undefined)
+          // A fresh reading of a plan, or a turn that went through, may have ended an account's out-of-usage state (Limits): what
+          // waits for its reset looks again, and goes on if it is not out any more.
+          if (event._tag === 'PlanUsage') return yield* Queue.offer(holdsChanged, undefined)
+          if (event._tag === 'TurnEnded' && event.errorClass === undefined && event.state === 'completed')
+            yield* Queue.offer(holdsChanged, undefined)
           // An agent that says it is trying its service again may be waiting on a dead connection, its turn never ending (Codex).
           if (
             event._tag === 'Agent' &&
@@ -5372,13 +5377,14 @@ export class Runs extends Context.Service<
         for (;;) {
           const held = yield* sql<{
             taskId: string
+            projectId: string
             attemptId: string
             nodeKey: string
             iteration: number
             output: string
             holdReason: string
           }>`
-            SELECT r.task_id, a.id AS attempt_id, n.node_key, n.iteration, a.output, a.hold_reason
+            SELECT r.task_id, r.project_id, a.id AS attempt_id, n.node_key, n.iteration, a.output, a.hold_reason
             FROM runs r JOIN workflow_executions e ON e.run_id = r.id JOIN nodes n ON n.execution_id = e.id
             JOIN node_attempts a ON a.node_id = n.id
             WHERE r.state = 'running' AND a.state = 'held' AND a.hold_reason IN ('usage_limit', 'agent_unavailable')`
@@ -5400,9 +5406,26 @@ export class Runs extends Context.Service<
             if (hold === undefined) continue
             const connection = step.holdReason === 'agent_unavailable'
             if (connection && !online) continue
+            // Waiting for a reset, it goes on at once if its agent's account is not out of usage any more: the person reset it,
+            // or a fresh reading shows room (Limits). A new step held for being nearly out, or handed over, waits for its time.
+            const back =
+              !connection &&
+              hold.why !== undefined &&
+              hold.left === undefined &&
+              Option.isNone(
+                yield* (
+                  hold.account != null
+                    ? limits.outAccount(hold.account)
+                    : limits.out(hold.heldFor, step.projectId, undefined, hold.model ?? undefined)
+                ).pipe(
+                  contained('Runs.held', () =>
+                    Option.some<Out>({ agentId: hold.heldFor, accountId: '', resetsAt: null, until: hold.until }),
+                  ),
+                ),
+              )
             due.push({
               key: step.attemptId,
-              at: Date.parse(hold.until),
+              at: back ? 0 : Date.parse(hold.until),
               run: connection
                 ? backOnline(step, hold)
                 : resumeHeld({ ...step, agentId: hold.heldFor, accountId: hold.account ?? null, model: hold.model ?? null }),

@@ -668,7 +668,13 @@ agent, model and reason; a same-maker review fallback is said as such, not
 as an agent reviewing its own work. The replacement finishes the current
 step even if the original account resets meanwhile. At the next step the
 planned lead returns if it has room. Under the wait rule, or where nothing else was free to move it to, the
-work is held until the reset, and the thread says which it was. A held step
+work is held until the reset, and the thread says which it was. An account
+marked out is back before its reset when it shows it works: a reading of its
+plan taken after the limit with room in every window, or a turn that completed
+on it after (`Limits.outOf`, the one rule the model list, picking an account,
+the pickers and the cards go by); a step held for it goes on at once then, not
+at the reset, and the model list asks an out account's plan again before it
+leaves its models out. A held step
 keeps who could take it over, so the task offers them while it waits, without
 asking: the person can move it to one (as answering the call below would; a
 lead's step waits its turn for a place among the agents at work, as work

@@ -2,12 +2,14 @@ import { isAgentDefault, knownModelName } from '@althar/contracts'
 import type { AgentDefinition } from '@althar/provider-adapters'
 import { Effect, Option } from 'effect'
 
+import { Accounts } from './Accounts'
 import { Agents } from './Config'
 import { Installs, isInstalled } from './Installs'
 import { Limits, NEARLY_OUT, type Room, roomWords } from './Limits'
 import { type ModelFact, ModelFacts } from './ModelFacts'
 import { Models } from './Models'
 import { makerOf } from './modelMaker'
+import { PlanUsage } from './PlanUsage'
 import { SignIns } from './SignIns'
 
 /*
@@ -17,7 +19,8 @@ import { SignIns } from './SignIns'
  * only a route to a model: a step names the model, and Althar takes it the
  * best way, on a plan with room before one nearly out, and a plan before a
  * key. Each way says how much room its plan has, as last read, so the
- * coordinator can pick with that in mind.
+ * coordinator can pick with that in mind. An agent marked out is read again before it is left out, as the person may have reset it
+ * since, and a fresh reading with room ends the out state (Limits).
  */
 
 /** One way to a model: the agent that runs it, its id for it there, whether a plan pays, and how hard it can think there. */
@@ -60,6 +63,8 @@ export const usableModels = (projectId?: string) =>
     const signIns = yield* SignIns
     const installs = yield* Installs
     const limits = yield* Limits
+    const accounts = yield* Accounts
+    const planUsage = yield* PlanUsage
     const catalog = yield* models.catalog
     const byKey = new Map<string, { name: string; maker: string | null; fact: ModelFact | null; routes: Route[] }>()
     // Per account, the providers within its agent that refused work lately, by id: read once for all its models.
@@ -67,7 +72,19 @@ export const usableModels = (projectId?: string) =>
     for (const entry of agents.list) {
       const agent = { id: entry.definition.id, name: entry.definition.name }
       if (!isInstalled(installs, entry.definition) || (yield* signIns.of(agent.id)) === 'signed_out') continue
-      if (Option.isSome(yield* limits.out(agent.id, projectId).pipe(Effect.orElseSucceed(() => Option.none())))) continue
+      const isOut = limits.out(agent.id, projectId).pipe(
+        Effect.map(Option.isSome),
+        Effect.orElseSucceed(() => false),
+      )
+      if (yield* isOut) {
+        // Marked out of usage: the person may have reset it since, so its plan is read again, only now, and only its accounts.
+        const marked: string[] = []
+        for (const account of yield* accounts.of(agent.id).pipe(Effect.orElseSucceed(() => []))) {
+          if (Option.isSome(yield* limits.outAccount(account.id).pipe(Effect.orElseSucceed(() => Option.none())))) marked.push(account.id)
+        }
+        yield* planUsage.refresh(marked).pipe(Effect.ignore)
+        if (yield* isOut) continue
+      }
       const offered = catalog.find((one) => one.agentId === agent.id)
       if (offered === undefined) continue
       for (const model of offered.models) {
