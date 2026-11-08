@@ -29,7 +29,9 @@ export function BoardCard(props: BoardCardProps) {
       word={c.word}
       kind={KINDS[c.kind]}
       local={c.changes.some((one) => one.place === 'local')}
-      {...(c.changes.some((one) => one.toward !== undefined) ? { toward: c.changes.find((one) => one.toward !== undefined)?.toward ?? '' } : {})}
+      {...(c.changes.some((one) => one.toward !== undefined)
+        ? { toward: c.changes.find((one) => one.toward !== undefined)?.toward ?? '' }
+        : {})}
       {...over}
     />
   )

@@ -16,7 +16,19 @@ import { makeQueryClient } from '../../../../apps/desktop/src/renderer/data/read
 import { ServicesProvider } from '../../../../apps/desktop/src/renderer/data/services'
 import { makeRouter } from '../../../../apps/desktop/src/renderer/router'
 import { chooseFace } from '../../../../apps/desktop/src/renderer/features/task/chosenFaces'
-import { card, change, coordinatorSnapshot, fakeClient, fakeHost, home, items, models, project, repositories, snapshot } from '../../../../apps/desktop/tests/fixtures'
+import {
+  card,
+  change,
+  coordinatorSnapshot,
+  fakeClient,
+  fakeHost,
+  home,
+  items,
+  models,
+  project,
+  repositories,
+  snapshot,
+} from '../../../../apps/desktop/tests/fixtures'
 import { type Case, CASES, caseOf, type Change } from './cases'
 import { VIEWS } from './directions'
 import { open } from './need'
@@ -42,7 +54,12 @@ const repository = {
   id: 'repo_althar',
   name: 'althar',
   path: '/Users/balazs/Projects/charrette-project/althar',
-  host: { ...repositories[0]!.host!, path: 'AltharIDE/althar', url: 'https://github.com/AltharIDE/althar', account: { login: 'balazs', state: 'ready' as const } },
+  host: {
+    ...repositories[0]!.host!,
+    path: 'AltharIDE/althar',
+    url: 'https://github.com/AltharIDE/althar',
+    account: { login: 'balazs', state: 'ready' as const },
+  },
   tasks: 3,
 }
 
@@ -63,7 +80,15 @@ const summaryOf = (one: Change): ChangeSummary =>
     unpushed: one.waiting ?? 0,
     checks:
       one.checks === 'failed'
-        ? { outcome: 'failed', passed: 11, failed: 1, running: 0, total: 12, failing: [...(one.failing ?? ['e2e'])], list: [{ name: one.failing?.[0] ?? 'e2e', state: 'failed', summary: '1 failed' }] }
+        ? {
+            outcome: 'failed',
+            passed: 11,
+            failed: 1,
+            running: 0,
+            total: 12,
+            failing: [...(one.failing ?? ['e2e'])],
+            list: [{ name: one.failing?.[0] ?? 'e2e', state: 'failed', summary: '1 failed' }],
+          }
         : one.checks === 'running'
           ? { outcome: 'running', passed: 7, failed: 0, running: 5, total: 12, failing: [], list: [] }
           : { outcome: 'passed', passed: 12, failed: 0, running: 0, total: 12, failing: [], list: [] },
@@ -103,8 +128,26 @@ const caseTask = (c: Case): BoardTask => {
 }
 
 const others: BoardTask[] = [
-  boardTask({ taskId: 't2', threadId: 'th2', title: 'Office hours and privacy pages on the site', slug: 'office-hours', kind: 'change', phase: 'running', step: 'review', startedAt: recent(52) }),
-  boardTask({ taskId: 't3', threadId: 'th3', title: 'Nightly dependency check, 8 Nov', slug: 'nightly-deps', kind: 'change', phase: 'running', step: 'implement', startedAt: recent(14) }),
+  boardTask({
+    taskId: 't2',
+    threadId: 'th2',
+    title: 'Office hours and privacy pages on the site',
+    slug: 'office-hours',
+    kind: 'change',
+    phase: 'running',
+    step: 'review',
+    startedAt: recent(52),
+  }),
+  boardTask({
+    taskId: 't3',
+    threadId: 'th3',
+    title: 'Nightly dependency check, 8 Nov',
+    slug: 'nightly-deps',
+    kind: 'change',
+    phase: 'running',
+    step: 'implement',
+    startedAt: recent(14),
+  }),
   boardTask({
     taskId: 't4',
     threadId: 'th4',
@@ -112,9 +155,23 @@ const others: BoardTask[] = [
     slug: 'light-contrast',
     kind: 'change',
     phase: 'ready',
-    change: change({ draft: false, number: 653, title: 'Light theme meets WCAG AA contrast', repository: 'AltharIDE/althar', checks: { outcome: 'passed', passed: 12, failed: 0, running: 0, total: 12, failing: [], list: [] } }),
+    change: change({
+      draft: false,
+      number: 653,
+      title: 'Light theme meets WCAG AA contrast',
+      repository: 'AltharIDE/althar',
+      checks: { outcome: 'passed', passed: 12, failed: 0, running: 0, total: 12, failing: [], list: [] },
+    }),
   }),
-  boardTask({ taskId: 't5', threadId: 'th5', title: 'A remote added after the project is made is picked up', slug: 'late-remote', kind: 'change', phase: 'settled', settledAt: '2026-11-08T07:00:00.000Z' }),
+  boardTask({
+    taskId: 't5',
+    threadId: 'th5',
+    title: 'A remote added after the project is made is picked up',
+    slug: 'late-remote',
+    kind: 'change',
+    phase: 'settled',
+    settledAt: '2026-11-08T07:00:00.000Z',
+  }),
 ]
 
 // The coordinator's conversation, made once: read again, its items keep their ids.
@@ -122,7 +179,6 @@ const talk = [
   items.you('The board jumps when a card changes lanes. Fix it, and rename “Keep for later” to “Later” while you’re at it.'),
   items.says('Started “Hold the board still while agents work”, a Change. Its lead keeps the rename apart if it’s unrelated.'),
 ]
-
 
 const withNames = models.map((one) =>
   one.agentId === 'claude-code'
@@ -153,7 +209,7 @@ const snapshotOf = (): ThreadSnapshot => {
       commits: 3,
       actions: ['abandon'],
     },
-    ...(base.session === null ? {} : { session: { ...base.session, model: 'opus', turnRunning: false } }),
+    ...(base.session === null ? {} : { session: { ...base.session, model: 'opus', turnRunning: false, held: false } }),
     items: itemsOf(c, direction),
   })
 }
@@ -233,7 +289,13 @@ const onKey = (event: KeyboardEvent) => {
   if (event.key.startsWith('Arrow') && target?.closest('[role=radiogroup]')) return
   const at = DIRECTIONS.indexOf(proto.get().direction)
   const picked =
-    event.key === 'ArrowRight' ? DIRECTIONS[(at + 1) % 3] : event.key === 'ArrowLeft' ? DIRECTIONS[(at + 2) % 3] : /^[1-3]$/.test(event.key) ? DIRECTIONS[Number(event.key) - 1] : undefined
+    event.key === 'ArrowRight'
+      ? DIRECTIONS[(at + 1) % 3]
+      : event.key === 'ArrowLeft'
+        ? DIRECTIONS[(at + 2) % 3]
+        : /^[1-3]$/.test(event.key)
+          ? DIRECTIONS[Number(event.key) - 1]
+          : undefined
   if (picked !== undefined) {
     event.preventDefault()
     proto.set({ direction: picked, opening: null })
@@ -255,7 +317,11 @@ function Switcher() {
         label="Direction"
         value={p.direction}
         onChange={(direction) => proto.set({ direction, opening: null })}
-        options={DIRECTIONS.map((one, at) => ({ value: one, label: `${one} · ${VIEWS[one].name}`, tooltip: { label: VIEWS[one].what, kbd: String(at + 1) } }))}
+        options={DIRECTIONS.map((one, at) => ({
+          value: one,
+          label: `${one} · ${VIEWS[one].name}`,
+          tooltip: { label: VIEWS[one].what, kbd: String(at + 1) },
+        }))}
       />
       <Select<string>
         label="Case"

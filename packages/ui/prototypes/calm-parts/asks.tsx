@@ -30,8 +30,8 @@ export function AskView({ c, ask }: { c: Case; ask: Ask }) {
         <AskCard icon="lock" kicker="Run it" who={`#${ask.pr} · ${ask.by}, outside the team`} what="How far should it trust this code?">
           <div className={css.choices}>
             <p>
-              <b>Run safely.</b> Installs from the lockfile with install scripts off, from the registries main names. Its tests and app run offline, with nothing of
-              yours copied in.
+              <b>Run safely.</b> Installs from the lockfile with install scripts off, from the registries main names. Its tests and app run
+              offline, with nothing of yours copied in.
             </p>
             <p>
               <b>Trust fully.</b> Runs as your team’s code does: the recorded setup, its files, install scripts and the network.
@@ -50,7 +50,12 @@ export function AskView({ c, ask }: { c: Case; ask: Ask }) {
     case 'switch': {
       const change = of(ask.change)
       return (
-        <AskCard icon="folder" kicker="Local" who="Before it moves" what={`Your checkout is on ${ask.own}, a branch of yours. It goes back to it when you settle this task.`}>
+        <AskCard
+          icon="folder"
+          kicker="Local"
+          who="Before it moves"
+          what={`Your checkout is on ${ask.own}, a branch of yours. It goes back to it when you settle this task.`}
+        >
           <AskFoot>
             <Button variant="signal" onClick={() => answer(`Switched to ${change?.branch ?? ''}`)}>
               Switch to <code>{change?.branch}</code>
@@ -63,7 +68,11 @@ export function AskView({ c, ask }: { c: Case; ask: Ask }) {
     case 'settle-unshipped': {
       const change = of(ask.change)
       return (
-        <AskCard icon="after" kicker="Before it settles" what={`${commits(change?.waiting ?? 0)} on ${change?.branch ?? ''} aren’t shipped.`}>
+        <AskCard
+          icon="after"
+          kicker="Before it settles"
+          what={`${commits(change?.waiting ?? 0)} on ${change?.branch ?? ''} aren’t shipped.`}
+        >
           <AskFoot>
             <Button variant="signal" onClick={() => answer('Ship, then settle')}>
               Ship, then settle
@@ -97,7 +106,11 @@ export function AskView({ c, ask }: { c: Case; ask: Ask }) {
     }
     case 'remove-draft':
       return (
-        <AskCard icon="comment" kicker={`Remove the review of #${ask.pr}`} what={`Its ${ask.findings} comments aren’t posted. Removed, they stay in this thread, and nothing reaches #${ask.pr}.`}>
+        <AskCard
+          icon="comment"
+          kicker={`Remove the review of #${ask.pr}`}
+          what={`Its ${ask.findings} comments aren’t posted. Removed, they stay in this thread, and nothing reaches #${ask.pr}.`}
+        >
           <AskFoot>
             <Button variant="signal" onClick={() => answer(`Posted on #${ask.pr}, then removed`)}>
               Post it first
@@ -138,7 +151,12 @@ export function AskView({ c, ask }: { c: Case; ask: Ask }) {
       )
     case 'usage':
       return (
-        <AskCard icon="clock" kicker="Out of usage" who={ask.agent} what={`Claude’s plan is used up until ${ask.until}. Your message waits, and goes as soon as it resets.`}>
+        <AskCard
+          icon="clock"
+          kicker="Out of usage"
+          who={ask.agent}
+          what={`Claude’s plan is used up until ${ask.until}. Your message waits, and goes as soon as it resets.`}
+        >
           <AskFoot>
             <Button variant="signal" onClick={() => answer('Moved to DeepSeek V4.1 Flash')}>
               Use DeepSeek V4.1 Flash
@@ -177,7 +195,12 @@ export function AskView({ c, ask }: { c: Case; ask: Ask }) {
     case 'attach': {
       const change = of(ask.change)
       return (
-        <AskCard icon="pr" kicker="Found, not taken" quiet what={`#${ask.pr} is from ${change?.branch ?? ''}, but into ${ask.base}, not main. It isn’t taken as ${change === undefined ? '' : nameOf(change)}’s.`}>
+        <AskCard
+          icon="pr"
+          kicker="Found, not taken"
+          quiet
+          what={`#${ask.pr} is from ${change?.branch ?? ''}, but into ${ask.base}, not main. It isn’t taken as ${change === undefined ? '' : nameOf(change)}’s.`}
+        >
           <AskFoot>
             <Button onClick={() => answer(`Attached #${ask.pr} as a change of its own`)}>Attach it as its own change</Button>
             <LinkButton onClick={() => answer('Left alone')}>Leave it</LinkButton>
@@ -187,7 +210,13 @@ export function AskView({ c, ask }: { c: Case; ask: Ask }) {
     }
     case 'preset-offer':
       return (
-        <AskCard icon="agents" kicker="The coordinator" who="A preset" quiet what={`You’ve started three tasks with these parts. Keep them as “${ask.name}”?`}>
+        <AskCard
+          icon="agents"
+          kicker="The coordinator"
+          who="A preset"
+          quiet
+          what={`You’ve started three tasks with these parts. Keep them as “${ask.name}”?`}
+        >
           <AskNote>{ask.holds}.</AskNote>
           <AskFoot>
             <Button onClick={() => answer(`Kept as “${ask.name}”`)}>Keep it</Button>
@@ -199,10 +228,20 @@ export function AskView({ c, ask }: { c: Case; ask: Ask }) {
       const change = of(ask.change)
       const below = change?.heldBy === undefined ? undefined : of(change.heldBy)
       return (
-        <AskCard icon="after" kicker="Held" what={`${change === undefined ? '' : nameOf(change)} carries the ${commits(below?.waiting ?? 0)} waiting on ${below === undefined ? '' : nameOf(below)} below it, so it goes up only with them.`}>
+        <AskCard
+          icon="after"
+          kicker="Held"
+          what={`${change === undefined ? '' : nameOf(change)} carries the ${commits(below?.waiting ?? 0)} waiting on ${below === undefined ? '' : nameOf(below)} below it, so it goes up only with them.`}
+        >
           <AskFoot>
-            <Button variant="signal" onClick={() => answer(`Shipping ${below === undefined ? '' : nameOf(below)}, then ${change === undefined ? '' : nameOf(change)}`)}>
-              Ship {change === undefined ? '' : nameOf(change)}, and the {commits(below?.waiting ?? 0)} on {below === undefined ? '' : nameOf(below)} below it
+            <Button
+              variant="signal"
+              onClick={() =>
+                answer(`Shipping ${below === undefined ? '' : nameOf(below)}, then ${change === undefined ? '' : nameOf(change)}`)
+              }
+            >
+              Ship {change === undefined ? '' : nameOf(change)}, and the {commits(below?.waiting ?? 0)} on{' '}
+              {below === undefined ? '' : nameOf(below)} below it
             </Button>
           </AskFoot>
         </AskCard>

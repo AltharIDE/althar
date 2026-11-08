@@ -100,7 +100,15 @@ export type Beat =
 
 export type Preset = 'Change' | 'Small change' | 'Chat' | 'Review a PR' | 'Prototype'
 
-export type Group = 'Several changes' | 'Found, not made here' | 'Where it works' | 'Waiting for Ship' | 'Parts' | 'Reviews' | 'Chats and presets' | 'Time and failures'
+export type Group =
+  | 'Several changes'
+  | 'Found, not made here'
+  | 'Where it works'
+  | 'Waiting for Ship'
+  | 'Parts'
+  | 'Reviews'
+  | 'Chats and presets'
+  | 'Time and failures'
 
 export interface Case {
   readonly key: string
@@ -207,7 +215,14 @@ export const CASES: ReadonlyArray<Case> = [
     preset: 'Change',
     changes: [ch(STILL, { ready: true })],
     reviewer: SOL,
-    thread: [...opening.slice(0, 1), { ...(opening[1] as Extract<Beat, { kind: 'lead' }>), text: 'Each lane holds its height until the move ends. #714 is up, reviewed, checks pass.' }, { kind: 'review', findings: 1, fixed: '1 fixed' }],
+    thread: [
+      ...opening.slice(0, 1),
+      {
+        ...(opening[1] as Extract<Beat, { kind: 'lead' }>),
+        text: 'Each lane holds its height until the move ends. #714 is up, reviewed, checks pass.',
+      },
+      { kind: 'review', findings: 1, fixed: '1 fixed' },
+    ],
     adr: 'A task that never splits has one change, as now.',
   },
   {
@@ -224,7 +239,13 @@ export const CASES: ReadonlyArray<Case> = [
     reviewer: SOL,
     thread: [
       ...opening,
-      { kind: 'part', who: 'lead', text: 'Started a second change, althar/rename-later, toward main, to keep the rename apart.', change: 'later', act: 'Keep them together' },
+      {
+        kind: 'part',
+        who: 'lead',
+        text: 'Started a second change, althar/rename-later, toward main, to keep the rename apart.',
+        change: 'later',
+        act: 'Keep them together',
+      },
       { kind: 'review', findings: 0, change: 'still' },
       { kind: 'review', findings: 0, change: 'later' },
       { kind: 'line', text: 'Opened #714 and #715, as drafts.' },
@@ -249,7 +270,12 @@ export const CASES: ReadonlyArray<Case> = [
     reviewer: SOL,
     thread: [
       ...opening,
-      { kind: 'line', text: 'e2e (board.spec.ts) still fails on #714 after the lead’s fix: it times out only on CI. Over to you.', change: 'still', tone: 'warning' },
+      {
+        kind: 'line',
+        text: 'e2e (board.spec.ts) still fails on #714 after the lead’s fix: it times out only on CI. Over to you.',
+        change: 'still',
+        tone: 'warning',
+      },
     ],
     adr: 'It names the pull request that most needs the person, with its state, and says how many more there are: “#714 checks failing · 2 more”.',
   },
@@ -294,7 +320,12 @@ export const CASES: ReadonlyArray<Case> = [
     thread: [
       ...opening,
       { kind: 'you', text: 'The held height is a frame late on a slow card. Tighten it.' },
-      { kind: 'lead', text: 'It now holds from the moment the card lifts, not when it lands. Try it on the running board.', took: { work: 96, tools: 22 }, commits: { n: 2, change: 'still' } },
+      {
+        kind: 'lead',
+        text: 'It now holds from the moment the card lifts, not when it lands. Try it on the running board.',
+        took: { work: 96, tools: 22 },
+        commits: { n: 2, change: 'still' },
+      },
       { kind: 'ask', ask: { kind: 'ship-stack', change: 'motion' } },
     ],
     adr: 'Ship on a stacked change ships what waits beneath it first: “Ship #715, and the 2 commits waiting on #714 below it”. Its row says what holds it: “Held: 2 commits waiting on #714 below”.',
@@ -309,13 +340,26 @@ export const CASES: ReadonlyArray<Case> = [
     title: TITLE,
     kind: 'change',
     preset: 'Change',
-    changes: [ch(STILL, { state: 'merged', place: 'none', checks: undefined }), ch(LATER, { checks: 'passed' }), ch(MOTION, { on: undefined, toward: undefined, pr: undefined, state: undefined, checks: undefined, helper: 'Sonnet 5.5' })],
+    changes: [
+      ch(STILL, { state: 'merged', place: 'none', checks: undefined }),
+      ch(LATER, { checks: 'passed' }),
+      ch(MOTION, { on: undefined, toward: undefined, pr: undefined, state: undefined, checks: undefined, helper: 'Sonnet 5.5' }),
+    ],
     reviewer: SOL,
     thread: [
       ...opening,
-      { kind: 'line', text: '#714 merged. Its folder goes in a day; the task carries on with #715 and althar/board-motion.', change: 'still' },
+      {
+        kind: 'line',
+        text: '#714 merged. Its folder goes in a day; the task carries on with #715 and althar/board-motion.',
+        change: 'still',
+      },
       { kind: 'you', text: 'Good. Start the slide now, on main.' },
-      { kind: 'lead', text: 'A helper is making the slide in its own worktree. Ask me anything meanwhile.', took: { wait: 0, start: 4, work: 18 }, part: { text: 'Handed althar/board-motion to a helper, Sonnet 5.5.', change: 'motion' } },
+      {
+        kind: 'lead',
+        text: 'A helper is making the slide in its own worktree. Ask me anything meanwhile.',
+        took: { wait: 0, start: 4, work: 18 },
+        part: { text: 'Handed althar/board-motion to a helper, Sonnet 5.5.', change: 'motion' },
+      },
     ],
     adr: 'A merge ends only its own change, never the task, its session or what runs.',
   },
@@ -335,7 +379,12 @@ export const CASES: ReadonlyArray<Case> = [
       ...opening,
       { kind: 'part', who: 'lead', text: 'Handed #716 to a helper, Sonnet 5.5.', change: 'motion' },
       { kind: 'you', text: 'While that runs: does the held height survive a window resize?' },
-      { kind: 'lead', text: 'It didn’t: a resize mid-move kept the old height. Fixed on althar/board-still, one commit. Not shipped yet.', took: { work: 71, tools: 19 }, commits: { n: 1, change: 'still' } },
+      {
+        kind: 'lead',
+        text: 'It didn’t: a resize mid-move kept the old height. Fixed on althar/board-still, one commit. Not shipped yet.',
+        took: { work: 71, tools: 19 },
+        commits: { n: 1, change: 'still' },
+      },
     ],
     adr: 'The change’s row in the header says a helper is on it, with Stop.',
   },
@@ -349,7 +398,10 @@ export const CASES: ReadonlyArray<Case> = [
     title: TITLE,
     kind: 'change',
     preset: 'Change',
-    changes: [ch(STILL, { pr: undefined, state: undefined, checks: undefined, waiting: 3 }), ch(LATER, { pr: undefined, state: undefined, checks: undefined })],
+    changes: [
+      ch(STILL, { pr: undefined, state: undefined, checks: undefined, waiting: 3 }),
+      ch(LATER, { pr: undefined, state: undefined, checks: undefined }),
+    ],
     reviewer: SOL,
     thread: [
       opening[0]!,
@@ -360,7 +412,13 @@ export const CASES: ReadonlyArray<Case> = [
         took: { work: 120, tools: 30 },
         commits: { n: 3, change: 'still' },
       },
-      { kind: 'part', who: 'lead', text: 'Started a second change, althar/rename-later, toward main, to keep the rename apart.', change: 'later', act: 'Keep them together' },
+      {
+        kind: 'part',
+        who: 'lead',
+        text: 'Started a second change, althar/rename-later, toward main, to keep the rename apart.',
+        change: 'later',
+        act: 'Keep them together',
+      },
     ],
     adr: 'The thread’s line lets the person say “keep them together”, which joins two changes again before either ships.',
   },
@@ -376,13 +434,35 @@ export const CASES: ReadonlyArray<Case> = [
     title: TITLE,
     kind: 'change',
     preset: 'Change',
-    changes: [ch(STILL, { place: 'none' }), { id: 'virtual', branch: 'althar/try-virtual-lanes', title: 'Virtual lanes, to try', place: 'worktree', came: 'git', add: 140, del: 22 }],
+    changes: [
+      ch(STILL, { place: 'none' }),
+      {
+        id: 'virtual',
+        branch: 'althar/try-virtual-lanes',
+        title: 'Virtual lanes, to try',
+        place: 'worktree',
+        came: 'git',
+        add: 140,
+        del: 22,
+      },
+    ],
     reviewer: SOL,
     thread: [
       ...opening,
       { kind: 'you', text: 'Would virtualizing the lanes fix it too?' },
-      { kind: 'lead', text: 'Trying it on a branch of its own: `git switch -c althar/try-virtual-lanes`. Early: it fixes the jump, but drops focus when a card scrolls out.', took: { work: 188, tools: 70 }, commits: { n: 1, change: 'virtual' } },
-      { kind: 'part', who: 'althar', text: 'althar/try-virtual-lanes is a change of this task now, toward main. #714 keeps its pull request, with no folder until it’s worked on again.', change: 'virtual', act: 'Drop it' },
+      {
+        kind: 'lead',
+        text: 'Trying it on a branch of its own: `git switch -c althar/try-virtual-lanes`. Early: it fixes the jump, but drops focus when a card scrolls out.',
+        took: { work: 188, tools: 70 },
+        commits: { n: 1, change: 'virtual' },
+      },
+      {
+        kind: 'part',
+        who: 'althar',
+        text: 'althar/try-virtual-lanes is a change of this task now, toward main. #714 keeps its pull request, with no folder until it’s worked on again.',
+        change: 'virtual',
+        act: 'Drop it',
+      },
     ],
     adr: 'A folder now on another branch makes that branch a change of the task’s, with a line in the thread.',
   },
@@ -400,7 +480,12 @@ export const CASES: ReadonlyArray<Case> = [
     reviewer: SOL,
     thread: [
       ...opening,
-      { kind: 'part', who: 'althar', text: 'Found #717, from althar/rename-later into main, opened on GitHub. It’s that change’s now.', change: 'later' },
+      {
+        kind: 'part',
+        who: 'althar',
+        text: 'Found #717, from althar/rename-later into main, opened on GitHub. It’s that change’s now.',
+        change: 'later',
+      },
     ],
     adr: 'An open one whose head is the change’s own branch, and whose base is the branch it works toward, is that change’s.',
   },
@@ -416,10 +501,7 @@ export const CASES: ReadonlyArray<Case> = [
     preset: 'Change',
     changes: [ch(STILL)],
     reviewer: SOL,
-    thread: [
-      ...opening,
-      { kind: 'ask', ask: { kind: 'attach', pr: 718, base: 'release/0.8.0', change: 'still' } },
-    ],
+    thread: [...opening, { kind: 'ask', ask: { kind: 'attach', pr: 718, base: 'release/0.8.0', change: 'still' } }],
     adr: 'Where that doesn’t give one pull request, Althar takes none and names what it found in a line.',
   },
 
@@ -438,9 +520,19 @@ export const CASES: ReadonlyArray<Case> = [
     reviewer: null,
     thread: [
       { kind: 'you', text: 'Why does the board jump when a card moves?' },
-      { kind: 'lead', text: 'Each lane measures itself again when a card leaves it, so the lanes under it move up a frame before the card lands.', took: { work: 41, tools: 12 } },
+      {
+        kind: 'lead',
+        text: 'Each lane measures itself again when a card leaves it, so the lanes under it move up a frame before the card lands.',
+        took: { work: 41, tools: 12 },
+      },
       { kind: 'you', text: 'Can you fix it?' },
-      { kind: 'lead', text: 'Fixed: each lane holds its height until the move ends. One commit, not shipped. Try it with the board running.', took: { work: 132, tools: 38 }, commits: { n: 1, change: 'jump' }, part: { text: 'Took a worktree, to write the fix.', change: 'jump' } },
+      {
+        kind: 'lead',
+        text: 'Fixed: each lane holds its height until the move ends. One commit, not shipped. Try it with the board running.',
+        took: { work: 132, tools: 38 },
+        commits: { n: 1, change: 'jump' },
+        part: { text: 'Took a worktree, to write the fix.', change: 'jump' },
+      },
       { kind: 'line', text: 'On the board now, as it has a branch of its own.' },
     ],
     adr: 'It moves to the board as soon as it takes a worktree or an output, and says so in its thread.',
@@ -520,7 +612,11 @@ export const CASES: ReadonlyArray<Case> = [
     reviewing: { pr: 702, title: 'Page the thread faster', by: 'dmitri-k', draft: 3, outside: true },
     thread: [
       { kind: 'you', text: 'Review #702.' },
-      { kind: 'lead', text: 'Read it through: three things to raise, one blocking. Drafted, not posted. I couldn’t run its tests: the code is from outside the team.', took: { work: 248, tools: 90 } },
+      {
+        kind: 'lead',
+        text: 'Read it through: three things to raise, one blocking. Drafted, not posted. I couldn’t run its tests: the code is from outside the team.',
+        took: { work: 248, tools: 90 },
+      },
       { kind: 'you', text: 'Run its tests.' },
       { kind: 'ask', ask: { kind: 'run-it', pr: 702, by: 'dmitri-k' } },
     ],
@@ -543,8 +639,17 @@ export const CASES: ReadonlyArray<Case> = [
     thread: [
       { kind: 'you', text: 'Run its tests.' },
       { kind: 'part', who: 'you', text: 'You ran #702 safely: offline, install scripts off.' },
-      { kind: 'line', text: 'electron and playwright didn’t install: they need their install scripts.', tone: 'warning', act: 'Trust fully' },
-      { kind: 'lead', text: 'The unit tests pass: 212 of 212. The end-to-end tests need Electron, which didn’t install.', took: { start: 6, work: 104, tools: 88 } },
+      {
+        kind: 'line',
+        text: 'electron and playwright didn’t install: they need their install scripts.',
+        tone: 'warning',
+        act: 'Trust fully',
+      },
+      {
+        kind: 'lead',
+        text: 'The unit tests pass: 212 of 212. The end-to-end tests need Electron, which didn’t install.',
+        took: { start: 6, work: 104, tools: 88 },
+      },
     ],
     adr: 'The thread says what didn’t install, and Trust fully is one press away.',
   },
@@ -565,9 +670,19 @@ export const CASES: ReadonlyArray<Case> = [
     thread: [
       ...opening,
       { kind: 'you', text: 'Hold it from the moment the card lifts, not when it lands.' },
-      { kind: 'lead', text: 'Done: it holds from the lift. Try it on the running board.', took: { work: 64, tools: 15 }, commits: { n: 1, change: 'still' } },
+      {
+        kind: 'lead',
+        text: 'Done: it holds from the lift. Try it on the running board.',
+        took: { work: 64, tools: 15 },
+        commits: { n: 1, change: 'still' },
+      },
       { kind: 'you', text: 'And keep the lane’s count from flickering.' },
-      { kind: 'lead', text: 'The count now waits for the move too. 3 commits since #714 went up, not shipped.', took: { work: 52, tools: 11 }, commits: { n: 2, change: 'still' } },
+      {
+        kind: 'lead',
+        text: 'The count now waits for the move too. 3 commits since #714 went up, not shipped.',
+        took: { work: 52, tools: 11 },
+        commits: { n: 2, change: 'still' },
+      },
     ],
     adr: 'The header and the card say how much is waiting, “3 commits not shipped”, with Ship.',
   },
@@ -589,7 +704,13 @@ export const CASES: ReadonlyArray<Case> = [
       { kind: 'lead', text: 'Done. Not shipped.', took: { work: 64, tools: 15 }, commits: { n: 2, change: 'still' } },
       { kind: 'line', text: 'lint fails on #714’s pushed head. Ship replaces it.', change: 'still' },
       { kind: 'line', text: 'noor-a on #714: “Name the magic 180ms.”', change: 'still' },
-      { kind: 'lead', text: 'Named it `LANE_HOLD_MS` and replied on #714 that it goes up with the next Ship.', took: { work: 38, tools: 9 }, commits: { n: 1, change: 'still' }, who: 'reply' },
+      {
+        kind: 'lead',
+        text: 'Named it `LANE_HOLD_MS` and replied on #714 that it goes up with the next Ship.',
+        took: { work: 38, tools: 9 },
+        commits: { n: 1, change: 'still' },
+        who: 'reply',
+      },
     ],
     adr: 'Failing checks start no round; the card shows them beside Ship. A change a comment asks for is committed beside the person’s and waits for Ship.',
   },
@@ -623,12 +744,25 @@ export const CASES: ReadonlyArray<Case> = [
     title: TITLE,
     kind: 'change',
     preset: 'Change',
-    changes: [ch(STILL, { waiting: 3, toward: 'release/0.8.0', branch: 'althar/board-still-2' })],
+    changes: [
+      ch(STILL, {
+        waiting: 3,
+        toward: 'release/0.8.0',
+        branch: 'althar/board-still-2',
+        pr: undefined,
+        state: undefined,
+        checks: undefined,
+      }),
+    ],
     reviewer: SOL,
     thread: [
       ...opening,
       { kind: 'part', who: 'you', text: 'You moved althar/board-still toward release/0.8.0.', change: 'still' },
-      { kind: 'line', text: 'Made althar/board-still-2 from release/0.8.0, with the 3 commits. It stays here until Ship; #714 stays open.', change: 'still' },
+      {
+        kind: 'line',
+        text: 'Made althar/board-still-2 from release/0.8.0, with the 3 commits. It stays here until Ship; #714 stays open.',
+        change: 'still',
+      },
     ],
     adr: 'Where commits wait for Ship, the cherry-picks take them along, and the new branch is made only on this computer. Ship pushes it and opens its pull request, and only then asks about the old one.',
   },
@@ -662,7 +796,12 @@ export const CASES: ReadonlyArray<Case> = [
     shots: 6,
     thread: [
       { kind: 'you', text: 'Prototype a calmer empty board, three ways.' },
-      { kind: 'lead', text: 'Three directions on one page, at localhost:5380. B is my pick.', took: { work: 610, tools: 220 }, commits: { n: 4, change: 'empty' } },
+      {
+        kind: 'lead',
+        text: 'Three directions on one page, at localhost:5380. B is my pick.',
+        took: { work: 610, tools: 220 },
+        commits: { n: 4, change: 'empty' },
+      },
       { kind: 'you', text: 'Thanks, that’s enough. Done.' },
       { kind: 'ask', ask: { kind: 'settle-unshipped', change: 'empty' } },
     ],
@@ -688,7 +827,11 @@ export const CASES: ReadonlyArray<Case> = [
       { kind: 'part', who: 'coordinator', text: 'The coordinator added a review of #698, as it touches the same lanes.' },
       { kind: 'part', who: 'you', text: 'You moved Checked by to after it merges.' },
       { kind: 'you', text: 'Does #698 break the held height?' },
-      { kind: 'lead', text: 'No: #698 keeps the lane element, so the hold still finds it. One comment drafted on #698.', took: { work: 140, tools: 51 } },
+      {
+        kind: 'lead',
+        text: 'No: #698 keeps the lane element, so the hold still finds it. One comment drafted on #698.',
+        took: { work: 140, tools: 51 },
+      },
     ],
     adr: 'Every change writes one line in the thread, saying who changed which part and why.',
   },
@@ -729,8 +872,18 @@ export const CASES: ReadonlyArray<Case> = [
     reviewer: SOL,
     thread: [
       ...opening.slice(0, 1),
-      { kind: 'review', findings: 3, fixed: '3 fixed', checked: 'One fix checked again by GPT-6.1 Sol; two were a line or two, not read again.' },
-      { kind: 'lead', text: 'Settled all three. #714 is up; its description names the two small fixes nobody read again.', took: { work: 88, tools: 20, review: 240 }, commits: { n: 3, change: 'still' } },
+      {
+        kind: 'review',
+        findings: 3,
+        fixed: '3 fixed',
+        checked: 'One fix checked again by GPT-6.1 Sol; two were a line or two, not read again.',
+      },
+      {
+        kind: 'lead',
+        text: 'Settled all three. #714 is up; its description names the two small fixes nobody read again.',
+        took: { work: 88, tools: 20, review: 240 },
+        commits: { n: 3, change: 'still' },
+      },
     ],
     adr: 'A tiny fix needs no check, and a bigger one gets one short check by the same reviewer.',
   },
@@ -748,9 +901,21 @@ export const CASES: ReadonlyArray<Case> = [
     reviewer: { who: 'GPT-6.1 Sol', when: 'after' },
     thread: [
       { kind: 'you', text: 'Rename “Keep for later” to “Later”.' },
-      { kind: 'lead', text: 'Renamed it in the board, the menu and the glossary. #715 merged.', took: { work: 58, tools: 14 }, commits: { n: 1, change: 'later' } },
+      {
+        kind: 'lead',
+        text: 'Renamed it in the board, the menu and the glossary. #715 merged.',
+        took: { work: 58, tools: 14 },
+        commits: { n: 1, change: 'later' },
+      },
       { kind: 'review', findings: 2, after: true, change: 'later' },
-      { kind: 'ask', ask: { kind: 'after-merge', pr: 715, findings: ['The Settled lane’s head still says “Kept 3”.', 'The edge’s menu still says “Keep for later”.'] } },
+      {
+        kind: 'ask',
+        ask: {
+          kind: 'after-merge',
+          pr: 715,
+          findings: ['The Settled lane’s head still says “Kept 3”.', 'The edge’s menu still says “Keep for later”.'],
+        },
+      },
     ],
     adr: 'If it finds something, the task is in Needs you with the findings, which name the merged pull request: Fix it or Leave it.',
   },
@@ -768,7 +933,12 @@ export const CASES: ReadonlyArray<Case> = [
     reviewer: { who: 'GPT-6.1 Sol', when: 'after' },
     thread: [
       { kind: 'you', text: 'Rename “Keep for later” to “Later”.' },
-      { kind: 'lead', text: 'Renamed it in the board, the menu, the edge and the glossary. #715 merged.', took: { work: 58, tools: 14 }, commits: { n: 1, change: 'later' } },
+      {
+        kind: 'lead',
+        text: 'Renamed it in the board, the menu, the edge and the glossary. #715 merged.',
+        took: { work: 58, tools: 14 },
+        commits: { n: 1, change: 'later' },
+      },
       { kind: 'review', findings: 0, after: true, change: 'later' },
     ],
     adr: 'If the review finds nothing, the thread gets a line, with no notification and nothing in Needs you.',
@@ -789,7 +959,12 @@ export const CASES: ReadonlyArray<Case> = [
     thread: [
       ...opening,
       { kind: 'you', text: 'Look at #698 too, it touches the same lanes.' },
-      { kind: 'lead', text: 'Two comments on #698, drafted: its lanes drop the element the hold measures. Run in a copy at its head, beside this change.', took: { start: 9, work: 176, tools: 64 }, part: { text: 'Added a review of #698, in a copy at its head.' } },
+      {
+        kind: 'lead',
+        text: 'Two comments on #698, drafted: its lanes drop the element the hold measures. Run in a copy at its head, beside this change.',
+        took: { start: 9, work: 176, tools: 64 },
+        part: { text: 'Added a review of #698, in a copy at its head.' },
+      },
     ],
     adr: 'Its draft is the person’s to post. A draft still unposted keeps the task in Needs you.',
   },
@@ -810,7 +985,11 @@ export const CASES: ReadonlyArray<Case> = [
     reviewer: null,
     thread: [
       { kind: 'you', text: 'What does ADR-087 say about helpers?' },
-      { kind: 'lead', text: 'A lead can start helpers on any agent, each in a copy of its own, four at once. The phase 5 proposal adds one handed a change, working in that change’s worktree.', took: { start: 3, work: 22, tools: 8 } },
+      {
+        kind: 'lead',
+        text: 'A lead can start helpers on any agent, each in a copy of its own, four at once. The phase 5 proposal adds one handed a change, working in that change’s worktree.',
+        took: { start: 3, work: 22, tools: 8 },
+      },
     ],
     adr: 'It sits on Scratch, off the board’s lanes. It opens in place from the board, as one chip at most. A reply the person hasn’t seen waits in Needs you until they open it.',
   },
@@ -830,7 +1009,14 @@ export const CASES: ReadonlyArray<Case> = [
     thread: [
       { kind: 'you', text: 'Prototype the Scratch shelf, three ways, on the real board.' },
       { kind: 'lead', text: 'Three directions on one page at localhost:5381, keys 1 to 3. A is my pick.', took: { work: 940, tools: 300 } },
-      { kind: 'ask', ask: { kind: 'preset-offer', name: 'Design round', holds: 'a worktree, Claude Opus 5.5 at xhigh, reviewed only once it ships, no pull request' } },
+      {
+        kind: 'ask',
+        ask: {
+          kind: 'preset-offer',
+          name: 'Design round',
+          holds: 'a worktree, Claude Opus 5.5 at xhigh, reviewed only once it ships, no pull request',
+        },
+      },
     ],
     adr: 'A chip names the preset. The coordinator offers one when it sees the person set up the same parts more than once.',
   },
@@ -850,9 +1036,17 @@ export const CASES: ReadonlyArray<Case> = [
     reviewer: SOL,
     thread: [
       { kind: 'you', text: ASK },
-      { kind: 'lead', text: 'Each lane holds its height until the move ends. #714 is up.', took: { wait: 190, start: 35, work: 214, tools: 61 } },
+      {
+        kind: 'lead',
+        text: 'Each lane holds its height until the move ends. #714 is up.',
+        took: { wait: 190, start: 35, work: 214, tools: 61 },
+      },
       { kind: 'you', text: 'Why did that take so long?' },
-      { kind: 'lead', text: 'Most of it was waiting: four tasks had the agents for three minutes before I started. The work itself took under four.', took: { work: 9 } },
+      {
+        kind: 'lead',
+        text: 'Most of it was waiting: four tasks had the agents for three minutes before I started. The work itself took under four.',
+        took: { work: 9 },
+      },
       { kind: 'you', text: 'Make the hold a little shorter.' },
       { kind: 'lead', text: 'Down to 140ms. Not shipped.', took: { work: 31, tools: 12 }, commits: { n: 1, change: 'still' } },
     ],
@@ -871,7 +1065,11 @@ export const CASES: ReadonlyArray<Case> = [
     changes: [ch(STILL, { waiting: 1 }), ch(LATER, { checks: 'passed' })],
     reviewer: SOL,
     still: { why: 'Claude is out of usage until 14:00.', act: 'Use another model' },
-    thread: [...opening, { kind: 'you', text: 'Now the same for the Settled lane.' }, { kind: 'ask', ask: { kind: 'usage', agent: 'Claude Opus 5.5', until: '14:00' } }],
+    thread: [
+      ...opening,
+      { kind: 'you', text: 'Now the same for the Settled lane.' },
+      { kind: 'ask', ask: { kind: 'usage', agent: 'Claude Opus 5.5', until: '14:00' } },
+    ],
     adr: 'Nothing fails quietly: every error says what went wrong, and offers what fixes it.',
   },
   {
@@ -911,7 +1109,14 @@ export const CASES: ReadonlyArray<Case> = [
     thread: [
       ...opening,
       { kind: 'you', text: 'Ship it.' },
-      { kind: 'ask', ask: { kind: 'stuck', what: 'The review for Ship', why: 'GPT-6.1 Sol stopped answering 6 minutes into the review of #714’s 2 commits.' } },
+      {
+        kind: 'ask',
+        ask: {
+          kind: 'stuck',
+          what: 'The review for Ship',
+          why: 'GPT-6.1 Sol stopped answering 6 minutes into the review of #714’s 2 commits.',
+        },
+      },
     ],
     adr: 'What needs the person never folds: a stuck step, a question, a permission, an error and its way out.',
   },
@@ -931,7 +1136,14 @@ export const CASES: ReadonlyArray<Case> = [
       ...opening,
       { kind: 'you', text: 'Ship it.' },
       { kind: 'review', findings: 0, change: 'still' },
-      { kind: 'ask', ask: { kind: 'refused', change: 'still', why: 'GitHub refused the push to althar/board-still: this repository asks for signed commits.' } },
+      {
+        kind: 'ask',
+        ask: {
+          kind: 'refused',
+          change: 'still',
+          why: 'GitHub refused the push to althar/board-still: this repository asks for signed commits.',
+        },
+      },
     ],
     adr: 'The Push card, where code hosts’ rules held back a push of Althar’s own, becomes Ship, since one push would send both.',
   },

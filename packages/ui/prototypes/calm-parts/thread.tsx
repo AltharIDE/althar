@@ -51,7 +51,12 @@ export const itemsOf = (c: Case, direction: Direction): ThreadItem[] => {
     const beat = beats[index]!
     switch (beat.kind) {
       case 'you':
-        out.push({ ...base(null), kind: 'user_message', content: { text: beat.text, links: [], pictures: [], files: [] }, input: { state: 'delivered', interrupting: false } })
+        out.push({
+          ...base(null),
+          kind: 'user_message',
+          content: { text: beat.text, links: [], pictures: [], files: [] },
+          input: { state: 'delivered', interrupting: false },
+        })
         break
       case 'lead': {
         const tools = beat.tools ?? ['Read packages/ui/src/board/Board/Board.tsx']
@@ -63,17 +68,40 @@ export const itemsOf = (c: Case, direction: Direction): ThreadItem[] => {
             model: 'opus',
             ...(n === 0 ? { createdAt: new Date(from).toISOString() } : {}),
             kind: 'tool_call',
-            content: { title, toolKind: /^Ran/.test(title) ? 'execute' : /^Edit/.test(title) ? 'edit' : 'read', status: 'completed', command: null, locations: [], declined: false, pictures: [], files: [], output: null, exit: null },
+            content: {
+              title,
+              toolKind: title.startsWith('Ran') ? 'execute' : title.startsWith('Edit') ? 'edit' : 'read',
+              status: 'completed',
+              command: null,
+              locations: [],
+              declined: false,
+              pictures: [],
+              files: [],
+              output: null,
+              exit: null,
+            },
           })
         })
         // A part it changed on its way: inside its work, where the direction folds it.
         const after = beats[index + 1]
         if (after?.kind === 'part' && view.folds(after)) {
-          out.push({ ...base(null), kind: 'notice', content: { source: 'runtime', severity: 'info', title: after.text, description: null, role: 'aside' } })
+          out.push({
+            ...base(null),
+            kind: 'notice',
+            content: { source: 'runtime', severity: 'info', title: after.text, description: null, role: 'aside' },
+          })
           index += 1
         }
-        clock = from + total * 1000
-        out.push({ ...base('claude-code'), model: 'opus', createdAt: new Date(clock).toISOString(), kind: 'agent_message', content: { text: beat.text, pictures: [], files: [] } })
+        // Its answer exactly its time after its first step, so its line's took finds its timing.
+        const end = from + total * 1000
+        clock = end - 4000
+        out.push({
+          ...base('claude-code'),
+          model: 'opus',
+          createdAt: new Date(end).toISOString(),
+          kind: 'agent_message',
+          content: { text: beat.text, pictures: [], files: [] },
+        })
         TIMES.set(tookOf(beat.took), { t: beat.took, beat })
         break
       }
@@ -81,7 +109,8 @@ export const itemsOf = (c: Case, direction: Direction): ThreadItem[] => {
         block(beat)
     }
   }
-  if (known !== undefined && known.length === out.length) return known.map((item, n) => ({ ...item, content: out[n]!.content }) as ThreadItem)
+  if (known !== undefined && known.length === out.length)
+    return known.map((item, n) => ({ ...item, content: out[n]!.content }) as ThreadItem)
   made.set(key, out)
   return out
 }

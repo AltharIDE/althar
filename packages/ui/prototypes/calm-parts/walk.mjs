@@ -8,7 +8,9 @@ const repo = resolve(import.meta.dirname, '../../../..')
 const require = createRequire(resolve(repo, 'apps/desktop/package.json'))
 const { chromium } = require('@playwright/test')
 
-const cases = readFileSync(resolve(import.meta.dirname, 'cases.ts'), 'utf8').match(/key: '([a-z-]+)'/g).map((one) => one.slice(6, -1))
+const cases = readFileSync(resolve(import.meta.dirname, 'cases.ts'), 'utf8')
+  .match(/key: '([a-z-]+)'/g)
+  .map((one) => one.slice(6, -1))
 const only = process.argv.slice(2)
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
@@ -22,9 +24,17 @@ for (const key of cases.filter((one) => only.length === 0 || only.includes(one))
       errors = []
       await page.goto(`http://localhost:5374/?d=${d}&s=${key}&bare#/${where}`)
       await page.waitForTimeout(450)
-      const chip = where.startsWith('threads') ? await page.locator('header[aria-label] span[data-status]').first().innerText().catch(() => '—') : ''
+      const chip = where.startsWith('threads')
+        ? await page
+            .locator('header[aria-label] span[data-status]')
+            .first()
+            .innerText()
+            .catch(() => '—')
+        : ''
       if (errors.length > 0) bad += 1
-      process.stdout.write(`${key} ${d} ${where.startsWith('threads') ? 'task ' : 'board'} ${errors.length === 0 ? 'ok' : `ERR ${[...new Set(errors)].join(' | ')}`}${chip === '' ? '' : `  [${chip.replace(/\n/g, ' ')}]`}\n`)
+      process.stdout.write(
+        `${key} ${d} ${where.startsWith('threads') ? 'task ' : 'board'} ${errors.length === 0 ? 'ok' : `ERR ${[...new Set(errors)].join(' | ')}`}${chip === '' ? '' : `  [${chip.replace(/\n/g, ' ')}]`}\n`,
+      )
     }
   }
 }

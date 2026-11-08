@@ -70,7 +70,7 @@ const named = (c: Case, need: Need) => need.change ?? c.changes.find(open) ?? c.
 
 const nextOf = (need: Need) =>
   need.act === undefined ? undefined : (
-    <NextStep signal={need.tone === 'you'} onPress={press(need.act)}>
+    <NextStep signal={need.tone === 'you' || need.tone === 'bad'} onPress={press(need.act)}>
       {need.act}
     </NextStep>
   )
@@ -156,7 +156,11 @@ const presetMenu = (c: Case) => (
     note="Switching changes its parts to match. Nothing is lost."
   >
     {(['Chat', 'Change', 'Small change', 'Review a PR', 'Prototype'] as ReadonlyArray<Preset>).map((one) => (
-      <MenuItem key={one} {...(one === c.preset ? { icon: 'check' as const } : {})} onSelect={press(one, { who: 'you', text: `You switched it to ${one}.` })}>
+      <MenuItem
+        key={one}
+        {...(one === c.preset ? { icon: 'check' as const } : {})}
+        onSelect={press(one, { who: 'you', text: `You switched it to ${one}.` })}
+      >
         {one}
       </MenuItem>
     ))}
@@ -178,7 +182,12 @@ const A: View = {
     const parts: TaskPartModel[] = [...c.changes.map((one) => changePart(c, one)), ...taskWide(c)]
     return {
       status: statusOf(c, need),
-      state: need.says === c.word ? c.word : <span className={css.chipWords} title={`${need.says}${more(need)}`}>{`${need.says}${more(need)}`}</span>,
+      state:
+        need.says === c.word ? (
+          c.word
+        ) : (
+          <span className={css.chipWords} title={`${need.says}${more(need)}`}>{`${need.says}${more(need)}`}</span>
+        ),
       ...(need.act === undefined
         ? {}
         : {
@@ -221,7 +230,13 @@ const A: View = {
 const saysMore = (c: Case) =>
   c.changes.length > 1 ||
   c.changes.some(
-    (one) => (one.waiting ?? 0) > 0 || one.heldBy !== undefined || one.helper !== undefined || one.toward !== undefined || one.place === 'local' || one.shipping !== undefined,
+    (one) =>
+      (one.waiting ?? 0) > 0 ||
+      one.heldBy !== undefined ||
+      one.helper !== undefined ||
+      one.toward !== undefined ||
+      one.place === 'local' ||
+      one.shipping !== undefined,
   ) ||
   c.moving !== undefined
 
@@ -249,8 +264,15 @@ const B: View = {
               name: c.preset,
               detail: 'The preset it started from',
               actions: [
-                { label: 'Use Change', onClick: press('Change', { who: 'you', text: 'You switched it to Change: Checked by moves to before it ships.' }) },
-                { label: 'Save as preset…', variant: 'quiet' as const, onClick: press('save', { who: 'you', text: 'You saved its parts as a preset, “Board fix”.' }) },
+                {
+                  label: 'Use Change',
+                  onClick: press('Change', { who: 'you', text: 'You switched it to Change: Checked by moves to before it ships.' }),
+                },
+                {
+                  label: 'Save as preset…',
+                  variant: 'quiet' as const,
+                  onClick: press('save', { who: 'you', text: 'You saved its parts as a preset, “Board fix”.' }),
+                },
               ],
             },
           ]),
@@ -270,7 +292,16 @@ const B: View = {
       case 'line':
         return line(c, beat, { name: true })
       case 'live':
-        return line(c, { kind: 'line', text: beat.text, ...(beat.change === undefined ? {} : { change: beat.change }), ...(beat.act === undefined ? {} : { act: beat.act }) }, { name: true })
+        return line(
+          c,
+          {
+            kind: 'line',
+            text: beat.text,
+            ...(beat.change === undefined ? {} : { change: beat.change }),
+            ...(beat.act === undefined ? {} : { act: beat.act }),
+          },
+          { name: true },
+        )
       case 'review':
         return review(c, beat, { name: true })
       case 'ask':
@@ -303,13 +334,14 @@ const C: View = {
           {need.more > 0 && <Fact>{`${need.more} more`}</Fact>}
         </FactLine>
       ),
-      next: n > 0 && need.act !== undefined && /^Ship/.test(need.act) ? (
-        <NextStep signal onPress={press('Ship')}>
-          Ship
-        </NextStep>
-      ) : (
-        nextOf(need)
-      ),
+      next:
+        n > 0 && need.act !== undefined && need.act.startsWith('Ship') ? (
+          <NextStep signal onPress={press('Ship')}>
+            Ship
+          </NextStep>
+        ) : (
+          nextOf(need)
+        ),
     }
   },
   header: (c, need) => ({
@@ -317,7 +349,8 @@ const C: View = {
     state: c.word,
     parts: <TaskParts parts={[...c.changes.map((one) => changePart(c, one)), ...taskWide(c)]} kinds={kindsOf(c)} />,
   }),
-  above: (c, opening) => (c.changes.some((one) => open(one) && (one.waiting ?? 0) > 0) ? <Outbox c={c} opened={opening === 'outbox'} /> : null),
+  above: (c, opening) =>
+    c.changes.some((one) => open(one) && (one.waiting ?? 0) > 0) ? <Outbox c={c} opened={opening === 'outbox'} /> : null,
   // A part the lead changed on its way is its housekeeping, inside its work; one with a way on stands as a line.
   folds: (beat) => beat.who === 'lead' && beat.act === undefined,
   beat: (c, beat) => {

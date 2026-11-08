@@ -16,7 +16,9 @@ export function TaskHeader<F extends string>(props: TaskHeaderProps<F>) {
   useProto()
   const over = overOf()
   const beside = over.beside ?? props.beside
-  return <RealTaskHeader {...props} status={over.status} state={over.state} parts={over.parts} {...(beside === undefined ? {} : { beside })} />
+  return (
+    <RealTaskHeader {...props} status={over.status} state={over.state} parts={over.parts} {...(beside === undefined ? {} : { beside })} />
+  )
 }
 
 export function TitleBar(props: TitleBarProps) {
