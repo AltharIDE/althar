@@ -1950,6 +1950,57 @@ describe('a fork as its host says, through the API', () => {
     ),
   )
 
+  it.live('adds it once when asked several times at once', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, projectId, path, read } = yield* siteOpened([], ['meridian', 'site'])
+        const repositoryId = (yield* read)?.id ?? ''
+        yield* Effect.all(
+          Array.from({ length: 5 }, () => client.AddParentRemote({ commandId: commandId(), projectId, repositoryId })),
+          {
+            concurrency: 'unbounded',
+          },
+        )
+        assert.strictEqual(execFileSync('git', ['remote'], { cwd: path }).toString(), 'origin\nupstream\n')
+      }),
+    ),
+  )
+
+  it.live('sets the default branch of the remote it adds, where it could fetch it', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, projectId, path, read } = yield* siteOpened([], ['meridian', 'site'])
+        // The parent's address reaches a repository on disk here, as a host's would.
+        const bare = mkdtempSync(join(tmpdir(), 'althar-parent-'))
+        execFileSync('git', ['clone', '-q', '--bare', path, bare])
+        execFileSync('git', ['config', `url.${bare}.insteadOf`, `${HOST}/meridian/site.git`], { cwd: path })
+        // As a git before 2.48 fetches, which leaves a new remote without its HEAD.
+        yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            Object.assign(process.env, {
+              GIT_CONFIG_COUNT: '1',
+              GIT_CONFIG_KEY_0: 'remote.upstream.followRemoteHEAD',
+              GIT_CONFIG_VALUE_0: 'never',
+            })
+          }),
+          () =>
+            Effect.sync(() => {
+              delete process.env.GIT_CONFIG_COUNT
+              delete process.env.GIT_CONFIG_KEY_0
+              delete process.env.GIT_CONFIG_VALUE_0
+            }),
+        )
+        yield* client.AddParentRemote({ commandId: commandId(), projectId, repositoryId: (yield* read)?.id ?? '' })
+        // Its HEAD, so a task started from it needn't ask the remote for its default branch.
+        const current = execFileSync('git', ['branch', '--show-current'], { cwd: path }).toString().trim()
+        assert.strictEqual(
+          execFileSync('git', ['symbolic-ref', 'refs/remotes/upstream/HEAD'], { cwd: path }).toString().trim(),
+          `refs/remotes/upstream/${current}`,
+        )
+      }),
+    ),
+  )
+
   it.live('takes `parent` for it where `upstream` names another repository', () =>
     Effect.scoped(
       Effect.gen(function* () {

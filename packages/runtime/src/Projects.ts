@@ -23,6 +23,7 @@ import { RuntimeConfig } from './Config'
 import { branchFor, conventionsOnBase, ruleOf } from './conventions'
 import { BranchNotFound, type GitFailed, NotARepository, NotFound, ProjectRefused, RepositoriesNeeded } from './errors'
 import { type Fork, forkOf, onRemote, parentRemote } from './forks'
+import { makeKeyedLock } from './keyedLock'
 import { makeScratch } from './firstWrite'
 import {
   addDetachedWorktree,
@@ -1290,30 +1291,40 @@ export class Projects extends Context.Service<
           )
         })
 
+      /** One add of a parent remote at a time in a clone, so two asked at once add it once: the second finds it there. */
+      const parentAdds = makeKeyedLock()
+
       const addParentRemote = (projectId: string, repositoryId: string, commandId?: CommandId) =>
         Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
           const binding = yield* bindingOf(projectId, repositoryId)
           if (binding.path === null) return yield* new ProjectRefused({ reason: 'not_a_fork' })
           const path = binding.path
-          const remotes = yield* namedRemotes(path).pipe(Effect.orElseSucceed(() => []))
-          const fork = forkOf(remotes)
-          if (fork === null) return yield* new ProjectRefused({ reason: 'not_a_fork' })
-          if (fork.upstream.remote !== null) return fork.upstream.remote
-          const taken = new Set(remotes.map((remote) => remote.name))
-          const name = taken.has('upstream') ? freeSlug('parent', [...taken]) : 'upstream'
-          yield* git(path, 'remote', 'add', name, fork.upstream.url)
-          // Its branches, to start tasks from; where it can't be reached now, the next fetch brings them.
-          yield* fetchRemote(path, name)
-          yield* sql.withTransaction(
-            changed(
-              projectId,
-              'project.repository_changed',
-              { repository: binding.name, parentRemote: name, url: fork.upstream.url },
-              commandId,
-            ),
+          return yield* parentAdds.withLock(
+            path,
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              const remotes = yield* namedRemotes(path).pipe(Effect.orElseSucceed(() => []))
+              const fork = forkOf(remotes)
+              if (fork === null) return yield* new ProjectRefused({ reason: 'not_a_fork' })
+              if (fork.upstream.remote !== null) return fork.upstream.remote
+              const taken = new Set(remotes.map((remote) => remote.name))
+              const name = taken.has('upstream') ? freeSlug('parent', [...taken]) : 'upstream'
+              yield* git(path, 'remote', 'add', name, fork.upstream.url)
+              // Its branches, to start tasks from; where it can't be reached now, the next fetch brings them. Its default branch
+              // too, as refs/remotes/<name>/HEAD, so starting a task from it needn't ask the remote each time.
+              if (yield* fetchRemote(path, name))
+                yield* git(path, 'remote', 'set-head', name, '--auto').pipe(Effect.orElseSucceed(() => ''))
+              yield* sql.withTransaction(
+                changed(
+                  projectId,
+                  'project.repository_changed',
+                  { repository: binding.name, parentRemote: name, url: fork.upstream.url },
+                  commandId,
+                ),
+              )
+              return name
+            }),
           )
-          return name
         })
 
       const remove = (projectId: string, commandId?: CommandId) =>
