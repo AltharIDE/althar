@@ -196,10 +196,19 @@ conversation.
   stays.
 - **To a worktree:** the lead commits its own files by name first, as it
   always does in the person's checkout. Althar commits nothing there, so
-  whatever is left uncommitted stays in the checkout as the person's. A
-  worktree is made on the task's branch, and the checkout goes back to where
-  it was, as it does when a task settles. Where it can't, because it has
-  uncommitted changes, it stays and says so.
+  whatever is left uncommitted is the person's. Git lets only one folder
+  have a branch checked out, so the checkout lets go of the task's branch
+  before a worktree takes it:
+  - **Clean, and still on the task's branch:** the checkout goes back to
+    where it was (`returns_to`), as it does when a task settles. Then a
+    worktree is made on the branch, and the task carries on there.
+  - **Already on another branch,** because the person switched it: the
+    branch is free, and the worktree is made at once.
+  - **With uncommitted changes:** the move waits, and the task carries on
+    in Local. The workspace part names what holds it, "Moves to a worktree
+    once `Board.tsx` is committed". Althar tries again as each turn ends,
+    and the person can call the move off. A settled Local task already
+    does this when it's reopened with its checkout still on its branch.
 - **The conversation carries on.** Where the agent can resume its session in
   the new folder, it does. Otherwise the next turn starts a fresh session
   with the thread's handover, as switching the lead does now.
@@ -219,9 +228,17 @@ that computer's.
 - **After a push,** the open pull request can't change its history, so
   Althar does what it does after a merge now. It makes a fresh branch from
   the new target, named for the task with `-2`, and cherry-picks the task's
-  own commits onto it. Then it opens a pull request into the new target and
-  asks the person whether to close the old one. The old branch isn't
-  touched.
+  own commits onto it. Then it pushes that branch, as its own pushes go now,
+  opens a pull request into the new target and asks the person whether to
+  close the old one. The old branch isn't touched.
+- **A held branch stays held.** Where commits wait for Ship, the
+  cherry-picks take them along, and the new branch is made only on this
+  computer, held as the old one was. Ship pushes it and opens its pull
+  request, after its review, and only then asks about the old one, which
+  keeps what was pushed until then.
+- **The review's mark moves too.** The commit the last review read up to
+  becomes its rebased or cherry-picked copy, so the next review reads only
+  the task's own commits since, not the new target's.
 - Everything that follows the target, follows the new one: the pull
   request's base, keeping the branch current, the checks compared against,
   and the diff's base.
@@ -648,6 +665,10 @@ What is new:
 - **The hold for Ship,** per task and repository: the head as the last turn
   ended, and whether the branch is held. Commits not shipped are those past
   where Althar last pushed, which it already keeps, while the branch is held.
+- **`workspaces.moving_to`,** `worktree` or `checkout`: a move between them
+  that waits for the person's checkout, until it is made or called off. A
+  Local start waits as `preparing` does now, but a running task's row is
+  already `ready`, so its move needs a field of its own.
 - **Each turn's timings:** waiting for a place, starting the session, the
   agent's work and its tools, plus a ship's review and checks.
 - **One event per part change** (`task.part_added`, `task.part_changed`,
@@ -708,8 +729,10 @@ It is done when:
 - "Run it" runs an outside pull request's tests offline;
 - a small change's review after merge runs in its own task and thread;
 - a chat on Scratch takes a worktree and moves to the board;
-- a running task moves between a worktree and Local, and changes the branch
-  it works toward;
+- a running task moves between a worktree and Local, and out of Local
+  waits while the person's checkout has edits;
+- a task changes the branch it works toward with a tweak waiting, and the
+  tweak reaches the new pull request only with Ship;
 - a preset is saved from a task, and the coordinator offers one.
 
 ## What this changes in the decision documents
@@ -734,9 +757,11 @@ It is done when:
 
 ## Risks and open questions
 
-- **Moving to Local beside the person's own edits** is the move that needs
-  the most care. It waits for a free, clean checkout, and asks before
-  leaving a branch of the person's own. Althar never commits, stashes,
+- **Moving between Local and a worktree beside the person's own edits**
+  needs the most care. Into Local, the move waits for a free, clean
+  checkout, and asks before leaving a branch of the person's own. Out of
+  Local, it waits until the checkout can let go of the task's branch, and
+  the task carries on in Local meanwhile. Althar never commits, stashes,
   resets or cleans the person's work, and switches their checkout only as
   the Local rule allows.
 - **A changed target can conflict.** The rebase and the cherry-picks stop
@@ -782,6 +807,11 @@ It is done when:
 - **Letting Althar's own course push past the person's commits,** as
   code-hosts does now. The person's tweaks would reach the pull request
   before they said Ship.
+- **Leaving Local at once, with the person's edits still in the checkout.**
+  Sharing the branch between both folders (`git worktree add --force`)
+  would let the lead's next commit move it under the person's files. A
+  branch of the worktree's own would split the task's work in two, and what
+  the person commits next, on the old one, would need carrying across.
 - **Keeping the person's commits on a ref of their own,** and pushing
   Althar's fixes past them by cherry-picking. A folder has one head, so the
   lead would fix a state it isn't working in, and a fix made on the tweaks
