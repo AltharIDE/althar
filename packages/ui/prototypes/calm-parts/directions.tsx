@@ -4,7 +4,6 @@ import type { ReactNode } from 'react'
 
 import { Icon } from '../../src/foundations/Icon/Icon'
 import { TaskStatus, Verdict } from '../../src/foundations/vocabulary'
-import { Menu, MenuItem } from '../../src/primitives/Menu/Menu'
 import { NextStep } from '../../src/primitives/NextStep/NextStep'
 import { LinkButton } from '../../src/primitives/LinkButton/LinkButton'
 import { TaskParts, type TaskPartModel } from '../../src/chrome/TaskParts/TaskParts'
@@ -12,10 +11,24 @@ import { Fact, FactLine } from '../../src/board/BoardCard/Chips'
 import { AltharLine } from '../../src/thread/AltharLine/AltharLine'
 import { ReviewLine } from '../../src/thread/ReviewLine/ReviewLine'
 import { AskView } from './asks'
-import { type Beat, type Case, changeIn, type Preset, type Timing } from './cases'
+import { SOL } from './team'
+import { type Beat, type Case, changeIn, type Timing } from './cases'
 import { type Need, commits, nameOf, open, partsOfTime, said } from './need'
 import { act as doAct, lineAct, savePreset, setPreset } from './moves'
-import { ChangesStrip, ChangeTrack, changePart, chipOf, css, kindsOf, LiveLine, Named, Outbox, taskWide, TimeParts } from './parts'
+import {
+  ChangesStrip,
+  ChangeTrack,
+  changePart,
+  chipOf,
+  css,
+  kindsOf,
+  LiveLine,
+  Named,
+  Outbox,
+  taskWide,
+  TimeParts,
+  WorkingOn,
+} from './parts'
 import type { Direction } from './state'
 
 export interface CardOver {
@@ -42,6 +55,10 @@ export interface View {
   readonly card: (c: Case, need: Need) => CardOver
   readonly header: (c: Case, need: Need, opening: string | null) => HeaderOver
   readonly above: (c: Case, opening: string | null) => ReactNode
+  /** Beside the composer's model: what the conversation is on. */
+  readonly picker: (c: Case) => ReactNode
+  /** Outputs: the change that most needs you and the rest a line each (one), every change a card (all), or the outbox first (outbox). */
+  readonly outputs: 'one' | 'all' | 'outbox'
   /** A lead's part change mid-turn: folded into its work (an aside), or a line of its own. */
   readonly folds: (beat: Extract<Beat, { kind: 'part' }>) => boolean
   readonly beat: (c: Case, beat: Exclude<Beat, { kind: 'you' | 'lead' }>) => ReactNode
@@ -50,8 +67,6 @@ export interface View {
   /** Where Scratch opens from on the board. */
   readonly scratch: 'shelf' | 'corner' | 'talk'
 }
-
-const SOL = { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', short: 'Sol', runtime: 'codex', efforts: [] }
 
 const statusOf = (c: Case, need: Need): TaskStatus =>
   need.tone === 'you' || need.tone === 'bad'
@@ -127,27 +142,6 @@ const review = (c: Case, beat: Extract<Beat, { kind: 'review' }>, { name = false
 
 /* ——— A · One sentence: the task's one next step, the same words on the card, in the bar and in Needs you ——— */
 
-const presetMenu = (c: Case) => (
-  <Menu
-    label="Preset"
-    align="end"
-    trigger={
-      <button type="button" className={css.scratchChip} aria-label={`Preset: ${c.preset}`}>
-        {c.preset}
-        <Icon name="chevronD" size={10} />
-      </button>
-    }
-    note="Switching changes its parts to match. Nothing is lost."
-  >
-    {(['Chat', 'Change', 'Small change', 'Review a PR', 'Prototype'] as ReadonlyArray<Preset>).map((one) => (
-      <MenuItem key={one} {...(one === c.preset ? { icon: 'check' as const } : {})} onSelect={() => setPreset(one)}>
-        {one}
-      </MenuItem>
-    ))}
-    <MenuItem onSelect={savePreset}>Save as preset…</MenuItem>
-  </Menu>
-)
-
 const A: View = {
   name: 'One sentence',
   what: 'The task is its one next step: one sentence and one button, the same on the card, in the bar and in Needs you. The parts stay behind their marks.',
@@ -177,16 +171,15 @@ const A: View = {
               </button>
             ),
           }),
-      parts: (
-        <>
-          {c.preset !== 'Change' && presetMenu(c)}
-          <TaskParts parts={parts} kinds={kindsOf(c)} />
-        </>
-      ),
+      // The preset is named on the plan card only: once the task runs, its parts are what it has.
+      parts: <TaskParts parts={parts} kinds={kindsOf(c)} />,
     }
   },
   above: () => null,
-  folds: () => false,
+  // The branch the conversation is on, beside the model, once there are two to tell apart.
+  picker: (c) => <WorkingOn c={c} />,
+  // A part the lead changed on its way is its housekeeping, inside its work; one with a way on stands as a line.
+  folds: (beat) => beat.who === 'lead' && beat.act === undefined,
   beat: (c, beat) => {
     switch (beat.kind) {
       case 'part':
@@ -200,8 +193,15 @@ const A: View = {
         return <AskView c={c} ask={beat.ask} />
     }
   },
-  took: (_c, took) => took,
+  // Once a task has two changes, each turn's line says where its commits went.
+  took: (c, took, _t, beat) => {
+    const change = changeIn(c, beat.commits?.change)
+    return c.changes.length < 2 || beat.commits === undefined || change === undefined
+      ? took
+      : `${took} · ${commits(beat.commits.n)} to ${nameOf(change)}`
+  },
   scratch: 'corner',
+  outputs: 'one',
 }
 
 /* ——— B · Change rows: the change is the one shape; a strip of them under the bar, a mark each on the card ——— */
@@ -293,6 +293,8 @@ const B: View = {
     return beat.commits === undefined || change === undefined ? took : `${took} · ${commits(beat.commits.n)} to ${nameOf(change)}`
   },
   scratch: 'shelf',
+  picker: () => null,
+  outputs: 'all',
 }
 
 /* ——— C · The outbox: the bar and the card stay as today; what waits to go up gathers over the composer; what happens, happens in the thread ——— */
@@ -352,6 +354,8 @@ const C: View = {
     return first !== undefined && first[1] !== 'the agent’s own work' && first[0] * 3 >= total ? `${took} · ${said(first)}` : took
   },
   scratch: 'talk',
+  picker: () => null,
+  outputs: 'outbox',
 }
 
 export const VIEWS: Record<Direction, View> = { A, B, C }

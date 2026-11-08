@@ -180,6 +180,34 @@ const talk = [
   items.says('Started “Hold the board still while agents work”, a Change. Its lead keeps the rename apart if it’s unrelated.'),
 ]
 
+/** The plan card the case's task started from, held so its clock waits: the one place its preset shows. A chat has none. */
+const planOf = (c: Case) =>
+  items.card(
+    // A task of its own: one still held is not started, and its thread would open here instead of the case's.
+    card({
+      taskId: 'tp',
+      threadId: 'thp',
+      title: c.title,
+      slug: 'board-still',
+      phase: 'held',
+      kind: c.kind,
+      plan: {
+        id: 'pln1',
+        steps: [
+          { key: 'implement', agentId: 'claude-code', model: 'opus', skipped: false },
+          { key: 'review', agentId: 'codex', model: 'gpt-6.1-sol', skipped: false },
+        ],
+        startsAt: null,
+        reason: 'It knows the board.',
+        end: 'draft',
+        worksIn: 'worktree',
+      },
+      branch: 'althar/board-still',
+    }),
+    'plan-t1',
+  )
+const talkOf = (c: Case) => (c.preset === 'Chat' ? talk : [...talk, planOf(c)])
+
 const withNames = models.map((one) =>
   one.agentId === 'claude-code'
     ? { ...one, models: one.models.map((model) => (model.id === 'opus' ? { ...model, name: 'Claude Opus 5.5' } : model)) }
@@ -225,7 +253,7 @@ const { client } = fakeClient({
     return { cursor: 1, tasks, calls: [], settledTotal: 41 }
   },
   getThread: async () => snapshotOf(),
-  getCoordinator: async () => coordinatorSnapshot({ project: { id: 'p1', name: 'althar' }, items: talk }),
+  getCoordinator: async () => coordinatorSnapshot({ project: { id: 'p1', name: 'althar' }, items: talkOf(proto.current()) }),
 })
 
 const host = fakeHost()
@@ -238,6 +266,8 @@ proto.subscribe(() => {
   const p = proto.get()
   const now = `${p.direction}/${p.key}/${p.rev}`
   if (now === read) return
+  // Another case: the coordinator's conversation is read afresh, with that case's plan card.
+  if (read.split('/')[1] !== p.key) void cache.resetQueries({ queryKey: ['coordinator'] })
   read = now
   void cache.invalidateQueries({ queryKey: ['thread'] })
   void cache.invalidateQueries({ queryKey: ['board'] })
@@ -274,6 +304,26 @@ const toBoard = () => {
     else if (tries > 0) window.setTimeout(() => pressBoard(tries - 1), 100)
   }
   window.setTimeout(() => pressBoard(30), 120)
+}
+
+/** Presses the header's switch named so, once it shows: a task's face, or the project's room. */
+const pressSwitch = (name: string, tries = 30) => {
+  const button = [...document.querySelectorAll<HTMLElement>('header [role=radio]')].find((one) => one.textContent?.trim().startsWith(name))
+  if (button !== undefined) button.click()
+  else if (tries > 0) window.setTimeout(() => pressSwitch(name, tries - 1), 100)
+}
+
+/** The task, on its conversation or its Outputs. */
+const toFace = (face: 'talk' | 'out') => {
+  chooseFace('t1', face)
+  if (!window.location.hash.startsWith('#/threads/th1')) window.location.assign('#/threads/th1')
+  window.setTimeout(() => pressSwitch(face === 'out' ? 'Outputs' : 'Conversation'), 120)
+}
+
+/** The coordinator's conversation, where the case's plan card is. */
+const toPlan = () => {
+  window.location.assign('#/projects/p1?room=talk')
+  window.setTimeout(() => pressSwitch('Conversation'), 120)
 }
 
 const step = (by: number) => {
@@ -332,7 +382,9 @@ function Switcher() {
         options={CASES.map((one) => ({ value: one.key, label: `${one.group}: ${one.label}` }))}
       />
       <LinkButton onClick={toBoard}>Board</LinkButton>
-      <LinkButton onClick={() => window.location.assign('#/threads/th1')}>Task</LinkButton>
+      <LinkButton onClick={() => toFace('talk')}>Task</LinkButton>
+      <LinkButton onClick={() => toFace('out')}>Outputs</LinkButton>
+      <LinkButton onClick={toPlan}>Plan</LinkButton>
       {proto.touched() && <LinkButton onClick={() => proto.go(p.key)}>Start over</LinkButton>}
       <span className={css.adr} title={c.adr}>
         {c.adr}
@@ -350,7 +402,7 @@ export const boot = () => {
   titled()
   window.localStorage.removeItem('althar.tabs')
   // The case's task opens on its conversation, where most of what changes is.
-  chooseFace('t1', 'talk')
+  chooseFace('t1', params.get('face') === 'out' ? 'out' : 'talk')
   if (window.location.hash === '' || window.location.hash === '#/') window.location.hash = '#/threads/th1'
   if (!params.has('bare')) window.addEventListener('keydown', onKey)
   if (window.location.hash.includes('room=board')) toBoard()

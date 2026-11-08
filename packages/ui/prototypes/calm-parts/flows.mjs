@@ -284,12 +284,11 @@ await page.keyboard.press('Escape')
 // Failures, each with its way out.
 await open('A', 'usage')
 await page
-  .getByRole('button', { name: /^Use DeepSeek/ })
+  .getByRole('button', { name: /^Continue with/ })
   .first()
   .click()
 await settle(600)
-t = await text()
-check(!t.includes('out of usage until 14:00.') || t.includes('Moved to DeepSeek'), 'A usage: Use DeepSeek answers and moves on')
+check((await text()).includes('Moved to DeepSeek V4.1 Flash'), 'A usage: the kit’s card moves the lead to the first free model')
 await open('A', 'stuck')
 await press('Try again')
 await settle(4200)
@@ -339,6 +338,71 @@ await page
   .first()
   .click()
   .catch(() => undefined)
+
+/* ——— Round two: Outputs, the branch the conversation is on, the plan card's preset, the pickers on the error cards ——— */
+
+// Outputs: the change that most needs you, the rest a line each; a line shows its change.
+await page.goto('http://localhost:5374/?d=A&s=needs-one&face=out#/threads/th1')
+await settle(1200)
+t = (await text()).toLowerCase()
+check(t.includes('what #714 changes') && t.includes('2 more changes'), 'A needs-one Outputs: #714 first, then 2 more changes')
+await page.getByRole('button', { name: /#715/ }).first().click()
+await settle(400)
+check((await text()).toLowerCase().includes('what #715 changes'), 'A needs-one Outputs: pressing #715’s line shows #715')
+
+// The branch the conversation is on, in the composer, and turning it to another.
+await open('A', 'needs-one')
+check(
+  await page.getByRole('button', { name: 'On althar/board-still' }).isVisible(),
+  'A needs-one: the composer names the branch the conversation is on',
+)
+await page.getByRole('button', { name: 'On althar/board-still' }).click()
+await settle(250)
+await page.getByRole('menuitem', { name: /althar\/rename-later/ }).click()
+await settle(500)
+t = await text()
+check(t.includes('You turned the conversation to #715, althar/rename-later.'), 'A needs-one: turning it to #715 says so')
+check(await page.getByRole('button', { name: 'On althar/rename-later' }).isVisible(), 'A needs-one: and the composer names its branch')
+await open('A', 'one')
+check((await page.getByRole('button', { name: /^On althar\// }).count()) === 0, 'A one: one change, no branch chip (as today)')
+
+// The plan card names the preset; another preset changes its steps.
+await page.goto('http://localhost:5374/?d=A&s=needs-one#/projects/p1?room=talk')
+await settle(1500)
+const launch = page.locator('[class*="TaskLaunch-module__launch"]').first()
+check((await launch.innerText()).includes('Review'), 'Plan card: Change has a review step')
+await launch.getByRole('button', { name: 'Preset: Change' }).click()
+await settle(250)
+await page.getByRole('menuitem', { name: /^Prototype/ }).click()
+await settle(400)
+check(
+  !(await launch.innerText()).includes('Review') && (await launch.getByRole('button', { name: 'Preset: Prototype' }).count()) === 1,
+  'Plan card: Prototype drops the review step',
+)
+await page.goto('http://localhost:5374/?d=A&s=needs-one#/threads/th1')
+await settle(900)
+check(
+  (await page.locator('header[aria-label]').first().innerText()).includes('Change') === false,
+  'A needs-one: no preset chip in the task’s bar',
+)
+
+// The stuck card's picker: another model takes the review, and Ship goes on.
+await open('A', 'stuck')
+await page
+  .getByRole('button', { name: /Review with another model/ })
+  .first()
+  .click()
+await settle(300)
+await page
+  .getByRole('menuitem', { name: /GPT-6.1 Terra/ })
+  .first()
+  .click()
+await settle(4200)
+t = await text()
+check(
+  t.includes('Reviewing with GPT-6.1 Terra') && t.includes('Shipped: #714 has the 2 commits'),
+  'A stuck: picking GPT-6.1 Terra reviews with it, then ships',
+)
 
 process.stdout.write(`${failed} failed; page errors: ${errors.length === 0 ? 'none' : [...new Set(errors)].join(' | ')}\n`)
 await browser.close()

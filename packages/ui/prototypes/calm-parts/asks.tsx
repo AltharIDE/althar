@@ -2,11 +2,14 @@
 import { AskAnswered, AskCard, AskFoot, AskNote } from '../../src/primitives/Ask/Ask'
 import { Button } from '../../src/primitives/Button/Button'
 import { LinkButton } from '../../src/primitives/LinkButton/LinkButton'
+import { RateLimit } from '../../src/thread/RateLimit/RateLimit'
+import { Stuck } from '../../src/thread/Stuck/Stuck'
 import { type Ask, type Case, changeIn } from './cases'
 import { commits, nameOf } from './need'
 import { answerAsk } from './moves'
 import { proto, useProto } from './state'
 import { css } from './parts'
+import { FLASH, OPUS, SOL, SONNET, TAKERS, TERRA } from './team'
 
 export function AskView({ c, ask }: { c: Case; ask: Ask }) {
   const { answered } = useProto()
@@ -141,34 +144,36 @@ export function AskView({ c, ask }: { c: Case; ask: Ask }) {
           </AskFoot>
         </AskCard>
       )
+    // Out of usage: the kit's own card, with the models free now to move the work to, each with how it is reached.
     case 'usage':
       return (
-        <AskCard
-          icon="clock"
-          kicker="Out of usage"
-          who={ask.agent}
-          what={`Claude’s plan is used up until ${ask.until}. Your message waits, and goes as soon as it resets.`}
-        >
-          <AskFoot>
-            <Button variant="signal" onClick={() => answer('Use another model')}>
-              Use DeepSeek V4.1 Flash
-            </Button>
-            <Button onClick={() => answer('Wait')}>Wait until {ask.until}</Button>
-          </AskFoot>
-        </AskCard>
+        <RateLimit
+          runtime={ask.agent.startsWith('Claude') ? 'Claude Code' : ask.agent}
+          resets={ask.until}
+          affects={[{ id: 'lead', label: 'the lead', model: OPUS }]}
+          options={[
+            { model: FLASH, note: 'OpenCode Go · your plan' },
+            { model: SOL, note: 'Codex · 38% of this week used' },
+            { model: TERRA, note: 'Codex · 38% of this week used' },
+            { model: SONNET, note: 'same limit, resets 14:00', busy: true },
+          ]}
+          onSwap={(id) => answer(`swap:${[FLASH, SOL, TERRA, SONNET].find((one) => one.id === id)?.name ?? id}`)}
+          onWait={() => answer('Wait')}
+        />
       )
+    // A stuck step: the kit's own card, with the models that can take the review over in its menu.
     case 'stuck':
       return (
-        <AskCard icon="hold" kicker="Stuck" who={ask.what} what={ask.why}>
-          <AskNote>The 2 commits are still held. Nothing went up.</AskNote>
-          <AskFoot>
-            <Button variant="signal" onClick={() => answer('Try again')}>
-              Try again
-            </Button>
-            <Button onClick={() => answer('Review with another model')}>Review with DeepSeek V4.1 Flash</Button>
-            <LinkButton onClick={() => answer('Ship without it')}>Ship without it</LinkButton>
-          </AskFoot>
-        </AskCard>
+        <Stuck
+          step={ask.what}
+          what={`${ask.why} The 2 commits are still held; nothing went up.`}
+          tried={[{ id: 'again', what: 'Asked GPT-6.1 Sol again', result: 'No answer after 2 minutes' }]}
+          handOn={{ models: TAKERS, onHandOn: (model) => answer(`retry:${model.name}`) }}
+          onAgain={() => answer('Try again')}
+          onAbandon={() => answer('Ship without it')}
+          primary="again"
+          text={{ retry: 'Review with another model', retryLabel: 'Review with', abandon: 'Ship without the review' }}
+        />
       )
     case 'refused': {
       const change = of(ask.change)

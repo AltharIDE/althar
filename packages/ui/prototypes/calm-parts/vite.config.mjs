@@ -21,6 +21,10 @@ const seams = [
   { importer: 'features/board/BoardView.tsx', id: '@althar/ui', to: 'seams/boardUi.ts' },
   // A task's bar and composer: its chip, its parts, what sits over the composer.
   { importer: 'features/task/TaskView.tsx', id: '@althar/ui', to: 'seams/taskUi.ts' },
+  // A task's Outputs: each of its changes, as the direction has them.
+  { importer: 'features/task/TaskView.tsx', id: './Outputs', to: 'seams/Outputs.tsx' },
+  // The plan card: it names the preset, the one place it shows.
+  { importer: 'features/project/Card.tsx', id: '@althar/ui', to: 'seams/cardUi.ts' },
   // The coordinator's conversation: in C, Scratch sits over its composer.
   { importer: 'features/project/ProjectView.tsx', id: '@althar/ui', to: 'seams/projectUi.ts' },
   // A task's thread: Althar's lines carry the direction's blocks, a turn's line where its time went.

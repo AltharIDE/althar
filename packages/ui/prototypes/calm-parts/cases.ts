@@ -139,6 +139,8 @@ export interface Case {
     readonly copy?: boolean
   }
   readonly moving?: { readonly change: string; readonly to: 'local' | 'worktree'; readonly waitsOn?: string; readonly off?: boolean }
+  /** The change the conversation is on, where the person turned it there: what they say next, and “Ship it”, go to it. */
+  readonly working?: string
   /** Gone from its parts, and what it left. */
   readonly left?: ReadonlyArray<{ readonly what: string; readonly stays: string }>
   readonly issue?: string

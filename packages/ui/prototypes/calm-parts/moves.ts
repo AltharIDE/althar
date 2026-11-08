@@ -506,6 +506,13 @@ export const setPreset = (to: Preset) =>
 
 export const savePreset = () => proto.edit(part('you', 'You saved its parts as a preset, “Board fix”.'))
 
+/** The conversation turns to another change: what the person says next, and “Ship it”, go there. */
+export const workOn = (id: string) => {
+  const one = changeIn(proto.current(), id)
+  if (one === undefined) return
+  proto.edit(compose((c) => ({ ...c, working: id }), part('you', `You turned the conversation to ${nameOf(one)}, ${one.branch}.`, id)))
+}
+
 /* ——— A line's way on ——— */
 
 export const lineAct = (act: string, id?: string) => {
@@ -636,24 +643,26 @@ export const answerAsk = (c: Case, ask: Ask, choice: string) => {
       return choice === 'Close it'
         ? say(`Closed #${ask.old}`, compose(working, line(`Closed #${ask.old}. #${ask.now} carries on.`)))
         : say(`Kept #${ask.old} open`, working)
-    case 'usage':
-      return choice === 'Use another model'
-        ? say('Moved to DeepSeek V4.1 Flash', compose(working, part('you', 'You moved it to DeepSeek V4.1 Flash until Claude is back.')))
-        : say(`Waits until ${ask.until}`)
-    case 'stuck':
-      if (choice === 'Try again') {
-        say('Trying the review again')
-        return ship(c.changes.find((x) => x.shipping !== undefined)?.id)
+    case 'usage': {
+      if (choice === 'Wait') return say(`Waits until ${ask.until}`)
+      // The chip's press takes the card's first: the project's backup.
+      const to = choice.startsWith('swap:') ? choice.slice(5) : 'DeepSeek V4.1 Flash'
+      return say(`Moved to ${to}`, compose(working, part('you', `You moved the lead to ${to} until Claude is back.`)))
+    }
+    case 'stuck': {
+      const stuck = c.changes.find((x) => x.shipping !== undefined)?.id
+      if (choice.startsWith('retry:')) {
+        const to = choice.slice(6)
+        say(`Reviewing with ${to}`, (cc) => ({ ...cc, reviewer: cc.reviewer == null ? cc.reviewer : { ...cc.reviewer, who: to } }))
+        return ship(stuck)
       }
-      if (choice === 'Review with another model') {
-        say('Moved the review to DeepSeek V4.1 Flash', (cc) => ({
-          ...cc,
-          reviewer: cc.reviewer == null ? cc.reviewer : { ...cc.reviewer, who: 'DeepSeek V4.1 Flash' },
-        }))
-        return ship(c.changes.find((x) => x.shipping !== undefined)?.id)
+      if (choice === 'Ship without it') {
+        say('Shipped without a review')
+        return ship(stuck, { skipReview: true })
       }
-      say('Shipped without a review')
-      return ship(c.changes.find((x) => x.shipping !== undefined)?.id, { skipReview: true })
+      say('Trying the review again')
+      return ship(stuck)
+    }
     case 'refused':
       say(choice === 'Set up signing' ? 'Signing set up. Shipping' : 'Shipping again')
       return ship(ask.change, { skipReview: true })

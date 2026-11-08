@@ -8,6 +8,7 @@ import { Button } from '../../src/primitives/Button/Button'
 import { KeyValues } from '../../src/primitives/KeyValues/KeyValues'
 import { LinkButton } from '../../src/primitives/LinkButton/LinkButton'
 import { LiveDot } from '../../src/primitives/LiveDot/LiveDot'
+import { Menu, MenuItem } from '../../src/primitives/Menu/Menu'
 import { Popover } from '../../src/primitives/Popover/Popover'
 import type { PartAction, PartKind, PartTone, TaskPartModel } from '../../src/chrome/TaskParts/TaskParts'
 import { BranchChip, PullChip } from '../../src/board/BoardCard/Chips'
@@ -33,6 +34,7 @@ import {
   toLocal,
   toWorktree,
   trust,
+  workOn,
 } from './moves'
 import css from './parts.module.css'
 
@@ -510,6 +512,57 @@ export function ChangesStrip({ c, opened }: { c: Case; opened: string | null }) 
         </Button>
       )}
     </section>
+  )
+}
+
+/* ——— A: the change the conversation is on, in the composer ——— */
+
+/** The change the conversation is on: where the person turned it, else where the lead's last turn worked, else the first open one. */
+export const workingOf = (c: Case): Change | undefined => {
+  const turned = changeIn(c, c.working)
+  if (turned !== undefined && open(turned)) return turned
+  for (const beat of [...c.thread].reverse()) {
+    const one = changeIn(
+      c,
+      beat.kind === 'lead' ? (beat.commits?.change ?? beat.part?.change) : beat.kind === 'part' ? beat.change : undefined,
+    )
+    if (one !== undefined && open(one)) return one
+  }
+  return c.changes.find(open)
+}
+
+/** Its branch, beside the model, once the task has two changes open: the one what you say next goes to, and the way to another. */
+export function WorkingOn({ c }: { c: Case }) {
+  const live = c.changes.filter(open)
+  const now = workingOf(c)
+  if (live.length < 2 || now === undefined) return null
+  return (
+    <Menu
+      label="The change you’re talking about"
+      placement="above"
+      align="start"
+      width={360}
+      note="What you say next, and “Ship it”, go to it."
+      trigger={
+        <button type="button" className={css.working} aria-label={`On ${now.branch}`}>
+          <Icon name="branch" size={12} />
+          <span className={css.workingName}>{now.branch}</span>
+          <Icon name="chevronD" size={10} />
+        </button>
+      }
+    >
+      {live.map((one) => (
+        <MenuItem
+          key={one.id}
+          {...(one.id === now.id ? { icon: 'check' as const } : {})}
+          hint={nameOf(one) === one.branch ? undefined : nameOf(one)}
+          description={standingOf(c, one).detail}
+          onSelect={() => workOn(one.id)}
+        >
+          {one.branch}
+        </MenuItem>
+      ))}
+    </Menu>
   )
 }
 

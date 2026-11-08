@@ -35,9 +35,20 @@ export function TitleBar(props: TitleBarProps) {
 export function Composer(props: ComposerProps) {
   const p = useProto()
   const mine = VIEWS[p.direction].above(proto.current(), p.opening)
+  const beside = VIEWS[p.direction].picker(proto.current())
   return (
     <RealComposer
       {...props}
+      {...(beside === null
+        ? {}
+        : {
+            picker: (
+              <>
+                {props.picker}
+                {beside}
+              </>
+            ),
+          })}
       above={
         mine === null ? (
           props.above
