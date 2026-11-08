@@ -625,8 +625,11 @@ export const installDriver = (hooks: DriverHooks, trusted: (event: Event) => boo
    * The frames of the page's own origin (Storybook's preview, an editor's frame) are listened to as well, each time the
    * count is asked for: the person's press or key in one is theirs as much as one in the page. A frame of another
    * origin can't be listened to from here.
+   *
+   * Kept by the document it was last listened to in, not by the frame's window: a frame that loads another document
+   * keeps its window's identity, but its old window's listeners are gone with the document, so it is listened to again.
    */
-  const heard = new WeakSet<Window>()
+  const heard = new WeakSet<Document>()
   const listenToFrames = (within: Document, depth: number) => {
     if (depth > 4) return
     for (const frame of within.querySelectorAll('iframe, frame')) {
@@ -639,8 +642,8 @@ export const installDriver = (hooks: DriverHooks, trusted: (event: Event) => boo
         continue
       }
       if (inner === null || document_ === null) continue
-      if (!heard.has(inner)) {
-        heard.add(inner)
+      if (!heard.has(document_)) {
+        heard.add(document_)
         for (const kind of INPUTS) inner.addEventListener(kind, count, { capture: true, passive: true })
       }
       listenToFrames(document_, depth + 1)

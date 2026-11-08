@@ -1616,6 +1616,85 @@ describe('a call the runtime gave up on', () => {
   })
 })
 
+describe('an action interrupted while it looks at the page', () => {
+  it('doesn’t choose in a field the person used while it was being found, and what waited behind it isn’t done', async () => {
+    const { pages, id, contents } = await shown()
+    const looking = held()
+    contents.driver.locate = async () => {
+      await looking.promise
+      return found()
+    }
+    let chosen = 0
+    contents.driver.select = () => {
+      chosen += 1
+      return { ok: true, chosen: ['Paid'] }
+    }
+    let n = 0
+    const counts = [0, 1]
+    contents.driver.input = () => counts[Math.min(n++, counts.length - 1)]
+    const choosing = pages.drive(id, { op: 'select', target: { ref: 'e3' }, values: ['Paid'] })
+    const queued = pages.drive(id, { op: 'scroll', target: null, to: 'down', by: null })
+    await vi.waitFor(() => expect(contents.asks.some((one) => one.method === 'locate')).toBe(true))
+    looking.release()
+    expect((await choosing).error).toContain('The person clicked, typed or scrolled in the page while you acted on it')
+    // A select may submit on change: the person's choice, or their typing elsewhere, isn't overwritten by it.
+    expect(chosen).toBe(0)
+    expect((await queued).error).toBe(
+      'The person clicked, typed or scrolled in the page while this waited its turn, so it wasn’t done. Take a new snapshot to see where the page is now.',
+    )
+  })
+
+  it('doesn’t run the agent’s script where the person used the page while it was being compiled', async () => {
+    const { pages, id, contents } = await shown()
+    const compiling = held()
+    const ran: Array<string> = []
+    contents.evaluated = (code, world) => {
+      if (world !== 7_302) return true
+      // The probe that only compiles it, then the script itself.
+      if (code.startsWith('(() => { void')) return compiling.promise.then(() => true)
+      ran.push(code)
+      return 2
+    }
+    let n = 0
+    const counts = [0, 1]
+    contents.driver.input = () => counts[Math.min(n++, counts.length - 1)]
+    const evaluating = pages.drive(id, { op: 'evaluate', script: '1 + 1' })
+    await vi.waitFor(() => expect(contents.worlds.some((one) => one.world === 7_302)).toBe(true))
+    compiling.release()
+    expect((await evaluating).error).toContain('The person clicked, typed or scrolled in the page while you acted on it')
+    expect(ran).toEqual([])
+  })
+
+  it('stops a scroll where the person used the page, and doesn’t scroll one outside the viewport into it', async () => {
+    const { pages, id, contents } = await shown()
+    let scrolled = 0
+    contents.driver.scroll = () => {
+      scrolled += 1
+      return { ok: true, moved: 100 }
+    }
+    let n = 0
+    const counts = [0, 1]
+    contents.driver.input = () => counts[Math.min(n++, counts.length - 1)]
+    expect((await pages.drive(id, { op: 'scroll', target: null, to: 'down', by: null })).error).toContain(
+      'The person clicked, typed or scrolled in the page while you acted on it',
+    )
+    expect(scrolled).toBe(0)
+
+    const looking = held()
+    contents.driver.locate = async () => {
+      await looking.promise
+      return found({ at: { x: 90_000, y: 90_000 } })
+    }
+    let m = 0
+    const second = [0, 1]
+    contents.driver.input = () => second[Math.min(m++, second.length - 1)]
+    const intoView = pages.drive(id, { op: 'scroll', target: { ref: 'e3' }, to: null, by: null })
+    await vi.waitFor(() => expect(contents.asks.some((one) => one.method === 'locate')).toBe(true))
+    looking.release()
+    expect((await intoView).error).toContain('The person clicked, typed or scrolled in the page while you acted on it')
+  })
+})
+
 describe('a page that doesn’t answer', () => {
   it('gives up on a picture the compositor never gives, and says so', async () => {
     const { pages, id, contents } = await shown()

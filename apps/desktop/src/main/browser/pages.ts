@@ -1475,8 +1475,13 @@ export const startPages = (options: PagesOptions) => {
       if (call.target !== null && call.to === null && call.by === null) {
         const found = await finding(page, call.target, true)
         if (typeof found === 'string') return { error: found }
+        // Looking for it scrolled it into view: where the person used the page meanwhile, the action stops here.
+        const stopped = await yielded(page, started, '')
+        if (stopped !== null) return stopped
         return { value: { text: acted('Scrolled into view', found, []) } }
       }
+      const early = await yielded(page, started, '')
+      if (early !== null) return early
       const to = call.to === null && call.by === null ? 'down' : call.to
       const scrolled = scrolledOf(await ask(page, 'scroll', call.target === null ? null : targetOf(call.target), to, call.by))
       if (scrolled === null) return { error: words.unreadable }
@@ -1497,6 +1502,9 @@ export const startPages = (options: PagesOptions) => {
       if (typeof found === 'string') return { error: found }
       if (found.disabled) return { error: `${named_(found)} is disabled, so nothing can be chosen in it.` }
       outline(page, found.rect)
+      // Choosing changes the page (a select may submit on change): where the person used it meanwhile, it isn't chosen.
+      const early = await yielded(page, started, '')
+      if (early !== null) return early
       const chosen = chosenOf(await ask(page, 'select', targetOf(call.target), call.values))
       if (chosen === null) return { error: words.unreadable }
       if (!chosen.ok) return { error: chosen.why }
@@ -1567,6 +1575,9 @@ export const startPages = (options: PagesOptions) => {
         () => true,
         () => false,
       )
+      // Compiling gave the page nothing to do: the person using it meanwhile, or the call being given up on, stops it here.
+      const early = await yielded(page, started, '')
+      if (early !== null) return early
       let value: unknown
       try {
         value = await racing(expression ? `(async () => (${body}\n))()` : `(async () => {${script}\n})()`, true)

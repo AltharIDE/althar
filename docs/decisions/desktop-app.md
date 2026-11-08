@@ -365,7 +365,8 @@ stays, for a page nobody has open: it draws a URL headless in a fresh session.
   scroll the person makes in the page stops the lead's action in flight: the
   page counts the presses, keys and wheel turns it has from real input, and
   the lead's own are known, so any more is the person, in the page and in its
-  frames of the same origin (Storybook's preview); a frame of another origin
+  frames of the same origin (Storybook's preview), a frame that loads another
+  document listened to again; a frame of another origin
   can't be listened to. What waited its turn behind the stopped action isn't
   done either. While the person points at the page to comment, the lead's
   actions wait for them, and its reads go on.

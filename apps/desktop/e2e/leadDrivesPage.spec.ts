@@ -37,6 +37,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewp
   <p><button id="approve" type="button">Approve</button></p>
   <p id="status" role="status">Waiting</p>
   <p><a id="file" href="file:///etc/hosts">A file</a> · <a id="github" href="https://github.com/login">Sign in with GitHub</a></p>
+  <iframe id="preview" title="Preview" style="width: 320px; height: 80px; border: 1px solid #ccc" srcdoc="<input id='inside' aria-label='Inside'>"></iframe>
   <button id="far" type="button">Far down</button>
 </main>
 <script>
@@ -272,6 +273,58 @@ test('a lead opens the page beside its task, reads it, types and clicks, and its
     expect(far.error).toBeUndefined()
     await expect.poll(() => inPage<string>(electronApp, 'document.getElementById("status").textContent')).toBe('Far pressed')
     await drive(electronApp, owner, { op: 'viewport', viewport: 'fit' })
+
+    // The person's own input wins, in the page and in a frame of its own origin (Storybook's preview): as the lead types,
+    // its text insertion is held in flight, the person loads another document in the frame and types there with a real
+    // key, and the lead's action stops, and the line under the bar goes.
+    await inPage(electronApp, `document.getElementById('preview').srcdoc = "<input id='inside' aria-label='Inside'>"; true`)
+    await expect
+      .poll(() => inPage<boolean>(electronApp, `document.getElementById('preview').contentDocument?.readyState === 'complete'`))
+      .toBe(true)
+    await electronApp.evaluate(async ({ webContents }) => {
+      const contents = webContents.getAllWebContents().find((one) => one.session.storagePath?.includes('task-') === true)!
+      const held = { release: () => undefined as void }
+      ;(globalThis as unknown as { leadText: Promise<void> }).leadText = new Promise<void>((resolve) => {
+        held.release = resolve
+      })
+      ;(globalThis as unknown as { releaseLeadText: () => void }).releaseLeadText = () => held.release()
+      const original = contents.debugger.sendCommand.bind(contents.debugger)
+      contents.debugger.sendCommand = async (method: string, params?: Record<string, unknown>) => {
+        if (method === 'Input.insertText') {
+          ;(globalThis as unknown as { leadTextHeld: boolean }).leadTextHeld = true
+          await (globalThis as unknown as { leadText: Promise<void> }).leadText
+          // The person typed first: the lead's text isn't sent at all.
+          return {}
+        }
+        return original(method, params)
+      }
+    })
+    const leadTyping = drive(electronApp, owner, {
+      op: 'type',
+      target: { selector: '#note' },
+      text: 'Typed by the lead',
+      replace: true,
+      submit: false,
+    })
+    await expect(panel.getByText(/The lead is at work on this page/)).toBeVisible()
+    // The lead's text is in flight, as if the page were slow to take it.
+    await expect
+      .poll(() => electronApp.evaluate(() => (globalThis as unknown as { leadTextHeld?: boolean }).leadTextHeld === true))
+      .toBe(true)
+    await inPage(electronApp, `document.getElementById('preview').contentDocument.getElementById('inside').focus(); true`)
+    await electronApp.evaluate(({ webContents }) => {
+      const contents = webContents.getAllWebContents().find((one) => one.session.storagePath?.includes('task-') === true)!
+      // A real key, as a person's is: trusted, and in the frame's document.
+      for (const type of ['keyDown', 'char', 'keyUp'] as const) contents.sendInputEvent({ type, keyCode: 'Y' })
+    })
+    await electronApp.evaluate(() => (globalThis as unknown as { releaseLeadText: () => void }).releaseLeadText())
+    expect((await leadTyping).error).toContain('The person clicked, typed or scrolled in the page while you acted on it')
+    // The page shows the person's work, not the lead's, and the lead isn't said to be there any more.
+    expect(await inPage<string>(electronApp, 'document.getElementById("note").value')).not.toContain('Typed by the lead')
+    expect(
+      await inPage<string>(electronApp, `document.getElementById('preview').contentDocument.getElementById('inside').value`),
+    ).toContain('Y')
+    await expect(panel.getByText(/The lead is at work on this page/)).toHaveCount(0)
 
     // Out of sight (the task's Outputs in front), the page is still there to read, press and draw.
     await page.keyboard.press('o')

@@ -741,6 +741,37 @@ describe('what a real device did', () => {
     expect(counting.input()).toBe(4)
   })
 
+  it('listens to a frame again once it loads another document, though its window stays the same', () => {
+    const counting = installDriver({ mark: () => undefined, unmark: () => 0 }, () => true)
+    document.body.innerHTML = '<iframe id="preview"></iframe>'
+    const frame = document.getElementById('preview') as HTMLIFrameElement
+    // A frame keeps its window across a navigation, but the listeners were on the window it had before, and went with it.
+    let listeners = new Map<string, Array<(event: Event) => void>>()
+    let loaded = document.implementation.createHTMLDocument('')
+    const proxy = {
+      get document() {
+        return loaded
+      },
+      addEventListener(kind: string, listener: (event: Event) => void) {
+        listeners.set(kind, [...(listeners.get(kind) ?? []), listener])
+      },
+    }
+    Object.defineProperty(frame, 'contentWindow', { get: () => proxy })
+    const press = () => {
+      for (const listener of listeners.get('pointerdown') ?? []) listener(new Event('pointerdown'))
+    }
+    expect(counting.input()).toBe(0)
+    press()
+    expect(counting.input()).toBe(1)
+    loaded = document.implementation.createHTMLDocument('')
+    listeners = new Map()
+    expect(counting.input()).toBe(1)
+    press()
+    expect(counting.input()).toBe(2)
+    // Listened to once, not again each time the count is asked for.
+    expect(counting.input()).toBe(2)
+  })
+
   it('goes past a frame of another origin, which can’t be listened to from the page', () => {
     const counting = installDriver({ mark: () => undefined, unmark: () => 0 }, () => true)
     document.body.innerHTML = '<iframe id="other"></iframe>'
