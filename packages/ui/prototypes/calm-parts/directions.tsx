@@ -8,8 +8,7 @@ import { Icon } from '../../src/foundations/Icon/Icon'
 import { TaskStatus, Verdict } from '../../src/foundations/vocabulary'
 import { NextStep } from '../../src/primitives/NextStep/NextStep'
 import { LinkButton } from '../../src/primitives/LinkButton/LinkButton'
-import { TaskParts, type TaskPartModel } from '../../src/chrome/TaskParts/TaskParts'
-import { Fact, FactLine } from '../../src/board/BoardCard/Chips'
+import { TaskParts } from '../../src/chrome/TaskParts/TaskParts'
 import { AltharLine } from '../../src/thread/AltharLine/AltharLine'
 import { ReviewLine } from '../../src/thread/ReviewLine/ReviewLine'
 import { AskView } from './asks'
@@ -96,23 +95,6 @@ const nextOf = (need: Need) =>
       {need.act}
     </NextStep>
   )
-
-/** Today's one fact for a change, at a card's foot: its checks. */
-const checksFact = (c: Case, need: Need) => {
-  const change = named(c, need)
-  if (change === undefined || change.pr === undefined || change.state === 'merged') return null
-  return change.checks === 'failed' ? (
-    <Fact icon="close" tone="danger">
-      {change.failing?.[0] ?? 'A check'} failed
-    </Fact>
-  ) : change.checks === 'running' ? (
-    <Fact tone="live">Checks running</Fact>
-  ) : change.checks === 'passed' ? (
-    <Fact icon="check" tone="ok">
-      Checks passed
-    </Fact>
-  ) : null
-}
 
 /** The line a part change, or Althar, writes: who and what, its way on after it. */
 const line = (c: Case, beat: Extract<Beat, { kind: 'part' | 'line' }>, { links = false }: { links?: boolean } = {}) => (
