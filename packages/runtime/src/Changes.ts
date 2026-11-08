@@ -15,6 +15,7 @@ import {
   type CodeHost,
   Comment,
   ConnectorFailed,
+  MergeRules,
   type Person,
   type Product,
   products,
@@ -234,6 +235,12 @@ const Snapshot = Schema.Struct({
    * this was (ADR-085).
    */
   head: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
+  /**
+   * What merging it needs, as its host last said (DEV-204), at which head
+   * and when: read again as something happens on it, else every few
+   * minutes. Absent where its host doesn't read it, or hasn't yet.
+   */
+  rules: Schema.optional(Schema.Struct({ ...MergeRules.fields, sha: Schema.NullOr(Schema.String), at: Schema.String })),
 })
 type Snapshot = typeof Snapshot.Type
 
@@ -389,6 +396,14 @@ const QUIET_SLOWER = 10
  */
 const BASE_TURNS = 4
 
+/**
+ * How often what merging an open pull request needs is read again when
+ * nothing happened on it (DEV-204): a review, a comment, a push or its checks
+ * ending read it at once, so this only catches what says nothing, such as a
+ * conversation resolved or a branch's rules changed.
+ */
+export const RULES_EVERY = Duration.minutes(5)
+
 /** How many turns running a pull request whose host hasn't worked out whether it conflicts is asked again each turn. */
 const UNKNOWN_TURNS = 5
 
@@ -511,6 +526,8 @@ const snapshotOf = (
   source: change.source,
   ...(change.queued === true ? { queued: true } : {}),
   ...(change.headRepository !== undefined ? { head: change.headRepository } : before?.head !== undefined ? { head: before.head } : {}),
+  // What merging needs stays as last read until it is read again, on its own turn (DEV-204).
+  ...(before?.rules === undefined || change.state !== 'open' ? {} : { rules: before.rules }),
 })
 
 type Store =
@@ -4024,6 +4041,26 @@ export class Changes extends Context.Service<
         }).pipe(Effect.orElseSucceed(() => read.headSha))
 
       /**
+       * What merging an open pull request needs on its host (DEV-204), where
+       * it is due: never read, its head moved, something happened on it, or
+       * `RULES_EVERY` since. Kept as it was where it isn't due, or its host
+       * couldn't say now; none for one that isn't open, or a host that can't.
+       */
+      const rulesOf = (host: CodeHost, repository: Repository, before: Snapshot, now: ChangeRequest, happened: boolean) =>
+        Effect.gen(function* () {
+          if (now.state !== 'open' || host.mergeRules === undefined) return undefined
+          const at = yield* Clock.currentTimeMillis
+          const kept = before.rules
+          const due =
+            kept === undefined || happened || kept.sha !== now.headSha || at - Date.parse(kept.at) >= Duration.toMillis(RULES_EVERY)
+          if (!due) return kept
+          return yield* host.mergeRules(repository, now).pipe(
+            Effect.map((read) => ({ ...read, sha: now.headSha, at: new Date(at).toISOString() })),
+            Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not read what merging the pull request needs', cause), kept)),
+          )
+        })
+
+      /**
        * One turn of listening to a change: its state, its finished checks, and
        * what was said since the cursor. Whether anything happened on it, so
        * a quiet one is asked less often.
@@ -4246,9 +4283,22 @@ export class Changes extends Context.Service<
           const leftQueue = before.queued === true && now.state === 'open' && now.queued === false && !lands
           const unsaid = before.queued === true && now.state === 'open' && now.queued === undefined
           const entered = before.queued !== true && now.state === 'open' && now.queued === true
+          // What merging needs, read again where anything happened on it, its head moved, or it was read a while ago (DEV-204).
+          const rules = yield* rulesOf(
+            host,
+            repository,
+            before,
+            now,
+            activity.reviews.length + activity.comments.length > 0 ||
+              checks?.outcome !== before.checks?.outcome ||
+              now.draft !== before.draft ||
+              (now.conflicts ?? null) !== (before.conflicts ?? null) ||
+              (now.queued === true) !== (before.queued === true),
+          )
           // Attached to the task, it stays so (ADR-052).
           const after = {
             ...snapshotOf(now, before.repository, before.words, checks, before),
+            ...(rules === undefined ? {} : { rules }),
             checksRevision,
             ...(before.attached === true ? { attached: true } : {}),
             ...(lands || unsaid ? { queued: true } : {}),

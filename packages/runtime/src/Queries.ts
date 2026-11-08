@@ -1,5 +1,5 @@
 import { errandLines } from './Errands'
-import { HOSTED, newPullRequestLink } from '@althar/connectors'
+import { HOSTED, MergeRules, newPullRequestLink } from '@althar/connectors'
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 
@@ -73,6 +73,7 @@ import { taskFindingsOf } from './taskFindings'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { answeredIn, handedOf, issueCardsWaiting, kindOf } from './kinds'
 import { BETWEEN_AGENTS_MS, betweenAgents, byItself, DRAFTING_MS, isMergeable, stillDrafting } from './needsYou'
+import { mergeNeedsOf, withPushed } from './mergeNeeds'
 import { documentKept, documentText, outputText } from './reading'
 import { type CodeRoot, type CodeRoots, findCode, readCode } from './code'
 import type { Artifacts } from './Artifacts'
@@ -470,7 +471,7 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
   // Where the host said whether it conflicts, and which branch it merges into: absent from a snapshot kept before them.
   const conflicts = field(value, 'conflicts')
   const target = text(value, 'target')
-  return {
+  const seen: ChangeSummary = {
     product: productIs,
     number: n,
     title: text(value, 'title'),
@@ -506,6 +507,9 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
     unpushed: 0,
     diverged: null,
   }
+  // What merging it needs, as its host last said, with what Althar knows of it (DEV-204); what is left to push is counted later.
+  const needs = mergeNeedsOf(seen, Option.getOrNull(decodeRules(field(value, 'rules'))))
+  return needs === undefined ? seen : { ...seen, needs }
 }
 
 const decodeLinks = Schema.decodeUnknownOption(Schema.Array(Unfurl))
@@ -523,6 +527,7 @@ const decodeNoticeTask = Schema.decodeUnknownOption(
   Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String }),
 )
 const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
+const decodeRules = Schema.decodeUnknownOption(MergeRules)
 
 const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'] as const
 
@@ -1838,8 +1843,8 @@ export class Queries extends Context.Service<
                           ...(held === undefined ? {} : { pushing: held }),
                           ...(pictures === undefined ? {} : { screenshots: pictures }),
                         }
-                        if (here === undefined || !existsSync(here.path)) return shown
-                        return { ...shown, ...(yield* againstPullRequest(here, change.head, here.headCommit, here.base)) }
+                        if (here === undefined || !existsSync(here.path)) return withPushed(shown)
+                        return withPushed({ ...shown, ...(yield* againstPullRequest(here, change.head, here.headCommit, here.base)) })
                       }),
                 ),
               ),

@@ -1,5 +1,7 @@
 import type { ChangeSummary } from '@althar/contracts'
 
+import { heldBack } from './mergeNeeds'
+
 /*
  * A card is in Needs you only where the person has a decision to make, never
  * for a moment while Althar or the lead is on its way to the next thing
@@ -35,14 +37,15 @@ export const byItself = (change: ChangeSummary | null, how: { readonly failuresG
 }
 
 /**
- * Whether an open pull request can be merged as it stands: not a draft, nothing of the lead's still to push, no conflict and
- * checks that all passed. A stopped task with one is no less the person's to merge: stopped never hides the way to it.
+ * Whether an open pull request can be merged as it stands: not a draft, nothing of the lead's still to push, no conflict,
+ * checks that all passed, and nothing its host requires still missing or waited on, as far as it says (DEV-204). A stopped
+ * task with one is no less the person's to merge: stopped never hides the way to it.
  */
 export const isMergeable = (change: ChangeSummary | null): boolean => {
   if (change === null || change.state !== 'open' || change.draft || change.queued === true) return false
   if (change.diverged !== null || change.conflicts === true || (change.localHead !== null && change.unpushed > 0)) return false
   const checks = change.checks
-  return checks !== null && checks.outcome === 'passed' && checks.failed === 0 && checks.running === 0
+  return checks !== null && checks.outcome === 'passed' && checks.failed === 0 && checks.running === 0 && !heldBack(change.needs)
 }
 
 /** How long a task no agent is on, with nothing that says why, is taken to be between agents rather than stopped. */
