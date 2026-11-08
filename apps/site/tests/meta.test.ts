@@ -28,6 +28,7 @@ describe('page meta', () => {
       '/docs',
       '/enterprise',
       '/office-hours',
+      '/privacy',
       '/shifts',
       '/thesis',
       '/wallpaper',

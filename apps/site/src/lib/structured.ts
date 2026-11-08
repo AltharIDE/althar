@@ -177,7 +177,7 @@ function thesis(origin: string): object[] {
 
 /** A plain page: its name, description and preview, and its place in the site. */
 const webPage =
-  (path: '/wallpaper' | '/office-hours') =>
+  (path: '/wallpaper' | '/office-hours' | '/privacy') =>
   (origin: string): object[] => {
     const page = PAGE_META[path]
     const url = urlOf(origin, page.path)
@@ -203,6 +203,7 @@ const BY_PATH: Partial<Record<PagePath, (origin: string) => object[]>> = {
   '/thesis': thesis,
   '/wallpaper': webPage('/wallpaper'),
   '/office-hours': webPage('/office-hours'),
+  '/privacy': webPage('/privacy'),
 }
 
 /** A page's schema.org data, with absolute addresses from `origin`. None for a page kept out of search. */

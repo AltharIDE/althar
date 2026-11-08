@@ -80,6 +80,15 @@ export const PAGE_META = {
     image: '/og/home.jpg',
     index: true,
   },
+  '/privacy': {
+    path: '/privacy',
+    name: 'Privacy',
+    title: 'Privacy · Althar',
+    description:
+      'What Althar sends and to whom: anonymous usage data and crash reports you can turn off, problem reports only when you send one, no cookies.',
+    image: '/og/home.jpg',
+    index: true,
+  },
   /** The earlier page, kept for the company version: linked from nowhere, and kept out of search until then. */
   '/enterprise': {
     path: '/enterprise',

@@ -6,6 +6,7 @@ import { Home } from './home/Home'
 import { Pathname } from './lib/pathname'
 import { NotFound } from './notfound/NotFound'
 import { OfficeHours } from './office-hours/OfficeHours'
+import { Privacy } from './privacy/Privacy'
 import { Shifts } from './shifts/Shifts'
 import { Wallpaper } from './wallpaper/Wallpaper'
 
@@ -22,6 +23,7 @@ const PAGES: Record<string, ComponentType> = {
   '/docs': Docs,
   '/changelog': Changelog,
   '/office-hours': OfficeHours,
+  '/privacy': Privacy,
   /** The earlier, enterprise-facing page: kept for the company version, linked from nowhere. */
   '/enterprise': EnterpriseHome,
   /** The link previews, drawn for scripts/og.ts to screenshot: in development only, and not in the build. */
