@@ -50,6 +50,9 @@ import { codeRootOf } from './code'
 import { NotFound, ProjectRefused, RetryRefused } from './errors'
 import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
+import { modelNamer } from './coordinatorNews'
+import { teamChanges, teamLine } from './teamWords'
+import { addItem } from './threads'
 import { type ConnectionInfo, Connections } from './Connections'
 import { coAuthorLine, coAuthorOn, setCoAuthor } from './credit'
 import { plansAndReviewsOf, newProjectDefaultsOf, setPlansAndReviews, setNewProjectDefaults } from './plansAndReviews'
@@ -98,6 +101,7 @@ import { applyRules } from './rulesChange'
 import { UsageData } from './UsageData'
 import { Queries } from './Queries'
 import { Busy } from './Busy'
+import { clearView, showEarlier, undoClearView } from './chatView'
 import { timestamp } from './records'
 import { Setups } from './Setups'
 import * as Runtime from './Runtime'
@@ -110,6 +114,7 @@ import { TaskActions } from './TaskActions'
 import { IssueChanges } from './IssueChanges'
 import { IssueDrafts } from './IssueDrafts'
 import { postTeamReviews, Reviews, setPostTeamReviews } from './Reviews'
+import { FastLane } from './fastLane'
 import { Plans } from './Plans'
 import { Runs } from './Runs'
 import { findTasks } from './Search'
@@ -122,6 +127,17 @@ import { anyOf, SignIns } from './SignIns'
 import { describe, listSkills, type SkillsConfig } from './Skills'
 import { expected, words } from './words'
 import { makeBranch } from './newBranch'
+import { agentTools, setToolRoles, syncIo } from './agentTools'
+import * as mcpSync from './mcpSync'
+import * as skillSync from './skillSync'
+
+/** Runs one of sync's steps against the person's agents' settings, where this runtime reads them; refused where it doesn't. */
+const withSync = (step: (io: mcpSync.SyncIo & skillSync.SkillIo) => Promise<unknown>) =>
+  Effect.gen(function* () {
+    const io = yield* syncIo
+    if (io === undefined) return yield* Effect.fail(new Error('This Althar doesn’t read your agents’ settings.'))
+    yield* Effect.tryPromise({ try: () => step(io), catch: (error) => (error instanceof Error ? error : new Error(String(error))) })
+  })
 
 /*
  * The runtime's side of the API (`@althar/contracts`): each call runs the
@@ -228,6 +244,7 @@ export const handlers = Api.toLayer(
     const issueDrafts = yield* IssueDrafts
     const issueChanges = yield* IssueChanges
     const reviews = yield* Reviews
+    const fastLane = yield* FastLane
     const runs = yield* Runs
     const tasks = yield* Tasks
     const coordinator = yield* Coordinator
@@ -661,6 +678,7 @@ export const handlers = Api.toLayer(
                   _tag: 'Streaming',
                   threadId: event.threadId,
                   itemId: event.itemId,
+                  sequence: event.sequence,
                   kind: event.kind,
                   agentId: event.agentId,
                   text: event.text,
@@ -1047,6 +1065,58 @@ export const handlers = Api.toLayer(
           }),
         ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
       SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      GetAgentTools: ({ projectId }) =>
+        api(agentTools(projectId)).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.provideService(RuntimeConfig, config)),
+      SetToolRoles: ({ commandId, kind, name, roles, projectId }) =>
+        once(commandId, api(setToolRoles(kind, name, roles, projectId)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetToolSync: ({ commandId, kind, on, takeBack }) =>
+        once(
+          commandId,
+          api(
+            withSync((io) =>
+              kind === 'server'
+                ? on
+                  ? mcpSync.turnOn(io)
+                  : mcpSync.turnOff(io, takeBack)
+                : mcpSync.serialized(io, () => (on ? skillSync.turnSkillsOn(io) : skillSync.turnSkillsOff(io, takeBack))),
+            ),
+          ).pipe(Effect.provideService(RuntimeConfig, config)),
+        ),
+      SetToolKeptOut: ({ commandId, kind, agent, name, out }) =>
+        once(
+          commandId,
+          api(
+            withSync((io) =>
+              kind === 'server'
+                ? out
+                  ? mcpSync.keepOut(io, agent, name)
+                  : mcpSync.putBack(io, agent, name)
+                : mcpSync.serialized(io, () => (out ? skillSync.keepSkillOut(io, agent, name) : skillSync.putSkillBack(io, agent, name))),
+            ),
+          ).pipe(Effect.provideService(RuntimeConfig, config)),
+        ),
+      PickToolWay: ({ commandId, kind, name, way }) =>
+        once(
+          commandId,
+          api(
+            withSync((io) =>
+              kind === 'server' ? mcpSync.pickWay(io, name, way) : mcpSync.serialized(io, () => skillSync.pickSkill(io, name, way)),
+            ),
+          ).pipe(Effect.provideService(RuntimeConfig, config)),
+        ),
+      UndoToolSync: ({ commandId, id }) =>
+        once(commandId, api(withSync((io) => mcpSync.undoSince(io, id))).pipe(Effect.provideService(RuntimeConfig, config))),
+      SignInToolServer: ({ commandId, agent, name }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const io = yield* syncIo
+              const line = io === undefined ? undefined : mcpSync.signIn(io, agent, name)
+              if (line !== undefined && config.openTerminal !== undefined) yield* config.openTerminal(line)
+            }),
+          ).pipe(Effect.provideService(RuntimeConfig, config)),
+        ),
       SetReviewSeal: ({ commandId, on }) => once(commandId, api(setReviewSeal(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetReviewSealStyle: ({ commandId, style }) =>
         once(commandId, api(setReviewSealStyle(style)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
@@ -1096,6 +1166,9 @@ export const handlers = Api.toLayer(
         once(commandId, api(automations.runNow(automationId, instance.personId, itemId))),
       DeleteAutomation: ({ commandId, automationId }) => once(commandId, api(automations.remove(automationId, instance.personId))),
       AnswerTaskAsk: ({ commandId, itemId, yes }) => once(commandId, api(taskActions.answer(itemId, yes, instance.personId))),
+      MakeItAFullTask: ({ commandId, taskId }) => once(commandId, api(fastLane.makeFullTask(taskId))),
+      KeepTheModel: ({ commandId, itemId }) => once(commandId, api(fastLane.keepTheModel(itemId))),
+      UndoTheModelMove: ({ commandId, itemId }) => once(commandId, api(fastLane.undoTheModelMove(itemId))),
       UndoAutomationChange: ({ commandId, itemId }) => once(commandId, api(automations.undo(itemId, instance.personId))),
       AnswerSettingChange: ({ commandId, itemId, yes }) => once(commandId, api(settingsTools.answer(itemId, yes))),
       UndoSettingChange: ({ commandId, itemId }) => once(commandId, api(settingsTools.undo(itemId))),
@@ -1120,6 +1193,42 @@ export const handlers = Api.toLayer(
           commandId,
           api(
             Effect.flatMap(envelope('thread.compact', { threadId }, commandId), (made) => sessions.compact({ envelope: made, threadId })),
+          ),
+        ),
+      ClearView: ({ commandId, threadId }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('thread.clear_view', { threadId }, commandId), (made) =>
+              Effect.provideContext(clearView({ envelope: made, threadId }), store),
+            ),
+          ),
+        ),
+      ShowEarlier: ({ commandId, threadId, open }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('thread.show_earlier', { threadId, open }, commandId), (made) =>
+              Effect.provideContext(showEarlier({ envelope: made, threadId, open }), store),
+            ),
+          ),
+        ),
+      UndoClearView: ({ commandId, threadId }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('thread.undo_clear_view', { threadId }, commandId), (made) =>
+              Effect.provideContext(undoClearView({ envelope: made, threadId }), store),
+            ),
+          ),
+        ),
+      ForgetConversation: ({ commandId, threadId }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('thread.forget_conversation', { threadId }, commandId), (made) =>
+              sessions.forget({ envelope: made, threadId }),
+            ),
           ),
         ),
       // Stopped by the person, a conflict its lead was resolving is theirs (ADR-030): the lead isn't started again for it.
@@ -1289,6 +1398,29 @@ export const handlers = Api.toLayer(
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
       ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
         once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn, toward))),
+      ChangeTeam: ({ commandId, taskId, steps }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const changed = yield* runs.changeTeam({ taskId, steps, actorId: instance.personId })
+              const named = yield* modelNamer.pipe(Effect.provideService(Agents, agents), Effect.provideService(Models, models))
+              const [thread] = yield* sql<{ id: string; projectId: ProjectId }>`
+                SELECT id, project_id FROM threads WHERE task_id = ${taskId} AND kind = 'task'`
+              if (thread === undefined) return
+              // Each change, said in the task's thread as the person made it.
+              for (const line of teamChanges(changed, named))
+                yield* Effect.provideContext(
+                  addItem({ projectId: thread.projectId, threadId: thread.id }, 'notice', {
+                    source: 'runtime',
+                    severity: 'info',
+                    title: `You ${teamLine(line)}`,
+                  }),
+                  folderStore,
+                )
+            }),
+          ),
+        ),
       ChangeIssueDraft: ({ commandId, draftId, title, body, labels, priority }) =>
         once(
           commandId,

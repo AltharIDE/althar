@@ -123,7 +123,7 @@ describe('the agent registry', () => {
     assert.isFalse(lead.claudeCode.options.allowDangerouslySkipPermissions)
     // A reader (and so a review's lead) is given none, even if one is passed.
     const reader = agents['claude-code'].sessionMeta?.('reader', { skills: '/x', untrusted: true }) as Meta
-    assert.isUndefined(reader.claudeCode.options.plugins)
+    assert.deepStrictEqual(reader.claudeCode.options.plugins, [{ type: 'local', path: '/x' }])
   })
 
   it('says how each agent is given the run’s skills: Claude Code in its session, Codex as an added directory, OpenCode in its config, the rest none', () => {
@@ -184,12 +184,19 @@ describe('the agent registry', () => {
     assert.lengthOf(secretReadRules(), SECRET_PLACES.length * 2)
   })
 
-  it('lets a Claude Code lead listen on localhost in its sandbox, and a reader not', () => {
-    type Sandbox = { network?: { allowLocalBinding?: boolean } }
+  it('lets a Claude Code lead listen on localhost and reach any host in its sandbox, with only the SSH agent’s socket, and a reader neither', () => {
+    type Sandbox = {
+      network?: { allowLocalBinding?: boolean; allowAllUnixSockets?: boolean; allowUnixSockets?: string[]; allowedDomains?: string[] }
+    }
     const sandboxOf = (role?: 'reader') =>
       (agents['claude-code'].sessionMeta?.(role) as { claudeCode: { options: { settings: { sandbox: Sandbox } } } }).claudeCode.options
         .settings.sandbox
-    assert.deepStrictEqual(sandboxOf().network, { allowLocalBinding: true })
+    const network = sandboxOf().network
+    assert.isTrue(network?.allowLocalBinding)
+    assert.deepStrictEqual(network?.allowedDomains, ['*'])
+    // Never every socket: a blanket allowance would let Docker's or the session bus's socket out of the sandbox.
+    assert.isUndefined(network?.allowAllUnixSockets)
+    assert.deepStrictEqual(network?.allowUnixSockets, process.env.SSH_AUTH_SOCK ? [process.env.SSH_AUTH_SOCK] : undefined)
     assert.isUndefined(sandboxOf('reader').network)
   })
 
@@ -198,7 +205,13 @@ describe('the agent registry', () => {
       autoAllowBashIfSandboxed: boolean
       allowUnsandboxedCommands: boolean
       excludedCommands?: Array<string>
-      network?: { allowLocalBinding?: boolean; allowedDomains?: Array<string> }
+      network?: {
+        allowLocalBinding?: boolean
+        allowAllUnixSockets?: boolean
+        allowUnixSockets?: Array<string>
+        allowedDomains?: Array<string>
+        deniedDomains?: string[]
+      }
       filesystem?: { allowWrite?: Array<string> }
     }
     const metaOf = agents['claude-code'].sessionMeta
@@ -217,7 +230,13 @@ describe('the agent registry', () => {
       'env -i',
       'env -i *',
     ])
-    assert.deepStrictEqual(lead.sandbox.network, { allowLocalBinding: true, allowedDomains: ['github.com', 'registry.npmjs.org'] })
+    assert.deepInclude(lead.sandbox.network, { allowLocalBinding: true, allowedDomains: ['*'] })
+    assert.isUndefined(lead.sandbox.network?.allowAllUnixSockets)
+    assert.deepStrictEqual(
+      sandboxOf('lead', { sandbox: { ...upFront, deniedHosts: ['private.example.com', '*.internal.example.com'] } }).sandbox.network
+        ?.deniedDomains,
+      ['private.example.com', '*.internal.example.com'],
+    )
     // Without caches given, it writes nowhere beyond its folder.
     assert.isUndefined(lead.sandbox.filesystem)
     // The tools' caches it writes to, but never where keys and sign-ins are kept, nor anything not from the home folder.
@@ -233,13 +252,13 @@ describe('the agent registry', () => {
     assert.deepStrictEqual(sandboxOf('lead', { sandbox: { ...upFront, writes } }).sandbox.filesystem, {
       allowWrite: ['~/.bun/install/cache', '~/Library/Caches/ms-playwright'],
     })
-    // A command outside the sandbox still asks, and meets Althar's rules: nothing else changes.
+    // Every command asks Althar, so a visible irreversible act still asks the person and nothing else does.
     assert.include(lead.permissions.ask, 'Bash')
-    assert.isTrue(lead.sandbox.autoAllowBashIfSandboxed)
+    assert.isFalse(lead.sandbox.autoAllowBashIfSandboxed)
     // Without known commands or hosts, the settings say nothing of them.
     const plain = sandboxOf('lead', { sandbox: { commands: [], hosts: [] } }).sandbox
     assert.isUndefined(plain.excludedCommands)
-    assert.deepStrictEqual(plain.network, { allowLocalBinding: true })
+    assert.deepInclude(plain.network, { allowLocalBinding: true, allowedDomains: ['*'] })
     // A reader is given neither, whatever it is passed.
     const reader = sandboxOf('reader', { sandbox: upFront }).sandbox
     assert.isUndefined(reader.excludedCommands)
@@ -312,7 +331,7 @@ describe('the agent registry', () => {
     assert.isUndefined((metaOf('lead', { untrusted: true }) as { claudeCode: { options: Options } }).claudeCode.options.settingSources)
   })
 
-  it('holds the coordinator’s Claude Code to its folder: commands run sandboxed without asking, writing only there, with no network', () => {
+  it('holds the coordinator’s Claude Code to its folder: commands run sandboxed, writing only there, with an open network and every command asking', () => {
     type Options = {
       settingSources?: Array<string>
       settings: {
@@ -336,27 +355,26 @@ describe('the agent registry', () => {
     const reads = { allowed: [folder, '/work/meridian/.coordinator-mirrors', '/home/dana/.bun'], denied: ['/home/dana', '/work/meridian'] }
     const contained = optionsOf({ contained: { folder, reads } })
     // Only where its sandbox can start: there, failing to start it fails the session rather than running commands without it.
-    const starts = process.platform === 'darwin' || (process.platform === 'linux' && process.env.FLATPAK_ID === undefined)
-    if (!starts || contained.settings.sandbox.autoAllowBashIfSandboxed === false) {
-      assert.deepStrictEqual(contained, optionsOf({}))
-      return
-    }
-    assert.deepStrictEqual(contained.settings.sandbox, {
-      enabled: true,
-      autoAllowBashIfSandboxed: true,
-      allowUnsandboxedCommands: false,
-      failIfUnavailable: true,
-      network: { allowedDomains: [], strictAllowlist: true, allowLocalBinding: false, allowAllUnixSockets: false },
+    const starts = claudeSandboxStarts()
+    assert.deepInclude(contained.settings.sandbox, {
+      enabled: starts,
+      autoAllowBashIfSandboxed: false,
+      // A read the sandbox cannot run, such as process substitution on macOS, may retry outside against its read-only rules.
+      allowUnsandboxedCommands: true,
+      failIfUnavailable: starts,
       // It writes only its folder, and reads none of the home folder or the person's checkouts but what it is given back.
       filesystem: { allowWrite: [folder], denyRead: reads.denied, allowRead: reads.allowed },
     })
+    assert.deepInclude(contained.settings.sandbox.network, { allowedDomains: ['*'], allowLocalBinding: true })
+    assert.isUndefined(contained.settings.sandbox.network?.allowAllUnixSockets)
     // No settings file loads, the person's or the repository's, and no hook runs: none of their allow rules or sandbox exemptions
     // lets a command out, and none of their hooks runs beside it.
     assert.deepStrictEqual(contained.settingSources, [])
     assert.isTrue(contained.settings.disableAllHooks)
-    // Its edit tools and the person's keys stay denied; no command asks, as each runs in the sandbox.
+    // Its edit tools and the person's keys stay denied (ADR-097); every command asks Althar, so an irreversible one reaches the person.
     assert.includeMembers(contained.settings.permissions.deny, ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', ...secretReadRules()])
-    assert.notInclude(contained.settings.permissions.ask, 'Bash')
+    assert.include(contained.settings.permissions.ask, 'Bash')
+    assert.notInclude(contained.settings.permissions.ask, 'Edit')
     // A review's lead never gets it, whatever it is passed: it reads a repository it doesn't trust.
     for (const options of [
       { contained: { folder, reads }, untrusted: true },
@@ -368,7 +386,7 @@ describe('the agent registry', () => {
     }
   })
 
-  it('says which of Claude Code’s sessions its sandbox holds, so what it holds runs unread (ADR-071)', () => {
+  it('says which of Claude Code’s sessions its sandbox holds, and what a held read may retry outside (ADR-071)', () => {
     const holds = agents['claude-code'].holds
     if (holds === undefined) return assert.fail('Claude Code says what its sandbox holds')
     type Sandbox = { failIfUnavailable: boolean }
@@ -390,8 +408,8 @@ describe('the agent registry', () => {
       unsandboxed: true,
     })
     assert.isTrue(sandboxOf('lead').failIfUnavailable)
-    // The coordinator, which runs nothing outside.
-    assert.deepStrictEqual(holds('reader', { contained }), { outside: [], unsandboxed: false })
+    // The coordinator, which may retry a read its sandbox cannot run outside, against its read-only rules.
+    assert.deepStrictEqual(holds('reader', { contained }), { outside: [], unsandboxed: true })
     // Never a review's lead, nor a reader that isn't held to a folder: the rules read each of their commands.
     assert.isUndefined(holds('reader', { contained, untrusted: true }))
     assert.isUndefined(holds('reader', { contained, offline: true }))
@@ -408,7 +426,8 @@ describe('the agent registry', () => {
   it('reviews a pull request from outside only on an agent its session holds to reading', () => {
     assert.isTrue(agents['claude-code'].reviewing?.outside)
     assert.isTrue(agents.opencode.reviewing?.outside)
-    // codex-acp starts every turn on its mode's approval policy, on-request: what its sandbox contains runs without asking.
+    // Codex's shell network is open; its own sandbox still decides when it asks.
+    assert.isTrue(JSON.parse(agents.codex.sessionEnv?.({}, {}).CODEX_CONFIG ?? '{}')['sandbox_workspace_write.network_access'])
     assert.isFalse(agents.codex.reviewing?.outside)
   })
 
@@ -525,7 +544,7 @@ describe('project web tools', () => {
       assert.includeMembers(offline.permissions.deny, ['WebSearch', 'WebFetch'])
     }
   })
-  it('sets live Codex search and fetch, with shell network closed, and disables it when off or offline', () => {
+  it('opens Codex shell networking independently of native web tools, keeping outside reviews offline', () => {
     const own = { CODEX_CONFIG: JSON.stringify({ 'mcp_servers.test.enabled': false }) }
     for (const [options, search] of [
       [{ web: true }, 'live'],
@@ -534,9 +553,12 @@ describe('project web tools', () => {
     ] as const) {
       const config = JSON.parse(agents.codex.sessionEnv?.(own, options).CODEX_CONFIG ?? '{}')
       assert.strictEqual(config.web_search, search)
-      assert.strictEqual(config['sandbox_workspace_write.network_access'], false)
+      assert.strictEqual(config['sandbox_workspace_write.network_access'], !('offline' in options && options.offline))
       assert.strictEqual(config['mcp_servers.test.enabled'], false)
+      // Every command Codex doesn't read as safe asks Althar, so the irreversible list holds inside its sandbox (ADR-097).
+      assert.strictEqual(agents.codex.sessionEnv?.(own, options).ALTHAR_APPROVAL_POLICY, 'untrusted')
     }
+    assert.isTrue(JSON.parse(agents.codex.sessionEnv?.({}, {}).CODEX_CONFIG ?? '{}')['sandbox_workspace_write.network_access'])
     assert.isFalse(agents.codex.reviewing?.outside)
   })
   it('allows OpenCode search and fetch globally and for both agents, but offline and off still ask', () => {
@@ -552,4 +574,9 @@ describe('project web tools', () => {
       }
     }
   })
+})
+
+it('keeps Copilot’s built-in tools available while self-approval stays off', () => {
+  assert.notInclude(agents.copilot.launch('node').args, '--disable-builtin-mcps')
+  assert.strictEqual(agents.copilot.options.held?.allow_all, 'off')
 })

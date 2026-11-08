@@ -17,7 +17,7 @@ The demo, end to end in the desktop app:
 6. It ends with a draft PR.
 
 Simple as it is, it is built to the product standard
-([ADR-008](../decisions/008-shortcuts-in-behaviour-not-in-records.md)).
+([ADR-008](../decisions/foundations.md#recorded-facts-are-complete-behaviour-may-start-simple)).
 
 ## The plan
 

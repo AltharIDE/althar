@@ -63,6 +63,7 @@ import { workedOutReach } from './sandboxReach'
 import { listSkills } from './Skills'
 import { addItem, updateItem } from './threads'
 import { POOL, ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
+import { agentTools } from './agentTools'
 
 /*
  * Settings, as the person changes them on the Settings screens, for the
@@ -656,6 +657,21 @@ export class SettingsTools extends Context.Service<
                   yield* models.setModelBlocked({ agentId, model, blocked: true })
                 for (const model of was.filter((one) => !off.includes(one)))
                   yield* models.setModelBlocked({ agentId, model, blocked: false })
+              }
+            }),
+        },
+        {
+          id: 'althar/mcp-servers',
+          title: 'MCP servers',
+          scope: 'althar',
+          note: "The person's own servers, from their agents' settings, and which roles get each. Which roles get one, and keeping their agents' servers the same, are the person's: sync writes into files that are theirs.",
+          fields: {},
+          read: () =>
+            Effect.gen(function* () {
+              const tools = yield* agentTools(null)
+              return {
+                servers: tools.servers.map((server) => `${server.name} (${server.about}), for ${server.roles.join(', ') || 'no role'}`),
+                keepTheSame: tools.serverSync.on,
               }
             }),
         },
@@ -1288,6 +1304,13 @@ export const SETTINGS_ADDRESSES: ReadonlyArray<string> = [
  * walks the screens' calls against it, so a setting added to a screen without a way here fails it (ADR-097).
  */
 export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
+  // althar/mcp-servers and althar/skills: the person's own agents' settings (ADR-097)
+  setToolRoles: "person: which roles get the person's own servers and skills is theirs (althar/mcp-servers says so)",
+  setToolSync: "person: keeping their agents the same writes into the person's own files",
+  setToolKeptOut: "person: what sync keeps out of the person's own agents is theirs",
+  pickToolWay: "person: how a server set up two ways runs everywhere is the person's",
+  undoToolSync: "person: undoing what sync did in the person's own files is theirs",
+  signInToolServer: "person: signing in to a server is the person's",
   // project/general
   renameProject: 'project/general.name',
   setProjectInk: 'project/general.ink',

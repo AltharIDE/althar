@@ -42,8 +42,8 @@ const command = (line: string, input: Readonly<Record<string, unknown>> = {}): P
 
 /** A lead's sandbox, with what runs outside it from the start, as Claude Code's is held. */
 const lead: Hold = { outside: ['bunx playwright', 'ps', 'env -i'], unsandboxed: true }
-/** The coordinator's, which runs nothing outside it. */
-const coordinator: Hold = { outside: [], unsandboxed: false }
+/** The coordinator's, which may retry a read it cannot run outside, against its read-only rules. */
+const coordinator: Hold = { outside: [], unsandboxed: true }
 
 /** What leads and the coordinator ran today, and had asked about or refused (the 14 days in ADR-071). */
 const TODAY = {
@@ -53,6 +53,7 @@ const TODAY = {
     "p = pathlib.Path('src/app.ts'); s = p.read_text(); assert s.count('old') == 1; p.write_text(s.replace('old', 'new'))",
     'EOF',
   ].join('\n'),
+  process: 'diff <(printf a) <(printf b)',
   copy: 'cp $TMPDIR/shots/a.png docs/shots/ && rm -rf $TMPDIR/shots',
   patch: [
     "python3 - <<'EOF'",
@@ -86,8 +87,9 @@ describe('a command its sandbox holds', () => {
     assert.isFalse(runsInside(command('ps'), lead))
     // `bunx playwrightish` is not `bunx playwright`.
     assert.isTrue(runsInside(command('bunx playwrightish'), lead))
-    // The coordinator's never leaves it, whatever it asks.
-    assert.isTrue(runsInside(command(TODAY.loop, { dangerouslyDisableSandbox: true }), coordinator))
+    // The coordinator may ask to leave it for a read its sandbox cannot run, so that crosses to the read-only rules.
+    assert.isFalse(runsInside(command(TODAY.loop, { dangerouslyDisableSandbox: true }), coordinator))
+    assert.isTrue(runsInside(command(TODAY.loop, { dangerouslyDisableSandbox: false }), coordinator))
     // Only a shell command: an edit, a read or a fetch is the rules' as before.
     assert.isFalse(runsInside({ ...command('x'), kind: 'edit', rawInput: { file_path: '/elsewhere/a.ts' } }, lead))
     assert.isFalse(runsInside({ ...command(''), rawInput: {} }, lead))
@@ -103,10 +105,10 @@ describe('a command its sandbox holds', () => {
     assert.strictEqual(decide(command(TODAY.variable), context('allow')).verdict, 'allow')
   })
 
-  it('runs unread for the coordinator: the loops and substitutions its reader rules refused', () => {
+  it('runs unread inside a sandbox, while the reader rules a review still uses refuse them', () => {
     for (const line of [TODAY.loop, TODAY.arithmetic, TODAY.substitution])
       assert.deepStrictEqual(decideInside(command(line)), { verdict: 'allow' }, line)
-    // Outside a sandbox Althar holds, its reader rules still refuse them, with why.
+    // Review roles keep the strict reader: they read someone else's code.
     assert.include(
       (decideReader(command(TODAY.arithmetic), { trusted: true, cwd: '/work/meridian/.coordinator' }) as { reason: string }).reason,
       'only reads',
@@ -120,14 +122,13 @@ describe('a command its sandbox holds', () => {
       reason: "The project's rules never allow deploying and publishing.",
     })
     assert.strictEqual(decideInside(command('rm -rf build'), never).verdict, 'deny')
-    // What it can't read could be what Never lists where nothing at the boundary would stop it: a deploy, a command the project
-    // named. A python script's `npm publish` is refused as the plain one is, saying how to run it so it can be read.
+    // Opaque scripts run; an unrelated Never is not a reason to refuse them.
     const publish = "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['npm', 'publish'])\nEOF"
     for (const line of [publish, "bun -e \"Bun.spawnSync(['npm', 'publish'])\"", 'deno run tools/fix.ts', '/tmp/fix.sh'])
-      assert.include((decideInside(command(line), never) as { reason: string }).reason, 'run its commands written out', line)
+      assert.strictEqual(decideInside(command(line), never).verdict, 'allow', line)
     assert.strictEqual(
       decideInside(command(TODAY.loop), context('allow', { commands: [{ pattern: 'rm -rf', decision: 'never' }] })).verdict,
-      'deny',
+      'allow',
     )
     // Where Never lists only what the sandbox and git's guard stop themselves, what it can't read runs: they hold it.
     const held = context('allow', { never: ['force-push', 'default-branch', 'delete-branch', 'outside'] })
@@ -139,6 +140,55 @@ describe('a command its sandbox holds', () => {
       reason: "The project's rules ask before `terraform`.",
       held: true,
     })
+  })
+
+  it('still asks for what can’t be undone, sandbox or not (ADR-097)', () => {
+    for (const line of [
+      'gh pr merge 12 --squash',
+      'gh release create v1',
+      'gh pr comment 12 --body ok',
+      'npm publish',
+      'git push origin main',
+      'git push --force origin althar/retry',
+    ])
+      assert.strictEqual(decideInside(command(line), context('allow')).verdict, 'ask', line)
+    // What the rules can't read isn't refused for what it could do: only a visible kind asks.
+    assert.strictEqual(decideInside(command("python3 - <<'EOF'\nprint(1)\nEOF"), context('allow')).verdict, 'allow')
+    assert.strictEqual(decideInside(command('node scripts/build.mjs'), context('allow')).verdict, 'allow')
+  })
+
+  it('refuses approving its own work or widening what the host lets agents do, sandbox or not', () => {
+    for (const line of [
+      'gh pr review 12 --approve',
+      'gh api -X POST repos/o/r/pulls/12/reviews -f event=APPROVE',
+      'glab mr approve 4',
+      'glab api -X POST projects/1/merge_requests/4/approve',
+      'gh api graphql -f query=mutation{addPullRequestReview(input:{pullRequestId:"x",event:APPROVE}){clientMutationId}}',
+      'glab api graphql -f query=mutation{mergeRequestApprove(input:{iid:"4"}){clientMutationId}}',
+      'gh api -X POST repos/o/r/statuses/abc -f state=success',
+      'glab api -X POST projects/1/statuses/abc -f state=success',
+      'gh api graphql -f query=mutation{createCommitStatus(input:{}){clientMutationId}}',
+      'gh api -X PUT repos/o/r/branches/main/protection',
+      'glab api -X POST projects/1/protected_branches -f name=main',
+      'gh api graphql -f query=mutation{updateBranchProtectionRule(input:{}){clientMutationId}}',
+      'gh api -X PUT repos/o/r/collaborators/mallory',
+      'glab api -X POST projects/1/members -f user_id=2',
+      'gh api -X PUT repos/o/r/actions/permissions -f enabled=true',
+      'glab api -X POST projects/1/variables -f key=X -f value=y',
+      'gh secret set DEPLOY_KEY',
+      'glab variable set DEPLOY_KEY',
+      'gh repo edit --visibility public',
+      'glab api -X PUT projects/1 -f visibility=public',
+    ])
+      for (const verdict of [decideInside(command(line), context('allow')), decide(command(line), context('allow'))])
+        assert.strictEqual(verdict.verdict, 'deny', line)
+  })
+
+  it('refuses a host the person put in Never when a command names it, in or out of the sandbox', () => {
+    const project = { commands: [{ pattern: 'private.example.com', decision: 'never' as const }] }
+    for (const line of ['curl https://private.example.com/data', 'gh api https://private.example.com/x'])
+      for (const verdict of [decideInside(command(line), context('allow', project)), decide(command(line), context('allow', project))])
+        assert.include((verdict as { reason: string }).reason, 'private.example.com', line)
   })
 
   it('never reads the keychain or git’s stored passwords, which a Mac’s sandbox still reaches', () => {
@@ -194,7 +244,7 @@ describe('what crosses a lead’s sandbox', () => {
     assert.strictEqual(tallyKindOf(command('git push -f origin althar/retry'), at), 'force-push')
     assert.strictEqual(tallyKindOf(command('rm -rf /work/meridian/main/src'), at), 'outside')
     assert.strictEqual(tallyKindOf(command(TODAY.variable), at), 'unclear')
-    assert.strictEqual(tallyKindOf(command('gh pr merge 12'), at), 'code-host')
+    assert.strictEqual(tallyKindOf(command('gh pr merge 12'), at), 'deploy')
     assert.strictEqual(tallyKindOf(command('cat ~/.ssh/id_ed25519'), at), 'credentials')
     assert.strictEqual(tallyKindOf(command('npm test'), at), 'other')
   })
@@ -314,7 +364,7 @@ describe('a lead whose sandbox Althar holds', () => {
       const forced = yield* permissions.decide(requestContext, command('git push --force origin althar/retry'))
       assert.deepStrictEqual(forced, {
         decision: 'reject',
-        reason: "The project's rules never allow force pushes.",
+        reason: 'Refused by your rule against force pushes.',
         decidedBy: 'rules',
       })
       // A push to main asked to run outside the sandbox: a card, which the person allows.
@@ -419,7 +469,7 @@ describe('a lead whose sandbox Althar holds', () => {
   )
 
   it.live(
-    'as the coordinator, runs its loops without a refusal where its sandbox holds it, and refuses them where none does',
+    'as the coordinator, runs opaque reads with or without a sandbox and refuses only visible outside writes',
     () =>
       Effect.gen(function* () {
         const { requestContext } = yield* held()
@@ -427,14 +477,13 @@ describe('a lead whose sandbox Althar holds', () => {
         const reader: RequestContext = {
           ...requestContext,
           taskId: null,
-          rules: { role: 'reader', trusted: true, cwd: '/work/meridian/.coordinator' },
+          rules: { role: 'task', context: { ...context('allow'), readOnly: true } },
         }
         const { sandbox: _, ...unheld } = reader
-        for (const line of [TODAY.loop, TODAY.arithmetic, TODAY.substitution, TODAY.heredoc]) {
+        for (const line of [TODAY.process, TODAY.loop, TODAY.arithmetic, TODAY.substitution, TODAY.heredoc]) {
           assert.strictEqual((yield* permissions.decide({ ...reader, sandbox: coordinator }, command(line))).decision, 'allow', line)
-          // Where none holds it, its reader rules read it: a loop of reads runs, what they can't follow is refused.
-          const read = [TODAY.loop, TODAY.substitution].includes(line) ? 'allow' : 'reject'
-          assert.strictEqual((yield* permissions.decide(unheld, command(line))).decision, read, line)
+          // Without a sandbox, opaque commands run under the same project rules.
+          assert.strictEqual((yield* permissions.decide(unheld, command(line))).decision, 'allow', line)
         }
       }).pipe(Effect.provide(runtime())),
     // Seven seconds alone; more while other tests share the machine.

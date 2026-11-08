@@ -226,6 +226,8 @@ describe('settings, for the coordinator and leads', () => {
   it.live('a loosening without the person’s words is a card, which their press makes; with them it goes, quoting them', () =>
     Effect.gen(function* () {
       const { projectId, coordinator, lead, turn } = yield* opened
+      // The person asks about more than what can't be undone here, so allowing everything loosens it (ADR-097).
+      yield* (yield* Policies).set(projectId, { allowEverything: false }, (yield* Instance).personId)
       yield* turn(lead, 'carry on', false)
       const asked = yield* callTool(lead, 'change_settings', {
         section: 'project/rules',
@@ -692,6 +694,7 @@ describe('each section of the settings, as agents change it', () => {
       assert.strictEqual((yield* lines(lead.threadId)).at(-1)?.state, 'moot')
 
       // The person declines a card: nothing changes, and pressing it again does nothing either.
+      yield* (yield* Policies).set(projectId, { allowEverything: false }, (yield* Instance).personId)
       yield* callTool(lead, 'change_settings', { section: 'project/rules', change: { allowEverything: true } })
       const card = (yield* lineIds(lead.threadId)).at(-1) ?? ''
       yield* settings.answer(card, false)

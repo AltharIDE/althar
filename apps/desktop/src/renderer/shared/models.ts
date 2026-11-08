@@ -47,6 +47,63 @@ export const choiceOf = (key: string): { readonly agentId: string; readonly mode
   return { agentId: key.slice(0, at), model: model === '' ? null : model }
 }
 
+/** A model's id without the provider an agent puts before it: `opencode-go/deepseek-v4.1-flash` is `deepseek-v4.1-flash`. */
+const bareModel = (id: string): string => (id.includes('/') ? id.slice(id.indexOf('/') + 1) : id)
+
+/** The provider an agent puts before a model's id, as it writes it: `opencode-go` for `opencode-go/deepseek-v4.1-flash`; null where it puts none. */
+const providerIn = (id: string): string | null => (id.includes('/') ? id.slice(0, id.indexOf('/')) : null)
+
+/**
+ * Whether two ids name the same model: the same id, or the same bare id with
+ * a provider on neither or only one side (an agent may list it either way).
+ * Two different providers are two routes, not one model.
+ */
+const sameModel = (one: string, other: string): boolean => {
+  if (one === other) return true
+  if (bareModel(one) !== bareModel(other)) return false
+  const oneProvider = providerIn(one)
+  const otherProvider = providerIn(other)
+  return oneProvider === null || otherProvider === null || oneProvider.toLowerCase() === otherProvider.toLowerCase()
+}
+
+/** Words a model's id doesn't say in lower case, for a name nothing else knows: DeepSeek, GPT, GLM. */
+const SAID: Readonly<Record<string, string>> = {
+  anthropic: 'Anthropic',
+  claude: 'Claude',
+  deepseek: 'DeepSeek',
+  gemini: 'Gemini',
+  glm: 'GLM',
+  gpt: 'GPT',
+  grok: 'Grok',
+  kimi: 'Kimi',
+  llama: 'Llama',
+  minimax: 'MiniMax',
+  mistral: 'Mistral',
+  moonshot: 'Moonshot',
+  openai: 'OpenAI',
+  qwen: 'Qwen',
+  xai: 'xAI',
+}
+
+/** A model's id as people read it, where nothing else names it: `opencode-go/deepseek-v4.1-flash` is "DeepSeek V4.1 Flash". */
+const readableModelName = (id: string): string =>
+  bareModel(id)
+    .split(/[-_\s:]+/)
+    .filter((word) => word !== '')
+    .map((word) => SAID[word.toLowerCase()] ?? capital(word))
+    .join(' ')
+
+/** A model as a catalog offers it, by its id as it was stored: the same id exactly, else the same model with or without the provider before it, where that is the only one. */
+const offeredIn = (catalog: Catalog, agentId: string, model: string): ModelInfo | undefined => {
+  const exact = catalog.models.find((info) => info.id === keyOf(agentId, model))
+  if (exact !== undefined) return exact
+  const same = catalog.models.filter((info) => {
+    const choice = choiceOf(info.id)
+    return choice.agentId === agentId && choice.model !== null && sameModel(model, choice.model)
+  })
+  return same.length === 1 ? same[0] : undefined
+}
+
 /** Who made a model, from the words in its id and name. */
 const MAKERS: ReadonlyArray<readonly [RegExp, Lab]> = [
   [/claude|opus|sonnet|haiku|anthropic/, Lab.Anthropic],
@@ -126,6 +183,12 @@ const providerWords = (provider: string, agentName: string): string => {
 }
 const capital = (word: string) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`
 
+/** The way to a model in people's words: the provider that names the agent (OpenCode Go), or else the agent itself. */
+const routeOf = (agentName: string, provider: string | null): string => {
+  if (provider === null) return agentName
+  return provider.toLowerCase().includes(agentName.toLowerCase()) ? providerWords(provider, agentName) : agentName
+}
+
 /** A model's name in a list of every agent's models (see `@althar/contracts`'s models). */
 export const nameOf = namedAmongAgents
 
@@ -177,20 +240,19 @@ export const catalogOf = (
       const mark = makerOf(agent.id, `${model.id} ${model.name}`)
       const { provider } = nameOf(agent.name, model)
       const name = knownModelName(agent, model)
+      // The way it goes: the agent, or its provider where that names the agent (OpenCode Go).
+      const route = routeOf(agent.name, provider ?? null)
       const info: ModelInfo = {
         id: keyOf(agent.id, model.id),
         name,
         short: name,
         runtime: agent.id,
-        via: viaOf(agent.name),
+        via: viaOf(route),
         efforts: model.efforts.map((effort) => effortWord(effort.name)),
         ...(mark ? { mark } : {}),
         ...(model.description === null ? {} : { note: model.description }),
       }
-      // The way it goes: the agent, or its provider where that names the agent (OpenCode Go).
       const named = provider === undefined ? undefined : providerWords(provider, agent.name)
-      const route =
-        named !== undefined && provider !== undefined && provider.toLowerCase().includes(agent.name.toLowerCase()) ? named : agent.name
       return { info, by: named ?? agent.name, route, native: isNative(agent.id, `${model.id} ${model.name}`) }
     })
   })
@@ -226,13 +288,17 @@ export const infoOf = (catalog: Catalog, choice: { readonly agentId: string; rea
   const offered = catalog.agents.get(choice.agentId)
   const asked = choice.model ?? offered?.model ?? null
   const model = offered === undefined ? asked : (standsFor(offered.models, asked) ?? asked)
-  const found =
-    catalog.models.find((info) => info.id === keyOf(choice.agentId, model)) ??
-    catalog.models.find((info) => info.id === keyOf(choice.agentId, null))
-  if (found !== undefined) return found
-  // A model the agent no longer lists, or an agent this picker doesn't offer: its id, as it was set, or the agent's name.
   const agentName = catalog.runtimes.find((runtime) => runtime.id === choice.agentId)?.name ?? choice.agentId
-  const name = model ?? agentName
+  const found =
+    model === null ? catalog.models.find((info) => info.id === keyOf(choice.agentId, null)) : offeredIn(catalog, choice.agentId, model)
+  if (found !== undefined) {
+    // The stored id's provider is the route this choice goes by, even where the listed name leaves it out.
+    const provider = model === null ? null : providerIn(model)
+    const via = viaOf(routeOf(agentName, provider))
+    return provider === null || found.via === via ? found : { ...found, via }
+  }
+  // A model the agent no longer lists, or an agent this picker doesn't offer: its name as people read it, or the agent's own.
+  const name = model === null ? agentName : readableModelName(model)
   const mark = makerOf(choice.agentId, name)
   return {
     id: keyOf(choice.agentId, model),
@@ -240,7 +306,7 @@ export const infoOf = (catalog: Catalog, choice: { readonly agentId: string; rea
     short: name,
     runtime: choice.agentId,
     efforts: [],
-    via: viaOf(agentName),
+    via: viaOf(routeOf(agentName, model === null ? null : providerIn(model))),
     ...(mark ? { mark } : {}),
   }
 }
@@ -248,9 +314,12 @@ export const infoOf = (catalog: Catalog, choice: { readonly agentId: string; rea
 /** A model's name as its agent gives it, for a line that already names the agent; null for the agent's own default. */
 export const modelName = (catalog: Catalog, agentId: string, model: string | null): string | null => {
   if (model === null) return null
-  const offered = catalog.agents.get(agentId)?.models.find((candidate) => candidate.id === model)
-  if (offered === undefined) return model
-  return /^default\b/i.test(offered.name) ? null : nameOf('', offered).name
+  const offered = catalog.agents.get(agentId)?.models ?? []
+  const exact = offered.find((candidate) => candidate.id === model)
+  const same = offered.filter((candidate) => sameModel(model, candidate.id))
+  const chosen = exact ?? (same.length === 1 ? same[0] : undefined)
+  if (chosen === undefined) return readableModelName(model)
+  return /^default\b/i.test(chosen.name) ? null : nameOf('', chosen).name
 }
 
 /** A model as its agent offers it, by its key: the agent's own default is the model it is on. */

@@ -25,12 +25,12 @@ durable project layer that differentiates it.
 
 Althar reaches every agent through one protocol, the Agent Client Protocol
 (ACP), and adds native channels per agent only where ACP falls short
-([ADR-002](../decisions/002-acp-for-every-agent.md)).
+([ADR-002](../decisions/agents.md#acp-for-every-agent)).
 
 ## Agents in the MVP
 
 Claude Code, Codex and OpenCode are interchangeable from the first version, and
-seven more since October 2026 ([ADR-050](../decisions/050-an-agent-joins-where-althar-can-hold-it-to-asking.md)). A
+seven more since October 2026 ([ADR-050](../decisions/agents.md#which-agents-join)). A
 task's lead, any step and the coordinator can run on any of them, and a task
 can move between them.
 
@@ -65,7 +65,7 @@ and help. Google Antigravity's server 1.3.0 is as Orca (stablyai/orca) runs
 it, from Orca's code and its recording of a real session; it hasn't run here.
 None has run signed in against its vendor's models yet. Which agents join, and
 why four more wait, is
-[ADR-050](../decisions/050-an-agent-joins-where-althar-can-hold-it-to-asking.md).
+[ADR-050](../decisions/agents.md#which-agents-join).
 
 Althar checks sign-in with each agent's documented status command, never by
 reading a credential store, and tells the user the agent's own login command
@@ -74,12 +74,12 @@ line sign in separately; the adapter uses the command line's sign-in.
 
 An agent can have several sign-ins. Each is an account with its own folder,
 and the agent's usual folder is the first
-([ADR-012](../decisions/012-several-accounts-per-agent.md); Several accounts,
+([ADR-012](../decisions/agents.md#accounts); Several accounts,
 below).
 
 Another ACP agent is added by a registry entry and the contract suite, not new
 code, where its entry can say what keeps it asking
-([ADR-050](../decisions/050-an-agent-joins-where-althar-can-hold-it-to-asking.md)).
+([ADR-050](../decisions/agents.md#which-agents-join)).
 Gemini CLI no longer runs on Google's consumer plans (since 18 June 2026), which
 moved to Antigravity.
 
@@ -98,7 +98,7 @@ The domain depends on the adapter's own interface, in
 `@althar/provider-adapters`, not directly on a vendor SDK, CLI schema, or
 ACP revision. No ACP type appears in it, so a native adapter for one agent
 (Tier B below) can stand in without callers changing. It is written with Effect
-([ADR-009](../decisions/009-effect-on-the-runtime-side.md)).
+([ADR-009](../decisions/foundations.md#effect-on-the-runtime-side)).
 
 ```ts
 connect(options: {
@@ -322,7 +322,7 @@ durable, observable nodes.
 
 Althar assembles every session's starting context. A new session learns
 about the task only from its brief. No session depends on what another agent
-remembered ([ADR-005](../decisions/005-althar-briefs-every-agent.md)).
+remembered ([ADR-005](../decisions/agents.md#briefs-and-switching-agent-or-model)).
 
 A brief contains, as the role needs:
 
@@ -454,7 +454,7 @@ in two layers:
    3. the agent's own control channel, started with the account's home;
    4. the provider's usage endpoint, read with the account's own sign-in:
       the usage read, rule 3's one exception
-      ([ADR-062](../decisions/062-a-usage-read-may-use-an-account-s-own-sign-in-once.md)).
+      ([ADR-062](../decisions/agents.md#reading-plan-usage)).
 
    Today (`usageSources.ts` declares each pair's sources, or why it has none):
    - Claude Code: live, `claude-agent-acp` forwards the Agent SDK's
@@ -620,6 +620,12 @@ principal for a bounded purpose.
 
 ### Vendor CLI and subscription login policy
 
+[ADR-103](../decisions/proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
+proposes replacing rules 5–8's blanket device/remote split with verified
+provider support for sign-in on a personal host, separately from managed
+cloud support. It keeps provider-owned login and forbids copying vendor
+credential caches. This is a proposal, not a verified support matrix.
+
 Some providers offer a useful local CLI authenticated through a consumer or
 team subscription but no supported API equivalent. Presence of that CLI is a
 capability, not permission to extract or relay its session.
@@ -631,7 +637,7 @@ Rules:
    structured `auth_required` response.
 3. Althar never reads, scrapes, copies, decrypts, exports, uploads, or
    synchronizes the CLI's credential cache, but for one exception: the
-   usage read ([ADR-062](../decisions/062-a-usage-read-may-use-an-account-s-own-sign-in-once.md)),
+   usage read ([ADR-062](../decisions/agents.md#reading-plan-usage)),
    an account's access token read into memory for one allowlisted `GET` to
    its provider's usage URL, and dropped.
 4. It never asks for a provider password or browser session cookie.
@@ -657,7 +663,7 @@ of a vendor's private auth cache.
 
 An agent can have several sign-ins on one Mac: a work and a personal plan,
 a plan per client, several OpenCode logins
-([ADR-012](../decisions/012-several-accounts-per-agent.md)). Each is an
+([ADR-012](../decisions/agents.md#accounts)). Each is an
 **account**: one sign-in, kept by the agent in a folder of its own, its
 **home**. Althar only points the agent at the folder, and the rules above
 still hold: it never reads, copies or moves what the agent keeps there.
@@ -812,7 +818,7 @@ to the adapter/protocol version with which they began.
 A feature built for one agent is built for every one that can have it, in
 the same release, and where one can't, its registry entry and this table say
 why
-([ADR-082](../decisions/082-a-feature-for-one-host-tracker-or-agent-ships-for-all.md)).
+([ADR-082](../decisions/foundations.md#a-feature-ships-for-every-service-that-can-have-it)).
 What isn't alike, as read on 31 October 2026:
 
 | What | Which agents have it | Why the others don't | What follows |
@@ -826,7 +832,7 @@ What isn't alike, as read on 31 October 2026:
 
 Althar must see every permission request to apply the project's rules,
 including the always-ask list
-([ADR-007](../decisions/007-permission-requests-reach-althar.md)).
+([ADR-007](../decisions/what-agents-may-do.md#how-a-request-reaches-althar)).
 
 - Every session starts in a mode where the agent asks rather than acts. No
   session starts in a bypass mode. Requests arrive as ACP
@@ -851,17 +857,17 @@ including the always-ask list
 - Cancelling a turn answers the requests still waiting with `cancelled`, as
   ACP asks of the client, whether or not the agent withdraws them.
 - Althar answers from the project rules
-  ([ADR-013](../decisions/013-project-rules.md)). Allowing everything is
-  every project's default ([ADR-097](../decisions/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md)): only what can't be
+  ([ADR-013](../decisions/what-agents-may-do.md#the-persons-rules)). Allowing everything is
+  every project's default ([ADR-097](../decisions/what-agents-may-do.md#what-asks)): only what can't be
   undone becomes an attention request, and the person's own Never and Ask me
   rules hold. The other modes are the person's choice to be asked more. The rules see what reaches
   Althar, which is what agents ask to do beyond their sandbox. Every answer is recorded on the task. What the
   project's allow rules let through shows under its turn as one quiet line,
   saying which rule; the person's Allow always and Deny always keep such a
-  rule in the project ([ADR-018](../decisions/018-allow-always-keeps-a-rule.md)),
+  rule in the project ([ADR-018](../decisions/what-agents-may-do.md#the-persons-rules)),
   and the agent is still sent its narrowest option.
 - Where the project has the coordinator decide, it judges what no rule
-  answers, in a fresh session ([ADR-019](../decisions/019-coordinator-judges-permissions.md)).
+  answers, in a fresh session ([ADR-019](../decisions/what-agents-may-do.md#ask-about-more-and-the-coordinator-decides)).
   The order is: what no project can change; what is never allowed; allowing
   everything; what always asks, held for the person, which the coordinator
   never answers; the allow rules; the coordinator; the person. An allow rule
@@ -869,7 +875,7 @@ including the always-ask list
   rules can't tell goes to the person. The thread keeps the two receipts
   apart: the rules' quiet line under a turn, and the coordinator's
   "By the coordinator: …" with its reason.
-- A session with a read-only role, such as the coordinator or a review step,
+- A review session with a read-only role (not the coordinator)
   starts in the agent's read-only mode where it has one (for example Claude
   Code's plan mode, Codex's read-only sandbox, or OpenCode's plan agent), and
   the rules deny it writes as well.
@@ -879,60 +885,45 @@ What keeps each agent asking, whatever its own settings say:
 | Agent | How | Checked against |
 |---|---|---|
 | Claude Code | Every session gets ask rules for Bash, Edit, Write, MultiEdit, NotebookEdit, with WebFetch/WebSearch allowed for project leads when web access is on (otherwise asking), has bypass mode turned off for its whole life, loads only the MCP servers Althar gives it (`strictMcpConfig`; from ADR-097's first phase, the person's servers too, each with an ask rule so its calls reach Althar), and runs its shell in Claude's sandbox, all through the adapter's `_meta.claudeCode.options`. Ask rules win over allow rules from any settings file, and over a hook that approves | A repository whose `.claude/settings.json` allows those tools, defaults to `bypassPermissions`, and has a hook that approves every tool call |
-| Codex | Mode `workspace-write`, whose reviewer is the person. The default `agent` mode sends requests to an automatic reviewer instead, and was seen to write outside the workspace without asking | Writing outside the workspace, which it asks for |
+| Codex | Mode `workspace-write`, whose reviewer is the person, and each turn's approval policy `untrusted` through the adapter's patch, so every command its own safe list doesn't cover reaches Althar. The default `agent` mode sends requests to an automatic reviewer instead, and was seen to write outside the workspace without asking | Writing outside the workspace, which it asks for; `gh pr merge`, which now gets a permission request |
 | OpenCode | Inline config (`OPENCODE_CONFIG_CONTENT`) that sets edits and commands to ask, and webfetch/websearch to allow for project leads when web access is on (otherwise asking), for its built-in agents too, and lets it carry on after a rejection (`experimental.continue_loop_on_deny`) | A repository whose `opencode.json` allows everything |
 
 **Sandboxes are the boundary for commands.** A permission request for a shell
 command carries only its text, and no rule can tell what a script will write.
 So where an agent has a sandbox, it keeps commands inside the worktree:
 
-- Codex's, in `workspace-write`, with the network off. Its only network
-  setting (`network_access`) is all or nothing, with no localhost-only form, so
-  it stays off, until ADR-097's first phase turns it on.
-- Claude Code's, switched on for every session. A command that stays inside
-  runs without asking. One that needs the network asks per host. A write
-  outside is blocked, and Claude reports it instead of retrying outside the
-  sandbox unless asked to. Where it can start (macOS; Linux with bubblewrap
-  and socat that start a namespace, outside a Flatpak), a lead's session
-  doesn't start without it, and Althar relies on it
-  ([ADR-071](../decisions/071-the-sandbox-is-the-boundary-anything-inside-it-runs.md)):
-  a command Claude Code can't read itself (a loop, `$(…)`, a heredoc, a
-  script) still asks, and Althar lets it run there without reading it. A lead's sandbox also lets commands bind and
-  listen on localhost (`sandbox.network.allowLocalBinding`), so tests that
-  start a server, and a prototype's throwaway showcase server that the person
-  opens from the Running pill, don't have to leave it. The setting is broader
-  than listening (macOS, per Claude's sandbox docs): sandboxed commands can
-  also connect to any localhost port, including an unauthenticated local
-  service outside the sandbox such as a debugger or proxy, and can listen on
-  non-loopback addresses that other machines may reach. We accept that for
-  leads. It adds no writable paths, and readers don't get it.
-- OpenCode has none yet. Wrapping it in the same sandbox-runtime Claude uses
-  is next.
+- Codex's `workspace-write` sandbox has open networking. Its ACP adapter
+  also applies that setting on every turn, instead of overriding it with a
+  network-off policy. Ordinary readers get network access too; outside
+  reviews remain offline. Its turn takes the `untrusted` approval policy
+  through the same patch, so the commands its safe list doesn't cover, a
+  merge or release among them, reach Althar and meet the irreversible list;
+  ordinary reads run unasked.
+- Claude Code's sandbox is on wherever it can start (macOS; Linux with
+  working bubblewrap and socat, outside a Flatpak). Every command reaches
+  Althar's rules, which answer it at once; a visible irreversible one asks
+  the person, and the sandbox holds what runs. Its network reaches any host,
+  and commands may bind localhost; only the SSH agent's own socket is
+  allowed. The writable roots and secret-file exclusions remain. Recorded
+  commands and common dev/test tools started by hand run outside from the
+  start, still meeting the irreversible rules. A line starting with `bun` is
+  kept inside by Claude itself; use the command its script runs when necessary.
+- OpenCode has no OS sandbox. Each command reaches Althar's rules; with
+  Allow everything, only a visible irreversible operation or the person's
+  own rule asks.
 
-**Project leads can read the web** ([ADR-078](../decisions/078-project-leads-can-read-the-web.md)).
+**Project leads can read the web** ([ADR-078](../decisions/what-agents-may-do.md#the-web)).
 “Leads can reach the web”, on by default in project Settings → General,
 allows implementers and the project’s own reviewers to use Claude Code’s
 WebSearch/WebFetch, Codex’s live web_search and page opening, and OpenCode’s
 websearch/webfetch without a permission request reaching Althar. Outside
 pull request reviews remain offline (ADR-058); Codex remains ineligible to
-lead them. The coordinator’s settings are unchanged. Changes apply to new
+lead them. The coordinator uses the same native-web switch. Changes apply to new
 sessions; restart an existing session after changing the switch.
 
-Shell networking stays constrained (until ADR-097's first phase, which gives
-Codex's shell the network and drops the `curl` form below, since with
-everything allowed a host a command asks for goes ahead): Codex’s
-all-or-nothing switch stays off, and Claude’s known-host allowlist stays in
-place. Neither can grant GETs
-without also granting POSTs and uploads. Instead the rules allow plain
-HTTP(S) reads to stdout, such as `curl -q -fsSL https://example.com` and
-`wget --no-config --no-netrc --no-hsts -qO- https://example.com`, while the project switch is on.
-Disabling local config prevents it from silently selecting an upload or
-another method. Explicit command rules still win. Scripts, compound
-commands, custom headers, output files and uploads retain the existing
-rules; a host-only sandbox request is not proof of a GET and receives no new
-exemption. Prefer native web tools when a sandbox cannot express that read.
-Off, native fetches ask again, native search is gated (disabled for Codex),
-and shell commands receive no new read exemption.
+Shell networking is independent of the native web-tools switch. There is
+no host allowlist and no GET-only command form needed to reach the network.
+An outside review's offline setting still holds.
 
 A lead reading a private repository could be steered by a web page into
 leaking code through a URL or search query. Read-only requests still carry
@@ -941,12 +932,11 @@ credential denials and the rules for irreversible operations remain.
 ADR-097 drops the coordinator's web mark (ADR-081) and leaves this switch
 as the person's control for that leak.
 
-**Known commands and hosts, from the start.** Some commands can't work inside
-Claude's sandbox on a Mac (a browser, Electron, a test runner, `ps`), and
-some hosts every lead reaches (the code host, the package registry). Each
+**Known commands, and the open network.** Some commands can't work inside
+Claude's sandbox on a Mac (a browser, Electron, a test runner, `ps`). Each
 used to cost a failed try inside the sandbox, then a retry outside it that
-the rules allowed anyway. A lead's Claude Code session now starts with both
-in its settings (`sandboxReach.ts`, `Permissions.upFront`):
+the rules allowed anyway. A lead's Claude Code session now starts with them
+in its settings (`sandboxReach.ts`):
 
 - commands that run outside the sandbox from the start
   (`sandbox.excludedCommands`). Each still goes through Claude Code's
@@ -956,15 +946,12 @@ in its settings (`sandboxReach.ts`, `Permissions.upFront`):
   (`bunx` it does), so a lead is told to run them on a line of their own,
   and a Bun script is listed by what it runs (`node scripts/e2e.ts`, not
   `bun run test:e2e`);
-- hosts its sandboxed commands reach without asking
-  (`sandbox.network.allowedDomains`), only those the rules would let a
-  request for them through without anyone: none while the rest asks the
-  person or the coordinator decides it, none the project never allows. A
-  host is named on its own, never `*.` for every host under one: the rules
-  judge a request by the host it names, and a wildcard would let through
-  hosts under it that they ask about or refuse. A request is read as a
-  host, never as a command: `release-assets.githubusercontent.com`, where
-  Electron's build downloads from, is no release script;
+- every host, with no list (`sandbox.network.allowedDomains: ['*']`). The
+  one exception is a host the person put in Never, which is passed as a
+  denied domain and refused with its name, so a blocked request says what
+  blocked it. A request is read as a host, never as a command:
+  `release-assets.githubusercontent.com`, where Electron's build downloads
+  from, is no release script;
 - the caches of the tools the project installs with, which its sandboxed
   commands write to without asking (`sandbox.filesystem.allowWrite`): what
   fails in a fresh task folder is rarely the install, but a tool that
@@ -983,16 +970,18 @@ in its settings (`sandboxReach.ts`, `Permissions.upFront`):
   something there that a later install of theirs picks up: the trade made
   so a task's folder gets ready without anyone.
 
-All three are worked out from the project: the tools its packages bring, its
-test and end-to-end scripts, what is kept for how it runs and is set up,
-its repositories' code hosts, its package managers' registries and what
-its packages download, and the trackers Althar is connected to (Linear's
-hosts, for one). The person adds to the commands and hosts and takes from
-them in the project's rules, under Sandbox, and those edits hold over what
-is worked out later; the caches follow the tools. A change applies from a lead's next session. Codex's
+All the commands and caches are worked out from the project: the tools its
+packages bring, its test and end-to-end scripts, what is kept for how it runs
+and is set up, and the caches those tools use. The person adds to the commands
+and takes from them in the project's rules, under Sandbox, and those edits hold
+over what is worked out later; the caches follow the tools. Hosts are no longer
+worked out or listed: every host is reachable but for the person's Never rules.
+A change applies from a lead's next session. Codex's
 `workspace-write` has no list of commands to run outside it, and its list
 of hosts belongs to its experimental permission profiles, which codex-acp's
-modes don't use, so its leads are given none of them; OpenCode has no sandbox.
+modes don't use, so its leads are given none of them; its shell network is open
+and its turn takes the `untrusted` approval policy, so a command its safe list
+doesn't cover reaches Althar. OpenCode has no sandbox.
 Every sandbox network request keeps its host on the record. Native web tools
 allowed by the session do not reach Althar’s permission record.
 
@@ -1001,21 +990,21 @@ A worktree's setup Althar runs before the lead starts
 in its sandbox, writing to its tools' caches.
 
 **What the sandbox holds runs; what crosses meets the rules**
-([ADR-071](../decisions/071-the-sandbox-is-the-boundary-anything-inside-it-runs.md)).
+([ADR-071](../decisions/what-agents-may-do.md#the-sandbox-is-the-boundary)).
 Where a session's sandbox holds its shell commands (the registry's `holds`:
 Claude Code's lead and coordinator, where the sandbox starts), a shell
 command that doesn't ask to leave it, and starts as none of the commands
 that run outside from the start, is allowed in every mode without the
 rules reading what it does (`runsInside`, `decideInside`). Only what the
 project said itself holds there: a command or kind it never allows, where
-the line plainly is one, is refused; what Althar can't read is refused too
-where Never lists what the boundary doesn't stop (a deploy, a named
-command); a command it asks about asks; and no one reads the keychain or
+the line plainly is one, is refused, and what Althar can't read runs, even
+beside Never (ADR-067's amendment); a command it asks about asks; and no
+one reads the keychain or
 git's stored passwords where the words show it, whose service a Mac's
 sandbox still reaches (ADR-071's trade-off). What crosses meets the rules
 as any request does: with everything allowed, what Althar can't read goes
 ahead, and only what they read as irreversible asks
-([ADR-089](../decisions/089-the-asks-and-refusals-left-are-what-can-t-be-undone.md)).
+([ADR-089](../decisions/what-agents-may-do.md#gits-guard)).
 A lead's line is read from the folder its shell is in, where its agent
 records it (Claude Code's transcript, `shellFolder`), not from the
 worktree's top. Where nothing holds a session (Windows, a Flatpak,
@@ -1076,9 +1065,9 @@ Code sessions are given those places as denied reads.
 #### What asks with everything allowed
 
 Only what the rules read as irreversible
-([ADR-067](../decisions/067-allow-everything-asks-only-before-what-can-t-be-undone.md),
-[ADR-089](../decisions/089-the-asks-and-refusals-left-are-what-can-t-be-undone.md),
-[ADR-097](../decisions/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md)), and the coordinator never judges it:
+([ADR-067](../decisions/what-agents-may-do.md#what-asks),
+[ADR-089](../decisions/what-agents-may-do.md#gits-guard),
+[ADR-097](../decisions/what-agents-may-do.md#what-asks)), and the coordinator never judges it:
 
 - a force push (`+ref` and `--mirror` included), a push to the default
   branch or deleting it, and deleting or moving by force another branch
@@ -1094,10 +1083,8 @@ Only what the rules read as irreversible
 
 What the rules can't read goes ahead (ADR-067's amendment), and so do the
 stash, `git reflog expire` and `gc --prune`, and reading a `.env` outside
-the worktree. In the other modes the whole floor asks today (the stash
-entries that aren't the task's, what git keeps to recover lost work, a
-`.env` outside, writing outside); ADR-097's first phase drops the floor
-there too.
+the worktree. The extra non-irreversible floor is gone in every mode.
+Ask about more and the person's explicit Never and Ask rules still hold.
 
 #### MCP calls and the person's sign-in
 
@@ -1153,8 +1140,8 @@ Known gaps:
 A lead starts in a fresh worktree with nothing installed, and nothing of
 what git ignores, such as `.env`. So Althar sets the worktree up itself, as
 Superset, Conductor and Codex do, before the lead starts
-([ADR-023](../decisions/023-althar-runs-the-project.md),
-[ADR-080](../decisions/080-a-task-folder-s-setup-is-recorded-by-a-lead-and-replayed.md)):
+([ADR-023](../decisions/workspaces-and-runs.md#running-the-project),
+[ADR-080](../decisions/workspaces-and-runs.md#setting-up-a-tasks-folder)):
 
 - **What runs** is the setup a lead recorded for the repository with
   `record_setup` (`recorded_setup`): the ignored files to copy from the
@@ -1218,7 +1205,7 @@ Codex's request_user_input. Both arrive as an ACP form elicitation, each
 shaped its own way, and the adapter reads them into the same fields: what
 each asks, a short name for it, its options (one or several picks), and where
 the person's own words go. A question waits for the person as a permission
-the rules keep for them does ([ADR-021](../decisions/021-a-question-outlives-its-session.md)):
+the rules keep for them does ([ADR-021](../decisions/tasks.md#questions-to-the-person)):
 
 - It is a call (an attention request of the kind `question`) and an item of
   its thread, shown where it was asked, in place of the agent's tool call for

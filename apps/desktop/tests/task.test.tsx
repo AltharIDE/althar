@@ -247,7 +247,7 @@ describe('a task', () => {
     // The round is over: its work is one line, under what it said; Althar's news between rounds stands alone.
     expect(screen.queryByText('src/checkout.ts')).toBeNull()
     expect(screen.getByText('Codex took over from Claude Code.')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: /^Worked 0s/ }))
+    await userEvent.click(screen.getByRole('button', { name: /^Worked for 0s/ }))
     expect(screen.getByText('src/checkout.ts')).toBeTruthy()
     expect(screen.getByText('Write the test')).toBeTruthy()
     expect(screen.getByText('Context is filling up')).toBeTruthy()
@@ -1842,9 +1842,40 @@ describe('a task', () => {
     expect(screen.queryByRole('button', { name: 'All models' })).toBeNull()
   })
 
-  it('offers no change of team once its plan has begun', async () => {
-    const begun = {
-      ...card({ taskId: 't1', threadId: 'th1', phase: 'running', step: 'implement' }),
+  it('offers a change of team while it is at work, and not once it is settled or abandoned', async () => {
+    const onBoard = (phase: 'running' | 'ready' | 'settled') => ({
+      ...card({ taskId: 't1', threadId: 'th1', phase, step: phase === 'running' ? 'implement' : null }),
+      state: phase === 'settled' ? 'done' : 'open',
+      createdAt: '',
+      settledAt: null,
+      changed: null,
+      here: [],
+    })
+    const opened = async (phase: 'running' | 'ready' | 'settled') => {
+      const { client } = fakeClient({
+        getThread: vi.fn(async () =>
+          thread({ task: { ...thread().task, phase, actions: phase === 'running' ? ['stop', 'abandon'] : [] } }),
+        ),
+        getBoard: vi.fn(async () => ({ cursor: 1, tasks: [onBoard(phase)], calls: [], settledTotal: 0 })),
+      })
+      const view = withServices(<Task />, client)
+      await waitFor(() => expect(client.getBoard).toHaveBeenCalled())
+      await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+      await screen.findAllByRole('menuitem')
+      return view
+    }
+    for (const phase of ['running', 'ready'] as const) {
+      const view = await opened(phase)
+      expect(await screen.findByRole('menuitem', { name: /Change the team…/ })).toBeTruthy()
+      view.unmount()
+    }
+    await opened('settled')
+    expect(screen.queryByRole('menuitem', { name: /Change the team…/ })).toBeNull()
+  })
+
+  it('changes the team of a task at work from its menu, saving through the task', async () => {
+    const running = {
+      ...card({ taskId: 't1', threadId: 'th1', phase: 'running', step: 'implement', reviewerChange: 'now' }),
       state: 'open',
       createdAt: '',
       settledAt: null,
@@ -1853,13 +1884,17 @@ describe('a task', () => {
     }
     const { client } = fakeClient({
       getThread: vi.fn(async () => thread({ task: { ...thread().task, phase: 'running', actions: ['stop', 'abandon'] } })),
-      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [begun], calls: [], settledTotal: 0 })),
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [running], calls: [], settledTotal: 0 })),
     })
     withServices(<Task />, client)
-    await waitFor(() => expect(client.getBoard).toHaveBeenCalled())
     await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
-    expect(await screen.findByRole('menuitem', { name: /Stop the task/ })).toBeTruthy()
-    expect(screen.queryByRole('menuitem', { name: /Change the team…/ })).toBeNull()
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Change the team…/ }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    expect(dialog.getByText('From its next turn.')).toBeTruthy()
+    expect(dialog.queryByRole('button', { name: 'Start' })).toBeNull()
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(client.changeTeam).toHaveBeenCalledWith('t1', running.plan!.steps))
+    expect(client.changePlan).not.toHaveBeenCalled()
   })
 
   it('marks each of its draft pull requests ready from its menu, in turn', async () => {

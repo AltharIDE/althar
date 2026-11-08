@@ -20,7 +20,7 @@
 -- node_attempt_state: ready, admitted, running, waiting_attention, verifying, succeeded, failed, cancelling, cancelled, uncertain, reconciling, held, superseded
 -- hold_reason: usage_limit, agent_unavailable, machine_busy, checkout
 -- thread_kind: coordinator, task, step
--- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival, question, run, issue_draft, setup, push_request, review_draft, issue_changes, automation, pictures, task_ask, setting
+-- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival, question, run, issue_draft, setup, push_request, review_draft, issue_changes, automation, pictures, task_ask, setting, small_change, model_move
 -- input_disposition: after_current, interrupt_and_continue, supersede_pending, cancel_run
 -- user_input_state: queued, delivered, superseded, withdrawn
 -- turn_delivery_state: pending, delivered, completed, interrupted, interruption_uncertain, failed
@@ -375,7 +375,7 @@ CREATE TABLE threads (
   execution_id TEXT,
   node_key TEXT,
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), waits_for_place TEXT CHECK (waits_for_place GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), waits_for_place TEXT CHECK (waits_for_place GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), view_from INTEGER CHECK (view_from >= 1), earlier_shown INTEGER NOT NULL DEFAULT 0 CHECK (earlier_shown IN (0, 1)),
   CHECK (
     (kind = 'coordinator' AND owner_actor_id IS NOT NULL AND task_id IS NULL AND execution_id IS NULL AND node_key IS NULL)
     OR (kind = 'task' AND owner_actor_id IS NULL AND task_id IS NOT NULL AND execution_id IS NULL AND node_key IS NULL)
@@ -1448,3 +1448,22 @@ CREATE TABLE setting_changes (
   ) STRICT;
 
 CREATE INDEX setting_changes_by_project ON setting_changes(project_id, state, created_at);
+
+CREATE INDEX setting_changes_by_item ON setting_changes(item_id) WHERE item_id IS NOT NULL;
+
+CREATE TABLE task_model_keeps (
+    task_id TEXT PRIMARY KEY NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    -- The agent the person kept the task's lead on, and the model it kept.
+    agent_id TEXT NOT NULL,
+    model TEXT NOT NULL,
+    kept_at TEXT NOT NULL
+  ) STRICT;
+
+CREATE TABLE reviews_after_merge (
+    task_id TEXT PRIMARY KEY NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+    message TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  ) STRICT;

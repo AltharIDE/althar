@@ -365,7 +365,7 @@ describe('sessions', () => {
         assert.deepStrictEqual(
           decisions.map((decision) => [decision.outcome, decision.reason]),
           [
-            ['reject', "The project's rules never allow deploying and publishing."],
+            ['reject', 'Refused by your rule against deploying and publishing.'],
             ['allow', 'Allowed by the project rules.'],
           ],
         )

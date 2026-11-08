@@ -1,7 +1,7 @@
 # Agents work as the person's own, and only what can't be undone asks
 
 > **Decided, 6 November 2026,** and recorded in
-> [ADR-097](../decisions/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md),
+> [ADR-097](../decisions/what-agents-may-do.md#what-asks),
 > which supersedes the restrictive parts of the ADRs it lists. This is the
 > phased plan to build it, not architecture. Delete this file when the last
 > phase ships.
@@ -91,8 +91,8 @@ ADR-097 has the whole of it. In short:
    Ask me, the irreversible list, a server switched back on) needs the
    person's own message in that turn, as the asked-for tools do, so no
    agent can free itself from an ask; tightening goes at once.
-4. **The coordinator is optional.** Tasks start from the board, the
-   composer or a lead.
+4. **The coordinator is always on.** There is no switch, setting or mode to
+   turn it off. Tasks can also start from the board, the composer or a lead.
 5. **Kept:** the sandbox's write boundary, git's guard, no secret files, no
    self-approval, an outside author's code not running without the person's
    word, cost caps, and asked-for tools only on the person's message (an
@@ -214,12 +214,13 @@ lasted of it).
   otherwise), review again, skip the review, open a new pull request, mark
   ready, rename, attach. What can't be undone (accept and merge) stays on
   the person's word (`TaskActions.ts:491-506`).
-- **The coordinator optional.** A task starts from the board, the composer
+- **Tasks start without the coordinator too.** It is always on, with no
+  setting to turn it off, but a task starts from the board, the composer
   or a lead without it; its plan and models come from the person's
   defaults. Its session starts when the person talks to it, or news it acts
   on wakes it. With the task "Small changes finish in minutes, not 40".
 - **Settings, as the person changes them** (ADR-097's
-  [Settings](../decisions/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md#settings)).
+  [Settings](../decisions/what-agents-may-do.md#what-asks)).
   One pair, `read_settings` and `change_settings`, in both roles, beside
   `keep_note`, `set_run_command`, `keep_run` and the automation tools
   (`Launches.ts:1151-1183`, `Coordinator.ts`), which stay.
@@ -291,6 +292,10 @@ Settings screen makes with the setting or tool agents use for it, or why it
 stays the person's; a test reads the screens' calls against it.
 
 ### 3. Host tools
+
+The environment part (gh, glab, git credential helpers and the SSH agent)
+is implemented in the [7 November limits sweep](no-arbitrary-limits-audit.md).
+The remaining host-tool changes below build on it.
 
 - **The person's own sign-in.** Stop taking `gh`, `glab`, git's credential
   helpers and the SSH agent out of agents' environment (`Config.ts:329-386`,
@@ -386,17 +391,11 @@ once phases 1 to 4 have shown what it needs.
 
 ## What stays, and why
 
-| Kept | Why |
-|---|---|
-| The OS sandbox writes only the worktree, temp and tool caches | It's why commands needn't ask |
-| The irreversible list asks in every mode, never judged | Lost work, a merge, a publish or a word to others can't be taken back |
-| Git guard hooks on pushes | A script can hide a force push |
-| Asked-for tools only on the person's own message (ADR-081); a command or an MCP call on the list on a card | News and PR text can't merge, publish or post, as far as Althar sees the call |
-| Secret files and the keychain are refused | Leaked credentials can't be taken back |
-| No agent answers its own permission request, approves its own work, or loosens what asks without the person's words | Otherwise none of the above holds |
-| An outside author's code doesn't run without the person's word, and none of its repository's settings or hooks load | A stranger's code on the person's machine |
-| Cost caps (40 turns, 6 hours, review rounds, helpers' counts) | Money, not safety |
-| The coordinator changes no code | Tidiness: a change is a task, with a branch, a review and a record |
+The table of what stays, and why, is kept in
+[What agents may do § What stays, and why](../decisions/what-agents-may-do.md#what-stays-and-why),
+where it is the current list. It adds two rows by name: running or
+resuming an automation goes on the person's word, and a lead's helpers push
+nothing.
 
 ## The docs this changed
 
