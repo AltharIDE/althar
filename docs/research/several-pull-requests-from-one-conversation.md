@@ -258,17 +258,31 @@ From [its docs](https://code.claude.com/docs/en/) and
 
 ## What Althar takes
 
-In [a task holds as many changes as it needs](../decisions/proposed/a-task-is-a-conversation-plus-parts.md#a-task-holds-as-many-changes-as-it-needs):
+In [a task holds as many changes as it needs](../decisions/proposed/a-task-is-a-conversation-plus-parts.md#a-task-holds-as-many-changes-as-it-needs),
+one rule for each of the four places their bugs come from:
 
-- a worktree for each change, which stays on its branch;
-- each pull request recorded as it's made, `gh pr create` included, never
-  found by branch name;
-- each change shipped, reviewed and followed on its own, and several pull
-  requests' news in one turn that names each;
-- a merge that ends only its change, and a task that settles once all are
-  done;
+- **Everything hangs on the change, never on a folder.** A folder is where
+  a change is checked out at the moment. Althar reads each folder's branch
+  as a turn ends and follows it, as T3 Code has since 5 November, rather
+  than forbid a switch, as Orca does.
+- **A pull request is recorded as it's made, or found by a change's own
+  branch:** Ship, `open_pull_request`, attaching, or a `gh pr create`'s
+  address, as T3 Code reads it; and an open pull request whose head is one
+  of the task's own branches, for one opened another way. Never by a
+  prefix, as Agent Orchestrator does.
+- **A merge ends only its own change,** and the task settles once all are
+  done, as T3 Code and Agent Orchestrator settle.
+- **Every turn, line and badge names the pull request it's about,** and
+  several pull requests' news comes as one turn.
+
+And from what they do well:
+
+- a worktree for each change being worked on, which Claude Code's CLI
+  alone gives one conversation;
 - a helper handed a change works in that change's worktree, so nothing
-  needs bringing back;
-- stacks, as a change working toward another;
-- a card that names the pull request that needs the person, and counts the
-  rest apart from its state.
+  needs bringing back, which none of the products does by itself;
+- stacks only where one change needs another's code, merged from the bottom
+  up, as T3 Code's Merge stack and Orca's "Merge through #N" do;
+- a card that names the pull request that needs the person, counts the rest
+  apart from its state, and works that out each time rather than keeping a
+  "current" one, as T3 Code and Orca do.
