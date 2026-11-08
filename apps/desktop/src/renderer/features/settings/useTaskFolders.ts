@@ -2,15 +2,16 @@ import { useQuery } from '@tanstack/react-query'
 import { useCallback, useRef, useState } from 'react'
 
 import { ApiError, type AppSettings, type FinishedFolder, type FolderWait } from '@althar/contracts'
-import type { FinishedFolder as FolderRow, HeldFolder } from '@althar/ui'
+import type { FolderDisk, FinishedFolder as FolderRow, HeldFolder } from '@althar/ui'
 
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
+import { shortFolder } from '../../shared/folders'
 import { ago } from '../../shared/time'
 
 /*
  * Finished tasks' folders, as Work on this computer shows them (ADR-056): when
- * they go, the disk they are on, those Clean up takes and those held back,
+ * they go, the disks they are on, those Clean up takes and those held back,
  * each with why. A new choice of when shows at once; one the runtime can't
  * keep reads again, and says so, as the other settings do. Clean up and
  * Remove say what they freed, measured after, until the next change. Remove
@@ -22,7 +23,8 @@ import { ago } from '../../shared/time'
 export interface TaskFoldersModel {
   readonly wait: FolderWait
   readonly setWait: (wait: FolderWait) => void
-  readonly disk: { readonly total: number; readonly used: number } | null
+  /** Where new tasks' folders go first, then each other disk a finished one is on. */
+  readonly disks: ReadonlyArray<FolderDisk>
   /** Clean up takes these: nothing holds them. */
   readonly goes: ReadonlyArray<FolderRow>
   /** These stay, each with why, until removed by hand. */
@@ -52,6 +54,7 @@ const rowOf = (folder: FinishedFolder, now: Date): FolderRow => ({
   kind: folder.kind,
   when: ago(folder.settledAt, now),
   bytes: folder.bytes,
+  disk: folder.disk,
 })
 
 /** Null until both the settings and the folders are read. `onTask` opens a task, by its thread. */
@@ -112,7 +115,7 @@ export const useTaskFolders = (onTask?: (threadId: string) => void): TaskFolders
   return {
     wait: settings.folderWait,
     setWait,
-    disk: folders.disk,
+    disks: folders.disks.map((disk) => ({ ...disk, folder: shortFolder(disk.folder) })),
     goes: folders.folders.filter((one) => one.held === null).map((one) => rowOf(one, now)),
     held: folders.folders.flatMap((one) =>
       one.held === null ? [] : [{ ...rowOf(one, now), why: one.held.why, ...(one.held.count === null ? {} : { count: one.held.count }) }],

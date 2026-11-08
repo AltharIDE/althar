@@ -14,7 +14,9 @@ import s from './TaskFolders.module.css'
  * When finished tasks' folders go, and what this computer's disk holds of them,
  * as one row of Work on this computer. The choice is at its end, Smart to start.
  * Under it, one bar of the disk: what the rest of the Mac uses, the folders
- * Althar holds back in a paler cobalt, and what could go now hatched. Its
+ * Althar holds back in a paler cobalt, and what could go now hatched. Where
+ * task folders are on several disks (the person moved where they go, and some
+ * stayed behind), a bar each, named by the folder they are in on it. Its
  * legend says each in GB and opens a compact list, one line a folder: what
  * Clean up takes, then, below a hairline, what is held back, each with why
  * and its own Remove, which takes the place of its words and size on the row
@@ -43,6 +45,16 @@ export interface FinishedFolder {
   readonly when: string
   /** On disk, in bytes; null until measured. */
   readonly bytes: number | null
+  /** The disk it is on, by its id; where there is one disk, it needn't say. */
+  readonly disk?: string | null
+}
+
+/** A disk task folders are on, in bytes: its size and what is used, and the folder they are in on it. */
+export interface FolderDisk {
+  readonly id: string
+  readonly folder: string
+  readonly total: number
+  readonly used: number
 }
 
 export interface HeldFolder extends FinishedFolder {
@@ -149,8 +161,8 @@ const loses = (why: HeldWhy) => why === 'uncommitted' || why === 'unreadable'
 export interface TaskFoldersProps {
   wait: FolderWait
   onWait: (wait: FolderWait) => void
-  /** This Mac's disk, in bytes: its size and what is used; null until read, which leaves the bar out. */
-  disk: { readonly total: number; readonly used: number } | null
+  /** The disks task folders are on, where new ones go first; none until read, which leaves the bar out. */
+  disks: ReadonlyArray<FolderDisk>
   /** Finished tasks' folders Clean up takes now: their wait isn't up yet, and nothing holds them. */
   goes: ReadonlyArray<FinishedFolder>
   /** Folders whose wait is up, which Althar holds back; each removed by hand, but while it runs. */
@@ -293,14 +305,29 @@ function FolderList({
   )
 }
 
+/** A disk as a bar: what the rest of it holds, the folders held back on it, and those that could go now. */
+function DiskBar({ disk, goes, held }: { disk: FolderDisk; goes: ReadonlyArray<FinishedFolder>; held: ReadonlyArray<FinishedFolder> }) {
+  const going = total(goes)
+  const holding = total(held)
+  const width = (n: number) => `${disk.total === 0 ? 0 : (Math.max(0, n) / disk.total) * 100}%`
+  return (
+    <span className={s.bar} aria-hidden="true">
+      <i className={s.others} style={{ width: width(disk.used - (going ?? 0) - (holding ?? 0)) }} />
+      <i className={s.heldPart} style={{ width: width(holding ?? 0) }} />
+      <i className={s.goesPart} style={{ width: width(going ?? 0) }} />
+    </span>
+  )
+}
+
 /**
  * When finished tasks' folders go, the choice at the row's end; under it
- * this computer's disk as one bar, its legend opening the folders, and Clean up.
+ * this computer's disk as one bar, a bar each where they are on several, its
+ * legend opening the folders, and Clean up.
  */
 export function TaskFolders({
   wait,
   onWait,
-  disk,
+  disks,
   goes,
   held,
   onCleanUp,
@@ -315,7 +342,7 @@ export function TaskFolders({
   const t = { ...taskFoldersText, ...text, waits: { ...taskFoldersText.waits, ...text?.waits } }
   const going = total(goes)
   const holding = total(held)
-  const width = (n: number) => `${disk === null || disk.total === 0 ? 0 : (Math.max(0, n) / disk.total) * 100}%`
+  const on = (disk: FolderDisk, folders: ReadonlyArray<FinishedFolder>) => folders.filter((one) => one.disk === disk.id)
   const any = goes.length > 0 || held.length > 0
   return (
     <SettingRow
@@ -323,14 +350,20 @@ export function TaskFolders({
       note={t.waits[wait].note}
       glyph={<Icon name="folder" size={15} />}
       under={
-        (disk !== null || any || measuring || freed !== null || error !== undefined) && (
+        (disks.length > 0 || any || measuring || freed !== null || error !== undefined) && (
           <div className={s.space}>
-            {disk !== null && (
-              <span className={s.bar} aria-hidden="true">
-                <i className={s.others} style={{ width: width(disk.used - (going ?? 0) - (holding ?? 0)) }} />
-                <i className={s.heldPart} style={{ width: width(holding ?? 0) }} />
-                <i className={s.goesPart} style={{ width: width(going ?? 0) }} />
-              </span>
+            {disks.length === 1 && disks[0] !== undefined && <DiskBar disk={disks[0]} goes={goes} held={held} />}
+            {disks.length > 1 && (
+              <div className={s.disks}>
+                {disks.map((disk) => (
+                  <div key={disk.id} className={s.disk}>
+                    <code className={s.where} title={disk.folder}>
+                      {disk.folder}
+                    </code>
+                    <DiskBar disk={disk} goes={on(disk, goes)} held={on(disk, held)} />
+                  </div>
+                ))}
+              </div>
             )}
             <span className={s.legend}>
               {any && (

@@ -486,6 +486,7 @@ function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
           <TaskFolderLocation
             folder={taskFolder.folder}
             from={taskFolder.from}
+            sandboxed={taskFolder.sandboxed === true}
             {...(taskFolder.defaultFolder === undefined ? {} : { defaultFolder: taskFolder.defaultFolder })}
             onChange={taskFolder.change}
             onUseDefault={taskFolder.useDefault}
@@ -499,7 +500,7 @@ function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
           <TaskFolders
             wait={folders.wait}
             onWait={folders.setWait}
-            disk={folders.disk}
+            disks={folders.disks}
             goes={folders.goes}
             held={folders.held}
             onCleanUp={folders.cleanUp}

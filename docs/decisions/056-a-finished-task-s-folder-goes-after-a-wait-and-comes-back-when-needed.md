@@ -2,6 +2,10 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-21
+- **Amended:** 2026-11-08: Smart's low-disk pass works a disk at a time,
+  and folders left under an earlier root are found and cleaned like the
+  rest (DEV-145's follow-up, after the person could choose where task
+  folders go).
 - **Owner:** Repository maintainers
 - **Context:** Each task has a worktree folder of its own
   ([ADR-006](006-worktree-per-task.md)), set up with its repository's
@@ -30,7 +34,7 @@
     | A merged change | 3 days |
     | A done quick task | A week |
     | An abandoned one | 2 weeks |
-    | Any, below 10% of the disk free | Sooner: the oldest go first, until 15% is free |
+    | Any, below 10% of its disk free | Sooner: the oldest on that disk go first, until 15% of it is free |
 
     Or one wait for all: a day, a week or a month. Or only when the
     person cleans up. The wait runs from the latest of three moments: it
@@ -38,6 +42,23 @@
     last opened from Althar (`tasks.opened_at`). A sweep runs two minutes
     after Althar starts, every hour after, and at once on a new choice
     (`FolderCleanup.ts`).
+  - **Each disk on its own.** Task folders can be on several disks: the
+    person may move where new ones go (Settings › Task folders), and those
+    made before stay where they were. A folder counts on the disk its own
+    path is on, by device, never on the root's. Smart's low-disk pass runs
+    per disk: a disk below 10% free has only its own finished folders
+    swept, the oldest first, and the pass stops once that disk is at 15%;
+    a roomy disk's folders keep their wait, whatever another disk does.
+    What it holds back, keeping the last commit and bringing a folder back
+    work as for any other folder.
+  - **Folders under an earlier root.** Every folder is found by the path
+    the store keeps for it, not by looking under the root, so one made
+    before the person moved the root is listed, held back and removed by
+    its wait like the rest, and comes back where it was. Once Althar
+    starts, it also removes what it keeps in an earlier root's project
+    folders and nothing reads again: runs' copies (`.run`, `.runs`) and the
+    coordinator's mirrors. The coordinator's copies stay, because files
+    sent to the coordinator are read from there.
   - **What goes:** the folder, with everything in it, the reviewer's copy
     beside it (`.review/<task>`), and the task's folder once it is empty.
     The branch stays. The folder's last commit is kept under
@@ -93,7 +114,10 @@
   - **Where the person sees it.** One row in Settings › Work on this computer,
     "Remove finished tasks' folders", with the choice at its end.
     - **Under it:** this computer's disk as one bar, with what is held back
-      in a paler cobalt and what could go now hatched.
+      in a paler cobalt and what could go now hatched. Where task folders
+      are on several disks, there is a bar for each: first the disk new
+      folders go to, then each other disk a finished folder is on, each
+      named by the folder they were made in on it.
     - **The legend:** it opens a compact list, one line a folder: what
       Clean up takes, then, below a hairline, what is held back, each with
       why and its own Remove.

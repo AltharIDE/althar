@@ -3,12 +3,12 @@ import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { SettingList } from '../Preferences/Preferences'
-import { type FinishedFolder, type FolderWait, type HeldFolder, TaskFolders, type TaskFoldersProps } from './TaskFolders'
+import { type FinishedFolder, type FolderDisk, type FolderWait, type HeldFolder, TaskFolders, type TaskFoldersProps } from './TaskFolders'
 
 const GB = 1024 ** 3
 
 /** This Mac: 460 GB, 429 of them used. */
-const DISK = { total: 460 * GB, used: 429 * GB }
+const DISK = { id: 'd1', folder: '~/Althar', total: 460 * GB, used: 429 * GB }
 
 const GOES: ReadonlyArray<FinishedFolder> = [
   { id: 't1', title: 'CI on Windows: checks, unit tests and an e2e smoke', kind: 'merged', when: 'today', bytes: 2.4 * GB },
@@ -52,7 +52,7 @@ function Row(props: Partial<TaskFoldersProps>) {
       <TaskFolders
         wait={wait}
         onWait={setWait}
-        disk={DISK}
+        disks={[DISK]}
         goes={GOES}
         held={HELD}
         onCleanUp={onCleanUp}
@@ -69,7 +69,7 @@ const meta = {
   component: TaskFolders,
   parameters: { layout: 'centered' },
   decorators: [(Story) => <div style={{ width: 680 }}>{Story()}</div>],
-  args: { wait: 'smart', onWait: fn(), disk: DISK, goes: GOES, held: HELD, onCleanUp, onRemove },
+  args: { wait: 'smart', onWait: fn(), disks: [DISK], goes: GOES, held: HELD, onCleanUp, onRemove },
 } satisfies Meta<typeof TaskFolders>
 export default meta
 type Story = StoryObj<typeof meta>
@@ -212,5 +212,25 @@ export const Asking: Story = {
     const held = within(await within(document.body).findByRole('region', { name: 'Held back' }))
     await userEvent.click(held.getAllByRole('button', { name: 'Remove' })[1]!)
     await expect(held.getByRole('button', { name: 'Remove anyway' })).toBeVisible()
+  },
+}
+
+/** An external drive the person moved task folders to, its own nearly full; the folders left on the Mac's disk are on its bar. */
+const EXTERNAL: FolderDisk = { id: 'd2', folder: '/Volumes/Studio SSD/Althar', total: 1863 * GB, used: 1790 * GB }
+
+/** Task folders on two disks, after the person moved where they go: a bar each, named by the folder they are in on it. */
+export const TwoDisks: Story = {
+  render: () => (
+    <Row
+      disks={[EXTERNAL, DISK]}
+      goes={GOES.map((one, i) => ({ ...one, disk: i < 2 ? 'd2' : 'd1' }))}
+      held={HELD.map((one, i) => ({ ...one, disk: i === 0 ? 'd2' : 'd1' }))}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('/Volumes/Studio SSD/Althar')).toBeVisible()
+    await expect(c.getByText('~/Althar')).toBeVisible()
+    await expect(c.getByRole('button', { name: /^Can go now 9\.5 GB\s*Held back 7\.0 GB/ })).toBeVisible()
   },
 }

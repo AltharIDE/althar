@@ -21,7 +21,7 @@ import { withServices } from './render'
 const GB = 1024 ** 3
 
 const FOLDERS: TaskFolders = {
-  disk: { total: 460 * GB, used: 429 * GB },
+  disks: [{ id: 'd1', folder: '/Users/ada/Althar', total: 460 * GB, used: 429 * GB }],
   measuring: false,
   folders: [
     {
@@ -33,6 +33,7 @@ const FOLDERS: TaskFolders = {
       settledAt: new Date(Date.now() - 86_400_000).toISOString(),
       bytes: 2.4 * GB,
       held: null,
+      disk: 'd1',
     },
     {
       taskId: 't2',
@@ -43,6 +44,7 @@ const FOLDERS: TaskFolders = {
       settledAt: new Date(Date.now() - 9 * 86_400_000).toISOString(),
       bytes: 2.3 * GB,
       held: { why: 'uncommitted', count: 3 },
+      disk: 'd1',
     },
   ],
 }
@@ -75,6 +77,33 @@ describe('finished tasks’ folders under Work on this computer', () => {
     const held = await screen.findByRole('region', { name: 'Held back' })
     expect(within(held).getByText('Not committed')).toBeTruthy()
     expect(within(screen.getByRole('region', { name: 'Goes with Clean up' })).getByText('CI on Windows')).toBeTruthy()
+  })
+
+  it('shows a bar for each disk task folders are on, named by the folder they are in there', async () => {
+    const [goes, held] = FOLDERS.folders
+    const two: TaskFolders = {
+      ...FOLDERS,
+      disks: [
+        { id: 'd2', folder: '/Volumes/Studio SSD/Althar', total: 1863 * GB, used: 1790 * GB },
+        { id: 'd1', folder: '/Users/ada/Althar', total: 460 * GB, used: 429 * GB },
+      ],
+      folders: [{ ...goes!, disk: 'd2' }, held!],
+    }
+    const { client } = fakeClient({ getTaskFolders: vi.fn(async () => two) })
+    withServices(<Settings />, client)
+    const page = screen.getByRole('main')
+    expect(await within(page).findByText('/Volumes/Studio SSD/Althar')).toBeTruthy()
+    // Home said short, as everywhere else.
+    expect(within(page).getByText('~/Althar')).toBeTruthy()
+    expect(within(page).getByRole('button', { name: /Can go now 2\.4 GB.*Held back 2\.3 GB/ })).toBeTruthy()
+  })
+
+  it('names no disk where task folders are on one', async () => {
+    const { client } = fakeClient({ getTaskFolders: vi.fn(async () => FOLDERS) })
+    withServices(<Settings />, client)
+    const page = screen.getByRole('main')
+    await within(page).findByRole('button', { name: /Can go now/ })
+    expect(within(page).queryByText('~/Althar')).toBeNull()
   })
 
   it('cleans up, says what it freed, and removes a held-back folder by hand once asked', async () => {
@@ -116,7 +145,7 @@ describe('finished tasks’ folders under Work on this computer', () => {
   })
 
   it('says it measures while sizes are still being worked out, and nothing more without folders', async () => {
-    const { client } = fakeClient({ getTaskFolders: vi.fn(async () => ({ disk: null, folders: [], measuring: true })) })
+    const { client } = fakeClient({ getTaskFolders: vi.fn(async () => ({ disks: [], folders: [], measuring: true })) })
     withServices(<Settings />, client)
     expect(await within(screen.getByRole('main')).findByText('Measuring…')).toBeTruthy()
     expect(within(screen.getByRole('main')).queryByRole('button', { name: 'Clean up' })).toBeNull()

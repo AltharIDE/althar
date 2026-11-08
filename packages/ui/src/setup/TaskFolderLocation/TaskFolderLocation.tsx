@@ -10,7 +10,8 @@ import s from './TaskFolderLocation.module.css'
  * as it stands, and Change, which opens a folder picker. It says what the
  * choice leaves alone: folders already made stay where they are. Where the
  * environment sets the folder (ALTHAR_WORKTREES), the row says so and Change
- * is off. A chosen folder that can't be used now is a lasting state, said calmly
+ * is off; so it is in the Flatpak, where every pick comes through the file
+ * portal, which task folders can't use (ADR-027). A chosen folder that can't be used now is a lasting state, said calmly
  * in a line of its own that Use the default answers; a pick Althar refused is the
  * answer to what the person just did, in red, and goes with the next try.
  */
@@ -27,22 +28,28 @@ export interface TaskFolderLocationText {
   useDefault: string
   /** Under the folder, where the environment sets it. */
   fromEnvironment: string
+  /** Under the folder, in the Flatpak: why Change is off. */
+  sandboxed: string
   /** After the note, where the person chose a folder: what the default is. */
   theDefault: (folder: string) => string
 }
 
 export const taskFolderLocationText: TaskFolderLocationText = {
   title: 'Task folders',
-  note: 'New tasks’ folders are made here, in a folder named Althar inside the one you choose. Folders already made stay where they are, with their copies; the command line keeps using the default.',
+  note: 'New tasks’ folders are made here, in a folder named Althar inside the one you choose. Folders already made stay where they are, with their copies.',
   change: 'Change',
   useDefault: 'Use the default',
   fromEnvironment: 'Set by ALTHAR_WORKTREES in the environment, so it can’t be changed here.',
+  sandboxed:
+    'The Flatpak reaches a folder you pick only through its file portal, which task folders can’t use, so it can’t be changed here.',
   theDefault: (folder) => `The default is ${folder}.`,
 }
 
 export interface TaskFolderLocationProps {
   folder: string
   from: TaskFolderFrom
+  /** In the Flatpak: every pick comes through the file portal, which task folders can't use, so Change is off. */
+  sandboxed?: boolean
   /** Where the platform keeps them, to say what Use the default goes back to. */
   defaultFolder?: string
   onChange: () => void
@@ -60,6 +67,7 @@ export interface TaskFolderLocationProps {
 export function TaskFolderLocation({
   folder,
   from,
+  sandboxed = false,
   defaultFolder,
   onChange,
   onUseDefault,
@@ -68,7 +76,7 @@ export function TaskFolderLocation({
   refusal,
   text = taskFolderLocationText,
 }: TaskFolderLocationProps) {
-  const fixed = from === 'environment'
+  const fixed = from === 'environment' || sandboxed
   const own = useId()
   const problemId = `${own}-problem`
   const changeId = `${own}-change`
@@ -80,7 +88,11 @@ export function TaskFolderLocation({
       note={
         <>
           {text.note}
-          {fixed && <span className={s.line}>{text.fromEnvironment}</span>}
+          {from === 'environment' ? (
+            <span className={s.line}>{text.fromEnvironment}</span>
+          ) : (
+            sandboxed && <span className={s.line}>{text.sandboxed}</span>
+          )}
           {from === 'setting' && defaultFolder !== undefined && <span className={s.line}>{text.theDefault(defaultFolder)}</span>}
         </>
       }

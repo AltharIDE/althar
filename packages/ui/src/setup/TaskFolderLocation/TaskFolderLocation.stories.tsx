@@ -117,3 +117,18 @@ export const SetByEnvironment: Story = {
     </SettingList>
   ),
 }
+
+/** In the Flatpak: every pick comes through the file portal, which task folders can't use, so Change is off and the row says why. */
+export const Flatpak: Story = {
+  args: { folder: '/home/ada/.var/app/dev.althar.app/data/althar/worktrees', from: 'default', sandboxed: true },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText(/only through its file portal/)).toBeVisible()
+    await expect(c.getByRole('button', { name: /Change/ })).toBeDisabled()
+  },
+  render: (args) => (
+    <SettingList>
+      <TaskFolderLocation {...args} />
+    </SettingList>
+  ),
+}

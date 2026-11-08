@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { defaultProfile, defaultWorktrees } from '@althar/runtime/locations'
+import { defaultProfile, defaultWorktrees, worktreesFrom, type WorktreesFrom } from '@althar/runtime/locations'
 
 /*
  * The profile and worktrees, as the command-line client has them, so both see
@@ -11,12 +11,13 @@ import { defaultProfile, defaultWorktrees } from '@althar/runtime/locations'
  *
  * Where new tasks' worktrees go is, in order: ALTHAR_WORKTREES where the
  * environment sets it, the folder the person chose in Settings, else where
- * the platform keeps them. Worktrees already made stay where they are: the
- * store holds their paths.
+ * the platform keeps them (`worktreesFrom`, which the command line goes by
+ * too). Worktrees already made stay where they are: the store holds their
+ * paths.
  */
 
 /** Who decided where task folders go. */
-export type TaskFolderFrom = 'environment' | 'setting' | 'default'
+export type TaskFolderFrom = WorktreesFrom
 
 export const taskFolder = (
   env: NodeJS.ProcessEnv,
@@ -26,11 +27,8 @@ export const taskFolder = (
   chosen: string | null = null,
 ): { readonly profile: string; readonly folder: string; readonly from: TaskFolderFrom } => {
   const profile = defaultProfile(env, platform, home, exists)
-  if (env.ALTHAR_WORKTREES !== undefined && env.ALTHAR_WORKTREES !== '')
-    return { profile, folder: env.ALTHAR_WORKTREES, from: 'environment' }
-  if (chosen !== null) return { profile, folder: chosen, from: 'setting' }
-  const folder = env.FLATPAK_ID === undefined ? defaultWorktrees(env, home, exists) : join(profile, 'worktrees')
-  return { profile, folder, from: 'default' }
+  const fallback = env.FLATPAK_ID === undefined ? defaultWorktrees({}, home, exists) : join(profile, 'worktrees')
+  return { profile, ...worktreesFrom(env, chosen, fallback) }
 }
 
 export const locations = (

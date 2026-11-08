@@ -9,6 +9,8 @@
   with the person's agent and known hosts; ssh in the sandbox trusts pinned
   code hosts and never asks
   ([ADR-073](073-git-over-ssh-in-the-flatpak-goes-through-the-device.md)).
+- **Amended:** 2026-11-08: where task folders go can't be changed in the
+  Flatpak (DEV-145).
 - **Owner:** Repository maintainers
 - **Context:** In a Flatpak the home is a fresh empty one and the filesystem
   is the runtime's: the person's own OpenCode and Codex, their editors, their
@@ -98,6 +100,15 @@
     `$XDG_DATA_HOME/althar` = `~/.var/app/dev.althar.app/data/althar`, with the
     worktrees beside it; the CLI keeps `~/.local/share/althar`. Projects reach
     the app through the document portal.
+  - **Where task folders go stays the Flatpak's own.** Settings › Task
+    folders shows the folder, `<profile>/worktrees`, with Change off and
+    a line saying why. In the Flatpak a picked folder comes through the
+    file-chooser portal as `/run/flatpak/doc/<id>/…`. That path is not
+    the same on the device, so the worktrees and the profile would no
+    longer be the same path on both sides, which the device's tools
+    depend on. Task folders can't use a portal path, so the check refuses
+    one too. A folder chosen before this (by hand, in `desktop.json`)
+    can still go back to the default.
 - **Alternatives considered:** swapping the bundled bubblewrap for a bridge or
   relaying Codex's sandbox to the device — drops Codex's own integrity check
   and escapes the Flatpak's confinement; running bundled Codex with its
