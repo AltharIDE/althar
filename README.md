@@ -181,7 +181,7 @@ Tasks don't stop at a first draft. Other models review the lead's work, the lead
 
 No more meat proxying: no more pasting one agent's answer into another.
 
-<img src="brand/export/screenshots/framed/review.jpg" width="100%" alt="A settled review by Sonnet 5 and Gemini 3 Pro: three findings, two fixed by the lead in round 2 and one set aside with its reason." />
+<img src="brand/export/screenshots/framed/graph.jpg" width="100%" alt="The VAT fix as a graph, a lane for each agent: Opus 5 implements in 21 minutes, Codex's first review finds two things, Opus 5 settles both, the second review passes, and Althar opens draft pull request 1214." />
 
 <br />
 
@@ -255,6 +255,16 @@ Tired of juggling terminals, re-explaining your project and babysitting agents? 
     </td>
     <td valign="top">
       <picture><source media="(prefers-color-scheme: dark)" srcset="brand/export/drawings/workspaces-dark.jpg" /><img src="brand/export/drawings/workspaces.jpg" width="100%" alt="Linear's Work workspace bound to the Tally project, Jira's Client workspace to Halyard, and GitHub Issues connected: a new Linear issue lands in Tally." /></picture>
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>Talk instead of typing.</h3>
+      <p>Dictate to the coordinator or any lead. It runs on your computer, after a one-time download of the speech model.</p>
+      <p>The agent knows the message was spoken, so a misheard name is read generously.</p>
+    </td>
+    <td valign="top">
+      <img src="brand/export/screenshots/framed/dictation.jpg" width="100%" alt="Dictating to Opus 5: what was said so far is in the field, the newest words arriving faint, and the voice drawn as bars at 0:05." />
     </td>
   </tr>
   <tr>

@@ -73,6 +73,23 @@ export const SCREENSHOTS: readonly Screenshot[] = [
     crop: true,
   },
   {
+    file: 'graph',
+    story: 'thread-stepgraph--round-until-clean',
+    width: 1360,
+    height: 900,
+    shows: 'A task as a graph: a lane for each agent, and a card for each step, round until the review passes',
+    crop: true,
+  },
+  {
+    file: 'dictation',
+    story: 'composer-composer--dictating-word-by-word',
+    /* Narrow, as a composer beside a conversation, so its words read in a table cell; any narrower and the wallpaper's mark shows above it. */
+    width: 760,
+    height: 400,
+    shows: 'Dictating to a lead: your voice as bars, and the words arriving in the field as you say them',
+    crop: true,
+  },
+  {
     file: 'review',
     story: 'thread-review--settled-open',
     width: 960,
