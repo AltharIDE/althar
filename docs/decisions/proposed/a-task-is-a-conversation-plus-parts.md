@@ -82,8 +82,9 @@
 - **Fixes after a review are checked only where they need it:** a tiny fix
   needs no check, and a bigger one gets one short check by the same reviewer.
   A fix never sets off another whole review.
-- **The review after a merge runs in the same task,** which settles as it
-  merges and comes back only if the review finds something.
+- **The review after a merge runs in the same task.** The merge ends only
+  its change: the task settles where that was its last, and comes back only
+  if the review finds something.
 - **A lead starts afresh only when its context is full,** never at a break.
 - **Each turn records where its time went,** so "why is it slow" has an
   answer for every turn.
@@ -176,7 +177,7 @@ these:
 - **Everything hangs on the change, never on a folder,** so a branch moving
   in a folder can't show the wrong pull request.
 - **A pull request is recorded as it's made, or found by a change's own
-  branch,** never guessed from a name or a folder.
+  branch and target,** never guessed from a name or a folder.
 - **A merge ends only its own change,** never the task, its session or what
   runs.
 - **Every turn, line and badge names the pull request it's about.**
@@ -186,7 +187,9 @@ needs bringing back.
 
 Where the rest of this proposal says "the task's branch", it means each
 change's. A move between a worktree and Local, a new target, the hold for
-Ship and the review's mark each belong to one change.
+Ship and the review's mark each belong to one change. Only the hold reaches
+further, up a stack ([below](#starting-and-splitting)), since a push sends
+everything below it.
 
 ### What a change is
 
@@ -216,8 +219,9 @@ Ship and the review's mark each belong to one change.
   imposed (the person's note of 6 November). As each turn ends, Althar reads
   each folder's branch from git:
   - a folder now on another branch makes that branch a change of the
-    task's, with a line in the thread. Where the branch has an open pull
-    request, it is attached under the attaching rules;
+    task's, with a line in the thread. It works toward the task's target,
+    or, where the branch has one open pull request, toward that one's
+    base, and the pull request is attached under the attaching rules;
   - the change whose branch the folder left keeps its branch and pull
     request, with no folder until it's worked on again;
   - a folder left detached, or on the branch a change works toward, gets a
@@ -227,14 +231,22 @@ Ship and the review's mark each belong to one change.
   one stamped when the thread began, which one user found wrong on 25
   threads.
 - **A pull request is recorded as it is made, and found only by a change's
-  own branch:**
+  own branch and target:**
   - as it's made: by Ship or `open_pull_request`, by attaching one, or from
     the address a `gh pr create` the lead ran itself printed, as T3 Code
-    reads it;
-  - as Althar reads the host for the task: an open pull request whose head
-    is a change's own branch, on the repository that change pushes to, is
-    that change's. That catches one the lead opened through an MCP server,
-    or the person opened on the website;
+    reads it. One recorded this way stays the change's, by its number,
+    until it merges or closes. Reading the host never swaps it;
+  - as Althar reads the host, for a change with no open pull request
+    recorded: an open one whose head is the change's own branch, on the
+    repository it pushes to, and whose base is the branch it works toward,
+    on the repository it targets, is that change's. That catches one the
+    lead opened through an MCP server, or the person opened on the website;
+  - where that doesn't give one pull request, Althar takes none and names
+    what it found in a line. One from the change's branch into another
+    base, such as a backport to `release/0.8.0`, would show the checks and
+    Merge of another target. A host that allows two that match leaves
+    nothing to tell them apart by. The lead or the person attaches the one
+    that's the change's;
   - never by a branch-name prefix, by what a folder has checked out, or as
     "the repository's pull request". Prefix matching is Agent
     Orchestrator's longest-running family of bugs, and Claude Code hid a
@@ -264,15 +276,33 @@ Ship and the review's mark each belong to one change.
   its pull request targets it. When the one below merges, Althar
   retargets the one above to what the merged one worked toward, as
   changing the target does
-  ([below](#changing-the-branch-a-task-works-toward)). Keeping a stack
-  current brings the target into its bottom change, and each change above
-  takes the one below it.
+  ([below](#changing-the-branch-a-task-works-toward)).
+- **A hold reaches up a stack.** A push sends a branch's whole history, so
+  a change whose branch carries commits that wait for Ship on a change
+  below it is held as if they were its own. Nothing pushes it but a Ship
+  that ships the one below too: not a plan's turn, a round for failing
+  checks, or keeping the stack current. Althar works this out from git
+  before each push, rather than keeping it.
+- **Ship on a stacked change ships what waits beneath it first,** from the
+  bottom up, and says so before it starts: "Ship #715, and the 2 commits
+  waiting on #714 below it". Each change gets its own review of everything
+  since its last, and goes up only after it. "Ship them all" goes in the
+  same order.
+- **Keeping a stack current takes only what's shipped.** Althar's own
+  course brings the target into the bottom change, and into each change
+  above the pushed head of the one below, never its commits waiting. The
+  lead takes those in itself only where the work above needs them, and the
+  change above is then held with them.
+- **A stacked change's review reads its own commits,** against the head of
+  the one below. The commits below are for that change's own review.
 - **Merge on a stacked change offers the whole stack,** from the bottom up:
   "Merge #714, then #715". Each merges once the one below has merged and
   it has been retargeted, and each after its own review, as T3 Code's Merge
-  stack and Orca's "Merge through #N" do. Keeping stacks to where they're
-  needed spares reviewers what Agent Orchestrator's had: several pull
-  requests to review "in the correct order" (#1044).
+  stack and Orca's "Merge through #N" do. A change with commits waiting
+  offers Review and merge or Merge now, as any does
+  ([below](#merge-with-commits-not-shipped)). Keeping stacks to where
+  they're needed spares reviewers what Agent Orchestrator's had: several
+  pull requests to review "in the correct order" (#1044).
 - **Splitting work already made** moves only what hasn't shipped. The lead
   makes the new change and carries the commits or files across, with git,
   as it would by hand. A pull request's pushed history is never rewritten,
@@ -333,14 +363,18 @@ Ship and the review's mark each belong to one change.
 - **A change is done when its pull request merges or closes,** or all of
   them, for a change across repositories. Its worktree goes after the usual
   wait for finished folders, and the task, its session and its other
-  changes carry on. A merge never ends a turn, a helper or what runs. Claude
-  Code removed a session's worktree when its first pull request merged, and
-  Agent Orchestrator stopped following a worker's other pull requests.
+  changes carry on. A merge never ends a turn or a helper, and stops what
+  runs only where the task then settles. Claude Code removed a session's
+  worktree when its first pull request merged, and Agent Orchestrator
+  stopped following a worker's other pull requests.
 - **Before each push, Althar reads the pull request's state.** Where it
   merged a moment ago, the commits go to a new change, "After #N", as a
   round after a merge does now, rather than to the merged branch.
-- **The task settles once all its changes are done,** and no draft review of
-  its waits. T3 Code and Agent Orchestrator settle the same way.
+- **The task settles once all its changes are done,** no draft review or
+  review findings of its wait on the person, and no turn or helper of its
+  is at work. T3 Code and Agent Orchestrator settle the same way. Settling
+  then stops what else it ran, as now, but for an after-merge review
+  ([below](#after-merge-in-the-same-task)).
 
 ### Local, attaching and the card
 
@@ -349,7 +383,9 @@ Ship and the review's mark each belong to one change.
   Moving a change to Local is how the person tries it in their own checkout,
   and it follows the rules of the move ([below](#moving-between-a-worktree-and-local)).
 - **Attaching a pull request adds a change** that follows it. The task no
-  longer stops following the one before.
+  longer stops following the one before. One whose head is a change's own
+  branch is recorded on that change instead, in place of any open one it
+  had.
 - **The card keeps one fact.** With one change it is as now. With several,
   it names the pull request that most needs the person, with its state, and
   says how many more there are: "#714 checks failing · 2 more". Where none
@@ -603,8 +639,8 @@ Nothing pushes the branch but Ship, so Althar's own course goes as follows:
   A change it asks for is committed beside the person's and waits for Ship,
   and the reply says so.
 - **Fix it, after a review that ran after a merge,** is the person's word,
-  so it ships: the fix goes up with the commits waiting, and Fix it says how
-  many it takes along.
+  so it ships: the fix goes up in its "After #N" change, with any commits
+  waiting there, and Fix it says how many it takes along.
 - **The Push card,** where code hosts' rules held back a push of Althar's
   own, becomes Ship, since one push would send both.
 
@@ -712,37 +748,48 @@ later (the person, 8 November).
 
 ```mermaid
 flowchart TD
-  M["The pull request merges"] --> S["The task settles"]
-  S --> R["Its reviewer reads what merged, in the same thread"]
+  M["A change's pull request merges"] --> D["That change is done"]
+  D --> L{"Anything else of the task's<br/>open or at work?"}
+  L -->|"no"| S["The task settles"]
+  L -->|"yes"| C["The task carries on"]
+  D --> R["The reviewer reads what merged, in the same thread"]
   R -->|"nothing found"| Q["A line in the thread, nothing else"]
-  R -->|"findings"| N["Back in Needs you: Fix it or Leave it"]
-  N -->|"Fix it"| F["A round: the fix goes out as After #N"]
-  N -->|"Leave it"| D["Settled again; the findings stay in the thread"]
+  R -->|"findings"| N["Needs you, for that change:<br/>Fix it or Leave it"]
+  N -->|"Fix it"| F["A round: the fix goes out<br/>as a new change, After #N"]
+  N -->|"Leave it"| E["The findings stay in the thread.<br/>The task settles if nothing else is open"]
 ```
 
-This covers a small change, and what Merge now merged on any task.
+This covers a small change, and what Merge now merged on any task. All of
+it is about the change that merged. The task's other changes, its helpers
+and its session carry on ([above](#when-one-merges)).
 
-- **The task settles as it merges,** and leaves the person's plate at once.
-  Its reviewer reads a copy at the merged commit, in the task's own thread.
-  There is no second task and no second card.
+- **The change is done as it merges.** Where it was the task's last, and
+  nothing else of the task's is open or at work, the task settles and
+  leaves the person's plate at once. Otherwise the task carries on as it
+  was. Either way, the reviewer reads a copy at the merged commit, in the
+  task's own thread. There is no second task and no second card.
 - **If the review finds nothing,** the thread gets a line, with no
   notification and nothing in Needs you.
-- **If it finds something,** the task comes back to Needs you with the
-  findings and two ways on:
+- **If it finds something,** the task is in Needs you with the findings,
+  which name the merged pull request, and two ways on:
   - **Fix it** opens a round. The lead gets the findings, and its fix goes
-    out as the task's next pull request, "After #N", as any round after a
-    merge does now.
-  - **Leave it** settles the task again. The findings stay in the thread.
+    out as a new change, "After #N", as any round after a merge does now.
+    The task's other changes are left as they are.
+  - **Leave it** closes the findings, which stay in the thread. The task
+    settles where nothing else of its is open or at work, and otherwise
+    carries on.
 - **Nothing is posted on the merged pull request.** Today's review after a
   merge is a review task of its own, so it drafts and posts as a review of a
   pull request does. Here it is the task's own review, which reports in its
   thread, as Checked by does before a merge. The fix's pull request says
   what it fixes.
-- **Settling spares this review.** "Settling stops everything" gets one
-  exception: the after-merge review's reviewer and its copy run until the
-  review ends, and the sweep leaves them alone until then. Everything else
-  the task ran stops as it does now. If Althar restarts mid-review, the
-  review starts again.
+- **Settling spares these reviews.** While the task carries on, nothing
+  stops, and the review runs beside its other work. Where the task settles
+  with an after-merge review still running, of that change or one that
+  merged before, "Settling stops everything" gets one exception: each such
+  review's reviewer and copy run until the review ends, and the sweep
+  leaves them alone until then. Everything else the task ran stops as it
+  does now. If Althar restarts mid-review, the review starts again.
 - A fast-lane pull request still carries no seal. A plan that named no
   reviewer, and a pull request closed unmerged, get no review after merge, as
   now.
@@ -857,8 +904,8 @@ One saved from a task can be kept to that project.
   ([above](#local-attaching-and-the-card)).
 - **Needs you** is unchanged, but for three things: a chat doesn't wait
   there for being finished, a reply the person hasn't seen waits there until
-  they open it, and a settled task comes back when its after-merge review
-  finds something.
+  they open it, and a task comes back when the after-merge review of one of
+  its changes finds something, settled or not.
 - **The thread** gets a line for each part change, and each turn's line
   shows where its time went. The header's parts row keeps what #684 built,
   adds Checked by, and adds Access where it shows. A chip names the preset,
@@ -909,7 +956,13 @@ What is new:
 - **The hold for Ship,** on each `repository_changes` row: the head as the
   last turn ended, and whether the branch is held. Commits not shipped are
   those past where Althar last pushed, which it already keeps, while the
-  branch is held.
+  branch is held. A change stacked on a held one is held while its branch
+  holds commits past the pushed head of the one below, which Althar reads
+  from git before each push rather than keep.
+- **A pull request found on the host** matches a row's head repository and
+  branch, and its base repository and `base_ref`. It is taken only where
+  the row has no open pull request recorded and exactly one matches. One
+  recorded is kept by its number.
 - **`workspaces.moving_to`,** `worktree` or `checkout`: a move between them
   that waits for the person's checkout, until it is made or called off. A
   Local start waits as `preparing` does now, but a running task's row is
@@ -975,13 +1028,20 @@ It is done when:
   shipped on its own, with a helper working on one while the person talks
   to the lead about the other;
 - the first of a task's pull requests merges, and its other change, its
-  session and what runs carry on;
+  session and what runs carry on. Its after-merge review's findings bring
+  the task to Needs you, and Leave it closes only them, leaving the task
+  open;
 - a `gh pr create` the lead ran itself, a pull request it opened through an
   MCP server, and a branch it made with git in a change's folder each show
   as a change of the task's, and the change that folder left keeps its pull
   request;
+- a pull request from a change's branch into another base is named in a
+  line and not taken as the change's;
 - a stack of two merges with one Merge, from the bottom up, each after its
   own review;
+- with a tweak waiting on the change below, the change stacked on it
+  pushes nothing, not even for a plan's turn or failing checks, and Ship on
+  it ships the one below first, each after its own review;
 - a tweak, tried in the person's running project, ships with one review of
   only what changed since the last;
 - while a tweak waits, failing checks and a comment on the pull request
@@ -1008,13 +1068,13 @@ It is done when:
 | [tasks § What a task is](../tasks.md#what-a-task-is) | Four parts: a workspace, a review, outputs and access. The Scratch shelf, presets and moving a running task are not built | Five, with the review split into Checked by and Reviewing. All three are built |
 | [tasks § Kinds](../tasks.md#kinds-read-from-what-a-task-has) (ADR-035) | Plain, review or change, read from a task's plan, pull requests and review. A quick task becomes a change through `make_it_a_change` | Change, review or none, read from its parts. A chat sits on Scratch, and adding parts replaces `make_it_a_change` |
 | [tasks § Rounds](../tasks.md#rounds-back-to-work-and-shipping-again) | The person's words to a finished lead open a round with the plan's steps and review. No report means a reminder, then the person. A task has as many pull requests as it needs, one per repository at a time | A turn, with no step, report or review. Its commits wait for Ship. A task has a pull request for each of its changes, several in one repository at once included |
-| [tasks § Needs you and settling](../tasks.md#needs-you-and-settling) | A finished task that isn't a change waits there. A merged change is done, and only another round brings a settled task back | A chat doesn't wait there for being finished. A reply the person hasn't seen waits there until they open it, and a settled task comes back when its after-merge review finds something |
-| [tasks § The small-change lane](../tasks.md#the-small-change-lane) and [reviews § A small change is reviewed after it merges](../reviews.md#a-small-change-is-reviewed-after-it-merges) (ADR-102) | A merged small change is reviewed in a task of its own, which posts what it finds as any review of a pull request does | Reviewed in the same task, which settles as it merges, and nothing is posted on the merged pull request. So is what Merge now merges |
+| [tasks § Needs you and settling](../tasks.md#needs-you-and-settling) | A finished task that isn't a change waits there. A merged change is done, and only another round brings a settled task back | A task settles once all its changes are done, not as one merges. A chat doesn't wait there for being finished. A reply the person hasn't seen waits there until they open it, and a task comes back when an after-merge review of one of its changes finds something |
+| [tasks § The small-change lane](../tasks.md#the-small-change-lane) and [reviews § A small change is reviewed after it merges](../reviews.md#a-small-change-is-reviewed-after-it-merges) (ADR-102) | A merged small change is reviewed in a task of its own, which posts what it finds as any review of a pull request does | Reviewed in the same task, as is what Merge now merges, and nothing is posted on the merged pull request. The merge ends only that change, and the task settles where it was its last |
 | [tasks § Plan and review settings](../tasks.md#plan-and-review-settings) | Rounds of review: 1, 2, 3 or 5, and what happens when they run out | The rounds setting goes. "When rounds run out" stays, for a finding the check reopened |
 | [reviews § How a review round runs](../reviews.md#how-a-review-round-runs) | A fix that changed code sets off another whole round, up to the "Review rounds" setting | Tiny fixes aren't checked, others get one short check by the same reviewer, and the setting goes |
 | [reviews § What a pull request shows of its review](../reviews.md#what-a-pull-request-shows-of-its-review) | No seal where the code changed after the last pass | A seal where every fix since the last pass or check was tiny, and the folded review names them |
 | [reviews § Reviewing someone else's pull request](../reviews.md#reviewing-someone-elses-pull-request) (ADR-050, ADR-097) | An outside author's code is only read, and a team's is read in a copy | "Run it" asks Run safely or Trust fully, and a team's runs in a worktree |
-| [code-hosts § A lead's commits go up as its turn ends](../code-hosts.md#a-leads-commits-go-up-as-its-turn-ends) (ADR-072) | Every turn's commits push as it ends, and commits the person made by hand go up with the lead's | What the person's turns or hands commit holds the branch, and only Ship pushes it until then. Otherwise Althar's own course pushes as now |
+| [code-hosts § A lead's commits go up as its turn ends](../code-hosts.md#a-leads-commits-go-up-as-its-turn-ends) (ADR-072) | Every turn's commits push as it ends, and commits the person made by hand go up with the lead's | What the person's turns or hands commit holds the branch, and every change stacked on it, and only Ship pushes them until then. Otherwise Althar's own course pushes as now |
 | [tasks § Helpers (proposed)](../tasks.md#helpers-proposed) (ADR-087) | A helper works in a copy of its own, and the lead takes its commits in | It can also be handed one of the task's changes, and works in that change's worktree. This build takes ADR-087's tasks 1 to 5 |
 | [tasks § The board card](../tasks.md#the-board-card) | One fact: a change's branch, pull request, checks or conflict | With several changes, how many pull requests, and the state of the one that most needs the person, or what they wait on |
 | [workspaces-and-runs § Worktree](../workspaces-and-runs.md#worktree) | One worktree per repository | One for each change in each repository, all in the task's folder |
@@ -1059,6 +1119,10 @@ It is done when:
 - **An after-merge review keeps working on a settled task.** It spends usage
   after the person has moved on, and needs its exception to the sweep tested
   across a restart.
+- **A tweak low in a stack holds everything above it.** A plan's turns on
+  the change above push nothing, so its checks don't run until Ship. Its
+  row in the header says what holds it: "Held: 2 commits waiting on #714
+  below".
 - **A stranger's lockfile** can point at a git host or a tarball address.
   Run safely fetches from the registries alone, so such entries don't
   install, and the thread names them.

@@ -266,10 +266,11 @@ one rule for each of the four places their bugs come from:
   as a turn ends and follows it, as T3 Code has since 5 November, rather
   than forbid a switch, as Orca does.
 - **A pull request is recorded as it's made, or found by a change's own
-  branch:** Ship, `open_pull_request`, attaching, or a `gh pr create`'s
-  address, as T3 Code reads it; and an open pull request whose head is one
-  of the task's own branches, for one opened another way. Never by a
-  prefix, as Agent Orchestrator does.
+  branch and target:** Ship, `open_pull_request`, attaching, or a `gh pr
+  create`'s address, as T3 Code reads it; and, for one opened another way,
+  an open pull request from one of the task's own branches into the branch
+  that change works toward. Never by a prefix, as Agent Orchestrator does,
+  and never a guess where two could be the change's.
 - **A merge ends only its own change,** and the task settles once all are
   done, as T3 Code and Agent Orchestrator settle.
 - **Every turn, line and badge names the pull request it's about,** and
@@ -281,8 +282,9 @@ And from what they do well:
   alone gives one conversation;
 - a helper handed a change works in that change's worktree, so nothing
   needs bringing back, which none of the products does by itself;
-- stacks only where one change needs another's code, merged from the bottom
-  up, as T3 Code's Merge stack and Orca's "Merge through #N" do;
+- stacks only where one change needs another's code, shipped and merged
+  from the bottom up, as T3 Code's Merge stack and Orca's "Merge through
+  #N" do, with a hold on a change below holding those above it;
 - a card that names the pull request that needs the person, counts the rest
   apart from its state, and works that out each time rather than keeping a
   "current" one, as T3 Code and Orca do.
