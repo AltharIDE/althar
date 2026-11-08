@@ -1372,6 +1372,7 @@ export const fakePagesHost = (overrides: Partial<PagesHost> = {}): PagesHost => 
   clearAll: vi.fn(async () => {}),
   onState: () => () => {},
   onKey: () => () => {},
+  onOpened: () => () => {},
   onClosed: () => () => {},
   ...overrides,
 })
