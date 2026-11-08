@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-import { Clock, Effect, Schema } from 'effect'
+import { Clock, Duration, Effect, Schedule, Schema } from 'effect'
 
 import { type Access, type AccessLine, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
@@ -571,6 +571,15 @@ const issueRef = /^(.+\/[^/#\s]+)#(\d+)$/
 /** How many pages of a merge request's threads are read: a hundred threads each. */
 const THREAD_PAGES = 10
 
+/**
+ * GitLab says a branch pushed a moment ago "does not exist" until it has
+ * worked through the push in the background: a merge request asked for
+ * straight after the push is refused, and the same one a few seconds later
+ * opens. Nothing was made, so it's asked again, for a quarter of a minute.
+ */
+const sourceUnknown = (error: ConnectorFailed) => error.reason === 'rejected' && /source_branch\b.*does not exist/i.test(error.message)
+const SOURCE_AGAIN = { times: 5, schedule: Schedule.exponential(Duration.millis(500)), while: sourceUnknown }
+
 /** How many merge requests' sizes are kept: more than are open at once, in any project Althar follows. */
 const SIZES_KEPT = 1_000
 
@@ -954,6 +963,18 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
           description: change.body,
         })
         .pipe(
+          Effect.retry(SOURCE_AGAIN),
+          // Still unknown after that: which project hasn't the branch, in words that say so, not GitLab's field name.
+          Effect.mapError((error) =>
+            sourceUnknown(error)
+              ? new ConnectorFailed({
+                  product,
+                  reason: 'rejected',
+                  ...(error.status === undefined ? {} : { status: error.status }),
+                  message: `${(change.from ?? repository).path.join('/')} has no branch ${change.source}`,
+                })
+              : error,
+          ),
           Effect.map(changeOf),
           // One already open from the branch is the one: adopted, not duplicated.
           Effect.catchIf(
