@@ -45,6 +45,8 @@ export const modelRooms = (projectId?: string) =>
         if (account.paidBy !== 'plan' && !onPlanProvider(entry.definition, entry.definition.signIn.providers?.of(model.id))) continue
         const room = yield* limits.room(starts.value.id, named)
         if (Option.isNone(room)) continue
+        // Marked out of usage by the one rule steering goes by: the figure above is its last read, which the picker mustn't pass for room.
+        const out = yield* limits.outAccount(starts.value.id).pipe(Effect.orElseSucceed(() => Option.none()))
         rooms.push({
           agentId,
           model: model.id,
@@ -55,6 +57,7 @@ export const modelRooms = (projectId?: string) =>
           resetsAt: room.value.resetsAt,
           kind: room.value.kind,
           label: room.value.label,
+          ...(Option.isSome(out) ? { outUntil: out.value.until } : {}),
         })
       }
     }

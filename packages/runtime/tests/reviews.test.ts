@@ -262,6 +262,24 @@ describe('reviewing someone else’s pull request', () => {
     }).pipe(Effect.provide(withQueries(github)))
   })
 
+  it.live('takes the lead’s agent by its name as well as its id', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull } = pullRequest(at, github)
+    return Effect.gen(function* () {
+      const { coordinator } = yield* project(at.working)
+      const sql = yield* SqlClient.SqlClient
+      assert.match(
+        yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(pull.number), lead: { agent: 'Fake claude-code' } }),
+        /^Planned /,
+      )
+      const [plan] = yield* sql<{ parameters: string }>`SELECT parameters FROM task_plans`
+      const steps = (JSON.parse(plan?.parameters ?? '{}') as { steps: Array<{ key: string; agentId: string }> }).steps
+      assert.deepStrictEqual(steps.find((step) => step.key === 'implement')?.agentId, 'claude-code')
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
   it.live('waits in the line, up next, while every place is taken, until its lead has a place to read it', () => {
     const at = hosted()
     const github = makeFakeService({ pushUrl: () => at.bare })

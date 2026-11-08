@@ -193,6 +193,48 @@ describe('merging a task here', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('says there is nothing to merge when the branch has no commits ahead, and doesn’t settle it as merged', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const { task, worktrees } = yield* taskIn([root], root)
+      const worktree = worktrees[0]?.path ?? ''
+      // The branch is still where its default branch is: the task built nothing.
+      const head = git(worktree, 'rev-parse', 'HEAD')
+      const refused = yield* Effect.flip(mergeHere(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }]))
+      assert.deepStrictEqual(cantOf(refused).slice(0, 2), ['CantMerge', 'nothing'])
+      assert.strictEqual(yield* stateOf(task.taskId), 'open')
+      assert.notInclude(
+        (yield* notices(task.threadId)).map((notice) => notice.title),
+        'Merged into main here.',
+      )
+      assert.deepStrictEqual((yield* (yield* Queries).thread(task.threadId, {})).task.merged, [])
+    }).pipe(Effect.provide(withQueries()))
+  })
+
+  it.live('is nothing built where the branch is in the default branch, though it started from an older commit', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const { task, worktrees } = yield* taskIn([root], root)
+      const worktree = worktrees[0]?.path ?? ''
+      // Main moves on after the task's branch started; the branch is fast-forwarded to it without a commit of its own.
+      commit(root, 'moved.txt', 'moved\n')
+      git(worktree, 'merge', '-q', '--ff-only', 'refs/heads/main')
+      assert.isTrue(yield* (yield* Changes).nothingBuilt(task.taskId))
+    }).pipe(Effect.provide(runtime()))
+  })
+
+  it.live('counts files left uncommitted as built, even where the branch is in the default branch', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const { task, worktrees } = yield* taskIn([root], root)
+      const worktree = worktrees[0]?.path ?? ''
+      commit(root, 'moved.txt', 'moved\n')
+      git(worktree, 'merge', '-q', '--ff-only', 'refs/heads/main')
+      writeFileSync(join(worktree, 'draft.md'), 'A first draft.\n')
+      assert.isFalse(yield* (yield* Changes).nothingBuilt(task.taskId))
+    }).pipe(Effect.provide(runtime()))
+  })
+
   it.live('says what the remote doesn’t have once merged, pushes it with the person’s own git, and says when the remote has moved on', () =>
     Effect.gen(function* () {
       const root = repository()

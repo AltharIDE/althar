@@ -86,7 +86,7 @@ export const REELS: readonly Reel[] = [
     scenes: [
       { story: 'screens-launch--opening', width: 1440, height: 900, steps: [{ wait: 2500 }] },
       {
-        story: 'setup-controlcenter--at-a-glance',
+        story: 'setup-controlcenter--at-rest',
         width: 1000,
         height: 625,
         density: 2,
@@ -102,7 +102,7 @@ export const REELS: readonly Reel[] = [
         ],
       },
       {
-        story: 'setup-controlcenter--at-a-glance',
+        story: 'setup-controlcenter--at-rest',
         width: 1000,
         height: 625,
         /* the settings' corner, where the icon is picked and the Dock shows it */

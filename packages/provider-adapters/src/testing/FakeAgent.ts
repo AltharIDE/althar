@@ -261,6 +261,8 @@ export interface FakeAgentOptions {
 
   /** Hold `session/new` open to exercise startup timeout cleanup. */
   readonly beforeNewSession?: () => Promise<void>
+  /** Called with what each `session/new` asked for, as the agent received it: its added directories and `_meta` among it. */
+  readonly sessionAsked?: (params: acp.NewSessionRequest) => void
   /** Hold `initialize` open, the first thing a connection asks, to exercise the same cleanup. */
   readonly beforeInitialize?: () => Promise<void>
   /** A scripted response to a permission judgment, with the actual session settings exposed to the test. */
@@ -295,6 +297,12 @@ export interface FakeAgentOptions {
   readonly initialized?: (capabilities: acp.ClientCapabilities | undefined) => void
   /** Leave a permission request open when the turn is cancelled, for Althar to answer. */
   readonly keepsRequests?: boolean
+  /**
+   * Never reports a step: a lead or a reviewer says it is done in words and
+   * ends its turn without Althar's tools, every turn, as an agent whose
+   * session lacks them does (OpenCode Go's, #692). The coordinator plays on.
+   */
+  readonly noReport?: true
   /**
    * Out of usage: every prompt fails with Claude Code's usage-limit message,
    * until `until` (in milliseconds, which the message gives as its reset), or
@@ -656,7 +664,9 @@ const playStall = async (
  * proposes the release notes automation, every Friday at 16:00; a review's lead, `[lead:review]`, drafts asking for changes with a
  * comment on each of its first two changed lines, or, `[lead:review-approve]`, approves it;
  * `[lead:finish]` finishes the step, and so does being told to carry on with
- * it after, with `[lead:answered]` saying it only answered the person; asked to, `[lead:make-change]` makes its quick task a change
+ * it after, with `[lead:answered]` saying it only answered the person; asked to,
+ * `[lead:wait-for-person]` asks the person a question with `wait_for_person`
+ * and ends its turn, then finishes once their answer comes; asked to, `[lead:make-change]` makes its quick task a change
  * first, reviewed by Codex and ending in a draft pull request, or with no
  * review (`[lead:make-change-alone]`), and without `[lead:finish]` ends its
  * turn there; `[review:pass]` and `[review:findings]`
@@ -670,7 +680,8 @@ const playStall = async (
  * `[lead:settle-quietly]` settles without reporting; `[lead:fix-elsewhere]` names a commit from before the round as its fix. `[lead:slowly]` takes some
  * seconds over what it was asked before it plays its part. Either takes until a test opens its hold instead, where
  * the test holds it (`FakeAgentOptions.holds`).
- * `[lead:edit]` commits a change when it finishes, as a lead is asked to;
+ * `[lead:edit]` commits a change when it finishes, as a lead is asked to; `[lead:nothing]` says it built
+ * nothing, so a task with a review runs none;
  * `[lead:scratch]` leaves a scratch file lying about too, and deletes it when
  * Althar says it isn't committed; `[lead:evidence]` saves a screenshot in
  * the worktree, uncommitted, and finishes with it, a test run and something
@@ -712,6 +723,20 @@ const playStall = async (
 export const BUILT = 'Checkout retries once when the payment call fails, in `src/checkout.ts`. Try a checkout with the network off.'
 export const BUILT_SETTLED =
   'Checkout retries once when the payment call fails, in `src/checkout.ts`, and the README heading names it. Try a checkout with the network off.'
+/** The proposal a `[lead:points-back]` lead writes on the way, and its questions: long, as the compaction lead's was. */
+export const POINTED_PROPOSAL = [
+  '## Proposal: twelve current-state decisions',
+  '',
+  ...Array.from(
+    { length: 12 },
+    (_, index) => `${index + 1}. Decision ${index + 1}: what holds today, folding the ADRs that led to it, with their dates.`,
+  ),
+].join('\n')
+export const POINTED_QUESTIONS = [
+  '## Questions',
+  '',
+  ...Array.from({ length: 17 }, (_, index) => `${index + 1}. Question ${index + 1}: keep its history, or only where it stands now?`),
+].join('\n')
 /** The description it writes for the task's pull request, where the repository has no template. */
 export const DESCRIBED =
   'Checkout gave up on the first failed payment call, so a dropped connection lost the order. It now retries once before it says the payment failed.'
@@ -889,6 +914,11 @@ const playRole = async (
     readonly printsAfterEnd?: boolean
     readonly again?: boolean
   }) => Promise<void> = () => Promise.resolve(),
+  /** What it says on the way, and a step of work between, each in the thread as the turn goes. */
+  aloud: { readonly say: (said: string) => Promise<void>; readonly step: (title: string) => Promise<void> } = {
+    say: () => Promise.resolve(),
+    step: () => Promise.resolve(),
+  },
 ): Promise<string | undefined> => {
   for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
   const asked = session.markers.size > 0 || text.includes('Settle each') || text.startsWith('Round ') || text.startsWith('More to review')
@@ -1089,6 +1119,31 @@ const playRole = async (
         const names = /, one for each of ([^.]+)\./.exec(answer)?.[1]?.split(', ')
         const descriptions = names === undefined ? [{ text: described }] : names.map((repository) => ({ repository, text: described }))
         return await call('finish_step', { summary: 'Did the task.', built: BUILT, descriptions, ...evidence() })
+      }
+      // Asked to wait on the person's answer (`[lead:wait-for-person]`), it asks in a line and ends its turn; told the
+      // answer, it carries on and finishes as it would have.
+      if (available.has('wait_for_person') && session.markers.has('[lead:wait-for-person]')) {
+        if (text.includes('[lead:wait-for-person]'))
+          return await call('wait_for_person', { question: 'Which ADRs should the compaction keep?' })
+        if (session.markers.has('[lead:edit]')) await commitIn(session.cwd, 'change.txt', 'Change it')
+        return await finish()
+      }
+      // Shaped like the lead that compacted the ADRs, `[lead:points-back]`: progress lines, its whole proposal on the way,
+      // finish_step, then a short last message that only points at the proposal above. Told to say it again, it does, in full.
+      if (session.markers.has('[lead:points-back]') && available.has('finish_step')) {
+        if (text.startsWith('Your last message points back')) return `${POINTED_PROPOSAL}\n\n${POINTED_QUESTIONS}`
+        if (text.includes('[lead:points-back]')) {
+          await aloud.say('Reading the ADRs first.')
+          await aloud.step('Read docs/decisions')
+          await aloud.say('Grouping them by what each decides now.')
+          await aloud.step('Read docs/architecture')
+          await aloud.say(`${POINTED_PROPOSAL}\n\n${POINTED_QUESTIONS}`)
+          await aloud.step('Write the proposal')
+          // It built something, so its step has a review: nothing built runs none.
+          await commitIn(session.cwd, 'compact.md', 'Compact the ADRs')
+          await call('finish_step', { summary: 'Proposed a dozen current-state decisions; waiting on the answers.', built: BUILT })
+          return 'The proposal is above: answer the questions and I’ll compact the ADRs.'
+        }
       }
       // Fixes and pushes it itself, as a lead may while the person hasn't seen the change yet: each fix a commit of its own.
       // Started again for it, it reads its brief first: the failure is in what it is told, not always at the start.
@@ -1447,6 +1502,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
     .onRequest(acp.methods.agent.session.new, async ({ params, client }) => {
       if (options.slowStart !== undefined) await pause(options.slowStart)
       await options.beforeNewSession?.()
+      options.sessionAsked?.(params)
       created += 1
       const sessionId = `fake-${created}`
       const session: SessionState = {
@@ -1636,6 +1692,16 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         if (session.cancelled) return { stopReason: 'cancelled' }
       }
       const say = (said: string) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: said } })
+      // A step of work between what it says, so each is a message of its own, as an agent's tool call between them makes it.
+      let steps = 0
+      const aloud = {
+        say,
+        step: async (title: string) => {
+          const toolCallId = `aloud-${++steps}`
+          await update({ sessionUpdate: 'tool_call', toolCallId, title, kind: 'read', status: 'in_progress' })
+          await update({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' })
+        },
+      }
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
       // Signed out, as its account no longer is, where the prompt says `[signed-out]`.
       if (text.includes('[signed-out]')) throw acp.RequestError.authRequired()
@@ -1845,6 +1911,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           text,
           (how) => leaveRunning(params.sessionId, session, client, 'claude', how),
           (plan) => leaveTests(params.sessionId, session, client, plan),
+          aloud,
         )
         if (after !== undefined) await say(after)
         return ended()
@@ -1874,6 +1941,11 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         connections.get(shared(client))?.close()
         return ended()
       }
+      // One that never reports says its work is done in words, without Althar's tools.
+      if (options.noReport === true && !session.coordinator) {
+        await say("Done. Althar's finish_step and report_review aren't among my tools.")
+        return ended()
+      }
       // With Althar's tools, a marker in the prompt says which role to play; but what the person names as a scenario is played
       // as one, whatever its session's markers say, as a lead keeps its session after its step (ADR-034).
       const named = (Object.values(scenarios) as ReadonlyArray<string>).includes(text)
@@ -1884,6 +1956,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             text,
             (how) => leaveRunning(params.sessionId, session, client, 'claude', how),
             (plan) => leaveTests(params.sessionId, session, client, plan),
+            aloud,
           )
       // Stopped while it played its part, the turn was cancelled, as an agent says.
       if (played !== undefined && session.cancelled) return { stopReason: 'cancelled' }

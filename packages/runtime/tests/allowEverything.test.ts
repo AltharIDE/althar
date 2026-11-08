@@ -9,7 +9,6 @@ import { Instance } from '../src/Instance'
 import { Permissions } from '../src/Permissions'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
-import { guardHolds } from '../src/pushGuard'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
@@ -215,14 +214,12 @@ describe('allow everything on a task (ADR-043)', () => {
         JOIN provider_sessions s ON s.id = r.provider_session_id JOIN threads t ON t.id = s.thread_id
         WHERE t.id = ${created.threadId} ORDER BY d.decided_at DESC LIMIT 1`
       assert.strictEqual(decision?.outcome, 'allow')
-      // Where the project never allows only what git's guard stops, whatever runs it, the lead's session says the guard holds, and
-      // what Althar can't read goes ahead (ADR-089); where no guard holds (Windows), it is refused as before.
+      // So too where the project never allows only what git's guard stops: on every platform, as it no longer hangs on the guard,
+      // which Windows hasn't.
       yield* policies.set(project.projectId as ProjectId, { never: ['delete-branch'] }, instance.personId)
       yield* say(created.threadId, `${scenarios.run}echo $(echo deploy)`)
       yield* ended(created.threadId, 2)
-      assert.deepStrictEqual((yield* said(created.threadId)).slice(-1), [
-        guardHolds ? 'chosen=allow_once' : 'chosen=declinecarrying on without it',
-      ])
+      assert.deepStrictEqual((yield* said(created.threadId)).slice(-1), ['chosen=allow_once'])
     }).pipe(Effect.provide(withQueries())),
   )
 

@@ -56,6 +56,7 @@ import {
   type NewProjectDefaultsChange,
   type IssueList,
   type Load,
+  type MissedReports,
   type ModelRoom,
   type PlanUsage,
   type OutputText,
@@ -531,6 +532,8 @@ export interface Client {
   readonly getPlanUsage: (options?: { readonly refresh?: boolean }) => Promise<PlanUsage>
   /** Each model's room where work on it would start, in a project (its rule for moving work through accounts) or anywhere. */
   readonly getModelRooms: (projectId: string | null) => Promise<ReadonlyArray<ModelRoom>>
+  /** Each model that ended steps without its report in the last week, once reminded, with how often. */
+  readonly getMissedReports: () => Promise<ReadonlyArray<MissedReports>>
   /** Downloads an agent for the person, checks it, and keeps it for Althar to run; done once it is ready. */
   readonly installAgent: (agentId: string) => Promise<void>
   /** Opens a task's folder in an editor, at one of its files and a line; whether it could. */
@@ -912,6 +915,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getLoad: () => settle(api.GetLoad({})),
     getPlanUsage: (options = {}) => settle(api.GetPlanUsage(options.refresh === undefined ? {} : { refresh: options.refresh })),
     getModelRooms: (projectId) => settle(api.GetModelRooms(projectId === null ? {} : { projectId })),
+    getMissedReports: () => settle(api.GetMissedReports({})),
     openInEditor: (input) => command((commandId) => api.OpenInEditor({ commandId, ...input })),
     openCode: (input) => command((commandId) => api.OpenCode({ commandId, ...input })),
     installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),

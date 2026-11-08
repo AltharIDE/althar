@@ -6,6 +6,7 @@ import { Connections } from './Connections'
 import { forkOf, parentRemote } from './forks'
 import { commitOf, type FetchSource, fetchSpecs, git, gitOutcome, hostNameOf, namedRemotes, redactUrl, remoteHeads } from './git'
 import { Instance } from './Instance'
+import { canonicalHost } from './sshHosts'
 import { type Tool, ToolRefused, ToolServer } from './ToolServer'
 
 /*
@@ -107,10 +108,6 @@ const numberOf = (which: string) => {
 }
 
 const sameRepository = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) => a.join('/').toLowerCase() === b.join('/').toLowerCase()
-
-/** A host by its name, the hosts' own SSH names read as the host they are. */
-const hostName = (host: string) =>
-  ({ 'ssh.github.com': 'github.com', 'altssh.gitlab.com': 'gitlab.com' })[host.toLowerCase()] ?? host.toLowerCase()
 
 export class Fetches extends Context.Service<
   Fetches,
@@ -254,12 +251,12 @@ export class Fetches extends Context.Service<
             const ref = resolved?.ref ?? parseLink(asked)
             if (ref?.kind !== 'change') return yield* new FetchRefused({ message: 'That link isn’t to a pull request.' })
             // Its host and its repository both the remote's: a link elsewhere with the same number is another change.
-            const here = parseRemote(reach.url)
+            const here = parseRemote(yield* connections.reached(reach.url).pipe(Effect.orElseSucceed(() => reach.url)))
             if (here === null)
               return yield* new FetchRefused({
                 message: `That link is to ${ref.host}, and ${remote} isn't on a code host Althar can tell. Give the pull request's number.`,
               })
-            if (hostName(here.host) !== hostName(ref.host) || !sameRepository(here.path, ref.path))
+            if (canonicalHost(here.host) !== canonicalHost(ref.host) || !sameRepository(here.path, ref.path))
               return yield* new FetchRefused({
                 message: `That pull request is on ${ref.host}/${ref.path.join('/')}, not ${here.host}/${here.path.join('/')}.`,
               })

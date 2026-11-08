@@ -27,7 +27,14 @@ export const runtimeWith = (
   services: { readonly github?: FakeService; readonly linear?: FakeService },
   file = ':memory:',
   listenEvery: Duration.Duration = Duration.millis(100),
-) => Queries.layer.pipe(Layer.provideMerge(runtime(file, {}, { connectors: fakeConnectors(services), listenEvery })))
+  /** Agents on a key, paid per use, which Althar won't hand a step on to by itself. */
+  perUse?: ReadonlyArray<string>,
+) =>
+  Queries.layer.pipe(
+    Layer.provideMerge(
+      runtime(file, {}, { connectors: fakeConnectors(services), listenEvery, ...(perUse === undefined ? {} : { perUse }) }),
+    ),
+  )
 
 export const connect = (product: 'github' | 'linear', webUrl?: string) =>
   Effect.gen(function* () {

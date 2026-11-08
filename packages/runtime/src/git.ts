@@ -49,7 +49,7 @@ const READ_COPY = 'althar-read-copy'
 export const isReadCopy = (cwd: string) => existsSync(join(cwd, '.git', READ_COPY))
 
 /** Where the Flatpak keeps the bridge that runs Althar's own ssh on the device (flatpak/host-ssh.sh). */
-const HOST_SSH = '/app/bin/althar-host-ssh'
+export const HOST_SSH = '/app/bin/althar-host-ssh'
 
 /**
  * The ssh Althar's own git runs, by its environment: inside a Flatpak, the

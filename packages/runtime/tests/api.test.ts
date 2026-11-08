@@ -2119,7 +2119,7 @@ describe('the coordinator, through the API', () => {
           commandId: commandId(),
           projectId: project.id,
           title: 'Tidy the README',
-          description: 'Short. [lead:finish] [review:pass]',
+          description: 'Short. [lead:finish] [lead:edit] [review:pass]',
           steps: [
             { key: 'implement' as const, agentId: 'codex', model: null, skipped: false },
             { key: 'review' as const, agentId: 'claude-code', model: 'large', skipped: false },
@@ -3045,6 +3045,12 @@ describe('thread items', () => {
     disposition: input?.disposition ?? null,
     decision,
     createdAt: '2026-09-29T12:00:00.000Z',
+  })
+
+  it('keeps a session’s skills line that said nothing new from the window', () => {
+    const line = { source: 'runtime', role: 'skills', title: 'Codex could see 2 skills', skills: [] }
+    assert.strictEqual(itemOf(row('notice', { ...line, hidden: true })), undefined)
+    assert.strictEqual(itemOf(row('notice', line))?.kind, 'notice')
   })
 
   it('gives each kind its own content, and leaves out kinds the window has no use for yet', () => {
