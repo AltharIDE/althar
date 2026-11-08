@@ -150,6 +150,13 @@ describe('What merging a change needs, as one list (DEV-204)', () => {
       })
     })
 
+    it('a required name run twice counts once, passed only where every run of it did', () => {
+      const need = checksNeedOf(checks(ran('test', 'passed'), ran('test', 'running'), ran('lint', 'passed')), ['test', 'lint'])
+      assert.strictEqual(need.state, 'waiting')
+      assert.strictEqual(need.have, 1)
+      assert.strictEqual(need.need, 2)
+    })
+
     it('none run yet: waited on where the host holds it to all, unknown where it can’t say; not read at all, unknown', () => {
       assert.strictEqual(checksNeedOf(checks(), 'all').state, 'waiting')
       assert.strictEqual(checksNeedOf(checks(), null).state, 'unknown')

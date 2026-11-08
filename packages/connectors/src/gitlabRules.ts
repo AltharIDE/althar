@@ -133,9 +133,13 @@ export const gitlabRulesOf = (input: {
   }
 
   const changesBy = reviewers.filter((one) => one.state === 'requested_changes').map((one) => one.user.username)
-  if (changesBy.length > 0 || status === 'requested_changes')
+  // Changes asked for hold it back where GitLab says so; mergeable, they don't; held back for another reason, GitLab, which
+  // says one at a time, doesn't say whether they do too.
+  if (status === 'requested_changes')
     needs.push({ kind: 'changes_requested', state: 'unmet', ...(changesBy.length > 0 ? { who: changesBy } : {}) })
-  else if (input.reviewers !== null && (reviewers.length > 0 || needs.length > 0)) needs.push({ kind: 'changes_requested', state: 'met' })
+  else if (changesBy.length > 0) {
+    if (status !== 'mergeable') needs.push({ kind: 'changes_requested', state: 'unknown', who: changesBy })
+  } else if (input.reviewers !== null && (reviewers.length > 0 || needs.length > 0)) needs.push({ kind: 'changes_requested', state: 'met' })
 
   if (project.only_allow_merge_if_all_discussions_are_resolved === true || status === 'discussions_not_resolved') {
     const resolved = request.blocking_discussions_resolved

@@ -236,11 +236,12 @@ export function MergeNeeds({ needs, host, target = 'main', checks, className, te
     .sort((a, b) => URGENCY[a.need.state] - URGENCY[b.need.state] || a.at - b.at)
     .map(({ need }) => need)
   const met = needs.filter((need) => need.state === 'met' && need.kind !== 'checks')
-  const line = (need: MergeNeed) =>
+  // Keyed by kind and place: two of a kind (a host's other rules) may say the same.
+  const line = (need: MergeNeed, at: number) =>
     need.kind === 'checks' && checks !== undefined && checks.length > 0 ? (
       <ChecksNeed key={need.kind} need={need} checks={checks} host={host} target={target} t={t} />
     ) : (
-      <li key={`${need.kind}${need.said ?? ''}`}>
+      <li key={`${need.kind}-${at}`}>
         <Said need={need} host={host} target={target} t={t} />
       </li>
     )
@@ -262,8 +263,8 @@ export function MergeNeeds({ needs, host, target = 'main', checks, className, te
             </DisclosureTrigger>
             <Fold bleed={false}>
               <ul className={m.met}>
-                {met.map((need) => (
-                  <li key={`${need.kind}${need.said ?? ''}`}>
+                {met.map((need, at) => (
+                  <li key={`${need.kind}-${at}`}>
                     <Said need={need} host={host} target={target} t={t} />
                   </li>
                 ))}

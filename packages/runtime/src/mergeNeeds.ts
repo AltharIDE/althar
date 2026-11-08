@@ -29,7 +29,13 @@ export const checksNeedOf = (checks: Seen['checks'], required: MergeRules['requi
   const failing = counted.filter(failed).map((check) => check.name)
   const pending = [...counted.filter(running).map((check) => check.name), ...missing]
   const need = named === null ? counted.length : named.length
-  const have = counted.filter((check) => !failed(check) && !running(check)).length
+  // Named, each counts once, passed where every run of that name did (two workflows may run a job of the same name).
+  const done = (check: Ran) => !failed(check) && !running(check)
+  const have =
+    named === null
+      ? counted.filter(done).length
+      : named.filter((name) => counted.some((check) => check.name === name) && counted.every((check) => check.name !== name || done(check)))
+          .length
   const others = named === null ? [] : checks.list.filter((check) => !named.includes(check.name))
   const apart =
     others.length === 0

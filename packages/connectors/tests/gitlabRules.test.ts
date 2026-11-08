@@ -172,4 +172,18 @@ describe('What GitLab needs before a merge request merges', () => {
       [{ kind: 'other', state: 'unmet', said: 'weird_new_status' }],
     )
   })
+
+  it('changes a reviewer asked for hold it back only where GitLab says; held back for another reason, whether they do is unknown', () => {
+    const asked = (status: string) =>
+      gitlabRulesOf({
+        project: {},
+        request: { detailed_merge_status: status },
+        approvals: null,
+        state: null,
+        reviewers: [reviewer('cy', 'requested_changes')],
+      }).needs
+    assert.deepStrictEqual(asked('mergeable'), [])
+    assert.deepStrictEqual(asked('requested_changes'), [{ kind: 'changes_requested', state: 'unmet', who: ['cy'] }])
+    assert.deepStrictEqual(asked('ci_must_pass'), [{ kind: 'changes_requested', state: 'unknown', who: ['cy'] }])
+  })
 })

@@ -15,13 +15,17 @@ import type { HostNeed, MergeMethod, MergeRules } from './model'
  * for anyone else it is unknown, until GitHub says BEHIND.
  */
 
-/** The pull request's merge requirements; `refUpdateRule` left out where the server doesn't know it (an older Enterprise Server). */
-export const mergeRulesQuery = (rule: boolean) => `query($owner: String!, $name: String!, $number: Int!) {
+/**
+ * The pull request's merge requirements. `full` false leaves out what an older
+ * Enterprise Server may not know: its branch protection (`refUpdateRule`), its
+ * merge queue, and which checks are required.
+ */
+export const mergeRulesQuery = (full: boolean) => `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
-      isDraft mergeStateStatus reviewDecision isMergeQueueEnabled isInMergeQueue
+      isDraft mergeStateStatus reviewDecision ${full ? 'isMergeQueueEnabled isInMergeQueue' : ''}
       ${
-        rule
+        full
           ? `baseRef { refUpdateRule { requiredApprovingReviewCount requiredStatusCheckContexts requiresCodeOwnerReviews
         requiresConversationResolution requiresLinearHistory requiresSignatures } }`
           : ''
@@ -35,8 +39,8 @@ export const mergeRulesQuery = (rule: boolean) => `query($owner: String!, $name:
       head: commits(last: 1) {
         nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
           __typename
-          ... on CheckRun { name status conclusion isRequired(pullRequestNumber: $number) }
-          ... on StatusContext { context state isRequired(pullRequestNumber: $number) }
+          ... on CheckRun { name status conclusion ${full ? 'isRequired(pullRequestNumber: $number)' : ''} }
+          ... on StatusContext { context state ${full ? 'isRequired(pullRequestNumber: $number)' : ''} }
         } } } } }
       }
     }
@@ -165,6 +169,9 @@ export const NO_RULESETS: Rulesets = {
   queue: false,
 }
 
+/** The fields of `mergeRulesQuery` an older Enterprise Server may not know: one it rejects for is asked without them. */
+export const NEWER_FIELDS = /refUpdateRule|isMergeQueueEnabled|isInMergeQueue|isRequired/
+
 /** Whether a check of the rollup passed, as GitHub counts it toward a merge: skipped and neutral do. */
 const passed = (context: typeof Context.Type) =>
   context.__typename === 'StatusContext'
@@ -215,7 +222,7 @@ export const mergeRulesOf = (input: {
   const owners = unique(requests.filter((one) => one.asCodeOwner).flatMap((one) => reviewerOf(one.requestedReviewer) ?? []))
   const decision = pull.reviewDecision ?? null
   const counted = Math.max(rule?.requiredApprovingReviewCount ?? 0, rulesets.approvals)
-  // GitHub sums the reviews up only where the branch requires them: then changes asked for hold it back.
+  // GitHub sums the reviews up only where the branch requires them: then, and only then, changes asked for hold it back.
   const reviewed = counted > 0 || decision !== null
   const enough = decision === 'APPROVED' || (counted > 0 ? approvedBy.length >= counted : decision !== 'REVIEW_REQUIRED')
   if (counted > 0 || decision === 'REVIEW_REQUIRED')
@@ -235,7 +242,7 @@ export const mergeRulesOf = (input: {
           ? { kind: 'code_owners', state: 'unmet' }
           : { kind: 'code_owners', state: 'met' },
     )
-  if (reviewed || changesBy.length > 0)
+  if (reviewed)
     needs.push(
       changesBy.length > 0 ? { kind: 'changes_requested', state: 'unmet', who: changesBy } : { kind: 'changes_requested', state: 'met' },
     )
@@ -271,16 +278,19 @@ export const mergeRulesOf = (input: {
       have: unsigned,
     })
   }
+  // Met where it may merge as a squash or rebase; where Althar sees only merge commits, GitHub may not have said the others
+  // (it tells only some who may), so it is unknown rather than crossed.
   if (rule?.requiresLinearHistory === true || rulesets.linear)
-    needs.push({ kind: 'linear_history', state: input.merges.some((way) => way !== 'merge') ? 'met' : 'unmet' })
+    needs.push({ kind: 'linear_history', state: input.merges.some((way) => way !== 'merge') ? 'met' : 'unknown' })
   const queue = pull.isMergeQueueEnabled === true || rulesets.queue
   if (queue) needs.push({ kind: 'merge_queue', state: pull.isInMergeQueue === true ? 'waiting' : 'met' })
 
-  // GitHub blocks it, and nothing Althar read says why: a rule it can't read, such as one only an admin sees.
+  // GitHub blocks it, and nothing Althar read says why (one not known doesn't): a rule it can't read, such as one only an
+  // admin sees.
   const explained =
     queue ||
     pull.isDraft ||
-    needs.some((one) => one.state !== 'met') ||
+    needs.some((one) => one.state === 'unmet' || one.state === 'waiting') ||
     required.some((name) => {
       const ran = contexts.find((one) => nameOf(one) === name)
       return ran === undefined || !passed(ran)

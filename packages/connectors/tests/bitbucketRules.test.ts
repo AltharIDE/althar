@@ -110,7 +110,7 @@ describe('What Bitbucket Cloud needs before a pull request merges', () => {
         requiredChecks: null,
         needs: [
           { kind: 'approvals', state: 'unknown', have: 1, who: ['ana'] },
-          { kind: 'changes_requested', state: 'unmet', who: ['cy'] },
+          { kind: 'changes_requested', state: 'unknown', who: ['cy'] },
         ],
       })
     }),
@@ -221,6 +221,11 @@ describe('What Bitbucket Data Center needs before a pull request merges', () => 
     assert.deepStrictEqual(
       dataCenterRulesOf({ reviewers: [], merge: { canMerge: false, vetoes: [{ summaryMessage: 'Requires approvals' }] } }).needs,
       [{ kind: 'approvals', state: 'unmet', have: 0, who: [] }],
+    )
+    // Work asked for that no merge check vetoes doesn't hold it back: no line, and never "no changes requested".
+    assert.deepStrictEqual(
+      dataCenterRulesOf({ reviewers: [{ user: { name: 'tom' }, status: 'NEEDS_WORK' }], merge: { canMerge: true } }).needs,
+      [{ kind: 'approvals', state: 'met', have: 0, who: [] }],
     )
   })
 })

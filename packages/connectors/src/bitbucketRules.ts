@@ -88,8 +88,11 @@ export const cloudRulesOf = (input: {
       who: met || pending.length === 0 ? approvedBy : pending,
     })
   }
-  if (changesBy.length > 0) needs.push({ kind: 'changes_requested', state: 'unmet', who: changesBy })
-  else if (input.restrictions === null || has('require_no_changes_requested') || need > 0)
+  // Changes asked for hold it back only where its branch says so; where Althar can't read that, whether they do is unknown.
+  if (changesBy.length > 0) {
+    if (input.restrictions === null) needs.push({ kind: 'changes_requested', state: 'unknown', who: changesBy })
+    else if (has('require_no_changes_requested')) needs.push({ kind: 'changes_requested', state: 'unmet', who: changesBy })
+  } else if (input.restrictions === null || has('require_no_changes_requested') || need > 0)
     needs.push({ kind: 'changes_requested', state: 'met' })
   // How far behind it may be, Bitbucket says only as it refuses the merge.
   if (has('require_commits_behind')) needs.push({ kind: 'up_to_date', state: 'unknown' })
@@ -140,9 +143,9 @@ export const dataCenterRulesOf = (input: {
     })
   else if (input.reviewers.length > 0)
     needs.push({ kind: 'approvals', state: input.merge.canMerge ? 'met' : 'unknown', have: approvedBy.length, who: approvedBy })
-  if (changesBy.length > 0 || work.length > 0)
-    needs.push({ kind: 'changes_requested', state: 'unmet', ...(changesBy.length > 0 ? { who: changesBy } : {}) })
-  else if (input.reviewers.length > 0) needs.push({ kind: 'changes_requested', state: 'met' })
+  // Work needed holds it back only where a merge check vetoes it, which then lists it; else it doesn't.
+  if (work.length > 0) needs.push({ kind: 'changes_requested', state: 'unmet', ...(changesBy.length > 0 ? { who: changesBy } : {}) })
+  else if (changesBy.length === 0 && input.reviewers.length > 0) needs.push({ kind: 'changes_requested', state: 'met' })
   for (const said of vetoes)
     if (!approvals.includes(said) && !builds.includes(said) && !work.includes(said)) needs.push({ kind: 'other', state: 'unmet', said })
   // Its builds are held to what its merge checks say: by a veto, all of them; with none, whether any are required it doesn't say.

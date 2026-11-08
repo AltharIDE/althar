@@ -282,6 +282,46 @@ describe('What GitHub needs before a pull request merges', () => {
     }),
   )
 
+  it.effect('a passing failure reading whether it must be up to date is asked again next time, not kept an hour', () =>
+    Effect.gen(function* () {
+      let tries = 0
+      const { host } = github([
+        ['POST', `${API}/graphql`, answered(rules({ baseRef: protection({ requiredStatusCheckContexts: ['test'] }) }))],
+        ['GET', `${REPO}/rules/branches/main`, { json: [] }],
+        [
+          'GET',
+          `${REPO}/branches/main/protection/required_status_checks`,
+          () => (++tries === 1 ? { status: 502, json: { message: 'Bad Gateway' } } : { json: { strict: true } }),
+        ],
+        ['GET', `${REPO}/compare/main...abc`, { json: { behind_by: 2 } }],
+      ])
+      yield* host.mergeRules!(repository, change)
+      const again = yield* host.mergeRules!(repository, change)
+      assert.strictEqual(tries, 2)
+      assert.deepInclude(again.needs, { kind: 'up_to_date', state: 'unmet', have: 2 })
+    }),
+  )
+
+  it.effect('one that doesn’t know the merge queue or required checks is asked without them too', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([
+        [
+          'POST',
+          `${API}/graphql`,
+          (request) =>
+            String((request.body as { query: string }).query).includes('isMergeQueueEnabled')
+              ? { json: { errors: [{ message: "Field 'isMergeQueueEnabled' doesn't exist on type 'PullRequest'" }] } }
+              : answered(rules({ baseRef: undefined })),
+        ],
+        ['GET', `${REPO}/rules/branches/main`, { status: 404, json: { message: 'Not Found' } }],
+        ['GET', `${REPO}/branches/main/protection/required_status_checks`, { status: 404, json: { message: 'Branch not protected' } }],
+      ])
+      assert.deepStrictEqual(yield* host.mergeRules!(repository, change), { requiredChecks: [], needs: [] })
+      const queries = sent.filter((one) => one.method === 'POST').map((one) => String((one.body as { query: string }).query))
+      assert.isFalse(/isRequired|refUpdateRule|isMergeQueueEnabled/.test(queries.at(-1) ?? ''))
+    }),
+  )
+
   it.effect('a pull request GitHub doesn’t have is not found', () =>
     Effect.gen(function* () {
       const { host } = github([['POST', `${API}/graphql`, { json: { data: { repository: { pullRequest: null } } } }]])
@@ -332,7 +372,20 @@ describe('What a branch’s rulesets require', () => {
     ])
   })
 
-  it('linear history where only merge commits are allowed is crossed; approved by enough and still a review short, a code owner’s is', () => {
+  it('changes asked for where no review is required don’t hold it back, and a rule unknown doesn’t explain a block', () => {
+    const pull = rules({
+      mergeStateStatus: 'BLOCKED',
+      reviewDecision: null,
+      baseRef: protection({ requiredApprovingReviewCount: 0, requiredStatusCheckContexts: [] }),
+      latestOpinionatedReviews: { nodes: [{ state: 'CHANGES_REQUESTED', author: { login: 'cy' } }] },
+    }) as unknown as PullRules
+    assert.deepStrictEqual(mergeRulesOf({ pull, rulesets: NO_RULESETS, behind: null, strict: null, merges: ['squash'] }).needs, [
+      { kind: 'up_to_date', state: 'unknown' },
+      { kind: 'other', state: 'unmet' },
+    ])
+  })
+
+  it('linear history where Althar sees only merge commits allowed is not known; approved by enough and still a review short, a code owner’s is', () => {
     const pull = rules({
       mergeStateStatus: 'BLOCKED',
       reviewDecision: 'REVIEW_REQUIRED',
@@ -343,7 +396,7 @@ describe('What a branch’s rulesets require', () => {
       { kind: 'approvals', state: 'met', have: 1, need: 1, who: ['ben'] },
       { kind: 'code_owners', state: 'unmet' },
       { kind: 'changes_requested', state: 'met' },
-      { kind: 'linear_history', state: 'unmet' },
+      { kind: 'linear_history', state: 'unknown' },
     ])
   })
 })

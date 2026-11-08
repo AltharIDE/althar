@@ -6,7 +6,7 @@ import { mergeInCopy } from './branchCopy'
 import { ConnectorFailed } from './errors'
 import { makeHttp, paged } from './http'
 import { makeGitHubReleases } from './githubReleases'
-import { mergeRulesOf, mergeRulesQuery, NO_RULESETS, PullRulesAnswer, RulesetsAnswer, rulesetsOf } from './githubRules'
+import { mergeRulesOf, mergeRulesQuery, NEWER_FIELDS, NO_RULESETS, PullRulesAnswer, RulesetsAnswer, rulesetsOf } from './githubRules'
 import type {
   Account,
   Activity,
@@ -876,19 +876,25 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       const now = yield* Clock.currentTimeMillis
       const kept = stricts.get(key)
       if (kept !== undefined && now - kept.at < STRICT_KEPT_MS) return kept.strict
-      const strict = yield* http
+      const said = yield* http
         .json(
           Schema.Struct({ strict: Schema.optional(Schema.Boolean) }),
           'GET',
           `${repo(repository)}/branches/${branchPath(target)}/protection/required_status_checks`,
         )
         .pipe(
-          Effect.map((checks) => checks.strict ?? null),
-          // To an admin, a branch with no required checks says so; to anyone else, GitHub says only Not Found.
-          Effect.catch((error) => Effect.succeed(error.status === 404 && /not enabled|not protected/i.test(error.message) ? false : null)),
+          Effect.map((checks) => ({ strict: checks.strict ?? null, kept: true })),
+          // To an admin, a branch with no required checks says so; to anyone else, GitHub says only Not Found, or Forbidden:
+          // either is kept. A failure on the way (limited, unreachable, a server's error) isn't, so the next read asks again.
+          Effect.catch((error) =>
+            Effect.succeed({
+              strict: error.status === 404 && /not enabled|not protected/i.test(error.message) ? false : null,
+              kept: error.reason === 'not_found' || error.reason === 'forbidden',
+            }),
+          ),
         )
-      stricts.set(key, { at: now, strict })
-      return strict
+      if (said.kept) stricts.set(key, { at: now, strict: said.strict })
+      return said.strict
     })
 
   /** A branch as a pull request's head names it: with its owner, the fork's where it is on one. */
@@ -1404,19 +1410,32 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
     mergeRules: (repository, change) =>
       Effect.gen(function* () {
         const variables = { owner: repository.path[0], name: repository.path[1], number: change.number }
-        const ask = (rule: boolean) => http.graphql(PullRulesAnswer, graphqlUrl, mergeRulesQuery(rule), variables)
-        // An Enterprise Server too old to know the branch protection anyone may read is asked without it from then on.
-        const answer = readsRule
-          ? yield* ask(true).pipe(
+        const ask = (full: boolean) => http.graphql(PullRulesAnswer, graphqlUrl, mergeRulesQuery(full), variables)
+        // An Enterprise Server too old to know the newer fields is asked without them from then on. Its branch's rulesets, by
+        // ETag, alongside: one a server has none of, or won't say, adds nothing; GitHub's BLOCKED still shows.
+        const [answer, rulesets] = yield* Effect.all(
+          [
+            readsRule
+              ? ask(true).pipe(
+                  Effect.catchIf(
+                    (error) => error.reason === 'rejected' && NEWER_FIELDS.test(error.message),
+                    () => {
+                      readsRule = false
+                      return ask(false)
+                    },
+                  ),
+                )
+              : ask(false),
+            http.cached(RulesetsAnswer, `${repo(repository)}/rules/branches/${branchPath(change.target)}`).pipe(
+              Effect.map(rulesetsOf),
               Effect.catchIf(
-                (error) => error.reason === 'rejected' && /refUpdateRule/.test(error.message),
-                () => {
-                  readsRule = false
-                  return ask(false)
-                },
+                (error) => error.reason === 'not_found' || error.reason === 'forbidden' || error.reason === 'rejected',
+                () => Effect.succeed(NO_RULESETS),
               ),
-            )
-          : yield* ask(false)
+            ),
+          ],
+          { concurrency: 'unbounded' },
+        )
         const pull = answer.repository?.pullRequest
         if (pull == null)
           return yield* new ConnectorFailed({
@@ -1424,14 +1443,6 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
             reason: 'not_found',
             message: `No pull request #${change.number} in ${repository.path.join('/')}`,
           })
-        // Its branch's rulesets, by ETag: one a server has none of, or won't say, adds nothing; GitHub's BLOCKED still shows.
-        const rulesets = yield* http.cached(RulesetsAnswer, `${repo(repository)}/rules/branches/${branchPath(change.target)}`).pipe(
-          Effect.map(rulesetsOf),
-          Effect.catchIf(
-            (error) => error.reason === 'not_found' || error.reason === 'forbidden' || error.reason === 'rejected',
-            () => Effect.succeed(NO_RULESETS),
-          ),
-        )
         const rule = pull.baseRef?.refUpdateRule ?? null
         // Required up to date where its rulesets or GitHub say; else as classic protection says, which only an admin reads, and
         // where there are no required checks, or no protection, it needs nothing.
