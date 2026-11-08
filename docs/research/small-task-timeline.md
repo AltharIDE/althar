@@ -10,7 +10,7 @@ two runs of CI, the pull request's and the merge queue's.** Worktrees, setup,
 agent start-up, hand-offs between steps and publishing take under a minute
 together. This change takes the largest wait out of a small task's time to
 its pull request: a task planned small no longer waits for a place behind
-long ones ([ADR-032](../decisions/032-agents-at-once-on-this-machine.md),
+long ones ([ADR-032](../decisions/scheduling.md#how-many-agents-work-at-once),
 follow-up of 6 November).
 
 ## What was measured

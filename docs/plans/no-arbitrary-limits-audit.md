@@ -1,7 +1,7 @@
 # Limits audit, 7 November 2026
 
-The contract is [ADR-097's irreversible list](../decisions/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md#what-asks)
-and [What stays](capable-by-default.md#what-stays-and-why). A restriction without a row there goes.
+The contract is [ADR-097's irreversible list](../decisions/what-agents-may-do.md#what-asks)
+and [What stays](../decisions/what-agents-may-do.md#what-stays-and-why). A restriction without a row there goes.
 This table also records work deliberately moved out of this task by the coordinator.
 
 | Limit and enforcement point | Disposition | Basis for keeping, or regression coverage |
