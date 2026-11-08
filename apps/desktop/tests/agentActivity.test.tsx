@@ -131,6 +131,18 @@ describe('drawn in the thread', () => {
     expect(screen.getAllByText(/the web for “effect layers”/).length).toBeGreaterThan(0)
   })
 
+  it('shows a call to an MCP server by the server and what its tool did', async () => {
+    await opened([
+      items.tool({
+        title: 'mcp__linear__get_issue',
+        toolKind: 'other',
+        mcp: { server: 'linear', tool: 'get_issue', acts: false, did: 'Read DEV-25' },
+      }),
+    ])
+    expect(screen.getByText('linear')).toBeTruthy()
+    expect(screen.getByText('DEV-25')).toBeTruthy()
+  })
+
   it('opens a page read to where it is, as a link out', async () => {
     await opened([page('https://effect.website/docs/schema')])
     await userEvent.click(screen.getByRole('button', { name: /docs\/schema/ }))
