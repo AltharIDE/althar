@@ -51,7 +51,7 @@ was decided. These are what they leave open.
 - [ ] **An MCP broker.** Build one only if MCP calls are seen slipping past
   the agents' own hooks.
 - [ ] **Skills per project.** There is no per-project choice of skills, and
-  Codex may drop catalog skills over its budget without saying so.
+  Codex may drop skills over its budget without saying so.
 
 **Code hosts and trackers**
 

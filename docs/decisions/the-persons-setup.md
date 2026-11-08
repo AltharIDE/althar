@@ -1,8 +1,8 @@
 # The person's setup
 
 What of the person's own setup an agent Althar starts gets: their MCP
-servers, their skills and Althar's skill catalog, and their code host
-sign-in. What these may then do, and what asks, is in
+servers, their skills, and their code host sign-in. Althar ships no skills
+of its own. What these may then do, and what asks, is in
 [what agents may do](what-agents-may-do.md).
 
 **Replaces:** ADR-094,
@@ -96,7 +96,7 @@ starts. It writes through `claude mcp add-json --scope user` and
 **One store, outside every repository** (`@althar/skills`, in the profile's
 `skills/`). A skill's files are kept by content hash and never change.
 `installs.json` says which versions are installed, where each came from
-(Althar's catalog, GitHub at a commit, or local) and which is active.
+(GitHub at a commit, or local) and which is active.
 
 **The same skills for every agent.** For each session, Althar lays out
 read-only copies of the active set and hands them over the way the agent's
@@ -107,16 +107,17 @@ never written. The set is fixed for the session and recorded with it, and a
 change reaches each lead the next time it starts. A skill that needs
 subagents is left out for an agent that can't be counted on to have them.
 
-**A curated catalog, vendored and pinned** (`packages/skills/catalog/`). It
-holds 32 skills copied from
-[addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) and
-[obra/superpowers](https://github.com/obra/superpowers) at pinned commits,
-each with its source, licence and the patch Althar applied. Where two skills
-do the same job, the better one is kept (`catalog/CURATION.md`). The patches
-take out push and pull request steps (Althar pushes), hand merging and
-worktree cleanup to Althar, keep planning files out of commits, and make the
-text agent-neutral. `scripts/vendor.ts` rebuilds the catalog, and stops where
-upstream changed under a patch. A catalog update needs an app release.
+**Althar ships no skills of its own.** An earlier version carried a curated
+catalog of 32 skills copied from agent-skills and superpowers and installed
+them, off, as `althar-default`. The person decided against it on 8 Nov 2026: a
+default set is Althar choosing how every lead works, and the person's agents
+already load the skills they chose. The catalog, its packaging and its
+install are gone. What the person has is in their agents' own skill folders
+and plugins, the repository's `.claude/skills`, and what they add from
+GitHub. On the first start after the update the runtime takes the installs
+the older Althar made out of the store, with the stored versions nothing else
+points at, and leaves what was added from GitHub
+(`removeBundledSkills`).
 
 **Installs from GitHub are reviewed.** A ref is resolved once to a commit, and
 only the skill's own folder is fetched, each file checked against the
@@ -138,14 +139,13 @@ push or merge. The irreversible list and git's guard are what hold.
 
 **Not built yet:**
 
-- Each catalog skill is off until the person turns it on
-  (`skills/src/local.ts`); it should be on by default. The skills the person
-  turns on already load in every ordinary role, the coordinator included; an
-  outside author's review loads no skill plugin that runs code.
+- The skills the person turns on already load in every ordinary role, the
+  coordinator included; an outside author's review loads no skill plugin that
+  runs code.
 - `allowed-tools` frontmatter is refused at install (`skills/src/validate.ts`).
   It should be accepted, since nothing it would allow asks now.
-- All catalog skills on is more than Codex may list in its fallback budget,
-  and nothing checks or reports that. There is no per-project selection.
+- Too many skills on is more than Codex may list in its fallback budget, and
+  nothing checks or reports that. There is no per-project selection.
 
 ## Skill and OpenSpec files in a change
 
@@ -209,3 +209,4 @@ goes on is open.
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: the limits sweep (#696) built: agents carry the person's own code-host sign-in, picked skills load in every ordinary role, and skill and OpenSpec files push like any other.
+- 8 Nov 2026: Althar ships no skills of its own. The curated catalog, its packaging and its install are removed, and the first start after the update takes the older installs out of the store.
