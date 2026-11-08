@@ -1749,8 +1749,9 @@ export class Runs extends Context.Service<
        * failed and who takes it over, and the new agent starts briefed with the
        * thread so far, as for any handover. Handed on for this once already in
        * the step's round, so it can't go round, or with no other model free, it
-       * needs the person, as before. An automation's run goes the same way:
-       * nothing here waits on the person while another model can take it.
+       * needs the person, as before; and so does one whose task was settled
+       * meanwhile. An automation's run goes the same way: nothing here waits
+       * on the person while another model can take it.
        */
       const noReport = (
         on: LimitedStep,
@@ -1771,8 +1772,10 @@ export class Runs extends Context.Service<
             SELECT 1 AS one FROM record_events WHERE aggregate_type = 'node_attempt'
               AND aggregate_id IN (SELECT id FROM node_attempts WHERE node_id = ${on.nodeId})
               AND type = ${NO_REPORT} AND json_extract(payload, '$.handedTo') IS NOT NULL LIMIT 1`
+          // A task settled meanwhile, its change merged as its lead worked on, has nothing left to hand on: its lead stops as it does.
+          const [settled] = yield* sql<{ one: number }>`SELECT 1 AS one FROM tasks WHERE id = ${on.run.taskId} AND settled_at IS NOT NULL`
           const next =
-            before !== undefined || agentId === null
+            before !== undefined || agentId === null || settled !== undefined
               ? undefined
               : yield* takerFor(on, { agentId, model }).pipe(Effect.orElseSucceed(() => undefined))
           if (agentId !== null) {
