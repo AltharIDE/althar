@@ -11,7 +11,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { ProjectSummary } from '@althar/contracts'
+import type { HomeCall, HomeSnapshot, HomeTask, ProjectSummary } from '@althar/contracts'
 import { Room } from '@althar/ui'
 
 import { draftsOf } from '../src/renderer/features/newProject/draft'
@@ -21,11 +21,52 @@ import { brandOf } from '../src/renderer/shared/agents'
 import { moved } from '../src/renderer/features/tabs/store'
 import { afterClosing, beside, byNumber, firstOpen, keptFrom, whereOf } from '../src/renderer/features/tabs/tabs'
 import type { Host } from '../src/renderer/data/services'
-import { changed, fakeClient, fakeHost, load, project } from './fixtures'
+import { card, changed, fakeClient, fakeHost, home, load, project } from './fixtures'
 import { withServices } from './render'
 
 const halyard: ProjectSummary = { ...project, id: 'p2', name: 'halyard', slug: 'halyard', running: 0, working: 0, waiting: 0, ready: 0 }
 const tessera: ProjectSummary = { ...project, id: 'p3', name: 'tessera', slug: 'tessera', running: 0, working: 0, waiting: 1, ready: 1 }
+
+/**
+ * The home's cards for what the projects list counts: a coordinator's call for
+ * each waiting, a ready task for each ready. A tab's dot counts these as its
+ * board does; a test that says the dot differs gives its own home.
+ */
+const homeOf = (projects: ReadonlyArray<ProjectSummary>): HomeSnapshot =>
+  home({
+    projects: [...projects],
+    calls: projects.flatMap((one) =>
+      Array.from({ length: one.waiting }, (_, at): HomeCall => ({
+        id: `${one.id}-call-${at}`,
+        kind: 'question',
+        title: `${one.name} asks`,
+        reason: '',
+        command: null,
+        stuck: null,
+        createdAt: `2026-10-14T09:0${at}:00.000Z`,
+        taskId: null,
+        threadId: `${one.id}-coordinator`,
+        taskTitle: null,
+        taskSlug: null,
+        projectId: one.id,
+      })),
+    ),
+    tasks: projects.flatMap((one) =>
+      Array.from({ length: one.ready }, (_, at): HomeTask => ({
+        ...card(),
+        taskId: `${one.id}-ready-${at}`,
+        threadId: `${one.id}-ready-thread-${at}`,
+        title: `${one.name} ready`,
+        phase: 'ready',
+        state: 'open',
+        createdAt: '2026-10-14T09:00:00.000Z',
+        settledAt: null,
+        changed: null,
+        here: [],
+        projectId: one.id,
+      })),
+    ),
+  })
 
 /* The app's places, with screens that only say where they are; a task's says its project, as the task screen does once it reads it. */
 const THREADS: Readonly<Record<string, string>> = { th1: 'p1', th9: 'p2' }
@@ -80,12 +121,20 @@ let making = () => ''
 const newRoute = createRoute({ getParentRoute: () => rootRoute, path: '/new', component: () => <NewScreen projectId={() => making()} /> })
 const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: '/settings/$section', component: Where })
 
-const windowAt = (path: string, projects: ReadonlyArray<ProjectSummary> = [project, halyard, tessera], host: Host = fakeHost()) => {
+const windowAt = (
+  path: string,
+  projects: ReadonlyArray<ProjectSummary> = [project, halyard, tessera],
+  host: Host = fakeHost(),
+  homeFor: (projects: ReadonlyArray<ProjectSummary>) => HomeSnapshot = homeOf,
+) => {
   const router = createRouter({
     routeTree: rootRoute.addChildren([homeRoute, projectRoute, threadRoute, newRoute, settingsRoute]),
     history: createMemoryHistory({ initialEntries: [path] }),
   })
-  const { client, emit } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 3, projects })) })
+  const { client, emit } = fakeClient({
+    listProjects: vi.fn(async () => ({ cursor: 3, projects })),
+    getHome: vi.fn(async () => homeFor(projects)),
+  })
   making = () => draftsOf(client).get()?.id ?? ''
   withServices(<RouterProvider router={router} />, client, host)
   const go = (to: string) => act(() => router.history.push(to))
@@ -195,12 +244,36 @@ describe('the window’s tabs', () => {
     go('/threads/th9')
     await waitFor(() => expect(tab('halyard').getAttribute('aria-current')).toBe('page'))
 
-    vi.mocked(client.listProjects).mockResolvedValue({ cursor: 4, projects: [project, { ...halyard, waiting: 3 }] })
+    const asked = [project, { ...halyard, waiting: 3 }]
+    vi.mocked(client.listProjects).mockResolvedValue({ cursor: 4, projects: asked })
+    vi.mocked(client.getHome).mockResolvedValue(homeOf(asked))
     emit(changed('attention_request', 'a1'))
     await waitFor(() => expect(tab('halyard, 3 calls wait on you')).toBeTruthy())
     // What changes elsewhere doesn't read them again.
     emit(changed('thread_item', 'i1'))
     expect(client.listProjects).toHaveBeenCalledTimes(2)
+  })
+
+  it('keep a project’s dot dark while its work is running, though the projects list counts it ready', async () => {
+    // fnt: three tasks whose last runs passed, but whose pull requests' checks run now. Its board shows them in Running; the
+    // projects list counted them ready, and lit the dot with nothing in Needs you.
+    const fnt: ProjectSummary = { ...project, id: 'p4', name: 'fnt', slug: 'fnt', running: 3, working: 3, waiting: 0, ready: 3 }
+    const running = Array.from({ length: 3 }, (_, at): HomeTask => ({
+      ...card(),
+      taskId: `t${at}`,
+      threadId: `th${at}`,
+      title: `Work ${at}`,
+      phase: 'running',
+      state: 'open',
+      createdAt: '2026-10-14T09:00:00.000Z',
+      settledAt: null,
+      changed: null,
+      here: [],
+      projectId: fnt.id,
+    }))
+    windowAt('/', [fnt], fakeHost(), (projects) => home({ projects: [...projects], tasks: running }))
+    // Its work runs, so its tab says so; nothing waits on the person, so the tab has no dot and the home counts none.
+    await waitFor(() => expect(names()).toEqual(['Home', 'fnt, work running']))
   })
 
   it('forget projects removed since, and open the busy ones when none of what was kept is left', async () => {
@@ -504,6 +577,47 @@ describe('the window’s own buttons in the strip', () => {
     windowAt('/')
     await waitFor(() => expect(tab('Home')).toBeTruthy())
     expect(screen.queryByRole('button', { name: 'Close the window' })).toBeNull()
+  })
+})
+
+describe('dismissing Home', () => {
+  it('closes Home, selects a project, persists dismissal and reopens explicitly', async () => {
+    window.localStorage.setItem('althar.tabs', JSON.stringify({ open: ['p1'], places: {} }))
+    windowAt('/')
+    await userEvent.click(await screen.findByRole('button', { name: 'Close Home' }))
+    await waitFor(() => expect(where()).toBe('/projects/p1'))
+    expect(nav().queryByRole('button', { name: 'Close Home' })).toBeNull()
+    expect(JSON.parse(window.localStorage.getItem('althar.tabs')!).home).toBe(false)
+    await userEvent.click(nav().getByRole('button', { name: /^Home/ }))
+    await waitFor(() => expect(where()).toBe('/'))
+    expect(nav().getByRole('button', { name: 'Close Home' })).toBeTruthy()
+    expect(JSON.parse(window.localStorage.getItem('althar.tabs')!).home).toBe(true)
+  })
+
+  it('keeps Home closed in a new window and starts on a kept project', async () => {
+    window.localStorage.setItem('althar.tabs', JSON.stringify({ home: false, open: ['p2'], places: {} }))
+    windowAt('/')
+    await waitFor(() => expect(where()).toBe('/projects/p2'))
+    expect(nav().queryByRole('button', { name: 'Close Home' })).toBeNull()
+    fireEvent.keyDown(window, { key: '1', metaKey: true })
+    await waitFor(() => expect(where()).toBe('/projects/p2'))
+  })
+
+  it('falls back to Home, shown again, when no project tab remains', async () => {
+    window.localStorage.setItem('althar.tabs', JSON.stringify({ home: false, open: ['p1'], places: {} }))
+    windowAt('/projects/p1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Close meridian' }))
+    await waitFor(() => expect(where()).toBe('/'))
+    expect(tab('Home')).toBeTruthy()
+    expect(nav().queryByRole('button', { name: 'Close Home' })).toBeNull()
+    expect(JSON.parse(window.localStorage.getItem('althar.tabs')!).home).toBe(true)
+  })
+
+  it('validates persisted visibility and numbers only visible tabs', () => {
+    expect(keptFrom('{"open":[],"home":false}')?.home).toBe(false)
+    expect(keptFrom('{"open":[],"home":"false"}')?.home).toBeUndefined()
+    expect(byNumber(['a', 'b'], 1, false)).toBe('a')
+    expect(beside(['a', 'b'], 'b', 1, false)).toBe('a')
   })
 })
 

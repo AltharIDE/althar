@@ -1,7 +1,7 @@
-import { Decision, PermissionScope } from '@althar/ui'
+import { Brand, Decision, PermissionScope } from '@althar/ui'
 import { describe, expect, it } from 'vitest'
 
-import { permissionOf, replyOf, ruleWordsOf } from '../src/renderer/shared/permissions'
+import { permissionOf, replyOf, ruleWordsOf, waitedFor, waitedWords } from '../src/renderer/shared/permissions'
 
 /*
  * A permission call as the kit's card asks it, and its answer as the
@@ -20,6 +20,29 @@ const call = {
 }
 
 describe('a permission call, as the card asks it', () => {
+  it('asks what can’t be undone on its own card: the action, what stays, the words, the server, and no always', () => {
+    const merge = permissionOf({
+      ...call,
+      title: 'mcp__github__add_issue_comment',
+      irreversible: {
+        kind: 'speak',
+        verb: 'Post on #640',
+        done: 'Posted on #640.',
+        stays: 'Everyone watching it is told at once; it can’t be called back.',
+        words: 'Not needed once #635 merges.',
+        through: { server: 'github', tool: 'add_issue_comment' },
+      },
+    })
+    expect(merge.irreversible).toEqual({
+      verb: 'Post on #640',
+      done: 'Posted on #640.',
+      stays: 'Everyone watching it is told at once; it can’t be called back.',
+      words: 'Not needed once #635 merges.',
+      through: { server: 'github', brand: Brand.GitHub, tool: 'add_issue_comment' },
+    })
+    expect(merge.offers).toBeUndefined()
+  })
+
   it('offers once and deny alone where the runtime says nothing of always', () => {
     expect(permissionOf(call)).toEqual({
       id: 'a1',
@@ -64,5 +87,22 @@ describe('an answer, as the runtime takes it', () => {
     expect(ruleWordsOf({ pattern: 'git status', match: 'prefix' })).toBe('commands starting “git status”')
     expect(ruleWordsOf({ pattern: 'git status -s', match: 'exact' })).toBe('this exact command')
     expect(ruleWordsOf({ kind: 'deploy' })).toBe('deploying and publishing')
+  })
+})
+
+describe('a call that waits while the person is away', () => {
+  const now = Date.parse('2026-10-10T09:40:00.000Z')
+
+  it('says how long it has waited in the words people use', () => {
+    expect(waitedFor('2026-10-10T09:39:30.000Z', now)).toBe('1 min')
+    expect(waitedFor('2026-10-10T09:00:00.000Z', now)).toBe('40 min')
+    expect(waitedFor('2026-10-10T08:40:00.000Z', now)).toBe('1 h')
+    expect(waitedFor('2026-10-10T07:35:00.000Z', now)).toBe('2 h 5 min')
+  })
+
+  it('says where else it reached the person, and nothing for a call that reached no other device', () => {
+    expect(waitedWords(call, now)).toBeUndefined()
+    const words = waitedWords({ ...call, reached: { device: 'iPhone', at: '2026-10-10T09:05:00.000Z' } }, now)
+    expect(words).toMatch(/^Waiting 40 min · sent to your iPhone at \d\d:\d\d$/)
   })
 })

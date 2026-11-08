@@ -19,6 +19,8 @@ export type LiveEvent =
       readonly _tag: 'Streaming'
       readonly threadId: string
       readonly itemId: string
+      /** Where the thread places it. */
+      readonly sequence: number
       readonly kind: 'agent_message' | 'agent_thought'
       readonly agentId: string
       readonly text: string
@@ -66,6 +68,8 @@ export type LiveEvent =
       readonly threadId: string
       readonly attentionId: string
       readonly outcome: 'answered' | 'withdrawn'
+      /** For a request its agent went on without: what it was, and the person's answer, for its lead to be told. */
+      readonly setAside?: { readonly title: string; readonly decision: 'allow' | 'reject' }
     }
 
 export class Live extends Context.Service<

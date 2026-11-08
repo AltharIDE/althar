@@ -269,6 +269,7 @@ describe('the Settings tab', () => {
           .map((one) => one.textContent),
       ).toEqual([
         'Agents, needs you',
+        'MCP servers',
         'Skills',
         'Code hosts and trackers',
         'Work on this Mac',
@@ -308,6 +309,7 @@ describe('the Settings tab', () => {
   it('names its sections as the address does, and takes nothing else for one', () => {
     expect(SECTIONS).toEqual([
       'agents',
+      'mcp-servers',
       'skills',
       'code-hosts',
       'this-mac',

@@ -1,5 +1,5 @@
 import { Lexer, type MarkedToken, type Token } from 'marked'
-import { createContext, memo, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, Fragment, memo, useContext, useMemo, useState, type ReactNode } from 'react'
 
 import { cx } from '../../lib/cx'
 import { usePacedText } from '../../lib/pace'
@@ -14,6 +14,7 @@ import { CodeRef } from '../Code/CodeRef'
 import { type CodeShell, useThreadShell } from '../Shell/Shell'
 import { Table, type TableText } from '../Table/Table'
 import { closedFence, isDiagram } from './drawing'
+import { Fresh, FreshWhole, useFreshly, useFreshness } from './fresh'
 import { CodeBlock, Diagram, type DiagramText } from './Diagram'
 import { blocksOf, type Lexed, lexAll, lexOn } from './lexed'
 import s from './Markdown.module.css'
@@ -30,9 +31,10 @@ import { streamable } from './streaming'
  * (Diagram), mermaid fetched the first time one shows.
  *
  * Still being written (`streaming`), it is shown at an even pace
- * (lib/pace), and without what would change its mind as it grows
- * (streaming.ts); a block read and drawn already isn't read or drawn again
- * for the next words, only the one they are in (lexed.ts).
+ * (lib/pace), its newest words fading in (fresh.tsx), and without what
+ * would change its mind as it grows (streaming.ts); a block read and drawn
+ * already isn't read or drawn again for the next words, only the one they
+ * are in (lexed.ts).
  */
 
 const KNOWN: ReadonlySet<string> = new Set<MarkedToken['type']>([
@@ -145,12 +147,14 @@ export function Markdown({
   const t = useMemo(() => ({ ...markdownText, ...text }), [text])
   const paced = usePacedText(source, streaming)
   const shown = streaming ? streamable(paced) : source
+  const fresh = useFreshness(shown, streaming ? paced : source, streaming)
   // Streaming, read on from where it was settled; else whole.
   const [lexed, setLexed] = useState<Lexed | null>(null)
   const read = !streaming ? null : lexed !== null && lexed.text === shown ? lexed : lexOn(shown, lexed)
   if (read !== null && read !== lexed) setLexed(read)
   const whole = useMemo(() => (streaming ? null : lexAll(shown)), [streaming, shown])
   const doc = read ?? whole ?? lexAll(shown)
+  fresh?.place(doc.tokens)
   const blocks = useMemo(() => blocksOf(doc.tokens), [doc])
   const code = useThreadShell().code
   const finds = code !== undefined
@@ -161,13 +165,15 @@ export function Markdown({
   const drawn = blocks.slice(from, to).map((b, i) => <Block key={i} token={b} defs={doc.defs} base={headingLevel} t={t} />)
   return (
     <div className={cx(s.md, size === 'panel' && s.panel, className)} aria-busy={streaming || undefined} {...rest}>
-      {code !== undefined && names.length > 0 ? (
-        <WithCode code={code} names={names}>
-          {drawn}
-        </WithCode>
-      ) : (
-        drawn
-      )}
+      <Fresh.Provider value={fresh}>
+        {code !== undefined && names.length > 0 ? (
+          <WithCode code={code} names={names}>
+            {drawn}
+          </WithCode>
+        ) : (
+          drawn
+        )}
+      </Fresh.Provider>
     </div>
   )
 }
@@ -280,22 +286,23 @@ function inline(tokens: readonly Token[], t: MarkdownText): ReactNode {
   return tokens.map((token, i) => <Inline key={i} token={token} t={t} />)
 }
 
-/** Words, with the paths written into them that name code as the files they name. */
-function Words({ text }: { text: string }): ReactNode {
+/** Words, with the paths written into them that name code as the files they name; those that came in lately fading in. */
+function Words({ text, token }: { text: string; token: Token }): ReactNode {
   const { found, inLink } = useContext(Found)
-  if (found === null || inLink) return text
+  const freshly = useFreshly(token)
+  if (found === null || inLink) return freshly(text)
   const parts: ReactNode[] = []
   let at = 0
   for (const match of text.matchAll(PLAIN_PATH)) {
     const named = found.get(match[0])
     if (named === undefined) continue
     const start = match.index
-    if (start > at) parts.push(text.slice(at, start))
+    if (start > at) parts.push(<Fragment key={`w${at}`}>{freshly(text.slice(at, start), at)}</Fragment>)
     parts.push(<CodeRef key={start} found={named} plain />)
     at = start + match[0].length
   }
-  if (parts.length === 0) return text
-  parts.push(text.slice(at))
+  if (parts.length === 0) return freshly(text)
+  parts.push(<Fragment key={`w${at}`}>{freshly(text.slice(at), at)}</Fragment>)
   return parts
 }
 
@@ -342,9 +349,9 @@ function Inline({ token, t }: { token: Token; t: MarkdownText }): ReactNode {
   if (!known(token)) return token.raw
   switch (token.type) {
     case 'text':
-      return token.tokens ? inline(token.tokens, t) : <Words text={decode(token.text)} />
+      return token.tokens ? inline(token.tokens, t) : <Words text={decode(token.text)} token={token} />
     case 'escape':
-      return decode(token.text)
+      return <FreshWhole token={token}>{decode(token.text)}</FreshWhole>
     case 'strong':
       return <strong>{inline(token.tokens, t)}</strong>
     case 'em':
@@ -352,7 +359,11 @@ function Inline({ token, t }: { token: Token; t: MarkdownText }): ReactNode {
     case 'del':
       return <del>{inline(token.tokens, t)}</del>
     case 'codespan':
-      return <Codespan text={decode(token.text)} />
+      return (
+        <FreshWhole token={token}>
+          <Codespan text={decode(token.text)} />
+        </FreshWhole>
+      )
     case 'br':
       return <br />
     case 'link': {

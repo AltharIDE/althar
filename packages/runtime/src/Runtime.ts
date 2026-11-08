@@ -22,6 +22,7 @@ import { Launches } from './Launches'
 import { Live } from './Live'
 import { MachineLoad } from './MachineLoad'
 import { Overlaps } from './Overlaps'
+import { Situations } from './Situations'
 import { PlanUsage } from './PlanUsage'
 import { Permissions } from './Permissions'
 import { Questions } from './Questions'
@@ -43,6 +44,8 @@ import { Sessions } from './Sessions'
 import { LeftBehind } from './LeftBehind'
 import { Setups } from './Setups'
 import { Limits } from './Limits'
+import { AutoModels } from './modelMoves'
+import { FastLane } from './fastLane'
 import { ModelFacts } from './ModelFacts'
 import { Models } from './Models'
 import { SignIns } from './SignIns'
@@ -111,7 +114,12 @@ export const layer = (options: RuntimeLayerOptions) => {
   // The models each agent offers, read from its sessions, or asked of it once: sessions name them to the coordinator.
   // Whether the computer is online, as the app says, and whether an agent's service answers (ADR-060).
   const connected = startupLayer('connectivity', Connectivity.layer).pipe(Layer.provideMerge(base))
-  const able = Layer.mergeAll(startupLayer('limits', Limits.layer), startupLayer('planusage', PlanUsage.layer)).pipe(
+  const able = Layer.mergeAll(
+    startupLayer('limits', Limits.layer),
+    startupLayer('planusage', PlanUsage.layer),
+    // Auto moves a lead to a lighter model on the plan's usage: it reads the same limits (modelMoves.ts).
+    AutoModels.layer.pipe(Layer.provideMerge(startupLayer('limits', Limits.layer))),
+  ).pipe(
     Layer.provideMerge(startupLayer('models', Models.layer)),
     Layer.provideMerge(
       startupLayer('signins', SignIns.layer).pipe(
@@ -139,7 +147,10 @@ export const layer = (options: RuntimeLayerOptions) => {
   // A task's issue, and changes to issues on the person's trackers, which its pull request offers as it opens and merges.
   const tracked = IssueChanges.layer.pipe(Layer.provideMerge(Issues.layer.pipe(Layer.provideMerge(busy))))
   // A task's pull request, the issues the coordinator drafts and the reviews leads draft, through the person's connections to code hosts and trackers.
-  const linked = Layer.mergeAll(Changes.layer, IssueDrafts.layer, Reviews.layer).pipe(Layer.provideMerge(tracked))
+  // Its merge starts the review of a small change, and Make it a full task starts one before it merges (fastLane.ts).
+  const reviewing = Layer.mergeAll(Reviews.layer, IssueDrafts.layer).pipe(Layer.provideMerge(tracked))
+  const fastLane = FastLane.layer.pipe(Layer.provideMerge(reviewing))
+  const linked = Changes.layer.pipe(Layer.provideMerge(fastLane), Layer.provideMerge(reviewing), Layer.provideMerge(tracked))
   // A task's screenshots, in one comment on its pull request, kept as its Outputs show them (ADR-077).
   const shown = PullRequestScreenshots.layer.pipe(Layer.provideMerge(linked))
   // Runs drive a task's steps; plans start runs when their time comes; the person steers a task's course; the coordinator plans tasks and passes messages on.
@@ -163,6 +174,8 @@ export const layer = (options: RuntimeLayerOptions) => {
         SettingsTools.layer,
         MachineLoad.layer,
         Overlaps.layer,
+        // A child that ended, and a call that waits while the person is away (Situations.ts).
+        Situations.layer,
         startupLayer('search-index', fillIndex),
       ).pipe(Layer.provideMerge(automating)),
     ),

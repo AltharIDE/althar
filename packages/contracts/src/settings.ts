@@ -10,6 +10,7 @@ import { Schema } from 'effect'
 
 export const SETTINGS_SECTIONS = [
   'agents',
+  'mcp-servers',
   'skills',
   'code-hosts',
   'this-mac',

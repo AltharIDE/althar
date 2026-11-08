@@ -27,6 +27,11 @@ export const Closed: Story = {}
 /** While it works, waits on you, or waits out a limit: stop it, or abandon it. */
 export const Working: Story = { args: { defaultOpen: true } }
 /** Stopped by you, its step cut short: resume it, or abandon it. */
+/** A task at work: its team still changes, as a task that hasn't begun does. */
+export const ChangingTheTeam: Story = { args: { onChangeTeam: fn(), defaultOpen: true } }
+
+export const ChangingTheTeamDark: Story = { ...ChangingTheTeam, globals: { theme: 'dark' } }
+
 export const Stopped: Story = { args: { onStop: undefined, onResume: fn(), defaultOpen: true } }
 /** Its plan waits to start, counting down or held: start it now, or abandon it. */
 export const Planned: Story = { args: { onOpen: undefined, onStop: undefined, onStartNow: fn(), defaultOpen: true } }

@@ -217,6 +217,40 @@ describe('running a branch or a pull request', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('runs a repository’s branch only what that repository runs, and refuses what another does', () =>
+    Effect.gen(function* () {
+      const launches = yield* Launches
+      const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
+      for (const name of ['api', 'web']) {
+        const path = join(folder, name)
+        mkdirSync(path)
+        git(path, 'init', '-q', '-b', 'main')
+        writeFileSync(join(path, 'package.json'), JSON.stringify({ name, scripts: { dev: `node -e "console.log('${name}')"` } }))
+        git(path, 'add', '.')
+        git(path, 'commit', '-q', '-m', 'Start')
+        const remote = mkdtempSync(join(tmpdir(), 'althar-remote-'))
+        git(remote, 'init', '-q', '--bare', '-b', 'main')
+        git(path, 'remote', 'add', 'origin', remote)
+        git(path, 'push', '-q', 'origin', 'main')
+        // The same branch name in both: it is the picked repository's, whichever runs.
+        git(path, 'push', '-q', 'origin', 'main:feature/x')
+      }
+      const { projectId } = yield* open(folder)
+      const [api, web] = yield* launches.runnables(projectId, null)
+      const ref = { kind: 'branch', name: 'feature/x' } as const
+      // web's branch asked to run api's: another repository's, so nothing is fetched into either.
+      const refused = yield* Effect.flip(
+        launches.start({ projectId, taskId: null, threadId: null, repository: 'web', runnableId: api?.id ?? '', ref }),
+      )
+      assert.deepInclude(refused, { _tag: 'LaunchRefused', why: 'which' })
+      assert.include((refused as { message: string }).message, 'another repository than web')
+      // What web runs, on web's branch, runs.
+      const started = yield* launches.start({ projectId, taskId: null, threadId: null, repository: 'web', runnableId: web?.id ?? '', ref })
+      assert.deepInclude(started, { branch: 'feature/x', runnableId: web?.id ?? null })
+      yield* launches.stop(started.id)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('the coordinator runs a branch when the person asks to start one, rather than starting a task', () =>
     Effect.gen(function* () {
       const { path, branch } = withRemote()

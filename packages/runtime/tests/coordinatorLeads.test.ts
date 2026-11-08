@@ -118,7 +118,7 @@ describe('the buttons on a task’s lead, as tools', () => {
       }
       const titles = (thread: string) => Effect.map(notices(thread), (rows) => rows.map((row) => row.title ?? ''))
 
-      // As the model picker and Hand over: a session of the new agent, said in both threads with why.
+      // From its next turn, by the hand-over of the model picker: said in both threads with why, and when it takes effect.
       assert.match(
         yield* callTool(coordinator, 'change_lead', {
           task: one.slug,
@@ -126,9 +126,12 @@ describe('the buttons on a task’s lead, as tools', () => {
           message: 'Carry on from the sketch.',
           why: 'codex is out',
         }),
-        /^sketch-the-settings's lead is claude-code now, briefed with its thread so far/,
+        /^sketch-the-settings: changed the lead to Fake claude-code's default model\. It takes over from its next turn\. Both threads have a line saying so\.$/,
       )
-      assert.include(yield* titles(one.threadId), 'The coordinator put claude-code on this task: codex is out')
+      assert.include(
+        yield* titles(one.threadId),
+        "The coordinator changed the lead to Fake claude-code's default model: codex is out. It takes over from its next turn.",
+      )
       assert.match(
         yield* callTool(lead, 'change_lead', { task: other.slug, lead: { agent: 'codex' } }),
         /is your own task: the person changes who leads it/,

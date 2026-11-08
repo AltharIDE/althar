@@ -1,16 +1,18 @@
 # ADR-004: The coordinator is an agent session with Althar's tools
 
-- **Status:** Accepted; partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06): the
-  coordinator is optional, shares one pool of tools, MCP servers and skills
-  with leads, and changes no code for tidiness, not as a safety boundary
+- **Status:** Accepted; partly superseded by [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) (2026-11-06): tasks can
+  also start without the coordinator, while the coordinator itself is always
+  on, it shares one pool of tools, MCP servers and skills with leads, and it
+  changes no code for tidiness, not as a safety boundary
 - **Date:** 2026-09-28
 - **Amended:** 2026-09-30, on what read-only rests on. Agents' plan modes
   refuse MCP tools (Claude Code's plan mode, OpenCode's plan agent), so a
   coordinator in them can't plan anything.
 - **Owner:** Repository maintainers
 - **Context:** Each project has a coordinator that plans and hands out work
-  and never writes code (optional since ADR-097: tasks also start from the
-  board, the composer or a lead). Its conversation is kept in full, its agent can be
+  and never writes code. It is always on, with no switch, setting or mode to
+  turn it off; tasks also start from the board, the composer or a lead. Its
+  conversation is kept in full, its agent can be
   switched, and continuous compaction may come later.
 - **Decision:**
   - The coordinator is an ordinary agent session, over ACP, on any agent.

@@ -26,13 +26,14 @@ export const FIRST_SECTION: Section = 'agents'
 
 /** The sections in their groups, a little apart down the side. */
 export const GROUPS: ReadonlyArray<ReadonlyArray<Section>> = [
-  ['agents', 'skills', 'code-hosts'],
+  ['agents', 'mcp-servers', 'skills', 'code-hosts'],
   ['this-mac', 'plans-and-reviews', 'new-projects', 'reviews', 'notifications', 'dictation', 'appearance', 'editor', 'browser'],
   ['about'],
 ]
 
 export const sectionText: Readonly<Record<Section, { readonly title: string; readonly icon: IconName }>> = {
   agents: { title: 'Agents', icon: 'agents' },
+  'mcp-servers': { title: 'MCP servers', icon: 'plug' },
   skills: { title: 'Skills', icon: 'knowledge' },
   'code-hosts': { title: 'Code hosts and trackers', icon: 'plug' },
   'this-mac': { title: `Work on ${device.this}`, icon: 'load' },

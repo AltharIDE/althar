@@ -130,6 +130,9 @@ export const agentSaid = (error: unknown): string | undefined => {
     // An agent that couldn't start: the sentence Althar wrote when it failed, or nothing where there was none to say.
     case 'SessionFailed':
       return text(error, 'summary')
+    // What the fast lane couldn't do, as it was written for the person.
+    case 'FastLaneRefused':
+      return text(error, 'message')
     default:
       return undefined
   }
@@ -216,8 +219,12 @@ export const words = (
         return noteRefused[text(error, 'why') as NoteRefused['why']] ?? 'Althar can’t keep that note.'
       case 'SessionRunning':
         return 'An agent is already working on this task.'
+      case 'RetryRefused':
+        return 'There is no failed turn or lost connection to try again.'
       case 'NoSession':
         return 'The task isn’t running.'
+      case 'NothingToClear':
+        return 'The view is already clear.'
       case 'InstallFailed':
         return text(error, 'summary')
       case 'SessionFailed': {
@@ -336,6 +343,7 @@ export const words = (
       case 'LaunchRefused':
       case 'AttachRefused':
       case 'ReviewRefused':
+      case 'FastLaneRefused':
       case 'ScreenshotsRefused':
         return text(error, 'message')
       case 'AutomationRefused':
@@ -500,6 +508,8 @@ const taskRefused = {
   title_too_long: 'Keep the title to a few words.',
   folder_in_use: 'Something is running in the task’s folder. Stop it, then remove the folder.',
   folder_in_way: 'Something else is where the task’s folder goes. Move it away, then try again.',
+  review_done: 'Its review is done, so its reviewer can’t change.',
+  no_lead: 'The task has no lead to change.',
 } as const satisfies Record<TaskRefused['why'], string>
 
 /** Why an issue draft can't change, by where it stands. */
@@ -566,6 +576,8 @@ export const expected = new Set([
   'UnknownAgent',
   'SessionRunning',
   'NoSession',
+  'RetryRefused',
+  'NothingToClear',
   'AttentionClosed',
   'AlwaysNotOffered',
   'QuestionUnanswered',

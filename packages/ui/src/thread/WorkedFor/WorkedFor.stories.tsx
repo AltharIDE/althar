@@ -3,11 +3,13 @@ import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import { threadDecorator } from '../../storybook/ThreadFrame'
 import { Delta } from '../../primitives/FileChanges/FileChanges'
+import { Markdown } from '../Markdown/Markdown'
+import { Reasoning } from '../Reasoning/Reasoning'
 import { Tool, ToolGroup } from '../Tool/Tool'
 import { Prose, Turn } from '../Turn/Turn'
 import { Step } from '../Step/Step'
 import { OPUS } from '../../fixtures/models'
-import { WorkedFor } from './WorkedFor'
+import { WorkedFor, WorkNow } from './WorkedFor'
 import { routerFile } from '../../fixtures/meridian'
 import { useThreadShell } from '../Shell/Shell'
 import { StepState, ToolKind } from '../../foundations/vocabulary'
@@ -27,8 +29,15 @@ function EditedRouter() {
   )
 }
 
+const SAID = 'I’ll find where refunds skip the partner limit, and wrap them the way charges are.'
+
 const work = (
   <>
+    <Markdown source={SAID} />
+    <Reasoning
+      source="Charges wrap the handler in withPartnerLimit. Refunds were added later behind their own router and never picked it up."
+      took="6s"
+    />
     <ToolGroup summary="Explored 3 files" took="8s">
       <Tool kind={ToolKind.Read} verb="Read" target="src/charges/limit.ts" meta="88 lines" />
     </ToolGroup>
@@ -41,14 +50,15 @@ const meta = {
   title: 'Thread/WorkedFor',
   component: WorkedFor,
   decorators: [threadDecorator],
-  args: { took: '12m 40s', summary: '3 files edited · 4 commands · 1 search', children: work },
+  args: { took: '12m 40s', children: work },
 } satisfies Meta<typeof WorkedFor>
 export default meta
 type Story = StoryObj<typeof meta>
 
+/** Done: the turn's work is its header alone, how long it worked; its answer stands under it. */
 export const Folded: Story = {}
 
-/** Opening it shows what the turn did. */
+/** Opening it shows the whole trail: what it said on the way, its thoughts, its tools. */
 export const Opening: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
@@ -62,16 +72,55 @@ export const Opening: Story = {
 }
 export const Open: Story = { args: { defaultOpen: true } }
 
-/** While the turn runs, its work folds under how long it has worked so far, and what it is doing now. */
+/** Just started: how long so far, and that it is thinking. */
+export const Thinking: Story = {
+  args: { live: true, took: '4s', now: <WorkNow>Thinking</WorkNow> },
+}
+
+/**
+ * At work: what it has said on the way, in its own words, and one line for
+ * what it is doing now, replaced in place as it moves on.
+ */
 export const Working: Story = {
-  args: { live: true, took: '1m 12s', summary: 'Reading src/refunds/router.ts' },
+  args: {
+    live: true,
+    took: '1m 12s',
+    said: <Markdown source={SAID} />,
+    now: <WorkNow icon="file">Reading src/refunds/router.ts</WorkNow>,
+  },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     const row = c.getByRole('button', { name: /Working for 1m 12s/ })
     await expect(row).toHaveAttribute('aria-busy', 'true')
-    await expect(c.getByText('Reading src/refunds/router.ts')).toBeInTheDocument()
+    await expect(c.getByText('Reading src/refunds/router.ts')).toBeVisible()
+    await expect(c.getByText(SAID)).toBeVisible()
   },
 }
+
+/** At work, its step a long command: the line ends in an ellipsis, the whole of it on hover. */
+export const WorkingOnALongStep: Story = {
+  args: {
+    live: true,
+    took: '3m 2s',
+    said: <Markdown source={SAID} />,
+    now: (
+      <WorkNow icon="terminal">
+        Running bunx vitest run tests/refunds/router.test.ts tests/charges/limit.test.ts tests/partners/bucket.test.ts --maxWorkers=1
+      </WorkNow>
+    ),
+  },
+}
+
+/** A turn, then its answer: the work folded under how long it took, the answer under it. */
+export const OverItsAnswer: Story = {
+  render: (args) => (
+    <Turn model={OPUS} at="4m ago">
+      <WorkedFor {...args} took="19s" />
+      <Prose>Refunds now go through the partner limit, as charges do: they share the partner’s bucket, so the budget stays one.</Prose>
+    </Turn>
+  ),
+}
+
 /**
  * A lead that carries on after a step's result, woken by a command it left
  * running, is a turn of its own: it folds its work under its own time, and
@@ -81,9 +130,9 @@ export const Working: Story = {
 export const SelfStarted: Story = {
   render: (args) => (
     <>
-      <WorkedFor {...args} took="9m 12s" summary="4 files edited · 6 commands" />
+      <WorkedFor {...args} took="9m 12s" />
       <Step n={3} of={4} label="Publish" model={OPUS} state={StepState.Done} outcome="Pull request opened" took="9m" />
-      <WorkedFor {...args} took="3m 40s" summary="2 commands" />
+      <WorkedFor {...args} took="3m 40s" />
       <Turn model={OPUS} at="4m ago" bare>
         <Prose>
           The log isn’t where I expected; it was under the build output, which shows whether branch coverage clears 90%. It does: the verify
@@ -93,7 +142,6 @@ export const SelfStarted: Story = {
     </>
   ),
 }
-export const WithoutSummary: Story = { args: { summary: undefined } }
 
 export const AllStates: Story = {
   parameters: statesParameters,
@@ -107,8 +155,26 @@ export const AllStates: Story = {
           node: <WorkedFor {...args} />,
         })),
         { state: 'open', node: <WorkedFor {...args} defaultOpen /> },
-        { state: 'no summary', node: <WorkedFor {...args} summary={undefined} /> },
-        { state: 'working', node: <WorkedFor {...args} live took="1m 12s" summary="Reading src/refunds/router.ts" /> },
+        { state: 'thinking', node: <WorkedFor {...args} live took="4s" now={<WorkNow>Thinking</WorkNow>} /> },
+        {
+          state: 'working',
+          node: (
+            <WorkedFor
+              {...args}
+              live
+              took="1m 12s"
+              said={<Markdown source={SAID} />}
+              now={<WorkNow icon="file">Reading src/refunds/router.ts</WorkNow>}
+            />
+          ),
+        },
+        {
+          state: 'working, hover',
+          force: 'hover',
+          node: <WorkedFor {...args} live took="1m 12s" now={<WorkNow icon="search">Searching POLL_EVERY</WorkNow>} />,
+        },
+        { state: 'working, writing', node: <WorkedFor {...args} live took="1m 30s" said={<Markdown source={SAID} />} /> },
+        { state: 'working, opened', node: <WorkedFor {...args} live took="1m 12s" defaultOpen now={<WorkNow>Thinking</WorkNow>} /> },
       ]}
     />
   ),

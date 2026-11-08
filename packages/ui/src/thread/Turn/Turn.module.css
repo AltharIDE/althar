@@ -9,8 +9,9 @@
 .turn > .head + * {
   margin-top: 0;
 }
-.turn > [data-rhythm='fold'][data-state='closed'] + * {
-  margin-top: 8px;
+/* under a turn's work, its answer stands where what it said on the way stood, a breath under the header */
+.turn > [data-rhythm='fold'] + * {
+  margin-top: 12px;
 }
 /* a record or a card keeps its own distance, even from the head */
 .turn > * + :is([data-rhythm='change'], [data-rhythm='allowed']) {
