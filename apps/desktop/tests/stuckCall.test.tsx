@@ -174,6 +174,19 @@ const buttonsOf = async (step: StuckStep) => {
   return names
 }
 
+describe('a lead waiting on the person', () => {
+  it('says it is waiting, with its question, and only takes the answer', async () => {
+    const onAnswer = show(stuck({ why: 'waiting_on_person', detail: 'Which ADRs should the compaction keep?' }))
+    expect(await screen.findByText('Waiting on you')).toBeTruthy()
+    expect(screen.getByText('Which ADRs should the compaction keep?')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Tell the lead' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Answer the lead' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'What should it do?' }), 'Keep the dozen current-state decisions.')
+    await userEvent.click(screen.getByRole('button', { name: 'Send the answer' }))
+    expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'tell', note: 'Keep the dozen current-state decisions.' })
+  })
+})
+
 describe('the ways on each card offers', () => {
   const report = 'Report this'
 

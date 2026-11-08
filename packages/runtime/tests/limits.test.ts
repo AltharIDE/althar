@@ -25,7 +25,7 @@ import { type PlanStep, Runs, type StuckAnswer } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { RULES } from '../src/rules'
 import { Sessions } from '../src/Sessions'
-import { atReset, callTool, fakeAgents, items, later, onTestClock, repository, runtime, until } from './support'
+import { atReset, callTool, fakeAgents, items, later, onTestClock, repository, runtime, until, withWork } from './support'
 import type { ToolAccess } from '../src/ToolServer'
 
 /*
@@ -52,6 +52,10 @@ const planned = (steps: ReadonlyArray<PlanStep>, title = 'Retry the checkout [le
       envelope: yield* Runtime.envelope('task.create', {}),
       projectId: project.projectId,
       title,
+      description: withWork(
+        title,
+        steps.some((step) => step.key === 'review'),
+      ),
       draft: true,
     })
     const planId = yield* plans.propose({

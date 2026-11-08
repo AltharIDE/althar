@@ -2767,6 +2767,9 @@ export class Changes extends Context.Service<
               return { repository, plan, settle }
             }),
           )
+          // Nothing of the task's own is ahead of its default branch: its work is in already, so nothing is merged and nothing says it was.
+          if (plans.every(({ plan }) => plan.kind === 'already'))
+            return yield* cant('nothing', '', { into: [...new Set(repositories.map(into))].join(' and ') })
           // A checkout, or a submodule the merge moves, that can't be read stops the merge, with its path and git's own words, before anything else.
           for (const { repository, plan } of plans)
             if (plan.kind === 'unreadable') return yield* cant('unreadable', named(repository, `${plan.checkout}\n${plan.detail}`))
@@ -2821,11 +2824,12 @@ export class Changes extends Context.Service<
                   into: into(refused.repository),
                   files: refused.problem?.kind === 'busy' ? refused.problem.files : [],
                 })
-          for (const { settle } of plans) yield* settle
-          const merged = plans.map(({ repository, plan }) => ({
+          const moved = plans.filter(({ plan }) => plan.kind === 'move')
+          for (const { settle } of moved) yield* settle
+          const merged = moved.map(({ repository }) => ({
             repository: repository.name,
             branch: repository.base,
-            already: plan.kind === 'already',
+            already: false,
           }))
           yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
             source: 'runtime',
@@ -4566,8 +4570,16 @@ export class Changes extends Context.Service<
           const links = yield* sql<{ state: string | null }>`
             SELECT json_extract(snapshot, '$.state') AS state FROM external_links WHERE task_id = ${taskId} AND kind = 'change'`
           if (links.some((link) => link.state !== 'closed')) return false
-          const worktrees = yield* sql<{ path: string; baseCommit: string | null; baseRef: string | null }>`
-            SELECT w.path, w.base_commit, w.base_ref FROM workspaces w
+          const worktrees = yield* sql<{
+            path: string
+            baseCommit: string | null
+            baseRef: string | null
+            root: string | null
+            defaultBase: string | null
+          }>`
+            SELECT w.path, w.base_commit, w.base_ref, l.path AS root, coalesce(w.toward, b.default_base_ref, w.base_ref) AS default_base
+            FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+            LEFT JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
             WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.state = 'ready'`
           // No branch of its own to read, or one whose folder is gone (deleted, or on a volume not mounted): not known to be empty.
           if (worktrees.length === 0) return false
@@ -4577,6 +4589,12 @@ export class Changes extends Context.Service<
             const base = worktree.baseCommit ?? worktree.baseRef
             // Where git can't say what it started from, it isn't known to be empty.
             if (base === null) return false
+            // Its branch is in the default branch already, so it has nothing of its own, whatever it started from.
+            const head = yield* commitOf(worktree.path, 'HEAD').pipe(Effect.orElseSucceed(() => ''))
+            if (head !== '' && worktree.root !== null && worktree.defaultBase !== null) {
+              const inDefault = yield* gitOutcome(worktree.root, 'merge-base', '--is-ancestor', head, `refs/heads/${worktree.defaultBase}`)
+              if (inDefault.code === 0) continue
+            }
             if ((yield* commitsAhead(worktree.path, base)) > 0) return false
             if ((yield* uncommittedFiles(worktree.path)).some((file) => !pictures(worktree.path, file))) return false
           }
@@ -4645,6 +4663,23 @@ export class Changes extends Context.Service<
           // A round of work under way settles it when it ends, by what it left (ADR-034).
           const [working] = yield* sql<{ id: string }>`SELECT id FROM runs WHERE task_id = ${taskId} AND state = 'running' LIMIT 1`
           if (working !== undefined) return yield* touchCard(taskId)
+          // Each repository merged here is recorded as merged here, not left to be read from a branch that may already have been in the default branch.
+          if (task.state === 'open' && by.here !== undefined) {
+            const recorded = by.here.filter((one) => !one.already)
+            if (recorded.length > 0) {
+              const [now] = yield* sql<{ revision: number }>`SELECT revision FROM tasks WHERE id = ${taskId}`
+              for (const one of recorded)
+                yield* fact({
+                  projectId: task.projectId,
+                  aggregateType: 'task',
+                  aggregateId: taskId,
+                  revision: now?.revision ?? 1,
+                  type: 'task.merged_here',
+                  payload: { repository: one.repository, branch: one.branch },
+                  actorId: by.actorId,
+                })
+            }
+          }
           const { open, unmerged } = yield* mergeOf(taskId)
           // Commits after a merged pull request are in none yet: a new one takes them.
           const after =

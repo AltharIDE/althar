@@ -1244,8 +1244,11 @@ the rules keep for them does ([ADR-021](../decisions/021-a-question-outlives-its
 
 As of 10 October 2026, Claude Code asks in a form. Codex offers
 request_user_input only in its Plan mode, which a lead isn't in, and OpenCode
-keeps its question tool off over ACP; both ask in their own words, and a lead
-that stops to wait is reminded to report its step (05).
+keeps its question tool off over ACP. A lead whose agent has no way to ask
+still needn't guess or report its step done: it calls `wait_for_person` with
+its question and ends its turn. Its step waits in Needs you, with the question,
+and the person's answer starts it again where it stopped (05). `finish_step`
+says not to be used for work that waits on the person.
 
 ## Approval boundary
 

@@ -138,7 +138,7 @@ const blankAgain = (step: StuckInfo['step'], round: boolean) =>
     ? "Your last turn ended before you could do anything. Carry on with the review; when it's done, call Althar's report_review tool with your verdict, a summary and your findings."
     : round
       ? 'Your last turn ended before you could do anything. Carry on with what you were last asked.'
-      : "Your last turn ended before you could do anything. Carry on with the task from where it stands. When it's done, call Althar's finish_step tool with your summary."
+      : "Your last turn ended before you could do anything. Carry on with the task from where it stands. When it's done, call Althar's finish_step tool with your summary. If it waits on the person, call wait_for_person with your question and end your turn."
 
 export const PlanStep = Schema.Struct({
   key: Schema.Literals(['implement', 'review']),
@@ -250,6 +250,8 @@ const Finished = Schema.Struct({
     ),
   ),
 })
+/** A lead stopping to wait for the person: the question it needs answered before it can go on. */
+const WaitingForPerson = Schema.Struct({ question: Schema.String })
 const Shown = Schema.Struct({ pictures: Schema.Array(PictureGiven) })
 /** The longest a finding's title is kept: past it, a reviewer wrote its claim there, cut at a word with an ellipsis. */
 const TITLE_LONGEST = 120
@@ -422,6 +424,8 @@ export type StuckWhy =
   | 'transient'
   /** Its agent's account is signed out: reminding it can't help; signing it in again can. */
   | 'signed_out'
+  /** The lead stopped to wait for the person's answer, which starts it again. */
+  | 'waiting_on_person'
 
 /** What a stuck step's call says: the step, why, what went wrong in words, who was on it, the round, and the findings still open. */
 export interface StuckInfo {
@@ -1658,9 +1662,9 @@ export class Runs extends Context.Service<
 
       /** Told once when its turn ends without the report its step needs. */
       const reminders = {
-        lead: "Your step isn't done until you call Althar's finish_step tool. If you have done it, call finish_step now with your summary. If you can't go on without the person, call it saying what you need from them.",
+        lead: "Your step isn't done until you call Althar's finish_step tool. If you have done it, call finish_step now with your summary. If you can't go on without the person, call wait_for_person with your question and end your turn; don't call finish_step for work that waits on them.",
         round:
-          "Your step isn't done until you call Althar's finish_step tool: you changed the task's work since the person last wrote to you. If you have done what they asked, call finish_step now with your summary and your evidence. If you can't go on without the person, call it saying what you need from them.",
+          "Your step isn't done until you call Althar's finish_step tool: you changed the task's work since the person last wrote to you. If you have done what they asked, call finish_step now with your summary and your evidence. If you can't go on without the person, call wait_for_person with your question and end your turn; don't call finish_step for work that waits on them.",
         reviewer:
           "Your review isn't done until you call Althar's report_review tool. Call it now with your verdict, a summary and your findings.",
       }
@@ -3637,6 +3641,48 @@ export class Runs extends Context.Service<
         })
 
       /**
+       * The lead ends its turn waiting on the person's answer, its step still
+       * open: the call says what it asks, the task waits in Needs you, and the
+       * person's answer starts the lead again where it stopped. Never a step
+       * done, so no review runs and the task isn't ready.
+       */
+      const waitForPerson = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const { question } = yield* read(WaitingForPerson, input)
+          const asked = question.replace(/\s+/g, ' ').trim()
+          if (asked === '')
+            return yield* new ToolRefused({
+              message: 'Ask the person a question in a line, so they know what you need before you end your turn.',
+            })
+          if (access.taskId === null)
+            return yield* new ToolRefused({
+              message: 'Only a task’s lead waits on the person: the coordinator talks with them in its thread.',
+            })
+          const current = yield* currentRun(access.taskId)
+          const attempt = current === undefined ? undefined : yield* running(current, ['implement', 'settle'])
+          if (current === undefined || attempt === undefined)
+            return yield* new ToolRefused({ message: 'No step is waiting on you, so there is nothing to wait on the person for.' })
+          const step = attempt.nodeKey === 'settle' ? 'settle' : 'implement'
+          const [agent] = yield* sql<{ agentId: string }>`
+            SELECT agent_id FROM provider_sessions WHERE thread_id = ${access.threadId}
+            ORDER BY started_at DESC, rowid DESC LIMIT 1`
+          yield* stuck(
+            current,
+            { id: attempt.id },
+            {
+              step,
+              why: 'waiting_on_person',
+              detail: asked,
+              agentId: agent?.agentId ?? null,
+              round: attempt.iteration,
+              open: 0,
+            },
+          )
+          return `Althar has your question. Your step waits in the person’s Needs you; their answer starts you again. End your turn now.`
+        })
+
+      /**
        * The lead says its step is done: Implement, or a round of settling. A
        * description it gives reaches the task's pull requests open already,
        * which opened with an earlier one; what became of each is said after.
@@ -3728,6 +3774,15 @@ export class Runs extends Context.Service<
           if (current === undefined || attempt === undefined)
             return yield* new ToolRefused({ message: 'No step is waiting on you, so Althar keeps no summary now.' })
           const step = attempt.nodeKey === 'settle' ? 'settle' : 'implement'
+          // A step waiting on the person's answer isn't done: their answer starts it again.
+          const [waitingOnPerson] = yield* sql<{ id: string }>`
+            SELECT id FROM attention_requests WHERE task_id = ${current.taskId} AND kind = 'stuck' AND state = 'open'
+              AND json_extract(payload, '$.why') = 'waiting_on_person' LIMIT 1`
+          if (waitingOnPerson !== undefined)
+            return yield* new ToolRefused({
+              message:
+                'You are waiting on the person’s answer: end your turn. Their answer starts you again; don’t call finish_step until the work is done.',
+            })
           // A round of work that made nothing new ends with its summary, and the task is back where it was.
           const round = current.planId === null && step === 'implement' ? roundOf(attempt.input) : undefined
           const quiet = round !== undefined && !(yield* madeSince(current.taskId, round.start))
@@ -3818,6 +3873,11 @@ export class Runs extends Context.Service<
             return `Althar has your summary. Nothing ${plain ? 'in the repository' : 'on the branch'} changed this round, so the task is back where it was.`
           }
           if (step === 'implement') {
+            // Nothing on its branch to read: no review runs, and the task goes on to its ending as it is.
+            if (yield* changes.nothingBuilt(current.taskId).pipe(Effect.orElseSucceed(() => false))) {
+              yield* conclude(current)
+              return reply('Althar has your summary. Nothing was built, so there is nothing to review; the task is ready for the person.')
+            }
             const next = yield* review(current, 0)
             return reply(
               next === undefined
@@ -4040,7 +4100,7 @@ export class Runs extends Context.Service<
       yield* toolServer.serve('lead', [
         tool(
           'finish_step',
-          "Tells Althar you have done your step: the task, or settling a review's findings. The summary is what the person reads instead of your whole turn: a few lines on what you changed, how you checked it, and anything left open. In `built`, what the task has built as it stands now, which the person reads at its end. Where the task ends in a pull request, its description in `descriptions`, for whoever reviews it on the code host. With it, the evidence you gathered that the change does what it should, and in `unverified` what you couldn't show.",
+          "Tells Althar you have done your step: the task, or settling a review's findings. Don't call it while the work isn't done because it waits on the person: call wait_for_person with your question instead. The summary is what the person reads instead of your whole turn: a few lines on what you changed, how you checked it, and anything left open. In `built`, what the task has built as it stands now, which the person reads at its end. Where the task ends in a pull request, its description in `descriptions`, for whoever reviews it on the code host. With it, the evidence you gathered that the change does what it should, and in `unverified` what you couldn't show.",
           {
             type: 'object',
             properties: {
@@ -4139,6 +4199,22 @@ export class Runs extends Context.Service<
             required: ['summary'],
           },
           finishStep,
+        ),
+        tool(
+          'wait_for_person',
+          "Ends your turn waiting on the person's answer, without finishing your step: ask your question in a line, and the task waits in their Needs you until they answer, when their answer starts you again. Use this instead of finish_step when the work isn't done because it waits on the person. Don't call finish_step while you wait.",
+          {
+            type: 'object',
+            properties: {
+              question: {
+                type: 'string',
+                description:
+                  'The question, in one line, the decision in a few words, with the options where there are any. Put the background in what you write just before it, which stays in the thread.',
+              },
+            },
+            required: ['question'],
+          },
+          waitForPerson,
         ),
       ])
       // Showing pictures is in the shared set (ADR-097): a lead's from its worktree, the coordinator's from its copies.

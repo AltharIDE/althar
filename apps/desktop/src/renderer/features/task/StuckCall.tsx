@@ -63,6 +63,8 @@ export const waysOn: Record<Why, { readonly lead: Ways; readonly review: Ways }>
   refused: { lead: tellFirst, review: anotherFirst },
   // Signed in again in Settings first, then tried again.
   signed_out: { lead: { ...againFirst, fix: 'signIn' }, review: { ...againFirst, fix: 'signIn' } },
+  // The lead stopped to wait for the person's answer: they give it, and it starts again.
+  waiting_on_person: { lead: { ways: ['tell'], primary: 'tell' }, review: { ways: ['tell'], primary: 'tell' } },
 }
 
 /** The pull request, which Althar opens itself: tried again as it was, or gone on without; its host connected first, where it isn't. */
@@ -106,6 +108,8 @@ export const text = {
         return `${agent} refused to go on.`
       case 'signed_out':
         return `${agent} is signed out.`
+      case 'waiting_on_person':
+        return stuck.detail ?? 'It needs your answer before it can go on.'
     }
   },
   /** How many rounds of review the task ran, not today's setting; its last settle changed code no review has seen. */
@@ -323,6 +327,22 @@ function StuckCard({
   // Started again, let carry on, or tried once back, a lead's agent says so in its own words; any other tries again.
   const again = review ? undefined : out ? text.out : (text.again as Partial<Record<Why, typeof text.out>>)[stuck.why]
   const lastRound = stuck.why === 'round_limit'
+  const waiting = stuck.why === 'waiting_on_person'
+  const words = waiting
+    ? { kicker: 'Waiting on you', tell: 'Answer the lead', tellPlaceholder: 'What should it do?', send: 'Send the answer' }
+    : again !== undefined
+      ? { again: again.again(agent), tryingAgain: again.tryingAgain(agent) }
+      : review
+        ? {
+            again: text.review.again,
+            tryingAgain: text.review.tryingAgain,
+            retry: text.review.retry,
+            retryLabel: text.review.retryLabel,
+            retried: text.review.retried,
+            abandon: lastRound ? text.review.accept : text.review.skip,
+            abandoned: lastRound ? text.review.accepted : text.review.skipped,
+          }
+        : undefined
   return (
     <>
       <Stuck
@@ -344,21 +364,7 @@ function StuckCard({
         {...fixing}
         {...(offers('abandon') ? { onAbandon: () => onAnswer(request.id, { kind: 'abandon' }) } : {})}
         {...reporting(text.step[stuck.step])}
-        {...(again !== undefined
-          ? { text: { again: again.again(agent), tryingAgain: again.tryingAgain(agent) } }
-          : review
-            ? {
-                text: {
-                  again: text.review.again,
-                  tryingAgain: text.review.tryingAgain,
-                  retry: text.review.retry,
-                  retryLabel: text.review.retryLabel,
-                  retried: text.review.retried,
-                  abandon: lastRound ? text.review.accept : text.review.skip,
-                  abandoned: lastRound ? text.review.accepted : text.review.skipped,
-                },
-              }
-            : {})}
+        {...(words === undefined ? {} : { text: words })}
       />
       {browser}
     </>

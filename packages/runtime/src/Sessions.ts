@@ -3367,7 +3367,7 @@ export class Sessions extends Context.Service<
                   ].join(' '),
                 ]),
             // How the step ends: the lead says so, with what the person reads instead of the whole turn.
-            "When you have done the task, or can't go further without the person, call Althar's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did.",
+            "When you have done the task, call Althar's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did. If you can't go further without the person's answer, call wait_for_person with your question and end your turn: the task waits in their Needs you, and their answer starts you again. Don't use finish_step for work that waits on them.",
             // After its plan, what the person asks for is a round of work of its own (ADR-034).
             "Once the plan's steps are done, what the person asks you for is a round of work of its own: when you have done it, call finish_step the same way, with your summary and evidence. Where they only asked something and you changed nothing, answer them; there is nothing to finish. What you commit after the task's pull request merged or closed goes in a new pull request, which Althar opens as a draft once you finish; where they only asked something and you committed in passing as you answered, call finish_step with `answered`, and the person opens it from the task if they want it.",
             // The thread reads in rounds: what was asked, the lead's word on it, its work folded into one line, and what it did.
