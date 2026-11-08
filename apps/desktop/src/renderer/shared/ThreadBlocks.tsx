@@ -1,10 +1,11 @@
 import { createContext, Fragment, useContext, useState, type ReactNode } from 'react'
 
-import type { FieldAnswer, Unfurl } from '@althar/contracts'
+import type { FieldAnswer, SentLineComment, Unfurl } from '@althar/contracts'
 import {
   AltharLine,
   Arrived,
   CodeBlock,
+  CommentExcerpt,
   FailedLogs,
   Gallery,
   glyphOf,
@@ -200,6 +201,8 @@ export function McpActs({ parts }: { parts: ReadonlyArray<Part> }) {
 export interface ThreadWays {
   readonly onRules?: () => void
   readonly onSignIn?: (agentId: string) => void
+  /** Opens the task's diff on a comment the person sent on its lines (ADR-105). */
+  readonly onOpenComment?: (id: string, path: string) => void
 }
 export const ThreadWaysContext = createContext<ThreadWays>({})
 
@@ -313,6 +316,14 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
 }
 
 /** What the person said, each link that unfurled read as its key where they pasted it; its card, under the words, says the rest. */
+/** The person's comments on lines of the diff, in their message: each opens the diff at its line, where the thread is a task's. */
+function SentComments({ comments }: { comments: ReadonlyArray<SentLineComment> }) {
+  const open = useContext(ThreadWaysContext).onOpenComment
+  return comments.map((comment) => (
+    <CommentExcerpt key={comment.id} comment={comment} {...(open === undefined ? {} : { onOpen: () => open(comment.id, comment.path) })} />
+  ))
+}
+
 function Said({ text, links }: { text: string; links: ReadonlyArray<Unfurl> }) {
   return pastedIn(text, links).map((piece, at) =>
     typeof piece === 'string' ? (
@@ -596,6 +607,8 @@ export function ThreadBlocks({
               : { attach: [...sentAttachments(block.pictures), ...fileAttachments(block.files)] })}
             // The links in it that unfurled, in the bubble under the words, so they read as part of what the person said.
             {...(block.links.length === 0 ? {} : { unfurl: block.links.map((link) => <LinkView key={link.url} link={link} />) })}
+            // What they said of lines of the diff, after their words, each with its code.
+            {...(block.comments === undefined ? {} : { comments: <SentComments comments={block.comments} /> })}
           >
             {block.links.length === 0 || block.text === '' ? block.text : <Said text={block.text} links={block.links} />}
           </You>

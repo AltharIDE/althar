@@ -46,6 +46,8 @@ import {
   domPort,
   type FileDiff,
   type TaskFindings,
+  type TaskLineComments,
+  type LineComment,
   type FolderHeld,
   type FolderReading,
   type MadeRepository,
@@ -169,6 +171,8 @@ export interface Client {
   readonly getFileDiff: (taskId: string, path: string, untouched?: boolean) => Promise<FileDiff>
   /** What the reviews of a task's run found, each where it is in the change now: the run of the review reported in `review`, else the latest. */
   readonly getTaskFindings: (taskId: string, review?: string) => Promise<TaskFindings>
+  /** The comments the person sent on lines of a task's diff, each where it is now and whether a commit since addressed it (ADR-105). */
+  readonly getLineComments: (taskId: string) => Promise<TaskLineComments>
   /** What the names in a thread's messages name where its agent works, each message by its item where it has one. */
   readonly findCode: (
     threadId: string,
@@ -196,6 +200,7 @@ export interface Client {
       readonly images?: ReadonlyArray<SentImage>
       readonly files?: ReadonlyArray<SentFile>
       readonly dictated?: boolean
+      readonly comments?: ReadonlyArray<LineComment>
     },
   ) => Promise<string>
   readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
@@ -347,6 +352,8 @@ export interface Client {
     readonly files?: ReadonlyArray<SentFile>
     /** Any of its words came from dictation, even if edited after. */
     readonly dictated?: boolean
+    /** Comments on lines of the task's diff, each with its file, lines and code (ADR-105). */
+    readonly comments?: ReadonlyArray<LineComment>
   }) => Promise<void>
   /** Takes back a message still waiting its turn, by its item. */
   readonly takeBack: (itemId: string) => Promise<void>
@@ -720,6 +727,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     readDocument: (threadId, path) => settle(api.ReadDocument({ threadId, path })),
     getFileDiff: (taskId, path, untouched) => settle(api.GetFileDiff({ taskId, path, ...(untouched === true ? { untouched } : {}) })),
     getTaskFindings: (taskId, review) => settle(api.GetTaskFindings({ taskId, ...(review === undefined ? {} : { review }) })),
+    getLineComments: (taskId) => settle(api.GetLineComments({ taskId })),
     findCode: (threadId, messages) => settle(api.FindCode({ threadId, messages })),
     readCode: (threadId, path, at = {}) =>
       settle(

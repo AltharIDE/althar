@@ -1,6 +1,7 @@
 import {
   type AgentModels,
   type AttachedFile,
+  type LineComment,
   MESSAGE_FILES,
   MESSAGE_IMAGES,
   type Picture,
@@ -50,15 +51,23 @@ export interface Outgoing {
   readonly attached: ReadonlyArray<AttachedFile>
   /** Some of its words were dictated, even if edited after: the agent is told so. Set with the images, so each send carries it. */
   readonly dictated?: boolean
+  /** Comments on lines of the task's diff (ADR-105), sent with it from the Changes view. */
+  readonly comments?: ReadonlyArray<LineComment>
 }
 
-/** What a send or a switch carries of a message's images and files and of its being dictated: nothing where it has none. */
+/** What a send or a switch carries of a message's images, files and comments on the diff and of its being dictated: nothing where it has none. */
 export const sentWith = (
   outgoing: Outgoing | undefined,
-): { readonly images?: ReadonlyArray<SentImage>; readonly files?: ReadonlyArray<SentFile>; readonly dictated?: boolean } => ({
+): {
+  readonly images?: ReadonlyArray<SentImage>
+  readonly files?: ReadonlyArray<SentFile>
+  readonly dictated?: boolean
+  readonly comments?: ReadonlyArray<LineComment>
+} => ({
   ...(outgoing === undefined || outgoing.sent.length === 0 ? {} : { images: outgoing.sent }),
   ...(outgoing === undefined || outgoing.files.length === 0 ? {} : { files: outgoing.files }),
   ...(outgoing?.dictated === true ? { dictated: true } : {}),
+  ...(outgoing?.comments === undefined || outgoing.comments.length === 0 ? {} : { comments: outgoing.comments }),
 })
 
 /** What a queued message went with, as its item says. */

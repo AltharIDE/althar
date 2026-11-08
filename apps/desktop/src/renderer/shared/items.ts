@@ -1,4 +1,4 @@
-import type { AttachedFile, ConversationView, Picture, ThreadItem } from '@althar/contracts'
+import type { AttachedFile, ConversationView, LineComment, Picture, ThreadItem } from '@althar/contracts'
 
 import { text as imagesText } from './images'
 import type { Streamed } from './thread'
@@ -29,6 +29,8 @@ export const sending = (
     readonly pictures?: ReadonlyArray<Picture>
     /** The files and folders sent with it. */
     readonly files?: ReadonlyArray<AttachedFile>
+    /** Its comments on lines of the diff (ADR-105). */
+    readonly comments?: ReadonlyArray<LineComment>
   },
 ): { readonly id: string; readonly items: ReadonlyArray<ThreadItem> } => {
   sent += 1
@@ -39,7 +41,15 @@ export const sending = (
     sequence: (items.at(-1)?.sequence ?? 0) + 0.5,
     agentId: null,
     createdAt: new Date().toISOString(),
-    content: { text: message.text, links: [], pictures: message.pictures ?? [], files: message.files ?? [] },
+    content: {
+      text: message.text,
+      links: [],
+      pictures: message.pictures ?? [],
+      files: message.files ?? [],
+      ...(message.comments === undefined || message.comments.length === 0
+        ? {}
+        : { comments: message.comments.map((comment, index) => ({ id: `${id}:${index}`, ...comment })) }),
+    },
     input: {
       state: message.queued ? 'queued' : 'delivered',
       interrupting: message.interrupting,
