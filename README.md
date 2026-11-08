@@ -189,28 +189,56 @@ No more meat proxying: no more pasting one agent's answer into another.
 
 Tired of juggling terminals, re-explaining your project and babysitting agents? So were we.
 
-- **Every plan you have. One agent.** Sign Claude Code, Codex or OpenCode in once for each plan you pay for. When one runs out, Althar goes on with the next, in the order you set.
-- **It keeps going while you're away.** Usage limits, stalled turns, review rounds: it handles them and carries on. You only hear what needs you.
+<table>
+  <tr>
+    <td width="44%" valign="top">
+      <h3>Every plan you have. One agent.</h3>
+      <p>Sign Claude Code, Codex or OpenCode in once for each plan you pay for: personal, work, a client's.</p>
+      <p>When one runs out, Althar goes on with the next, in the order you set, on the same thread and branch.</p>
+    </td>
+    <td width="56%" valign="top">
+      <img src="brand/export/screenshots/framed/first-run.jpg" width="100%" alt="The first screen: Your agents. Claude Code, Codex, GitHub Copilot and OpenCode are signed in, each on its own plan, and Kimi Code and Junie aren't on this computer yet." />
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>It keeps going while you're away.</h3>
+      <p>Usage limits, stalled turns, review rounds: Althar handles them and carries on.</p>
+      <p>Every task sits on the board by lane, and you only hear about what needs you.</p>
+    </td>
+    <td valign="top">
+      <img src="brand/export/screenshots/framed/board.jpg" width="100%" alt="A project's board: up next, running, needs you, and settled, with each running task's steps and its lead." />
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>Wherever you are, still in reach.</h3>
+      <p>On a Mac, Althar sits round the notch or in the menu bar; on Windows and Linux, in the tray.</p>
+      <p>Point at it to answer a permission or open a pull request, and carry on.</p>
+    </td>
+    <td valign="top">
+      <img src="brand/export/reels/island.gif" width="100%" alt="The island round the notch: two calls wait, and pointing at it drops it open to answer them." />
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>The craft of a paid app. The freedom of open source.</h3>
+      <p>The window opens in its own light. Every agent and account sits in one place. You pick the app's icon. When nothing needs you, it says so and gets out of the way.</p>
+    </td>
+    <td valign="top">
+      <img src="brand/export/reels/details.gif" width="100%" alt="Details: the launch rising out of its own light, the agents and their accounts, choosing the app icon, and the home at rest." />
+    </td>
+  </tr>
+</table>
+
+### And the rest
+
 - **Ten at once. None in each other's way.** Run as many tasks as you like side by side. Each gets a worktree of its own, so no two agents ever work in the same files.
 - **Conflicts, settled.** Each lead settles its own conflicts with the default branch; only the odd one needs you.
 - **Work that starts itself.** Ask once, for a time or for when something happens. It runs on your computer while Althar is open, and not until you turn it on.
 - **Every workspace, side by side.** Day job on Linear, a client on Jira, side projects on GitHub? Plug them all in, and every issue lands in the right project. Pull requests go out to GitHub, GitLab or Bitbucket.
 - **One home for everything.** What needs you, across every project, in one place, answered where it is. And what happened since you looked.
 - **Your computer, your data.** Projects, threads and history live in a local database on your machine. No Althar account, no Althar cloud.
-
-<table>
-  <tr>
-    <td width="44%" valign="top">
-      <h3>Wherever you are, still in reach.</h3>
-      <p>On a Mac, Althar sits round the notch or in the menu bar; on Windows and Linux, in the tray. Point at it to answer a permission or open a pull request, and carry on.</p>
-    </td>
-    <td width="56%" valign="top">
-      <img src="brand/export/reels/island.gif" width="100%" alt="The island round the notch: two calls wait, and pointing at it drops it open to answer them." />
-    </td>
-  </tr>
-</table>
-
-**The craft of a paid app. The freedom of open source.**
 
 <br />
 
@@ -228,8 +256,6 @@ brew install --cask altharide/tap/althar
 ```
 
 Open it. The first screen finds the agents on your computer and shows which are signed in; then you pick the repositories your first project works in.
-
-<img src="brand/export/screenshots/framed/first-run.jpg" width="100%" alt="The first screen: Your agents. Claude Code, Codex, GitHub Copilot and OpenCode are signed in, each on its own plan, and Kimi Code and Junie aren't on this computer yet." />
 
 Claude Code, Codex and Google Antigravity sign in from inside Althar. The others sign in with their own tools:
 
