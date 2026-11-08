@@ -1408,9 +1408,11 @@ export class Changes extends Context.Service<
           }
           const { host } = found
           const forked = yield* host.repository(found.path)
-          // What the host says of it now, whether it is a fork and of what, is kept, and goes for where its work goes from now.
+          // What the host says of it now, whether it is a fork and of what, is kept, and goes for where its work goes from now: only
+          // where that host is origin's, reached through its address, as another remote's (a mirror's at the same path) says
+          // nothing of origin.
           const origin = named.find((remote) => remote.name === 'origin')
-          if (origin !== undefined) tellOf(origin.url, forked, yield* Clock.currentTimeMillis, host.product)
+          if (origin !== undefined && found.remote === origin.url) tellOf(origin.url, forked, yield* Clock.currentTimeMillis, host.product)
           const fork = forkOf(named)
           const upstream =
             fork !== null && (task.changeTarget === 'upstream' || task.changeTarget === 'upstream_branch')

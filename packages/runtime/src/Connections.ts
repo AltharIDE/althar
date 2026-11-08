@@ -351,11 +351,15 @@ export class Connections extends Context.Service<
      * that reaches it. With `fromCli`, where none there is ready, one that
      * needs signing in again and was made with gh's or glab's sign-in takes
      * the tool's again, where the tool has one that works for its account.
+     * `remote` is the one of them it was reached through, as given.
      */
     hostOf(
       remotes: ReadonlyArray<string>,
       options?: { readonly fromCli?: boolean },
-    ): Effect.Effect<{ readonly connectionId: string; readonly host: CodeHost; readonly path: ReadonlyArray<string> } | null, unknown>
+    ): Effect.Effect<
+      { readonly connectionId: string; readonly host: CodeHost; readonly path: ReadonlyArray<string>; readonly remote: string } | null,
+      unknown
+    >
     /**
      * Where a remote is: the host, the repository's path there, the code host
      * Althar knows there, and the connection that reaches it, signed in or
@@ -1651,14 +1655,14 @@ export class Connections extends Context.Service<
       const hostOf = (remotes: ReadonlyArray<string>, options: { readonly fromCli?: boolean } = {}) =>
         Effect.gen(function* () {
           const all = yield* rows
-          const refs = (yield* Effect.forEach(remotes, reached)).flatMap((remote) => {
-            const ref = parseRemote(remote)
-            return ref === null ? [] : [ref]
+          const refs = (yield* Effect.forEach(remotes, reached)).flatMap((written, at) => {
+            const ref = parseRemote(written)
+            return ref === null ? [] : [{ ...ref, remote: remotes[at] ?? written }]
           })
           for (const ref of refs)
             for (const row of all) {
               const host = row.state === 'ready' ? hostAt(row, ref) : undefined
-              if (host !== undefined) return { connectionId: row.id, host, path: ref.path }
+              if (host !== undefined) return { connectionId: row.id, host, path: ref.path, remote: ref.remote }
             }
           // None ready there: one that needs signing in again, made with gh's or glab's sign-in, takes the tool's again where it can.
           if (options.fromCli === true)
@@ -1669,7 +1673,7 @@ export class Connections extends Context.Service<
                 // Ready now: its tool's sign-in took over, or another call's did meanwhile.
                 const now = yield* rowOf(row.id).pipe(Effect.orElseSucceed(() => null))
                 const host = now?.state === 'ready' ? hostAt(now, ref) : undefined
-                if (host !== undefined) return { connectionId: row.id, host, path: ref.path }
+                if (host !== undefined) return { connectionId: row.id, host, path: ref.path, remote: ref.remote }
               }
           return null
         })
