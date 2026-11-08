@@ -151,3 +151,47 @@ it.live('a sandboxed Codex coordinator runs process substitution', () =>
     }),
   ),
 )
+
+it.live('a Claude Code coordinator runs process substitution, retrying outside the sandbox where its pipes are refused', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const definition = agents['claude-code']
+      const options = {
+        contained: { folder: cwd, reads: { allowed: [] as string[], denied: [] as string[] } },
+        sandbox: { commands: [] as string[], hosts: [] as string[], writes: [] as string[] },
+      }
+      const asked = yield* Ref.make<string[]>([])
+      const spec = definition.launch(process.execPath)
+      const own = definition.withoutOwnTools?.({ env: process.env, homeDir: homedir(), cwd }) ?? {}
+      const connection = yield* connect({
+        transport: { _tag: 'Process', cwd, spec: { ...spec, env: { ...spec.env, ...own } } },
+        permissions: definition.permissions,
+        onPermission: (request) =>
+          Ref.update(asked, (calls) => [...calls, request.title]).pipe(
+            Effect.as({ decision: 'allow' as const, reason: 'Public scratch-folder probe.' }),
+          ),
+      })
+      const session = yield* connection.newSession({
+        cwd,
+        mode: definition.modes.ask,
+        modeOptionId: definition.options.mode,
+        ...(definition.sessionMeta === undefined ? {} : { meta: definition.sessionMeta('reader', options) }),
+      })
+      const events = yield* Stream.runCollect(
+        session.prompt(
+          'Run exactly this read-only shell command, with no edits or alternatives: diff <(printf same) <(printf same) && printf PROCESS_SUBSTITUTION_PASSED. If the sandbox refuses to open the process-substitution pipes, run the same command outside the sandbox with dangerouslyDisableSandbox true. Report the output.',
+        ),
+      )
+      process.stdout.write(`Claude coordinator events: ${JSON.stringify(events.filter((event) => event._tag === 'ToolCallUpdate'))}\n`)
+      assert.isTrue(
+        events.some(
+          (event) =>
+            event._tag === 'ToolCallUpdate' &&
+            'terminal' in event &&
+            JSON.stringify(event.terminal).includes('PROCESS_SUBSTITUTION_PASSED'),
+        ),
+      )
+      process.stdout.write('Claude coordinator process substitution: ran, inside or just outside the sandbox.\n')
+    }),
+  ),
+)

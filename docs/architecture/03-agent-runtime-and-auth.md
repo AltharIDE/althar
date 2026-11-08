@@ -895,14 +895,18 @@ So where an agent has a sandbox, it keeps commands inside the worktree:
 - Codex's `workspace-write` sandbox has open networking. Its ACP adapter
   also applies that setting on every turn, instead of overriding it with a
   network-off policy. Ordinary readers get network access too; outside
-  reviews remain offline.
+  reviews remain offline. Codex 0.165's approval policy has no form that
+  makes every sandboxed command ask, so its commands do not reach Althar:
+  that one gap is recorded in its `knownGaps` and the limits audit.
 - Claude Code's sandbox is on wherever it can start (macOS; Linux with
-  working bubblewrap and socat, outside a Flatpak). Commands inside it run
-  unread. Its network reaches any host, and commands may bind localhost.
-  The writable roots and secret-file exclusions remain. Recorded commands
-  and common dev/test tools started by hand run outside from the start,
-  still meeting the irreversible rules. A line starting with `bun` is kept
-  inside by Claude itself; use the command its script runs when necessary.
+  working bubblewrap and socat, outside a Flatpak). Every command reaches
+  Althar's rules, which answer it at once; a visible irreversible one asks
+  the person, and the sandbox holds what runs. Its network reaches any host,
+  and commands may bind localhost; only the SSH agent's own socket is
+  allowed. The writable roots and secret-file exclusions remain. Recorded
+  commands and common dev/test tools started by hand run outside from the
+  start, still meeting the irreversible rules. A line starting with `bun` is
+  kept inside by Claude itself; use the command its script runs when necessary.
 - OpenCode has no OS sandbox. Each command reaches Althar's rules; with
   Allow everything, only a visible irreversible operation or the person's
   own rule asks.

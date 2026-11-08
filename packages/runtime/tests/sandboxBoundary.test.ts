@@ -42,8 +42,8 @@ const command = (line: string, input: Readonly<Record<string, unknown>> = {}): P
 
 /** A lead's sandbox, with what runs outside it from the start, as Claude Code's is held. */
 const lead: Hold = { outside: ['bunx playwright', 'ps', 'env -i'], unsandboxed: true }
-/** The coordinator's, which runs nothing outside it. */
-const coordinator: Hold = { outside: [], unsandboxed: false }
+/** The coordinator's, which may retry a read it cannot run outside, against its read-only rules. */
+const coordinator: Hold = { outside: [], unsandboxed: true }
 
 /** What leads and the coordinator ran today, and had asked about or refused (the 14 days in ADR-071). */
 const TODAY = {
@@ -87,8 +87,9 @@ describe('a command its sandbox holds', () => {
     assert.isFalse(runsInside(command('ps'), lead))
     // `bunx playwrightish` is not `bunx playwright`.
     assert.isTrue(runsInside(command('bunx playwrightish'), lead))
-    // The coordinator's never leaves it, whatever it asks.
-    assert.isTrue(runsInside(command(TODAY.loop, { dangerouslyDisableSandbox: true }), coordinator))
+    // The coordinator may ask to leave it for a read its sandbox cannot run, so that crosses to the read-only rules.
+    assert.isFalse(runsInside(command(TODAY.loop, { dangerouslyDisableSandbox: true }), coordinator))
+    assert.isTrue(runsInside(command(TODAY.loop, { dangerouslyDisableSandbox: false }), coordinator))
     // Only a shell command: an edit, a read or a fetch is the rules' as before.
     assert.isFalse(runsInside({ ...command('x'), kind: 'edit', rawInput: { file_path: '/elsewhere/a.ts' } }, lead))
     assert.isFalse(runsInside({ ...command(''), rawInput: {} }, lead))
@@ -139,6 +140,43 @@ describe('a command its sandbox holds', () => {
       reason: "The project's rules ask before `terraform`.",
       held: true,
     })
+  })
+
+  it('still asks for what can’t be undone, sandbox or not (ADR-097)', () => {
+    for (const line of [
+      'gh pr merge 12 --squash',
+      'gh release create v1',
+      'gh pr comment 12 --body ok',
+      'npm publish',
+      'git push origin main',
+      'git push --force origin althar/retry',
+    ])
+      assert.strictEqual(decideInside(command(line), context('allow')).verdict, 'ask', line)
+    // What the rules can't read isn't refused for what it could do: only a visible kind asks.
+    assert.strictEqual(decideInside(command("python3 - <<'EOF'\nprint(1)\nEOF"), context('allow')).verdict, 'allow')
+    assert.strictEqual(decideInside(command('node scripts/build.mjs'), context('allow')).verdict, 'allow')
+  })
+
+  it('refuses approving its own work or widening what the host lets agents do, sandbox or not', () => {
+    for (const line of [
+      'gh pr review 12 --approve',
+      'gh api -X POST repos/o/r/pulls/12/reviews -f event=APPROVE',
+      'gh api -X POST repos/o/r/statuses/abc -f state=success',
+      'gh api -X PUT repos/o/r/branches/main/protection',
+      'gh api -X PUT repos/o/r/collaborators/mallory',
+      'gh api -X PUT repos/o/r/actions/permissions -f enabled=true',
+      'gh secret set DEPLOY_KEY',
+      'gh repo edit --visibility public',
+    ])
+      for (const verdict of [decideInside(command(line), context('allow')), decide(command(line), context('allow'))])
+        assert.strictEqual(verdict.verdict, 'deny', line)
+  })
+
+  it('refuses a host the person put in Never when a command names it, in or out of the sandbox', () => {
+    const project = { commands: [{ pattern: 'private.example.com', decision: 'never' as const }] }
+    for (const line of ['curl https://private.example.com/data', 'gh api https://private.example.com/x'])
+      for (const verdict of [decideInside(command(line), context('allow', project)), decide(command(line), context('allow', project))])
+        assert.include((verdict as { reason: string }).reason, 'private.example.com', line)
   })
 
   it('never reads the keychain or git’s stored passwords, which a Mac’s sandbox still reaches', () => {

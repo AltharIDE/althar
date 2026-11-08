@@ -761,6 +761,12 @@ const codexReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<
  * takes only from trusted sources, which these, given as the session's own,
  * are.
  */
+/** The person's own SSH agent socket, the one inherited sign-in sandboxed commands need; never every socket. */
+const sshSockets = (): ReadonlyArray<string> => {
+  const socket = process.env.SSH_AUTH_SOCK
+  return socket === undefined || socket === '' ? [] : [socket]
+}
+
 const claudeAsks = (
   sandbox: UpFront = { commands: [], hosts: [] },
   skills?: string,
@@ -782,14 +788,15 @@ const claudeAsks = (
         },
         sandbox: {
           enabled: true,
-          autoAllowBashIfSandboxed: true,
+          // Every command reaches Althar's rules, so a visible irreversible act still asks; nothing else asks the person.
+          autoAllowBashIfSandboxed: false,
           allowUnsandboxedCommands: true,
           failIfUnavailable: starts,
           ...(sandbox.commands.length === 0 ? {} : { excludedCommands: excludedCommandsOf(sandbox.commands) }),
           network: {
             allowLocalBinding: true,
-            allowAllUnixSockets: true,
             allowedDomains: ['*'],
+            ...(sshSockets().length === 0 ? {} : { allowUnixSockets: [...sshSockets()] }),
             ...(sandbox.deniedHosts?.length ? { deniedDomains: [...sandbox.deniedHosts] } : {}),
           },
           ...(writes.length === 0 ? {} : { filesystem: { allowWrite: [...writes] } }),
@@ -878,7 +885,7 @@ const claudeHolds = (role: 'lead' | 'reader' = 'lead', options: SessionOptions =
   if (!claudeSandboxStarts()) return undefined
   if (role === 'lead') return { outside: options.sandbox?.commands ?? [], unsandboxed: true }
   return options.contained !== undefined && options.untrusted !== true && options.offline !== true
-    ? { outside: [], unsandboxed: false }
+    ? { outside: [], unsandboxed: true }
     : undefined
 }
 
@@ -888,14 +895,13 @@ const claudeHolds = (role: 'lead' | 'reader' = 'lead', options: SessionOptions =
  * without asking, held to the coordinator's folder. They write only there
  * (and in the sandbox's own temporary folder), and may read ordinary files
  * anywhere, with secret files and sign-ins still denied. Commands reach any host and may
- * listen locally, and never run outside it (`allowUnsandboxedCommands: false`).
- * It loads no settings file (`settingSources: []`) and runs no hook, as a
- * review's lead: no allow rule or sandbox exemption of the person's or the
- * repository's lets a command out, and no hook of theirs runs beside it. Its
- * edits meet the project rules and can write its own folder. Without an OS
- * sandbox, every command reaches those rules; only visible outside-folder
- * writes are refused. Claude's own sandbox still refuses opening /dev/fd
- * pipes; that native-provider limitation is recorded in the limits audit.
+ * listen locally, and every one asks, so a visible irreversible act still
+ * asks the person. A read the sandbox cannot run (process substitution on
+ * macOS) may run outside it, against the same read-only rules. It loads no
+ * settings file (`settingSources: []`) and runs no hook, as a review's lead:
+ * no allow rule or sandbox exemption of the person's or the repository's
+ * lets a command out, and no hook of theirs runs beside it. Its edit tools
+ * stay denied, as ADR-097 keeps them: a change is a task.
  */
 const claudeContains = (
   { folder, reads }: Contained,
@@ -911,16 +917,20 @@ const claudeContains = (
       settingSources: [],
       settings: {
         disableAllHooks: true,
-        permissions: { deny: secretReadRules(), ask: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch'] },
+        permissions: {
+          deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', ...secretReadRules()],
+          ask: ['Bash', 'WebFetch'],
+        },
         sandbox: {
           enabled: starts,
-          autoAllowBashIfSandboxed: starts,
-          allowUnsandboxedCommands: !starts,
+          // Every command asks Althar's rules: a visible irreversible act still asks the person, nothing else does.
+          autoAllowBashIfSandboxed: false,
+          allowUnsandboxedCommands: true,
           failIfUnavailable: starts,
           network: {
             allowedDomains: ['*'],
             allowLocalBinding: true,
-            allowAllUnixSockets: true,
+            ...(sshSockets().length === 0 ? {} : { allowUnixSockets: [...sshSockets()] }),
             ...(deniedHosts?.length ? { deniedDomains: [...deniedHosts] } : {}),
           },
           filesystem: { allowWrite: [folder], denyRead: [...reads.denied], allowRead: [...reads.allowed] },
@@ -1130,7 +1140,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      * switch controls native search separately, not a shell's network.
      */
     knownGaps: [
-      'It works inside its sandbox without asking: it edits the workspace and runs commands there, and asks only to go beyond it, such as writing outside its folder. As a reader too, so it never leads a review of a pull request from outside.',
+      'It works inside its sandbox without asking: commands there never reach Althar, so a visible irreversible host command (such as `gh pr merge` or `gh release create`) can run unasked. Its shell carries the person’s sign-in; Althar’s tools are the reliable route for code-host work. The limits audit records this gap.',
       "Shell networking is open. The project's web switch controls native search and page opening separately.",
       "codex-acp marks every session folder trusted, so a repository's own `.codex` config and hooks apply; a review's lead has hooks off.",
       'The adapter holds usage limits but sends them nowhere over ACP (/status prints text); Althar asks the Codex app-server for them (`usage.ts`).',

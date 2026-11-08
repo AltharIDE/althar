@@ -29,8 +29,9 @@
 - **Owner:** Repository maintainers
 - **Current enforcement (7 November 2026):** [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md)
   and the [limits audit](../plans/no-arbitrary-limits-audit.md) define the boundary.
-  Allow everything is the default. Sandboxed commands run unread; outside,
-  visible irreversible acts and the person's Ask rules ask. Never rules and
+  Allow everything is the default. Sandboxed commands reach the rules, which
+  answer ordinary ones at once; a visible irreversible act and the person's Ask
+  rules ask, inside the sandbox or outside it. Never rules and
   secret protections remain. An unreadable command is not refused merely
   because a Never rule exists. The non-irreversible floor is gone. gh, glab
   and the Flatpak bridge have no blanket refusal. The coordinator uses the

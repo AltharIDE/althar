@@ -2,16 +2,18 @@ import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'n
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, posix, resolve, win32 } from 'node:path'
 
+import { hostOf } from '@althar/contracts'
 import { type McpCall, type PermissionRequest, SECRET_PLACES } from '@althar/provider-adapters'
 
 import { mcpActOf } from './mcpActs'
 
 /*
- * ADR-097: permissive by default. A command inside an OS sandbox runs
- * unread, apart from secrets and the person's own rules. Outside it, Allow
+ * ADR-097: permissive by default. A command inside an OS sandbox is answered
+ * at once from these rules; only secrets, the person's own rules and a visible
+ * irreversible act hold it, and an opaque one runs. Outside it, Allow
  * everything asks only about visible irreversible actions. Opaque commands
- * run; they are not denied for what the rules cannot infer. Git's guard
- * still holds hidden irreversible pushes and branch moves.
+ * are not denied for what the rules cannot infer. Git's guard still holds
+ * hidden irreversible pushes and branch moves.
  *
  * The coordinator uses these same rules, with visible outside-folder writes
  * refused where no sandbox holds them. The strict reader below is reserved
@@ -447,6 +449,10 @@ const hostKinds = (words: ReadonlyArray<string>): ReadonlyArray<Kept> => {
   if (command === 'release' && ['create', 'upload', 'delete'].includes(action ?? ''))
     return publish('Publishing or deleting a release always asks.')
   if (['pr', 'mr', 'issue'].includes(command ?? '') && ['create', 'comment', 'review', 'note'].includes(action ?? '')) return speak()
+  if (['issue', 'release'].includes(command ?? '') && action === 'delete')
+    return [kept('Deleting work on the host always asks.', 'deploy', 'irreversible')]
+  if (command === 'release' && action === 'edit' && /(?:^|\s)--draft(?:=|\s+)false(?:\s|$)/.test(words.join(' ')))
+    return publish('Publishing a release always asks.')
   if (command === 'repo' && action === 'delete') return publish('Deleting a repository always asks.')
   if (command !== 'api') return []
   const value = (flag: string) =>
@@ -466,9 +472,70 @@ const hostKinds = (words: ReadonlyArray<string>): ReadonlyArray<Kept> => {
     (method === 'POST' && /\/(issues|pulls)(?:\s|$)/.test(input))
   )
     return speak()
-  if (method === 'DELETE' && /\/(repos|refs|branches)\//.test(input))
+  // A ref written through the API moves a branch or makes a tag: git's own guard never sees it.
+  if (/\brefs\/tags\b/.test(input)) return publish('Publishing a tag always asks.')
+  if (/\brefs\b/.test(input) && /\/(git\/)?refs(?:\/|\s|$)/.test(input))
+    return [kept('Moving a branch or tag on the host always asks.', 'delete-branch', 'irreversible')]
+  if (method === 'DELETE' && /(^|\/|\s)(repos|refs|branches)\//.test(input))
     return [kept('Deleting remote work always asks.', 'delete-branch', 'irreversible')]
   return []
+}
+
+/** What an agent never does on the person's code host: approve its own work or widen what the host lets agents do. */
+const SELF_APPROVAL_REFUSED = "An agent doesn't approve its own work or widen what the host lets agents do. The person does that."
+
+/** Why a `gh`/`glab` call is refused rather than asked: it would approve the agent's own work or widen access (ADR-097). */
+const hostRefusedReason = (words: ReadonlyArray<string>): string | undefined => {
+  const program = (words[0] ?? '').split('/').at(-1)
+  if (program !== 'gh' && program !== 'glab') return undefined
+  if (words.includes('--help') || words.includes('--version')) return undefined
+  const args = words
+    .slice(1)
+    .filter((word, i, all) => !word.startsWith('-') && !['-R', '--repo', '--hostname', '-H'].includes(all[i - 1] ?? ''))
+  const [command, action] = args
+  const line = words.join(' ')
+  if (['pr', 'mr'].includes(command ?? '') && action === 'review' && /(?:^|\s)--approve(?:=|\s|$)/.test(line)) return SELF_APPROVAL_REFUSED
+  if (command === 'secret' && action === 'set') return SELF_APPROVAL_REFUSED
+  if (command === 'repo' && action === 'edit' && /(?:^|\s)--visibility(?:=|\s+)public(?:\s|$)/.test(line)) return SELF_APPROVAL_REFUSED
+  if (command !== 'api') return undefined
+  const value = (flag: string) =>
+    words.find((word) => word.startsWith(flag + '='))?.slice(flag.length + 1) ??
+    (words.indexOf(flag) < 0 ? undefined : words[words.indexOf(flag) + 1])
+  const explicit = words.some((word) => /^(-X|--method)(=|$)/.test(word))
+    ? (value('--method') ?? value('-X'))
+    : words.find((word) => /^-X[A-Z]+$/.test(word))?.slice(2)
+  const writes = words.some((word) => /^(-[fF]|--field|--raw-field|--input)(=|$)/.test(word))
+  const method = (explicit ?? (writes ? 'POST' : 'GET')).toUpperCase()
+  if (method === 'GET' || method === 'HEAD') return undefined
+  // An approval, a commit status or a check run is the agent vouching for its own work.
+  if (/\bpulls\/[^/\s]+\/reviews\b/.test(line) && /APPROVE|--approve/.test(line)) return SELF_APPROVAL_REFUSED
+  if (/\b(statuses|check-runs|check-suites)\b/.test(line)) return SELF_APPROVAL_REFUSED
+  // Protection, collaborators, secrets and a public visibility widen what the host lets agents do.
+  if (
+    /\bbranches\/[^/\s]+\/protection\b|\bcollaborators\b|\bactions\/(permissions|secrets)\b|\bdependabot\/secrets\b|\bcodespaces\/secrets\b/.test(
+      line,
+    ) ||
+    /"visibility"\s*:\s*"public"|--visibility(?:=|\s+)public/.test(line)
+  )
+    return SELF_APPROVAL_REFUSED
+  return undefined
+}
+
+/** The host a command names, where one of the person's own host rules matches it. */
+const hostRuleOf = (text: string, rules: ProjectRuleSet['commands'], system: System) => {
+  const named = new Set<string>()
+  for (const line of lineReadings(text, system))
+    for (const words of line.commands.flatMap((words) => [words, ...commandsIn(words)]))
+      for (const word of words) {
+        const host = hostOf(word)
+        if (host !== null) named.add(host)
+      }
+  if (named.size === 0) return undefined
+  const met = rules.filter((rule) => {
+    const host = hostOf(rule.pattern.trim())
+    return host !== null && named.has(host)
+  })
+  return met.find((rule) => rule.decision === 'never') ?? met[0]
 }
 
 const field = (value: unknown, key: string): unknown =>
@@ -2805,32 +2872,8 @@ const kindsOf = (
     const repository = [locate(where, cwd, git.cwd), ...git.elsewhere.map((path) => locate(where, cwd, path))]
     const elsewhere = repository.find((path) => outside(where, path))
     if (elsewhere !== undefined) {
-      // A read of another repository's config changes nothing; a write there is a visible outside write.
-      const configWrites =
-        git.subcommand === 'config' &&
-        !git.args.some((arg) => /^(--get(?:-all|-regexp|-urlmatch)?|--list|-l)$/.test(arg)) &&
-        git.args.filter((arg) => !arg.startsWith('-')).length > 1
-      if (
-        context.readOnly !== true ||
-        configWrites ||
-        [
-          'add',
-          'commit',
-          'reset',
-          'checkout',
-          'restore',
-          'clean',
-          'fetch',
-          'pull',
-          'merge',
-          'rebase',
-          'init',
-          'clone',
-          'worktree',
-          'switch',
-          'stash',
-        ].includes(git.subcommand)
-      )
+      // A read of another repository changes nothing; a write there is a visible outside write the coordinator refuses.
+      if (context.readOnly !== true || !gitReadsElsewhere(git.subcommand, git.args))
         kinds.push(kept(`Git in another folder always asks: ${elsewhere}`, 'outside'))
       // The person's own checkout, say: what they haven't committed there is nowhere else.
       const isPath = (name: string) =>
@@ -2952,6 +2995,100 @@ const unseenReadings = (words: ReadonlyArray<string>, where: Places, context: Ru
 }
 
 /** What a command line does that the rules keep for the person: every kind, in every command of it. */
+/** Git's subcommands that only look, wherever they run; `branch`, `tag`, `remote`, `worktree` and `stash` also have writing forms. */
+const GIT_READS_ELSEWHERE = new Set([
+  'status',
+  'log',
+  'show',
+  'diff',
+  'grep',
+  'ls-files',
+  'rev-parse',
+  'blame',
+  'cat-file',
+  'for-each-ref',
+  'describe',
+  'shortlog',
+  'show-ref',
+  'ls-tree',
+  'ls-remote',
+  'name-rev',
+  'merge-base',
+  'help',
+  'version',
+  'whatchanged',
+  'count-objects',
+  'verify-commit',
+  'verify-tag',
+  'fsck',
+  'check-ignore',
+  'check-attr',
+  'check-ref-format',
+  'diff-tree',
+  'diff-files',
+  'diff-index',
+  'rev-list',
+  'symbolic-ref',
+])
+
+/** Whether a git call in another folder only reads it: the coordinator may do that without asking, and nothing else. */
+const gitReadsElsewhere = (subcommand: string, args: ReadonlyArray<string>): boolean => {
+  if (GIT_READS_ELSEWHERE.has(subcommand)) return true
+  const words = args.filter((arg) => !arg.startsWith('-'))
+  const flags = args.filter((arg) => arg.startsWith('-'))
+  if (subcommand === 'config')
+    return (
+      flags.some((flag) => /^(--get(?:-all|-regexp|-urlmatch)?|--list|-l|--show-(origin|scope|name-only))$/.test(flag)) ||
+      words.length === 0
+    )
+  if (subcommand === 'reflog') return words.length === 0 || words[0] === 'show'
+  if (subcommand === 'worktree') return words[0] === 'list'
+  // `git stash` with no arguments saves the working tree; only its listing forms read.
+  if (subcommand === 'stash') return ['list', 'show'].includes(words[0] ?? '')
+  if (subcommand === 'notes') return words.length === 0 || ['list', 'show'].includes(words[0] ?? '')
+  if (subcommand === 'submodule') return words.length === 0 || ['status', 'summary'].includes(words[0] ?? '')
+  if (subcommand === 'bisect') return words.length === 0 || ['log', 'view'].includes(words[0] ?? '')
+  if (subcommand === 'replace') return flags.some((flag) => ['-l', '--list'].includes(flag))
+  if (subcommand === 'remote')
+    return (
+      words.length === 0 ||
+      ['show', 'get-url'].includes(words[0] ?? '') ||
+      (flags.some((flag) => ['-v', '--verbose'].includes(flag)) && words.length === 0)
+    )
+  if (subcommand === 'branch')
+    return (
+      (words.length === 0 && !flags.some((flag) => /^-(d|D|m|M|c|C|f)$/.test(flag))) ||
+      (flags.some((flag) =>
+        [
+          '--list',
+          '-l',
+          '-a',
+          '-r',
+          '-v',
+          '--verbose',
+          '--show-current',
+          '--contains',
+          '--merged',
+          '--no-merged',
+          '--points-at',
+          '--format',
+        ].includes(flag),
+      ) &&
+        !flags.some(
+          (flag) => /^-(d|D|m|M|c|C|f)$/.test(flag) || /^--(delete|move|copy|set-upstream-to|unset-upstream|edit-description)$/.test(flag),
+        ))
+    )
+  if (subcommand === 'tag')
+    return (
+      (words.length === 0 && !flags.some((flag) => /^-[adfsm]$/.test(flag))) ||
+      (flags.some((flag) =>
+        ['--list', '-l', '-n', '--contains', '--points-at', '--merged', '--no-merged', '--sort', '--format'].includes(flag),
+      ) &&
+        !flags.some((flag) => /^-[adfsm]$/.test(flag) || /^--(delete|force)$/.test(flag)))
+    )
+  return false
+}
+
 const commandKinds = (text: string, context: RuleContext): ReadonlyArray<Kept> => {
   const { commands, opaque } = eachCommand(text, context)
   // What a quoted heredoc holds is text: words in it say nothing of what the command does.
@@ -3264,7 +3401,7 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
     network !== undefined
       ? commandRule(network, project.commands, system)
       : request.kind === 'execute' || request.kind === 'other'
-        ? commandRule(commandOf(request), project.commands, system)
+        ? (commandRule(commandOf(request), project.commands, system) ?? hostRuleOf(commandOf(request), project.commands, system))
         : undefined
   if (network === undefined && (request.kind === 'execute' || request.kind === 'other')) {
     // Explicit credential reads are refused, wherever they appear in the command.
@@ -3273,6 +3410,12 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
       .map(credentialReason)
       .find((reason) => reason !== undefined)
     if (refused !== undefined) return { verdict: 'deny', reason: refused }
+    // Approving the agent's own work or widening access is refused, whoever asks.
+    const widened = lineReadings(commandOf(request), system)
+      .flatMap((line) => line.commands.flatMap((words) => [words, ...commandsIn(words)]))
+      .map(hostRefusedReason)
+      .find((reason) => reason !== undefined)
+    if (widened !== undefined) return { verdict: 'deny', reason: widened }
   }
   // Nor the files people keep keys and sign-ins in, whatever the request does with them.
   const secret = secretOf(request, context, system)
@@ -3369,10 +3512,11 @@ export const runsInside = (request: PermissionRequest, hold: Hold): boolean => {
 
 /**
  * Decides a shell command its session's sandbox holds (ADR-071). Nothing is
- * read for what it does but what the project said itself: a command it never
- * allows, or a kind it never allows that the line plainly is, is refused; a
- * command it asks about asks. And no one reads the keychain or git's stored
- * passwords, which the sandbox reaches on a Mac. The rest runs.
+ * read for what it does but what the person and the irreversible list said:
+ * a command they never allow, or a kind they never allow that the line plainly
+ * is, is refused; a command they ask about asks; and an operation that can't
+ * be undone still asks, sandbox or not (ADR-097). Approving the agent's own
+ * work or widening access is refused. The rest runs.
  */
 export const decideInside = (request: PermissionRequest, context?: RuleContext): Verdict => {
   const system = systemOf(context)
@@ -3382,17 +3526,25 @@ export const decideInside = (request: PermissionRequest, context?: RuleContext):
     .map(credentialReason)
     .find((reason) => reason !== undefined)
   if (credentials !== undefined) return { verdict: 'deny', reason: credentials }
+  const widened = lineReadings(command, system)
+    .flatMap((line) => line.commands.flatMap((words) => [words, ...commandsIn(words)]))
+    .map(hostRefusedReason)
+    .find((reason) => reason !== undefined)
+  if (widened !== undefined) return { verdict: 'deny', reason: widened }
   const project = context?.project
   if (context === undefined) return ALLOW
   const secret = secretOf(request, context, system)
   if (secret !== undefined) return { verdict: 'deny', reason: secret }
   if (project === undefined) return ALLOW
-  const named = commandRule(command, project.commands, system)
+  const named = commandRule(command, project.commands, system) ?? hostRuleOf(command, project.commands, system)
   if (named?.decision === 'never') return { verdict: 'deny', reason: `The project's rules never allow \`${named.pattern.trim()}\`.` }
   const kinds = commandKinds(command, context)
   const never = kinds.find((each) => each.rule !== 'unclear' && project.never.includes(each.rule))
   if (never !== undefined && never.rule !== 'unclear')
     return { verdict: 'deny', reason: `The project's rules never allow ${RULE_WORDS[never.rule]}.` }
+  // The irreversible list asks in every role, sandbox or not (ADR-097).
+  const lasting = lastingOf(request, context)
+  if (lasting !== undefined) return ask(evenAllowed(lasting.reason), false)
   if (named?.decision === 'ask') return ask(`The project's rules ask before \`${named.pattern.trim()}\`.`, true)
   return ALLOW
 }
@@ -4940,10 +5092,10 @@ export interface ReaderOptions {
   readonly cwd?: string
   readonly trusted?: boolean
   /**
-   * A trusted reader whose agent runs every command in a sandbox held to its
-   * folder, never outside it, and reaching no network (ADR-058): what a
-   * command writes stays in its copies, so it may `git fetch` there wherever
-   * the command asks, as in a loop.
+   * A trusted reader whose agent runs its commands in a sandbox held to its
+   * folder (ADR-058): what a command writes stays in its copies, so it may
+   * `git fetch` there wherever the command asks, as in a loop. A read the
+   * sandbox cannot run may retry outside, against the reader's rules.
    */
   readonly contained?: boolean
   /**

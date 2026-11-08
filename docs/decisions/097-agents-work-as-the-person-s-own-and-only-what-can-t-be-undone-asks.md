@@ -28,8 +28,8 @@
   [ADR-057](057-a-lead-works-outside-its-sandbox-through-althar-s-tools.md)
   (a review's lead gets no tools; screenshots of this computer only),
   [ADR-058](058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md)
-  (the coordinator installs nothing, reaches no network, loads nothing of the
-  person's),
+  (the coordinator installs nothing, loads nothing of the person's, and keeps
+  its edit tools denied; its commands reach the network),
   [ADR-066](066-althar-runs-any-branch-or-pull-request-and-fetches-for-leads.md)
   (leads carry none of the person's sign-ins),
   [ADR-067](067-allow-everything-asks-only-before-what-can-t-be-undone.md)
@@ -778,7 +778,7 @@ this ADR or the prototype's README.
 | 050 | No review led by an agent a repository's settings can approve for | That rule for an outside author's review |
 | 052 | A branch on someone else's fork never attached | Never forced; attached one at a time |
 | 057 | A review's lead gets no tools; screenshots of this computer only | The tools themselves |
-| 058 | No installs in its copies; no network for its commands; none of the person's setup | Copies of its own, edit tools denied |
+| 058 | No installs in its copies; no network for its commands; none of the person's setup | Copies of its own, edit tools denied; the network is open |
 | 066 | Leads carry none of the person's sign-ins | `fetch_from_remote`, preferred |
 | 067 | The floor in the other modes | The irreversible kinds |
 | 071 | Today's rules where no sandbox holds; review steps' rules | The sandbox as the boundary; the guard |
@@ -832,10 +832,21 @@ direction; they are not a separate path in this sweep.
 
 The coordinator uses the project rules, including the person's Never and Ask,
 rather than the strict reader whitelist. Without a sandbox only visible writes
-outside its folder are refused; unreadable commands run. A silent refusal is
-recovered in the same turn. Claude's native sandbox still refuses opening pipe
-descriptors under `/dev/fd`, even when those paths are explicitly allowed;
-Althar no longer refuses process substitution itself.
+outside its folder are refused; unreadable commands run. Its edit tools stay
+denied, as the What stays table keeps them. A silent refusal is recovered in
+the same turn. Claude's native sandbox still refuses opening pipe descriptors
+under `/dev/fd`; the coordinator now retries such a read outside the sandbox,
+where its read-only rules run it, so `<(…)` works. Althar no longer refuses
+process substitution itself.
+
+Sandboxed commands reach Althar's rules so the list holds inside the sandbox
+too: each command is answered at once, a visible irreversible one asks the
+person, and an unreadable one runs. Approving an agent's own work or widening
+host access through `gh api` is refused, not asked. Claude Code's sandbox opens
+the network and the SSH agent's socket only. Codex is the one gap: its 0.165
+approval policy has no form that asks about every sandboxed command, so its
+shell runs unseen; its `knownGaps` and the limits audit say so, and Althar's
+tools are the route for merges, releases and comments there.
 
 The non-irreversible floor is gone in every mode. Code-host CLI changes and the
 Flatpak bridge are ordinary commands. Visible merges, releases, posts and

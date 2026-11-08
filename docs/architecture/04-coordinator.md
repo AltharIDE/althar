@@ -91,14 +91,16 @@ The coordinator leaves implementation to task leads for tidiness, not safety.
 It works in disposable copies, refreshed before each turn. Ordinary files may
 be read anywhere; secret files and the keychain remain protected.
 
-Where Claude Code's OS sandbox starts, commands run in it without being parsed,
-with writes held to its folder and temporary files. Network, localhost and Unix
-sockets are open. It loads selected skills, but no repository settings or hooks.
-Claude's native sandbox still refuses opening process-substitution pipes under
-`/dev/fd`; the limits audit records this unresolved provider restriction.
-Codex uses its ordinary workspace sandbox. Without an OS sandbox, commands run
-unless they visibly write outside the coordinator's folder. Scripts, variables,
-loops and process substitutions are not refused for being unreadable.
+Where Claude Code's OS sandbox starts, commands run in it with writes held to
+its folder and temporary files, and every command reaches Althar's rules, which
+answer it at once. Network and localhost are open; only the SSH agent's own
+socket is allowed. It loads selected skills, but no repository settings or
+hooks, and its edit tools stay denied. Claude's native sandbox still refuses
+opening process-substitution pipes under `/dev/fd`; the coordinator retries
+such a read outside the sandbox, where its read-only rules run it. Codex uses
+its ordinary workspace sandbox. Without an OS sandbox, commands run unless they
+visibly write outside the coordinator's folder. Scripts, variables, loops and
+process substitutions are not refused for being unreadable.
 
 The coordinator uses the project's rules, including the person's Never and Ask
 rules. Visible irreversible crossings ask as for a lead. A refusal is explained

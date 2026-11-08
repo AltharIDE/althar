@@ -149,14 +149,29 @@ describe('code hosts use the irreversible rules', () => {
     ['glab mr merge 4', 'ask'],
     ['gh pr comment 12 --body done', 'ask'],
     ['glab mr note 4 -m x', 'ask'],
-    ['gh pr review 12 --approve', 'ask'],
+    ['gh pr review 12 --approve', 'deny'],
     ['gh issue create --title x', 'ask'],
+    ['gh issue delete 7', 'ask'],
     ['gh release create v1', 'ask'],
     ['gh release delete v1', 'ask'],
+    ['gh release edit v1 --draft=false', 'ask'],
     ['gh api -X POST repos/x/issues -f title=x', 'ask'],
     ['gh api --method=PUT repos/x/pulls/1/merge', 'ask'],
     ['gh api -XPOST repos/x/issues/1/comments -f body=x', 'ask'],
     ['gh api -X DELETE repos/x/git/refs/heads/main', 'ask'],
+    // Without a leading slash, as gh api paths are usually written.
+    ['gh api -X DELETE repos/x', 'ask'],
+    // A ref moved or made through the API, which git's guard never sees.
+    ['gh api -X PATCH repos/x/git/refs/heads/main -f sha=x -F force=true', 'ask'],
+    ['gh api -X POST repos/x/git/refs -f ref=refs/tags/v1', 'ask'],
+    // Approving its own work, making a status or widening what the host lets agents do is refused, whoever asks.
+    ['gh api -X POST repos/x/pulls/1/reviews -f event=APPROVE', 'deny'],
+    ['gh api -X POST repos/x/statuses/abc -f state=success', 'deny'],
+    ['gh api -X PUT repos/x/branches/main/protection', 'deny'],
+    ['gh api -X PUT repos/x/collaborators/y', 'deny'],
+    ['gh api -X PUT repos/x/actions/permissions -f enabled=true', 'deny'],
+    ['gh secret set DEPLOY_KEY', 'deny'],
+    ['gh repo edit --visibility public', 'deny'],
     ['flatpak-spawn --host gh pr merge 1', 'ask'],
     ['flatpak-spawn --host security find-generic-password -w', 'deny'],
     ['gh auth token', 'deny'],
@@ -2714,6 +2729,13 @@ describe('the coordinator uses the project rules instead of the reader whitelist
     'python3 report.py',
     'echo $((1+2))',
     'git -C /another/repository status',
+    'git -C /another/repository log --oneline',
+    'git -C /another/repository diff',
+    'git -C /another/repository branch --list',
+    'git -C /another/repository tag -l',
+    'git -C /another/repository remote -v',
+    'git -C /another/repository worktree list',
+    'git -C /another/repository stash list',
     'git -C /another/repository config --get user.name',
     'unknown-tool --read',
     'flatpak-spawn --host uptime',
@@ -2722,7 +2744,26 @@ describe('the coordinator uses the project rules instead of the reader whitelist
     assert.strictEqual(run(command, at).verdict, 'allow')
   })
   it('refuses visible writes outside its folder, while writes inside run', () => {
-    for (const command of ['touch /another/folder/a', 'echo hi > /another/a', 'git -C /another/repository commit -m x'])
+    for (const command of [
+      'touch /another/folder/a',
+      'echo hi > /another/a',
+      'git -C /another/repository commit -m x',
+      'git -C /another/repository apply a.patch',
+      'git -C /another/repository am a.patch',
+      'git -C /another/repository cherry-pick abc',
+      'git -C /another/repository revert abc',
+      'git -C /another/repository mv a b',
+      'git -C /another/repository rm a',
+      'git -C /another/repository notes add -m x',
+      'git -C /another/repository remote add origin https://example.com/r.git',
+      'git -C /another/repository gc',
+      'git -C /another/repository update-ref refs/heads/x HEAD',
+      'git -C /another/repository branch new',
+      'git -C /another/repository tag v1',
+      'git -C /another/repository stash',
+      'git -C /another/repository worktree add ../x',
+      'git -C /another/repository config user.name x',
+    ])
       assert.strictEqual(run(command, at).verdict, 'deny', command)
     assert.strictEqual(run('echo hi > own-notes.txt', at).verdict, 'allow')
   })
