@@ -1040,6 +1040,32 @@ const playRole = async (
         })
         return 'Those are the two states.'
       }
+      // Asked to work on the page beside its task, `[lead:page]` with `page: <address>` and `shot: <file>`, it opens it there,
+      // reads it, types in its Note field, presses Approve, reads it again and writes its screenshot to the file, and says
+      // what each of Althar's tools answered.
+      if (text.includes('[lead:page]') && available.has('page_open')) {
+        const address = /page: (\S+)/.exec(text)?.[1] ?? ''
+        const shot = /shot: (\S+)/.exec(text)?.[1]
+        const said: Array<string> = []
+        const told = async (name: string, args: Record<string, unknown>) => {
+          const answer = await call(name, args)
+          said.push(`${name}: ${answer}`)
+          return answer
+        }
+        await told('page_open', { url: address })
+        const before = await told('page_snapshot', {})
+        const note = /textbox "Note" \[ref=(e\d+)\]/.exec(before)?.[1]
+        const approve = /button "Approve" \[ref=(e\d+)\]/.exec(before)?.[1]
+        if (note !== undefined) await told('page_type', { ref: note, text: 'Refund approved' })
+        if (approve !== undefined) await told('page_click', { ref: approve })
+        await told('page_snapshot', {})
+        const result = await client.callTool({ name: 'page_screenshot', arguments: {} })
+        const parts = Array.isArray(result.content) ? (result.content as ReadonlyArray<Record<string, unknown>>) : []
+        const picture = parts.find((part) => part.type === 'image')
+        if (shot !== undefined && typeof picture?.data === 'string') writeFileSync(shot, Buffer.from(picture.data, 'base64'))
+        said.push(`page_screenshot: ${parts.map((part) => (typeof part.text === 'string' ? part.text : '')).join('')}`)
+        return said.join('\n\n')
+      }
       if (text.includes('Settle each')) {
         if (session.markers.has('[lead:settle-quietly]')) return 'Settled, without saying so.'
         const aside = session.markers.has('[lead:set-aside]')
