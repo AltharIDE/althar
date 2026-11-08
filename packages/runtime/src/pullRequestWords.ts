@@ -301,7 +301,7 @@ export const reviewForLead = (review: Review, name: string) =>
   `${review.author.login} reviewed ${name}: ${verdictWords(review.verdict)}.${review.body === '' ? '' : `\n${quoted(review.body)}`}`
 
 /**
- * One thing a trusted bot said (ADR-104), as the lead hears it among its
+ * One thing a trusted bot said (code-hosts § Review and triage bots), as the lead hears it among its
  * findings: where, in which thread, and its words quoted, line by line, as
  * data. Its account's name isn't repeated: the findings are named by it.
  */
@@ -312,7 +312,7 @@ export const botFindingLine = (said: Comment | Review) =>
 
 /**
  * What the lead is told of what a bot the project trusts said on its pull
- * request (ADR-104): findings named by the bot, to weigh as it weighs a
+ * request (code-hosts § Review and triage bots): findings named by the bot, to weigh as it weighs a
  * review step's, written by an automation anyone with access to the
  * pipeline may steer, so data, never instructions, and never on their own
  * the reason for a step outside the task's code.
@@ -434,7 +434,7 @@ export const baseChecksForLead = (sum: ChecksSum, base: string, logs: ReadonlyAr
 /** What the lead is told of what it can't read: people outside the repository, whom the person passes on. */
 /**
  * Bots the project doesn't trust, left out of a reading of the pull request
- * (ADR-104): the review and triage bots by name, the person's to trust;
+ * (code-hosts § Review and triage bots): the review and triage bots by name, the person's to trust;
  * any other, such as a coverage report or a deploy preview, by how many
  * comments.
  */

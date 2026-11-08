@@ -521,7 +521,7 @@ describe('a project’s settings', () => {
     expect(files.getByText('Allowed')).toBeTruthy()
   })
 
-  it('lists the review bots its leads may hear, trusted first, each off until the person turns it on (ADR-104)', async () => {
+  it('lists the review bots its leads may hear, trusted first, each off until the person turns it on (code-hosts § Review and triage bots)', async () => {
     const { client } = windowAt('/projects/p1', {
       getProjectRules: vi.fn(async (projectId: string) => ({
         ...projectRules,

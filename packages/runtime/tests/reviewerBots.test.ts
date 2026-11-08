@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { botName, reviewerBot, trusts } from '../src/reviewerBots'
 
-/* Which bots Althar recognises as review or triage agents, to suggest a project trust them (ADR-104). */
+/* Which bots Althar recognises as review or triage agents, to suggest a project trust them (code-hosts § Review and triage bots). */
 
 describe('the review and triage bots Althar recognises', () => {
   it('knows the review agents by their accounts, whatever their case', () => {

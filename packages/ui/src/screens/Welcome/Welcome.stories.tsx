@@ -39,6 +39,23 @@ const EVERY_AGENT = [
   { id: 'kimi', name: 'Kimi Code', brand: Brand.Moonshot, state: RuntimeState.Missing },
 ] satisfies RuntimeEntry[]
 
+/* The agents a person who codes with agents already pays for: each signed in on its own plan, and one more Althar can fetch. */
+const SIGNED_IN = [
+  { ...FIRST_RUN[0]! },
+  { ...FIRST_RUN[1]!, state: RuntimeState.Ready, account: 'you@meridian.dev · Pro', version: '0.52.0' },
+  {
+    id: 'copilot',
+    name: 'GitHub Copilot',
+    brand: Brand.GitHubCopilot,
+    state: RuntimeState.Ready,
+    account: 'meridian-dev · Pro+',
+    version: '1.4.2',
+  },
+  { id: 'opencode', name: 'OpenCode', brand: Brand.OpenCode, state: RuntimeState.Ready, account: 'Go', version: '1.0.84' },
+  { id: 'junie', name: 'Junie', brand: Brand.Junie, state: RuntimeState.Missing },
+  { id: 'kimi', name: 'Kimi Code', brand: Brand.Moonshot, state: RuntimeState.Missing, download: '38 MB' },
+] satisfies RuntimeEntry[]
+
 const onCreate = fn()
 const onOpen = fn()
 const onToured = fn()
@@ -150,6 +167,9 @@ export const Walking: Story = {
 
 /** The agents on this computer: one signed in, one signed out, one to download. One is enough to go on. */
 export const Agents: Story = { args: { toured: true } }
+
+/** The agents you already pay for, each signed in on its own plan: the README's picture of a first run. */
+export const SignedIn: Story = { args: { toured: true, runtimes: SIGNED_IN } }
 
 /** Every agent Althar runs: those on this computer a row each, the others under them, quieter, a tile each. */
 export const EveryAgent: Story = {

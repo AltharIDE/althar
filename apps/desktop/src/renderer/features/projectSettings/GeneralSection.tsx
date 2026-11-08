@@ -154,7 +154,7 @@ function WorkToward({ projectId, repositories }: { projectId: string; repositori
 }
 
 /**
- * The review and triage bots a project's leads may hear (ADR-104): those it
+ * The review and triage bots a project's leads may hear (code-hosts § Review and triage bots): those it
  * trusts, then those Althar recognised on its tasks' pull requests, each a
  * switch, off until the person turns it on. Until one has spoken, a line
  * says they show up here.

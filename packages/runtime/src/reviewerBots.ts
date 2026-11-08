@@ -1,7 +1,7 @@
 import { agentBot } from './credit'
 
 /*
- * The bots a project's leads may hear (ADR-104): the review and triage
+ * The bots a project's leads may hear (code-hosts § Review and triage bots): the review and triage
  * agents teams put in their pipelines, which Althar recognises by their
  * accounts. The person trusts each one alone, in the project's settings;
  * none is trusted unless they did. A bot Althar doesn't recognise as a

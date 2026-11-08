@@ -95,6 +95,7 @@ describe('what a repository says its leads run outside the sandbox', () => {
       'pnpm exec jest',
       'pnpm run test',
       'pnpm run e2e',
+      'pnpm run dev',
     ])
   })
 
@@ -116,7 +117,7 @@ describe('what a repository says its leads run outside the sandbox', () => {
         }),
       },
     )
-    assert.deepStrictEqual(commandsIn(root), ['bunx playwright', 'bunx vp test run', 'node scripts/e2e.ts'])
+    assert.deepStrictEqual(commandsIn(root), ['bunx playwright', 'bunx vp test run', 'node scripts/e2e.ts', 'electron .'])
     assert.deepStrictEqual(
       ['bun run test:e2e', '/opt/bin/bun x', 'bunx playwright', 'node scripts/e2e.ts', 'bundle exec rspec'].map(runsOutside),
       [false, false, true, true, true],
@@ -136,8 +137,23 @@ describe('what a repository says its leads run outside the sandbox', () => {
     assert.deepStrictEqual(runCommandsOf('bun --filter @althar/ui storybook'), ['bun --filter @althar/ui storybook'])
   })
 
-  it('always names ps and env -i', () => {
-    assert.deepStrictEqual(ALWAYS, ['ps', 'env -i'])
+  it('runs hand-started dev servers and test runners outside, with their usual launchers', () => {
+    assert.includeMembers(
+      [...ALWAYS],
+      [
+        'ps',
+        'env -i',
+        'next dev',
+        'npx next dev',
+        'bunx vite',
+        'pnpm exec vitest',
+        'yarn jest',
+        'npm run dev',
+        'pnpm test',
+        'bunx vp test',
+      ],
+    )
+    assert.isTrue(ALWAYS.every(runsOutside))
   })
 })
 
@@ -282,7 +298,10 @@ describe('a lead’s session', () => {
     Effect.gen(function* () {
       const sandbox = yield* leading({ permissions: 'rules', allowEverything: false })
       // Not `bun run dev` or `bun install`, which Claude Code would run in the sandbox anyway.
-      assert.deepStrictEqual(sandbox?.commands, ['bunx playwright', 'bunx electron', 'bunx vitest', 'node scripts/e2e.ts', 'ps', 'env -i'])
+      assert.sameMembers(
+        [...(sandbox?.commands ?? [])],
+        [...new Set(['bunx playwright', 'bunx electron', 'bunx vitest', 'node scripts/e2e.ts', ...ALWAYS])],
+      )
       // GitHub's release downloads too, where Electron's build comes from: a host, not a release script.
       assert.deepStrictEqual(sandbox?.hosts, [
         'github.com',
@@ -323,8 +342,9 @@ describe('a lead’s session', () => {
         'bunx playwright',
         'bunx electron',
         'bunx vitest',
+        'vite',
         'node scripts/e2e.ts',
-        'ps',
+        ...ALWAYS.filter((command) => !['env -i', 'vite', 'bunx playwright', 'bunx electron', 'bunx vitest'].includes(command)),
         'make e2e',
       ])
       assert.deepStrictEqual(sandbox?.hosts, [])
@@ -336,6 +356,20 @@ describe('a lead’s session', () => {
       const sandbox = yield* leading({ allowEverything: true, commands: [{ pattern: 'uploads.linear.app', decision: 'never' }] })
       assert.include(sandbox?.hosts ?? [], 'registry.npmjs.org')
       assert.notInclude(sandbox?.hosts ?? [], 'uploads.linear.app')
+      assert.deepStrictEqual(sandbox?.deniedHosts, ['uploads.linear.app'])
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('never reaches a host under a wildcard the project never allows, and leaves a Never that names no host alone', () =>
+    Effect.gen(function* () {
+      const sandbox = yield* leading({
+        allowEverything: true,
+        commands: [
+          { pattern: '*.example.com', decision: 'never' },
+          { pattern: 'npm publish', decision: 'never' },
+        ],
+      })
+      assert.deepStrictEqual(sandbox?.deniedHosts, ['*.example.com'])
     }).pipe(Effect.provide(runtime())),
   )
 
@@ -354,10 +388,10 @@ describe('a lead’s session', () => {
 })
 
 describe('a lead’s brief', () => {
-  it('names what runs outside its sandbox, how one does, and the hosts it reaches', () => {
+  it('names what runs outside its sandbox, how one does, and that its network is open', () => {
     assert.strictEqual(
       upFrontSaid({ commands: ['bunx playwright', 'ps'], hosts: ['github.com', 'registry.npmjs.org'], writes: [] }),
-      "These commands run outside your sandbox from the start, so they don't fail inside it first: `bunx playwright`, `ps`. Each still asks, and meets the project's rules. One runs outside only on a line of its own: a line that runs anything else with it, `cd` or a pipe into `tail` included, stays in the sandbox, so change folder in a call of its own first. On macOS, Electron and Chromium can't start inside the sandbox at all (it never lets them register a Mach service), so run the project's end-to-end tests this way. A line that starts with `bun` always stays in the sandbox: run what its script runs instead, from the script's folder, as listed here. Your sandbox reaches these hosts without asking: github.com, registry.npmjs.org.",
+      "These commands run outside your sandbox from the start, so they don't fail inside it first: `bunx playwright`, `ps`. Each still asks, and meets the project's rules. One runs outside only on a line of its own: a line that runs anything else with it, `cd` or a pipe into `tail` included, stays in the sandbox, so change folder in a call of its own first. On macOS, Electron and Chromium can't start inside the sandbox at all (it never lets them register a Mach service), so run the project's end-to-end tests this way. A line that starts with `bun` always stays in the sandbox: run what its script runs instead, from the script's folder, as listed here. Your sandbox reaches any host without asking: the network is open.",
     )
     assert.strictEqual(upFrontSaid({ commands: ['ps'], hosts: [], writes: [] }).includes('hosts'), false)
     assert.include(

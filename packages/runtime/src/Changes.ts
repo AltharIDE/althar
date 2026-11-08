@@ -149,6 +149,7 @@ import { LeftBehind } from './LeftBehind'
 import { spanOf } from './stallWatch'
 import { addItem, updateItem } from './threads'
 import { readReviewed, reviewOf } from './reviewing'
+import { RECENT, refreshRemotes } from './recordedRemotes'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
 import { summarize, words } from './words'
 import { BETWEEN_AGENTS_MS, betweenAgents } from './needsYou'
@@ -905,9 +906,11 @@ export class Changes extends Context.Service<
      * once, when the plan is made: as the project's rules say, else a draft
      * pull request where its repository's host is connected, else on its
      * branch. A project that wants a pull request where no host Althar
-     * knows is named ends on its branch, as it always has.
+     * knows is named ends on its branch, as it always has. `fresh` reads
+     * the repositories' remotes from git first, and waits for them: where a
+     * run's ending is decided, never where a screen reads it.
      */
-    endFor(projectId: string, taskId?: string): Effect.Effect<'draft' | 'ready' | 'none' | null, unknown>
+    endFor(projectId: string, taskId?: string, fresh?: boolean): Effect.Effect<'draft' | 'ready' | 'none' | null, unknown>
     /**
      * The code host the project's repositories are on, and whether Althar is
      * connected to it: the first connected, else the first Althar knows; null
@@ -1161,6 +1164,9 @@ export class Changes extends Context.Service<
       const hostsFor = (projectId: string, taskId?: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // Its repositories' remotes read again from their clones, apart: one added while Althar runs is found on the next read, and a card
+          // read never waits on git. Publishing and a run's ending read them first, and wait.
+          yield* Effect.forkIn(provide(refreshRemotes(instance.deviceId, taskId === undefined ? { projectId } : { taskId }, RECENT)), scope)
           const bindings =
             taskId === undefined
               ? yield* sql<{ remotes: string }>`
@@ -1208,6 +1214,8 @@ export class Changes extends Context.Service<
       const publish = (input: PublishInput): Effect.Effect<Published, unknown, Store> =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // Its repositories' remotes as their clones have them now: one added since the repository was, too.
+          yield* refreshRemotes(instance.deviceId, { taskId: input.taskId })
           const tasks = yield* sql<PublishRow>`
             SELECT k.title, b.display_name AS name, b.slug, t.id AS thread_id, w.id AS workspace_id, w.path, w.branch, w.base_commit, w.base_ref, b.id AS binding_id,
               w.branched_at IS NOT NULL AS branched, b.remote_fingerprints AS remotes, coalesce(w.toward, b.default_base_ref) AS default_base, b.change_target,
@@ -1460,7 +1468,12 @@ export class Changes extends Context.Service<
           const pictures = yield* evidencePaths(input.taskId)
           const left = (yield* uncommittedFiles(task.path)).filter((file) => !pictures(task.path, file))
           const base = task.baseCommit ?? task.baseRef ?? own.defaultBranch
-          if ((yield* commitsAhead(task.path, base)) === 0) return { kind: 'nothing', left } as const
+          // Nothing of its own to propose: not ahead of where it started, or wholly in the branch it goes into already (a branch
+          // that took main in without a commit of its own is behind it, not ahead of it).
+          const headNow = yield* commitOf(task.path, 'HEAD').pipe(Effect.orElseSucceed(() => ''))
+          const inTarget =
+            headNow !== '' && (yield* gitOutcome(task.path, 'merge-base', '--is-ancestor', headNow, `refs/heads/${target}`)).code === 0
+          if (inTarget || (yield* commitsAhead(task.path, base)) === 0) return { kind: 'nothing', left } as const
           const [sent] = yield* sql<{ head: string | null }>`
             SELECT head_commit AS head FROM repository_changes WHERE workspace_id = ${task.workspaceId} ORDER BY updated_at DESC LIMIT 1`
           const end = yield* commitOf(task.path, 'HEAD')
@@ -2771,6 +2784,9 @@ export class Changes extends Context.Service<
               return { repository, plan, settle }
             }),
           )
+          // Nothing of the task's own is ahead of its default branch: its work is in already, so nothing is merged and nothing says it was.
+          if (plans.every(({ plan }) => plan.kind === 'already'))
+            return yield* cant('nothing', '', { into: [...new Set(repositories.map(into))].join(' and ') })
           // A checkout, or a submodule the merge moves, that can't be read stops the merge, with its path and git's own words, before anything else.
           for (const { repository, plan } of plans)
             if (plan.kind === 'unreadable') return yield* cant('unreadable', named(repository, `${plan.checkout}\n${plan.detail}`))
@@ -2825,11 +2841,12 @@ export class Changes extends Context.Service<
                   into: into(refused.repository),
                   files: refused.problem?.kind === 'busy' ? refused.problem.files : [],
                 })
-          for (const { settle } of plans) yield* settle
-          const merged = plans.map(({ repository, plan }) => ({
+          const moved = plans.filter(({ plan }) => plan.kind === 'move')
+          for (const { settle } of moved) yield* settle
+          const merged = moved.map(({ repository }) => ({
             repository: repository.name,
             branch: repository.base,
-            already: plan.kind === 'already',
+            already: false,
           }))
           yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
             source: 'runtime',
@@ -3590,7 +3607,7 @@ export class Changes extends Context.Service<
           const replies = yield* repliesOf(link.id)
           const trusted = trustedBotsOf((yield* (yield* Policies).current(link.projectId)).rules)
           // What anyone else said isn't read to the lead: on a public repository, anyone can comment. Nor what a bot the project
-          // doesn't trust said; a trusted one's words are its findings, named by it and framed as data (ADR-104).
+          // doesn't trust said; a trusted one's words are its findings, named by it and framed as data (code-hosts § Review and triage bots).
           const quiet = new Set<string>()
           let otherBots = 0
           const heardBots = new Map<string, { readonly name: string; readonly said: Array<Comment | Review> }>()
@@ -4221,10 +4238,10 @@ export class Changes extends Context.Service<
           const activity = yield* host.activity(repository, before.number, link.cursor)
           const replies = activity.comments.length === 0 ? new Set<string>() : yield* repliesOf(link.id)
           const trusted = trustedBotsOf((yield* (yield* Policies).current(link.projectId)).rules)
-          // What each bot the project trusts said that its lead hears, by its account, as findings framed as data (ADR-104).
+          // What each bot the project trusts said that its lead hears, by its account, as findings framed as data (code-hosts § Review and triage bots).
           const fromBots = new Map<string, { readonly name: string; readonly said: Array<Comment | Review> }>()
           /*
-           * How a bot that spoke is heard (ADR-104): trusted, its words go to the lead as findings; a review or triage agent
+           * How a bot that spoke is heard (code-hosts § Review and triage bots): trusted, its words go to the lead as findings; a review or triage agent
            * Althar recognises but the project doesn't trust stays quiet, and the thread says once, per pull request, that it
            * spoke, with a way to trust it, where it is suggested in the project's settings too; any other bot stays quiet.
            */
@@ -4636,8 +4653,16 @@ export class Changes extends Context.Service<
           const links = yield* sql<{ state: string | null }>`
             SELECT json_extract(snapshot, '$.state') AS state FROM external_links WHERE task_id = ${taskId} AND kind = 'change'`
           if (links.some((link) => link.state !== 'closed')) return false
-          const worktrees = yield* sql<{ path: string; baseCommit: string | null; baseRef: string | null }>`
-            SELECT w.path, w.base_commit, w.base_ref FROM workspaces w
+          const worktrees = yield* sql<{
+            path: string
+            baseCommit: string | null
+            baseRef: string | null
+            root: string | null
+            defaultBase: string | null
+          }>`
+            SELECT w.path, w.base_commit, w.base_ref, l.path AS root, coalesce(w.toward, b.default_base_ref, w.base_ref) AS default_base
+            FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+            LEFT JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
             WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.state = 'ready'`
           // No branch of its own to read, or one whose folder is gone (deleted, or on a volume not mounted): not known to be empty.
           if (worktrees.length === 0) return false
@@ -4647,8 +4672,15 @@ export class Changes extends Context.Service<
             const base = worktree.baseCommit ?? worktree.baseRef
             // Where git can't say what it started from, it isn't known to be empty.
             if (base === null) return false
-            if ((yield* commitsAhead(worktree.path, base)) > 0) return false
+            // Anything it changed and didn't commit is work, whatever its branch holds.
             if ((yield* uncommittedFiles(worktree.path)).some((file) => !pictures(worktree.path, file))) return false
+            // Its branch is in the default branch already, so it has nothing of its own, whatever it started from.
+            const head = yield* commitOf(worktree.path, 'HEAD').pipe(Effect.orElseSucceed(() => ''))
+            if (head !== '' && worktree.root !== null && worktree.defaultBase !== null) {
+              const inDefault = yield* gitOutcome(worktree.root, 'merge-base', '--is-ancestor', head, `refs/heads/${worktree.defaultBase}`)
+              if (inDefault.code === 0) continue
+            }
+            if ((yield* commitsAhead(worktree.path, base)) > 0) return false
           }
           return true
         })
@@ -6417,6 +6449,9 @@ export class Changes extends Context.Service<
       )
       yield* Effect.forkScoped(afterOpen(startup('settled-pull-requests', readSettled)))
 
+      // Each repository's remotes as its clone has them, once a launch: a remote added since is known.
+      yield* Effect.forkScoped(afterOpen(startup('repository-remotes', provide(refreshRemotes(instance.deviceId, 'all')))))
+
       // A review after a merge that didn't start is tried again, at once and with each listening turn, until it does.
       yield* Effect.forkScoped(afterOpen(startup('reviews-after-merge', fastLane.retryPendingReviews())))
 
@@ -7435,12 +7470,13 @@ export class Changes extends Context.Service<
             Effect.sync(() => wakeNow(taskId)),
           ),
         // Worked out from the repositories the task changes, where it says which: one on a connected host opens a draft.
-        endFor: (projectId, taskId) =>
+        endFor: (projectId, taskId, fresh) =>
           provide(
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
               const [project] = yield* sql<{ id: ProjectId }>`SELECT id FROM projects WHERE id = ${projectId}`
               if (project === undefined) return null
+              if (fresh === true) yield* refreshRemotes(instance.deviceId, taskId === undefined ? { projectId } : { taskId })
               const hosts = yield* hostsFor(projectId, taskId)
               const wanted = (yield* (yield* Policies).current(project.id)).rules.end
               if (wanted === 'none') return wanted

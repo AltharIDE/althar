@@ -741,7 +741,7 @@ describe('the thread, reaching outside', () => {
     )
   })
 
-  it('says a review bot was heard as findings where trusted, else once that it wasn’t, and trusts it from there (ADR-104)', async () => {
+  it('says a review bot was heard as findings where trusted, else once that it wasn’t, and trusts it from there (code-hosts § Review and triage bots)', async () => {
     const trustBot = vi.fn(async () => {})
     const { client } = fakeClient({
       trustBot,

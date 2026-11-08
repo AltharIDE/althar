@@ -25,7 +25,7 @@ export const applyRules = (projectId: string, sent: RulesSent, actorId: ActorId,
   Effect.gen(function* () {
     const policies = yield* Policies
     const { rotateAccounts, onlyAccounts, ...sentRules } = sent
-    // Bots by their accounts, in small letters, each once (ADR-104).
+    // Bots by their accounts, in small letters, each once (code-hosts § Review and triage bots).
     const change =
       sentRules.trustedBots == null
         ? sentRules

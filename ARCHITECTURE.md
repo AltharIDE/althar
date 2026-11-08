@@ -44,7 +44,7 @@ Test valuable behavior: invariants, boundaries, invalid input, failures, recover
 
 Use strict TypeScript, type-aware linting, formatting, dependency and import-boundary rules, and build checks. Keep warnings and suppressions visible and justified.
 
-CI must block release on failed static checks, tests, coverage, or production builds, plus applicable accessibility and end-to-end checks. It blocks merge on those it runs before merge, and one that runs only after merge still gates every release ([ADR-074](docs/decisions/074-ci-gates-a-merge-on-linux-and-a-release-on-everything.md)). A check is a gate only when CI runs it and fails on a violation. A passing local run does not replace that gate; an untested failure path remains incomplete even when coverage is high.
+CI must block release on failed static checks, tests, coverage, or production builds, plus applicable accessibility and end-to-end checks. It blocks merge on those it runs before merge, and one that runs only after merge still gates every release ([ADR-074](docs/decisions/foundations.md#what-ci-gates)). A check is a gate only when CI runs it and fails on a violation. A passing local run does not replace that gate; an untested failure path remains incomplete even when coverage is high.
 
 ### Reproducibility
 
@@ -64,7 +64,7 @@ Consider performance in every design. Avoid unnecessary work, blocking operation
 
 Make failures diagnosable without leaking private data. Use actionable errors and, where appropriate, structured diagnostics with enough context to trace an operation across boundaries. Handle empty, slow, offline, partial, and interrupted states deliberately.
 
-Keep each failure to the smallest thing it belongs to. Where work covers independent things, one that fails says so on its own and the rest carry on; a loop survives the round or item it couldn't handle; fail a whole operation only when its parts can't stand apart. Combinators that run many things, such as Effect's `forEach` and `all`, stop at the first failure, so catch each item where its failure is its own. A failure kept this way still leaves a trace: log it, and report what the person didn't cause and can't put right where it is kept, at the edge, never what they did ([ADR-047](docs/decisions/047-failures-kept-where-they-belong-and-reported-at-the-edge.md)).
+Keep each failure to the smallest thing it belongs to. Where work covers independent things, one that fails says so on its own and the rest carry on; a loop survives the round or item it couldn't handle; fail a whole operation only when its parts can't stand apart. Combinators that run many things, such as Effect's `forEach` and `all`, stop at the first failure, so catch each item where its failure is its own. A failure kept this way still leaves a trace: log it, and report what the person didn't cause and can't put right where it is kept, at the edge, never what they did ([ADR-047](docs/decisions/foundations.md#failures-stay-with-what-they-belong-to)).
 
 Removing what was there only for a while, such as a temporary folder or the folder a process ran in, is best effort: it never fails, or loses, the work it followed. A folder can stay held for a moment after the process that used it has gone, so try again briefly, then log what still stays and leave it. Where the removal is itself the work, it says when something stayed.
 
@@ -86,15 +86,15 @@ Record consequential decisions in an ADR with context, alternatives considered, 
 
 ADR-001 is recorded here. Later decisions are one file each in [`docs/decisions/`](docs/decisions/), numbered in sequence. Preserve earlier decisions and mark them superseded when the target changes.
 
-- [ADR-002](docs/decisions/002-acp-for-every-agent.md) — 2026-09-28: ACP for every agent
-- [ADR-003](docs/decisions/003-electron-shell.md) — 2026-09-28: Electron shell, with the runtime in a utility process
-- [ADR-004](docs/decisions/004-coordinator-is-an-agent-session.md) — 2026-09-28: The coordinator is an agent session with Althar's tools
-- [ADR-005](docs/decisions/005-althar-briefs-every-agent.md) — 2026-09-28: Althar briefs every agent, and a switch hands over everything
-- [ADR-006](docs/decisions/006-worktree-per-task.md) — 2026-09-28: A git worktree per task
-- [ADR-007](docs/decisions/007-permission-requests-reach-althar.md) — 2026-09-28: Every permission request reaches Althar
-- [ADR-008](docs/decisions/008-shortcuts-in-behaviour-not-in-records.md) — 2026-09-28: Shortcuts in behaviour, never in recorded facts
-- [ADR-009](docs/decisions/009-effect-on-the-runtime-side.md) — 2026-09-28: Effect on the runtime side
-- [ADR-010](docs/decisions/010-desktop-app-mvvm.md) — 2026-09-28: The desktop app is MVVM, in feature folders
+- [ADR-002](docs/decisions/agents.md#acp-for-every-agent) — 2026-09-28: ACP for every agent
+- [ADR-003](docs/decisions/foundations.md#the-shell-and-the-runtime) — 2026-09-28: Electron shell, with the runtime in a utility process
+- [ADR-004](docs/decisions/coordinator.md#always-on) — 2026-09-28: The coordinator is an agent session with Althar's tools
+- [ADR-005](docs/decisions/agents.md#briefs-and-switching-agent-or-model) — 2026-09-28: Althar briefs every agent, and a switch hands over everything
+- [ADR-006](docs/decisions/workspaces-and-runs.md#worktree) — 2026-09-28: A git worktree per task
+- [ADR-007](docs/decisions/what-agents-may-do.md#how-a-request-reaches-althar) — 2026-09-28: Every permission request reaches Althar
+- [ADR-008](docs/decisions/foundations.md#recorded-facts-are-complete-behaviour-may-start-simple) — 2026-09-28: Shortcuts in behaviour, never in recorded facts
+- [ADR-009](docs/decisions/foundations.md#effect-on-the-runtime-side) — 2026-09-28: Effect on the runtime side
+- [ADR-010](docs/decisions/foundations.md#the-desktop-apps-layers) — 2026-09-28: The desktop app is MVVM, in feature folders
 
 ### ADR-001 — 2026-09-22: Repository-wide engineering target
 

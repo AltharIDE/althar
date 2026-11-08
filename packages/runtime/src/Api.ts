@@ -73,6 +73,7 @@ import { PlanUsage } from './PlanUsage'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
+import { missedReports } from './missedReports'
 import { PullRequestScreenshots } from './PullRequestScreenshots'
 import {
   accountsOf,
@@ -515,7 +516,7 @@ export const handlers = Api.toLayer(
         }
         // How each kind of ask and refusal went lately, so the person can drop one that mostly gets worked around (ADR-071).
         const tally = yield* tallyOf(projectId).pipe(Effect.provideService(SqlClient.SqlClient, sql))
-        // The review and triage bots that spoke on its tasks' pull requests, the latest first, but those it trusts (ADR-104).
+        // The review and triage bots that spoke on its tasks' pull requests, the latest first, but those it trusts (code-hosts § Review and triage bots).
         const spoke = yield* sql<{ login: string | null; name: string | null }>`
           SELECT json_extract(payload, '$.login') AS login, json_extract(payload, '$.name') AS name FROM observations
           WHERE project_id = ${projectId} AND kind = 'bot_spoke' ORDER BY observed_at DESC, rowid DESC`
@@ -1833,6 +1834,7 @@ export const handlers = Api.toLayer(
             Effect.provideService(Accounts, accounts),
           ),
         ),
+      GetMissedReports: () => api(missedReports),
       // Done once the copy is ready; its version and its models are asked again, as it is a new one.
       InstallAgent: ({ agentId }) =>
         api(

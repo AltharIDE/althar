@@ -9,7 +9,7 @@ import { HOST, hosted, until } from './support'
 import { arrivals, ask, cards, connect, git, runtimeWith, tipOf } from './changesSupport'
 
 /*
- * The review and triage bots a project trusts (ADR-104): what a trusted one
+ * The review and triage bots a project trusts (code-hosts § Review and triage bots): what a trusted one
  * says on a task's pull request reaches its lead as findings named by it,
  * quoted as data; one the project doesn't trust stays quiet, said once in the
  * thread, to be trusted there or in the settings; a bot that only reports or

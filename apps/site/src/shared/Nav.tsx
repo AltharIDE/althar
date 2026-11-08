@@ -34,6 +34,7 @@ export const PAGES = [
   { href: '/shifts', name: 'Shifts' },
   { href: '/changelog', name: 'Changelog' },
   { href: '/docs', name: 'Docs' },
+  { href: '/office-hours', name: 'Office hours' },
 ]
 
 /** Whether the page has scrolled past `past` px. */

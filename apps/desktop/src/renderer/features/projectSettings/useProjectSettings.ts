@@ -54,7 +54,7 @@ export interface ProjectSettingsModel {
   readonly setPushCommits: (on: boolean) => void
   /** Turns on or off a task's screenshots going up to its pull request on their own, kept as Outputs shows them (ADR-077). */
   readonly setPostScreenshots: (on: boolean) => void
-  /** Whether its leads hear a bot, by its account (ADR-104): trusted, or not. */
+  /** Whether its leads hear a bot, by its account (code-hosts § Review and triage bots): trusted, or not. */
   readonly setTrustsBot: (login: string, on: boolean) => void
   /** Looks at each open task now for a conflict with its default branch, under the project's rules (ADR-030). */
   readonly lookForConflicts: () => void

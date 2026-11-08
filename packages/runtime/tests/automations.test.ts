@@ -472,7 +472,7 @@ describe('automations', () => {
       // A lead that finishes at once, and a reviewer that never does, kept to five minutes.
       const reviewed: AutomationDefinition = {
         ...NOTES,
-        prompt: 'Check the dependencies. [lead:finish] [review:wait]',
+        prompt: 'Check the dependencies. [lead:finish] [lead:edit] [review:wait]',
         work: { kind: 'task', review: { agentId: 'codex', model: null }, end: 'ready' },
         minutes: 5,
       }

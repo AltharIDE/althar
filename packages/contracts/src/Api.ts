@@ -220,8 +220,23 @@ export const ModelRoom = Schema.Struct({
   resetsAt: Schema.NullOr(Schema.String),
   kind: UsageWindowKind,
   label: Schema.NullOr(Schema.String),
+  /** The account is marked out of usage, as steering sees it (no fresh reading since shows room): until when. The room above is its last read. */
+  outUntil: Schema.optional(Schema.String),
 })
 export type ModelRoom = typeof ModelRoom.Type
+
+/**
+ * How often a model ended a step without its report in the last week, even
+ * once reminded, by agent and model: Althar handed each to another model, or
+ * it needed the person. Pickers say it beside the model.
+ */
+export const MissedReports = Schema.Struct({
+  agentId: Schema.String,
+  /** The model's id at the agent; null for the agent's own default. */
+  model: Schema.NullOr(Schema.String),
+  count: Schema.Number,
+})
+export type MissedReports = typeof MissedReports.Type
 
 /** The percent of a plan left at which a warning is told. */
 export const USAGE_WARN_AT = [50, 25, 10, 5] as const
@@ -896,7 +911,7 @@ export const RepositoryFilesSetting = Schema.Struct({
 })
 export type RepositoryFilesSetting = typeof RepositoryFilesSetting.Type
 
-/** A bot a project's leads may hear (ADR-104): its account on the host, and what it is called. */
+/** A bot a project's leads may hear (code-hosts § Review and triage bots): its account on the host, and what it is called. */
 export const TrustedBot = Schema.Struct({
   /** In small letters: `coderabbitai[bot]`. */
   login: Schema.String,
@@ -931,7 +946,7 @@ export const ProjectRulesView = Schema.Struct({
   pushCommits: Schema.Boolean,
   /** Whether a task's screenshots go in a comment on its open pull request on their own, kept as Outputs shows them (ADR-077). */
   postScreenshots: Schema.Boolean,
-  /** The bots whose comments and reviews its leads hear, as findings framed as data (ADR-104), by their accounts; none unless trusted. */
+  /** The bots whose comments and reviews its leads hear, as findings framed as data (code-hosts § Review and triage bots), by their accounts; none unless trusted. */
   trustedBots: Schema.Array(TrustedBot),
   /** Review and triage bots Althar recognised on its tasks' pull requests that aren't trusted yet, the latest first. */
   suggestedBots: Schema.Array(TrustedBot),
@@ -1812,7 +1827,7 @@ export const ArrivalItem = Schema.Struct({
     /** Said by someone who can't write to the repository, as anyone can on a public one: not passed to the lead, for the person to pass on. */
     outsider: Schema.Boolean,
     /**
-     * Said by a review or triage bot (ADR-104): `trusted`, it reached the lead as findings; not, it didn't, and this, the first it
+     * Said by a review or triage bot (code-hosts § Review and triage bots): `trusted`, it reached the lead as findings; not, it didn't, and this, the first it
      * said on the pull request, offers to trust it. Absent for anyone else, and for a bot Althar doesn't recognise as a reviewer.
      */
     bot: Schema.optional(Schema.Struct({ login: Schema.String, name: Schema.String, trusted: Schema.Boolean })),
@@ -2878,6 +2893,8 @@ export const StuckStep = Schema.Struct({
     'transient',
     // Its agent's account is signed out: signing it in again in Settings, then trying again, is the way on.
     'signed_out',
+    // The lead stopped to wait for the person's answer: its detail is the question, and the answer starts it again.
+    'waiting_on_person',
   ]),
   /** What went wrong, in the agent's or Althar's words; for the last round, the lead's summary. */
   detail: Schema.NullOr(Schema.String),
@@ -2889,8 +2906,8 @@ export const StuckStep = Schema.Struct({
   round: Schema.Number,
   /** Review findings the lead hasn't settled. */
   open: Schema.Number,
-  /** What Althar did before asking: told the agent to carry on, started it afresh, or told it to try another way. */
-  tried: Schema.optional(Schema.Array(Schema.Literals(['carried_on', 'restarted', 'redirected']))),
+  /** What Althar did before asking: told the agent to carry on, started it afresh, told it to try another way, or handed the step to another model. */
+  tried: Schema.optional(Schema.Array(Schema.Literals(['carried_on', 'restarted', 'redirected', 'handed_on']))),
   /** For a usage limit: the account that reached it, and when it resets, where it said, and who could take the step over. */
   limit: Schema.optional(LimitCall),
   /** For a service that kept failing: its name. */
@@ -4629,7 +4646,7 @@ export const Api = RpcGroup.make(
     ProjectRulesView,
   ),
   /**
-   * Trusts a bot in a task's project (ADR-104), from the thread where it spoke: its leads hear its comments and reviews from
+   * Trusts a bot in a task's project (code-hosts § Review and triage bots), from the thread where it spoke: its leads hear its comments and reviews from
    * then on, as findings framed as data. A new revision of the project's rules, the person's, its other trusted bots kept.
    */
   command('TrustBot', { taskId: Schema.String, login: Schema.String }, Schema.Void),
@@ -4689,6 +4706,8 @@ export const Api = RpcGroup.make(
   call('GetPlanUsage', { refresh: Schema.optional(Schema.Boolean) }, PlanUsage),
   /** Each model's room where work on it would start, in the project where given (its rule for moving work through accounts): read again as plan usage changes. */
   call('GetModelRooms', { projectId: Schema.optional(Schema.String) }, Schema.Array(ModelRoom)),
+  /** Each model that ended steps without its report in the last week, once reminded, with how often. */
+  call('GetMissedReports', {}, Schema.Array(MissedReports)),
   /** Downloads an agent's latest release for the person, checks it against the digest its release publishes, and keeps it for Althar to run; done once it is ready. */
   command('InstallAgent', { agentId: Schema.String }, Schema.Void),
   /** Opens a task's folder in an editor, at one of its files and a line where given; whether it could. The path is the task's, as its changes list it. */

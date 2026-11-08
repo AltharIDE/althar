@@ -230,6 +230,7 @@ describe('the client', () => {
           GetLoad: () => Effect.die('unused'),
           GetPlanUsage: () => Effect.die('unused'),
           GetModelRooms: () => Effect.die('unused'),
+          GetMissedReports: () => Effect.die('unused'),
           InstallAgent: () => Effect.die('unused'),
           OpenInEditor: () => Effect.die('unused'),
           ListProjects: () => Effect.die('unused'),

@@ -121,7 +121,7 @@ export const text = {
   failing: (names: ReadonlyArray<string>) => (names.length > 2 ? `${names.length} failed` : `Failed: ${names.join(', ')}`),
   outsider: (from: string) => `Not passed to the lead: ${from} can’t write to the repository.`,
   passOn: 'Pass it on',
-  /** A review or triage bot's words (ADR-104): passed to the lead as findings where the project trusts it, else not, with a way to. */
+  /** A review or triage bot's words (code-hosts § Review and triage bots): passed to the lead as findings where the project trusts it, else not, with a way to. */
   bot: {
     heard: (name: string) => `Passed to the lead as findings from ${name}, to weigh.`,
     quiet: (name: string) => `The lead doesn’t hear ${name}: this project doesn’t trust it yet.`,
@@ -459,7 +459,7 @@ function ArrivalView({
 }
 
 /**
- * Under a review or triage bot's words (ADR-104): that its lead heard them as
+ * Under a review or triage bot's words (code-hosts § Review and triage bots): that its lead heard them as
  * findings, where the project trusts it; else that it doesn't, once, with a
  * way to trust it from here, which says how it went in place.
  */
@@ -576,7 +576,7 @@ export function ThreadBlocks({
   session?: { readonly agentId: string; readonly model: string | null; readonly account: string | null } | null
   /** Sends what someone outside said to the lead, in the person's name. */
   onPassOn?: (words: string) => void
-  /** Trusts a review or triage bot in the task's project, from where it spoke (ADR-104). */
+  /** Trusts a review or triage bot in the task's project, from where it spoke (code-hosts § Review and triage bots). */
   onTrustBot?: (login: string) => Promise<void>
   /** Answers an agent's question; what went wrong, in words, or null. Without it, a question can't be answered here. */
   onAnswerQuestion?: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
