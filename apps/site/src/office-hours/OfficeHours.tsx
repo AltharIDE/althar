@@ -79,8 +79,8 @@ export function OfficeHours() {
               </p>
               <h1 className={n.headline}>Twenty minutes with me.</h1>
               <p className={n.why}>
-                Book a call and we’ll get Althar set up on your machine together, or talk through working with coding agents: your ideas,
-                your thoughts, what frustrates you. It’s free, and I’m not selling anything.
+                I’d love to hear how you work with coding agents: what’s working, what’s driving you mad, what you wish existed. Or bring a
+                repo and we’ll get Althar running on it together.
               </p>
             </div>
             <div className={s.ways}>
