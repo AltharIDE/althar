@@ -58,9 +58,9 @@
 - **Every part changes at any time, at once,** by the person, the lead or the
   coordinator, with a line in the thread. Only two moves wait for the person:
   running an outside author's code, and a removal that would lose something.
-- **The workspace moves up in one step at a time:** none, a copy, a worktree,
-  Local, and back between a worktree and Local. A review that runs code comes
-  from this move.
+- **The workspace moves up a step at a time:** none, a copy, a worktree,
+  Local. It moves back between a worktree and Local, and down only where
+  nothing would be lost. A review that runs code comes from this move.
 - **"Run it" on an outside author's code asks how far to trust it:** Run
   safely, the default, or Trust fully. A setting can answer for the person.
 - **The review after a small change merges runs in the same task,** which
@@ -76,8 +76,9 @@
   chat or a task and which preset fits. The person changes it from the
   task's header afterwards, as they change its team.
 - **Nothing new stores a task's kind.** Parts are read from the rows that
-  already hold them. Two things are new: where a task sits (the board or
-  Scratch), and an event for each part change.
+  already hold them. What is new is small: where a task sits (the board or
+  Scratch), the preset it started from, when its review runs, how far an
+  outside author's code is trusted, and an event for each part change.
 
 ## The parts
 
@@ -115,9 +116,12 @@ where it stands: Read only, Runs safely or Trusted.
     stranger's code. A lead can suggest it, but never say it.
   - A removal that would lose something, such as a draft review never
     posted. It asks first, on a card.
-- **Parts change between turns.** A change asked for during a turn waits for
-  that turn to end, so the lead never finds its folder moved under it. The
-  line in the thread says it is waiting.
+- **A move that changes the lead's folder waits for its turn to end:**
+  between a worktree and Local, and a rebase onto a new target. The lead
+  never finds its folder moved under it, and the thread's line says the move
+  is waiting. Every other change is made at once, even mid-turn: a copy takes
+  its branch where it stands, so a chat's lead that has to write gets its
+  worktree without stopping.
 
 `make_it_a_change` and taking a review over go. "Make it a change" is now
 adding a worktree, adding Checked by and giving the task an ending, one
@@ -261,8 +265,8 @@ Checked by stops a round under way, as Skip the review does.
 
 The task's own reviewer gets a copy it can install in, with the recorded
 setup replayed, plus `install_dependencies` and `run_project`. It runs the
-task's tests and build before it reports. Its findings stay read-only: it
-changes nothing in the task's worktree.
+task's tests and build before it reports. It still only reads the task's
+work: it changes nothing in the task's worktree.
 
 ### After merge, in the same task
 
@@ -426,6 +430,8 @@ What is new:
   way by the person.
 - **`tasks.preset`:** the preset a task started from, for the header's chip
   and for Save as preset. Nothing reads it for behaviour.
+- **`when` on the review step and `trust` on a reviewed pull request,** as
+  the table says.
 - **One event per part change** (`TaskPartAdded`, `TaskPartChanged`,
   `TaskPartRemoved`), with who made it (the person, the lead or the
   coordinator) and why. The thread's line is read from it.
