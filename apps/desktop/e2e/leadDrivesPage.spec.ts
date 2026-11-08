@@ -277,10 +277,22 @@ test('a lead opens the page beside its task, reads it, types and clicks, and its
     // The person's own input wins, in the page and in a frame of its own origin (Storybook's preview): as the lead types,
     // its text insertion is held in flight, the person loads another document in the frame and types there with a real
     // key, and the lead's action stops, and the line under the bar goes.
-    await inPage(electronApp, `document.getElementById('preview').srcdoc = "<input id='inside' aria-label='Inside'>"; true`)
+    await inPage(electronApp, `document.getElementById('preview').contentWindow.location.href = 'about:blank'; true`)
     await expect
-      .poll(() => inPage<boolean>(electronApp, `document.getElementById('preview').contentDocument?.readyState === 'complete'`))
+      .poll(() =>
+        inPage<boolean>(
+          electronApp,
+          `document.getElementById('preview').contentDocument?.readyState === 'complete' && document.getElementById('preview').contentDocument.body !== null`,
+        ),
+      )
       .toBe(true)
+    await inPage(
+      electronApp,
+      `const inside = document.getElementById('preview').contentDocument;
+      inside.body.innerHTML = "<input id='inside' aria-label='Inside'>";
+      inside.getElementById('inside').focus();
+      true`,
+    )
     await electronApp.evaluate(async ({ webContents }) => {
       const contents = webContents.getAllWebContents().find((one) => one.session.storagePath?.includes('task-') === true)!
       const held = { release: () => undefined as void }
