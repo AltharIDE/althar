@@ -933,16 +933,19 @@ describe('limits', () => {
       assert.instanceOf(yield* Effect.flip(policies.setUsageLimit('proj_none', 'move', instance.personId)), NotFound)
       assert.instanceOf(yield* Effect.flip(policies.rulesOf('pol_none')), NotFound)
 
+      // The models on offer are asked of each agent in the background: what follows reads them once they have been.
+      const models = yield* Models
+      yield* until(models.catalog, (catalog) => catalog.every((one) => !one.probing))
       // The plan's model for its own agent, else the last the agent ran in the project, else its own.
       assert.strictEqual(
         yield* limits.modelFor({ agentId: 'codex', projectId: project.projectId, planned: { agentId: 'codex', model: 'large' } }),
         'large',
       )
       assert.strictEqual(yield* limits.modelFor({ agentId: 'codex', projectId: project.projectId }), 'small')
-      assert.isNull(yield* limits.modelFor({ agentId: 'opencode', projectId: project.projectId }))
+      assert.strictEqual(yield* limits.modelFor({ agentId: 'opencode', projectId: project.projectId }), 'small')
       assert.deepStrictEqual(yield* limits.named('codex', 'large'), { agent: 'Fake codex', model: 'Large' })
       assert.deepStrictEqual(yield* limits.named('codex', 'huge'), { agent: 'Fake codex', model: 'huge' })
-      assert.deepStrictEqual(yield* limits.named('opencode', 'large'), { agent: 'Fake opencode', model: 'large' })
+      assert.deepStrictEqual(yield* limits.named('opencode', 'large'), { agent: 'Fake opencode', model: 'Large' })
       // An account given is the agent's own, or none.
       assert.instanceOf(yield* Effect.flip(limits.pick({ agentId: 'opencode', accountId: yield* usual('codex') })), NotFound)
     }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: {} } }))),
