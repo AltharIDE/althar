@@ -4391,6 +4391,11 @@ export class Runs extends Context.Service<
                 WHERE id = ${input.attentionId} AND kind = 'stuck'`
               if (row === undefined) return yield* new NotFound({ kind: 'attention_request', id: input.attentionId })
               if (row.state !== 'open') return yield* new AttentionClosed({ attentionId: input.attentionId })
+              // Going on without opening the pull request doesn't finish a task whose lead is still at work.
+              if (answer.kind === 'abandon' && (JSON.parse(row.payload) as StuckInfo).step === 'publish' && (yield* atWork(row.taskId)))
+                return yield* new ToolRefused({
+                  message: 'Its lead is still at work, so the task isn’t finished: the pull request opens when the lead’s work is done.',
+                })
               // Only a reset that is known can be waited for.
               if (answer.kind === 'wait' && (JSON.parse(row.payload) as StuckInfo).limit?.resetsAt == null)
                 return yield* new NothingToWaitFor({ attentionId: input.attentionId })
