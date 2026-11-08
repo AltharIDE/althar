@@ -117,6 +117,7 @@ import { outputText } from './reading'
 import { ToolServer } from './ToolServer'
 import { agentSaid, lostWords, startedAfreshWords, summarize } from './words'
 import { serversFor } from './agentTools'
+import { type KeptLineComment, withLineComments } from './lineComments'
 
 /*
  * Agent sessions on a task's thread (docs/architecture/03). The runtime
@@ -714,6 +715,8 @@ export class Sessions extends Context.Service<
       readonly files?: ReadonlyArray<InputFile>
       /** Some of its words came from dictation: every turn that delivers it says so, so the agent reads past what was misheard. */
       readonly dictated?: boolean
+      /** Comments on lines of the task's diff, each with the tree it was made on (ADR-105): the agent reads them after the words, the thread shows them with them. */
+      readonly comments?: ReadonlyArray<KeptLineComment>
       readonly sender?: MessageSender
       readonly origin?: 'news' | 'system'
       /** Input Althar writes, such as findings to settle: delivered, but shown in the thread by what it came from, not as the person's message. */
@@ -776,6 +779,7 @@ export class Sessions extends Context.Service<
         readonly files?: ReadonlyArray<InputFile>
         /** Some of it was dictated. */
         readonly dictated?: boolean
+        readonly comments?: ReadonlyArray<KeptLineComment>
         readonly sender?: MessageSender
         readonly origin?: 'news' | 'system'
       }
@@ -2962,6 +2966,8 @@ export class Sessions extends Context.Service<
         readonly images?: ReadonlyArray<InputImage>
         readonly files?: ReadonlyArray<InputFile>
         readonly dictated?: boolean
+        /** Comments on lines of the task's diff (ADR-105): the agent reads them after the words; the thread shows them beside them. */
+        readonly comments?: ReadonlyArray<KeptLineComment>
         readonly sender?: MessageSender
         readonly origin?: 'news' | 'system'
         readonly quiet?: boolean
@@ -2994,7 +3000,8 @@ export class Sessions extends Context.Service<
                 sequence,
                 commandId: input.envelope.commandId,
                 disposition,
-                body: input.body,
+                // What the agent reads: the person's words, then their comments on the diff, each with its file, lines and code.
+                body: withLineComments(input.body, input.comments ?? []),
                 dictated: input.dictated === true ? 1 : 0,
                 senderKind: input.quiet === true ? 'internal' : (input.sender?.kind ?? 'internal'),
                 senderDeviceId: input.sender?.kind === 'paired_device' ? input.sender.deviceId : null,
@@ -3056,6 +3063,7 @@ export class Sessions extends Context.Service<
                           })),
                         }),
                     ...(files.length === 0 ? {} : { files: files.map((file, index) => ({ id: keptId(inputId, index + 1), ...file })) }),
+                    ...(input.comments === undefined || input.comments.length === 0 ? {} : { comments: input.comments }),
                   },
                   { userInputId: inputId },
                 )
@@ -3580,6 +3588,7 @@ export class Sessions extends Context.Service<
           readonly images?: ReadonlyArray<InputImage>
           readonly files?: ReadonlyArray<InputFile>
           readonly dictated?: boolean
+          readonly comments?: ReadonlyArray<KeptLineComment>
           readonly sender?: MessageSender
           readonly origin?: 'news' | 'system'
         }
@@ -3620,6 +3629,7 @@ export class Sessions extends Context.Service<
                   ...(input.message.images === undefined ? {} : { images: input.message.images }),
                   ...(input.message.files === undefined ? {} : { files: input.message.files }),
                   ...(input.message.dictated === true ? { dictated: true } : {}),
+                  ...(input.message.comments === undefined ? {} : { comments: input.message.comments }),
                 })
               return yield* briefFor(thread, { kind: 'takeover', from })
             }).pipe(beforeTakingOver(connected))
