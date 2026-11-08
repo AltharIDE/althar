@@ -138,9 +138,7 @@
     request opens. A doc that offers several patterns is a judgement left
     to the person. The rules screen says, for each repository, where its
     names come from.
-  - **They hold for what reaches Althar:** what an agent asks to do beyond
-    its sandbox, which is the network or outside the task. The screen says
-    so.
+  - **They hold for what reaches Althar:** every Claude Code shell command, every OpenCode one, and every Codex command its own safe list doesn't cover. Since ADR-097 a rule fires inside the sandbox too, not only for what crosses it.
   - **Each change is a revision, recorded as the person's.** The rules as
     they are decide the next request; a run cites the revision it started
     under. (Since [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md#settings), recorded as whoever
@@ -163,12 +161,11 @@
   - **Regular expressions** (VS Code). They are harder to read and to get
     right. A prefix with `*` is what most tools offer.
 - **Trade-off:**
-  - **Rules don't see what an agent does inside its sandbox.** Codex's
-    `workspace-write` and Claude Code's sandboxed commands run without
-    asking, so a rule for a command that stays in the worktree never fires.
-    Giving each agent the project's command rules in its own form would
-    close that gap: Claude Code's ask rules, OpenCode's bash patterns, and
-    Codex's rules.
+  - **Codex runs the commands on its own safe list without asking**, so a
+    project rule for one of those never fires. Since ADR-097 that list is
+    only what Codex reads as safe; a merge, a release or a post reaches
+    Althar through its `untrusted` approval policy, as every Claude Code and
+    OpenCode command does.
   - **The rules live in Althar's store, not the repository**, so a team
     can't share them yet.
 - **Revisit when:**
