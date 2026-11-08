@@ -594,8 +594,15 @@ export class Setups extends Context.Service<
           return found
         })
 
-      /** Keeps a repository's setup, replacing what was recorded (the person's own edit only where `personAgreed`, which is Althar's own, once the person answered); the project changes with it, so its settings read it again. */
-      const record = (projectId: ProjectId, bindingId: string, name: string, recorded: Recorded, actorId: ActorId, personAgreed: boolean) =>
+      /** Keeps a repository's setup, replacing what was recorded (the person's own edit only where `replacing` is exactly what the person was shown and answered about); the project changes with it, so its settings read it again. */
+      const record = (
+        projectId: ProjectId,
+        bindingId: string,
+        name: string,
+        recorded: Recorded,
+        actorId: ActorId,
+        replacing: string | null,
+      ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           return yield* sql.withTransaction(
@@ -605,7 +612,7 @@ export class Setups extends Context.Service<
                 id: string
               }>`UPDATE repository_bindings SET recorded_setup = ${JSON.stringify(recorded)}
                 WHERE id = ${bindingId}
-                  AND (${personAgreed ? 1 : 0} = 1 OR recorded_setup IS NULL OR json_extract(recorded_setup, '$.taskId') IS NOT NULL)
+                  AND (recorded_setup = ${replacing} OR recorded_setup IS NULL OR json_extract(recorded_setup, '$.taskId') IS NOT NULL)
                 RETURNING id`
               if (written.length === 0) return false
               const [project] = yield* sql<{ revision: number }>`SELECT revision FROM projects WHERE id = ${projectId}`
@@ -735,15 +742,17 @@ export class Setups extends Context.Service<
               )
               if (!agreedTo(answer)) return yield* new ToolRefused({ message: keptIt(one.name) })
             }
-            const kept = yield* provide(record(one.projectId, one.bindingId, one.name, recorded, instance.systemId, replaces))
-            if (!kept) return yield* new ToolRefused({ message: keptIt(one.name) })
+            const kept = yield* provide(
+              record(one.projectId, one.bindingId, one.name, recorded, instance.systemId, replaces ? one.recorded : null),
+            )
+            if (!kept) return yield* new ToolRefused({ message: replaces ? changedWhileAsking(one.name) : keptIt(one.name) })
             // The person is told their setup was replaced, in the thread of the task whose lead did it.
             if (replaces)
               yield* provide(
                 addItem({ projectId: one.projectId, threadId: access.threadId }, 'notice', {
                   source: 'runtime',
                   severity: 'info',
-                  title: `Replaced your setup for ${one.name}, as you agreed. It now runs: ${recorded.commands.length === 0 ? 'nothing' : recorded.commands.join('; ')}.`,
+                  title: `Replaced your setup for ${one.name}, as you agreed. It now ${[recorded.commands.length === 0 ? null : `runs: ${recorded.commands.join('; ')}`, recorded.copy.length === 0 ? null : `copies: ${recorded.copy.join(', ')}`].filter((part) => part !== null).join(' and ') || 'does nothing'}.`,
                 }),
               )
             const copied = copy.length === 0 ? [] : (yield* copyInto(one.checkout, one.worktree, copy)).said
@@ -779,6 +788,9 @@ export class Setups extends Context.Service<
 
 const keptIt = (name: string) =>
   `The person edited ${name}'s setup themselves and Althar asked them: they kept theirs, so nothing was recorded. Carry on without recording it.`
+
+const changedWhileAsking = (name: string) =>
+  `The person changed ${name}'s setup while Althar was asking, so their answer was about an older one and nothing was recorded. Call record_setup again and Althar will ask about the current one.`
 
 const REPLACE = 'replace'
 

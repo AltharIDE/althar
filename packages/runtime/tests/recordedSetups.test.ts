@@ -192,11 +192,17 @@ describe('a setup the person changes in the project’s settings', () => {
 
 describe('a setup the person edited', () => {
   /** Runs a lead's record_setup, answers Althar's question to the person as `choice`, and gives what the lead was told. */
-  const recordAnswering = (lead: ToolAccess, commands: ReadonlyArray<string>, choice: 'replace' | 'keep') =>
+  const recordAnswering = (
+    lead: ToolAccess,
+    commands: ReadonlyArray<string>,
+    choice: 'replace' | 'keep',
+    meanwhile?: Effect.Effect<void, unknown, any>,
+    copy: ReadonlyArray<string> = [],
+  ) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const questions = yield* Questions
-      const fiber = yield* Effect.forkChild(callTool(lead, 'record_setup', { commands }))
+      const fiber = yield* Effect.forkChild(callTool(lead, 'record_setup', { commands, copy }))
       let asked: { id: string; payload: string } | undefined
       for (let i = 0; i < 200 && asked === undefined; i++) {
         ;[asked] = yield* sql<{ id: string; payload: string }>`
@@ -205,6 +211,8 @@ describe('a setup the person edited', () => {
       }
       assert.isDefined(asked, 'Althar asked the person')
       const payload = JSON.parse(asked?.payload ?? '{}') as { message: string }
+      // Something done while the question waits: the person edits or clears the setup.
+      if (meanwhile !== undefined) yield* meanwhile
       yield* questions.answer({
         envelope: yield* Runtime.envelope('attention.answer_question', {}),
         attentionId: asked?.id ?? '',
@@ -258,6 +266,39 @@ describe('a setup the person edited', () => {
       assert.isTrue(
         (yield* noticesOf(later.task.threadId)).some((title) => title.includes('Replaced your setup') && title.includes(step('agreed'))),
       )
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('is not replaced where the person changed or cleared it while Althar was asking: their answer was about the older one', () =>
+    Effect.gen(function* () {
+      const { path, first } = yield* editedByPerson()
+      const projects = yield* Projects
+      const [repository] = yield* projects.repositories(first.project.projectId)
+      const set = (setup: { copy: Array<string>; commands: Array<string> } | null) =>
+        Effect.asVoid(projects.setRepository({ projectId: first.project.projectId, repositoryId: repository?.id ?? '', setup }))
+      const later = yield* taskIn(path, 'Refund over budget')
+      const lead = yield* withSession(later.lead)
+      const edited = yield* recordAnswering(lead, [step('stale')], 'replace', set({ copy: [], commands: [step('mine again')] }))
+      assert.include(edited.told, 'while Althar was asking')
+      assert.deepInclude((yield* recordedIn(first.project.projectId)) ?? {}, { commands: [step('mine again')], taskId: null })
+      assert.deepStrictEqual(yield* noticesOf(later.task.threadId), [])
+
+      // Called again, it asks about the current one; the person clears it meanwhile, and nothing of theirs is left to replace.
+      const cleared = yield* recordAnswering(lead, [step('fresh')], 'replace', set(null))
+      assert.include(cleared.told, 'Recorded')
+      assert.deepInclude((yield* recordedIn(first.project.projectId)) ?? {}, { commands: [step('fresh')], taskId: later.task.taskId })
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('says what a copy-only setup copies when it replaces the person’s', () =>
+    Effect.gen(function* () {
+      const { path } = yield* editedByPerson()
+      const later = yield* taskIn(path, 'Refund over budget')
+      const lead = yield* withSession(later.lead)
+      yield* recordAnswering(lead, [], 'replace', undefined, ['.env'])
+      const [notice] = yield* noticesOf(later.task.threadId)
+      assert.include(notice, 'copies: .env')
+      assert.notInclude(notice, 'nothing')
     }).pipe(Effect.provide(runtime())),
   )
 
