@@ -52,13 +52,19 @@ export const TwoAgents: Story = {}
 /** Where the agent doesn't say which model a sub-agent runs on, as Claude Code's Task: its kind stands in its place. */
 export const WithoutModel: Story = {
   args: {
+    defaultOpen: 'explore',
     list: [
       {
         id: 'explore',
         label: 'Find the readers of the MCP servers',
         state: ToolState.Done,
-        meta: 'Explore · 4 calls',
-        calls: <Tool kind={ToolKind.Read} verb="Read" target="src/agentServers.ts" />,
+        meta: 'Explore · 2 calls',
+        calls: (
+          <>
+            <Tool kind={ToolKind.Read} verb="Read" target="src/agentServers.ts" />
+            <Tool kind={ToolKind.Search} verb="Searched" target="readServers" />
+          </>
+        ),
       },
     ],
   },

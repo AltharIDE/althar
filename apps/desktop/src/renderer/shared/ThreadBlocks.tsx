@@ -28,6 +28,7 @@ import {
   You,
   McpAct,
   McpServer,
+  Compacted,
   Interrupted,
   SubAgents,
   WebFetch,
@@ -101,8 +102,6 @@ export const text = {
   subAgent: (type: string | undefined, calls: number) =>
     [type, calls === 0 ? null : calls === 1 ? '1 call' : `${calls} calls`].filter((one) => one != null).join(' · '),
   compaction: {
-    summary: 'Show summary',
-    hide: 'Hide summary',
     /** A compaction's line, as it stands, with how far it took the context where Althar knows. */
     line: (status: Extract<Block, { kind: 'compacted' }>['status'], span: string | null, error: string | null) => {
       const words = {
@@ -278,30 +277,10 @@ function SubAgentView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }
 
 /** The agent compacting its context: a line across the thread, with the summary it kept behind Show summary. */
 function CompactedView({ block }: { block: Extract<Block, { kind: 'compacted' }> }) {
-  const [open, setOpen] = useState(false)
-  const line = text.compaction.line(block.status, block.span, block.error)
   return (
-    <>
-      {block.summary === null ? (
-        <ThreadDivider icon="compress" data-item={block.id}>
-          {line}
-        </ThreadDivider>
-      ) : (
-        <ThreadDivider
-          icon="compress"
-          data-item={block.id}
-          action={open ? text.compaction.hide : text.compaction.summary}
-          onAction={() => setOpen((was) => !was)}
-        >
-          {line}
-        </ThreadDivider>
-      )}
-      {open && block.summary !== null && (
-        <div className={s.summary}>
-          <Markdown source={block.summary} />
-        </div>
-      )}
-    </>
+    <Compacted data-item={block.id} {...(block.summary === null ? {} : { summary: <Markdown source={block.summary} /> })}>
+      {text.compaction.line(block.status, block.span, block.error)}
+    </Compacted>
   )
 }
 

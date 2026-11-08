@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 
 import { ToolState } from '../src/foundations/vocabulary'
 import { WebFetch, WebSearch } from '../src/thread/External/External'
+import { Compacted } from '../src/thread/Furniture/Furniture'
 import { SubAgents } from '../src/thread/SubAgents/SubAgents'
 
 /*
@@ -48,5 +49,21 @@ describe('a sub-agent without its model', () => {
     render(<SubAgents list={[{ id: 'a', label: 'Find the readers', state: ToolState.Running, meta: 'Explore · 2 calls', calls: null }]} />)
     expect(screen.getByText('Explore · 2 calls')).toBeTruthy()
     expect(screen.getByRole('button', { name: /Find the readers, running/ })).toBeTruthy()
+  })
+})
+
+describe('a compaction', () => {
+  it('keeps its summary behind Show summary, and hides it again', () => {
+    render(<Compacted summary="We were fixing the retry.">Context compacted</Compacted>)
+    expect(screen.queryByText('We were fixing the retry.')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Show summary' }))
+    expect(screen.getByText('We were fixing the retry.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Hide summary' }))
+    expect(screen.queryByText('We were fixing the retry.')).toBeNull()
+  })
+
+  it('offers nothing to open without one', () => {
+    render(<Compacted>Context compacted</Compacted>)
+    expect(screen.queryByRole('button')).toBeNull()
   })
 })

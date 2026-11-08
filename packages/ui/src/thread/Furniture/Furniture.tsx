@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
@@ -42,6 +42,41 @@ export interface InterruptedText {
 }
 
 export const interruptedText: InterruptedText = { interrupted: 'Interrupted by you' }
+
+export interface CompactedText {
+  summary: string
+  hide: string
+}
+
+export const compactedText: CompactedText = { summary: 'Show summary', hide: 'Hide summary' }
+
+export interface CompactedProps {
+  /** What the line says: that the context compacted, and how far, or how it stands. */
+  children: ReactNode
+  /** The summary the agent kept, where it said one: behind Show summary, under the line. */
+  summary?: ReactNode
+  defaultOpen?: boolean
+  text?: Partial<CompactedText>
+  'data-item'?: string
+}
+
+/** The agent compacted its context here: a line across the thread, with the summary it kept behind Show summary. */
+export function Compacted({ children, summary, defaultOpen = false, text, 'data-item': item }: CompactedProps) {
+  const t = { ...compactedText, ...text }
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div data-item={item}>
+      {summary === undefined ? (
+        <ThreadDivider icon="compress">{children}</ThreadDivider>
+      ) : (
+        <ThreadDivider icon="compress" action={open ? t.hide : t.summary} onAction={() => setOpen((was) => !was)}>
+          {children}
+        </ThreadDivider>
+      )}
+      {open && summary !== undefined && <div className={s.summary}>{summary}</div>}
+    </div>
+  )
+}
 
 /** You interrupted the agent's turn here, with the composer's square. The task kept going. */
 export function Interrupted({ text }: { text?: Partial<InterruptedText> }) {
