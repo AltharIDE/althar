@@ -355,10 +355,7 @@ describe('a reader held in its own folder', () => {
   const contained = (line: string) => decideReader(command(line), { cwd, trusted: true, contained: true })
   const reads = { allowed: ['/work/meridian/.coordinator/secrets/notes'], denied: ['/work/meridian/.coordinator/secrets'] }
   const reading = (path: string, kind: 'read' | 'search' = 'read', raw: Record<string, unknown> = {}) =>
-    decideReader(
-      { ...command(''), kind, paths: [path], rawInput: { path, ...raw } },
-      { cwd, trusted: true, reads },
-    )
+    decideReader({ ...command(''), kind, paths: [path], rawInput: { path, ...raw } }, { cwd, trusted: true, reads })
 
   it('fetches only its own remote, plainly: its sandbox keeps the fetch in its copy', () => {
     for (const line of ['git fetch', 'git fetch origin', 'git fetch --prune origin main'])
