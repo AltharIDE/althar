@@ -119,9 +119,41 @@ describe('GitHub as a code host', () => {
         ['GET', `${API}/repos/AltharIDE/althar`, { json: { ...fork, id: 1, full_name: 'AltharIDE/althar', fork: false } }],
         ['GET', `${API}/repos/old/one`, { json: { ...fork, id: 2, full_name: 'old/one' } }],
       ])
-      assert.deepStrictEqual((yield* host.repository(['ninemate', 'althar'])).parent, { path: ['AltharIDE', 'althar'] })
+      assert.deepStrictEqual((yield* host.repository(['ninemate', 'althar'])).parent, {
+        path: ['AltharIDE', 'althar'],
+        source: { path: ['AltharIDE', 'althar'] },
+      })
       assert.isNull((yield* host.repository(['AltharIDE', 'althar'])).parent)
       assert.notProperty(yield* host.repository(['old', 'one']), 'parent')
+    }),
+  )
+
+  it.effect('says a fork of a fork’s root beside its parent, each with the addresses GitHub gives to clone it by', () =>
+    Effect.gen(function* () {
+      const fork = { id: 9, full_name: 'you/althar', default_branch: 'main', html_url: 'https://github.com/you/althar' }
+      const at = (name: string) => ({ full_name: name, clone_url: `https://github.com/${name}.git`, ssh_url: `git@github.com:${name}.git` })
+      const { host } = github([
+        [
+          'GET',
+          `${API}/repos/you/althar`,
+          { json: { ...fork, fork: true, parent: at('ninemate/althar'), source: at('AltharIDE/althar') } },
+        ],
+        [
+          'GET',
+          `${API}/repos/ninemate/althar`,
+          { json: { ...fork, fork: true, parent: at('AltharIDE/althar'), source: at('AltharIDE/althar') } },
+        ],
+      ])
+      assert.deepStrictEqual((yield* host.repository(['you', 'althar'])).parent, {
+        path: ['ninemate', 'althar'],
+        addresses: ['https://github.com/ninemate/althar.git', 'git@github.com:ninemate/althar.git'],
+        source: {
+          path: ['AltharIDE', 'althar'],
+          addresses: ['https://github.com/AltharIDE/althar.git', 'git@github.com:AltharIDE/althar.git'],
+        },
+      })
+      // A fork of one that is no fork has its parent as its root.
+      assert.deepStrictEqual((yield* host.repository(['ninemate', 'althar'])).parent?.source?.path, ['AltharIDE', 'althar'])
     }),
   )
 

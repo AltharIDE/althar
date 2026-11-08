@@ -214,6 +214,23 @@ describe('GitLab as a code host', () => {
     }),
   )
 
+  it.effect('says the addresses to clone a fork’s parent by, as a server under a path of its own writes them', () =>
+    Effect.gen(function* () {
+      const project = { id: 7, path_with_namespace: 'alice/api', web_url: 'https://git.example.com/gitlab/alice/api' }
+      const parent = {
+        id: 3,
+        path_with_namespace: 'group/api',
+        http_url_to_repo: 'https://git.example.com/gitlab/group/api.git',
+        ssh_url_to_repo: 'git@git.example.com:group/api.git',
+      }
+      const { host } = gitlab([['GET', `${API}/projects/alice%2Fapi`, { json: { ...project, forked_from_project: parent } }]])
+      assert.deepStrictEqual((yield* host.repository(['alice', 'api'])).parent, {
+        path: ['group', 'api'],
+        addresses: ['https://git.example.com/gitlab/group/api.git', 'git@git.example.com:group/api.git'],
+      })
+    }),
+  )
+
   it('merges in the order Althar prefers, as the project allows', () => {
     assert.deepStrictEqual(mergesOf('merge', 'default_on'), ['squash', 'merge'])
     assert.deepStrictEqual(mergesOf('rebase_merge', 'default_off'), ['merge', 'squash'])

@@ -72,6 +72,12 @@ type User = typeof User.Type
 
 const Access = Schema.optional(Schema.NullOr(Schema.Struct({ access_level: Schema.Number })))
 
+/** The addresses a host gives to clone a repository by, where it gives any. */
+const addressesOf = (given: ReadonlyArray<string | undefined>) => {
+  const addresses = given.filter((address) => address !== undefined)
+  return addresses.length === 0 ? {} : { addresses }
+}
+
 const ProjectAnswer = Schema.Struct({
   id: Schema.Number,
   path_with_namespace: Schema.String,
@@ -85,7 +91,15 @@ const ProjectAnswer = Schema.Struct({
   merge_trains_enabled: Schema.optional(Schema.NullOr(Schema.Boolean)),
   permissions: Schema.optional(Schema.NullOr(Schema.Struct({ project_access: Access, group_access: Access }))),
   // The project it was forked from: given only for a fork, and only where the account can see that project.
-  forked_from_project: Schema.optional(Schema.NullOr(Schema.Struct({ path_with_namespace: Schema.String }))),
+  forked_from_project: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        path_with_namespace: Schema.String,
+        http_url_to_repo: Schema.optional(Schema.String),
+        ssh_url_to_repo: Schema.optional(Schema.String),
+      }),
+    ),
+  ),
 })
 
 const Pipeline = Schema.Struct({
@@ -943,7 +957,14 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
         canPush:
           Math.max(answer.permissions?.project_access?.access_level ?? 0, answer.permissions?.group_access?.access_level ?? 0) >= DEVELOPER,
         merges: mergesOf(answer.merge_method, answer.squash_option),
-        parent: answer.forked_from_project == null ? null : { path: answer.forked_from_project.path_with_namespace.split('/') },
+        parent:
+          answer.forked_from_project == null
+            ? null
+            : {
+                path: answer.forked_from_project.path_with_namespace.split('/'),
+                // Its addresses, as the server writes them, under its own path where it is under one.
+                ...addressesOf([answer.forked_from_project.http_url_to_repo, answer.forked_from_project.ssh_url_to_repo]),
+              },
       })),
     findChange,
     openChange: (repository, change) =>

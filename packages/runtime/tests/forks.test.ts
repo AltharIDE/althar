@@ -148,21 +148,21 @@ describe('telling a fork', () => {
     const parent = { name: 'base', url: 'git@gitlab.com:group/repo.git' }
     // Beside the parent, the archived one called upstream isn't it.
     assert.strictEqual(forkOf([lab, archived, parent], { path: ['group', 'repo'] })?.upstream.remote, 'base')
-    // On its own, the parent is among none of the remotes.
-    assert.isNull(forkOf([lab, archived], { path: ['group', 'repo'] })?.upstream.remote)
+    // On its own, under another name, the parent is among none of the remotes.
+    assert.isNull(forkOf([lab, { ...archived, name: 'archive' }], { path: ['group', 'repo'] })?.upstream.remote)
     // Bitbucket Data Center's HTTPS address has scm/ in front of what its SSH one has, either one the parent.
     const center = { name: 'origin', url: 'ssh://git@host:7999/~dana/api.git' }
     const https = { name: 'base', url: 'https://host/scm/prj/api.git' }
     const dc = { context: [], scm: true }
     assert.strictEqual(forkOf([center, https], { path: ['PRJ', 'api'] }, dc)?.upstream.remote, 'base')
-    const other = { name: 'upstream', url: 'https://host/scm/old/prj/api.git' }
+    const other = { name: 'old', url: 'https://host/scm/old/prj/api.git' }
     assert.isNull(forkOf([center, other], { path: ['PRJ', 'api'] }, dc)?.upstream.remote)
   })
 
   it('takes scm/ in front of its parent’s path only on Bitbucket Data Center, where its addresses have it', () => {
     // On GitLab, scm/group/repo is a project of its own, never group/repo, though called upstream.
     const lab = { name: 'origin', url: 'git@gitlab.com:alice/api.git' }
-    const scm = { name: 'upstream', url: 'git@gitlab.com:scm/group/repo.git' }
+    const scm = { name: 'scm', url: 'git@gitlab.com:scm/group/repo.git' }
     assert.isTrue(tellOf(lab.url, { path: ['alice', 'api'], parent: { path: ['group', 'repo'] } }, 1, 'gitlab'))
     assert.isNull(forkOf([lab, scm])?.upstream.remote)
     // Asked of a Data Center over SSH, the same remote over HTTPS, with its scm/, is the parent.
@@ -170,5 +170,79 @@ describe('telling a fork', () => {
     const https = { name: 'base', url: 'https://host/scm/prj/api.git' }
     assert.isTrue(tellOf(center.url, { path: ['~dana', 'api'], parent: { path: ['PRJ', 'api'] } }, 1, 'bitbucket_dc'))
     assert.strictEqual(forkOf([center, https])?.upstream.remote, 'base')
+  })
+
+  it('as a fork of a fork, by the remote that has the root of its forks where none has its parent', () => {
+    // GitHub says a fork of ninemate/web, itself forked from meridian/web, which the clone has as upstream.
+    const said = { path: ['ninemate', 'web'], source: { path: ['meridian', 'web'] } }
+    assert.deepStrictEqual(forkOf([origin, upstream], said), {
+      fork: { url: origin.url, path: ['you', 'web'], remote: 'origin' },
+      upstream: { url: upstream.url, path: ['meridian', 'web'], remote: 'upstream' },
+      by: 'host',
+    })
+    // Under another name, the root is it too; a remote with the parent itself comes first.
+    assert.strictEqual(forkOf([origin, { name: 'root', url: upstream.url }], said)?.upstream.remote, 'root')
+    const middle = { name: 'nine', url: 'git@github.com:ninemate/web.git' }
+    assert.deepStrictEqual(forkOf([origin, upstream, middle], said)?.upstream, {
+      url: middle.url,
+      path: ['ninemate', 'web'],
+      remote: 'nine',
+    })
+  })
+
+  it('by its `upstream` as before, where no remote has what its host said, as a fork of a fork whose root its host can’t say', () => {
+    // GitLab says only the parent, dana/web, of a fork whose upstream is the root, meridian/web.
+    const said = () => ({ path: ['dana', 'web'] })
+    const fork = forkOf([origin, upstream], said())
+    assert.deepStrictEqual(fork?.upstream, { url: upstream.url, path: ['meridian', 'web'], remote: 'upstream' })
+    assert.strictEqual(fork?.by, 'names')
+    // Where the host says the root of its forks, as GitHub does, an upstream that is neither isn't it.
+    const rooted = forkOf([origin, { name: 'upstream', url: 'https://github.com/someone/web.git' }], {
+      ...said(),
+      source: { path: ['dana', 'web'] },
+    })
+    assert.deepStrictEqual([rooted?.upstream.remote, rooted?.by], [null, 'host'])
+    // An upstream on another host is none the names make: the parent is then among none of the remotes.
+    const elsewhere = forkOf([origin, { name: 'upstream', url: 'https://gitlab.com/meridian/web.git' }], { path: ['dana', 'web'] })
+    assert.deepStrictEqual([elsewhere?.upstream.remote, elsewhere?.by], [null, 'host'])
+  })
+
+  it('finds its parent at an address its host gave for it, and offers to add it by the one written as origin’s is', () => {
+    // A GitLab under a path of its own, origin over SSH: its parent over HTTPS has the server's path, as the host's address says.
+    const ssh = { name: 'origin', url: 'git@git.example.com:alice/api.git' }
+    const https = { name: 'base', url: 'https://git.example.com/gitlab/group/api' }
+    const addresses = ['https://git.example.com/gitlab/group/api.git', 'git@git.example.com:group/api.git']
+    assert.strictEqual(forkOf([ssh, https], { path: ['group', 'api'], addresses })?.upstream.remote, 'base')
+    // Without the host's addresses, an HTTPS remote under a path Althar wasn't told of isn't taken for it.
+    assert.isNull(forkOf([ssh, https], { path: ['group', 'api'] })?.upstream.remote)
+    // Not a remote: the host's own address, written as origin's is.
+    assert.strictEqual(forkOf([ssh], { path: ['group', 'api'], addresses })?.upstream.url, 'git@git.example.com:group/api.git')
+    const mounted = { name: 'origin', url: 'https://git.example.com/gitlab/alice/api.git' }
+    assert.strictEqual(
+      forkOf([mounted], { path: ['group', 'api'], addresses }, { context: ['gitlab'], scm: false })?.upstream.url,
+      addresses[0],
+    )
+  })
+
+  it('takes an SSH remote at its parent’s path for it, where origin’s HTTPS address has the server’s own path in front', () => {
+    const mounted = { name: 'origin', url: 'https://git.example.com/gitlab/alice/api.git' }
+    assert.isTrue(tellOf(mounted.url, { path: ['alice', 'api'], parent: { path: ['group', 'api'] } }, 1, 'gitlab'))
+    assert.strictEqual(forkOf([mounted, { name: 'base', url: 'git@git.example.com:group/api.git' }])?.upstream.remote, 'base')
+    // Over HTTPS, the same path without the server's isn't it: another repository's address, or none.
+    assert.isNull(forkOf([mounted, { name: 'base', url: 'https://git.example.com/group/api.git' }])?.upstream.remote)
+    // On Data Center under a path of its own, its SSH address has neither that path nor scm/.
+    const center = { name: 'origin', url: 'https://host/bitbucket/scm/~dana/api.git' }
+    assert.isTrue(tellOf(center.url, { path: ['~dana', 'api'], parent: { path: ['PRJ', 'api'] } }, 1, 'bitbucket_dc'))
+    assert.strictEqual(forkOf([center, { name: 'base', url: 'ssh://git@host:7999/prj/api.git' }])?.upstream.remote, 'base')
+  })
+
+  it('says a host’s answer changed where only the root of its forks did', () => {
+    assert.isTrue(tellOf(origin.url, { path: ['you', 'web'], parent: { path: ['ninemate', 'web'] } }, 1))
+    assert.isTrue(
+      tellOf(origin.url, { path: ['you', 'web'], parent: { path: ['ninemate', 'web'], source: { path: ['meridian', 'web'] } } }, 2),
+    )
+    assert.isFalse(
+      tellOf(origin.url, { path: ['you', 'web'], parent: { path: ['ninemate', 'web'], source: { path: ['meridian', 'web'] } } }, 3),
+    )
   })
 })

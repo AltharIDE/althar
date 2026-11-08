@@ -28,8 +28,14 @@ export interface Fork {
   readonly by: 'host' | 'names'
 }
 
-/** What a host said of a repository: the path of the one it was forked from, or null for none. */
-export type Parent = { readonly path: ReadonlyArray<string> } | null
+/** A repository a host named: its path there, and the addresses it gives to clone it by, where it gives them. */
+type Named = { readonly path: ReadonlyArray<string>; readonly addresses?: ReadonlyArray<string> | undefined }
+
+/**
+ * What a host said of a repository: the one it was forked from, and, for a fork of a fork, the one at the root of its forks
+ * (GitHub's `source`); or null for no fork.
+ */
+export type Parent = (Named & { readonly source?: Named | undefined }) | null
 
 /** A repository's place, the same however its address is written: host and path, lowercased. */
 const keyOf = (ref: { readonly host: string; readonly path: ReadonlyArray<string> }) => `${ref.host}/${ref.path.join('/')}`.toLowerCase()
@@ -57,10 +63,30 @@ const NOWHERE: Place = { context: [], scm: false }
  * path there, so `archive/group/repo` is never `group/repo`; on Bitbucket Data Center, with its `scm/` or without, as its
  * HTTPS and SSH addresses differ, and on no other host, where `scm/group/repo` is a repository of its own.
  */
-const pathIs = (remote: ReadonlyArray<string>, host: ReadonlyArray<string>, { context, scm }: Place) => {
+const pathIs = (remote: ReadonlyArray<string>, host: ReadonlyArray<string>, { context, scm }: Place): boolean => {
   if (!scm) return samePath(remote, [...context, ...host])
   const bare = context.at(-1)?.toLowerCase() === 'scm' ? context.slice(0, -1) : context
   return [bare, [...bare, 'scm']].some((before) => samePath(remote, [...before, ...host]))
+}
+
+/** Whether an address is SSH's, `git@host:path` or `ssh://`, which never has a server's own path or Data Center's `scm/` in it. */
+const isSsh = (url: string) => /^ssh:\/\//i.test(url.trim()) || !url.includes('://')
+
+/**
+ * Whether a remote of the clone is a repository a host named: at one of the addresses the host gave for it, or, on `origin`'s
+ * host, at its path as the host's addresses are written there (`where`); an SSH remote at its path alone, as SSH addresses
+ * have nothing in front of it, though `origin`'s HTTPS one has the server's own path.
+ */
+const isAt = (remote: Remote, named: Named, host: string, where: Place) => {
+  const ref = parseRemote(remote.url)
+  if (ref === null) return false
+  if ((named.addresses ?? []).some((address) => matchKey(address) === keyOf(ref))) return true
+  return ref.host === host && (pathIs(ref.path, named.path, where) || (isSsh(remote.url) && samePath(ref.path, named.path)))
+}
+
+const matchKey = (url: string) => {
+  const ref = parseRemote(url)
+  return ref === null ? null : keyOf(ref)
 }
 
 /**
@@ -113,8 +139,12 @@ export const tellOf = (
   const was = told.get(keyOf(ref))?.parent
   const context = ref.path.slice(0, ref.path.length - repository.path.length)
   told.set(keyOf(ref), { at, parent: repository.parent, context, scm: product === 'bitbucket_dc' })
-  return was === undefined ? true : (was?.path.join('/') ?? null) !== (repository.parent?.path.join('/') ?? null)
+  return was === undefined ? true : saying(was) !== saying(repository.parent)
 }
+
+/** What a host's answer says of a fork, to tell whether a later one says otherwise: its parent, and its root. */
+const saying = (parent: Parent) =>
+  parent === null ? null : `${parent.path.join('/')} ${parent.source?.path.join('/') ?? ''}`.toLowerCase()
 
 /** Forgets every host's answer: for tests, which start each runtime afresh. */
 export const forgetTold = () => told.clear()
@@ -135,10 +165,16 @@ export const addressLike = (like: string, path: ReadonlyArray<string>, own: Read
  * The fork a repository's remotes make it, or null. `said` is what its host
  * said of `origin`'s repository, by default what a host last said of it here;
  * undefined where no host said. A host's parent is found among the remotes by
- * address, `upstream` first where several have it. A host saying it is no
- * fork leaves the remotes' names to say, so a clone with an `upstream` is
- * read as it always was. `place` is where the host's paths sit in its
- * addresses, as its answer told it, else as on GitHub.
+ * address, `upstream` first where several have it; where none has it, the
+ * root of its forks, where the host said one (a fork of a fork, whose
+ * `upstream` is often the root). Where none has either and the host can't say
+ * the root (GitLab, Bitbucket), an `upstream` on the same host naming another
+ * repository is the parent as the names say, as it always was: the root of a
+ * fork of a fork, or the repository a mirror its fork was made from mirrors.
+ * Where the host said the root (GitHub), one that is neither isn't. A host saying it is no fork leaves the remotes' names to say
+ * too, so a clone with an `upstream` is read as it always was. `place` is
+ * where the host's paths sit in its addresses, as its answer told it, else as
+ * on GitHub.
  */
 export const forkOf = (remotes: ReadonlyArray<Remote>, said?: Parent, place?: Place): Fork | null => {
   const origin = remotes.find((remote) => remote.name === 'origin')
@@ -149,28 +185,33 @@ export const forkOf = (remotes: ReadonlyArray<Remote>, said?: Parent, place?: Pl
   const parent = said === undefined ? kept?.parent : said
   const where = place ?? (said === undefined ? kept : undefined) ?? NOWHERE
   const before = where.context
-  if (parent != null && !samePath(parent.path, own.path.slice(before.length))) {
-    const having = remotes.filter((remote) => {
-      if (remote.name === 'origin') return false
-      const ref = parseRemote(remote.url)
-      return ref !== null && ref.host === own.host && pathIs(ref.path, parent.path, where)
-    })
-    const there = having.find((remote) => remote.name === 'upstream') ?? having[0]
-    return {
-      fork: { url: origin.url, path: own.path, remote: 'origin' },
-      upstream:
-        there === undefined
-          ? {
-              url:
-                addressLike(origin.url, parent.path, own.path, before) ??
-                `https://${own.host}/${[...before, ...parent.path].join('/')}.git`,
-              path: parent.path,
-              remote: null,
-            }
-          : { url: there.url, path: parent.path, remote: there.name },
-      by: 'host',
-    }
+  const fork = { url: origin.url, path: own.path, remote: 'origin' }
+  const named = byNames(remotes, origin, own)
+  if (parent == null || samePath(parent.path, own.path.slice(before.length))) return named
+  const having = (repository: Named) => {
+    const at = remotes.filter((remote) => remote.name !== 'origin' && isAt(remote, repository, own.host, where))
+    return at.find((remote) => remote.name === 'upstream') ?? at[0]
   }
+  const there = having(parent)
+  if (there !== undefined) return { fork, upstream: { url: there.url, path: parent.path, remote: there.name }, by: 'host' }
+  const root = parent.source === undefined ? undefined : having(parent.source)
+  if (root !== undefined && parent.source !== undefined) {
+    return { fork, upstream: { url: root.url, path: parent.source.path, remote: root.name }, by: 'host' }
+  }
+  // Where the host can't say the root of its forks, an `upstream` that is neither may be it: the names say, as they always did.
+  if (named !== null && parent.source === undefined) return named
+  // Its addresses as the host gives them, the one written as origin's is (SSH or HTTPS) first, else one made like origin's.
+  const given = parent.addresses ?? []
+  const url =
+    given.find((address) => isSsh(address) === isSsh(origin.url)) ??
+    addressLike(origin.url, parent.path, own.path, before) ??
+    given[0] ??
+    `https://${own.host}/${[...before, ...parent.path].join('/')}.git`
+  return { fork, upstream: { url, path: parent.path, remote: null }, by: 'host' }
+}
+
+/** The fork the remotes' names make: an `upstream` beside `origin`, on the same host, naming another repository. */
+const byNames = (remotes: ReadonlyArray<Remote>, origin: Remote, own: { readonly host: string; readonly path: ReadonlyArray<string> }) => {
   const upstream = remotes.find((remote) => remote.name === 'upstream')
   if (upstream === undefined) return null
   const from = parseRemote(upstream.url)
@@ -180,7 +221,7 @@ export const forkOf = (remotes: ReadonlyArray<Remote>, said?: Parent, place?: Pl
     fork: { url: origin.url, path: own.path, remote: 'origin' },
     upstream: { url: upstream.url, path: from.path, remote: 'upstream' },
     by: 'names',
-  }
+  } satisfies Fork
 }
 
 /** The remote of the clone a fork's parent is on, where it is among them: what fetching, starting from and merging from it go by. */

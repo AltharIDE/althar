@@ -1285,7 +1285,8 @@ describe('Bitbucket Data Center as a code host', () => {
         webUrl: `${SERVER}/projects/~DANA/repos/scratch`,
         canPush: false,
         merges: [],
-        parent: { path: ['PRJ', 'my-repo'] },
+        // With the addresses Data Center gives to clone it by.
+        parent: { path: ['PRJ', 'my-repo'], addresses: [`${SERVER}/scm/prj/my-repo.git`] },
       })
     }),
   )

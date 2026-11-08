@@ -85,6 +85,16 @@ const User = Schema.Struct({
 })
 type User = typeof User.Type
 
+/** A repository GitHub names in another's answer, a fork's parent or source: its path, and the addresses to clone it by. */
+const repositoryAt = (named: {
+  readonly full_name: string
+  readonly clone_url?: string | undefined
+  readonly ssh_url?: string | undefined
+}) => {
+  const addresses = [named.clone_url, named.ssh_url].filter((address) => address !== undefined)
+  return { path: named.full_name.split('/'), ...(addresses.length === 0 ? {} : { addresses }) }
+}
+
 const RepositoryAnswer = Schema.Struct({
   id: Schema.Number,
   full_name: Schema.String,
@@ -92,7 +102,13 @@ const RepositoryAnswer = Schema.Struct({
   html_url: Schema.String,
   // Whether it is a fork, and the repository it was forked from, which GitHub gives on a read of the repository alone.
   fork: Schema.optional(Schema.Boolean),
-  parent: Schema.optional(Schema.Struct({ full_name: Schema.String })),
+  // A fork of a fork's root, as `source`; each with the addresses to clone it by.
+  parent: Schema.optional(
+    Schema.Struct({ full_name: Schema.String, clone_url: Schema.optional(Schema.String), ssh_url: Schema.optional(Schema.String) }),
+  ),
+  source: Schema.optional(
+    Schema.Struct({ full_name: Schema.String, clone_url: Schema.optional(Schema.String), ssh_url: Schema.optional(Schema.String) }),
+  ),
   permissions: Schema.optional(Schema.Struct({ push: Schema.optional(Schema.Boolean) })),
   // Said only to someone who can push; anyone else can't merge anyway.
   allow_squash_merge: Schema.optional(Schema.Boolean),
@@ -1297,7 +1313,10 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           ...(answer.allow_rebase_merge === true ? (['rebase'] as const) : []),
         ],
         ...(answer.parent !== undefined
-          ? { parent: { path: answer.parent.full_name.split('/') } }
+          ? {
+              // GitHub gives the root of a fork's forks as its source: its parent, for a fork of a repository that is none.
+              parent: { ...repositoryAt(answer.parent), source: repositoryAt(answer.source ?? answer.parent) },
+            }
           : answer.fork === false
             ? { parent: null }
             : {}),
