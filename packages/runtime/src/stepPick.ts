@@ -114,7 +114,7 @@ export const stepOf = (projectId: string, pick: typeof StepPick.Type, use?: stri
       const elsewhere = known === undefined || keepAgent ? null : routeTo(yield* usableModels(projectId), knownModelName(agent, known))
       if (elsewhere !== null) return yield* on(elsewhere, model)
       return yield* new ToolRefused({
-        message: `The person switched ${model} off for ${agent.name}. ${describeModels(yield* usableModels(projectId), yield* Clock.currentTimeMillis, use)}`,
+        message: `The person switched ${model} off${keepAgent ? ` for ${agent.name}` : ''}. ${describeModels(yield* usableModels(projectId), yield* Clock.currentTimeMillis, use)}`,
       })
     }
     // Its efforts as the agent offers that model; on its own default, they aren't known, so none is taken.
