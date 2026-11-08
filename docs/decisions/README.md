@@ -37,13 +37,25 @@ state, and add a dated line to that document's **Changes** list at its foot.
 There are no more numbered ADRs. A proposal that isn't decided yet lives in
 [`proposed/`](proposed/) until it is, and then folds into its area document.
 
+Proposals waiting now:
+
+- [A task is a conversation plus parts, changeable at any time](proposed/a-task-is-a-conversation-plus-parts.md):
+  the parts, the workspace moving up, reviews that run code, the review after
+  a merge in the same task, chats on Scratch and presets. It would fold into
+  [tasks](tasks.md), [workspaces and runs](workspaces-and-runs.md) and
+  [reviews](reviews.md).
+- [ADR-087](proposed/087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md):
+  a lead's helpers.
+- [ADR-103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md):
+  projects on a host, and work placed across pools.
+
 ## The old ADRs
 
 ADR-002 to ADR-102 are in [`archive/`](archive/), under their old file names.
 Each starts with a line saying where its current state now lives. They are
 the record of how each decision was reached; where an archived ADR and an
-area document disagree, the document holds. Two proposals, ADR-087 and
-ADR-103, are in [`proposed/`](proposed/).
+area document disagree, the document holds. Two of them, ADR-087 and
+ADR-103, are still proposals, in [`proposed/`](proposed/).
 
 Code and older docs cite decisions as `ADR-NNN`. This table resolves each
 one.

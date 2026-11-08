@@ -382,8 +382,11 @@ word. Then no kind needs a hand-written path to another.
 - Merging two tasks into one stays out (6 Nov).
 
 This phase is the largest. It changes ADR-035, ADR-052 and the change sets
-model (`change_sets`, `repository_changes`), so it gets an ADR of its own
-once phases 1 to 4 have shown what it needs.
+model (`change_sets`, `repository_changes`), so it gets an ADR of its own:
+[a task is a conversation plus parts](../decisions/proposed/a-task-is-a-conversation-plus-parts.md),
+proposed on 8 November. It takes in phase 4: a review that runs code is a
+review whose workspace moved up, and phase 4's list is that ADR's first
+build slice.
 
 ## What stays, and why
 
