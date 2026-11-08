@@ -36,6 +36,7 @@ const PLAIN: Readonly<Record<string, string>> = {
     'the disk’s legend, the whole of which opens the list of folders; a folder’s row, which opens its task',
   'thread/Reviewer/Reviewer.tsx': 'a finding’s row, which opens it under its line in the code',
   'thread/Reviewer/FindingNote.tsx': 'a finding’s title, which opens it under its line in the code',
+  'outputs/LineComments/LineComments.tsx': 'a sent comment’s file and lines, heading its excerpt, which open the diff at its line',
   'chrome/TaskParts/TaskParts.tsx':
     'the parts’ marks in the bar, the whole of which opens them; a part’s row or chip, which opens it in place; Add and Back, a popover’s own head',
   'setup/AgentTools/AgentTools.tsx':
