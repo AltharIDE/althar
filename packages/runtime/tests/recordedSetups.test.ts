@@ -3,11 +3,14 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
+import { Ids, newId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Effect, Fiber } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Projects } from '../src/Projects'
+import { Questions } from '../src/Questions'
+import { timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
 import { copyablePath, copyInto, lineOf, type Recorded, recordedOf, type SetUp } from '../src/Setups'
 import { Sessions } from '../src/Sessions'
@@ -53,6 +56,15 @@ const taskIn = (path: string, title = 'Retry checkout') =>
     })
     const lead: ToolAccess = { role: 'lead', projectId: project.projectId, threadId: task.threadId, sessionId: 'none', taskId: task.taskId }
     return { project, task, lead }
+  })
+
+/** A lead's session on its thread, for the questions Althar asks in its name. */
+const withSession = (lead: ToolAccess) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const sessionId = yield* newId(Ids.providerSession)
+    yield* sql`INSERT INTO provider_sessions ${sql.insert({ id: sessionId, projectId: lead.projectId, threadId: lead.threadId, agentId: 'codex', state: 'active', startedAt: yield* timestamp })}`
+    return { ...lead, sessionId } satisfies ToolAccess
   })
 
 /** How the task's worktree was set up, once it has been. */
@@ -179,7 +191,32 @@ describe('a setup the person changes in the project’s settings', () => {
 })
 
 describe('a setup the person edited', () => {
-  it.live('isn’t replaced by a lead that doesn’t say the person agreed, and is once they did', () =>
+  /** Runs a lead's record_setup, answers Althar's question to the person as `choice`, and gives what the lead was told. */
+  const recordAnswering = (lead: ToolAccess, commands: ReadonlyArray<string>, choice: 'replace' | 'keep') =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const questions = yield* Questions
+      const fiber = yield* Effect.forkChild(callTool(lead, 'record_setup', { commands }))
+      let asked: { id: string; payload: string } | undefined
+      for (let i = 0; i < 200 && asked === undefined; i++) {
+        ;[asked] = yield* sql<{ id: string; payload: string }>`
+          SELECT id, payload FROM attention_requests WHERE kind = 'question' AND state = 'open' AND task_id = ${lead.taskId}`
+        if (asked === undefined) yield* Effect.sleep('25 millis')
+      }
+      assert.isDefined(asked, 'Althar asked the person')
+      const payload = JSON.parse(asked?.payload ?? '{}') as { message: string }
+      yield* questions.answer({
+        envelope: yield* Runtime.envelope('attention.answer_question', {}),
+        attentionId: asked?.id ?? '',
+        answers: { replace: { values: [choice] } },
+      })
+      return { told: yield* Fiber.join(fiber), asked: payload.message }
+    })
+
+  const noticesOf = (threadId: string) =>
+    Effect.map(items(threadId), (rows) => rows.flatMap((item) => (item.kind === 'notice' ? [String(item.content.title)] : [])))
+
+  const editedByPerson = () =>
     Effect.gen(function* () {
       const path = withEnv()
       const first = yield* taskIn(path)
@@ -192,15 +229,51 @@ describe('a setup the person edited', () => {
         repositoryId: repository?.id ?? '',
         setup: { copy: [], commands: [step('mine')] },
       })
+      return { path, first }
+    })
 
+  it.live('isn’t replaced where the person, asked by Althar, keeps theirs', () =>
+    Effect.gen(function* () {
+      const { path, first } = yield* editedByPerson()
       const later = yield* taskIn(path, 'Refund over budget')
-      const refused = yield* callTool(later.lead, 'record_setup', { commands: [step('lead again')] })
-      assert.include(refused, 'edited')
-      assert.include(refused, 'person_agreed')
+      const lead = yield* withSession(later.lead)
+      const { told, asked } = yield* recordAnswering(lead, [step('lead again')], 'keep')
+      // The question shows both, and the lead is told theirs stayed.
+      assert.include(asked, step('mine'))
+      assert.include(asked, step('lead again'))
+      assert.include(told, 'kept theirs')
       assert.deepInclude((yield* recordedIn(first.project.projectId)) ?? {}, { commands: [step('mine')], taskId: null })
+      assert.deepStrictEqual(yield* noticesOf(later.task.threadId), [])
+    }).pipe(Effect.provide(runtime())),
+  )
 
-      yield* callTool(later.lead, 'record_setup', { commands: [step('agreed')], person_agreed: true })
+  it.live('is replaced once the person, asked by Althar, says so, and they are told; a flag the agent sets means nothing', () =>
+    Effect.gen(function* () {
+      const { path, first } = yield* editedByPerson()
+      const later = yield* taskIn(path, 'Refund over budget')
+      const lead = yield* withSession(later.lead)
+      const { told } = yield* recordAnswering(lead, [step('agreed')], 'replace')
+      assert.include(told, 'Recorded')
       assert.deepInclude((yield* recordedIn(first.project.projectId)) ?? {}, { commands: [step('agreed')], taskId: later.task.taskId })
+      assert.isTrue(
+        (yield* noticesOf(later.task.threadId)).some((title) => title.includes('Replaced your setup') && title.includes(step('agreed'))),
+      )
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('stays where the lead only claims the person agreed', () =>
+    Effect.gen(function* () {
+      const { path, first } = yield* editedByPerson()
+      const later = yield* taskIn(path, 'Refund over budget')
+      const lead = yield* withSession(later.lead)
+      const sql = yield* SqlClient.SqlClient
+      // An input the tool no longer takes: the lead can't answer for the person; Althar asks, and no one answers, so it waits.
+      const fiber = yield* Effect.forkChild(callTool(lead, 'record_setup', { commands: [step('sneaky')], person_agreed: true }))
+      yield* Effect.sleep('300 millis')
+      const [open] = yield* sql<{ id: string }>`SELECT id FROM attention_requests WHERE kind = 'question' AND state = 'open'`
+      assert.isDefined(open)
+      assert.deepInclude((yield* recordedIn(first.project.projectId)) ?? {}, { commands: [step('mine')], taskId: null })
+      yield* Fiber.interrupt(fiber)
     }).pipe(Effect.provide(runtime())),
   )
 

@@ -137,9 +137,11 @@ export const layer = (options: RuntimeLayerOptions) => {
   const core = Layer.mergeAll(startupLayer('projects', Projects.layer), startupLayer('sessions', Sessions.layer), Launches.layer).pipe(
     Layer.provideMerge(Fetches.layer),
     Layer.provideMerge(
-      Layer.mergeAll(Permissions.layer, Questions.layer, Setups.layer, startupLayer('connections', Connections.layer)).pipe(
-        Layer.provideMerge(judging),
-      ),
+      Layer.mergeAll(
+        Permissions.layer,
+        Setups.layer.pipe(Layer.provideMerge(Questions.layer)),
+        startupLayer('connections', Connections.layer),
+      ).pipe(Layer.provideMerge(judging)),
     ),
   )
   // How many tasks are at work at once on this machine, and what waits for a place among them; and a task that settles stops all it left running.

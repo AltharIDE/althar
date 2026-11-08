@@ -23,9 +23,12 @@ export const repositorySetupsText = {
   copy: 'Copied from your checkout',
   unrecorded: 'None yet: the first task’s agent sets it.',
   byAgent: 'Set by an agent.',
-  byPerson: 'Edited by you. Agents are told to ask you before replacing it.',
+  byPerson: 'Edited by you. An agent asks you before it replaces it.',
   newTasks: 'New tasks use this; worktrees already made keep what they have.',
   clear: 'Clear, so an agent sets it again',
+  sure: 'Clear it? The next task’s agent sets it again.',
+  confirmClear: 'Yes, clear it',
+  keep: 'Keep it',
   nothing: 'Needs nothing.',
   noFiles: 'No files.',
   noCheckout: 'No checkout on this computer',
@@ -185,6 +188,7 @@ export function SetupLines({ lines, label, placeholder, colour, onSave }: LinesP
 
 export function RepositorySetups({ repositories, onChange, onClear, error }: RepositorySetupsProps) {
   const [chosen, setChosen] = useState<string | null>(null)
+  const [clearing, setClearing] = useState<string | null>(null)
   const tabs = useRef<HTMLDivElement>(null)
   const base = useId()
   const repository = repositories.find((one) => one.id === chosen) ?? repositories[0]
@@ -262,9 +266,28 @@ export function RepositorySetups({ repositories, onChange, onClear, error }: Rep
               {who === null ? '' : `${who} `}
               {repositorySetupsText.newTasks}
             </span>
-            <Button size="small" variant="danger" onClick={() => onClear(repository.id)}>
-              {repositorySetupsText.clear}
-            </Button>
+            {clearing === repository.id ? (
+              <span className={s.note}>
+                {repositorySetupsText.sure}{' '}
+                <Button
+                  size="small"
+                  variant="danger"
+                  onClick={() => {
+                    setClearing(null)
+                    onClear(repository.id)
+                  }}
+                >
+                  {repositorySetupsText.confirmClear}
+                </Button>{' '}
+                <Button size="small" onClick={() => setClearing(null)}>
+                  {repositorySetupsText.keep}
+                </Button>
+              </span>
+            ) : (
+              <Button size="small" variant="danger" onClick={() => setClearing(repository.id)}>
+                {repositorySetupsText.clear}
+              </Button>
+            )}
           </div>
         )}
       </section>

@@ -158,8 +158,9 @@ first lead in a repository works it out, and Althar replays it.
 - **A setup that fails never holds the task up.** The lead starts, told what
   failed and the end of what it printed, and is asked to get the folder ready
   and record the setup that works, which replaces the old one, unless the
-  person edited it: then the lead is told to report and ask, and
-  `record_setup` refuses until it is called with `person_agreed`.
+  person edited it: then `record_setup` has Althar ask the person (a question
+  in the lead's thread, showing both setups), waits for their answer, and
+  replaces it only if they say so; it also tells them in the thread that it did.
   `install_dependencies` runs the setup again on the lead's request, never a
   command it names.
 - **Secret files are copied** like any other file the setup names, because
@@ -168,9 +169,8 @@ first lead in a repository works it out, and Althar replays it.
   Running: a tab per repository, its commands and the files copied, as
   numbered lines typed in place. A change there replaces what the lead
   recorded and is the person's: it is kept with no task id, and a lead's
-  `record_setup` is refused until it passes `person_agreed`, which the lead
-  declares itself (Althar doesn't yet check that the person said yes).
-  Clearing it keeps nothing, so the next lead records it again. Nothing has
+  `record_setup` asks the person before replacing it, and never takes the
+  lead's word that they agreed. Clearing it (after a confirm) keeps nothing, so the next lead records it again. Nothing has
   to be written there.
 - **A lead's sandbox writes to its tools' caches,** so Electron's build,
   Playwright's browsers and Bun's packages download inside it. One list

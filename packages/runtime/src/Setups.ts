@@ -4,7 +4,7 @@ import { basename, isAbsolute, join, normalize, sep } from 'node:path'
 
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { type LaunchSpec, spawnOwned, withoutTrailingSlashes } from '@althar/provider-adapters'
+import { type LaunchSpec, type Question, type QuestionAnswer, spawnOwned, withoutTrailingSlashes } from '@althar/provider-adapters'
 import { bumpRevision } from '@althar/persistence-sqlite'
 import { Cause, Context, type Crypto, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Schema, Scope } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -17,6 +17,7 @@ import { printedMore, uncoloured } from './leftRunning'
 import { change, fact, timestamp } from './records'
 import { installIn } from './runCommand'
 import { addItem, updateItem } from './threads'
+import { Questions } from './Questions'
 import { POOL, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
 
 /*
@@ -295,10 +296,11 @@ export class Setups extends Context.Service<
     told(taskId: string): Effect.Effect<string | null>
   }
 >()('@althar/runtime/Setups') {
-  static readonly layer: Layer.Layer<Setups, never, Store | ToolServer> = Layer.effect(
+  static readonly layer: Layer.Layer<Setups, never, Store | ToolServer | Questions> = Layer.effect(
     Setups,
     Effect.gen(function* () {
       const context = yield* Effect.context<Store>()
+      const questions = yield* Questions
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       const instance = yield* Instance
       const options = (yield* RuntimeConfig).setups ?? {}
@@ -592,7 +594,7 @@ export class Setups extends Context.Service<
           return found
         })
 
-      /** Keeps a repository's setup, replacing what was recorded (the person's own edit only where `personAgreed`); the project changes with it, so its settings read it again. */
+      /** Keeps a repository's setup, replacing what was recorded (the person's own edit only where `personAgreed`, which is Althar's own, once the person answered); the project changes with it, so its settings read it again. */
       const record = (projectId: ProjectId, bindingId: string, name: string, recorded: Recorded, actorId: ActorId, personAgreed: boolean) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -687,14 +689,13 @@ export class Setups extends Context.Service<
       const recordTool = {
         name: 'record_setup',
         description:
-          "Records how your repository's folder gets ready to work in, for Althar to do the same in every later task's folder before its lead starts: copy, the ignored files and folders to copy from the person's checkout (such as `.env`, a local config), from the repository's root; and commands, what installs what it needs, one after another from the repository's folder, each a line as you ran it (`bun install --frozen-lockfile`, `bunx playwright install chromium`). Althar runs the commands itself, outside any agent's sandbox, and stops at the first that fails. Record only what worked here, the whole of it: it replaces the setup recorded before, and the person sees it in the project's settings. Where the person edited the setup themselves, it is theirs: ask them first, and only once they agree call again with person_agreed true; without it the edit stays. Where the folder needs nothing, record that, with no commands and no files. Althar copies the files into your folder now, so you have them. In a task of several repositories, repository names the one.",
+          "Records how your repository's folder gets ready to work in, for Althar to do the same in every later task's folder before its lead starts: copy, the ignored files and folders to copy from the person's checkout (such as `.env`, a local config), from the repository's root; and commands, what installs what it needs, one after another from the repository's folder, each a line as you ran it (`bun install --frozen-lockfile`, `bunx playwright install chromium`). Althar runs the commands itself, outside any agent's sandbox, and stops at the first that fails. Record only what worked here, the whole of it: it replaces the setup recorded before, and the person sees it in the project's settings. Where the person edited the setup themselves, it is theirs: Althar asks them whether to replace it, and this call waits for their answer; if they keep theirs, nothing is recorded. Where the folder needs nothing, record that, with no commands and no files. Althar copies the files into your folder now, so you have them. In a task of several repositories, repository names the one.",
         input: {
           type: 'object',
           properties: {
             copy: { type: 'array', items: { type: 'string' } },
             commands: { type: 'array', items: { type: 'string' } },
             repository: { type: 'string' },
-            person_agreed: { type: 'boolean' },
           },
           required: ['commands'],
         },
@@ -706,7 +707,6 @@ export class Setups extends Context.Service<
               readonly copy?: unknown
               readonly commands?: unknown
               readonly repository?: unknown
-              readonly person_agreed?: unknown
             }
             const strings = (value: unknown) => (Array.isArray(value) ? value.filter((one): one is string => typeof one === 'string') : [])
             const tidy = setupOf({ copy: strings(asked.copy), commands: strings(asked.commands) })
@@ -723,14 +723,29 @@ export class Setups extends Context.Service<
               return yield* new ToolRefused({
                 message: `Say which repository it is for, as repository: ${all.map((each) => each.name).join(', ')}.`,
               })
-            // What the person edited is theirs: it is replaced only once they agreed to it.
-            if (recordedOf(one.recorded)?.taskId === null && asked.person_agreed !== true)
-              return yield* new ToolRefused({ message: personEdited(one.name) })
             const recorded: Recorded = { copy: [...copy], commands: [...commands], at: yield* provide(timestamp), taskId }
-            const kept = yield* provide(
-              record(one.projectId, one.bindingId, one.name, recorded, instance.systemId, asked.person_agreed === true),
-            )
-            if (!kept) return yield* new ToolRefused({ message: personEdited(one.name) })
+            // What the person edited is theirs: Althar asks them, and it is replaced only once they answer that it may be.
+            const before = recordedOf(one.recorded)
+            const theirs = before?.taskId === null ? before : undefined
+            const replaces = theirs !== undefined
+            if (theirs !== undefined) {
+              const answer = yield* questions.ask(
+                { projectId: access.projectId as ProjectId, threadId: access.threadId, taskId, sessionId: access.sessionId },
+                replaceQuestion(one.name, theirs, recorded),
+              )
+              if (!agreedTo(answer)) return yield* new ToolRefused({ message: keptIt(one.name) })
+            }
+            const kept = yield* provide(record(one.projectId, one.bindingId, one.name, recorded, instance.systemId, replaces))
+            if (!kept) return yield* new ToolRefused({ message: keptIt(one.name) })
+            // The person is told their setup was replaced, in the thread of the task whose lead did it.
+            if (replaces)
+              yield* provide(
+                addItem({ projectId: one.projectId, threadId: access.threadId }, 'notice', {
+                  source: 'runtime',
+                  severity: 'info',
+                  title: `Replaced your setup for ${one.name}, as you agreed. It now runs: ${recorded.commands.length === 0 ? 'nothing' : recorded.commands.join('; ')}.`,
+                }),
+              )
             const copied = copy.length === 0 ? [] : (yield* copyInto(one.checkout, one.worktree, copy)).said
             if (commands.length === 0 && copy.length === 0)
               return `Recorded that ${one.name} needs nothing set up: later tasks' leads won't be asked again.`
@@ -762,8 +777,35 @@ export class Setups extends Context.Service<
   )
 }
 
-const personEdited = (name: string) =>
-  `The person edited ${name}'s setup themselves, so it stays as they left it. Tell them what you would change and why, and ask. Only once they agree, call record_setup again with person_agreed true.`
+const keptIt = (name: string) =>
+  `The person edited ${name}'s setup themselves and Althar asked them: they kept theirs, so nothing was recorded. Carry on without recording it.`
+
+const REPLACE = 'replace'
+
+/** Althar's question to the person before a lead replaces the setup they edited: theirs beside what the lead would record. */
+const replaceQuestion = (name: string, theirs: Recorded, mine: Recorded): Question => {
+  const lines = (r: Recorded) =>
+    r.commands.length === 0 && r.copy.length === 0 ? '(nothing)' : [...r.copy.map((c) => `copy ${c}`), ...r.commands].join('\n')
+  return {
+    message: `A lead wants to replace the setup you edited for ${name}.\n\nYours:\n${lines(theirs)}\n\nThe lead would record:\n${lines(mine)}`,
+    fields: [
+      {
+        id: REPLACE,
+        question: `Replace your setup for ${name} with the one the lead worked out?`,
+        header: 'Setup',
+        type: 'choice',
+        options: [
+          { value: REPLACE, label: 'Replace it', note: 'New tasks run the lead’s setup; worktrees already made keep theirs.' },
+          { value: 'keep', label: 'Keep mine' },
+        ],
+        multiple: false,
+        required: true,
+      },
+    ],
+  }
+}
+
+const agreedTo = (answer: QuestionAnswer) => answer.action === 'accept' && answer.content[REPLACE] === REPLACE
 
 /** How a setup that failed ended, in words for the lead. */
 const howItFailed = (setUp: SetUp) => {
@@ -809,7 +851,7 @@ export const toldOf = (
       const asked = recorded
         ? failedSetUp(setUp)
           ? byPerson
-            ? `See why first, then get ${where} ready yourself. The person edited this setup themselves, so don't replace it with record_setup on your own: tell them what failed and what you would change, and ask.`
+            ? `See why first, then get ${where} ready yourself. The person edited this setup themselves, so Althar asks them before record_setup replaces it: record the setup that works with record_setup, and wait for their answer.`
             : `See why first, then get ${where} ready yourself, and record the setup that works with record_setup: it replaces the one that failed, for every later task.`
           : null
         : `No setup is recorded for ${several ? name : 'the repository'} yet, so get ${where} ready to work in before anything else: install what it needs, its dependencies and what its tools download (Electron's build, Playwright's browsers), and copy the ignored files it needs from ${from}, such as \`.env\`, by naming them to record_setup. Then record what worked with record_setup, or that it needs nothing, so Althar gets every later task's folder ready the same way before its lead starts.`
