@@ -580,6 +580,47 @@ describe('the window’s own buttons in the strip', () => {
   })
 })
 
+describe('dismissing Home', () => {
+  it('closes Home, selects a project, persists dismissal and reopens explicitly', async () => {
+    window.localStorage.setItem('althar.tabs', JSON.stringify({ open: ['p1'], places: {} }))
+    windowAt('/')
+    await userEvent.click(await screen.findByRole('button', { name: 'Close Home' }))
+    await waitFor(() => expect(where()).toBe('/projects/p1'))
+    expect(nav().queryByRole('button', { name: 'Close Home' })).toBeNull()
+    expect(JSON.parse(window.localStorage.getItem('althar.tabs')!).home).toBe(false)
+    await userEvent.click(nav().getByRole('button', { name: /^Home/ }))
+    await waitFor(() => expect(where()).toBe('/'))
+    expect(nav().getByRole('button', { name: 'Close Home' })).toBeTruthy()
+    expect(JSON.parse(window.localStorage.getItem('althar.tabs')!).home).toBe(true)
+  })
+
+  it('keeps Home closed in a new window and starts on a kept project', async () => {
+    window.localStorage.setItem('althar.tabs', JSON.stringify({ home: false, open: ['p2'], places: {} }))
+    windowAt('/')
+    await waitFor(() => expect(where()).toBe('/projects/p2'))
+    expect(nav().queryByRole('button', { name: 'Close Home' })).toBeNull()
+    fireEvent.keyDown(window, { key: '1', metaKey: true })
+    await waitFor(() => expect(where()).toBe('/projects/p2'))
+  })
+
+  it('falls back to Home, shown again, when no project tab remains', async () => {
+    window.localStorage.setItem('althar.tabs', JSON.stringify({ home: false, open: ['p1'], places: {} }))
+    windowAt('/projects/p1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Close meridian' }))
+    await waitFor(() => expect(where()).toBe('/'))
+    expect(tab('Home')).toBeTruthy()
+    expect(nav().queryByRole('button', { name: 'Close Home' })).toBeNull()
+    expect(JSON.parse(window.localStorage.getItem('althar.tabs')!).home).toBe(true)
+  })
+
+  it('validates persisted visibility and numbers only visible tabs', () => {
+    expect(keptFrom('{"open":[],"home":false}')?.home).toBe(false)
+    expect(keptFrom('{"open":[],"home":"false"}')?.home).toBeUndefined()
+    expect(byNumber(['a', 'b'], 1, false)).toBe('a')
+    expect(beside(['a', 'b'], 'b', 1, false)).toBe('a')
+  })
+})
+
 describe('working out the tabs', () => {
   it('moves a project’s tab before another’s, or to the end, and leaves what is not a move alone', () => {
     const kept = { open: ['a', 'b', 'c'], places: {} }
