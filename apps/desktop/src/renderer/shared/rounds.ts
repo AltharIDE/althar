@@ -347,6 +347,7 @@ export const roundsOf = (
         const content = noticeOf(block)
         // Before the round it may arrive during, which it doesn't end: a session says what it could see once it has started.
         if (content.role === 'skills') {
+          if (content.hidden === true) return
           out.push({ kind: 'skills', id: block.id, title: content.title, skills: content.skills ?? [] })
           return
         }

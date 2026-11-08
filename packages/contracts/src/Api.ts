@@ -1663,6 +1663,8 @@ export const NoticeItem = Schema.Struct({
     skills: Schema.optional(
       Schema.Array(Schema.Struct({ name: Schema.String, path: Schema.String, from: Schema.Literals(['person', 'repository']) })),
     ),
+    /** For such a line a later session left with nothing to add, as its names are those of the line before: not shown. */
+    hidden: Schema.optional(Schema.Boolean),
     /**
      * For an agent's turn that failed: why, as the runtime classes it
      * (`auth_required`, `usage_limit`, `context_full`, `session_lost`,
