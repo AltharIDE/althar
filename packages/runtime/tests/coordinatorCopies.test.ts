@@ -176,6 +176,9 @@ describe("the coordinator's copies", () => {
       assert.isFalse(within(join(gitConfig, 'credentials'), allowed), 'the credential store is given back')
       assert.isTrue(within(join(gitConfig, 'credentials'), denied), 'the credential store isn’t held from it')
       assert.isTrue(within(join(gitConfig, 'config'), allowed), 'git’s config isn’t given back')
+      for (const ordinary of [join(home, 'Documents'), place.projectFolder, join(home, 'Projects', 'meridian')])
+        assert.isFalse(within(ordinary, denied), 'ordinary files are readable')
+      assert.isTrue(within(join(home, '.ssh', 'id_ed25519'), denied), 'secret files remain blocked')
     }
     holds(join(home, '.config', 'git'))
     // Where XDG_CONFIG_HOME is set, outside the home folder, as git reads it.
