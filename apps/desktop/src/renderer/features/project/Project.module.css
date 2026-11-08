@@ -46,7 +46,8 @@
   --face-surface: var(--n-1);
   position: relative;
   flex: none;
-  width: var(--talk-width, 560px);
+  /* as wide as it was dragged, set on the element itself (ProjectView) */
+  width: 560px;
   background: var(--n-1);
   border-right: 1px solid var(--line);
 }

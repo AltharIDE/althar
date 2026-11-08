@@ -32,6 +32,28 @@
   margin-top: 4px;
 }
 
+/*
+ * While the column a thread is in is dragged wider or narrower (its
+ * ResizeHandle's onResizing marks it `data-resizing`), what is off
+ * screen isn't laid out again at each width: it keeps the height it was last
+ * drawn at, so the drag stays smooth however long the thread, and is laid
+ * out once it ends. It stays in the page, found and read as ever. Its
+ * height is there before the drag starts: with `contain-intrinsic-size:
+ * auto`, a turn's size is remembered each time it is laid out, not only once
+ * it has been skipped, so a turn off screen at pointer-down keeps its own
+ * height rather than the 600px held for one never laid out.
+ * content-visibility contains the layout and paint of the turns on screen
+ * too: while the drag lasts, what a turn draws outside its own box (its
+ * actions at a negative margin, a focus ring) is clipped, and a fixed
+ * descendant is placed against the turn rather than the window.
+ */
+.thread > * {
+  contain-intrinsic-size: auto 600px;
+}
+:global([data-resizing]) .thread > * {
+  content-visibility: auto;
+}
+
 .measure {
   width: 100%;
   max-width: var(--measure);
