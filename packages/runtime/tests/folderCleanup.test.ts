@@ -1,13 +1,14 @@
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { Deferred, Effect, Fiber, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { attachmentsIn } from '../src/attachments'
+import { RuntimeConfig } from '../src/Config'
 import { bringBack, folderOf, KEPT } from '../src/bringBack'
 import { FolderCleanup, goneWords, ownedBytes, sizeWords, waitDays } from '../src/FolderCleanup'
 import { Instance } from '../src/Instance'
@@ -97,6 +98,29 @@ const folderLines = (threadId: string) =>
     }>`SELECT content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'notice' ORDER BY sequence`
     return rows.map((row) => JSON.parse(row.content) as { title: string; role?: string }).filter((notice) => notice.role === 'folder')
   })
+
+/**
+ * Moves a task's worktree to where it would be had it been made under `earlier`, as one made before the person moved the root in
+ * Settings is: the store keeps its path there.
+ */
+const madeUnder = <T extends { readonly taskId: string; readonly worktree: string }>(task: T, earlier: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const { worktreeRoot } = yield* RuntimeConfig
+    const moved = join(earlier, relative(worktreeRoot, task.worktree))
+    mkdirSync(dirname(moved), { recursive: true })
+    git(task.worktree, 'worktree', 'move', task.worktree, moved)
+    rmSync(dirname(task.worktree), { recursive: true, force: true })
+    yield* sql`UPDATE workspaces SET path = ${moved} WHERE task_id = ${task.taskId}`
+    return { ...task, worktree: moved }
+  })
+
+/** Two disks: the root's, and another an earlier root is on, each by what a path starts with. */
+const twoDisks = () => {
+  const earlier = realpathSync(mkdtempSync(join(tmpdir(), 'althar-earlier-root-')))
+  const device = (path: string) => Effect.succeed(path.startsWith(earlier) ? 2 : 1)
+  return { earlier, device }
+}
 
 /** The folders, once every size and hold is measured. */
 const measured = Effect.gen(function* () {
@@ -279,6 +303,81 @@ describe('finished tasks’ folders', () => {
       assert.isTrue(existsSync(newer.worktree))
       assert.match((yield* folderLines(older.threadId))[0]?.title ?? '', /^Folder removed when this computer ran low on space/)
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { disk })))))
+  })
+
+  it.live('sweeps a disk that ran low only until it is roomy, and leaves a roomy disk’s folders to their wait', () => {
+    const { earlier, device } = twoDisks()
+    // The root's disk: 5% free until the oldest folder on it goes, then half. The other disk is roomy.
+    let watched: string | null = null
+    const disk = (path: string) =>
+      Effect.sync(() => {
+        const free = path.startsWith(earlier) ? 0.6 : watched !== null && !existsSync(watched) ? 0.5 : 0.05
+        return { total: 1000, free: 1000 * free, used: 1000 * (1 - free) }
+      })
+    return Effect.gen(function* () {
+      // The oldest of all is on the roomy disk: the whole-computer pass took it first.
+      const elsewhere = yield* madeUnder(yield* finished('done', 2, 'Elsewhere'), earlier)
+      const older = yield* finished('done', 1.5, 'Older')
+      const newer = yield* finished('done', 1, 'Newer')
+      watched = older.worktree
+      yield* (yield* FolderCleanup).sweep
+      assert.isFalse(existsSync(older.worktree), 'the oldest folder on the disk that ran low stayed')
+      assert.match((yield* folderLines(older.threadId))[0]?.title ?? '', /^Folder removed when this computer ran low on space/)
+      assert.isTrue(existsSync(newer.worktree), 'a folder went once its disk was roomy')
+      assert.isTrue(existsSync(elsewhere.worktree), 'a folder on a roomy disk went before its wait')
+      assert.deepStrictEqual(yield* folderLines(elsewhere.threadId), [])
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { disk, device })))))
+  })
+
+  it.live('sweeps a disk an earlier root is on when that one runs low, though the root’s disk is roomy', () => {
+    const { earlier, device } = twoDisks()
+    const disk = (path: string) =>
+      Effect.sync(() => {
+        const free = path.startsWith(earlier) ? 0.05 : 0.6
+        return { total: 1000, free: 1000 * free, used: 1000 * (1 - free) }
+      })
+    return Effect.gen(function* () {
+      const elsewhere = yield* madeUnder(yield* finished('done', 1, 'Elsewhere'), earlier)
+      const here = yield* finished('done', 2, 'Here')
+      yield* (yield* FolderCleanup).sweep
+      assert.isFalse(existsSync(elsewhere.worktree))
+      assert.strictEqual((yield* stateOf(elsewhere.workspaceId))?.state, 'cleaned')
+      assert.isTrue(existsSync(here.worktree))
+      // The branch and last commit are kept, and it comes back on demand, to where it was.
+      assert.strictEqual(git(elsewhere.root, 'rev-parse', `${KEPT}${elsewhere.workspaceId}`), elsewhere.head)
+      yield* bringBack(elsewhere.taskId, yield* person)
+      assert.isTrue(existsSync(join(elsewhere.worktree, 'retry.ts')))
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { disk, device })))))
+  })
+
+  it.live('finds a folder left under an earlier root: lists it on its own disk, and its wait removes it', () => {
+    const { earlier, device } = twoDisks()
+    const disk = (path: string) =>
+      Effect.succeed(path.startsWith(earlier) ? { total: 2000, free: 1500, used: 500 } : { total: 1000, free: 600, used: 400 })
+    return Effect.gen(function* () {
+      const due = yield* madeUnder(yield* finished('done', 4, 'Due'), earlier)
+      const waiting = yield* madeUnder(yield* finished('done', 1, 'Waiting'), earlier)
+      const here = yield* finished('done', 1, 'Here')
+      const { worktreeRoot } = yield* RuntimeConfig
+      const listed = yield* measured
+      assert.deepStrictEqual(
+        listed.disks.map((one) => [one.folder, one.total, one.used]),
+        [
+          [worktreeRoot, 1000, 400],
+          [earlier, 2000, 500],
+        ],
+      )
+      const diskOf = (taskId: string) =>
+        listed.disks.find((one) => one.id === listed.folders.find((f) => f.taskId === taskId)?.disk)?.folder
+      assert.strictEqual(diskOf(due.taskId), earlier)
+      assert.strictEqual(diskOf(here.taskId), worktreeRoot)
+      yield* (yield* FolderCleanup).sweep
+      assert.isFalse(existsSync(due.worktree))
+      assert.isFalse(existsSync(dirname(due.worktree)), 'its task’s folder under the earlier root stayed')
+      assert.match((yield* folderLines(due.threadId))[0]?.title ?? '', /^Folder removed 3 days after the task finished/)
+      assert.isTrue(existsSync(waiting.worktree))
+      assert.isTrue(existsSync(here.worktree))
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { disk, device })))))
   })
 
   it.live('keeps the person’s choice of wait, and with Only when I clean up removes nothing by itself', () =>
@@ -703,4 +802,33 @@ describe('the words for a folder going', () => {
     rmSync(root, { recursive: true, force: true })
     assert.isTrue(failed)
   })
+})
+
+describe('a root the person moved away from', () => {
+  it.live(
+    'loses its runs’ copies and the coordinator’s mirrors as Althar starts, and keeps its task folders and the coordinator’s copies',
+    () => {
+      const database = join(mkdtempSync(join(tmpdir(), 'althar-earlier-')), 'althar.sqlite')
+      const { earlier } = twoDisks()
+      const left = ['.runs/run_1', '.run/app', '.coordinator-mirrors/app.git']
+      return Effect.gen(function* () {
+        const { folder, worktree } = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const task = yield* madeUnder(yield* finished('done', 1), earlier)
+            const folder = dirname(dirname(task.worktree))
+            for (const one of [...left, '.coordinator/app/.althar/attachments']) mkdirSync(join(folder, one), { recursive: true })
+            return { folder, worktree: task.worktree }
+          }).pipe(Effect.provide(runtime(database))),
+        )
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            yield* Launches
+            for (const one of left) assert.isFalse(existsSync(join(folder, one.split('/')[0] ?? one)), `${one} stayed`)
+            assert.isTrue(existsSync(join(folder, '.coordinator', 'app', '.althar', 'attachments')))
+            assert.isTrue(existsSync(worktree))
+          }).pipe(Effect.provide(runtime(database))),
+        )
+      })
+    },
+  )
 })

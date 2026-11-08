@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readdirSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
@@ -8,7 +9,7 @@ import { Clock, Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Schema
 import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
-import { copyAt, freshCopy } from './coordinatorFolder'
+import { copyAt, earlierProjectFolders, freshCopy } from './coordinatorFolder'
 import { startOf } from './Projects'
 import { bringBackThen } from './bringBack'
 import { thisDevice } from './device'
@@ -161,6 +162,9 @@ type Store = SqlClient.SqlClient | Crypto.Crypto | Instance | RuntimeConfig | Li
 /** Where a branch's runs keep their copies, in a project's folder: each run's its own, by its id. */
 const BRANCH_COPIES = '.runs'
 
+/** What Althar keeps in a project's folder that nothing reads once the root has moved: runs' copies, and the coordinator's mirrors. */
+const LEFT_UNDER_EARLIER = [BRANCH_COPIES, '.run', '.coordinator-mirrors']
+
 export class Launches extends Context.Service<
   Launches,
   {
@@ -268,6 +272,22 @@ export class Launches extends Context.Service<
       )
       for (const project of projects)
         yield* cleanUp(join(config.worktreeRoot, project, BRANCH_COPIES), 'copies of branches earlier runs ran from')
+      // Under a root task folders were made in before the person moved it (Settings › Task folders), nothing runs or fetches again:
+      // its runs' copies and the coordinator's mirrors go. Its task folders go by their waits (FolderCleanup.ts); the coordinator's
+      // copies stay, as the files sent to it are read from there.
+      const worktrees = yield* provide(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          return yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE device_id = ${instance.deviceId} AND kind IS NULL`
+        }),
+      ).pipe(Effect.orElseSucceed((): ReadonlyArray<{ path: string }> => []))
+      for (const folder of earlierProjectFolders(
+        worktrees.map((one) => one.path),
+        config.worktreeRoot,
+        homedir(),
+      ))
+        for (const left of LEFT_UNDER_EARLIER)
+          yield* cleanUp(join(folder, left), 'run copies and mirrors under an earlier task folder root')
 
       const shown = (launch: Launch): ShownLaunch => ({
         id: launch.id,

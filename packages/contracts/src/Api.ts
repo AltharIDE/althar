@@ -551,13 +551,25 @@ export const FinishedFolder = Schema.Struct({
   bytes: Schema.NullOr(Schema.Number),
   /** Why it stays; null where nothing holds it. */
   held: Schema.NullOr(FolderHeld),
+  /** The disk it is on, by its id in `disks`; null where that couldn't be read. */
+  disk: Schema.NullOr(Schema.String),
 })
 export type FinishedFolder = typeof FinishedFolder.Type
 
-/** Finished tasks' folders on this computer, and the disk they are on. */
+/** A disk task folders are on, in bytes: its size and what is used, and the folder they were made in on it. */
+export const FolderDisk = Schema.Struct({
+  id: Schema.String,
+  /** Where new tasks' folders go, on the disk that holds it; else the earlier folder those on it were made in, before the person moved it. */
+  folder: Schema.String,
+  total: Schema.Number,
+  used: Schema.Number,
+})
+export type FolderDisk = typeof FolderDisk.Type
+
+/** Finished tasks' folders on this computer, and the disks they are on. */
 export const TaskFolders = Schema.Struct({
-  /** The disk the folders are on, in bytes: its size and what is used; null where it couldn't be read. */
-  disk: Schema.NullOr(Schema.Struct({ total: Schema.Number, used: Schema.Number })),
+  /** The disk new tasks' folders go on first, then each other one a finished folder is on; one that couldn't be read is left out. */
+  disks: Schema.Array(FolderDisk),
   /** Every finished task's folder still here, the latest settled first. */
   folders: Schema.Array(FinishedFolder),
   /** Some sizes are still being measured; the feed says once they are (`folders`). */
