@@ -176,7 +176,10 @@ function ChangeCard({ c, change, ship = true, signal }: { c: Case; change: Chang
         ? {}
         : {
             actions: (
-              <Button variant={signal && (stands.tone === 'you' || stands.tone === 'bad') ? 'signal' : 'default'} onClick={act(press, change.id)}>
+              <Button
+                variant={signal && (stands.tone === 'you' || stands.tone === 'bad') ? 'signal' : 'default'}
+                onClick={act(press, change.id)}
+              >
                 {press}
               </Button>
             ),

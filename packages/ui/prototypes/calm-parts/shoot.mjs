@@ -16,60 +16,33 @@ const top = (height) => ({ clip: { x: 0, y: 44, width: 1440, height } })
 /** Each shot: its id (ordered), the direction, the case, where, what to press first, what to take. */
 export const SHOTS = [
   // One case, three ways: a task with three changes, one of which needs you.
-  { id: '01-A-needs-one-task', d: 'A', s: 'needs-one', at: 'task', ...top(56) },
-  { id: '02-B-needs-one-task', d: 'B', s: 'needs-one', at: 'task', ...top(100) },
-  { id: '03-C-needs-one-task', d: 'C', s: 'needs-one', at: 'task', open: 'outbox', ...around('commits not shipped, on', 240, 130) },
-  { id: '04-A-needs-one-card', d: 'A', s: 'needs-one', at: 'board', ...card() },
-  { id: '05-B-needs-one-card', d: 'B', s: 'needs-one', at: 'board', ...card() },
-  { id: '06-C-needs-one-card', d: 'C', s: 'needs-one', at: 'board', ...card() },
-  // Several changes
-  { id: '07-A-siblings-card', d: 'A', s: 'siblings', at: 'board', ...card() },
-  { id: '08-A-stack-card', d: 'A', s: 'stack', at: 'board', ...card() },
-  { id: '09-B-stack-held-strip', d: 'B', s: 'stack-held', at: 'task', open: 'motion', clip: { x: 0, y: 44, width: 760, height: 400 } },
-  { id: '10-C-merged-one-thread', d: 'C', s: 'merged-one', at: 'task', ...around('#714 merged.', 40, 260) },
-  // Where it works
-  { id: '11-A-local-waits-bar', d: 'A', s: 'local-waits', at: 'task', ...top(56) },
-  { id: '12-C-local-waits-thread', d: 'C', s: 'local-waits', at: 'task', ...around('You moved althar/board-still', 40, 220) },
-  { id: '13-run-it-ask', d: 'A', s: 'run-it', at: 'task', ...around('How far should it trust', 60, 250) },
-  { id: '14-to-local-ask', d: 'B', s: 'to-local', at: 'task', ...around('a branch of yours', 60, 140) },
-  // Waiting for Ship
+  { id: '01-A-needs-one-bar', d: 'A', s: 'needs-one', at: 'task', ...top(56) },
+  { id: '02-A-needs-one-marks', d: 'A', s: 'needs-one', at: 'task', press: 'button[aria-label^="3 changes"]', pop: true },
+  { id: '03-B-needs-one-bar', d: 'B', s: 'needs-one', at: 'task', ...top(56) },
+  { id: '04-B-needs-one-switch', d: 'B', s: 'needs-one', at: 'task', press: 'button[aria-label^="Showing"]', pop: true },
+  { id: '05-C-needs-one-tabs', d: 'C', s: 'needs-one', at: 'task', clip: { x: 280, y: 750, width: 880, height: 110 } },
+  { id: '06-A-needs-one-card', d: 'A', s: 'needs-one', at: 'board', ...card() },
+  { id: '07-BC-needs-one-card', d: 'B', s: 'needs-one', at: 'board', ...card() },
+  // As one, on more of the cases with several changes
+  { id: '08-A-siblings-bar', d: 'A', s: 'siblings', at: 'task', ...top(56) },
+  { id: '09-A-stack-bar', d: 'A', s: 'stack', at: 'task', ...top(56) },
+  { id: '10-A-stack-held-card', d: 'A', s: 'stack-held', at: 'board', ...card() },
+  { id: '11-A-merged-one-thread', d: 'A', s: 'merged-one', at: 'task', ...around('Lane heights (#714) merged', 40, 200) },
+  // Outputs: every change one under another, in every direction; a settled one folds to a line
+  { id: '12-outputs-needs-one', d: 'A', s: 'needs-one', at: 'task', face: 'out', clip: { x: 0, y: 44, width: 1440, height: 760 } },
+  { id: '13-outputs-merged-folded', d: 'A', s: 'merged-one', at: 'task', face: 'out', clip: { x: 0, y: 44, width: 1440, height: 420 } },
   {
-    id: '15-C-held-beside-outbox',
-    d: 'C',
-    s: 'held-beside',
-    at: 'task',
-    open: 'outbox',
-    ...around('commits not shipped, on', 270, 130),
-  },
-  { id: '16-A-held-beside-bar', d: 'A', s: 'held-beside', at: 'task', ...top(56) },
-  { id: '17-merge-unshipped-ask', d: 'A', s: 'merge-unshipped', at: 'task', ...around('aren’t shipped yet', 60, 200) },
-  { id: '18-B-retarget-strip', d: 'B', s: 'retarget', at: 'task', ...top(100) },
-  // Reviews
-  { id: '19-A-after-merge', d: 'A', s: 'after-merge', at: 'task', ...around('Found 2 in what merged', 120, 200) },
-  { id: '20-B-after-merge-card', d: 'B', s: 'after-merge', at: 'board', ...card('Call “Keep for later” “Later”') },
-  // Chats and presets
-  { id: '21-A-scratch-corner', d: 'A', s: 'scratch', at: 'board', open: 'scratch', clip: { x: 0, y: 380, width: 760, height: 520 } },
-  { id: '22-B-scratch-shelf', d: 'B', s: 'scratch', at: 'board', open: 'scratch', clip: { x: 0, y: 90, width: 1440, height: 420 } },
-  { id: '23-C-scratch-talk', d: 'C', s: 'scratch', at: 'project', open: 'scratch', clip: { x: 0, y: 380, width: 760, height: 520 } },
-  {
-    id: '24-A-preset-chip',
+    id: '14-outputs-merged-opened',
     d: 'A',
-    s: 'preset',
+    s: 'merged-one',
     at: 'task',
-    press: 'button[aria-label^="Preset"]',
-    clip: { x: 640, y: 44, width: 800, height: 330 },
+    face: 'out',
+    press: 'button:has-text("#714 merged")',
+    clip: { x: 0, y: 44, width: 1440, height: 560 },
   },
-  // Time and failures
-  {
-    id: '25-C-turn-time',
-    d: 'C',
-    s: 'turn-time',
-    at: 'task',
-    press: 'text=Worked for 7m 19s',
-    ...around('Worked for 7m 19s', 40, 200),
-  },
-  { id: '26-usage-ask', d: 'A', s: 'usage', at: 'task', ...around('is used up until', 90, 150) },
-  { id: '27-refused-ask', d: 'C', s: 'refused', at: 'task', ...around('GitHub refused the push', 90, 170) },
+  // The plan card: its preset, a quiet word in its kicker
+  { id: '15-plan-preset-word', d: 'A', s: 'needs-one', at: 'talk', selector: '[class*="TaskLaunch-module__launch"]' },
+  { id: '16-plan-preset-open', d: 'A', s: 'needs-one', at: 'talk', press: 'button[aria-label^="Preset"]', pop: true },
 ]
 
 const only = process.argv.slice(2)
@@ -80,8 +53,16 @@ for (const shot of SHOTS.filter((one) => only.length === 0 || only.some((id) => 
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 })
   const errors = []
   page.on('pageerror', (error) => errors.push(String(error).split('\n')[0]))
-  const where = shot.at === 'task' ? 'threads/th1' : shot.at === 'board' ? 'projects/p1?room=board' : 'projects/p1'
-  await page.goto(`http://localhost:5374/?d=${shot.d}&s=${shot.s}&bare${shot.open === undefined ? '' : `&open=${shot.open}`}#/${where}`)
+  const where =
+    shot.at === 'task'
+      ? 'threads/th1'
+      : shot.at === 'board'
+        ? 'projects/p1?room=board'
+        : shot.at === 'talk'
+          ? 'projects/p1?room=talk'
+          : 'projects/p1'
+  const extra = `${shot.open === undefined ? '' : `&open=${shot.open}`}${shot.face === undefined ? '' : `&face=${shot.face}`}`
+  await page.goto(`http://localhost:5374/?d=${shot.d}&s=${shot.s}&bare${extra}#/${where}`)
   await page.waitForTimeout(1400)
   if (shot.press !== undefined) {
     await page.locator(shot.press).first().click()
@@ -90,7 +71,21 @@ for (const shot of SHOTS.filter((one) => only.length === 0 || only.some((id) => 
   await page.mouse.move(0, 0)
   await page.waitForTimeout(300)
   const path = resolve(out, `${shot.id}.png`)
-  if (shot.around !== undefined) {
+  if (shot.pop === true) {
+    // What the press opened, with what it hangs from: the menu or popover's box, widened and taken from the bar down.
+    const box = await page
+      .locator('[role=dialog], [role=menu]')
+      .last()
+      .boundingBox({ timeout: 3000 })
+      .catch(() => null)
+    const x = Math.max(0, Math.round((box?.x ?? 600) - 120))
+    const bottom = Math.round((box?.y ?? 300) + (box?.height ?? 300) + 16)
+    const y = Math.max(0, Math.round((box?.y ?? 100) - 110))
+    await page.screenshot({
+      path,
+      clip: { x, y, width: Math.min(1440 - x, Math.round((box?.width ?? 400) + 240)), height: Math.min(900 - y, bottom - y) },
+    })
+  } else if (shot.around !== undefined) {
     const found = page.locator(`text=${shot.around.text}`).last()
     await found.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => undefined)
     await page.waitForTimeout(200)

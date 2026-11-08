@@ -70,10 +70,18 @@ check((await text()).includes('Shipped: Lane heights (#714) has the 2 commits'),
 
 // C · Where you talk: a tab picks the change; pressed again, its card, whose Ship ships it.
 await open('C', 'stack-held')
-check((await dock().getByRole('button', { pressed: true }).innerText()).includes('Card slide'), 'C stack-held: the tab picked is Card slide')
-await dock().getByRole('button', { name: /^Lane heights/ }).click()
+check(
+  (await dock().getByRole('button', { pressed: true }).innerText()).includes('Card slide'),
+  'C stack-held: the tab picked is Card slide',
+)
+await dock()
+  .getByRole('button', { name: /^Lane heights/ })
+  .click()
 await settle(300)
-check((await dock().getByRole('button', { pressed: true }).innerText()).includes('Lane heights'), 'C stack-held: pressing Lane heights picks it')
+check(
+  (await dock().getByRole('button', { pressed: true }).innerText()).includes('Lane heights'),
+  'C stack-held: pressing Lane heights picks it',
+)
 await dock().getByRole('button', { pressed: true }).click()
 await settle(300)
 await page.locator('[role=dialog]').getByRole('button', { name: 'Ship', exact: true }).first().click()
@@ -375,7 +383,9 @@ check((await text()).toLowerCase().includes('what lane heights changes'), 'A mer
 await open('B', 'needs-one')
 const field = () => page.locator('textarea, [contenteditable=true]').last()
 check(
-  ((await field().getAttribute('placeholder')) ?? (await field().getAttribute('aria-placeholder')) ?? (await text())).includes('about Lane heights'),
+  ((await field().getAttribute('placeholder')) ?? (await field().getAttribute('aria-placeholder')) ?? (await text())).includes(
+    'about Lane heights',
+  ),
   'B needs-one: the composer says what you say goes to Lane heights',
 )
 await switcher().click()
@@ -384,7 +394,10 @@ await page.getByRole('menuitem', { name: /Rename/ }).click()
 await settle(400)
 await page.getByRole('button', { name: 'Lane heights', exact: true }).first().click()
 await settle(400)
-check((await switcher().getAttribute('aria-label')) === 'Showing Lane heights', 'B needs-one: “Lane heights” in a line turns the window back to it')
+check(
+  (await switcher().getAttribute('aria-label')) === 'Showing Lane heights',
+  'B needs-one: “Lane heights” in a line turns the window back to it',
+)
 
 // As one: the chip's marks open to every change, each with its branch and where it stands.
 await open('A', 'needs-one')
@@ -392,7 +405,10 @@ await page.getByRole('button', { name: /^3 changes:/ }).click()
 await settle(300)
 t = await page.locator('[role=dialog]').innerText()
 check(
-  t.includes('althar/board-still') && t.includes('althar/rename-later') && t.includes('althar/board-motion') && t.includes('Ready to merge'),
+  t.includes('althar/board-still') &&
+    t.includes('althar/rename-later') &&
+    t.includes('althar/board-motion') &&
+    t.includes('Ready to merge'),
   'A needs-one: the marks open to each change, its branch and where it stands',
 )
 await page.keyboard.press('Escape')

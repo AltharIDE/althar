@@ -222,7 +222,12 @@ const asOne = (c: Case, need: Need): Need => {
   if (need.act.startsWith('Merge') && need.act !== 'Review and merge' && ready.length > 1)
     return {
       ...whole,
-      says: ready.length === live.length ? (ready.length === 2 ? 'Both ready to merge' : `All ${ready.length} ready to merge`) : `${list(ready.map(nameOf))}: ready to merge`,
+      says:
+        ready.length === live.length
+          ? ready.length === 2
+            ? 'Both ready to merge'
+            : `All ${ready.length} ready to merge`
+          : `${list(ready.map(nameOf))}: ready to merge`,
       act: ready.length === 2 ? 'Merge both' : `Merge all ${ready.length}`,
       change: undefined,
     }
@@ -231,7 +236,8 @@ const asOne = (c: Case, need: Need): Need => {
     const n = waiting.reduce((sum, one) => sum + (one.waiting ?? 0), 0)
     return {
       ...whole,
-      says: waiting.length === 1 ? about(waiting[0]!, `${commits(n)} not shipped`) : `${commits(n)} not shipped, in ${waiting.length} changes`,
+      says:
+        waiting.length === 1 ? about(waiting[0]!, `${commits(n)} not shipped`) : `${commits(n)} not shipped, in ${waiting.length} changes`,
       act: 'Ship',
       change: waiting.length === 1 ? waiting[0] : undefined,
     }
@@ -257,7 +263,12 @@ const ONE: View = {
     ...chip(c, need, several(c) ? <SetMarks c={c} says={need.says} /> : sentence(need)),
     ...(several(c) && need.says === c.word ? { state: <SetMarks c={c} says={need.says} /> } : {}),
     // The changes are in the chip: the parts row keeps what the task has as a whole.
-    parts: <TaskParts parts={several(c) ? [...taskWide(c)] : [...c.changes.map((one) => changePart(c, one)), ...taskWide(c)]} kinds={kindsOf(c)} />,
+    parts: (
+      <TaskParts
+        parts={several(c) ? [...taskWide(c)] : [...c.changes.map((one) => changePart(c, one)), ...taskWide(c)]}
+        kinds={kindsOf(c)}
+      />
+    ),
   }),
   above: () => null,
   crumb: () => null,
@@ -275,7 +286,10 @@ const FOCUS: View = {
   card,
   header: (c, need) => {
     if (!several(c))
-      return { ...chip(c, need, sentence(need)), parts: <TaskParts parts={[...c.changes.map((one) => changePart(c, one)), ...taskWide(c)]} kinds={kindsOf(c)} /> }
+      return {
+        ...chip(c, need, sentence(need)),
+        parts: <TaskParts parts={[...c.changes.map((one) => changePart(c, one)), ...taskWide(c)]} kinds={kindsOf(c)} />,
+      }
     // The change in view: its own one fact and button; the title's switch says where another waits.
     const now = focusOf(c)
     const stands = now === undefined ? undefined : standingOfNeed(c, now, need)
@@ -323,7 +337,12 @@ const DOCK: View = {
   header: (c, need) => ({
     ...chip(c, need, sentence(need)),
     // The changes are over the composer: the parts row keeps what the task has as a whole.
-    parts: <TaskParts parts={several(c) ? [...taskWide(c)] : [...c.changes.map((one) => changePart(c, one)), ...taskWide(c)]} kinds={kindsOf(c)} />,
+    parts: (
+      <TaskParts
+        parts={several(c) ? [...taskWide(c)] : [...c.changes.map((one) => changePart(c, one)), ...taskWide(c)]}
+        kinds={kindsOf(c)}
+      />
+    ),
   }),
   above: (c, opening) => (several(c) ? <ChangeDock c={c} opened={opening === 'dock'} /> : null),
   crumb: () => null,

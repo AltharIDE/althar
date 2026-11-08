@@ -561,9 +561,7 @@ export function ChangesList({ c, onPick }: { c: Case; onPick?: (id: string) => v
           <>
             <ChangeMark mark={markOf(c, change)} />
             <span className={css.outName}>{nameOf(change)}</span>
-            <code className={css.outRowBranch}>
-              {change.pr === undefined ? change.branch : `#${change.pr} · ${change.branch}`}
-            </code>
+            <code className={css.outRowBranch}>{change.pr === undefined ? change.branch : `#${change.pr} · ${change.branch}`}</code>
             <span className={css.outDetail} data-tone={stands.tone}>
               {stands.detail}
               {change.place === 'local' ? ' · in your checkout' : ''}
@@ -721,7 +719,10 @@ export function ChangeDock({ c, opened, card = true }: { c: Case; opened: boolea
 
 /** A line's words, each change named in them a way to it. */
 export function Linked({ c, text }: { c: Case; text: string }) {
-  const names = c.changes.filter(open).map((one) => [one.short, one.id] as const).filter((one): one is readonly [string, string] => one[0] !== undefined)
+  const names = c.changes
+    .filter(open)
+    .map((one) => [one.short, one.id] as const)
+    .filter((one): one is readonly [string, string] => one[0] !== undefined)
   if (names.length < 2) return <>{text}</>
   const pattern = new RegExp(`(${names.map(([name]) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`)
   return (

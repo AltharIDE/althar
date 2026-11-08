@@ -1203,7 +1203,16 @@ export const withWords = (c: Case): Case =>
         changes: c.changes.map((one) =>
           one.short !== undefined
             ? one
-            : { ...one, short: SHORT[one.id] ?? one.title.replace(/[,.:;“”"]/g, '').split(' ').slice(0, 2).join(' ') },
+            : {
+                ...one,
+                short:
+                  SHORT[one.id] ??
+                  one.title
+                    .replace(/[,.:;“”"]/g, '')
+                    .split(' ')
+                    .slice(0, 2)
+                    .join(' '),
+              },
         ),
       }
 

@@ -236,7 +236,10 @@ export const merge = (id?: string, then?: Edit, all = false) => {
             : other,
       ),
     }
-    return compose(calm, line(`${recordOf(one)} merged.${above === undefined ? '' : ` ${nameOf(above)} goes into main now.`}`, one.id))(next)
+    return compose(
+      calm,
+      line(`${recordOf(one)} merged.${above === undefined ? '' : ` ${nameOf(above)} goes into main now.`}`, one.id),
+    )(next)
   })
   list.push((cc) => {
     const left = cc.changes.filter(open)
