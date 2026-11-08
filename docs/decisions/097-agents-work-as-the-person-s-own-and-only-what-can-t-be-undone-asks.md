@@ -5,7 +5,7 @@
 - **Date:** 2026-11-06
 - **Supersedes, in part:**
   [ADR-004](004-coordinator-is-an-agent-session.md) (the coordinator is
-  optional; read-only is tidiness),
+  always on, and tasks can also start without it; read-only is tidiness),
   [ADR-011](011-own-connectors-for-hosts-and-trackers.md) (agents without the
   person's sign-in; tools only on the task's repository),
   [ADR-013](013-project-rules.md) (what asks by default; revisions as the
@@ -26,10 +26,10 @@
   lead a review),
   [ADR-052](052-a-task-attaches-to-a-pull-request-it-didn-t-open.md) (forks),
   [ADR-057](057-a-lead-works-outside-its-sandbox-through-althar-s-tools.md)
-  (a review's lead gets no tools; screenshots of this computer only),
+  (a review's lead gets no tools; screenshots of any page over HTTP),
   [ADR-058](058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md)
-  (the coordinator installs nothing, reaches no network, loads nothing of the
-  person's),
+  (the coordinator installs nothing, loads nothing of the person's, and keeps
+  its edit tools denied; its commands reach the network),
   [ADR-066](066-althar-runs-any-branch-or-pull-request-and-fetches-for-leads.md)
   (leads carry none of the person's sign-ins),
   [ADR-067](067-allow-everything-asks-only-before-what-can-t-be-undone.md)
@@ -122,8 +122,8 @@
      of tools. Each change is said in a line and can be undone; one that
      loosens what asks needs the person's own message in that turn
      ([Settings](#settings)).
-  6. **The coordinator is optional**
-     ([The coordinator](#the-coordinator-is-optional)).
+  6. **The coordinator is always on, and tasks can also start without it**
+     ([Tasks can start without the coordinator](#tasks-can-start-without-the-coordinator)).
   7. **What stays** is a short list, each line for a reason no tool takes
      away ([What stays](#what-stays-and-why)).
   8. **Two questions the person hasn't settled** take the plan's
@@ -361,8 +361,8 @@ it comes to matter.
 Agents may use the person's own `gh`, `glab` and git sign-in where they have
 one set up: their `gh` and `glab` config, git's credential helpers and their
 SSH agent are no longer taken out of the agent's environment
-(`runtime/src/Config.ts`, ADR-011). A project switch, "Agents use my code
-host sign-in", on by default, turns it off.
+(`runtime/src/Config.ts`, ADR-011). The proposed project switch is not
+implemented by this sweep; the inherited environment is the default.
 
 In the Flatpak the person's sign-in is on the device, not in the sandbox
 (ADR-027, ADR-073). Agents that run on the device get it as their
@@ -559,14 +559,73 @@ flowchart LR
 - **Answering a permission request or a question** stays theirs alone
   (ADR-019).
 
-## The coordinator is optional
+## Situations: what Althar says in a thread of the work around it
 
-A task can start without it: from the board, from the composer, or from a
-lead. The coordinator stays the place for triage, routing, launching a batch
-of tasks from the tracker, and merging. A project whose person never talks
-to it runs no coordinator session. How a task started without it gets its
-plan and models fast is phase 2's, beside the work on making small changes
-finish in minutes.
+Five things happen to a task that its lead, working alone, cannot see or say.
+Each is a line in the task's thread, where it happens, in Althar's own voice
+(the kit's `AltharLine`, in its warning tone where the person may need to act),
+and each has what the runtime needs. They went from the #640 prototype with
+these changes to its sketches:
+
+- **A Never rule an agent meets.** The call stands declined, and under it:
+  "Refused by your rule `rm -rf ~/Library`. The lead was told so. Rules". The
+  same words, "Refused by your rule `rm -rf ~/Library`.", are the tool's result
+  to the lead (`refusedWords`, Permissions.ts). Nothing asks and nothing waits:
+  Never is the person's answer given ahead. A kind the project never allows
+  reads "Refused by your rule against force pushes."
+- **An ask that waits while the person is away.** The request records where it
+  reached the person besides the window (`attention_request.reached`: the
+  device and when) and its card says how long it has waited: "Waiting 40 min ·
+  sent to your iPhone at 13:20". *Different from the prototype:* nothing in
+  Althar sends to a device yet, so the record is what a channel calls
+  (`Permissions.reached`) and the line shows only where it was. Once a request
+  that reached a device has waited three minutes, its lead is let go on without
+  it (`Permissions.setAside`, Situations.ts): the call is refused with a word
+  saying the person is away, the request stays open for the person and is out
+  of the session's way, and the lead is told when it is answered. An allowed
+  call goes through once, the next time the lead makes the same call, short of
+  what is never allowed. The kept call is the person's to answer, not a
+  suspended one: an agent's permission request cannot outlive its turn, so the
+  lead repeats it.
+  The request belongs to the person, not the session: it stays open when the
+  lead's session ends, and is answered all the same. It does not survive
+  Althar restarting, whose agent processes end with it; those are withdrawn
+  when it starts. Answered after the lead's session has ended, a request of a
+  task still open starts its lead again, in its place among the agents at work,
+  to read the answer (`Runs.answered`, as for a question); a stopped or settled
+  task's lead is left, the answer queued.
+- **A task a lead started that stops reaching its parent.** Settled without a
+  change, failed, or stopped by the person (stopped by anyone else says
+  nothing): once, a line in the parent's thread in its warning tone, "<child>
+  stopped without a change: <why>. Its report" (or "stopped by you"), and
+  news that wakes the parent's lead, started again if it had stopped, as
+  `message_lead` does (`task.parent_told` keeps that it was said). The why is
+  the first sentence of the child's last report.
+- **Two tasks changing the same files.** Overlaps.ts already told both leads
+  once; it now also puts "<other task> changes `TaskView.tsx` too. Both leads
+  were told." in each thread. Nothing on the board.
+- **A server that fails mid-task.** claude-agent-acp reports a server that
+  failed to start or needs signing in in a notice's `_meta.claudeCode`
+  (`kind: "mcpServerStatus"`); a call to that server that then fails keeps
+  which server and how (`server` on the tool call; the server is remembered from the
+  event that named the call, since the update that fails carries only its status), and the thread says so
+  under the call: "Claude Code isn't signed in to Linear, so this didn't go
+  through. Sign in". *Different from the prototype:* the call isn't turned to
+  done by signing in (the lead goes on, and Althar can't repeat its call), and
+  the line doesn't say what the call would have done: Althar knows its title,
+  not its effect. Sign in opens the agent's sign-in in Settings until the MCP
+  servers' own page can take it.
+
+## Tasks can start without the coordinator
+
+The coordinator is always there. There is no switch, setting or mode to turn
+it off, in any project. A task can also start without going through it: from
+the board, from the composer, or from a lead. The coordinator stays the place
+for triage, routing, launching a batch of tasks from the tracker, and merging,
+and it directs the leads. Its session starts when the person talks to it, or
+when news it acts on wakes it; that is not a setting and doesn't turn it off.
+How a task started without it gets its plan and models fast is phase 2's,
+beside the work on making small changes finish in minutes.
 
 ## What stays, and why
 
@@ -603,6 +662,106 @@ repository, gets what a task's lead gets: a worktree at its head with the
 project's setup replayed, its code run in the sandbox, skills, MCP servers,
 the network, screenshots, and a draft that carries pictures.
 
+## As built: the capable-agents UX (the #640 prototype's directions)
+
+The person picked the directions in the prototype of 6–7 November (#640);
+this is how they were built, and where the build went another way than
+this ADR or the prototype's README.
+
+- **Allow everything is on.** A new project's first rules have it, and an
+  existing project whose rules never said gets one revision with it on, the
+  first time they are read (`Policies.ts`): an explicit off, the person's
+  own, stays off. Their Never, Ask me and command rules stay as they were.
+- **What asks, in the project's Rules (direction A).** While everything is
+  allowed, Rules lead with the kinds that still ask: lost work and history
+  (the default branch, force pushes, every branch or tags, other branches'
+  deletion), publishing and merging (`deploy`), speaking for the person (a
+  new rule kind, `speak`), each Asks you or Never, and secrets, Never and not
+  to be changed, as above; then the person's own Never and Ask me commands.
+  *Another way than the README:* the mode and the switch don't go. "Ask about
+  more" turns allowing everything off and gives back the sentences, from
+  Never to the rest, where the switch turns it on again: a project the person
+  had asking about more keeps doing so, and its rules read as before. Deleting
+  what is outside the task stays asking, but isn't made Never with its kind:
+  its rule kind is all writing outside the worktree, which goes ahead.
+- **The person's Ask me holds with everything allowed** (the flow chart
+  above), which the rules hadn't done.
+- **MCP calls are read** (`mcpActs.ts`, `irreversible.ts`): by the server
+  and tool Claude Code's bridge names (`_meta.claudeCode`, or the
+  `mcp__server__tool` and `mcp.server.tool` names), then by what the tool's
+  name says and, for a general `graphql` or `api` tool, its mutation or
+  method. A merge or a release is publishing, a post, review or message
+  speaking for the person, a deletion of a branch, tag or file or a push to
+  the default branch lost history; each asks, with everything allowed too.
+  Every MCP post asks, the task's own pull request's included, as Althar
+  can't yet tell from a server's call whose pull request it is; Althar's own
+  tools still go on the person's word. The MCP spec's tool annotations
+  aren't read: no agent's bridge passes them on yet.
+- **The ask card** says Can't be undone, the action on its button, what
+  can't be taken back in one line, the words it would post, and the server
+  and tool or the command; Not now or the action, with no always. The
+  permission request carries it (`AttentionRequest.irreversible`).
+- **Each MCP call names its server** in its row; one that acted on the
+  outside world stands out under the round's work as a card: the server,
+  what it did, the words it posted, Open where its result says where to see
+  it (`ToolCallItem.mcp`). Its input and result aren't kept, as before; the
+  words it posted are, cut at 600 characters.
+- **The person's servers load in every role** (above, "MCP servers"): each
+  session is given the servers found in Claude Code's, Codex's or
+  OpenCode's own settings, whichever found it, that are on there and ticked
+  for its role in Settings › MCP servers, for every project or one, beside
+  Althar's own; Codex and OpenCode still have their own switched off by name
+  and Claude Code still takes only what it is given, so a session gets
+  exactly those, whichever agent runs it. A repository's `.mcp.json` is
+  listed nowhere yet and loads nowhere, as its trust is the agent's own.
+  The runtime reads the person's agents only where the desktop app gives it
+  their home (`agentConfigs`): a test's runtime reads none.
+- **One switch keeps the person's agents' servers the same** (`mcpSync.ts`),
+  with the dialog before it starts (direction A), To settle, Since, a chip
+  per server per file that takes it back out, a server's menu that keeps it
+  out of one agent, and Leave them in or Take them out when turned off. It
+  writes through `claude mcp add-json --scope user` and `codex mcp add`;
+  OpenCode has no such command, so its JSON is edited in place with its
+  comments kept. A copy of each file is kept before Althar first writes to
+  it, and a record of what it added: taking back removes only that, and only
+  while it is still as Althar wrote it: the same command, arguments,
+  environment, address, headers and token, and not turned off since; one the
+  person changed is theirs, and stays. What it couldn't take back stays its
+  own, to take back again, and what an agent's command couldn't do is said in
+  Settings. It brings the agents in step as Settings reads them and as each
+  session starts, which is when an agent reads its settings, rather than
+  watching the files. A pick for a server set up two ways replaces another
+  agent's way only where the picked one can go there as it is. A token goes across as its
+  variable's name; one written out in a file isn't copied, nor a Codex
+  command's variable by name (Codex's `--env` takes values), nor an SSE
+  server to Codex: each is said under To settle. Sign-ins open each agent's
+  own `mcp login` in a terminal; whether an agent is signed in to a server
+  isn't read, so a server Althar copied that signs in on its own shows
+  Sign in until pressed.
+- **Skills get their own switch** (`skillSync.ts`): it links each skill
+  into Claude Code's and Codex's folders (OpenCode reads both), never moves
+  or copies one, and takes out only its own links. One name with two
+  versions waits under To settle; picking one replaces only a link of the
+  person's, never a folder of theirs. *Another way than the README:* the
+  skills table has no role columns, as a skill loads by each agent's own
+  folders and Althar can't yet hold one back by role.
+- **A task's parts (direction C)** sit just before the faces: the worktree
+  (with the files it changed, which the files button was), its pull
+  requests (Merge from the row where it waits; a failing check's names and
+  Ask the lead to fix it), a review draft (Post it from the row), its issue,
+  what runs (Open, Stop) and its screenshots. Add opens a pull request or
+  attaches one; a worktree (a chat made a change, as make-it-a-change was
+  asked of the lead), a review, an issue and a page are asked of the lead in
+  the person's words. *Not built:* Access as a part, as with everything
+  allowed there is nothing to give a task but what can't be undone, which
+  the card asks for each time; Run a check again, and taking an issue off a
+  task, which have no command yet.
+- **The Situations and the fast lane** are tasks of their own, started from
+  this one: the thread (a Never rule met, an ask that waits, a lead-started
+  task that stops, two tasks on the same files, a server that fails), and the
+  fast lane with Auto's lighter model. The coordinator is never something to
+  turn off, in any project.
+
 ## What each ADR it supersedes loses
 
 | ADR | What goes | What holds |
@@ -618,8 +777,8 @@ the network, screenshots, and a draft that carries pictures.
 | 043 | Allowing everything as an opt-in; the host only through Althar | The one switch, project and task; Never over it |
 | 050 | No review led by an agent a repository's settings can approve for | That rule for an outside author's review |
 | 052 | A branch on someone else's fork never attached | Never forced; attached one at a time |
-| 057 | A review's lead gets no tools; screenshots of this computer only | The tools themselves |
-| 058 | No installs in its copies; no network for its commands; none of the person's setup | Copies of its own, edit tools denied |
+| 057 | A review's lead gets no tools; screenshots of any page over HTTP | The tools themselves |
+| 058 | No installs in its copies; no network for its commands; none of the person's setup | Copies of its own, edit tools denied; the network is open |
 | 066 | Leads carry none of the person's sign-ins | `fetch_from_remote`, preferred |
 | 067 | The floor in the other modes | The irreversible kinds |
 | 071 | Today's rules where no sandbox holds; review steps' rules | The sandbox as the boundary; the guard |
@@ -632,3 +791,68 @@ the network, screenshots, and a draft that carries pictures.
 | 089 | `reflog expire` and `gc --prune` asking in the other modes | The guard's reads, teardown and publishing asking |
 | 094 | Skills for leads only, off until turned on | One store, the catalog, reviewed installs |
 | 095 | The Repository files switches and the held push | – |
+
+## Enforcement sweep, 7 November 2026
+
+The sandbox, environment, coordinator and rules sweep is built on #684.
+The audit records the limits removed and each retained boundary. Review
+workspaces and the in-task reviewer's tool list are deliberately left to the
+task-as-parts work.
+
+The [limits audit](../plans/no-arbitrary-limits-audit.md) records every
+restriction found, its disposition and regression coverage. Sandboxed shell
+commands reach every host, without a project host list. Claude Code gets an
+open network; Codex gets it in both its session config and the adapter's
+per-turn policy; OpenCode has no OS sandbox and goes through the rules.
+An outside review remains offline.
+
+The coordinator may read ordinary files anywhere and reach the network;
+its OS sandbox still holds writes to its folder and temporary files.
+Secret-file protections remain. Common dev servers and test runners started
+by hand get the same sandbox exclusions as recorded project commands.
+
+The person's code-host identity is inherited: gh/glab config and tokens,
+git's credential helpers and the SSH agent. This completes the environment
+part of phase 3 here. Althar's sealed connection secrets and provider API
+keys are not inherited. Explicit credential-export commands still refuse.
+The git guard remains in place regardless of which sign-in pushes.
+
+Skill and OpenSpec files are ordinary repository files, with no separate
+push consent. Copilot's built-in tools remain available. Screenshots may
+visit any HTTP or HTTPS page, including redirects, in the existing isolated
+browser session; file URLs remain refused.
+
+A refusal that leaves an agent silent is followed up, and any final notice
+names the command and the reason Althar refused it. A review's lead of the
+repository's own people now has the full lead tool set; an outside author's
+review keeps the reading six tools, and its code does not run without the
+person's word. Review workspaces, the in-task reviewer's tool list and running
+the reviewed code remain with the task-as-parts work, by the coordinator's
+direction; they are not a separate path in this sweep.
+
+The coordinator uses the project rules, including the person's Never and Ask,
+rather than the strict reader whitelist. Without a sandbox only visible writes
+outside its folder are refused; unreadable commands run. Its edit tools stay
+denied, as the What stays table keeps them. A silent refusal is recovered in
+the same turn. Claude's native sandbox still refuses opening pipe descriptors
+under `/dev/fd`; the coordinator may run any command outside the sandbox when it
+asks to, and the same read-only rules decide it: a read such as `<(…)` runs, a
+visible write outside its folder is refused. Althar no longer refuses process
+substitution itself.
+
+Sandboxed commands reach Althar's rules so the list holds inside the sandbox
+too: each command is answered at once, a visible irreversible one asks the
+person, and an unreadable one runs. Approving an agent's own work or widening
+host access through `gh api` is refused, not asked. Claude Code's sandbox opens
+the network and the SSH agent's socket only. Codex's turn takes the `untrusted`
+approval policy through a patch to codex-acp, so the commands it doesn't read as
+safe, a merge, a release or a post among them, reach Althar and the irreversible
+list holds there too; commands its own safe list covers run unasked. Nothing of
+the network, the sign-in or the sandbox is left outside the list.
+
+The non-irreversible floor is gone in every mode. Code-host CLI changes and the
+Flatpak bridge are ordinary commands. Visible merges, releases, posts and
+credential exports remain held. Unknown host API mutations are allowed rather
+than treated as irreversible by default. Selected skills reach all ordinary
+roles, including the coordinator; outside reviews remain offline and load no
+executable skill plugins.

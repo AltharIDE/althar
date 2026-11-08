@@ -9,6 +9,7 @@ import {
   type Handed,
   type QuestionField,
   type SeenSkill,
+  serverOfCall,
   type SessionEvent,
 } from '@althar/provider-adapters'
 import { Cause, Clock, Duration, Effect, Exit, Fiber, Scope, Semaphore } from 'effect'
@@ -33,6 +34,48 @@ import { changeLinesWords } from './issueChangeWords'
 import { change, timestamp } from './records'
 import { commandIn, essentials } from './rules'
 import { indexThread } from './Search'
+import { mcpActOf } from './mcpActs'
+
+/** How long the words an MCP call posted are kept on its item: what it said, at a glance. */
+const WORDS_KEPT = 600
+
+/**
+ * What a call to one of the person's MCP servers did, kept on its item
+ * (ADR-097): its server and tool, whether it acts, in a few words, the words
+ * it posted and where to see it, read from its result. Its input and result
+ * themselves aren't kept (docs/architecture/07).
+ */
+const mcpKept = (
+  event: Extract<SessionEvent, { _tag: 'ToolCall' | 'ToolCallUpdate' }>,
+  stored: Readonly<Record<string, unknown>> | undefined,
+): { readonly mcp?: Readonly<Record<string, unknown>> } => {
+  const had = typeof stored?.mcp === 'object' && stored.mcp !== null ? (stored.mcp as Readonly<Record<string, unknown>>) : undefined
+  const call =
+    event.mcp ?? (typeof had?.server === 'string' && typeof had.tool === 'string' ? { server: had.server, tool: had.tool } : undefined)
+  if (call === undefined) return {}
+  const act = event.rawInput === undefined ? undefined : mcpActOf(call, event.rawInput)
+  const link = event.rawOutput === undefined ? undefined : linkIn(event.rawOutput)
+  return {
+    mcp: {
+      ...had,
+      server: call.server,
+      tool: call.tool,
+      ...(act === undefined
+        ? had?.acts === undefined
+          ? { acts: false, did: call.tool }
+          : {}
+        : { acts: act.acts, did: act.done, ...(act.words === undefined ? {} : { words: act.words.slice(0, WORDS_KEPT) }) }),
+      ...(link === undefined ? {} : { link }),
+    },
+  }
+}
+
+/** Where to see what an MCP call did: the first web address its result names, a review's or a comment's. */
+const linkIn = (output: unknown): string | undefined => {
+  const text = typeof output === 'string' ? output : (JSON.stringify(output) ?? '')
+  const found = /https:\/\/[^\s"'<>)\\]+/.exec(text)
+  return found === null ? undefined : found[0]
+}
 
 /*
  * The thread's items: what the person reads (docs/architecture/01). An
@@ -54,6 +97,8 @@ export interface ItemPlace {
   readonly sandboxed?: boolean
   /** A task's lead, by its agent's name: the thread says which skills it could see. */
   readonly lead?: string
+  /** The same agent's id, so a line about it can lead to its sign-in. */
+  readonly leadId?: string
 }
 
 /** Adds an item at the end of the thread. */
@@ -129,6 +174,48 @@ export const toolItem = (sessionId: string, toolCallId: string) =>
       content: string
     }>`SELECT id, content FROM thread_items WHERE provider_session_id = ${sessionId} AND tool_call_id = ${toolCallId}`
     return row === undefined ? undefined : { id: row.id, content: JSON.parse(row.content) as Record<string, unknown> }
+  })
+
+/** How much of an Althar tool's input, and of its error, a thread keeps of a call made inside another tool. */
+const CALL_KEPT = 300
+
+/**
+ * Keeps on an agent's code tool (OpenCode 2.x's `execute`, which runs the model's JavaScript and names nothing it calls)
+ * the Althar tool that code called, what it was given, shortened, and why it failed where it did. Without it the thread
+ * shows a bare `execute`, and a refusal or a malformed argument is lost with it. The latest such call still open takes it;
+ * none, or a call that already says its command, takes nothing.
+ */
+export const keepAltharCall = (
+  place: { readonly projectId: ProjectId; readonly threadId: string; readonly sessionId: string },
+  call: { readonly tool: string; readonly input: unknown; readonly error?: string },
+) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const open = yield* sql<{ id: string; content: string }>`
+      SELECT id, content FROM thread_items
+      WHERE thread_id = ${place.threadId} AND provider_session_id = ${place.sessionId} AND kind = 'tool_call'
+      ORDER BY sequence DESC LIMIT 8`
+    for (const row of open) {
+      const content = JSON.parse(row.content) as Record<string, unknown>
+      const running = content.status === 'pending' || content.status === 'in_progress'
+      const bare = content.rawInput === undefined || Object.keys(content.rawInput as object).length === 0
+      if (content.kind !== 'execute' || !running || !bare) continue
+      const shown = (value: unknown) => {
+        const text = typeof value === 'string' ? value : (JSON.stringify(value) ?? '')
+        return text.length > CALL_KEPT ? `${text.slice(0, CALL_KEPT)}…` : text
+      }
+      const input =
+        typeof call.input === 'object' && call.input !== null && !Array.isArray(call.input)
+          ? Object.fromEntries(Object.entries(call.input).map(([key, value]) => [key, shown(value)]))
+          : {}
+      const kept = {
+        tool: call.tool,
+        input,
+        ...(call.error === undefined ? {} : { error: shown(call.error) }),
+      }
+      const before = Array.isArray(content.althar) ? content.althar : []
+      return yield* updateItem(place.projectId, row.id, { ...content, althar: [...before, kept] })
+    }
   })
 
 /** Whether a path is inside a folder: the folder itself isn't. */
@@ -265,6 +352,8 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
     | {
         readonly kind: 'agent_message' | 'agent_thought'
         readonly id: string
+        /** Where the thread places it, which a window reads against the view's mark. */
+        readonly sequence: number
         /** The id the agent gave this message, where it gives one. */
         messageId: string | undefined
         /** It is the agent's answer, or a word on the way, where the agent says (Codex). */
@@ -279,6 +368,10 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   let plan: string | undefined
   /** Commands' output as it comes, by tool call, until each ends. */
   const outputs = new Map<string, Output>()
+  /** The person's MCP servers the agent said are down in this session, and how: a call to one that fails says so under it. */
+  const down = new Map<string, 'needs-auth' | 'failed'>()
+  /** Which of the person's servers each call went to, from the event that named it: an update that only says it failed doesn't. */
+  const servers = new Map<string, string>()
   /** Commands that ended, whose output is kept. */
   const finished = new Set<string>()
   const folders = place.folders ?? []
@@ -318,9 +411,13 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
         yield* flush
       if (gathering !== undefined) return { open: gathering, fresh: false }
       // The item is placed when its first chunk arrives, so the thread keeps the order things happened in.
+      const id = yield* addItem(place, kind, said({ text, answer }))
+      const sql = yield* SqlClient.SqlClient
+      const [placed] = yield* sql<{ sequence: number }>`SELECT sequence FROM thread_items WHERE id = ${id}`
       const open = {
         kind,
-        id: yield* addItem(place, kind, said({ text, answer })),
+        id,
+        sequence: placed?.sequence ?? 0,
         messageId,
         answer,
         text,
@@ -476,6 +573,8 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
           const marked = {
             ...(cut.length === 0 ? content : { ...content, cut }),
             ...(event.skill === undefined ? {} : { skill: { names: [event.skill], reported: true } }),
+            ...mcpKept(event, existing?.content),
+            ...serverDown(event),
           }
           // Only what it read of the skills its agent listed: an agent that says what it loads has said so.
           const read = (stored: Readonly<Record<string, unknown>>) =>
@@ -504,6 +603,10 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
       case 'SkillsSeen':
         return place.lead === undefined ? Effect.void : Effect.andThen(flush, sawSkills({ ...place, lead: place.lead }, event.skills))
       case 'Notice':
+        if (event.server !== undefined) {
+          if (event.server.status === 'needs-auth' || event.server.status === 'failed') down.set(event.server.name, event.server.status)
+          else down.delete(event.server.name)
+        }
         return notice({ source: 'agent', severity: event.severity, title: event.title, description: event.description })
       case 'AgentFailure':
         return notice({ source: 'agent', severity: event.severity, title: event.classified.message, failure: event.classified.failure })
@@ -519,8 +622,19 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
     }
   }
 
+  /** A call to a server that was down, once it failed: which, and how, for the thread to say under it. */
+  const serverDown = (event: Extract<SessionEvent, { _tag: 'ToolCall' | 'ToolCallUpdate' }>) => {
+    if (event.server !== undefined) servers.set(event.toolCallId, event.server)
+    const name = event.server ?? servers.get(event.toolCallId) ?? serverOfCall(event.title ?? '')
+    const how = name === undefined ? undefined : down.get(name)
+    return name === undefined || how === undefined || event.status !== 'failed'
+      ? {}
+      : { server: { name, down: how, ...(place.leadId === undefined ? {} : { agentId: place.leadId }) } }
+  }
+
   /** The message being gathered, as far as it has come: what a watching client shows while it streams. */
-  const current = () => (gathering === undefined ? undefined : { id: gathering.id, kind: gathering.kind, text: gathering.text })
+  const current = () =>
+    gathering === undefined ? undefined : { id: gathering.id, sequence: gathering.sequence, kind: gathering.kind, text: gathering.text }
 
   /** Commands' output that grew since this was last asked, each as far as it has come. */
   const outputsSoFar = (): ReadonlyArray<OutputSoFar> =>

@@ -38,6 +38,9 @@ export interface ToolAccess {
   readonly messages?: ReadonlyArray<string>
 }
 
+/** How long a connection an agent keeps open for its next call stays open: longer than a model thinks between calls. */
+export const KEEP_ALIVE_MS = 10 * 60_000
+
 export type ToolRole = 'coordinator' | 'lead' | 'reviewer'
 
 /** Leads and the coordinator: one pool of tools (ADR-097). */
@@ -79,6 +82,14 @@ export type Tool = ToolBase &
  */
 export type ToolGuard = (tool: Tool, access: ToolAccess) => Effect.Effect<string | null>
 
+/** An Althar tool a session called, with what it was given and, where it failed, why: what a thread's record of the call keeps. */
+export interface ToolCalled {
+  readonly access: ToolAccess
+  readonly tool: string
+  readonly input: unknown
+  readonly error?: string
+}
+
 export class ToolServer extends Context.Service<
   ToolServer,
   {
@@ -92,6 +103,8 @@ export class ToolServer extends Context.Service<
     serve(role: ToolRole | ReadonlyArray<ToolRole>, tools: ReadonlyArray<Tool>): Effect.Effect<void>
     /** Adds a guard to a role's tools: a tool it refuses isn't listed to that session, and is refused if called. */
     guard(role: ToolRole | ReadonlyArray<ToolRole>, check: ToolGuard): Effect.Effect<void>
+    /** Hears of every call a session makes, as it ends: failed or not. A hook that fails is ignored; it never changes the call. */
+    observe(hook: (called: ToolCalled) => Effect.Effect<void>): Effect.Effect<void>
   }
 >()('@althar/runtime/ToolServer') {
   static readonly layer: Layer.Layer<ToolServer, never, Errands> = Layer.effect(
@@ -104,6 +117,7 @@ export class ToolServer extends Context.Service<
         ['lead', errandTools(errands)],
       ])
       const guards = new Map<ToolRole, ReadonlyArray<ToolGuard>>()
+      const observers: Array<(called: ToolCalled) => Effect.Effect<void>> = []
 
       const respond = async (req: IncomingMessage, res: ServerResponse) => {
         const token = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1]
@@ -143,15 +157,23 @@ export class ToolServer extends Context.Service<
             return { isError: true, content: [{ type: 'text' as const, text: `Althar has no tool called ${request.params.name}.` }] }
           const guarded = await refusal(tool)
           if (guarded !== null) return { isError: true, content: [{ type: 'text' as const, text: guarded }] }
+          const input = request.params.arguments ?? {}
+          // The call as the thread keeps it: some agents (OpenCode's `execute`) run it inside a tool of their own, which names none of this.
+          const told = (error?: string) =>
+            Effect.runPromise(
+              Effect.forEach(observers, (hook) =>
+                hook({ access, tool: tool.name, input, ...(error === undefined ? {} : { error }) }).pipe(Effect.ignore),
+              ),
+            ).catch(() => undefined)
           const exit = await Effect.runPromiseExit(
             Effect.gen(function* () {
               const current: ToolAccess = { ...access, ...(yield* errands.turn(access)) }
-              const input = request.params.arguments ?? {}
               return tool.kind === 'asked-for'
                 ? yield* errands.execute(tool.name, current, yield* tool.action(input, current))
                 : yield* tool.call(input, current)
             }),
           )
+          if (Exit.isSuccess(exit)) await told()
           if (Exit.isSuccess(exit))
             return typeof exit.value === 'string'
               ? { content: [{ type: 'text' as const, text: exit.value }] }
@@ -166,6 +188,7 @@ export class ToolServer extends Context.Service<
             refused !== undefined && refused._tag === 'Fail' && refused.error instanceof ToolRefused
               ? refused.error.message
               : 'Althar could not do that. Try again, or tell the person.'
+          await told(text)
           return { isError: true, content: [{ type: 'text' as const, text }] }
         })
         // Without a session id generator, each request stands alone: the token says who is calling.
@@ -181,6 +204,11 @@ export class ToolServer extends Context.Service<
           if (!res.headersSent) res.writeHead(500).end()
         })
       })
+      // An agent keeps its connection for its next call, which can come minutes later, after a model's long thinking: Node's
+      // default of five seconds closes it just as the call is sent, and the agent sees the socket close (ECONNRESET). Its
+      // calls are safe to repeat (draft_task and propose_plan replace what they made), but better never to need it.
+      http.keepAliveTimeout = KEEP_ALIVE_MS
+      http.headersTimeout = KEEP_ALIVE_MS + 1_000
       yield* Effect.callback<void>((resume) => {
         http.listen(0, '127.0.0.1', () => resume(Effect.void))
       })
@@ -210,6 +238,10 @@ export class ToolServer extends Context.Service<
               const kept = (roles.get(role) ?? []).filter((tool) => !tools.some((added) => added.name === tool.name))
               roles.set(role, [...kept, ...tools])
             }
+          }),
+        observe: (hook) =>
+          Effect.sync(() => {
+            observers.push(hook)
           }),
         guard: (to, check) =>
           Effect.sync(() => {

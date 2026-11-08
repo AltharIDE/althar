@@ -651,6 +651,25 @@ describe('the Talk room', () => {
     expect(within(tidy).queryByText(/^(Low|Medium|High)$/)).toBeNull()
   })
 
+  it('names an OpenCode Go lead in people’s words before OpenCode lists its models', async () => {
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({
+          items: [
+            // The id as OpenCode stores it, while its models aren't reported yet.
+            items.card(
+              card({ phase: 'running', step: 'implement', plan: null, lead: 'opencode', leadModel: 'opencode-go/deepseek-v4.1-flash' }),
+            ),
+          ],
+        }),
+      ),
+    })
+    withServices(<Project room={Room.Talk} />, client)
+    const running = await screen.findByRole('article', { name: 'Add a retry' })
+    expect(await within(running).findByText('DeepSeek V4.1 Flash')).toBeTruthy()
+    expect(within(running).queryByText(/opencode-go/)).toBeNull()
+  })
+
   it('talks to the coordinator on the agent last used, or on another the person picks', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ session: { ...session, held: false } })) })
     withServices(<Project room={Room.Talk} />, client)

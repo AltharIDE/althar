@@ -151,7 +151,7 @@ export const usePlayed = (
               thread = placed ? thread.map((one) => (one.id === first.id ? item : one)) : [...thread, item]
               placed = true
             }
-            streaming = new Map(streaming).set(first.id, { kind, agentId, text, at: first.createdAt })
+            streaming = new Map(streaming).set(first.id, { kind, agentId, text, sequence: first.sequence, at: first.createdAt })
             show()
           }
           // Once it ends, the store holds all of it, and nothing of it streams.

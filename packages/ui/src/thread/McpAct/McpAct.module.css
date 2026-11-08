@@ -1,0 +1,53 @@
+/* An MCP call that acted outside: a card in the thread, quieter than an ask, louder than a row of work. */
+.card {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0;
+  padding: 9px 12px;
+  border-radius: var(--r);
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--t-1);
+}
+.server {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.did {
+  flex: 1;
+  min-width: 0;
+}
+.open {
+  flex: none;
+  font-size: 12px;
+  color: var(--t-2);
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 2px;
+}
+.open:hover {
+  color: var(--t-1);
+}
+.words {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

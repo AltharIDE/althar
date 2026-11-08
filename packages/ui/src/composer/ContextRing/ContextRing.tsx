@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { ReactNode, Ref } from 'react'
 
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import type { ModelInfo } from '../../primitives/Model/Model'
@@ -18,6 +18,8 @@ export interface ContextRingText {
   compact: string
   /** While it compacts. */
   compacting: string
+  /** The action that clears the chat; it asks first. */
+  clear: string
 }
 
 const k = (n: number) => (n >= 1000 ? `${n / 1000}M` : `${n}k`)
@@ -33,6 +35,7 @@ export const contextRingText: ContextRingText = {
   amount: (used, total) => `${k(used)} of ${k(total)}`,
   compact: 'Compact',
   compacting: 'Compacting…',
+  clear: 'Clear chat…',
 }
 
 export interface ContextRingProps {
@@ -55,6 +58,10 @@ export interface ContextRingProps {
   onCompact?: () => void
   /** A compaction asked for and not yet done: Compact is off, and says so. */
   compacting?: boolean
+  /** Clears the chat: given, Clear chat… is in the detail's foot, before Compact. The host asks what goes before it does. */
+  onClear?: () => void
+  /** The ring's own button, for a host that gives focus back to it. */
+  triggerRef?: Ref<HTMLButtonElement>
   text?: Partial<ContextRingText>
 }
 
@@ -64,8 +71,9 @@ const C = 2 * Math.PI * R
 /**
  * How full the model's context is: a ring you can read at a glance and
  * ignore otherwise. The numbers are behind it, as you point at it or press
- * it, and with them Compact, which has the agent sum up what it holds so
- * each turn after reads less.
+ * it, and with them, in its foot, Clear chat…, which ends the conversation,
+ * and Compact, which has the agent sum up what it holds so each turn after
+ * reads less.
  */
 export function ContextRing({
   used,
@@ -78,6 +86,8 @@ export function ContextRing({
   onOpenChange,
   onCompact,
   compacting,
+  onClear,
+  triggerRef,
   text,
 }: ContextRingProps) {
   const t = { ...contextRingText, ...text }
@@ -94,7 +104,7 @@ export function ContextRing({
       defaultOpen={defaultOpen}
       onOpenChange={onOpenChange}
       trigger={
-        <button type="button" className={s.ring} aria-label={t.label(percent)}>
+        <button ref={triggerRef} type="button" className={s.ring} aria-label={t.label(percent)}>
           <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
             <circle cx="8" cy="8" r={R} className={s.track} />
             {pct > 0 && <circle cx="8" cy="8" r={R} className={s.fill} strokeDasharray={`${C * pct} ${C}`} transform="rotate(-90 8 8)" />}
@@ -112,11 +122,18 @@ export function ContextRing({
           {model && ` · ${model.short}`}
         </span>
         {note && <span className={s.note}>{note}</span>}
-        {onCompact && (
+        {(onCompact || onClear) && (
           <span className={s.foot}>
-            <ActionButton size="small" flush="end" onClick={onCompact} disabled={compacting === true}>
-              {compacting === true ? t.compacting : t.compact}
-            </ActionButton>
+            {onClear && (
+              <ActionButton size="small" flush="start" onClick={onClear}>
+                {t.clear}
+              </ActionButton>
+            )}
+            {onCompact && (
+              <ActionButton size="small" flush="end" onClick={onCompact} disabled={compacting === true}>
+                {compacting === true ? t.compacting : t.compact}
+              </ActionButton>
+            )}
           </span>
         )}
         {usage !== undefined && <div className={s.usage}>{usage}</div>}

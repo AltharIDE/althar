@@ -69,6 +69,10 @@ export type Part =
       readonly skills?: { readonly names: ReadonlyArray<string>; readonly reported: boolean }
       /** For a refused call: who refused it and why, as the row says it; absent where the person refused it. */
       readonly why?: string
+      /** For a call the person's own Never rule refused: the words the lead was given, naming the rule; Althar's line under the call says them. */
+      readonly refused?: string
+      /** For a call to one of the person's MCP servers that failed because it was down: which, and how, under it as Althar's line. */
+      readonly server?: NonNullable<ToolContent['server']>
       /** The project's rule that let it through without asking (ADR-018), where one did. */
       readonly allowedBy?: AllowedBy
       /** For a command: its output so far, or how much it printed once it ended (handed.ts). */
@@ -77,6 +81,8 @@ export type Part =
       readonly exit: number | null
       /** Every file it names, as it names them: what it touched, wrote or pointed at. */
       readonly touches: ReadonlyArray<string>
+      /** A call to one of the person's MCP servers: which, and what it did; one that acted outside stands out as a card (ADR-097). */
+      readonly mcp?: ToolMcp
     } & HandedParts)
   | {
       readonly kind: 'plan'
@@ -108,6 +114,8 @@ export type ReviewDraftContent = Extract<ThreadItem, { kind: 'review_draft' }>['
 export type AutomationCardContent = Extract<ThreadItem, { kind: 'automation' }>['content']
 export type TaskAskContent = Extract<ThreadItem, { kind: 'task_ask' }>['content']
 export type SettingChangeContent = Extract<ThreadItem, { kind: 'setting' }>['content']
+export type SmallChangeContent = Extract<ThreadItem, { kind: 'small_change' }>['content']
+export type ModelMoveContent = Extract<ThreadItem, { kind: 'model_move' }>['content']
 
 export type Block =
   | {
@@ -179,12 +187,25 @@ export type Block =
   | { readonly kind: 'task_ask'; readonly id: string; readonly ask: TaskAskContent }
   /** An agent's change to a setting: a line with Undo, or a card the person presses first (ADR-097). */
   | { readonly kind: 'setting'; readonly id: string; readonly change: SettingChangeContent }
+  /** A small change's card: what its one-step path skipped, each step with its time, and Merge (README section 6). */
+  | { readonly kind: 'small_change'; readonly id: string; readonly card: SmallChangeContent }
+  /** Auto's line on moving the lead to a lighter model, with the way back (README section 7). */
+  | { readonly kind: 'model_move'; readonly id: string; readonly move: ModelMoveContent }
   /**
    * The agent's turn runs on what it was last asked, and it hasn't said
    * anything yet: where its reply will start, held for it, with how long it
    * has been once that is worth saying, and whether that is longer than usual.
    */
   | { readonly kind: 'waiting'; readonly id: string; readonly took: string | null; readonly slow: boolean }
+
+/** What a call to one of the person's MCP servers did, as its row and card say it. */
+export interface ToolMcp {
+  readonly server: string
+  readonly acts: boolean
+  readonly did: string
+  readonly words?: string
+  readonly link?: string
+}
 
 /** ACP's tool kinds, as the kit's. */
 /** The notice earlier versions left in a thread when Althar restarted under its lead. */
@@ -284,6 +305,15 @@ export const declinedWords = (by?: 'rules' | 'coordinator' | 'person', why?: str
   return reason ? `${who}: ${reason}` : who
 }
 
+/** What the lead is told of a command the person's Never rule refused, which Althar says under the call (runtime Permissions.ts). */
+const REFUSED = 'Refused by your rule'
+
+type RefusableCall = { readonly declinedBy?: 'rules' | 'coordinator' | 'person'; readonly declinedWhy?: string }
+
+/** The words of a refusal by the person's own rule, where the call was one. */
+export const ruleRefusal = (call: RefusableCall): string | undefined =>
+  call.declinedBy === 'rules' && call.declinedWhy?.startsWith(REFUSED) === true ? call.declinedWhy : undefined
+
 /** A plan step's status, as the kit's. A step still in progress when its turn has ended waits for the next. */
 export const planStateOf = (status: string, turnRunning: boolean): PlanState =>
   status === 'completed' ? PlanState.Done : status === 'in_progress' && turnRunning ? PlanState.Running : PlanState.Queued
@@ -334,6 +364,8 @@ export interface Streamed {
   readonly kind: 'agent_message' | 'agent_thought'
   readonly agentId: string
   readonly text: string
+  /** Where the thread places the item it will be. */
+  readonly sequence: number
   /** When it was first heard. */
   readonly at: string
 }
@@ -365,12 +397,41 @@ const partOf = (
           }
     }
     case 'tool_call': {
+      const { mcp } = item.content
+      if (mcp !== undefined) {
+        const state = toolStateOf(item.content.status, turnRunning, item.content.declined)
+        const why = declinedWords(item.content.declinedBy, item.content.declinedWhy)
+        const space = mcp.did.indexOf(' ')
+        return {
+          kind: 'tool',
+          id: item.id,
+          toolKind: mcp.acts ? ToolKind.Comment : ToolKind.Mcp,
+          verb: space > 0 ? mcp.did.slice(0, space) : mcp.did,
+          target: space > 0 ? mcp.did.slice(space + 1) : '',
+          state,
+          command: null,
+          ...(state === ToolState.Declined && why !== undefined ? { why } : {}),
+          ran: null,
+          exit: null,
+          touches: [],
+          pictures: item.content.pictures,
+          files: item.content.files,
+          mcp: {
+            server: mcp.server,
+            acts: mcp.acts,
+            did: mcp.did,
+            ...(mcp.words === undefined ? {} : { words: mcp.words }),
+            ...(mcp.link === undefined ? {} : { link: mcp.link }),
+          },
+        }
+      }
       const ranKind = toolKindOf(item.content.toolKind)
       const { skill } = item.content
       // A load is a row of its own, naming the skill; a command that printed one stays what it ran, and says so.
       const toolKind = skill !== undefined && ranKind !== ToolKind.Run ? ToolKind.Skill : ranKind
       const state = toolStateOf(item.content.status, turnRunning, item.content.declined)
-      const why = declinedWords(item.content.declinedBy, item.content.declinedWhy)
+      const refused = ruleRefusal(item.content)
+      const why = refused === undefined ? declinedWords(item.content.declinedBy, item.content.declinedWhy) : undefined
       return {
         kind: 'tool',
         id: item.id,
@@ -383,6 +444,8 @@ const partOf = (
         ...(item.content.label === undefined ? {} : { label: item.content.label }),
         ...(item.content.allowedBy === undefined ? {} : { allowedBy: item.content.allowedBy }),
         ...(state === ToolState.Declined && why !== undefined ? { why } : {}),
+        ...(state === ToolState.Declined && refused !== undefined ? { refused } : {}),
+        ...(state === ToolState.Failed && item.content.server !== undefined ? { server: item.content.server } : {}),
         ran: ranOf(item.content, state, outputs.get(item.id)),
         exit: item.content.exit,
         touches: [...item.content.locations.map((location) => location.path), ...item.content.files.map((file) => file.path)],
@@ -665,6 +728,12 @@ export const blocksOf = (
         continue
       case 'setting':
         blocks.push({ kind: 'setting', id: item.id, change: item.content })
+        continue
+      case 'small_change':
+        blocks.push({ kind: 'small_change', id: item.id, card: item.content })
+        continue
+      case 'model_move':
+        blocks.push({ kind: 'model_move', id: item.id, move: item.content })
         continue
       case 'notice':
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.

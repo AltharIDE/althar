@@ -87,7 +87,13 @@ describe('a thread as blocks', () => {
 
   it('shows text still streaming in place of what the store has, until the store catches up', () => {
     const message = items.says('Hel')
-    const live = (text: string): Streamed => ({ kind: 'agent_message', agentId: 'claude-code', text, at: '2026-09-30T12:00:00.000Z' })
+    const live = (text: string): Streamed => ({
+      kind: 'agent_message',
+      agentId: 'claude-code',
+      text,
+      sequence: 1,
+      at: '2026-09-30T12:00:00.000Z',
+    })
     const shown = (text: string) => {
       const [turn] = blocksOf(source([message]), new Map([[message.id, live(text)]]), at)
       return turn?.kind === 'turn' && turn.parts[0]?.kind === 'message' ? turn.parts[0].text : undefined
@@ -99,8 +105,8 @@ describe('a thread as blocks', () => {
   it('shows a message from its first words, before the window has read it, under the agent writing it', () => {
     const thread = source([items.you('Go'), items.says('Looking.')], true)
     const streaming = new Map<string, Streamed>([
-      ['unread', { kind: 'agent_message', agentId: 'claude-code', text: 'Found the call', at: '2026-09-30T12:00:00.000Z' }],
-      ['thinking', { kind: 'agent_thought', agentId: 'codex', text: 'Hmm', at: '2026-09-30T12:00:01.000Z' }],
+      ['unread', { kind: 'agent_message', agentId: 'claude-code', text: 'Found the call', sequence: 1, at: '2026-09-30T12:00:00.000Z' }],
+      ['thinking', { kind: 'agent_thought', agentId: 'codex', text: 'Hmm', sequence: 1, at: '2026-09-30T12:00:01.000Z' }],
     ])
     const blocks = blocksOf(thread, streaming, at)
     expect(blocks.map((block) => (block.kind === 'turn' ? [block.agentId, block.parts.map((part) => part.kind)] : block.kind))).toEqual([
@@ -184,8 +190,8 @@ describe('the wait for a reply', () => {
   it('gives its place to the first words, a thought or a call, whichever comes first', () => {
     const thread = [items.you('Add it.')]
     const first = (streamed: Streamed) => kinds(blocksOf(source(thread, true), new Map([['unread', streamed]]), at))
-    expect(first({ kind: 'agent_message', agentId: 'claude-code', text: 'On it', at: NOW })).toEqual(['you', 'turn, live'])
-    expect(first({ kind: 'agent_thought', agentId: 'claude-code', text: 'Hm', at: NOW })).toEqual(['you', 'turn, live'])
+    expect(first({ kind: 'agent_message', agentId: 'claude-code', text: 'On it', sequence: 1, at: NOW })).toEqual(['you', 'turn, live'])
+    expect(first({ kind: 'agent_thought', agentId: 'claude-code', text: 'Hm', sequence: 1, at: NOW })).toEqual(['you', 'turn, live'])
     expect(kinds(blocksOf(source([...thread, items.tool({ status: 'in_progress' })], true), new Map(), at))).toEqual(['you', 'turn, live'])
   })
 
@@ -449,7 +455,9 @@ describe('thinking, as it goes and once it is done', () => {
   })
 
   it('shows a message the store hasn’t placed yet live, from its first words', () => {
-    const streaming = new Map<string, Streamed>([['m9', { kind: 'agent_thought', agentId: 'claude-code', text: 'Hm', at: NOW }]])
+    const streaming = new Map<string, Streamed>([
+      ['m9', { kind: 'agent_thought', agentId: 'claude-code', text: 'Hm', sequence: 1, at: NOW }],
+    ])
     const [turn] = blocksOf(source([items.you('Go')], true), streaming, at).filter((block) => block.kind === 'turn')
     expect(parts(turn)).toMatchObject([{ kind: 'thought', id: 'm9', text: 'Hm', live: true }])
   })
@@ -499,6 +507,35 @@ describe('tool calls', () => {
     const [turn] = blocksOf(source([refused]), new Map(), at)
     const tool = turn?.kind === 'turn' ? turn.parts.find((part) => part.kind === 'tool') : undefined
     expect(tool).toMatchObject({ state: ToolState.Declined, why: 'Althar’s rules: No writes' })
+  })
+
+  it('keeps a call the person\u2019s own rule refused as the rule\u2019s words, for Althar\u2019s line under it', () => {
+    const refused = items.tool({
+      toolKind: 'execute',
+      declined: true,
+      command: 'rm -rf ~/Library',
+      declinedBy: 'rules',
+      declinedWhy: 'Refused by your rule `rm -rf ~/Library`.',
+    })
+    const [turn] = blocksOf(source([refused]), new Map(), at)
+    const tool = turn?.kind === 'turn' ? turn.parts.find((part) => part.kind === 'tool') : undefined
+    expect(tool).toMatchObject({ state: ToolState.Declined, refused: 'Refused by your rule `rm -rf ~/Library`.' })
+    expect(tool).not.toHaveProperty('why')
+  })
+
+  it('keeps which server was down under a call to it that failed, and nothing under one that went through', () => {
+    const partOf = (status: string) => {
+      const call = items.tool({
+        title: 'mcp__linear__save_issue',
+        toolKind: 'other',
+        status,
+        server: { name: 'linear', down: 'needs-auth', agentId: 'claude-code' },
+      })
+      const [turn] = blocksOf(source([call]), new Map(), at)
+      return turn?.kind === 'turn' ? turn.parts.find((part) => part.kind === 'tool') : undefined
+    }
+    expect(partOf('failed')).toMatchObject({ server: { name: 'linear', down: 'needs-auth', agentId: 'claude-code' } })
+    expect(partOf('completed')).not.toHaveProperty('server')
   })
 
   it('makes a skill loaded a row naming it, and a read of its file a row saying so', () => {

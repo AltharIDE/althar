@@ -62,7 +62,7 @@ describe('a project’s rules, as kept', () => {
       const instance = yield* Instance
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
       const projectId = project.projectId as ProjectId
-      yield* policies.set(projectId, { permissions: 'ask' }, instance.personId)
+      yield* policies.set(projectId, { permissions: 'ask', allowEverything: false }, instance.personId)
       yield* policies.set(projectId, { allowEverything: true }, instance.personId)
       const on = (yield* policies.current(projectId)).rules
       assert.strictEqual(ruleSetOf(on).mode, 'allow')
@@ -106,7 +106,7 @@ describe('a project’s rules, as kept', () => {
       yield* policies.current(projectId)
       yield* Effect.all(
         [
-          policies.set(projectId, { permissions: 'ask' }, instance.personId),
+          policies.set(projectId, { permissions: 'ask', allowEverything: false }, instance.personId),
           policies.set(projectId, { never: ['deploy'] }, instance.personId),
           policies.set(projectId, { end: 'none' }, instance.personId),
         ],
@@ -142,6 +142,7 @@ describe('a project’s rules, as kept', () => {
         source: 'person',
         permissions: 'ask',
         alwaysAsk: [...RULES],
+        allowEverything: true,
         never: ['deploy'],
         commands: [{ pattern: 'terraform *', decision: 'ask' }],
         end: 'ready',

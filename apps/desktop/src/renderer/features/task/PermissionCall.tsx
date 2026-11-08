@@ -3,7 +3,7 @@ import { useState } from 'react'
 import type { AttentionRequest } from '@althar/contracts'
 import { LinkButton, Permission, type PermissionFocus, Permissions } from '@althar/ui'
 
-import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
+import { permissionOf, type Reply, replyOf, waitedWords } from '../../shared/permissions'
 
 /*
  * What the rules keep for the person: an agent's action that waits for them
@@ -59,6 +59,7 @@ function Held({ project, wayOut }: { project: string; wayOut: WayOut }) {
 /** A call as its card shows it, saying why it has no "always allow" where the project always asks about it. */
 const cardOf = (request: AttentionRequest, project: string, wayOut: WayOut) => ({
   ...permissionOf(request),
+  ...(waitedWords(request, Date.now()) === undefined ? {} : { waited: waitedWords(request, Date.now()) }),
   ...(request.held === true ? { held: <Held project={project} wayOut={wayOut} /> } : {}),
 })
 

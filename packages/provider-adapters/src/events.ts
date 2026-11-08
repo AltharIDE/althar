@@ -6,7 +6,9 @@ import type { ToolKind } from '@althar/domain'
 import type { BackgroundEvent } from './background'
 import type { Classified } from './failures'
 import { type SeenSkill, skillLoadedBy, skillsAmong } from './skills'
+import { serverOfCall, serverStatusOf, type ServerStatus } from './serverStatus'
 import { claudeRateLimitWindows, record, type UsageWindow } from './usage'
+import { type McpCall, mcpCallOf } from './mcpCalls'
 
 /*
  * What an agent's updates become inside Althar. The runtime turns these
@@ -123,6 +125,10 @@ export type SessionEvent =
       readonly terminal?: TerminalReport
       /** The skill it loads, where it says. */
       readonly skill?: string
+      /** The person's MCP server and tool it calls, where it is a call to one. */
+      readonly mcp?: McpCall
+      /** The person's MCP server it calls, where it is a call to one (`serverStatus.ts`). */
+      readonly server?: string
     }
   | {
       readonly _tag: 'ToolCallUpdate'
@@ -137,6 +143,8 @@ export type SessionEvent =
       readonly content?: ReadonlyArray<ToolContent>
       readonly terminal?: TerminalReport
       readonly skill?: string
+      readonly mcp?: McpCall
+      readonly server?: string
     }
   /** The skills it could see, as it says, whole each time (`skills.ts`). */
   | { readonly _tag: 'SkillsSeen'; readonly skills: ReadonlyArray<SeenSkill> }
@@ -154,7 +162,14 @@ export type SessionEvent =
   | { readonly _tag: 'OptionsChanged'; readonly options: ReadonlyArray<ConfigOption> }
   /** The mode changed. `byAgent` when Althar didn't ask for it, such as a plan session leaving plan mode. */
   | { readonly _tag: 'ModeChanged'; readonly modeId: string; readonly byAgent: boolean }
-  | { readonly _tag: 'Notice'; readonly severity: string; readonly title: string; readonly description?: string }
+  | {
+      readonly _tag: 'Notice'
+      readonly severity: string
+      readonly title: string
+      readonly description?: string
+      /** Where the notice is a server's status: which of the person's MCP servers, and how it stands (`serverStatus.ts`). */
+      readonly server?: { readonly name: string; readonly status: ServerStatus }
+    }
   /**
    * Althar answered a permission request. `optionId` is what was sent to
    * the agent (null when the request was cancelled), and `stopsTurn` says the
@@ -354,6 +369,11 @@ export const answerOf = (meta: unknown): boolean | undefined => {
   return phase === 'final_answer' ? true : phase === 'commentary' ? false : undefined
 }
 
+const serverNoticeOf = (meta: unknown) => {
+  const status = serverStatusOf(meta)
+  return status === undefined ? undefined : { name: status.server, status: status.status }
+}
+
 export const normalize = (update: acp.SessionUpdate): SessionEvent => {
   switch (update.sessionUpdate) {
     case 'agent_message_chunk': {
@@ -382,6 +402,8 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         ...defined('content', toolContentOf(update.content)),
         ...defined('terminal', terminalOf(update._meta)),
         ...defined('skill', skillLoadedBy(update)),
+        ...defined('mcp', mcpCallOf(update.title, update._meta)),
+        ...defined('server', serverOfCall(update.title, update._meta)),
       }
     case 'tool_call_update':
       return {
@@ -395,6 +417,8 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         ...defined('content', toolContentOf(update.content)),
         ...defined('terminal', terminalOf(update._meta)),
         ...defined('skill', skillLoadedBy(update)),
+        ...defined('mcp', mcpCallOf(update.title ?? '', update._meta)),
+        ...defined('server', serverOfCall(update.title ?? '', update._meta)),
       }
     case 'plan':
       return { _tag: 'Plan', entries: update.entries.map((entry) => ({ content: entry.content, status: entry.status })) }
@@ -419,7 +443,13 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
     case 'current_mode_update':
       return { _tag: 'ModeChanged', modeId: update.currentModeId, byAgent: true }
     case 'notice':
-      return { _tag: 'Notice', severity: update.severity, title: update.title, ...defined('description', update.description) }
+      return {
+        _tag: 'Notice',
+        severity: update.severity,
+        title: update.title,
+        ...defined('description', update.description),
+        ...defined('server', serverNoticeOf((update as { readonly _meta?: unknown })._meta)),
+      }
     case 'available_commands_update': {
       const skills = skillsAmong(update.availableCommands)
       return skills === undefined ? { _tag: 'Other', update: update.sessionUpdate, raw: update } : { _tag: 'SkillsSeen', skills }

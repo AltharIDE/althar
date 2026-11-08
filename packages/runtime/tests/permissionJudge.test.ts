@@ -26,7 +26,7 @@ const setup = Effect.gen(function* () {
   const instance = yield* Instance
   const sessions = yield* Sessions
   const sql = yield* SqlClient.SqlClient
-  yield* policies.set(project.projectId, { permissions: 'coordinator', alwaysAsk: [] }, instance.personId)
+  yield* policies.set(project.projectId, { permissions: 'coordinator', allowEverything: false, alwaysAsk: [] }, instance.personId)
   // The coordinator's model is deliberately different from the task's.
   yield* sessions.start({ threadId: project.coordinatorThreadId, agentId: 'claude-code', model: 'small' })
   const sessionId = yield* sessions.start({ threadId: created.threadId, agentId: 'codex', model: 'large' })
@@ -601,7 +601,8 @@ describe('coordinator permission judgments', () => {
       const { context, permissions, policies, instance } = yield* setup
       yield* policies.set(context.projectId, { alwaysAsk: ['deploy'], never: ['force-push'] }, instance.personId)
       assert.strictEqual((yield* permissions.decide(context, request('git push --force origin main'))).decision, 'reject')
-      assert.strictEqual((yield* permissions.decide(context, request('gh pr merge 1'))).decision, 'reject')
+      // Approving the agent's own work stays refused; a merge now asks the person like the irreversible act it is.
+      assert.strictEqual((yield* permissions.decide(context, request('gh pr review --approve'))).decision, 'reject')
       assert.strictEqual((yield* permissions.decide({ ...context, rules: { role: 'reader' } }, request('npm install'))).decision, 'reject')
       assert.strictEqual((yield* permissions.decide({ ...context, rules: { role: 'reader' } }, request('git status'))).decision, 'allow')
       const pending = yield* Effect.forkChild(permissions.decide(context, request('npm publish')))
@@ -668,7 +669,7 @@ describe('coordinator permission judgments', () => {
       respond?.('{"decision":"allow","reason":"Deploy the changes."}')
       const decision = yield* Fiber.join(pending)
       assert.strictEqual(decision.decision, 'reject')
-      assert.include(decision.reason ?? '', 'never allow')
+      assert.include(decision.reason ?? '', 'Refused by your rule')
       const [row] = yield* sql<{ actor: string }>`SELECT decided_by_actor_id AS actor FROM decisions`
       assert.strictEqual(row?.actor, instance.systemId)
     }).pipe(

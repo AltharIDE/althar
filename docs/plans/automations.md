@@ -382,11 +382,12 @@ and signs what it does. So:
 - **Pushing to the default branch is never allowed** in a run, whatever the
   switches say: the run's rules add it to what they never allow, which
   allow everything doesn't go past
-  ([ADR-013](../decisions/013-project-rules.md)'s order). Then, as for any
-  rules that never allow something, a command the rules can't read (`eval`,
-  `$(…)`) is refused with how to spell it out. Merging was never an
-  agent's: `gh pr merge` and every other write to the code host are refused
-  in any mode (`hostReason` in `rules.ts`).
+  ([ADR-013](../decisions/013-project-rules.md)'s order). A command the
+  rules can't read (`eval`, `$(…)`) runs, as ADR-097 amended it to, unless
+  its words show the push. Merging is not an agent's by default: `gh pr
+  merge` and other writes that can't be undone ask the person, and self-
+  approval is refused, in any mode (`hostKinds`, `hostRefusedReason` in
+  `rules.ts`).
 - **Outward steps stay Althar's,** as today. Althar pushes and opens the
   pull request at the end of a run, as the automation's ending says: ready
   for review, or a draft. It replies on the pull request when the lead asks

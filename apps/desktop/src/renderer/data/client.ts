@@ -10,6 +10,9 @@ import {
   type AccountStatus,
   type AgentModels,
   type AlwaysScope,
+  type AgentTools,
+  type SyncedAgent,
+  type ToolRole,
   type AppSettings,
   type Attachment,
   type AutomationDefinition,
@@ -206,6 +209,14 @@ export interface Client {
   readonly setModelBlocked: (input: { readonly agentId: string; readonly model: string; readonly blocked: boolean }) => Promise<void>
   /** The person's settings for the app as a whole. */
   readonly getSettings: () => Promise<AppSettings>
+  /** The person's MCP servers and skills, the roles each gets, for every project or one, and how sync stands (ADR-097). */
+  readonly getAgentTools: (projectId: string | null) => Promise<AgentTools>
+  readonly setToolRoles: (kind: 'server' | 'skill', name: string, roles: ReadonlyArray<ToolRole>, projectId: string | null) => Promise<void>
+  readonly setToolSync: (kind: 'server' | 'skill', on: boolean, takeBack: boolean) => Promise<void>
+  readonly setToolKeptOut: (kind: 'server' | 'skill', agent: SyncedAgent, name: string, out: boolean) => Promise<void>
+  readonly pickToolWay: (kind: 'server' | 'skill', name: string, way: SyncedAgent | 'apart') => Promise<void>
+  readonly undoToolSync: (id: string) => Promise<void>
+  readonly signInToolServer: (agent: SyncedAgent, name: string) => Promise<void>
   /** Althar as co-author of the commits and pull requests it sends, or not. */
   readonly setCoAuthor: (on: boolean) => Promise<void>
   /** How many agents work at once on this machine: the person's number, or null for the default again. */
@@ -252,6 +263,12 @@ export interface Client {
   readonly runAutomationNow: (automationId: string, itemId?: string) => Promise<void>
   /** Answers the coordinator's card asking to stop, hold, restart or settle a task: yes does it. */
   readonly answerTaskAsk: (itemId: string, yes: boolean) => Promise<void>
+  /** Makes a small change a full task: its change is reviewed before it merges, by the reviewer its plan named. */
+  readonly makeItAFullTask: (taskId: string) => Promise<void>
+  /** Keeps the heavier model for this task, as the line Auto moved the lead with offers. */
+  readonly keepTheModel: (itemId: string) => Promise<void>
+  /** Puts the move Auto made again, after Keep. */
+  readonly undoTheModelMove: (itemId: string) => Promise<void>
   /** Deletes an automation: nothing of it starts again. The tasks its runs made stay. */
   readonly deleteAutomation: (automationId: string) => Promise<void>
   /** Puts back what the coordinator changed an automation from, as its card in the thread shows it. */
@@ -283,6 +300,14 @@ export interface Client {
   readonly tryAgain: (threadId: string) => Promise<void>
   /** Asks the thread's agent to compact its context, after what it was told before. */
   readonly compact: (threadId: string) => Promise<void>
+  /** Clears the view of the coordinator's thread: it starts here, and the coordinator keeps the conversation. */
+  readonly clearView: (threadId: string) => Promise<void>
+  /** Reads the conversation before a cleared view in the thread's place, or puts it away. */
+  readonly showEarlier: (threadId: string, open: boolean) => Promise<void>
+  /** Takes back a cleared view: the whole thread shows again. */
+  readonly undoClearView: (threadId: string) => Promise<void>
+  /** Ends the coordinator's session and deletes its conversation. It can't be undone. */
+  readonly forgetConversation: (threadId: string) => Promise<void>
   /** Stops a task: every agent on it, and the step it was on waits until it is resumed. */
   readonly stopTask: (taskId: string) => Promise<void>
   /** Whether a task's lead resolves conflicts on its own otherwise than its project says; null goes back to the project. */
@@ -362,6 +387,8 @@ export interface Client {
     /** The branch it works toward (ADR-093), until it starts; null for the default branch. */
     toward?: string | null,
   ) => Promise<void>
+  /** Changes who leads and who reviews a task that has begun: its lead from its next turn, its reviewer until its review is done. */
+  readonly changeTeam: (taskId: string, steps: ReadonlyArray<PlanStep>) => Promise<void>
   /** Changes what an issue the coordinator drafted says, before it is filed. */
   readonly changeIssueDraft: (
     draftId: string,
@@ -719,6 +746,14 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setDefaultEffort: (input) => command((commandId) => api.SetDefaultEffort({ commandId, ...input })),
     setModelBlocked: (input) => command((commandId) => api.SetModelBlocked({ commandId, ...input })),
     getSettings: () => settle(api.GetSettings({})),
+    getAgentTools: (projectId) => settle(api.GetAgentTools({ projectId })),
+    setToolRoles: (kind, name, roles, projectId) =>
+      command((commandId) => api.SetToolRoles({ commandId, kind, name, roles: [...roles], projectId })),
+    setToolSync: (kind, on, takeBack) => command((commandId) => api.SetToolSync({ commandId, kind, on, takeBack })),
+    setToolKeptOut: (kind, agent, name, out) => command((commandId) => api.SetToolKeptOut({ commandId, kind, agent, name, out })),
+    pickToolWay: (kind, name, way) => command((commandId) => api.PickToolWay({ commandId, kind, name, way })),
+    undoToolSync: (id) => command((commandId) => api.UndoToolSync({ commandId, id })),
+    signInToolServer: (agent, name) => command((commandId) => api.SignInToolServer({ commandId, agent, name })),
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
     setReviewSeal: (on) => command((commandId) => api.SetReviewSeal({ commandId, on })),
@@ -737,6 +772,9 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
       command((commandId) => api.RunAutomationNow({ commandId, automationId, ...(itemId === undefined ? {} : { itemId }) })),
     deleteAutomation: (automationId) => command((commandId) => api.DeleteAutomation({ commandId, automationId })),
     answerTaskAsk: (itemId, yes) => command((commandId) => api.AnswerTaskAsk({ commandId, itemId, yes })),
+    makeItAFullTask: (taskId) => command((commandId) => api.MakeItAFullTask({ commandId, taskId })),
+    keepTheModel: (itemId) => command((commandId) => api.KeepTheModel({ commandId, itemId })),
+    undoTheModelMove: (itemId) => command((commandId) => api.UndoTheModelMove({ commandId, itemId })),
     undoAutomationChange: (itemId) => command((commandId) => api.UndoAutomationChange({ commandId, itemId })),
     answerSettingChange: (itemId, yes) => command((commandId) => api.AnswerSettingChange({ commandId, itemId, yes })),
     undoSettingChange: (itemId) => command((commandId) => api.UndoSettingChange({ commandId, itemId })),
@@ -767,6 +805,10 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
     tryAgain: (threadId) => command((commandId) => api.TryAgain({ commandId, threadId })),
     compact: (threadId) => command((commandId) => api.CompactContext({ commandId, threadId })),
+    clearView: (threadId) => command((commandId) => api.ClearView({ commandId, threadId })),
+    showEarlier: (threadId, open) => command((commandId) => api.ShowEarlier({ commandId, threadId, open })),
+    undoClearView: (threadId) => command((commandId) => api.UndoClearView({ commandId, threadId })),
+    forgetConversation: (threadId) => command((commandId) => api.ForgetConversation({ commandId, threadId })),
     stopTask: (taskId) => command((commandId) => api.StopTask({ commandId, taskId })),
     setTaskResolveConflicts: (input) => command((commandId) => api.SetTaskResolveConflicts({ commandId, ...input })),
     resolveConflictsNow: (taskId) => command((commandId) => api.ResolveConflictsNow({ commandId, taskId })),
@@ -798,6 +840,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
           ...(toward === undefined ? {} : { toward }),
         }),
       ),
+    changeTeam: (taskId, steps) => command((commandId) => api.ChangeTeam({ commandId, taskId, steps })),
     changeIssueDraft: (draftId, edit) => command((commandId) => api.ChangeIssueDraft({ commandId, draftId, ...edit })),
     fileIssueDraft: (draftId) => command((commandId) => api.FileIssueDraft({ commandId, draftId })),
     discardIssueDraft: (draftId) => command((commandId) => api.DiscardIssueDraft({ commandId, draftId })),

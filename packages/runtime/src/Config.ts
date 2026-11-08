@@ -32,7 +32,7 @@ export interface Shot {
   readonly fullPage: boolean
   /** A CSS selector: only the first element it finds. */
   readonly selector: string | null
-  /** The origins of Althar's runs it may be of beside this computer's: a page it goes on to, by a redirect or itself, must be at one of them too (screenshots.ts, mayDraw). */
+  /** The origins of Althar's runs the shot is about; screenshots may be of any HTTP page (ADR-097). */
   readonly origins: ReadonlyArray<string>
 }
 
@@ -90,6 +90,21 @@ export interface RuntimeOptions {
   readonly editors?: {
     readonly list: () => ReadonlyArray<{ readonly id: string; readonly name: string }>
     readonly open: (editor: string, folder: string, file: string | null, line: number | null) => Effect.Effect<boolean>
+  }
+  /**
+   * The person's own agents' settings (ADR-097): the home their MCP servers
+   * and skills are read from, which load in every role, and which sync keeps
+   * the same; and Althar's folder for sync's record and the copies of the
+   * files it changed. Without it, none is read or written: a test's runtime
+   * never touches the home it runs in.
+   */
+  readonly agentConfigs?: {
+    readonly homeDir: string
+    readonly folder: string
+    /** The environment that says where each agent keeps its settings (CODEX_HOME, XDG_CONFIG_HOME): Althar's own without it. */
+    readonly env?: Readonly<Record<string, string | undefined>>
+    /** Runs one of the person's agents' own commands, as sync writes through them; the agents' own on this computer without it. */
+    readonly run?: (command: string, args: ReadonlyArray<string>) => Promise<{ readonly code: number; readonly output: string }>
   }
   readonly appVersion: string
   /** What this device is called, when the profile is new. */
@@ -306,18 +321,10 @@ export class Agents extends Context.Service<
     })
 
   /**
-   * The registry's agents, each run as a process without the person's ways
-   * into a code host, so they reach one only through Althar (ADR-011):
-   * `gh` and `glab` signed out, their config folders an empty one; git's
-   * credential helpers reset, so neither git nor `curl` through it signs in
-   * as the person; and git never asks for a password. The person's SSH agent
-   * isn't passed on either (provider-adapters' process environment). Nor
-   * are the MCP servers the person set up for an agent themselves, which
-   * Codex and OpenCode would otherwise load beside Althar's (ownTools.ts).
-   * The lead of a review of someone else's pull request also starts with what
-   * its registry entry says keeps that repository's config, hooks and plugins
-   * from loading, and with git that takes no repository the pull request
-   * carries for its own (`readingUntrusted`).
+   * The registry's agents, carrying the person's own code-host sign-ins (ADR-097).
+   * Althar's sealed connection tokens are never put in their environment. An
+   * outside review still loads none of the repository's config or hooks and
+   * uses git's untrusted-copy settings (`readingUntrusted`).
    */
   static readonly registry = (stderr?: AgentStderr): Layer.Layer<Agents, never, Installs> =>
     Layer.effect(
@@ -367,7 +374,8 @@ export class Agents extends Context.Service<
                 ...spec,
                 env: {
                   ...spec.env,
-                  ...withoutSignIns(signedOut),
+                  ...agentGit,
+                  ...(options.untrusted === true ? withoutSignIns(signedOut) : {}),
                   ...own,
                   ...held,
                   ...skills,
@@ -384,8 +392,16 @@ export class Agents extends Context.Service<
   }
 }
 
-/** How many entries of git's config `withoutSignIns` sets by the environment: what a lead's guard adds goes after them. */
-export const SIGNED_OUT_GIT_CONFIG = 2
+/** How many ordinary git config entries precede the lead's guard. */
+export const SIGNED_OUT_GIT_CONFIG = 1
+
+/** Keep branch creation within the worktree without resetting the person's credential helpers (ADR-097). */
+export const agentGit: Readonly<Record<string, string>> = {
+  GIT_CONFIG_COUNT: String(SIGNED_OUT_GIT_CONFIG),
+  GIT_CONFIG_KEY_0: 'branch.autoSetupMerge',
+  GIT_CONFIG_VALUE_0: 'false',
+  GIT_TERMINAL_PROMPT: '0',
+}
 
 /**
  * What an agent's environment adds so it carries none of the person's
@@ -398,7 +414,7 @@ export const withoutSignIns = (signedOut: string): Readonly<Record<string, strin
   GH_CONFIG_DIR: signedOut,
   GLAB_CONFIG_DIR: signedOut,
   // An empty helper resets git's list of them: the person's keychain and stored credentials aren't asked.
-  GIT_CONFIG_COUNT: String(SIGNED_OUT_GIT_CONFIG),
+  GIT_CONFIG_COUNT: '2',
   GIT_CONFIG_KEY_0: 'credential.helper',
   GIT_CONFIG_VALUE_0: '',
   GIT_CONFIG_KEY_1: 'branch.autoSetupMerge',

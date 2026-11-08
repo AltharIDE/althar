@@ -394,6 +394,14 @@ Do not market file synchronization of SQLite/artifacts as collaboration.
 
 ## Cloud authority
 
+[ADR-103](../decisions/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
+proposes an earlier step: the same runtime and single-writer SQLite profile
+can live on a personal host or a managed single-player home, with leased
+workers. The local deployment stays. Its SSH/relay paths, leases and
+provider-support policy amend the laptop-first sequence and blanket
+subscription restriction below if accepted. Multiplayer Postgres authority
+remains a later option, not a prerequisite for a remote project.
+
 The cloud is introduced when sharing or cross-device continuity is actually
 valuable.
 

@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -7,7 +7,7 @@ import { ApiError, type BoardSnapshot, type BoardTask } from '@althar/contracts'
 import { BoardView } from '../src/renderer/features/board/BoardView'
 import { lanesOf } from '../src/renderer/features/board/lanes'
 import { ChangeTeam, teamChangeOf } from '../src/renderer/features/team/Team'
-import { agents, card, fakeClient } from './fixtures'
+import { agents, card, change, fakeClient } from './fixtures'
 import { servicesFor, withServices } from './render'
 import { ServicesProvider } from '../src/renderer/data/services'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
@@ -52,14 +52,129 @@ const running = task({ taskId: 'r', threadId: 'thr', title: 'At work', phase: 'r
 const board = (tasks: ReadonlyArray<BoardTask>): BoardSnapshot => ({ cursor: 1, tasks: [...tasks], calls: [], settledTotal: 0 })
 const rowOf = (title: string) => within(screen.getByRole('button', { name: title }).closest('article') as HTMLElement)
 
+describe('changing the team of a task that has begun', () => {
+  const atWork = (overrides: Partial<BoardTask> = {}) => ({ ...running, reviewerChange: 'now' as const, ...overrides })
+  const opened = (overrides: Partial<BoardTask> = {}, client = fakeClient().client) => {
+    withServices(<ChangeTeam projectId="p1" task={atWork(overrides)} agents={agents} onClose={vi.fn()} />, client)
+    return within(screen.getByRole('dialog'))
+  }
+
+  it('saves both steps through the task, with no Start and no ending to pick, and says when the lead changes', async () => {
+    const { client } = fakeClient()
+    const dialog = opened({}, client)
+    expect(dialog.queryByRole('button', { name: 'Start' })).toBeNull()
+    expect(dialog.queryByText('When the work is done')).toBeNull()
+    expect(dialog.getByText('From its next turn.')).toBeTruthy()
+    await userEvent.click(dialog.getByRole('button', { name: /^Review:/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove from this step' }))
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(client.changeTeam).toHaveBeenCalledWith('r', [
+        { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
+        { key: 'review', agentId: 'codex', model: null, skipped: true },
+      ]),
+    )
+    expect(client.changePlan).not.toHaveBeenCalled()
+  })
+
+  it('says a reviewer change in a round under way starts from the next round', () => {
+    const dialog = opened({ reviewerChange: 'next_round' })
+    expect(dialog.getByText('From the next round.')).toBeTruthy()
+    expect(dialog.getByRole('button', { name: /^Review:/ })).toBeTruthy()
+  })
+
+  it('shows the reviewer as it stays once the review is done, and says so', () => {
+    const dialog = opened({ reviewerChange: 'never', phase: 'ready' })
+    expect(dialog.queryByRole('button', { name: /^Review:/ })).toBeNull()
+    expect(dialog.getByText('The review is done, so the reviewer stays.')).toBeTruthy()
+    // The lead still changes.
+    expect(dialog.getByRole('button', { name: /^Implement:/ })).toBeTruthy()
+    expect(dialog.getByRole('button', { name: 'Save' })).toBeTruthy()
+  })
+
+  it('offers adding a review to a change that has none, and shows a plain task or a review only what it has', () => {
+    const skipped = (kind: BoardTask['kind']) => ({
+      kind,
+      plan: { ...card().plan!, steps: card().plan!.steps.map((step) => (step.key === 'review' ? { ...step, skipped: true } : step)) },
+    })
+    opened(skipped('change'))
+    expect(screen.getByRole('button', { name: 'Add a review' })).toBeTruthy()
+    cleanup()
+    const plain = opened(skipped('plain'))
+    expect(plain.queryByText('No review')).toBeNull()
+    expect(plain.queryByRole('button', { name: 'Add a review' })).toBeNull()
+    expect(plain.getByRole('button', { name: /^Implement:/ })).toBeTruthy()
+  })
+
+  it('offers adding a review to a plan made with no review step at all, and saves it as one', async () => {
+    const none = (kind: BoardTask['kind']) => ({
+      kind,
+      plan: { ...card().plan!, steps: card().plan!.steps.filter((step) => step.key !== 'review') },
+    })
+    const { client } = fakeClient()
+    const dialog = opened(none('change'), client)
+    await userEvent.click(dialog.getByRole('button', { name: 'Add a review' }))
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(client.changeTeam).toHaveBeenCalledWith('r', [
+        { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
+        { key: 'review', agentId: 'codex', model: null, skipped: false },
+      ]),
+    )
+    cleanup()
+    // A plain task has no review to add, and a change whose review is done can't take one.
+    const plain = opened(none('plain'))
+    expect(plain.queryByRole('button', { name: 'Add a review' })).toBeNull()
+    cleanup()
+    const done = opened({ ...none('change'), reviewerChange: 'never' })
+    expect(done.queryByRole('button', { name: 'Add a review' })).toBeNull()
+  })
+
+  it('refuses a merged task with a short reason, and cannot be saved', () => {
+    const dialog = opened({ phase: 'ready', change: change({ state: 'merged' }) })
+    expect(dialog.getByRole('alert').textContent).toBe('It’s merged, so its team stays.')
+    expect(dialog.queryByRole('button', { name: 'Save' })).toBeNull()
+  })
+
+  it('says it settled, rather than going with what was picked, once it settles meanwhile', async () => {
+    const { client } = fakeClient()
+    const services = servicesFor(client, fakeHost())
+    const view = withServices(<ChangeTeam projectId="p1" task={atWork()} agents={agents} onClose={vi.fn()} />, client)
+    view.rerender(
+      <ServicesProvider value={services}>
+        <ChangeTeam projectId="p1" task={null} agents={agents} onClose={vi.fn()} />
+      </ServicesProvider>,
+    )
+    const dialog = within(await screen.findByRole('dialog'))
+    expect(dialog.getByRole('alert').textContent).toBe('It’s settled, so its team stays.')
+    expect(dialog.queryByRole('button', { name: 'Save' })).toBeNull()
+  })
+
+  it('keeps a row on the board without a team menu: it is the task’s own menu that changes the team', () => {
+    const team = { projectId: 'p1', start: vi.fn(async () => {}), change: vi.fn() }
+    withServices(
+      <BoardView lanes={lanesOf(board([running]))} agents={agents} now={NOW} onOpen={vi.fn()} team={team} />,
+      fakeClient().client,
+    )
+    expect(rowOf(running.title).queryByRole('button', { name: 'The team' })).toBeNull()
+  })
+})
+
 describe('changing a plan’s team before it begins', () => {
-  it('can, held or on its countdown and started but waiting with nothing begun; not once it is under way', () => {
+  it('starts or only changes while it hasn’t begun, and only changes once its first step waits', () => {
     expect(teamChangeOf(held)).toBe('starts')
     expect(teamChangeOf(task({ phase: 'planned' }))).toBe('starts')
     expect(teamChangeOf(queued)).toBe('waits')
-    expect(teamChangeOf({ ...queued, planWaits: false })).toBeNull()
-    expect(teamChangeOf(running)).toBeNull()
+    expect(teamChangeOf({ ...queued, planWaits: false })).toBe('begun')
     expect(teamChangeOf({ ...held, plan: null })).toBeNull()
+  })
+
+  it('can, at any time after it begins, until it is settled', () => {
+    expect(teamChangeOf(running)).toBe('begun')
+    for (const phase of ['waiting', 'ready', 'kept', 'stopped'] as const) expect(teamChangeOf({ ...running, phase })).toBe('begun')
+    expect(teamChangeOf({ ...running, phase: 'settled' })).toBeNull()
+    expect(teamChangeOf({ ...running, phase: 'drafting' })).toBeNull()
+    expect(teamChangeOf({ ...running, plan: null })).toBeNull()
   })
 
   it('starts a held plan from its row, and opens its team from the row’s menu', async () => {

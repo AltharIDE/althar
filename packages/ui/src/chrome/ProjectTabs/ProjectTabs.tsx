@@ -9,6 +9,7 @@ import { cx } from '../../lib/cx'
 import { ListMotion } from '../../lib/ListMotion'
 import type { RootProps } from '../../lib/props'
 import { IconButton } from '../../primitives/IconButton/IconButton'
+import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { Menu, MenuGroup, MenuItem, MenuSeparator } from '../../primitives/Menu/Menu'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
@@ -122,6 +123,9 @@ export const projectTabsText: ProjectTabsText = {
 export type ProjectTabsProps = RootProps<
   'header',
   {
+    home?: boolean
+    onCloseHome?: () => void
+    onOpenHome?: () => void
     tabs: readonly ProjectTab[]
     /** The tab that has the window: a project's id, or null for the home. The settings' own tab, where it has the window, says so itself. */
     current: string | null
@@ -186,6 +190,9 @@ const tabShift = (dragging: Dragging | null, id: string): CSSProperties | undefi
 }
 
 export function ProjectTabs({
+  home = true,
+  onCloseHome,
+  onOpenHome,
   tabs,
   current: route,
   onSelect,
@@ -289,20 +296,23 @@ export function ProjectTabs({
           )}
       <nav className={s.nav} aria-label={t.label}>
         <ul className={s.pinned}>
-          <li className={cx(s.tab, s.home, current === null && s.current)}>
-            <button
-              type="button"
-              className={s.select}
-              aria-current={current === null ? 'page' : undefined}
-              onClick={() => onSelect(null)}
-              onPointerEnter={() => onPreview?.(null)}
-              onFocus={() => onPreview?.(null)}
-            >
-              <Logo size={15} className={s.logo} />
-              <span className={s.name}>{t.home}</span>
-              <Yours n={yours} text={t} />
-            </button>
-          </li>
+          {home && (
+            <li className={cx(s.tab, s.home, current === null && s.current)}>
+              <button
+                type="button"
+                className={s.select}
+                aria-current={current === null ? 'page' : undefined}
+                onClick={() => onSelect(null)}
+                onPointerEnter={() => onPreview?.(null)}
+                onFocus={() => onPreview?.(null)}
+              >
+                <Logo size={15} className={s.logo} />
+                <span className={s.name}>{t.home}</span>
+                <Yours n={yours} text={t} />
+              </button>
+              {onCloseHome && <IconButton icon="close" label={t.close(t.home)} size="small" className={s.close} onClick={onCloseHome} />}
+            </li>
+          )}
           {settings !== undefined && (
             <li className={cx(s.tab, s.project, onSettings && s.current)}>
               <button type="button" className={s.select} aria-current={onSettings ? 'page' : undefined} onClick={settings.onSelect}>
@@ -369,6 +379,16 @@ export function ProjectTabs({
               </MenuItem>
             ))}
           </Menu>
+        )}
+        {/* Home dismissed: its mark comes back to reopen it, with the dot while anything waits in any project. */}
+        {!home && onOpenHome && (
+          <Tooltip label={t.home} placement="below">
+            <button type="button" className={s.reopenHome} onClick={onOpenHome}>
+              <Logo size={15} className={s.logo} />
+              <VisuallyHidden>{t.home}</VisuallyHidden>
+              <Yours n={yours} text={t} />
+            </button>
+          </Tooltip>
         )}
         {offered.length === 0 && onNewProject && (
           <ChromeButton icon="plus" label={t.newProject} kbd={t.newProjectKbd} compact className={s.plus} onClick={onNewProject} />

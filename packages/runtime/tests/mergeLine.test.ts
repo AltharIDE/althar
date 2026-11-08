@@ -552,6 +552,24 @@ describe('the coordinator merging through the host’s own queue', () => {
     }).pipe(Effect.provide(layer(service)))
   })
 
+  it.live('GitHub can’t find the branch to update: it steps out of line, said to its lead once', () => {
+    const { service, pull } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      const number = pull('Retry refunds')
+      service.writeTo('main')
+      const message = yield* turn(access, 'person')
+      yield* merge(access, { pull_request: `#${number}`, head: `head-${number}`, message })
+      service.failNext('updateBranch', 'not_found', undefined, 404)
+      yield* sweep(access)
+      yield* sweep(access)
+      const said = (yield* news(access)).filter((body) => body.includes('refused to update its branch'))
+      assert.strictEqual(said.length, 1)
+      assert.match(said[0] ?? '', /GitHub refused to update its branch.*message_lead/)
+    }).pipe(Effect.provide(layer(service)))
+  })
+
   it.live('GitHub doesn’t answer an update: said once without the lead, and tried again later', () => {
     const { service, pull } = host()
     const { working } = hosted(['meridian', 'api'])

@@ -48,8 +48,10 @@ export const useModelNames = (): NameModel => {
       if (agentId === null) return NOBODY
       const info = infoOf(catalog, { agentId, model })
       if (account === null) return info
+      // Keep the way it goes (OpenCode Go) under the account the line names.
       const agentName = catalog.runtimes.find((runtime) => runtime.id === agentId)?.name ?? agentId
-      return { ...info, via: viaOf(agentName, account) }
+      const route = info.via?.startsWith('via ') ? info.via.slice(4) : agentName
+      return { ...info, via: viaOf(route, account) }
     },
     [catalog],
   )

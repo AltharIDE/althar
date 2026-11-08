@@ -141,6 +141,8 @@ describe('the rules a new project starts with', () => {
       assert.deepStrictEqual(yield* rulesOf(project.projectId), {
         source: 'mvp',
         alwaysAsk: [...(yield* rulesOf(project.projectId)).alwaysAsk],
+        // Everything is allowed but what can't be undone, from the start (ADR-097).
+        allowEverything: true,
       })
       assert.strictEqual((yield* rulesOf(project.projectId)).permissions, undefined)
     }).pipe(Effect.provide(runtime())),
