@@ -261,6 +261,8 @@ export interface FakeAgentOptions {
 
   /** Hold `session/new` open to exercise startup timeout cleanup. */
   readonly beforeNewSession?: () => Promise<void>
+  /** Called with what each `session/new` asked for, as the agent received it: its added directories and `_meta` among it. */
+  readonly sessionAsked?: (params: acp.NewSessionRequest) => void
   /** Hold `initialize` open, the first thing a connection asks, to exercise the same cleanup. */
   readonly beforeInitialize?: () => Promise<void>
   /** A scripted response to a permission judgment, with the actual session settings exposed to the test. */
@@ -1500,6 +1502,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
     .onRequest(acp.methods.agent.session.new, async ({ params, client }) => {
       if (options.slowStart !== undefined) await pause(options.slowStart)
       await options.beforeNewSession?.()
+      options.sessionAsked?.(params)
       created += 1
       const sessionId = `fake-${created}`
       const session: SessionState = {
