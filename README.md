@@ -20,6 +20,10 @@
 </p>
 
 <p align="center">
+  Want help getting set up? Book 20 minutes with me: <a href="https://althar.ai/office-hours">althar.ai/office-hours</a>
+</p>
+
+<p align="center">
   Free and open source · Apache 2.0 · macOS, Windows and Linux
 </p>
 

@@ -19,6 +19,8 @@ export const LINKS = {
   components: `${REPO}/tree/main/packages/ui`,
   releases: `${REPO}/releases`,
   acp: 'https://agentclientprotocol.com',
+  /** Balazs's office hours: twenty minutes, booked on Cal.com. */
+  officeHours: 'https://cal.com/balazs-althar/20min',
 } as const
 
 /** GitHub's API for the latest published release: its files are what the download links give (src/lib/download.ts). Unauthenticated, 60 calls an hour per address. */
