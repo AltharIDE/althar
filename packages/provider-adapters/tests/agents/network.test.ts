@@ -60,7 +60,7 @@ try {
   )
 })
 
-for (const id of ['claude-code', 'codex', 'opencode'] as const) {
+for (const id of ['codex', 'opencode'] as const) {
   it.live(`${id} reaches Google Fonts and serves next/font inside an ordinary command`, () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -235,6 +235,82 @@ it.live('a Claude Code lead reaches Google Fonts inside its sandbox', () =>
         JSON.stringify(events.filter((event) => event._tag === 'ToolCallUpdate')),
       )
       assert.isFalse(permissions.some((call) => call.outside))
+    }),
+  ),
+)
+
+// A hand-started dev server is one of the commands a project's reach lists
+// (sandboxReach's ALWAYS), so Claude runs it outside its sandbox, where Next
+// compiles; inside, its native sandbox stalls on the same compile.
+it.live('a hand-started Next dev server runs outside Claude Code’s sandbox and serves next/font', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const definition = agents['claude-code']
+      const port = 45000 + Math.floor(Math.random() * 1000)
+      writeFileSync(
+        join(cwd, 'package.json'),
+        JSON.stringify({
+          private: true,
+          scripts: { dev: `next dev --webpack -p ${port}` },
+          dependencies: { next: '^16.0.0', react: '^19.0.0', 'react-dom': '^19.0.0' },
+        }),
+      )
+      const options = { web: true, sandbox: { commands: ['bun run dev'], hosts: [] as string[], writes: [] as string[] } }
+      const spec = definition.launch(process.execPath)
+      const own = definition.withoutOwnTools?.({ env: process.env, homeDir: homedir(), cwd }) ?? {}
+      const connection = yield* connect({
+        transport: {
+          _tag: 'Process',
+          cwd,
+          spec: {
+            ...spec,
+            env: {
+              ...spec.env,
+              ...own,
+              ...definition.sessionEnv?.({ ...spec.env, ...own }, options),
+              WATCHPACK_POLLING: 'true',
+            },
+          },
+        },
+        permissions: definition.permissions,
+        onPermission: () => Effect.succeed({ decision: 'allow' as const, reason: 'Public dev-server probe.' }),
+      })
+      const session = yield* connection.newSession({
+        cwd,
+        mode: definition.modes.ask,
+        modeOptionId: definition.options.mode,
+        ...(definition.sessionMeta === undefined ? {} : { meta: definition.sessionMeta('lead', options) }),
+      })
+      const events = yield* Stream.runCollect(
+        session.prompt(
+          `Start the project's dev server exactly as it is kept, as a background command, with no escalation and no edits: bun run dev. Do not stop it or run anything else.`,
+        ),
+      )
+      process.stdout.write(
+        `Claude dev server started: ${JSON.stringify(events.filter((event) => event._tag === 'ToolCallUpdate')).slice(0, 1500)}\n`,
+      )
+      let page = ''
+      try {
+        for (let attempt = 0; attempt < 60 && page === ''; attempt += 1) {
+          execFileSync('sleep', ['1'])
+          try {
+            const html = execFileSync('curl', ['--noproxy', '*', '--max-time', '10', '-fsS', `http://localhost:${port}`], {
+              encoding: 'utf8',
+            })
+            if (html.includes('Font network probe')) page = html
+          } catch {
+            // Not up yet.
+          }
+        }
+      } finally {
+        try {
+          execFileSync('sh', ['-c', `lsof -ti tcp:${port} | xargs kill 2>/dev/null || true`])
+        } catch {
+          // Already gone.
+        }
+      }
+      process.stdout.write(`Claude dev server page: ${page.slice(0, 200)}\n`)
+      assert.include(page, 'Font network probe')
     }),
   ),
 )
