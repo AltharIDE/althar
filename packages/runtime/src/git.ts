@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
@@ -635,17 +635,94 @@ export const hostNameOf = (url: string) => {
   return name === undefined || name.length < 2 ? null : name
 }
 
-/** Every remote's fetch URL, without credentials. */
+/*
+ * An SSH remote's host can be a name the person's ~/.ssh/config gives a real
+ * one: `git@github.com-work:owner/repo.git`, with `Host github.com-work` and
+ * `HostName github.com`, the usual way to keep two accounts' keys apart. Git
+ * doesn't know the real host; ssh does. So a remote is read as ssh reads it
+ * (`ssh -G`, which only reads the config and connects to nothing), once a
+ * launch for each name, and Althar knows the repository is on GitHub. The
+ * remote itself stays as it is: Althar's pushes and fetches go by its name.
+ */
+
+/** How long `ssh -G` may take before its host is taken as written. */
+const SSH_CONFIG_TIMEOUT = 3_000
+
+/** What ssh's config makes of a host's name: the name itself where it says nothing, or where ssh can't tell. */
+const askSsh = (host: string): Promise<string> =>
+  new Promise((resolveName) => {
+    // Inside a Flatpak, the device's ssh, whose config is the person's (flatpak/host-ssh.sh).
+    const command = process.env.FLATPAK_ID === undefined ? 'ssh' : HOST_SSH
+    execFile(
+      command,
+      ['-G', host],
+      { timeout: SSH_CONFIG_TIMEOUT, windowsHide: true, env: { ...process.env, LC_ALL: 'C' } },
+      (error, stdout) => {
+        if (error !== null) return resolveName(host)
+        const named = /^hostname\s+(\S+)\s*$/im.exec(stdout)?.[1]?.toLowerCase()
+        resolveName(named === undefined || named === '' ? host : named)
+      },
+    )
+  })
+
+/** Whether a host's name is one ssh can be asked about: never one it would read as an option. */
+const askable = (host: string) => /^[a-z0-9_][a-z0-9._-]*$/i.test(host)
+
+/** Each host's real name, as ssh's config gives it: asked once a launch. */
+let sshNames = new Map<string, Promise<string>>()
+let sshAsk = askSsh
+
+/** For tests: what ssh's config says of each host, in place of the person's own; `undefined` asks ssh again. */
+export const sshConfigSays = (names: Readonly<Record<string, string>> | undefined) => {
+  sshNames = new Map()
+  sshAsk = names === undefined ? askSsh : (host) => Promise.resolve(names[host] ?? host)
+}
+
+/** A host's real name, where ssh's config gives the one written another: `github.com` for `github.com-work`. */
+export const sshHostName = (host: string): Effect.Effect<string> => {
+  const name = host.toLowerCase()
+  if (!askable(name)) return Effect.succeed(name)
+  let asked = sshNames.get(name)
+  if (asked === undefined) {
+    asked = sshAsk(name).catch(() => name)
+    sshNames.set(name, asked)
+  }
+  const answer = asked
+  return Effect.promise(() => answer)
+}
+
+/**
+ * A remote with its host as ssh reaches it: `git@github.com:owner/repo.git`
+ * for `git@github.com-work:owner/repo.git`, so its code host is known by its
+ * name. An https remote, or one whose host ssh's config doesn't rename, is
+ * as it was.
+ */
+export const reachedRemote = (url: string): Effect.Effect<string> => {
+  const scheme = /^(ssh|git\+ssh|ssh\+git):\/\/([^/@]*@)?([^/:[\]]+)(.*)$/i.exec(url)
+  const scp = scheme === null ? /^([^/@:\s]+@)?([^/@:\s]{2,}):(?!\/\/)(.*)$/.exec(url) : null
+  const host = scheme?.[3] ?? scp?.[2]
+  if (host === undefined) return Effect.succeed(url)
+  return Effect.map(sshHostName(host), (name) => {
+    if (name === host.toLowerCase()) return url
+    return scheme !== null ? `${scheme[1]}://${scheme[2] ?? ''}${name}${scheme[4]}` : `${scp?.[1] ?? ''}${name}:${scp?.[3] ?? ''}`
+  })
+}
+
+/** Every remote's fetch URL, without credentials, its host as ssh reaches it. */
 export const remoteUrls = (cwd: string) =>
-  Effect.map(git(cwd, 'remote', '-v'), (output) => [
-    ...new Set(
-      output
-        .split('\n')
-        .filter((line) => line.endsWith('(fetch)'))
-        .map((line) => redactUrl(line.split(/\s+/)[1] ?? ''))
-        .filter((url) => url !== ''),
+  Effect.flatMap(git(cwd, 'remote', '-v'), (output) =>
+    Effect.map(
+      Effect.forEach(
+        output
+          .split('\n')
+          .filter((line) => line.endsWith('(fetch)'))
+          .map((line) => redactUrl(line.split(/\s+/)[1] ?? ''))
+          .filter((url) => url !== ''),
+        reachedRemote,
+      ),
+      (urls) => [...new Set(urls)],
     ),
-  ])
+  )
 
 /**
  * The remote a task's branch goes to with the person's own git. A fork's go to
@@ -660,17 +737,23 @@ export const branchRemoteIn = (cwd: string, base: string, target: ChangeTarget |
     return target === 'upstream_branch' ? 'upstream' : 'origin'
   })
 
-/** Each remote by name, with its fetch URL (or the URLs it pushes to) without credentials, in the order git lists them. */
+/**
+ * Each remote by name, with its fetch URL (or the URLs it pushes to) without credentials, its host as ssh reaches it, in the
+ * order git lists them.
+ */
 export const namedRemotes = (cwd: string, which: 'fetch' | 'push' = 'fetch') =>
-  Effect.map(git(cwd, 'remote', '-v'), (output) =>
-    output
-      .split('\n')
-      .filter((line) => line.endsWith(`(${which})`))
-      .map((line) => {
-        const [name = '', url = ''] = line.split(/\s+/)
-        return { name, url: redactUrl(url) }
-      })
-      .filter((remote) => remote.name !== '' && remote.url !== ''),
+  Effect.flatMap(git(cwd, 'remote', '-v'), (output) =>
+    Effect.forEach(
+      output
+        .split('\n')
+        .filter((line) => line.endsWith(`(${which})`))
+        .map((line) => {
+          const [name = '', url = ''] = line.split(/\s+/)
+          return { name, url: redactUrl(url) }
+        })
+        .filter((remote) => remote.name !== '' && remote.url !== ''),
+      (remote) => Effect.map(reachedRemote(remote.url), (url) => ({ name: remote.name, url })),
+    ),
   )
 
 /** Adds a worktree on a new branch from a base. */

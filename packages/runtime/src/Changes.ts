@@ -145,6 +145,7 @@ import { LeftBehind } from './LeftBehind'
 import { spanOf } from './stallWatch'
 import { addItem, updateItem } from './threads'
 import { readReviewed, reviewOf } from './reviewing'
+import { refreshRemotes } from './recordedRemotes'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
 import { summarize, words } from './words'
 import { BETWEEN_AGENTS_MS, betweenAgents } from './needsYou'
@@ -1204,6 +1205,8 @@ export class Changes extends Context.Service<
       const publish = (input: PublishInput): Effect.Effect<Published, unknown, Store> =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // Its repositories' remotes as their clones have them now: one added since the repository was, too.
+          yield* refreshRemotes(instance.deviceId, { taskId: input.taskId })
           const tasks = yield* sql<PublishRow>`
             SELECT k.title, b.display_name AS name, b.slug, t.id AS thread_id, w.id AS workspace_id, w.path, w.branch, w.base_commit, w.base_ref, b.id AS binding_id,
               w.branched_at IS NOT NULL AS branched, b.remote_fingerprints AS remotes, coalesce(w.toward, b.default_base_ref) AS default_base, b.change_target,
@@ -6347,6 +6350,9 @@ export class Changes extends Context.Service<
       )
       yield* Effect.forkScoped(afterOpen(startup('settled-pull-requests', readSettled)))
 
+      // Each repository's remotes as its clone has them, once a launch: a remote added since, or an SSH alias read now, is known.
+      yield* Effect.forkScoped(afterOpen(startup('repository-remotes', provide(refreshRemotes(instance.deviceId, 'all')))))
+
       // A review after a merge that didn't start is tried again, at once and with each listening turn, until it does.
       yield* Effect.forkScoped(afterOpen(startup('reviews-after-merge', fastLane.retryPendingReviews())))
 
@@ -7371,6 +7377,7 @@ export class Changes extends Context.Service<
               const sql = yield* SqlClient.SqlClient
               const [project] = yield* sql<{ id: ProjectId }>`SELECT id FROM projects WHERE id = ${projectId}`
               if (project === undefined) return null
+              yield* refreshRemotes(instance.deviceId, taskId === undefined ? { projectId } : { taskId })
               const hosts = yield* hostsFor(projectId, taskId)
               const wanted = (yield* (yield* Policies).current(project.id)).rules.end
               if (wanted === 'none') return wanted
