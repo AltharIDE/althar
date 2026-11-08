@@ -499,8 +499,23 @@ describe('what a lead could see', () => {
       yield* recorder(fourth).record(seen('a', 'b', 'deploy'))
       assert.deepStrictEqual(
         (yield* lines(where.threadId)).map((line) => line.title),
-        ['Codex could see 2 skills', 'Codex can now also see `deploy`'],
+        ['Codex could see 2 skills', 'Codex can now also see deploy'],
       )
+      // The same names, spelled with another path, give no line but the marks follow the newest spelling.
+      const spelled = yield* session(7)
+      yield* recorder(spelled).record({
+        _tag: 'SkillsSeen',
+        skills: ['a', 'b', 'deploy'].map((name) => ({ name, path: `/other/${name}/SKILL.md` })),
+      })
+      yield* recorder(spelled).record({
+        _tag: 'ToolCall',
+        toolCallId: 'moved',
+        title: 'moved',
+        kind: 'read',
+        status: 'completed',
+        locations: [{ path: '/other/a/SKILL.md' }],
+      })
+      assert.deepStrictEqual((yield* toolContent(where.threadId, 'moved'))?.skill, { names: ['a'], reported: false })
       // One that hears of less says what it no longer sees; its own line is changed, not added to, as it hears more.
       const fifth = yield* session(4)
       yield* recorder(fifth).record(seen('a'))
@@ -509,8 +524,8 @@ describe('what a lead could see', () => {
         (yield* lines(where.threadId)).map((line) => [line.title, line.hidden === true]),
         [
           ['Codex could see 2 skills', false],
-          ['Codex can now also see `deploy`', false],
-          ['Codex no longer sees `deploy`', false],
+          ['Codex can now also see deploy', false],
+          ['Codex no longer sees deploy', false],
         ],
       )
       // And one that lets it go again, ending where the thread said, leaves no line to show.

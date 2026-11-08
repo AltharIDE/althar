@@ -243,7 +243,6 @@ interface SkillsLine {
     readonly title: string
     readonly lead?: string
     readonly hidden?: boolean
-    readonly changes?: boolean
     readonly skills: ReadonlyArray<ShownSkill>
   }
 }
@@ -266,12 +265,7 @@ const leadOfLine = (line: SkillsLine) => line.content.lead ?? line.content.title
 
 const NAMES_SHOWN = 3
 const namesOf = (names: ReadonlyArray<string>) =>
-  names.length <= NAMES_SHOWN
-    ? names.map((name) => `\`${name}\``).join(', ')
-    : `${names
-        .slice(0, NAMES_SHOWN)
-        .map((name) => `\`${name}\``)
-        .join(', ')} and ${names.length - NAMES_SHOWN} more`
+  names.length <= NAMES_SHOWN ? names.join(', ') : `${names.slice(0, NAMES_SHOWN).join(', ')} and ${names.length - NAMES_SHOWN} more`
 
 /**
  * Keeps on the session what its agent could see, as lines of the thread. The
@@ -314,6 +308,9 @@ const sawSkills = (place: ItemPlace & { readonly lead: string }, skills: Readonl
       return
     }
     if (added.length === 0 && removed.length === 0) {
+      // The same names, perhaps spelled otherwise (a path): the line the thread shows keeps what this session says, which `skillsRead` reads.
+      if (before !== undefined && JSON.stringify(before.content.skills) !== JSON.stringify(shown))
+        yield* updateItem(place.projectId, before.id, { ...before.content, skills: shown })
       // Where the names are as the line before said, this session has nothing to add: its own line, if it made one, goes quiet.
       if (own !== undefined && own.content.hidden !== true)
         yield* updateItem(place.projectId, own.id, { ...base, title: own.content.title, hidden: true })
@@ -325,7 +322,7 @@ const sawSkills = (place: ItemPlace & { readonly lead: string }, skills: Readonl
     ]
       .filter((part) => part !== null)
       .join(' and ')}`
-    const content = { ...base, title, changes: true }
+    const content = { ...base, title }
     if (own !== undefined) {
       if (JSON.stringify(own.content) !== JSON.stringify(content)) yield* updateItem(place.projectId, own.id, content)
     } else yield* addItem(place, 'notice', content)

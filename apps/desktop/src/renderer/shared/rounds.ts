@@ -267,6 +267,7 @@ export const roundsOf = (
   // The round its lead's turn runs in now, by its id: it stays open for what follows the turn, as the report it hands in
   // before its answer.
   let liveId: string | null = null
+  let lastSkillsSaid = ''
   // What Althar did between rounds goes in the next one's work.
   let pending: Array<WorkStep> = []
   const close = () => {
@@ -347,7 +348,10 @@ export const roundsOf = (
         const content = noticeOf(block)
         // Before the round it may arrive during, which it doesn't end: a session says what it could see once it has started.
         if (content.role === 'skills') {
-          if (content.hidden === true) return
+          // Older threads kept a line for every session: one that says what the line before did is not said again.
+          const said = `${content.title}\n${(content.skills ?? []).map((skill) => skill.name).join('\n')}`
+          if (said === lastSkillsSaid) return
+          lastSkillsSaid = said
           out.push({ kind: 'skills', id: block.id, title: content.title, skills: content.skills ?? [] })
           return
         }
