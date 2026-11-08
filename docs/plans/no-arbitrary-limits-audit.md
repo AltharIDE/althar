@@ -87,8 +87,13 @@ The public-network probe has fetched Google Fonts and served a Next/font page
 with HTTP 200 through Claude Code, Codex and OpenCode. Claude's runs
 intermittently stall compiling Next; the fixture uses one webpack worker and
 filesystem polling to avoid this shared Mac's worker/watcher limits. In the
-latest rerun Codex passed and Claude stalled at `Compiling /` again, with both
-its old and new sandbox settings; OpenCode passed. That is a machine/provider
+latest reruns Codex passed and Claude stalled at `Compiling /` again, with both
+its old and new sandbox settings; the same probe run outside the sandbox serves
+in under a second, so the stall is in Claude's native sandbox on this Mac rather
+than in Althar's rules. Claude's sandboxed `curl
+https://fonts.googleapis.com/css2?family=Inter` does pass with the current
+settings, inside the sandbox and with no escalation, which is what the settings
+change touches. That is a machine/provider
 flake rather than a permission path, and is recorded with the completion.
 OpenCode has no OS sandbox; its check covers its real shell and permission path.
 A coordinator's `diff <(printf same) <(printf same)` now runs on Codex inside
