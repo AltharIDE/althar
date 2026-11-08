@@ -126,6 +126,9 @@ function TabsBar({
   return (
     <ProjectTabs
       tabs={tabs.tabs}
+      home={tabs.home}
+      onCloseHome={tabs.tabs.length > 0 || tabs.settings.open ? tabs.closeHome : undefined}
+      onOpenHome={() => select(null)}
       current={current}
       pages={pageTabs}
       yours={tabs.yours}
@@ -237,7 +240,7 @@ export function TabsFrame({ children }: { children: ReactNode }) {
         return
       }
       if (primaryDown(event) && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key)) {
-        const id = byNumber(ids, Number(event.key))
+        const id = byNumber(ids, Number(event.key), tabs.home)
         if (id === undefined) return
         event.preventDefault()
         select(id)
@@ -246,14 +249,19 @@ export function TabsFrame({ children }: { children: ReactNode }) {
       if (event.ctrlKey && !event.metaKey && !event.altKey && event.key === 'Tab') {
         event.preventDefault()
         // The settings' tab, while open, is a stop between the home's and the projects'.
-        const next = beside(settingsOpen ? [SETTINGS_STOP, ...ids] : ids, onSettings ? SETTINGS_STOP : current, event.shiftKey ? -1 : 1)
+        const next = beside(
+          settingsOpen ? [SETTINGS_STOP, ...ids] : ids,
+          onSettings ? SETTINGS_STOP : current,
+          event.shiftKey ? -1 : 1,
+          tabs.home,
+        )
         if (next === SETTINGS_STOP) openSettings()
         else select(next)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [order, current, select, newProject, openSettings, settingsOpen, onSettings, none])
+  }, [order, current, select, newProject, openSettings, settingsOpen, onSettings, none, tabs.home])
   return (
     <CarriedBack.Provider value={back}>
       <VisitContext.Provider value={tabs.visit}>

@@ -84,31 +84,25 @@ xdotool mousemove $((X + 300)) $((Y + 20)) click --repeat 2 --delay 50 1
 if wait_until maximized; then ok "double-click restores"; else bad "double-click restores"; fi
 sleep 1
 
-# The strip's own buttons: maximize, then back; minimize; restore.
-eval "$(geom)"
-xdotool mousemove $((X + 64)) $((Y + 20)) click 1
-if wait_for maximized; then ok "maximize button maximizes"; else bad "maximize button maximizes"; fi
-sleep 1
-eval "$(geom)"
-xdotool mousemove $((X + 64)) $((Y + 20)) click 1
-if wait_until maximized; then ok "maximize button restores"; else bad "maximize button restores"; fi
-sleep 1
-
-eval "$(geom)"
-xdotool mousemove $((X + 43)) $((Y + 20)) click 1
-if wait_for hidden; then ok "minimize button minimizes"; else bad "minimize button minimizes"; fi
+# The window's buttons sit on the desktop's side, or belong to the window manager (desktop.ts, ADR-098), so their place
+# can't be assumed. This checks the window manager's own operations on the window, not Althar's drawn buttons.
+wmctrl -ir "$WIN" -b add,maximized_vert,maximized_horz
+if wait_for maximized; then ok "window manager maximizes"; else bad "window manager maximizes"; fi
+wmctrl -ir "$WIN" -b remove,maximized_vert,maximized_horz
+if wait_until maximized; then ok "window manager restores"; else bad "window manager restores"; fi
+xdotool windowminimize "$WIN"
+if wait_for hidden; then ok "window manager minimizes"; else bad "window manager minimizes"; fi
 wmctrl -ia "$WIN" 2>/dev/null || xdotool windowactivate "$WIN" 2>/dev/null
 sleep 1
 
-# Close: the window goes and the app with it.
-eval "$(geom)"
-xdotool mousemove $((X + 22)) $((Y + 20)) click 1
+# Close through the window manager: the window goes and the app with it.
+wmctrl -ic "$WIN"
 closed=1
 for i in 1 2 3 4 5; do
   if ! xdotool search --onlyvisible --name '^Althar$' >/dev/null 2>&1; then closed=0; break; fi
   sleep 1
 done
-[ "$closed" = 0 ] && ok "close button closes the window" || bad "close button closes the window"
+[ "$closed" = 0 ] && ok "window manager closes the window" || bad "window manager closes the window"
 if pgrep -x althar >/dev/null; then bad "app exits with its last window"; else ok "app exits with its last window"; fi
 
 echo "RESULT: $pass passed, $fail failed"

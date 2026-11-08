@@ -5,7 +5,17 @@ import { describe, expect, it, vi } from 'vitest'
 import { ResizeHandle } from '../src/primitives/ResizeHandle/ResizeHandle'
 
 /* A column whose width the handle drives, kept as the app keeps it. */
-function Column({ edge, onCommit, onReset }: { edge?: 'start' | 'end'; onCommit?: (width: number) => void; onReset?: () => void }) {
+function Column({
+  edge,
+  onCommit,
+  onReset,
+  onResizing,
+}: {
+  edge?: 'start' | 'end'
+  onCommit?: (width: number) => void
+  onReset?: () => void
+  onResizing?: (resizing: boolean) => void
+}) {
   const [width, setWidth] = useState(400)
   return (
     <ResizeHandle
@@ -17,6 +27,7 @@ function Column({ edge, onCommit, onReset }: { edge?: 'start' | 'end'; onCommit?
       {...(edge ? { edge } : {})}
       {...(onCommit ? { onCommit } : {})}
       {...(onReset ? { onReset } : {})}
+      {...(onResizing ? { onResizing } : {})}
     />
   )
 }
@@ -86,6 +97,31 @@ describe('dragging a column’s edge', () => {
     fireEvent.lostPointerCapture(handle(), { pointerId: 1 })
     pointer('pointerMove', 200)
     expect(width()).toBe(400)
+  })
+
+  it('says it is resizing while the pointer drags it, until it lets go, is cancelled, loses the pointer or goes', () => {
+    const said: boolean[] = []
+    const { unmount } = render(<Column onResizing={(on) => said.push(on)} />)
+    expect(said).toEqual([])
+    pointer('pointerDown', 100)
+    expect(said).toEqual([true])
+    pointer('pointerMove', 150)
+    pointer('pointerUp', 150)
+    expect(said).toEqual([true, false])
+    pointer('pointerDown', 100)
+    pointer('pointerCancel', 100)
+    expect(said).toEqual([true, false, true, false])
+    pointer('pointerDown', 100)
+    fireEvent.lostPointerCapture(handle(), { pointerId: 1 })
+    expect(said).toEqual([true, false, true, false, true, false])
+    // A key moves it without saying so: there is no drag to wait for.
+    fireEvent.keyDown(handle(), { key: 'ArrowRight' })
+    expect(said).toHaveLength(6)
+    pointer('pointerDown', 100)
+    unmount()
+    expect(said.slice(6)).toEqual([true, false])
+    // It marks nothing itself: what it resizes is the consumer's to mark.
+    expect(document.documentElement.hasAttribute('data-resizing')).toBe(false)
   })
 
   it('takes no press but the main button’s', () => {
