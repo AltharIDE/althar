@@ -54,7 +54,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.any-linux == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2

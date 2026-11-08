@@ -237,6 +237,22 @@ describe('automatic usage takeover by model', () => {
     )
   })
 
+  it.live('moves work planned for an agent out of usage only where the project’s rule is move; under wait it is left to the run', () =>
+    Effect.gen(function* () {
+      const task = yield* startTask()
+      yield* task.start
+      yield* ready(task.projectId)
+      const limits = yield* Limits
+      const policies = yield* Policies
+      const instance = yield* Instance
+      const planned = { agentId: 'claude-code', model: null, projectId: task.projectId as ProjectId }
+      const moving = yield* limits.standing(planned)
+      assert.strictEqual(moving.kind === 'ok' ? undefined : moving.kind === 'instead' ? moving.because.why : moving.unable.why, 'out')
+      yield* policies.setUsageLimit(task.projectId as ProjectId, 'wait', instance.personId)
+      assert.deepStrictEqual(yield* limits.standing(planned), { kind: 'ok' })
+    }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: Date.now() + 3_600_000 } } }))),
+  )
+
   it.live('reviews with a third maker even when its agent also offers a stronger model from the lead’s maker', () => {
     const back = Date.now() + 3_600_000
     return Effect.gen(function* () {

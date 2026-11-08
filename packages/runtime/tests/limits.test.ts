@@ -948,15 +948,6 @@ describe('limits', () => {
       assert.deepStrictEqual(yield* limits.named('opencode', 'large'), { agent: 'Fake opencode', model: 'Large' })
       // An account given is the agent's own, or none.
       assert.instanceOf(yield* Effect.flip(limits.pick({ agentId: 'opencode', accountId: yield* usual('codex') })), NotFound)
-
-      // Out of usage, the project's rule says what work planned for the agent does: it is left to wait under `wait`, and moves
-      // on under `move`.
-      const planned = { agentId: 'codex', model: null, projectId: project.projectId }
-      assert.deepStrictEqual(yield* limits.standing(planned), { kind: 'ok' })
-      yield* policies.setUsageLimit(project.projectId, 'move', instance.personId)
-      const moving = yield* limits.standing(planned)
-      assert.notStrictEqual(moving.kind, 'ok')
-      assert.strictEqual(moving.kind === 'ok' ? undefined : moving.kind === 'instead' ? moving.because.why : moving.unable.why, 'out')
     }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: {} } }))),
   )
 
