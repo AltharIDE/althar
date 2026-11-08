@@ -12,25 +12,20 @@ import s from './OfficeHours.module.css'
  * The night window the other pages open on, with the call's length, the
  * time where Balazs is and the price along its top, and the invitation and
  * the booking in it. Bugs go to the issues, by a quiet link beside the
- * booking, so a call doesn't become triage. Under it, on paper, the
- * things people bring, then the few things worth knowing.
+ * booking, so a call doesn't become triage. Under it, on paper, examples
+ * of things to bring, then the few things worth knowing.
  */
 
 /** Where Balazs is: his clock in the window's readout. */
 const ZONE = 'Europe/London'
 
-/** What people bring: anything about building with agents, and Althar's own. */
+/** Examples of what to bring, not a menu. */
 const TOPICS = [
   'Getting Althar running on your repository',
-  'Which agent or model for which job',
-  'Using the plans you already pay for',
-  'A second agent reviewing the first',
-  'Leaving agents working while you’re away',
-  'Running into usage limits',
-  'Agents that drift, loop or go quiet',
-  'Bringing agents into how your team works',
-  'Something you wish Althar did',
-  'Anything else about coding with agents',
+  'A bug you’re running into',
+  'Something you wish Althar did, or an idea you have',
+  'A way you’d like to use Althar that it doesn’t support yet',
+  'Anything else on your mind',
 ]
 
 const GOOD_TO_KNOW = [
@@ -87,7 +82,6 @@ export function OfficeHours() {
                 Book a call and we’ll get Althar set up on your machine together, or talk through working with coding agents: your ideas,
                 your thoughts, what frustrates you. It’s free, and I’m not selling anything.
               </p>
-              <p className={s.sign}>Balazs</p>
             </div>
             <div className={s.ways}>
               <a className={s.primary} href={LINKS.officeHours} target="_blank" rel="noopener noreferrer">
@@ -104,7 +98,7 @@ export function OfficeHours() {
         <div className={s.sheet}>
           <section id="topics" className={s.part} aria-labelledby="topics-h">
             <h2 id="topics-h" className={s.h2}>
-              Things to bring
+              Examples of things to bring
             </h2>
             <ul className={s.topics}>
               {TOPICS.map((topic) => (

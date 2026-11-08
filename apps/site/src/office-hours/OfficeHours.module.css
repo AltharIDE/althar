@@ -1,5 +1,5 @@
 /* Office hours: the night window with the invitation and the booking in it;
-   on paper under it, the things people bring, then the few things worth
+   on paper under it, examples of things to bring, then the few things worth
    knowing. The buttons are the changelog's on the dark: white with the
    light's cobalt, and a hairline. */
 
@@ -7,10 +7,6 @@
 .page :focus-visible { outline: 2px solid var(--live); outline-offset: 3px; }
 
 .window { padding-bottom: 196px; }
-
-/* Signed, as a letter is: the display cut, light and a little apart. */
-.sign { margin-top: 2px; font-family: 'Inter Display', var(--display); font-size: 20px; font-weight: 400; font-style: italic; letter-spacing: -0.02em; color: rgba(255, 248, 240, 0.86); }
-.sign::before { content: '— '; color: var(--lit, #aeb6ff); }
 
 .ways { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 30px; }
 .primary, .secondary { display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 17px; border-radius: 8px; font: 600 14.5px var(--font); text-decoration: none; white-space: nowrap; }
@@ -40,7 +36,6 @@
 
 @media (max-width: 640px) {
   .window { padding-bottom: 150px; }
-  .sign { font-size: 17px; }
   .ways { display: grid; width: 100%; gap: 10px; margin-top: 24px; }
   .primary, .secondary { justify-content: center; height: 48px; }
 }
