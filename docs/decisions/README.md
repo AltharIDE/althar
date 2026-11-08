@@ -40,10 +40,11 @@ There are no more numbered ADRs. A proposal that isn't decided yet lives in
 Proposals waiting now:
 
 - [A task is a conversation plus parts, changeable at any time](proposed/a-task-is-a-conversation-plus-parts.md):
-  the parts, the workspace moving up, reviews that run code, the review after
-  a merge in the same task, chats on Scratch and presets. It would fold into
-  [tasks](tasks.md), [workspaces and runs](workspaces-and-runs.md) and
-  [reviews](reviews.md).
+  the parts, the workspace moving up, reviews that run code, talking to a
+  lead as plain turns with a review only when the person ships, the review
+  after a merge in the same task, chats on Scratch and presets. It would fold
+  into [tasks](tasks.md), [workspaces and runs](workspaces-and-runs.md),
+  [reviews](reviews.md), [code hosts](code-hosts.md) and [agents](agents.md).
 - [ADR-087](proposed/087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md):
   a lead's helpers.
 - [ADR-103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md):

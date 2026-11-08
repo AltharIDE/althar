@@ -389,8 +389,9 @@ This phase is the largest. It changes ADR-035, ADR-052 and the change sets
 model (`change_sets`, `repository_changes`), so it gets an ADR of its own:
 [a task is a conversation plus parts](../decisions/proposed/a-task-is-a-conversation-plus-parts.md),
 proposed on 8 November. It takes in phase 4: a review that runs code is a
-review whose workspace moved up, and phase 4's list is that ADR's first
-build slice.
+review whose workspace moved up. It also makes talking to a lead quick: a
+message is a turn with no review, and a tweak is reviewed once, when the
+person ships it. Once that ADR is accepted, all of it is built together.
 
 ## What stays, and why
 

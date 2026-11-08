@@ -1,38 +1,19 @@
 # A task is a conversation plus parts, changeable at any time
 
-> A proposal, not built. Where it would fold in:
-> [tasks.md § What a task is](../tasks.md#what-a-task-is),
-> [§ Kinds](../tasks.md#kinds-read-from-what-a-task-has),
-> [§ Needs you](../tasks.md#needs-you-and-settling) and
-> [§ The small-change lane](../tasks.md#the-small-change-lane);
-> [workspaces-and-runs.md § Where a task works](../workspaces-and-runs.md#where-a-task-works),
-> [§ The branch a task works toward](../workspaces-and-runs.md#the-branch-a-task-works-toward) and
-> [§ Settling stops everything](../workspaces-and-runs.md#settling-stops-everything);
-> [reviews.md § A small change is reviewed after it merges](../reviews.md#a-small-change-is-reviewed-after-it-merges) and
-> [§ Reviewing someone else's pull request](../reviews.md#reviewing-someone-elses-pull-request);
-> [what-agents-may-do.md § What stays, and why](../what-agents-may-do.md#what-stays-and-why).
+> A proposal, not built. It would fold into [tasks](../tasks.md),
+> [workspaces and runs](../workspaces-and-runs.md), [reviews](../reviews.md),
+> [code hosts](../code-hosts.md) and [agents](../agents.md).
+> [What this changes](#what-this-changes-in-the-decision-documents) lists
+> each section.
 
 - **Status:** Proposed
 - **Date:** 2026-11-08
 - **Owner:** Runtime and desktop maintainers
-- **Amends:**
-  - [tasks § Kinds, read from what a task has](../tasks.md#kinds-read-from-what-a-task-has)
-    (ADR-035): a task's kind is still read, never stored, but from its parts.
-    This overturns ADR-035's rejection of a temporary chat and a shelf for it,
-    as it does [`plans/task-as-container.md`](../../plans/task-as-container.md)'s.
-  - [workspaces-and-runs § Local](../workspaces-and-runs.md#local) (ADR-091)
-    and [§ The branch a task works toward](../workspaces-and-runs.md#the-branch-a-task-works-toward)
-    (ADR-093): a task's place and the branch it works toward change at any
-    time, not only until its first step.
-  - [reviews § A small change is reviewed after it merges](../reviews.md#a-small-change-is-reviewed-after-it-merges)
-    (ADR-102): the review after a small change merges runs in the same task,
-    not in a review task of its own.
-  - [reviews § Reviewing someone else's pull request](../reviews.md#reviewing-someone-elses-pull-request)
-    (ADR-050, ADR-097) on an outside author's code: "Run it" asks how far to
-    trust it.
-  - [code-hosts § Attaching a pull request a task didn't open](../code-hosts.md#attaching-a-pull-request-a-task-didnt-open)
-    (ADR-052) and the change sets model, only where a task reviews several
-    pull requests.
+- **Amends:** the sections in
+  [What this changes](#what-this-changes-in-the-decision-documents), among
+  them ADR-035, 072, 091, 093 and 102. This overturns ADR-035's rejection of
+  a temporary chat and a shelf for it, as it does
+  [`plans/task-as-container.md`](../../plans/task-as-container.md)'s.
 - **Context:** On 13 October the person set the direction: a task is a loose
   container, a conversation with an agent plus parts that attach and change at
   any time. The lightest form is a temporary chat on a Scratch shelf off the
@@ -48,8 +29,16 @@
   over). This is phase 5 of
   [capable by default](../../plans/capable-by-default.md#5-the-task-as-parts).
   It takes in phase 4, "Reviews that run things": a review that runs code is
-  a review whose workspace moved up, not a path of its own. The person
-  answered the questions behind it on 8 November.
+  a review whose workspace moved up, not a path of its own.
+
+  On 8 November the person added a second problem, which the coordinator
+  passed on. Althar works well for clear-cut work, but going back and forth
+  with a lead is slow and inflexible. A question or a small tweak to a
+  finished task starts a fresh session, opens a round with a report to give
+  and a whole review, and each fix after the review sets off another whole
+  review. With review as a part that runs when work ships, rather than a
+  fixed step, the parts model answers that too. The person answered the
+  questions behind both on 8 November.
 
 ## Decision
 
@@ -64,8 +53,23 @@
   nothing would be lost. A review that runs code comes from this move.
 - **"Run it" on an outside author's code asks how far to trust it:** Run
   safely, the default, or Trust fully. A setting can answer for the person.
-- **The review after a small change merges runs in the same task,** which
-  settles as it merges and comes back only if the review finds something.
+- **Clear-cut tasks don't change.** A task sent off with a plan comes back
+  reviewed and up as a pull request, draft or ready as its plan says.
+- **Talking to a lead is a turn, not a round:** the same session, with no
+  step, no report and no review. The turn's last message is its answer.
+- **A tweak stays on the task's branch until the person ships it.** Shipping
+  is when the review runs: one pass over everything since the last review.
+  Then the commits go up.
+- **Merge, with commits not shipped, offers two:** Review and merge, or Merge
+  now. What Merge now merges is reviewed after the merge.
+- **Fixes after a review are checked only where they need it:** a tiny fix
+  needs no check, and a bigger one gets one short check by the same reviewer.
+  A fix never sets off another whole review.
+- **The review after a merge runs in the same task,** which settles as it
+  merges and comes back only if the review finds something.
+- **A lead starts afresh only when its context is full,** never at a break.
+- **Each turn records where its time went,** so "why is it slow" has an
+  answer for every turn.
 - **Removing a part loses nothing.** Branches, pull requests, findings and
   pictures stay.
 - **A temporary chat is a task with a copy and nothing else.** It sits on
@@ -77,16 +81,15 @@
   chat or a task and which preset fits. The person changes it from the
   task's header afterwards, as they change its team.
 - **Nothing new stores a task's kind.** Parts are read from the rows that
-  already hold them. What is new is small: where a task sits (the board or
-  Scratch), the preset it started from, when its review runs, how far an
-  outside author's code is trusted, and an event for each part change.
+  already hold them. The [new data](#the-data-model) is small.
+- **It is built all together,** once this proposal is accepted.
 
 ## The parts
 
 | Part | What it holds | When a task has it | In the parts row |
 |---|---|---|---|
 | **Workspace** | Where the work happens on disk, per repository: a copy, a worktree or Local, with its branch and the branch it works toward | Every task but one with nothing to read yet | Always, with what runs there |
-| **Checked by** | Who reviews this task's own work, and when: before it merges or after | A change, unless its plan named no reviewer | Where there is a reviewer |
+| **Checked by** | Who reviews this task's own work, and when: before it ships, or after it merges | A change, unless its plan named no reviewer | Where there is a reviewer |
 | **Reviewing** | Pull requests this task reviews, each with its drafted review | A review, or any task asked to look at a related pull request | Each pull request reviewed |
 | **Outputs** | Pull requests it opened or attached, in any repository; the issue it came from or filed; its pictures and files | As soon as there is one | Each one |
 | **Access** | What the lead may run and reach in that code, read from who wrote it | Every task, read from its code's author | Only for an outside author's code |
@@ -252,23 +255,160 @@ A project that needs install scripts to run, such as an Electron or
 Playwright download, won't fully set up under Run safely. The thread says
 what didn't install, and Trust fully is one press away.
 
+## Talking to a lead, and shipping
+
+Most tasks are clear cut, and they work as now: the person sends one off,
+and hears of it once it has been reviewed and is up as a pull request. What
+changes is going back and forth with a lead, to ask it something or tweak
+what it made. That should be as quick as working with the agent on its own.
+
+```mermaid
+flowchart LR
+  T["The person writes"] --> W["The lead answers,<br/>or tweaks and commits"]
+  W --> T
+  W --> S{"Ship, or Merge"}
+  S -->|"Ship"| R["One review of everything<br/>since the last"] --> P["Pushed"]
+  S -->|"Review and merge"| R2["One review"] --> M["Pushed and merged"]
+  S -->|"Merge now"| M2["Pushed and merged"] --> A["Reviewed after the merge,<br/>in the same task"]
+```
+
+### A message is a turn, not a round
+
+- **What the person says to a lead whose plan is done is a turn** in the
+  same session, as is all of a chat. It opens no round and no step, asks for
+  no report, and starts no review. The turn's last message is its answer,
+  and it already carries everything the person needs (#699).
+- **Nothing reminds the lead to report,** and a turn never leaves a task
+  Stuck for lacking one. `finish_step` stays for a plan's steps and for
+  settling a review.
+- **A lead still at its plan's steps** takes the message into the step under
+  way, as now.
+- **A reply the person hasn't seen** puts the task in Needs you until they
+  open it. One they watched arrive doesn't. A question from the lead, or a
+  permission it waits on, shows there as now.
+- **Althar's own course still opens rounds:** fixing failing checks,
+  answering what people said on the pull request, resolving a conflict, and
+  Fix it after a review. Those are reviewed as the plan says, and push as
+  their turn ends, as now.
+
+### A tweak waits for Ship
+
+- **What the person's turns commit stays on the task's branch,** in its
+  worktree or the person's checkout, and isn't pushed. The person tries it
+  where it is, with the project running, and asks for more.
+- **The header and the card say how much is waiting,** "3 commits not
+  shipped", with **Ship**.
+- **Shipping is the person's word:** Ship, or "ship it" or "push it" in the
+  thread. "Do this and ship it" is the word to ship once that turn is done.
+  A lead or the coordinator ships when the person asked it to, as
+  `push_to_pull_request` does now.
+- **Shipping runs Checked by first:** one review of everything since the last
+  review, then the lead settles what it found (below), then the commits go
+  up. They go to the open pull request, or to a new one where the last
+  merged or closed, or where there was none. A new pull request is a draft or
+  ready, as the plan's ending says.
+- **A task with no Checked by ships at once.** One whose review runs after
+  merge ships at once too, and is reviewed once it merges.
+- **The project rule "Push the lead's commits automatically"** keeps pushing
+  what Althar's own course commits. What the person's turns commit waits for
+  Ship instead. The Push card for a held push stays as it is: it pushes what
+  Althar held back, and runs no review.
+- **Settling a task with commits not shipped asks first:** Ship, or settle
+  and leave them on the branch.
+
+### Merge, with commits not shipped
+
+With nothing waiting, Merge merges as now. With commits not shipped, it
+offers two:
+
+- **Review and merge:** one review of the commits waiting. The lead settles
+  what it finds, and then they go up and merge. A finding the lead sets aside
+  brings the task back to the person before anything merges.
+- **Merge now:** the commits go up and merge at once. They are reviewed after
+  the merge, in the same task ([below](#after-merge-in-the-same-task)),
+  whatever Checked by says.
+
+### The person's words go first
+
+What the person says to an agent already never waits for a place among the
+agents at work ([scheduling](../scheduling.md)). What the coordinator passes
+on from the person counts as theirs too, so it goes first in the same way.
+
+### A lead's session lasts until it's full
+
+- **A lead is handed to a fresh session only when its context is full:**
+  before a turn, once it's past 200,000 tokens or 80% of its window,
+  whichever comes first. A break hands nothing over, at any size.
+- **So coming back to a task after a pause carries on the conversation,**
+  with all the lead knows of the work. Nothing starts afresh, rebuilds a
+  brief or reads its files again.
+- **The cost:** after a pause longer than its prompt cache's life, the next
+  message reads the whole context at full price. The context ring shows the
+  size, and Compact stays one press away, as now.
+- **A reviewer keeps one session across a review,** as now. That is what
+  lets it check fixes (below).
+
+### Where a turn's time goes
+
+**Each turn records where its time went:**
+
+- waiting for a place;
+- starting or handing over the session;
+- the agent's own work, and the tools it ran.
+
+A ship adds its review and its checks. The turn's line in the thread shows
+the total, and opening the line shows the parts. The task adds up all its
+turns. A slow turn then says what made it slow.
+
 ## Checked by: a task's own review
 
 Checked by holds the reviewer, which is changed where the team is, and when
 the review runs:
 
-- **Before merge,** the default for a change: today's review rounds.
-- **After merge:** the small-change lane.
+- **Before it ships,** the default for a change. The review runs as work
+  leaves the person's hands. A plan that ends in a pull request ships at its
+  end, so its review runs there, as now. After that, each Ship reviews
+  everything since the last review. A prototype or an exploration whose plan
+  ends without a pull request is reviewed only once the person ships it.
+- **After it merges:** the small-change lane, and what Merge now merges.
 - **No Checked by:** no review, as for a chat, or a plan that named no
   reviewer.
 
-"Make it a full task" on a small change moves it to before merge. Removing
-Checked by stops a round under way, as Skip the review does.
+**The person can run a review at any time:** Review on the Checked by part,
+or "review it" in the thread. It reads everything since the last review, and
+ships nothing.
+
+**One review covers everything since the last.** Althar keeps, per
+repository, the commit each review read up to, and the next one reads from
+there: every tweak since, in one pass.
+
+"Make it a full task" on a small change moves its review to before it ships.
+Removing Checked by stops a review under way, as Skip the review does.
 
 The task's own reviewer gets a copy it can install in, with the recorded
 setup replayed, plus `install_dependencies` and `run_project`. It runs the
 task's tests and build before it reports. It still only reads the task's
 work: it changes nothing in the task's worktree.
+
+### Fixes are checked by the same reviewer, only where they need it
+
+A fix no longer sets off another whole review.
+
+- **The reviewer's session stays open** while the lead settles its findings.
+- **A tiny fix needs no check:** its commit changes ten lines or fewer, all
+  in the file its finding named. Althar reads that from the diff.
+- **A bigger fix gets one short check.** The same reviewer, its copy moved to
+  the fixes, reads only them, against its findings, and says whether each is
+  settled. A finding it reopens goes back to the lead once more. That second
+  fix isn't read again.
+- **The pull request lists the fixes nobody re-read:** the tiny ones, and any
+  second fix. A task whose fixes were all tiny or checked keeps its seal.
+- **The "Review rounds" setting goes,** since a check is never more than one
+  pass. "When rounds run out" keeps its job for a finding the check
+  reopened: carry on, or ask the person.
+
+A fresh reviewer for each check, if it's ever wanted, would be a setting
+later (the person, 8 November).
 
 ### After merge, in the same task
 
@@ -281,6 +421,8 @@ flowchart TD
   N -->|"Fix it"| F["A round: the fix goes out as After #N"]
   N -->|"Leave it"| D["Settled again; the findings stay in the thread"]
 ```
+
+This covers a small change, and what Merge now merged on any task.
 
 - **The task settles as it merges,** and leaves the person's plate at once.
   Its reviewer reads a copy at the merged commit, in the task's own thread.
@@ -324,7 +466,7 @@ flowchart TD
 | Removed | What stays | What goes | Asks first when |
 |---|---|---|---|
 | **Workspace** | The branch, here and on the remote; Local's checkout goes back as on settling | The folder, after its uncommitted work is committed; what runs there stops | Never: Althar commits nothing in the person's checkout, and says what it left |
-| **Checked by** | Findings already filed, in the thread | A round under way stops; no seal | Never |
+| **Checked by** | Findings already filed, in the thread | A review under way stops; no seal | Never |
 | **Reviewing** | The thread, and any posted review | Althar stops following that pull request | Its draft was never posted |
 | **A pull request, from Outputs** | The pull request, open on the host | Althar stops following it | Never: closing it is a separate move, on the person's word |
 | **A picture or file, from Outputs** | The item in the thread | It leaves Outputs and the pull request's screenshots comment | Never |
@@ -370,7 +512,7 @@ and changing them never changes the preset.
   - Small change
   - Review a PR
   - Prototype, led by Claude Opus 5.5 at an effort set by its size (the
-    person's notes)
+    person's notes), reviewed only once it ships
 - **Save as preset,** from any task's menu, takes its parts, team and the
   first lines of its brief.
 - **The coordinator offers one.** When it sees the person set up the same
@@ -404,13 +546,16 @@ One saved from a task can be kept to that project.
   - **Review:** it reviews a pull request, with no branch of its own;
   - **nothing:** anything else, such as a prototype.
 
-  "Local" and "→ release/0.8.0" show where they apply, as now.
-- **Needs you** is unchanged, but for two things: a chat doesn't wait there
-  for being finished, and a settled change comes back when its after-merge
-  review finds something.
-- **The thread** gets a line for each part change. The header's parts row
-  keeps what #684 built, adds Checked by, and adds Access where it shows. A
-  chip names the preset.
+  "Local" and "→ release/0.8.0" show where they apply, as now. A card with
+  commits not shipped says how many.
+- **Needs you** is unchanged, but for three things: a chat doesn't wait
+  there for being finished, a reply the person hasn't seen waits there until
+  they open it, and a settled task comes back when its after-merge review
+  finds something.
+- **The thread** gets a line for each part change, and each turn's line
+  shows where its time went. The header's parts row keeps what #684 built,
+  adds Checked by, and adds Access where it shows. A chip names the preset,
+  and Ship shows when commits are waiting.
 
 ## The data model
 
@@ -420,7 +565,7 @@ that already hold it.
 | Part | Read from |
 |---|---|
 | Workspace | `workspaces` rows, whose `kind` gains `copy` beside `worktree` and `checkout`. Today's review copy (`addReadCopy`) and a quick task's detached worktree both become one. No row means no workspace |
-| Checked by | The plan's review step and its reviewer, which gains `when`: before or after merge. The small-change lane's "skipped before merge" becomes "after merge" |
+| Checked by | The plan's review step and its reviewer, which gains `when`: before it ships or after it merges. The small-change lane's "skipped before merge" becomes "after it merges" |
 | Reviewing | The reviews of pull requests in `Reviews.ts` and their `review_drafts`, now any number per task |
 | Outputs | Change sets and `repository_changes`, attached pull requests, the task's issue, and the artifact store, all as now |
 | Access | The reviewed code's author, read from the host as now, plus a `trust` the person's "Run it" sets: `read`, `safe` or `full` |
@@ -434,6 +579,12 @@ What is new:
   and for Save as preset. Nothing reads it for behaviour.
 - **`when` on the review step and `trust` on a reviewed pull request,** as
   the table says.
+- **The commit the last review read up to,** per task and repository. The
+  next review reads from it. Commits not shipped need nothing new: they are
+  the branch's commits past where Althar last pushed it, which it already
+  keeps.
+- **Each turn's timings:** waiting for a place, starting the session, the
+  agent's work and its tools, plus a ship's review and checks.
 - **One event per part change** (`TaskPartAdded`, `TaskPartChanged`,
   `TaskPartRemoved`), with who made it (the person, the lead or the
   coordinator) and why. The thread's line is read from it.
@@ -442,7 +593,9 @@ What is new:
 **Migration:** today's kinds need none, since they are already read from
 these rows. Every existing task sits on the board. Read copies made before
 this aren't rows: they work as now until they are cleaned, and new copies
-are rows.
+are rows. A task's last review reads up to its branch's head as it stands,
+so what was reviewed before this isn't reviewed again. The "Review rounds"
+setting is dropped.
 
 **The tools:**
 
@@ -452,35 +605,48 @@ are rows.
   `toward` stay, and `change_part` changes them later.
 - `review_pull_request` starts a task from the Review a PR preset. Any other
   task adds a review with `add_part`.
+- `ship_task` ships on the person's word, as Ship does.
 - "Run it" is not a tool. It is only ever the person's.
 
-## Build order
+## Building it
 
-1. **A task's workspace part can change,** from a copy to a worktree. This
-   delivers phase 4's reviews that run things:
-   - the `copy` kind, with the review copy and the quick task's detached
-     worktree folded into it;
-   - a team's pull request reviewed in a worktree at its head, with its tests,
-     app and Storybook run, and the review's lead getting a lead's tools;
-   - "Run it" on an outside author's code, with the trust prompt and the
-     setting;
-   - the task's own reviewer getting a copy it can install in;
-   - `add_part` and `remove_part` for the workspace, with the thread's line
-     and the parts row's Add.
+The person's choice (8 November): this proposal ships first, and then all
+of it is built together, rather than in slices that each ship on their own.
+Within that build, recording each turn's time goes in first, so the rest can
+be measured against today's turns.
 
-   Proven by the person's design-review skill posting on a colleague's pull
-   request, and by "Run it" running an outside pull request's tests offline.
-2. **Checked by,** with the after-merge review in the same task, and
-   `make_it_a_change` replaced by parts.
-3. **Moving between a worktree and Local,** then changing the branch a task
-   works toward.
-4. **Chats and Scratch,** prototyped first on the real kit, then the
-   coordinator starting chats.
-5. **Presets:** the built-in ones, Save as preset, the coordinator's card,
-   then the Settings page.
+It is done when:
 
-Each slice ships on its own. The rest of the model holds without the slices
-after it.
+- a question to a finished task's lead is answered in the same session, with
+  no step, review or handover, and its turn's line shows where the time went;
+- a tweak, tried in the person's running project, ships with one review of
+  only what changed since the last;
+- a review's bigger fix is checked by the same reviewer in one pass, and a
+  tiny one by none;
+- the person's design-review skill posts on a colleague's pull request, run
+  in a worktree at its head;
+- "Run it" runs an outside pull request's tests offline;
+- a small change's review after merge runs in its own task and thread;
+- a chat on Scratch takes a worktree and moves to the board;
+- a running task moves between a worktree and Local, and changes the branch
+  it works toward;
+- a preset is saved from a task, and the coordinator offers one.
+
+## What this changes in the decision documents
+
+| Section | Today | With this |
+|---|---|---|
+| [tasks § Kinds](../tasks.md#kinds-read-from-what-a-task-has) (ADR-035) | Kinds read from what a task has. No temporary chat and no shelf | Kinds read from its parts. Chats sit on Scratch |
+| [tasks § Rounds](../tasks.md#rounds-back-to-work-and-shipping-again) | The person's words to a finished lead open a round with the plan's steps and review. No report means a reminder, then the person | A turn, with no step, report or review. Its commits wait for Ship |
+| [tasks § The small-change lane](../tasks.md#the-small-change-lane) and [reviews § A small change is reviewed after it merges](../reviews.md#a-small-change-is-reviewed-after-it-merges) (ADR-102) | A merged small change is reviewed in a task of its own | Reviewed in the same task, which settles as it merges. So is what Merge now merges |
+| [reviews § How a review round runs](../reviews.md#how-a-review-round-runs) | A fix that changed code sets off another whole round, up to the "Review rounds" setting | Tiny fixes aren't checked, others get one short check by the same reviewer, and the setting goes |
+| [reviews § Reviewing someone else's pull request](../reviews.md#reviewing-someone-elses-pull-request) (ADR-050, ADR-097) | An outside author's code is only read, and a team's is read in a copy | "Run it" asks Run safely or Trust fully, and a team's runs in a worktree |
+| [code-hosts § A lead's commits go up as its turn ends](../code-hosts.md#a-leads-commits-go-up-as-its-turn-ends) (ADR-072) | Every turn's commits push as it ends | What the person's turns commit waits for Ship. Althar's own course pushes as now |
+| [code-hosts § Attaching a pull request a task didn't open](../code-hosts.md#attaching-a-pull-request-a-task-didnt-open) (ADR-052) | One change set per repository | Unchanged, but where a task reviews several pull requests |
+| [workspaces-and-runs § Local](../workspaces-and-runs.md#local) (ADR-091) and [§ The branch a task works toward](../workspaces-and-runs.md#the-branch-a-task-works-toward) (ADR-093) | Fixed at the first step | Change at any time |
+| [workspaces-and-runs § Settling stops everything](../workspaces-and-runs.md#settling-stops-everything) | Everything the task ran | All but an after-merge review |
+| [agents § Keeping context small](../agents.md#keeping-context-small) | A lead starts afresh at a break past 80,000 tokens | Only when its context is full |
+| [what-agents-may-do § What stays](../what-agents-may-do.md#what-stays-and-why) | Running a stranger's code waits for the person | Still, and their word picks how far to trust it |
 
 ## Risks and open questions
 
@@ -490,6 +656,14 @@ after it.
 - **A changed target can conflict.** The rebase and the cherry-picks stop
   and hand the conflict to the lead, as a conflict with the default branch
   does now.
+- **A warm session costs more per message** once its prompt cache has
+  lapsed. Each turn's record shows what it cost, and Compact stays one press
+  away.
+- **Work can sit unshipped,** on a branch only on this computer. The card
+  says so, and settling asks first.
+- **"Tiny" is a rule of thumb:** ten lines, in the finding's file. It can
+  let a wrong one-line fix through, so the pull request names each one for a
+  reader to look at.
 - **An after-merge review keeps working on a settled task.** It spends usage
   after the person has moved on, and needs its exception to the sweep tested
   across a restart.
@@ -513,6 +687,21 @@ after it.
   an outside author's code from running.
 - **One Review part for both jobs.** It reads naturally, but "remove the
   review" would mean two different things.
+- **Pushing a tweak as its turn ends,** as now. The pull request would carry
+  work nobody reviewed, and every push sets off the checks. The person drew
+  the line at shipping (8 November).
+- **Drawing the line by a change's size.** A guess at size is wrong both
+  ways. Shipping says what the person means.
+- **Reviewing every round of a reviewed task,** as now. It is what makes a
+  tweak slow.
+- **Always reviewing before a merge.** Every merge would wait. **Never
+  waiting** instead would put larger unreviewed work on the default branch
+  before anyone read it.
+- **A whole new review, or a fresh reviewer, for each fix.** It reads
+  everything again and builds its context again. The reviewer that filed the
+  findings already knows them.
+- **Starting a lead afresh at a break,** as now. It is the cold start the
+  person runs into most.
 - **Keeping the separate review task after merge.** It means two cards for
   one change.
 - **Keeping the task open until its after-merge review ends.** It keeps one
@@ -531,5 +720,7 @@ after it.
 - **"Run it" as always full trust,** or always offline. The first runs a
   stranger's install scripts with the network on one word. The second only
   works where the packages are already cached.
+- **Building it in slices that each ship,** the first draft's order. The
+  person chose to build it all together.
 - **Merging two tasks into one** stays out (the person's note of 7
   November).
