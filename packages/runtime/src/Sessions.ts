@@ -81,6 +81,7 @@ import type { Reach } from './sandboxReach'
 import { withRole } from './roles'
 import { git, PUSHED } from './git'
 import { evidenceFolderOf, reviewCopyOf } from './reviewCopy'
+import { LAST_MESSAGE_COORDINATOR, LAST_MESSAGE_LEAD, LAST_MESSAGE_REVIEWER } from './lastMessage'
 import { reviewBrief as reviewingBrief, type Reviewed, reviewOf } from './reviewing'
 import { Setups } from './Setups'
 import { bringBackFor } from './bringBack'
@@ -3212,6 +3213,7 @@ export class Sessions extends Context.Service<
             ...(summary === '' ? [] : [`The lead says:\n${summary}`]),
             ...(shown === '' ? [] : [shown]),
             "Look for what would make the change wrong or unsafe to merge: bugs, missed cases, broken behaviour, security, tests that don't test it. Not style the project doesn't ask for. Where the lead's evidence leaves out something important the change should be seen doing, say so as a minor finding; that alone doesn't fail a review. Then call Althar's report_review tool once: a verdict (pass, or changes_requested), a summary of a few lines, and your findings, each with its severity (blocking, major, minor or nit), a title saying what is wrong in one short line, where it is (the file and line), and what is wrong in full. With no findings worth fixing, the verdict is pass.",
+            LAST_MESSAGE_REVIEWER,
             ...(yield* threadSoFar(thread.threadId)),
           ].join('\n\n')
         })
@@ -3372,6 +3374,8 @@ export class Sessions extends Context.Service<
             "Once the plan's steps are done, what the person asks you for is a round of work of its own: when you have done it, call finish_step the same way, with your summary and evidence. Where they only asked something and you changed nothing, answer them; there is nothing to finish. What you commit after the task's pull request merged or closed goes in a new pull request, which Althar opens as a draft once you finish; where they only asked something and you committed in passing as you answered, call finish_step with `answered`, and the person opens it from the task if they want it.",
             // The thread reads in rounds: what was asked, the lead's word on it, its work folded into one line, and what it did.
             'When you pick up something to do, whether the task, a message from the person, what the coordinator passes on or the findings of a review, first say in a sentence or two what you understood and what you will do, then do it. Say little while you work: your words along the way are folded in with your work. When you are done, end with a message that says what you did, what to look at, and what is left.',
+            // What stands open of a round is its last message, or its report where nothing follows it: it carries everything (ADR-099).
+            LAST_MESSAGE_LEAD,
             // What the lead shows of its work: evidence that fits the task, and what it couldn't show.
             "As you work, gather evidence that the change does what it should, and hand it with finish_step, each piece with a caption saying what it shows. Choose what fits the task: for a change someone sees, screenshots of the states you changed (the repository's docs may say how to take them; Althar's screenshot tool takes one of a page served on this computer); otherwise the test run or command that shows it, with its exit code and output, a response, a log, or a before and after. Where nothing fits, as for a typo or a version bump, a single note saying so is enough. Don't say something works without showing it: what you changed but couldn't show working, and why, goes in `unverified`, which the person reads as what is still theirs to check. Take a screenshot at 1× (a device scale of 1, not a Retina 2×), of only the part that changed where you can, and look at each once: every picture you read stays in your context for the rest of the task, and a whole Retina screen costs as much as a few thousand words.",
             // Each screenshot shows once, with its caption.
@@ -3497,6 +3501,8 @@ export class Sessions extends Context.Service<
           ].join('\n'),
           STANDING_DICTATED,
           'Answer questions yourself; changes, and anything to try out, become tasks. Keep your replies short: the person sees each task as a card, so say in a sentence what you planned, and not the plan itself again.',
+          // Its answer stands open, what it said on the way folds (ADR-099): the answer carries everything.
+          LAST_MESSAGE_COORDINATOR,
           // Althar draws a mermaid block as a diagram, in the thread and in a document it opens (packages/ui, Diagram).
           'When you explain something architectural or otherwise complicated, such as how parts of the code fit together or how a flow runs, include a diagram without being asked: a ```mermaid block in your reply is drawn as a diagram in Althar.',
         ]
