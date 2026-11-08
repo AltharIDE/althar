@@ -364,6 +364,13 @@ describe('a reader held in its own folder', () => {
       assert.strictEqual(contained(line).verdict, 'deny', line)
   })
 
+  it('fetches only where it has a network, and thinks without doing', () => {
+    const fetch = { ...command(''), kind: 'fetch' as const }
+    assert.strictEqual(decideReader(fetch, {}).verdict, 'allow')
+    assert.strictEqual(decideReader(fetch, { offline: true }).verdict, 'deny')
+    assert.strictEqual(decideReader({ ...command(''), kind: 'think' as const }, {}).verdict, 'allow')
+  })
+
   it('reads and searches only what it is given, but for what is given back', () => {
     assert.strictEqual(reading('/work/meridian/.coordinator/notes/a.md').verdict, 'allow')
     assert.strictEqual(reading('/work/meridian/.coordinator/secrets/key').verdict, 'deny')
