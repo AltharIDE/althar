@@ -41,7 +41,6 @@ import {
   resolveRef,
   resolveTree,
   rollBack,
-  setActive,
   SkillRefused,
   stageFromGitHub,
   uninstall,
