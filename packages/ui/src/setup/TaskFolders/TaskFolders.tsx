@@ -22,7 +22,9 @@ import s from './TaskFolders.module.css'
  * person's goes with it. Clean up asks nothing: what it takes loses nothing
  * for good. Until each of a group's folders is measured, its figure is a
  * placeholder and its part of the bar is left out: a part never shows as the
- * whole. No violet: nothing here needs the person.
+ * whole. With none yet, the legend says what the bar will show and how a
+ * folder gets there, by an empty key, rather than a card inside the row. No
+ * violet: nothing here needs the person.
  */
 
 /** When finished tasks' folders go: by how each task ended, or one wait for all, or only when the person cleans up. */
@@ -73,6 +75,8 @@ export interface TaskFoldersText {
   remove: string
   removeAnyway: string
   cancel: string
+  /** With no finished task's folder on this computer: what the bar will show, and how one gets there. */
+  none: string
 }
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? `1 ${one}` : `${n} ${many}`)
@@ -116,6 +120,7 @@ export const taskFoldersText: TaskFoldersText = {
   remove: 'Remove',
   removeAnyway: 'Remove anyway',
   cancel: 'Cancel',
+  none: 'No finished tasks’ folders yet. A task’s joins the bar once the task is finished.',
 }
 
 /** The choices, in the order the menu offers them. */
@@ -317,13 +322,15 @@ export function TaskFolders({
   const holding = total(held)
   const width = (n: number) => `${disk === null || disk.total === 0 ? 0 : (Math.max(0, n) / disk.total) * 100}%`
   const any = goes.length > 0 || held.length > 0
+  const none = !any && !measuring && freed === null
   return (
     <SettingRow
       title={t.title}
       note={t.waits[wait].note}
       glyph={<Icon name="folder" size={15} />}
       under={
-        (disk !== null || any || measuring || freed !== null || error !== undefined) && (
+        // With none, the legend still says what the bar will show: the row never ends on a blank.
+        (disk !== null || any || measuring || freed !== null || error !== undefined || none) && (
           <div className={s.space}>
             {disk !== null && (
               <span className={s.bar} aria-hidden="true">
@@ -374,6 +381,12 @@ export function TaskFolders({
                     t={t}
                   />
                 </Popover>
+              )}
+              {none && (
+                <span className={cx(s.key, s.none)}>
+                  <i className={s.emptyKey} aria-hidden="true" />
+                  {t.none}
+                </span>
               )}
               {measuring && going !== null && holding !== null && <span>{t.measuring}</span>}
               <span className={s.grow} />

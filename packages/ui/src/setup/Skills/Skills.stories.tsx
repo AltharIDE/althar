@@ -1,40 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
-import { SkillInstall, SkillList, type SkillListProps, SkillReview, type SkillReviewModel, type SkillRowModel } from './Skills'
-
-const SKILLS: SkillRowModel[] = [
-  {
-    id: 'brainstorming',
-    description:
-      'Use before building a new feature or change whose intent or design is not settled yet: draws out what the person wants and agrees a design before any code.',
-    from: 'acme/agent-skills',
-    on: true,
-    canRollBack: false,
-  },
-  {
-    id: 'subagent-driven-development',
-    description: 'Use when executing implementation plans with independent tasks in the current session.',
-    from: 'acme/agent-skills',
-    on: true,
-    canRollBack: false,
-  },
-  {
-    id: 'systematic-debugging',
-    description: 'Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes.',
-    from: 'acme/agent-skills',
-    on: false,
-    canRollBack: false,
-  },
-  {
-    id: 'release-notes',
-    description: 'Use when writing the notes for a release from the merged pull requests.',
-    from: 'acme/agent-skills',
-    on: true,
-    canRollBack: true,
-  },
-]
+import { SkillInstall, SkillReview, type SkillReviewModel } from './Skills'
 
 const CARD: SkillReviewModel = {
   id: 'release-notes',
@@ -73,81 +40,13 @@ const CARD: SkillReviewModel = {
 
 const meta = {
   title: 'Setup/Skills',
-  component: SkillList,
+  component: SkillInstall,
   parameters: { layout: 'padded' },
   decorators: [(Story) => <div style={{ maxWidth: 560 }}>{Story()}</div>],
-  args: { skills: SKILLS, onToggle: fn(), onRollBack: fn(), onRemove: fn(), onToggleAll: fn() },
-} satisfies Meta<typeof SkillList>
+  args: { found: null, busy: false, error: null, onFind: fn(), onReview: fn() },
+} satisfies Meta<typeof SkillInstall>
 export default meta
 type Story = StoryObj<typeof meta>
-
-function Kept(args: SkillListProps) {
-  const [skills, setSkills] = useState(args.skills)
-  return (
-    <SkillList
-      {...args}
-      skills={skills}
-      onToggle={(id, on) => {
-        args.onToggle(id, on)
-        setSkills((now) => now.map((skill) => (skill.id === id ? { ...skill, on } : skill)))
-      }}
-      onToggleAll={(on) => {
-        args.onToggleAll?.(on)
-        setSkills((now) => now.map((skill) => (skill.problem === undefined ? { ...skill, on } : skill)))
-      }}
-    />
-  )
-}
-
-/** Each skill on or off, and where it is from. */
-export const List: Story = {
-  render: (args) => <Kept {...args} />,
-  play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement)
-    await expect(canvas.getByText('3 of 4 on')).toBeVisible()
-    await userEvent.click(canvas.getByRole('switch', { name: 'systematic-debugging' }))
-    await expect(args.onToggle).toHaveBeenCalledWith('systematic-debugging', true)
-    await expect(canvas.getByText('all 4 on')).toBeVisible()
-    // Only the one with an earlier version can go back; each can be removed.
-    await userEvent.click(canvas.getByRole('button', { name: 'Previous version' }))
-    await expect(args.onRollBack).toHaveBeenCalledWith('release-notes')
-    await expect(canvas.getAllByRole('button', { name: 'Remove' })).toHaveLength(4)
-  },
-}
-
-/** Every skill at once: on while any is off, then off. */
-export const AllAtOnce: Story = {
-  render: (args) => <Kept {...args} />,
-  play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'Turn all on' }))
-    await expect(args.onToggleAll).toHaveBeenCalledWith(true)
-    await expect(canvas.getByText('all 4 on')).toBeVisible()
-    await userEvent.click(canvas.getByRole('button', { name: 'Turn all off' }))
-    await expect(args.onToggleAll).toHaveBeenCalledWith(false)
-    await expect(canvas.getByText('0 of 4 on')).toBeVisible()
-  },
-}
-
-/** One whose stored files Althar can't read: off, given to no run, and what to do about it. */
-export const Broken: Story = {
-  args: {
-    skills: [
-      {
-        id: 'release-notes',
-        description: 'Use when writing the notes for a release from the merged pull requests.',
-        from: 'acme/agent-skills',
-        on: false,
-        canRollBack: false,
-        problem: "Althar can't read this skill's stored files, so runs aren't given it. Install it again to put it right.",
-      },
-      ...SKILLS.slice(0, 1),
-    ],
-  },
-  play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText(/Install it again to put it right/)).toBeVisible()
-  },
-}
 
 /** A repository looked in, its skill folders to choose from. */
 export const Install: Story = {

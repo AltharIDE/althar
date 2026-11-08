@@ -12,6 +12,7 @@ import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Segmented } from '../../primitives/Segmented/Segmented'
 import { Select } from '../../primitives/Select/Select'
 import { Switch } from '../../primitives/Switch/Switch'
+import { EmptyState } from '../EmptyState/EmptyState'
 import s from './Preferences.module.css'
 
 /*
@@ -384,9 +385,19 @@ export function AgentsAtOnce({ count, own: kept, machine, most = 16, onChange, c
 
 export interface OpenFilesInText {
   title: string
+  /** With no editor found: what will be here, and how one gets here. */
+  none: string
+  noneLine: string
+  /** Looks for editors again, once one is installed. */
+  lookAgain: string
 }
 
-export const openFilesInText: OpenFilesInText = { title: 'Open files in' }
+export const openFilesInText: OpenFilesInText = {
+  title: 'Open files in',
+  none: 'No editor found',
+  noneLine: `Install an editor such as VS Code, Cursor or Zed, and it shows here. Until then, files open in ${device.files}.`,
+  lookAgain: 'Look again',
+}
 
 export interface EditorOption<V extends string> {
   value: V
@@ -400,13 +411,45 @@ export interface OpenFilesInProps<V extends string> {
   editors: readonly EditorOption<V>[]
   value: V | null
   onChange: (editor: V) => void
+  /** Looks for editors again; offered only with none found. Without it, nothing to press. */
+  onLookAgain?: () => void
+  /** Looking for them again is under way. */
+  looking?: boolean
+  /** The rank of the heading that says none was found. */
+  headingLevel?: HeadingLevel
   text?: Partial<OpenFilesInText>
 }
 
-/** Which editor a task's files and folder open in, each by its own icon. */
-export function OpenFilesIn<V extends string>({ editors, value, onChange, text }: OpenFilesInProps<V>) {
+/** Which editor a task's files and folder open in, each by its own icon; with none found, what will be here and how one gets here. */
+export function OpenFilesIn<V extends string>({
+  editors,
+  value,
+  onChange,
+  onLookAgain,
+  looking = false,
+  headingLevel = 3,
+  text,
+}: OpenFilesInProps<V>) {
   const t = { ...openFilesInText, ...text }
   const id = useId()
+  if (editors.length === 0)
+    return (
+      <EmptyState
+        icon="file"
+        title={t.none}
+        line={t.noneLine}
+        headingLevel={headingLevel}
+        {...(onLookAgain === undefined
+          ? {}
+          : {
+              actions: (
+                <Button size="small" icon="reload" busy={looking} onClick={onLookAgain}>
+                  {t.lookAgain}
+                </Button>
+              ),
+            })}
+      />
+    )
   return (
     <div className={s.block}>
       <span id={id} className={s.title}>

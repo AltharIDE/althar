@@ -25,10 +25,12 @@ import {
   Folder,
   Frame,
   GitBranch,
+  GitCompare,
   GitMerge,
   GitPullRequest,
   Globe,
   HalfMoon,
+  KanbanBoard,
   LightBulb,
   List,
   Lock,
@@ -171,6 +173,10 @@ export const ICONS = {
   /** Fetches something to this computer: an agent Althar can download. */
   download: Download,
   pr: GitPullRequest,
+  /** Two changes that touch the same lines, and resolving them: merge conflicts. */
+  conflict: GitCompare,
+  /** A tracker's issues, moving through its statuses as their tasks go. */
+  issues: KanbanBoard,
   /** Loads a page again. */
   reload: Refresh,
   /** Points at something on a page, to comment on it for the lead. */
