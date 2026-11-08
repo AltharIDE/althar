@@ -520,17 +520,11 @@ export const handlers = Api.toLayer(
           SELECT json_extract(payload, '$.login') AS login, json_extract(payload, '$.name') AS name FROM observations
           WHERE project_id = ${projectId} AND kind = 'bot_spoke' ORDER BY observed_at DESC, rowid DESC`
         const trusted = new Set(trustedBotsOf(rules).map(botLogin))
-        const suggestedBots = [
-          ...new Map(
-            spoke
-              .flatMap((one) =>
-                one.login === null || trusted.has(one.login)
-                  ? []
-                  : [[one.login, { login: one.login, name: one.name ?? botName(one.login) }] as const],
-              )
-              .toReversed(),
-          ).values(),
-        ].toReversed()
+        const suggested = new Map<string, { readonly login: string; readonly name: string }>()
+        for (const one of spoke)
+          if (one.login !== null && !trusted.has(one.login) && !suggested.has(one.login))
+            suggested.set(one.login, { login: one.login, name: one.name ?? botName(one.login) })
+        const suggestedBots = [...suggested.values()]
         return { ...rulesFields(projectId, rules), suggestedBots, revision, conventions, sandbox, tally }
       })
 

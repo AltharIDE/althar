@@ -741,6 +741,34 @@ describe('the thread, reaching outside', () => {
     )
   })
 
+  it('says a review bot was heard as findings where trusted, else once that it wasn’t, and trusts it from there (ADR-104)', async () => {
+    const trustBot = vi.fn(async () => {})
+    const { client } = fakeClient({
+      trustBot,
+      getThread: vi.fn(async (): Promise<ThreadSnapshot> =>
+        snapshot({
+          items: [
+            items.arrival({
+              from: 'coderabbitai[bot]',
+              text: 'Retry-After may be a date.',
+              bot: { login: 'coderabbitai[bot]', name: 'CodeRabbit', trusted: true },
+            }),
+            items.arrival({ from: 'claude[bot]', text: 'Cap the retries.', bot: { login: 'claude[bot]', name: 'Claude', trusted: false } }),
+          ],
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByText('Passed to the lead as findings from CodeRabbit, to weigh.')).toBeTruthy()
+    expect(screen.getByText('The lead doesn’t hear Claude: this project doesn’t trust it yet.')).toBeTruthy()
+    // Only the untrusted one offers to trust it.
+    expect(screen.getAllByRole('button', { name: /^Trust / })).toHaveLength(1)
+    await userEvent.click(screen.getByRole('button', { name: 'Trust Claude' }))
+    expect(trustBot).toHaveBeenCalledWith('t1', 'claude[bot]')
+    expect(await screen.findByText('Trusted. The lead hears what Claude says from now on.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Trust Claude' })).toBeNull()
+  })
+
   it('builds blocks for arrivals in their place', () => {
     const blocks = blocksOf({ items: [items.you('Hi'), items.arrival()], turnRunning: false, worktree: null }, new Map(), () => '1m')
     expect(blocks.map((block) => block.kind)).toEqual(['you', 'arrival'])

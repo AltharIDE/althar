@@ -432,9 +432,21 @@ export const baseChecksForLead = (sum: ChecksSum, base: string, logs: ReadonlyAr
   ].join('\n\n')
 
 /** What the lead is told of what it can't read: people outside the repository, whom the person passes on. */
-/** Bots the project doesn't trust, left out of a reading of the pull request (ADR-104). */
-export const quietBotsLine = (names: ReadonlyArray<string>) =>
-  `${names.length === 1 ? `${names[0]}, a bot this project doesn't trust, is` : `${names.length} bots this project doesn't trust (${names.join(', ')}) are`} left out. The person trusts a bot in the project's settings.`
+/**
+ * Bots the project doesn't trust, left out of a reading of the pull request
+ * (ADR-104): the review and triage bots by name, the person's to trust;
+ * any other, such as a coverage report or a deploy preview, by how many
+ * comments.
+ */
+export const quietBotsLine = (reviewers: ReadonlyArray<string>, others: number) =>
+  [
+    reviewers.length === 0
+      ? ''
+      : `${reviewers.length === 1 ? `${reviewers[0]}, a review bot this project doesn't trust, is` : `Review bots this project doesn't trust (${reviewers.join(', ')}) are`} left out; the person can trust one in the project's settings.`,
+    others === 0 ? '' : `${others === 1 ? 'One comment' : `${others} comments`} from other bots ${others === 1 ? 'is' : 'are'} left out.`,
+  ]
+    .filter((line) => line !== '')
+    .join(' ')
 
 export const outsidersLine = (count: number) =>
   `${count === 1 ? 'One comment' : `${count} comments`} from people who can't write to the repository ${count === 1 ? 'is' : 'are'} left out. On a public repository anyone can comment; the person reads them and passes on what matters.`

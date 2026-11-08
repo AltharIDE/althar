@@ -1187,6 +1187,56 @@ describe('project rules, through the API', () => {
     ),
   )
 
+  it.live('suggests the review bots that spoke on its tasks’ pull requests, and trusts one from a task, the person’s', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant, store } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Add a retry' })
+        // As listening records each review or triage bot the first time it speaks on a pull request (ADR-104): the latest first.
+        const spoke = (n: number, login: string, name: string) =>
+          store(
+            Effect.flatMap(
+              SqlClient.SqlClient,
+              (sql) =>
+                sql`INSERT INTO observations ${sql.insert({
+                  id: `obs_${String(n).padStart(32, '0')}`,
+                  projectId: project.id,
+                  subjectType: 'external_link',
+                  subjectId: `link_${n}`,
+                  kind: 'bot_spoke',
+                  payload: JSON.stringify({ id: `bot:${login}`, login, name }),
+                  source: 'github',
+                  observedAt: `2026-11-0${n}T10:00:00.000Z`,
+                })}`,
+            ),
+          )
+        yield* spoke(1, 'claude[bot]', 'Claude')
+        yield* spoke(2, 'coderabbitai[bot]', 'CodeRabbit')
+        yield* spoke(3, 'claude[bot]', 'Claude')
+        const before = yield* client.GetProjectRules({ projectId: project.id })
+        assert.deepStrictEqual(before.trustedBots, [])
+        assert.deepStrictEqual(before.suggestedBots, [
+          { login: 'claude[bot]', name: 'Claude' },
+          { login: 'coderabbitai[bot]', name: 'CodeRabbit' },
+        ])
+        // Trusted from the thread where it spoke, by any case, once: it is no longer suggested.
+        yield* client.TrustBot({ commandId: commandId(), taskId: task.id, login: 'CodeRabbitAI[bot]' })
+        yield* client.TrustBot({ commandId: commandId(), taskId: task.id, login: 'coderabbitai[bot]' })
+        const after = yield* client.GetProjectRules({ projectId: project.id })
+        assert.deepStrictEqual(after.trustedBots, [{ login: 'coderabbitai[bot]', name: 'CodeRabbit' }])
+        assert.deepStrictEqual(after.suggestedBots, [{ login: 'claude[bot]', name: 'Claude' }])
+        assert.strictEqual(after.revision, before.revision + 1)
+        // Untrusted from the settings, it is suggested again.
+        const untrusted = yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, trustedBots: [] })
+        assert.deepStrictEqual(
+          untrusted.suggestedBots.map((bot) => bot.login),
+          ['claude[bot]', 'coderabbitai[bot]'],
+        )
+      }),
+    ),
+  )
+
   it.live('reads a project’s rules, and changes them in part as the person', () =>
     Effect.scoped(
       Effect.gen(function* () {

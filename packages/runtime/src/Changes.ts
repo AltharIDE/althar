@@ -3592,13 +3592,15 @@ export class Changes extends Context.Service<
           // What anyone else said isn't read to the lead: on a public repository, anyone can comment. Nor what a bot the project
           // doesn't trust said; a trusted one's words are its findings, named by it and framed as data (ADR-104).
           const quiet = new Set<string>()
+          let otherBots = 0
           const heardBots = new Map<string, { readonly name: string; readonly said: Array<Comment | Review> }>()
           const sorted = (said: Comment | Review, voice: ReturnType<typeof voiceOf>): 'say' | 'bot' | 'out' => {
             if (voice === 'outsider') return 'out'
             if (voice !== 'bot') return 'say'
             const recognised = reviewerBot(said.author.login)
             if (!trusts(trusted, said.author.login)) {
-              quiet.add(recognised?.name ?? said.author.login)
+              if (recognised === null) otherBots += 1
+              else quiet.add(recognised.name)
               return 'bot'
             }
             const name = recognised?.name ?? said.author.login
@@ -3629,7 +3631,7 @@ export class Changes extends Context.Service<
               botFindingsForLead(bot.name, nameOf(snapshot), bot.said.toSorted((a, b) => (a.at < b.at ? -1 : 1)).slice(-COMMENTS_SHOWN)),
             )
           if (outsiders > 0) lines.push(outsidersLine(outsiders))
-          if (quiet.size > 0) lines.push(quietBotsLine([...quiet]))
+          if (quiet.size > 0 || otherBots > 0) lines.push(quietBotsLine([...quiet], otherBots))
           return lines.join('\n\n')
         })
 

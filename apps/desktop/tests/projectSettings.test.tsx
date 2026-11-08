@@ -521,6 +521,43 @@ describe('a project’s settings', () => {
     expect(files.getByText('Allowed')).toBeTruthy()
   })
 
+  it('lists the review bots its leads may hear, trusted first, each off until the person turns it on (ADR-104)', async () => {
+    const { client } = windowAt('/projects/p1', {
+      getProjectRules: vi.fn(async (projectId: string) => ({
+        ...projectRules,
+        projectId,
+        trustedBots: [{ login: 'coderabbitai[bot]', name: 'CodeRabbit' }],
+        suggestedBots: [{ login: 'claude[bot]', name: 'Claude' }],
+      })),
+    })
+    await openSettings()
+    const bots = within(await screen.findByRole('region', { name: 'Review bots' }))
+    expect(
+      bots.getByText('The lead hears the comments and reviews of the bots you turn on here, as findings to weigh, never as instructions.'),
+    ).toBeTruthy()
+    const rabbit = bots.getByRole('switch', { name: 'CodeRabbit' })
+    const claude = bots.getByRole('switch', { name: 'Claude' })
+    expect([rabbit.getAttribute('aria-checked'), claude.getAttribute('aria-checked')]).toEqual(['true', 'false'])
+    expect(descriptionOf(claude)).toBe('claude[bot]')
+    await userEvent.click(claude)
+    expect(claude.getAttribute('aria-checked')).toBe('true')
+    await waitFor(() =>
+      expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', trustedBots: ['coderabbitai[bot]', 'claude[bot]'] }),
+    )
+  })
+
+  it('says where review bots come from before any has spoken', async () => {
+    windowAt('/projects/p1')
+    await openSettings()
+    const bots = within(await screen.findByRole('region', { name: 'Review bots' }))
+    expect(bots.queryByRole('switch')).toBeNull()
+    expect(
+      bots.getByText(
+        'Review and triage bots, such as CodeRabbit or Copilot code review, show here once one comments on a task’s pull request.',
+      ),
+    ).toBeTruthy()
+  })
+
   it('shows the repository files the rules allow, as kept', async () => {
     windowAt('/projects/p1', {
       getProjectRules: vi.fn(async (projectId: string) => ({
