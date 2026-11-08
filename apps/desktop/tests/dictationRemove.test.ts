@@ -63,6 +63,8 @@ describe('removing the speech model', () => {
     startDictation({ script: 'speech.js', models: () => dir, mine: () => true, fakeModel: true, fakeMicrophone: true })
     const call = (name: string, ...args: Array<unknown>) => electron.handlers.get(`althar:dictation-${name}`)?.({ sender: {} }, ...args)
 
+    // The test may run again in the same process: count from where the speech processes stand now.
+    const before = electron.children.length
     const folder = join(dir, PARAKEET.id)
     mkdirSync(folder, { recursive: true })
     writeFileSync(join(folder, 'ready.json'), JSON.stringify({ id: PARAKEET.id }))
@@ -70,10 +72,10 @@ describe('removing the speech model', () => {
 
     // The speech process is running, as it is once the model has been used.
     await call('prepare')
-    expect(electron.children).toHaveLength(1)
+    expect(electron.children).toHaveLength(before + 1)
 
     await call('remove')
-    const first = electron.children[0] as { killed: boolean; modelThere: boolean | undefined }
+    const first = electron.children[before] as { killed: boolean; modelThere: boolean | undefined }
     expect(first.killed).toBe(true)
     // The folder was still there when the process exited, and gone once Remove returned.
     expect(first.modelThere).toBe(true)
@@ -82,7 +84,7 @@ describe('removing the speech model', () => {
 
     // Dictating again brings the model down by starting a speech process again.
     await call('download')
-    expect(electron.children).toHaveLength(2)
+    expect(electron.children).toHaveLength(before + 2)
     expect(await call('state')).toMatchObject({ model: { downloading: true } })
   })
 })
