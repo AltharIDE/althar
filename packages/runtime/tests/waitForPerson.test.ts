@@ -12,7 +12,7 @@ import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
 import { Tasks } from '../src/Tasks'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, notices, repository, runtime, toolDescriptions, until, withWork } from './support'
+import { callTool, notices, repository, runtime, toolDescriptions, turns, until, withWork } from './support'
 
 /*
  * A lead that can't go on without the person ends its turn waiting, rather
@@ -201,6 +201,36 @@ describe('a lead waiting on the person', () => {
         said.map((notice) => notice.title),
         'The review stopped: you interrupted it. It waits for you to start it again.',
       )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('carries the review on when the person writes in it, rather than saying it stopped', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* planned('Build it. [lead:finish] [lead:edit] [review:wait]')
+      const [thread] = yield* until(
+        sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${task.taskId} AND kind = 'step' AND node_key = 'review'`,
+        (rows) => rows.length === 1,
+      )
+      const reviewThread = thread?.id ?? ''
+      const sessions = yield* Sessions
+      yield* until(
+        Effect.map(sessions.running(reviewThread), (running) => Option.exists(running, (one) => one.turnRunning)),
+        (running) => running,
+      )
+      // Written while the review runs, the person's message interrupts the turn only to carry on with it.
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', { threadId: reviewThread, body: 'Also check the docs.' }),
+        threadId: reviewThread,
+        body: 'Also check the docs.',
+        disposition: 'interrupt_and_continue',
+      })
+      yield* until(turns(reviewThread), (rows) => rows.length >= 2)
+      assert.notInclude(
+        (yield* notices(reviewThread)).map((notice) => notice.title ?? ''),
+        'The review stopped: you interrupted it. It waits for you to start it again.',
+      )
+      assert.lengthOf(yield* sql`SELECT id FROM attention_requests WHERE task_id = ${task.taskId} AND kind = 'stuck' AND state = 'open'`, 0)
     }).pipe(Effect.provide(withQueries())),
   )
 

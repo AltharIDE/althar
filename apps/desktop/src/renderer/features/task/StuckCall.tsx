@@ -85,7 +85,7 @@ export const text = {
       case 'no_report':
         return `${agent} stopped without saying whether the step is done.`
       case 'session_ended':
-        return `${agent} closed before finishing the step.`
+        return stuck.detail === null ? `${agent} closed before finishing the step.` : `${stuck.detail} It waits for you to start it again.`
       case 'transient':
         return `${stuck.service ?? agent}'s service kept failing.`
       case 'failed_to_start':

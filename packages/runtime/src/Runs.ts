@@ -1737,7 +1737,11 @@ export class Runs extends Context.Service<
           const on = yield* stepOn(event.threadId)
           // A turn the person interrupted is theirs to carry on; a round of work it left with nothing new goes back where it was.
           if (event._tag === 'TurnEnded' && event.state === 'interrupted') {
+            // A person's message waiting in the queue interrupts the turn only to carry on: the review reads it next.
+            const [waiting] = yield* sql<{ id: string }>`
+              SELECT id FROM user_inputs WHERE thread_id = ${event.threadId} AND state = 'queued' LIMIT 1`
             if (on !== undefined && on.step === 'review') {
+              if (waiting !== undefined) return
               yield* addItem({ projectId: on.run.projectId, threadId: on.run.threadId }, 'notice', {
                 source: 'runtime',
                 severity: 'info',
