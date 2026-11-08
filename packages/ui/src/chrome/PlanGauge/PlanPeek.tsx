@@ -103,14 +103,16 @@ function Window({ window, t }: { window: PlanWindow; t: PlanPeekText }) {
     >
       <span>{window.label}</span>
       {window.unread === true ? (
-        <span className={s.windowUnknown} aria-hidden="true" />
+        <span className={s.windowUnknown}>{window.note}</span>
       ) : (
         <>
           <Bar left={window.left} className={s.windowBar} />
           <span className={s.windowLeft}>{window.left === 0 ? t.shareOut : t.share(window.left)}</span>
         </>
       )}
-      <span className={s.windowUntil}>{window.resets ?? window.until ?? ''}</span>
+      <span className={s.windowUntil} title={window.resetsTitle}>
+        {window.resets ?? window.until ?? ''}
+      </span>
     </li>
   )
 }

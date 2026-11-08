@@ -602,9 +602,13 @@ describe('a window as it resets, and what a restart reads back', () => {
       )
       assert.deepStrictEqual(yield* room(), Option.some(['five_hour', 5]))
       yield* TestClock.adjust(Duration.seconds(2))
-      assert.deepStrictEqual(accountOf(yield* usage.now(true), 'claude-code').windows, [
-        { kind: 'weekly', label: null, usedPercent: 46, resetsAt: RESET },
-      ])
+      const after = accountOf(yield* usage.now(true), 'claude-code')
+      assert.deepStrictEqual(after.windows, [{ kind: 'weekly', label: null, usedPercent: 46, resetsAt: RESET }])
+      // The five hours reset: not a window to rely on, but said apart as last read, so it is not simply gone.
+      assert.deepStrictEqual(
+        after.resetWindows.map((window) => [window.kind, window.usedPercent]),
+        [['five_hour', 95]],
+      )
       assert.deepStrictEqual(yield* room(), Option.some(['weekly', 54]))
     }).pipe(Effect.provide(withUsage({}))),
   )
@@ -632,6 +636,7 @@ describe('a window as it resets, and what a restart reads back', () => {
           [view.windows, view.resetSince, view.observedAt, view.fault?.message],
           [[], true, new Date(0).toISOString(), 'The provider asked Althar to wait before reading again.'],
         )
+        assert.deepStrictEqual([before.resetWindows.length, view.resetWindows.map((window) => window.kind)], [0, ['five_hour', 'weekly']])
       }).pipe(Effect.provide(layer))
     }),
   )

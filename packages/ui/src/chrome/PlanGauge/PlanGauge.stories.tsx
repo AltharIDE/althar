@@ -92,15 +92,15 @@ export const AllSignedOut: Story = {
   },
 }
 
-/** Each window says when it resets and how long is left; one that reset since it was read says so, and one with no time says that. */
+/** Each window ends its row with the time left, and the exact time on hover; one that reset since it was read says so, and one with no time says that. */
 export const Resets: Story = {
   args: { agents: [CLAUDE_RESETS, CODEX_PLENTY], defaultOpen: true },
   play: async () => {
     const page = within(document.body)
     await userEvent.click(page.getByRole('button', { name: /^Claude Code/ }))
-    await expect(page.getByText('resets Fri 09:00 · in 1d 18h')).toBeInTheDocument()
-    await expect(page.getByText('reset at 14:00 · not read since')).toBeInTheDocument()
-    await expect(page.getByText('no reset time given')).toBeInTheDocument()
+    await expect(page.getByTitle('Resets Fri 09:00 · in 1d 18h')).toBeInTheDocument()
+    await expect(page.getByTitle('Reset at 14:00 · not read since')).toBeInTheDocument()
+    await expect(page.getByText('no reset time')).toBeInTheDocument()
   },
 }
 
@@ -110,7 +110,7 @@ export const ResetsTwoAccounts: Story = {
   play: async () => {
     const page = within(document.body)
     await userEvent.click(page.getByRole('button', { name: /^Claude Code/ }))
-    await expect(page.getByText('resets 15:40 · in 50m')).toBeInTheDocument()
+    await expect(page.getByTitle('Resets 15:40 · in 50m')).toBeInTheDocument()
   },
 }
 

@@ -139,16 +139,18 @@ const readAt = (held: Held, now: number) =>
       null,
     ) ?? held.observedAt
 
+const viewOf = (window: UsageWindow) => ({
+  kind: window.kind,
+  label: window.label ?? null,
+  usedPercent: window.usedPercent,
+  resetsAt: window.resetsAt ?? null,
+})
+
 /** The windows as the view shows them: one whose reset has passed is unknown until it is read again, so it isn't shown. */
-const shown = (windows: ReadonlyArray<UsageWindow>, now: number) =>
-  windows
-    .filter((window) => !past(window.resetsAt, now))
-    .map((window) => ({
-      kind: window.kind,
-      label: window.label ?? null,
-      usedPercent: window.usedPercent,
-      resetsAt: window.resetsAt ?? null,
-    }))
+const shown = (windows: ReadonlyArray<UsageWindow>, now: number) => windows.filter((window) => !past(window.resetsAt, now)).map(viewOf)
+
+/** The windows that have reset since they were read, as last read: said apart, with no figure to rely on until they are read again. */
+const reset = (windows: ReadonlyArray<UsageWindow>, now: number) => windows.filter((window) => past(window.resetsAt, now)).map(viewOf)
 
 type Failure = SqlError.SqlError
 
@@ -592,6 +594,7 @@ export class PlanUsage extends Context.Service<
               const key = paidBy === 'key'
               const noReading = mine?.noReading ?? null
               const windows = shown(key ? [] : (mine?.windows ?? []), now)
+              const resetWindows = reset(key ? [] : (mine?.windows ?? []), now)
               // No window and no fault yet, where there is a reading to have, is a fault too: the agent has not been read yet.
               const fault =
                 mine?.fault ??
@@ -608,6 +611,7 @@ export class PlanUsage extends Context.Service<
                 observedAt: mine === undefined ? null : readAt(mine, now),
                 plan: mine?.plan ?? null,
                 windows,
+                resetWindows,
                 fault,
                 noReading,
                 // Read with windows, every one of which has reset since: said so, as no window shown isn't the same as none read.
