@@ -706,7 +706,17 @@ export class TaskActions extends Context.Service<
                 ? Effect.fail(error)
                 : Effect.andThen(
                     Effect.logWarning('A task action did not succeed', error),
-                    Effect.fail(new ToolRefused({ message: 'Althar could not do that. Try again, or tell the person.' })),
+                    Effect.fail(
+                      new ToolRefused({
+                        message: (() => {
+                          // What failed, in the window's words; a failure with none of its own is named by its kind.
+                          const said = words(error, (agentId) => agentId)
+                          return said.reason === 'Unknown' || said.message.startsWith("Althar's runtime couldn't do that")
+                            ? `Althar could not do that${said.reason === 'Unknown' ? '' : ` (${said.reason})`}, and what it did is in its log. Try again, or tell the person.`
+                            : `Nothing was done: ${said.message}`
+                        })(),
+                      }),
+                    ),
                   ),
             ),
           ),
@@ -816,11 +826,16 @@ export class TaskActions extends Context.Service<
               if (info.step === 'publish') return yield* cant('Althar opens the pull request itself: try it again instead.')
               if (asked.agent === undefined) return yield* cant('name the agent to hand it to (agent), and its model where it has several.')
               // The agent by its name or its id, and its model as list_models writes it or by the agent's id: refused here, not on a card.
-              const handed = yield* stepOf(access.projectId, {
-                agent: asked.agent,
-                ...(asked.model === undefined ? {} : { model: asked.model }),
-                ...(asked.effort === undefined ? {} : { effort: asked.effort }),
-              })
+              const handed = yield* stepOf(
+                access.projectId,
+                {
+                  agent: asked.agent,
+                  ...(asked.model === undefined ? {} : { model: asked.model }),
+                  ...(asked.effort === undefined ? {} : { effort: asked.effort }),
+                },
+                undefined,
+                true,
+              )
               return yield* on('hand_on', {
                 kind: 'retry',
                 agentId: handed.agentId,

@@ -63,8 +63,9 @@ export const effortOf = (
  * a model as list_models writes it, taken the best way there is; or an
  * agent, on its own id for a model or on its own default. An agent may be
  * named by its id or its name, and its model by its name or its id there.
+ * With keepAgent, the agent is the one asked for, never another that offers the same model.
  */
-export const stepOf = (projectId: string, pick: typeof StepPick.Type, use?: string) =>
+export const stepOf = (projectId: string, pick: typeof StepPick.Type, use?: string, keepAgent = false) =>
   Effect.gen(function* () {
     const agents = yield* Agents
     // On the way it goes, at an effort that model takes there; named as the plan names it.
@@ -109,10 +110,11 @@ export const stepOf = (projectId: string, pick: typeof StepPick.Type, use?: stri
     }
     // Named the old way, by agent, a model the person switched off is still off: the same model another way, by the name people know it by, or none.
     if (model !== undefined && (yield* blockedModelsOf(agentId)).includes(model)) {
-      const elsewhere = known === undefined ? null : routeTo(yield* usableModels(projectId), knownModelName(agent, known))
+      // Where the agent is the one asked for (a step handed on), the model isn't taken to another.
+      const elsewhere = known === undefined || keepAgent ? null : routeTo(yield* usableModels(projectId), knownModelName(agent, known))
       if (elsewhere !== null) return yield* on(elsewhere, model)
       return yield* new ToolRefused({
-        message: `The person switched ${model} off. ${describeModels(yield* usableModels(projectId), yield* Clock.currentTimeMillis, use)}`,
+        message: `The person switched ${model} off for ${agent.name}. ${describeModels(yield* usableModels(projectId), yield* Clock.currentTimeMillis, use)}`,
       })
     }
     // Its efforts as the agent offers that model; on its own default, they aren't known, so none is taken.

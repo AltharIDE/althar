@@ -423,13 +423,26 @@ describe('every tool that names an agent or a model', () => {
       )
       // start_task drafts nothing for one that doesn't resolve, and starts the one that does by name.
       assert.match(yield* callTool(access, 'start_task', { title: 'Quick one', lead: { agent: 'codex', model: 'GPT-9' } }), unknown)
-      assert.match(
-        yield* callTool(access, 'start_task', { title: 'Quick two', lead: { agent: 'Fake codex', model: 'Large' } }),
-        /^(?!.*doesn't offer)/s,
-      )
+      for (const [title, lead] of [
+        ['Quick two', { agent: 'Fake codex', model: 'Large' }],
+        ['Quick three', { agent: 'codex', model: 'large' }],
+      ] as const) {
+        assert.match(yield* callTool(access, 'start_task', { title, lead }), /^Started /)
+      }
+      for (const slug of ['quick-two', 'quick-three']) assert.deepStrictEqual(yield* planned(slug), [['codex', 'large']])
       // change_lead and review_pull_request: the same.
       yield* callTool(access, 'draft_task', { title: 'Hand me on' })
-      assert.match(yield* callTool(access, 'change_lead', { task: 'hand-me-on', lead: { agent: 'codex', model: 'GPT-9' } }), unknown)
+      assert.match(yield* callTool(access, 'change_lead', { task: 'quick-two', lead: { agent: 'codex', model: 'GPT-9' } }), unknown)
+      // By name, and by id: what the task's lead then is, is kept as the id.
+      for (const [agent, model] of [
+        ['Fake codex', 'Small'],
+        ['codex', 'large'],
+      ] as const) {
+        assert.match(
+          yield* callTool(access, 'change_lead', { task: 'quick-two', lead: { agent, model } }),
+          new RegExp(`^quick-two: changed the lead to ${model === 'Small' ? 'Small' : 'Large'}`),
+        )
+      }
       assert.match(
         yield* callTool(access, 'review_pull_request', {
           pull_request: 'https://github.com/a/b/pull/1',
