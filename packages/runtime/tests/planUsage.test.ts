@@ -606,7 +606,7 @@ describe('a window as it resets, and what a restart reads back', () => {
       assert.deepStrictEqual(after.windows, [{ kind: 'weekly', label: null, usedPercent: 46, resetsAt: RESET }])
       // The five hours reset: not a window to rely on, but said apart as last read, so it is not simply gone.
       assert.deepStrictEqual(
-        after.resetWindows.map((window) => [window.kind, window.usedPercent]),
+        (after.resetWindows ?? []).map((window) => [window.kind, window.usedPercent]),
         [['five_hour', 95]],
       )
       assert.deepStrictEqual(yield* room(), Option.some(['weekly', 54]))
@@ -630,7 +630,7 @@ describe('a window as it resets, and what a restart reads back', () => {
       const own = (id: string) => view.accounts.find((account) => account.accountId === id)!
       assert.deepStrictEqual(
         [
-          own(first!.id).resetWindows.map((window) => [window.kind, window.usedPercent]),
+          (own(first!.id).resetWindows ?? []).map((window) => [window.kind, window.usedPercent]),
           own(first!.id).windows.map((window) => window.kind),
         ],
         [[['five_hour', 95]], ['weekly']],
@@ -662,7 +662,10 @@ describe('a window as it resets, and what a restart reads back', () => {
           [view.windows, view.resetSince, view.observedAt, view.fault?.message],
           [[], true, new Date(0).toISOString(), 'The provider asked Althar to wait before reading again.'],
         )
-        assert.deepStrictEqual([before.resetWindows.length, view.resetWindows.map((window) => window.kind)], [0, ['five_hour', 'weekly']])
+        assert.deepStrictEqual(
+          [(before.resetWindows ?? []).length, (view.resetWindows ?? []).map((window) => window.kind)],
+          [0, ['five_hour', 'weekly']],
+        )
       }).pipe(Effect.provide(layer))
     }),
   )
