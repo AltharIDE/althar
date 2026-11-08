@@ -1,6 +1,6 @@
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Instance } from '../src/Instance'
@@ -172,6 +172,34 @@ describe('a lead waiting on the person', () => {
       assert.include(
         said.map((notice) => notice.title),
         'The review stopped: skipped, with what it found left open.',
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('says the review stopped when the person interrupts it, rather than vanishing', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* planned('Build it. [lead:finish] [lead:edit] [review:wait]')
+      yield* until(
+        Effect.map(attempts(task.taskId), (rows) => rows.filter((row) => row.step === 'review')),
+        (rows) => rows.length === 1,
+      )
+      const [thread] = yield* until(
+        sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${task.taskId} AND kind = 'step' AND node_key = 'review'`,
+        (rows) => rows.length === 1,
+      )
+      const sessions = yield* Sessions
+      yield* until(
+        Effect.map(sessions.running(thread?.id ?? ''), (running) => Option.exists(running, (one) => one.turnRunning)),
+        (running) => running,
+      )
+      yield* sessions.interrupt(thread?.id ?? '')
+      const said = yield* until(notices(task.threadId), (all) =>
+        all.some((notice) => notice.title?.includes('The review stopped: you interrupted it') === true),
+      )
+      assert.include(
+        said.map((notice) => notice.title),
+        'The review stopped: you interrupted it. It waits for you to start it again.',
       )
     }).pipe(Effect.provide(withQueries())),
   )
