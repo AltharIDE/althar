@@ -82,6 +82,7 @@ import { Instance } from './Instance'
 import { Launches } from './Launches'
 import type { ChangeTarget } from '@althar/domain'
 import { commitOf, commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRemotes, PUSHED, branchRemoteIn } from './git'
+import { reachedRemote } from './sshHosts'
 import { commandIn, shortCommand } from './rules'
 import { reviewBriefOf } from './Reviews'
 import { Sessions } from './Sessions'
@@ -1372,7 +1373,9 @@ export class Queries extends Context.Service<
             branch,
             pushed: there !== null || pushed !== null,
             ahead,
-            newPullRequest: url === undefined ? null : newPullRequestLink(url, branch, base, HOSTED),
+            // An SSH alias of a known host (github.com-work) opens its page on that host.
+            newPullRequest:
+              url === undefined ? null : newPullRequestLink(yield* reachedRemote(url, (host) => HOSTED.has(host)), branch, base, HOSTED),
           }
         }).pipe(Effect.orElseSucceed(() => null))
 

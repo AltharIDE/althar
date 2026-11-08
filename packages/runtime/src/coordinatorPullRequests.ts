@@ -81,12 +81,15 @@ export const placeOf = (projectId: string, asked: string) =>
       if (found.ref.kind !== 'change' || found.host === undefined) return yield* refused('That link isn’t a pull request.')
       const ref = found.ref
       const same = (path: ReadonlyArray<string>) => path.join('/').toLowerCase() === ref.path.join('/').toLowerCase()
-      const inProject = bindings.some((binding) =>
-        Option.getOrElse(decodeRemotes(binding.remotes), () => []).some((remote) => {
-          const place = parseRemote(remote)
-          return place !== null && place.host === ref.host && same(place.path)
-        }),
+      // Each remote with its host as Althar knows it: an SSH alias of GitHub's is on github.com.
+      const remotes = yield* Effect.forEach(
+        bindings.flatMap((binding) => Option.getOrElse(decodeRemotes(binding.remotes), () => [])),
+        connections.reached,
       )
+      const inProject = remotes.some((remote) => {
+        const place = parseRemote(remote)
+        return place !== null && place.host === ref.host && same(place.path)
+      })
       if (!inProject) return yield* refused(`That pull request is on ${ref.path.join('/')}, which isn’t one of the project’s repositories.`)
       const repository = yield* viaHost(found.host.repository(ref.path))
       return { host: found.host, repository, number: ref.number }

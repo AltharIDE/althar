@@ -1260,7 +1260,7 @@ export class Runs extends Context.Service<
             // Only a task that had a pull request, in any of its repositories: one whose project leaves its work on its branch, or
             // on no host, stays so.
             const had = (yield* changes.ofTask(run.taskId).pipe(Effect.orElseSucceed(() => []))).length > 0
-            const end = had ? yield* changes.endFor(run.projectId, run.taskId).pipe(Effect.orElseSucceed(() => null)) : null
+            const end = had ? yield* changes.endFor(run.projectId, run.taskId, true).pipe(Effect.orElseSucceed(() => null)) : null
             // Nor a round its lead said only answered the person: what it committed in passing waits for them (ADR-034).
             const [last] = yield* sql<{ answered: number | null }>`
               SELECT json_extract(a.output, '$.answered') AS answered FROM node_attempts a JOIN nodes n ON n.id = a.node_id
@@ -1293,7 +1293,8 @@ export class Runs extends Context.Service<
           }
           // The plan's ending, else the project's, as when a plan is made: one made while the host wasn't connected opens its pull request if it is by now.
           // A quick task's stays on this Mac, and says nothing of a host.
-          const end = ending.end ?? (ending.here ? null : yield* changes.endFor(run.projectId, run.taskId))
+          // Its repositories' remotes as git has them now: one added since the repository was is where it ends.
+          const end = ending.end ?? (ending.here ? null : yield* changes.endFor(run.projectId, run.taskId, true))
           if (end === null) {
             if (!ending.here) yield* onBranch(run)
             return yield* finish(run, 'succeeded')

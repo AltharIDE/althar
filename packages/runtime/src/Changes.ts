@@ -145,6 +145,7 @@ import { LeftBehind } from './LeftBehind'
 import { spanOf } from './stallWatch'
 import { addItem, updateItem } from './threads'
 import { readReviewed, reviewOf } from './reviewing'
+import { RECENT, refreshRemotes } from './recordedRemotes'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
 import { summarize, words } from './words'
 import { BETWEEN_AGENTS_MS, betweenAgents } from './needsYou'
@@ -901,9 +902,11 @@ export class Changes extends Context.Service<
      * once, when the plan is made: as the project's rules say, else a draft
      * pull request where its repository's host is connected, else on its
      * branch. A project that wants a pull request where no host Althar
-     * knows is named ends on its branch, as it always has.
+     * knows is named ends on its branch, as it always has. `fresh` reads
+     * the repositories' remotes from git first, and waits for them: where a
+     * run's ending is decided, never where a screen reads it.
      */
-    endFor(projectId: string, taskId?: string): Effect.Effect<'draft' | 'ready' | 'none' | null, unknown>
+    endFor(projectId: string, taskId?: string, fresh?: boolean): Effect.Effect<'draft' | 'ready' | 'none' | null, unknown>
     /**
      * The code host the project's repositories are on, and whether Althar is
      * connected to it: the first connected, else the first Althar knows; null
@@ -1157,6 +1160,9 @@ export class Changes extends Context.Service<
       const hostsFor = (projectId: string, taskId?: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // Its repositories' remotes read again from their clones, apart: one added while Althar runs is found on the next read, and a card
+          // read never waits on git. Publishing and a run's ending read them first, and wait.
+          yield* Effect.forkIn(provide(refreshRemotes(instance.deviceId, taskId === undefined ? { projectId } : { taskId }, RECENT)), scope)
           const bindings =
             taskId === undefined
               ? yield* sql<{ remotes: string }>`
@@ -1204,6 +1210,8 @@ export class Changes extends Context.Service<
       const publish = (input: PublishInput): Effect.Effect<Published, unknown, Store> =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // Its repositories' remotes as their clones have them now: one added since the repository was, too.
+          yield* refreshRemotes(instance.deviceId, { taskId: input.taskId })
           const tasks = yield* sql<PublishRow>`
             SELECT k.title, b.display_name AS name, b.slug, t.id AS thread_id, w.id AS workspace_id, w.path, w.branch, w.base_commit, w.base_ref, b.id AS binding_id,
               w.branched_at IS NOT NULL AS branched, b.remote_fingerprints AS remotes, coalesce(w.toward, b.default_base_ref) AS default_base, b.change_target,
@@ -6347,6 +6355,9 @@ export class Changes extends Context.Service<
       )
       yield* Effect.forkScoped(afterOpen(startup('settled-pull-requests', readSettled)))
 
+      // Each repository's remotes as its clone has them, once a launch: a remote added since is known.
+      yield* Effect.forkScoped(afterOpen(startup('repository-remotes', provide(refreshRemotes(instance.deviceId, 'all')))))
+
       // A review after a merge that didn't start is tried again, at once and with each listening turn, until it does.
       yield* Effect.forkScoped(afterOpen(startup('reviews-after-merge', fastLane.retryPendingReviews())))
 
@@ -7365,12 +7376,13 @@ export class Changes extends Context.Service<
             Effect.sync(() => wakeNow(taskId)),
           ),
         // Worked out from the repositories the task changes, where it says which: one on a connected host opens a draft.
-        endFor: (projectId, taskId) =>
+        endFor: (projectId, taskId, fresh) =>
           provide(
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
               const [project] = yield* sql<{ id: ProjectId }>`SELECT id FROM projects WHERE id = ${projectId}`
               if (project === undefined) return null
+              if (fresh === true) yield* refreshRemotes(instance.deviceId, taskId === undefined ? { projectId } : { taskId })
               const hosts = yield* hostsFor(projectId, taskId)
               const wanted = (yield* (yield* Policies).current(project.id)).rules.end
               if (wanted === 'none') return wanted

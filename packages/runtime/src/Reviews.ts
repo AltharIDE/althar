@@ -396,8 +396,10 @@ export class Reviews extends Context.Service<
             if (found.ref.kind !== 'change' || found.host === undefined) return yield* refused('That link isn’t a pull request.')
             const ref = found.ref
             const same = (path: ReadonlyArray<string>) => path.join('/').toLowerCase() === ref.path.join('/').toLowerCase()
-            const binding = bindings.find((one) =>
-              remotesOf(one).some((remote) => {
+            // Each remote with its host as Althar knows it: an SSH alias of GitHub's is on github.com.
+            const reached = yield* Effect.forEach(bindings, (one) => Effect.forEach(remotesOf(one), connections.reached))
+            const binding = bindings.find((_, index) =>
+              (reached[index] ?? []).some((remote) => {
                 const place = parseRemote(remote)
                 return place !== null && place.host === ref.host && same(place.path)
               }),
