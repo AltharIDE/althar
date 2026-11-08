@@ -299,8 +299,61 @@ meant for every comment made beside a conversation.
 **Not built yet:** comments on a line of the diff (DEV-175), which would use
 the same gathering.
 
-Agents don't drive these pages. A lead's own `screenshot` tool is separate.
-Any tool for them would go through the main process's page module.
+### Leads and the coordinator drive the page
+
+The lead of a task, and the coordinator for its project, read and drive the
+page beside their conversation: the very page the person looks at, in its
+owner's own session. This overturns DEV-83's "agents driving this browser: not
+now". They do it **without asking**, even though the page's session may be
+signed in to things (a dev app, a company SSO): the notes allow everything by
+default, and only what can't be undone asks. A lead's own `screenshot` tool
+stays, for a page nobody has open: it draws a URL headless in a fresh session.
+
+- **The tools** are one more part of the shared pool (ADR-097), served to both
+  roles: `page_state`, `page_open`, `page_move`, `page_viewport`,
+  `page_snapshot`, `page_screenshot`, `page_logs`, `page_click`, `page_hover`,
+  `page_type`, `page_press`, `page_scroll`, `page_select`, `page_wait` and
+  `page_evaluate`. A review's lead and a reviewer don't have them.
+- **Whose page** is never an argument. The runtime reads it from the session:
+  a lead reaches its task's page (`persist:task-<id>`), the coordinator its
+  project's (`persist:project-<id>`), and nothing else.
+- **The path** is the runtime's tool, then the host's `page` option, then the
+  utility process's own channel to the main process, then `pages.ts`. The main
+  process answers only the runtime it started, checks every call as it checks
+  anything crossing a process, and drives only through `pages.ts`'s own
+  functions, as the window does. The window has no channel for it and a page
+  has no preload, so nothing but Althar's own processes can reach it.
+- **Read.** `page_state` says what is open (address, title, viewport or
+  device, whether it is shown beside the conversation, in a tab, waiting out of
+  sight, or asleep). `page_snapshot` is the page's accessibility tree with a
+  reference on each element (`e12`), built by the overlay's driver in the
+  page's isolated world; a reference holds while its element stays on the page.
+  `page_screenshot` is the page at its current viewport as it is drawn, the
+  same pixels the person sees, its whole length, or one element. `page_logs`
+  gives console messages and failed requests since a mark.
+- **Drive.** Navigate, back, forward, reload; click, type, press keys, hover,
+  scroll and select, by a reference or a selector; wait for words or an
+  element; set the viewport to the bar's devices; evaluate script in an
+  isolated world of the page (its DOM, none of its scripts' variables), apart
+  from the overlay's and never Althar's. Clicks, keys and text go in as real
+  input through the debugger, so the page sees what it would from a person,
+  and the lead never takes the keyboard from the window.
+- **Open and wake.** `page_open` at an address opens a page beside the
+  conversation where none is open, as Run's card would, and wakes one that
+  went to sleep. The element words are the comment's (`describe`, the
+  selector and label the overlay already produces).
+- **Every guard holds.** Only `http:` and `https:` load; a sign-in to Claude,
+  GitHub, GitLab or Linear goes to the person's browser; no permissions;
+  downloads refused. What a guard refuses, the tool tells the lead in words,
+  whether the lead asked for it or a click led there.
+- **The person sees it, and wins.** While a lead acts, the element is outlined
+  and a quiet line under the bar says who is at work there. A click, key or
+  scroll the person makes in the page stops the lead's action in flight: the
+  page counts the presses, keys and wheel turns it has from real input, and
+  the lead's own are known, so any more is the person.
+- **When it isn't there,** the tool says so: no window of Althar's open,
+  Althar quitting, nothing open beside the conversation, a task that is done.
+  A call that only asks what is open (`page_state`) still answers.
 
 ## The step graph
 
