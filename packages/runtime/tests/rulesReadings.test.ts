@@ -350,6 +350,41 @@ describe('what a reader may run', () => {
   })
 })
 
+describe('a reader held in its own folder', () => {
+  const cwd = '/work/meridian/.coordinator'
+  const contained = (line: string) => decideReader(command(line), { cwd, trusted: true, contained: true })
+  const reads = { allowed: ['/work/meridian/.coordinator/secrets/notes'], denied: ['/work/meridian/.coordinator/secrets'] }
+  const reading = (path: string, kind: 'read' | 'search' = 'read', raw: Record<string, unknown> = {}) =>
+    decideReader(
+      { ...command(''), kind, paths: [path], rawInput: { path, ...raw } },
+      { cwd, trusted: true, reads },
+    )
+
+  it('fetches only its own remote, plainly: its sandbox keeps the fetch in its copy', () => {
+    for (const line of ['git fetch', 'git fetch origin', 'git fetch --prune origin main'])
+      assert.strictEqual(contained(line).verdict, 'allow', line)
+    for (const line of ['git fetch --upload-pack=sh origin', 'git fetch upstream', 'git fetch origin main:elsewhere'])
+      assert.strictEqual(contained(line).verdict, 'deny', line)
+  })
+
+  it('reads and searches only what it is given, but for what is given back', () => {
+    assert.strictEqual(reading('/work/meridian/.coordinator/notes/a.md').verdict, 'allow')
+    assert.strictEqual(reading('/work/meridian/.coordinator/secrets/key').verdict, 'deny')
+    // Given back inside a place held from it, it reads there too.
+    assert.strictEqual(reading('/work/meridian/.coordinator/secrets/notes/a.md').verdict, 'allow')
+    // A `.env` outside its folder is held from it, as it is from any reader.
+    assert.strictEqual(reading('/work/meridian/other/.env').verdict, 'deny')
+    // A search from above a held place reaches into it, and one from a folder that holds it does too.
+    assert.strictEqual(reading('/work/meridian', 'search').verdict, 'deny')
+    assert.strictEqual(reading('/work/meridian/.coordinator', 'search').verdict, 'deny')
+    // One from a folder that doesn't hold it, or a given-back part, does not.
+    assert.strictEqual(reading('/work/meridian/.coordinator/notes', 'search').verdict, 'allow')
+    assert.strictEqual(reading('/work/meridian/.coordinator/secrets/notes', 'search').verdict, 'allow')
+    // A pattern that starts outside the folder is a search there.
+    assert.strictEqual(reading(cwd, 'search', { pattern: '/work/meridian/.coordinator/secrets/*' }).verdict, 'deny')
+  })
+})
+
 describe('a cmd or PowerShell command on Windows', () => {
   const home = 'C:\\Users\\alice'
   const windows: RuleContext = {
