@@ -1,18 +1,33 @@
-import { Out } from '../shared/Out'
+import { useEffect, useState } from 'react'
+
 import { LINKS } from '../content/facts'
 import { Footer } from '../shared/footer/Footer'
 import { Nav } from '../shared/Nav'
 import { Night, night as n, Readout, Window } from '../shared/night/Night'
+import { Out } from '../shared/Out'
 import s from './OfficeHours.module.css'
 
 /*
  * Office hours: twenty minutes on a call with Balazs, booked on Cal.com.
- * The night window the other pages open on, the call's length, price and
- * medium along its top, the invitation and the booking in it; under it, on
- * paper, the few things worth knowing before booking. Bugs go to the
- * issues, by a quiet link beside the booking, so a call doesn't become
- * triage.
+ * The night window the other pages open on, with the call's length, the
+ * time where Balazs is and the price along its top, and the invitation and
+ * the booking in it. Bugs go to the issues, by a quiet link beside the
+ * booking, so a call doesn't become triage. Under it, on paper, how the
+ * twenty minutes usually go, as a rail, beside the few things worth knowing.
  */
+
+/** Where Balazs is: his clock in the window's readout. */
+const ZONE = 'Europe/London'
+
+const MINUTES = [
+  { at: '0′', name: 'Hello', note: 'Who you are, and what you’re building.' },
+  {
+    at: '5′',
+    name: 'Your setup, or your question',
+    note: 'Althar on your machine with your agents signed in, or whatever’s on your mind.',
+  },
+  { at: '18′', name: 'What to try next', note: 'Something you can do on your own the same day.' },
+]
 
 const GOOD_TO_KNOW = [
   'We meet on video.',
@@ -21,7 +36,21 @@ const GOOD_TO_KNOW = [
   'It’s fine to just say hello.',
 ]
 
+/** The time where Balazs is, to the minute; null in the prerender, so the page never shows the build's time. */
+function useTimeThere() {
+  const [time, setTime] = useState<string | null>(null)
+  useEffect(() => {
+    const format = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: ZONE })
+    const tick = () => setTime(format.format(new Date()))
+    tick()
+    const every = window.setInterval(tick, 15_000)
+    return () => window.clearInterval(every)
+  }, [])
+  return time
+}
+
 export function OfficeHours() {
+  const time = useTimeThere()
   return (
     <div className={s.page}>
       <Nav />
@@ -32,14 +61,14 @@ export function OfficeHours() {
             className={s.window}
             deck={
               <>
-                <Readout label="Length" href={LINKS.officeHours}>
+                <Readout label="Length" href="#how">
                   <b>20 min</b>
                 </Readout>
-                <Readout label="Price" href={LINKS.officeHours} at="mid">
-                  <b>Free</b>
+                <Readout label="For me, in London" href="#how" at="mid">
+                  <b>{time ?? 'London'}</b>
                 </Readout>
-                <Readout label="On" href="#good-to-know" at="end">
-                  <b>Video</b>
+                <Readout label="Price" href={LINKS.officeHours} at="end">
+                  <b>Free</b>
                 </Readout>
               </>
             }
@@ -54,6 +83,7 @@ export function OfficeHours() {
                 Book a call and we’ll get Althar set up on your machine together, or talk through working with coding agents: your ideas,
                 your thoughts, what frustrates you. It’s free, and I’m not selling anything.
               </p>
+              <p className={s.sign}>Balazs</p>
             </div>
             <div className={s.ways}>
               <a className={s.primary} href={LINKS.officeHours} target="_blank" rel="noopener noreferrer">
@@ -67,16 +97,36 @@ export function OfficeHours() {
           </Window>
         </Night>
 
-        <section id="good-to-know" className={s.sheet} aria-labelledby="good-to-know-h">
-          <h2 id="good-to-know-h" className={s.h2}>
-            Good to know
-          </h2>
-          <ul className={s.list}>
-            {GOOD_TO_KNOW.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-        </section>
+        <div className={s.sheet}>
+          <section id="how" className={s.part} aria-labelledby="how-h">
+            <h2 id="how-h" className={s.h2}>
+              How the twenty minutes go
+            </h2>
+            <ol className={s.rail}>
+              {MINUTES.map((m) => (
+                <li key={m.at}>
+                  <span className={s.at}>{m.at}</span>
+                  <span className={s.dot} aria-hidden="true" />
+                  <span className={s.stop}>
+                    <b>{m.name}</b>
+                    <span>{m.note}</span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </section>
+
+          <section id="good-to-know" className={s.part} aria-labelledby="good-to-know-h">
+            <h2 id="good-to-know-h" className={s.h2}>
+              Good to know
+            </h2>
+            <ul className={s.list}>
+              {GOOD_TO_KNOW.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </section>
+        </div>
       </main>
 
       <Footer />
