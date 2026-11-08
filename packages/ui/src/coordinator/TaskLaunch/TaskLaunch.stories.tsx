@@ -8,6 +8,7 @@ import { CODEX, effortFor, model, OPUS, useModelPrefs } from '../../fixtures/mod
 import { ModelPick } from '../../composer/ModelPick/ModelPick'
 import { States } from '../../storybook/States'
 import { threadDecorator } from '../../storybook/ThreadFrame'
+import { Thread } from '../../thread/Thread/Thread'
 import { Turn } from '../../thread/Turn/Turn'
 import { You } from '../../thread/You/You'
 import { TaskEnd, WorksIn } from '../../foundations/vocabulary'
@@ -366,7 +367,7 @@ const PLAN_ASKED: LaunchStep[] = [
 /** Where a plan comes from: what you asked, the coordinator's answer, and the plan under it. */
 export const InTheConversation: Story = {
   render: () => (
-    <>
+    <Thread label="Conversation">
       <You at="11:01">EU customers are seeing the wrong VAT rate on their invoice PDFs since Monday. Can you fix it?</You>
       <Turn voice="Coordinator" at="11:01">
         One task. Opus 5 fixes the rate lookup and adds a test for each EU country, and Codex reviews it.
@@ -377,7 +378,7 @@ export const InTheConversation: Story = {
         title="Fix the VAT rate on EU invoice PDFs"
         estimate="About 25 min · about $1 on your subscriptions"
       />
-    </>
+    </Thread>
   ),
 }
 

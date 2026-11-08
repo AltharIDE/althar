@@ -27,8 +27,9 @@ export const SCREENSHOTS: readonly Screenshot[] = [
   {
     file: 'project-home',
     story: 'screens-projecthome--busy',
-    width: 1440,
-    height: 900,
+    /* Wider than the others, so the conversation and the board each have room. */
+    width: 1680,
+    height: 1010,
     shows: "A project's home: the coordinator's conversation, with its plan, beside the board",
   },
   {

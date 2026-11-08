@@ -13,13 +13,13 @@
   min-height: 0;
 }
 
-/* The conversation, raised off the page, at the width it opens at. */
+/* The conversation, raised off the page: the width it opens at, drawn a little wider in a wide window, as a person would. */
 .talk {
   --face-surface: var(--n-1);
   display: flex;
   flex: none;
   flex-direction: column;
-  width: 560px;
+  width: clamp(560px, 38vw, 660px);
   min-width: 0;
   background: var(--n-1);
   border-right: 1px solid var(--line);
