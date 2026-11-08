@@ -902,9 +902,11 @@ export class Changes extends Context.Service<
      * once, when the plan is made: as the project's rules say, else a draft
      * pull request where its repository's host is connected, else on its
      * branch. A project that wants a pull request where no host Althar
-     * knows is named ends on its branch, as it always has.
+     * knows is named ends on its branch, as it always has. `fresh` reads
+     * the repositories' remotes from git first, and waits for them: where a
+     * run's ending is decided, never where a screen reads it.
      */
-    endFor(projectId: string, taskId?: string): Effect.Effect<'draft' | 'ready' | 'none' | null, unknown>
+    endFor(projectId: string, taskId?: string, fresh?: boolean): Effect.Effect<'draft' | 'ready' | 'none' | null, unknown>
     /**
      * The code host the project's repositories are on, and whether Althar is
      * connected to it: the first connected, else the first Althar knows; null
@@ -1158,8 +1160,9 @@ export class Changes extends Context.Service<
       const hostsFor = (projectId: string, taskId?: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          // Its repositories' remotes as their clones have them: one added while Althar runs is found here too.
-          yield* refreshRemotes(instance.deviceId, taskId === undefined ? { projectId } : { taskId }, RECENT)
+          // Its repositories' remotes read again from their clones, apart: one added while Althar runs is found on the next read, and a card
+          // read never waits on git. Publishing and a run's ending read them first, and wait.
+          yield* Effect.forkIn(provide(refreshRemotes(instance.deviceId, taskId === undefined ? { projectId } : { taskId }, RECENT)), scope)
           const bindings =
             taskId === undefined
               ? yield* sql<{ remotes: string }>`
@@ -7373,13 +7376,13 @@ export class Changes extends Context.Service<
             Effect.sync(() => wakeNow(taskId)),
           ),
         // Worked out from the repositories the task changes, where it says which: one on a connected host opens a draft.
-        endFor: (projectId, taskId) =>
+        endFor: (projectId, taskId, fresh) =>
           provide(
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
               const [project] = yield* sql<{ id: ProjectId }>`SELECT id FROM projects WHERE id = ${projectId}`
               if (project === undefined) return null
-              yield* refreshRemotes(instance.deviceId, taskId === undefined ? { projectId } : { taskId })
+              if (fresh === true) yield* refreshRemotes(instance.deviceId, taskId === undefined ? { projectId } : { taskId })
               const hosts = yield* hostsFor(projectId, taskId)
               const wanted = (yield* (yield* Policies).current(project.id)).rules.end
               if (wanted === 'none') return wanted

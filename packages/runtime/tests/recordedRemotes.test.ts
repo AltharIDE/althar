@@ -109,15 +109,16 @@ describe('where a repository’s pull request opens', () => {
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
       assert.deepStrictEqual(yield* recorded(project.projectId), [])
       assert.isNull(yield* changes.endFor(project.projectId))
+      // The read that ask started, apart, is done before the remote is added: a screen's reads leave it be for a while after.
+      yield* Effect.sleep('500 millis')
       bare = withOrigin(working, `${HOST}/meridian/api.git`)
-      // Its ending is worked out from the remote it has now.
-      assert.strictEqual(yield* changes.endFor(project.projectId), 'draft')
-      assert.deepStrictEqual(yield* recorded(project.projectId), [`${HOST}/meridian/api.git`])
-      assert.deepInclude(yield* changes.hostFor(project.projectId), { name: 'GitHub', connected: true })
-      // And a task's work opens its pull request there.
+      // A task's run, as it ends, reads the remote it has now, and opens its pull request there.
       yield* ask(working, PLAN)
       yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready')
       assert.strictEqual(github.changes[0]?.state, 'open')
+      assert.deepStrictEqual(yield* recorded(project.projectId), [`${HOST}/meridian/api.git`])
+      assert.deepInclude(yield* changes.hostFor(project.projectId), { name: 'GitHub', connected: true })
+      assert.strictEqual(yield* changes.endFor(project.projectId, undefined, true), 'draft')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
@@ -130,7 +131,9 @@ describe('where a repository’s pull request opens', () => {
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
       assert.deepStrictEqual(yield* recorded(project.projectId), [])
       withOrigin(working, `${HOST}/meridian/api.git`)
-      assert.deepInclude(yield* changes.hostFor(project.projectId), { name: 'GitHub', connected: true })
+      // Asked, its remotes are read again apart from the answer, which never waits on git: a later ask finds the host.
+      const host = yield* until(changes.hostFor(project.projectId), (found) => found !== null)
+      assert.deepInclude(host, { name: 'GitHub', connected: true })
       assert.deepStrictEqual(yield* recorded(project.projectId), [`${HOST}/meridian/api.git`])
     }).pipe(Effect.provide(runtimeWith({ github: makeFakeService() })))
   })
