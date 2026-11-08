@@ -4589,6 +4589,8 @@ export class Changes extends Context.Service<
             const base = worktree.baseCommit ?? worktree.baseRef
             // Where git can't say what it started from, it isn't known to be empty.
             if (base === null) return false
+            // Anything it changed and didn't commit is work, whatever its branch holds.
+            if ((yield* uncommittedFiles(worktree.path)).some((file) => !pictures(worktree.path, file))) return false
             // Its branch is in the default branch already, so it has nothing of its own, whatever it started from.
             const head = yield* commitOf(worktree.path, 'HEAD').pipe(Effect.orElseSucceed(() => ''))
             if (head !== '' && worktree.root !== null && worktree.defaultBase !== null) {
@@ -4596,7 +4598,6 @@ export class Changes extends Context.Service<
               if (inDefault.code === 0) continue
             }
             if ((yield* commitsAhead(worktree.path, base)) > 0) return false
-            if ((yield* uncommittedFiles(worktree.path)).some((file) => !pictures(worktree.path, file))) return false
           }
           return true
         })
