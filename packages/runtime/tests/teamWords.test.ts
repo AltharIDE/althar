@@ -27,9 +27,48 @@ describe('what a change of a task’s team says', () => {
     ])
     assert.strictEqual(teamLine(defaultEffort[0]!), 'changed the lead to claude-code/small. It takes over from its next turn.')
 
+    // Another agent's model is the lead changed, not only its effort.
+    assert.deepStrictEqual(
+      teamChanges(
+        {
+          lead: {
+            step: step({ agentId: 'codex', model: 'large' }),
+            was: step({ agentId: 'claude-code', model: 'large' }),
+            when: 'now',
+          },
+        },
+        named,
+      ),
+      [{ verb: 'changed', thing: 'the lead to codex/large' }],
+    )
+    // The effort it had, taken away: its own default.
+    assert.deepStrictEqual(teamChanges({ lead: { step: step({ effort: null }), was: step({ effort: 'high' }), when: 'now' } }, named), [
+      { verb: 'changed', thing: 'the lead’s effort to its default' },
+    ])
+    // A model the agent chooses, where one side had none.
+    assert.deepStrictEqual(teamChanges({ lead: { step: step({ model: null }), was: step({ model: 'large' }), when: 'now' } }, named), [
+      { verb: 'changed', thing: 'the lead to claude-code/own' },
+    ])
+    assert.deepStrictEqual(teamChanges({ lead: { step: step({ model: 'large' }), was: step({ model: null }), when: 'now' } }, named), [
+      { verb: 'changed', thing: 'the lead to claude-code/large' },
+    ])
     assert.deepStrictEqual(teamChanges({ review: { step: null, was: step({ key: 'review' }), when: 'now' } }, named), [
       { verb: 'removed', thing: 'the review' },
     ])
+    // A review changed now, with no next round to wait for.
+    assert.deepStrictEqual(
+      teamChanges(
+        {
+          review: {
+            step: step({ key: 'review', model: 'small' }),
+            was: step({ key: 'review', model: 'large' }),
+            when: 'now',
+          },
+        },
+        named,
+      ),
+      [{ verb: 'changed', thing: 'the review to claude-code/small' }],
+    )
 
     const nextRound = teamChanges(
       { review: { step: step({ key: 'review', model: 'small' }), was: step({ key: 'review' }), when: 'next_round' } },

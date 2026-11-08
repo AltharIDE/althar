@@ -9,6 +9,8 @@ describe('who makes a model', () => {
     // The agent's own maker, for a model the list doesn't know.
     assert.strictEqual(makerOf(null, 'claude-code'), 'Anthropic')
     assert.strictEqual(makerOf(null, 'codex'), 'OpenAI')
+    // An agent with no maker of its own and no model to name has none.
+    assert.strictEqual(makerOf(null, 'opencode'), null)
     // A model's name, where its agent has no maker of its own.
     for (const [id, maker] of [
       ['claude-sonnet-5', 'Anthropic'],
