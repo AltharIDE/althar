@@ -10,9 +10,9 @@ import { fakeClient } from './fixtures'
 import { withServices } from './render'
 
 /*
- * How long work goes on alone, and what the rules of a new project start
- * with: two sections of Settings, each choice kept at once and said where it
- * couldn't be.
+ * Settings › Tasks: how long work goes on alone, and what the rules of a new
+ * project start with, each choice kept at once and said where it couldn't be;
+ * and where a project's own values differ from what new projects start with.
  */
 
 function Settings({ section: first }: { section: Section }) {
@@ -25,10 +25,10 @@ const choose = async (page: HTMLElement, row: string, option: string) => {
   await userEvent.click(within(document.body).getByRole('option', { name: option }))
 }
 
-describe('plans and reviews', () => {
+describe('every task', () => {
   it('shows today’s values and keeps another choice at once, with the way back to today’s', async () => {
     const { client } = fakeClient()
-    withServices(<Settings section="plans-and-reviews" />, client)
+    withServices(<Settings section="tasks" />, client)
     const page = screen.getByRole('main')
     expect(await within(page).findByRole('combobox', { name: 'Start a plan after' })).toHaveProperty('textContent', '25 seconds')
     expect(within(page).getByRole('combobox', { name: 'Rounds of review' }).textContent).toBe('3 rounds')
@@ -48,7 +48,7 @@ describe('plans and reviews', () => {
 
   it('says a choice couldn’t be kept', async () => {
     const { client } = fakeClient({ setPlansAndReviews: vi.fn(async () => Promise.reject(new Error('disk full'))) })
-    withServices(<Settings section="plans-and-reviews" />, client)
+    withServices(<Settings section="tasks" />, client)
     const page = screen.getByRole('main')
     await within(page).findByRole('combobox', { name: 'Rounds of review' })
     await choose(page, 'Rounds of review', '2 rounds')
@@ -56,32 +56,70 @@ describe('plans and reviews', () => {
   })
 })
 
-describe('new projects', () => {
+describe('new projects start with', () => {
   it('shows what a project starts with and keeps another choice at once', async () => {
     const { client } = fakeClient()
-    withServices(<Settings section="new-projects" />, client)
+    withServices(<Settings section="tasks" />, client)
     const page = screen.getByRole('main')
-    expect((await within(page).findByRole('combobox', { name: 'Permission requests' })).textContent).toBe('Allow, except what you keep')
+    expect((await within(page).findByRole('combobox', { name: 'When a task is done' })).textContent).toBe('Open a draft pull request')
     expect(within(page).getByRole('combobox', { name: 'When an account runs out' }).textContent).toBe(
       'Move to the strongest model with usage left',
     )
-    expect(within(page).getByRole('combobox', { name: 'When a task is done' }).textContent).toBe('Open a draft pull request')
-    await choose(page, 'Permission requests', 'The coordinator decides')
-    expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ permissions: 'coordinator' })
+    expect(within(page).getByRole('switch', { name: 'Push the lead’s commits automatically' }).getAttribute('aria-checked')).toBe('true')
+    expect(within(page).getByRole('switch', { name: 'Post screenshots to pull requests automatically' }).getAttribute('aria-checked')).toBe(
+      'false',
+    )
+    // There is no permission request to choose: Allow everything is the default.
+    expect(within(page).queryByRole('combobox', { name: 'Permission requests' })).toBeNull()
+    expect(within(page).getByText('Changing one here leaves the projects you have as they are.')).toBeTruthy()
     await choose(page, 'When an account runs out', 'Wait for the reset')
     expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ usageLimit: 'wait' })
     await userEvent.click(within(page).getByRole('switch', { name: 'Try an agent’s other accounts first' }))
     expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ rotateAccounts: true })
+    await userEvent.click(within(page).getByRole('switch', { name: 'Post screenshots to pull requests automatically' }))
+    expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ postScreenshots: true })
+    await userEvent.click(within(page).getByRole('switch', { name: 'Move issues along with their tasks' }))
+    expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ moveIssues: false })
     await choose(page, 'When a task is done', 'Push the branch only')
     expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ end: 'none' })
   })
 
   it('says a choice couldn’t be kept', async () => {
     const { client } = fakeClient({ setNewProjectDefaults: vi.fn(async () => Promise.reject(new Error('disk full'))) })
-    withServices(<Settings section="new-projects" />, client)
+    withServices(<Settings section="tasks" />, client)
     const page = screen.getByRole('main')
     await within(page).findByRole('combobox', { name: 'When a task is done' })
     await choose(page, 'When a task is done', 'Open a pull request for review')
     await waitFor(() => expect(within(page).getByRole('alert').textContent).toBe('That couldn’t be kept. Try again.'))
+  })
+
+  it('shows where a project has another value, and brings every project in line in one press', async () => {
+    const { client } = fakeClient({
+      getProjectRules: vi.fn(async (projectId: string) => ({
+        ...(await fakeClient().client.getProjectRules(projectId)),
+        resolveConflicts: true,
+        postScreenshots: true,
+      })),
+    })
+    withServices(<Settings section="tasks" />, client)
+    const page = screen.getByRole('main')
+    const use = await within(page).findByRole('button', { name: 'Use this in every project' })
+    expect(within(page).getByText(/On/, { selector: 'span' })).toBeTruthy()
+    await userEvent.click(use)
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', postScreenshots: false }))
+  })
+
+  it('shows no line for a row where every project agrees', async () => {
+    const { client } = fakeClient({
+      getProjectRules: vi.fn(async (projectId: string) => ({
+        ...(await fakeClient().client.getProjectRules(projectId)),
+        resolveConflicts: true,
+      })),
+    })
+    withServices(<Settings section="tasks" />, client)
+    const page = screen.getByRole('main')
+    await within(page).findByRole('combobox', { name: 'When a task is done' })
+    await waitFor(() => expect(client.getProjectRules).toHaveBeenCalled())
+    expect(within(page).queryByRole('button', { name: 'Use this in every project' })).toBeNull()
   })
 })

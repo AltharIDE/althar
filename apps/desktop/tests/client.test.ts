@@ -356,7 +356,6 @@ describe('the client', () => {
           ApproveSkill: () => Effect.die('unused'),
           CheckSkillUpdates: () => Effect.die('unused'),
           RollBackSkill: () => Effect.die('unused'),
-          SetSkillActive: () => Effect.die('unused'),
           UninstallSkill: () => Effect.die('unused'),
           AnswerCheckout: () => Effect.die('unused'),
           HandOverHeld: () => Effect.die('unused'),

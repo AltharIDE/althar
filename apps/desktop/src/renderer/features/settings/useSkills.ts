@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { InstalledSkill, SkillList, SkillReviewCard, SkillsFound, SkillUpdate } from '@althar/contracts'
-import type { SkillReviewModel, SkillRowModel } from '@althar/ui'
+import type { SkillReviewModel } from '@althar/ui'
 
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
@@ -14,10 +14,10 @@ import { text } from './text'
  * says a skill changed, in this window or another; and the one review open
  * at a time, of a skill to install from GitHub or an update to one
  * installed. It says, for each card, whether installing it updates the
- * version installed or replaces one of the same name from elsewhere. A
- * switch, one or all at once, shows at once and reads the store again if it isn't kept;
- * everything else waits on the runtime and says in words what it couldn't
- * do. An update check only runs when the person asks.
+ * version installed or replaces one of the same name from elsewhere.
+ * Everything waits on the runtime and says in words what it couldn't do. A
+ * newer version of one from GitHub is looked for quietly as the skills open,
+ * and shows as Update ready where there is one.
  */
 
 /** An update the check couldn't look for, and why. */
@@ -27,11 +27,13 @@ export interface SkillUnchecked {
 }
 
 export interface SkillsModel {
-  /** Every skill as its row shows it; undefined until the store is read. */
-  readonly rows: ReadonlyArray<SkillRowModel> | undefined
+  /** Whether the store has been read. */
+  readonly loaded: boolean
   /** Whether Althar has skills to give at all; when it hasn't, the page says so and nothing else. */
   readonly enabled: boolean
   readonly loadFailed: boolean
+  /** Reads the store again. */
+  readonly reload: () => void
   readonly found: SkillsFound | null
   /** The card open for review, as it shows: whether installing it updates or replaces what is installed. */
   readonly card: SkillReviewModel | null
@@ -48,10 +50,9 @@ export interface SkillsModel {
   readonly reviewUpdate: (id: string) => void
   readonly install: (replace: boolean) => void
   readonly cancel: () => void
+  /** How many times a skill has been added or updated while this view is open: a dialog that was adding shuts when it goes up. */
+  readonly added: number
   readonly checkUpdates: () => void
-  readonly toggle: (id: string, on: boolean) => void
-  /** Turns every skill on or off at once, as the first screen asks and Settings offers; one with a problem is left as it is. */
-  readonly toggleAll: (on: boolean) => void
   readonly rollBack: (id: string) => void
   readonly remove: (id: string) => void
 }
@@ -61,15 +62,6 @@ const said = (error: unknown) => (error instanceof Error ? error.message : Strin
 /** Where an install is from, as the person reads it. */
 const fromOf = (skill: { readonly source: InstalledSkill['source']; readonly repo?: string | null | undefined }) =>
   skill.source === 'github' ? (skill.repo ?? 'GitHub') : text.skillsFromFolder
-
-export const rowOf = (skill: InstalledSkill): SkillRowModel => ({
-  id: skill.id,
-  description: skill.description,
-  from: fromOf(skill),
-  on: skill.active,
-  canRollBack: skill.canRollBack,
-  problem: skill.problem,
-})
 
 /**
  * A card as the review shows it. From the same folder of the same repository
@@ -96,16 +88,25 @@ export const reviewOf = (card: SkillReviewCard): SkillReviewModel => {
   }
 }
 
-export const useSkills = (): SkillsModel => {
+export const useSkills = (options: { readonly check?: boolean } = {}): SkillsModel => {
   const { client, cache } = useServices()
   const query = useQuery(reads(client).skills())
   const [found, setFound] = useState<SkillsFound | null>(null)
   const [card, setCard] = useState<SkillReviewCard | null>(null)
   const [updates, setUpdates] = useState<ReadonlyArray<SkillUpdate> | null>(null)
   const [busy, setBusy] = useState(false)
+  const [addedCount, setAdded] = useState(0)
   const [error, setError] = useState<string | null>(null)
 
   const reread = useCallback(() => void cache.refetchQueries({ queryKey: keys.skills }), [cache])
+  // Asked quietly as the skills open: what GitHub says shows as Update ready; nothing says where it couldn't be asked.
+  const checked = useRef<number | null>(null)
+  const fromGitHub = query.data?.skills.some((skill) => skill.source === 'github') === true
+  useEffect(() => {
+    if (options.check !== true || !fromGitHub || checked.current !== null) return
+    checked.current = Date.now()
+    client.checkSkillUpdates().then(setUpdates, () => undefined)
+  }, [fromGitHub, client, options.check])
   const run = useCallback(<A>(work: () => Promise<A>, then: (value: A) => void) => {
     setBusy(true)
     setError(null)
@@ -130,9 +131,10 @@ export const useSkills = (): SkillsModel => {
 
   const available = (updates ?? []).flatMap((update) => (update.state === 'available' ? [update] : []))
   return {
-    rows: query.data?.skills.map(rowOf),
+    loaded: query.data !== undefined,
     enabled: query.data?.enabled ?? false,
     loadFailed: query.isError,
+    reload: reread,
     found,
     card: card === null ? null : reviewOf(card),
     checked: updates !== null,
@@ -165,6 +167,7 @@ export const useSkills = (): SkillsModel => {
         () => {
           setCard(null)
           setFound(null)
+          setAdded((count) => count + 1)
           setUpdates((now) => now?.filter((update) => update.id !== card.id) ?? null)
           reread()
         },
@@ -174,29 +177,8 @@ export const useSkills = (): SkillsModel => {
       setCard(null)
       setError(null)
     },
+    added: addedCount,
     checkUpdates: () => run(() => client.checkSkillUpdates(), setUpdates),
-    toggle: (id, on) => {
-      cache.setQueryData<SkillList>(keys.skills, (was) =>
-        was === undefined ? was : { ...was, skills: was.skills.map((one) => (one.id === id ? { ...one, active: on } : one)) },
-      )
-      client.setSkillActive(id, on).then(kept, (failure: unknown) => {
-        setError(said(failure))
-        reread()
-      })
-    },
-    toggleAll: (on) => {
-      const ids = (query.data?.skills ?? []).flatMap((one) => (one.active !== on && one.problem === undefined ? [one.id] : []))
-      if (ids.length === 0) return
-      cache.setQueryData<SkillList>(keys.skills, (was) =>
-        was === undefined ? was : { ...was, skills: was.skills.map((one) => (ids.includes(one.id) ? { ...one, active: on } : one)) },
-      )
-      void Promise.allSettled(ids.map((id) => client.setSkillActive(id, on).then(kept))).then((settled) => {
-        const failed = settled.find((one) => one.status === 'rejected')
-        if (failed === undefined) return
-        setError(said(failed.reason))
-        reread()
-      })
-    },
     rollBack: (id) => run(() => client.rollBackSkill(id), kept),
     remove: (id) => run(() => client.uninstallSkill(id), reread),
   }

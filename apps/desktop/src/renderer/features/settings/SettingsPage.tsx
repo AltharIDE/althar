@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { type AgentStatus, MOST_AT_ONCE, type ToolRow } from '@althar/contracts'
+import { type AgentStatus, MOST_AT_ONCE } from '@althar/contracts'
 import {
   AgentInstall,
   AgentsAtOnce,
@@ -10,7 +10,6 @@ import {
   AgentTabPanel,
   AgentTabs,
   AppVersion,
-  Button,
   Choices,
   CoAuthor,
   CoAuthorFace,
@@ -23,9 +22,8 @@ import {
   EdgeSpot,
   Icon,
   KeepAwake,
-  PlansAndReviews,
   LinkButton,
-  NewProjectDefaults,
+  SettingGroup,
   NotificationSettings,
   NotificationSound,
   type NotifyChoices,
@@ -38,14 +36,9 @@ import {
   SettingsLayout,
   SettingsNav,
   SettingSwitch,
-  SkillInstall,
-  SkillList,
-  SkillReview,
   TaskFolders,
   UpdateReady,
   UsageData,
-  AgentTools,
-  type ToolRowModel,
 } from '@althar/ui'
 
 import altharFace from '../../../../resources/faces/althar-ai.svg'
@@ -58,7 +51,7 @@ import { systemAccentState } from '../../shared/accent'
 import { appIcons } from '../../shared/appIcons'
 import { device, platform } from '../../shared/device'
 import { choosing, edgePlaces, edgeWords } from '../../shared/edge'
-import { useEditorList, useEditorPictures } from '../../shared/OpenIn'
+import { useEditorPictures, useEditorsRead } from '../../shared/OpenIn'
 import { type PreferencesModel, usePreferences } from '../../shared/usePreferences'
 import { useSounds } from '../../shared/useSounds'
 import { useUpdate } from '../../shared/useUpdate'
@@ -83,14 +76,11 @@ import { type AppIconModel, useAppIcon } from './useAppIcon'
 import { useCoAuthor } from './useCoAuthor'
 import { useReviewSeal } from './useReviewSeal'
 import { useEdgeGlance } from './useEdgeGlance'
-import { usePlansAndReviews } from './usePlansAndReviews'
-import { useNewProjectDefaults } from './useNewProjectDefaults'
+import { TasksSection } from './TasksSection'
 import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
 import { usePostTeamReviews } from './usePostTeamReviews'
-import { useSkills } from './useSkills'
-import { type AgentToolsModel, useAgentTools } from './useAgentTools'
-import { serverBrand } from '../../shared/mcpServers'
 import { useTaskFolders } from './useTaskFolders'
+import { ServersSection, SkillsSection } from './ToolSections'
 
 /*
  * Althar's settings, as a tab of the window beside the home's. Down the
@@ -218,29 +208,30 @@ function SectionBody({
     case 'agents':
       return <AgentsSection start={start} accounts={accounts} {...(asked === undefined ? {} : { asked })} />
     case 'mcp-servers':
-      return <ServersSection />
+      return <ServersSection start={start} />
     case 'skills':
-      return <SkillsSection />
+      return <SkillsSection start={start} />
     case 'code-hosts':
       return <ConnectionsView model={connections} columns />
     case 'this-mac':
       return <ThisMacSection {...(onTask === undefined ? {} : { onTask })} />
-    case 'plans-and-reviews':
-      return <PlansAndReviewsSection />
-    case 'new-projects':
-      return <NewProjectsSection />
-    case 'reviews':
+    case 'tasks':
+      return <TasksSection />
+    case 'pull-requests':
       return <ReviewsSection connections={connections} />
     case 'notifications':
       return <NotificationsSection />
-    case 'dictation':
-      return <DictationSection />
     case 'appearance':
       return <AppearanceSection {...looks} />
-    case 'editor':
-      return <EditorSection />
-    case 'browser':
-      return <BrowserSection />
+    case 'editor-and-browser':
+      return (
+        <>
+          <EditorSection />
+          <SettingGroup title={text.pageBesideConversations} headingLevel={2}>
+            <BrowserSection />
+          </SettingGroup>
+        </>
+      )
     case 'about':
       return <AboutSection start={start} />
   }
@@ -331,102 +322,6 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
   )
 }
 
-/* ---- skills ----------------------------------------------------------------------- */
-
-/** A row of the person's servers or skills, as the kit's table takes it. */
-const toolRowOf = (row: ToolRow): ToolRowModel => {
-  const brand = serverBrand(row.name)
-  return { ...row, ...(brand === undefined ? {} : { brand }) }
-}
-
-/** When a line under Since happened, as the section says it. */
-const sinceWhen = (at: string) => {
-  const date = new Date(at)
-  return Number.isNaN(date.getTime()) ? at : date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
-}
-
-/** The person's own servers or skills, the roles each gets, and the switch that keeps their agents the same (ADR-097). */
-function PersonsTools({ kind, model }: { kind: 'server' | 'skill'; model: AgentToolsModel }) {
-  const tools = model.tools
-  if (tools === undefined) return <Failed when={model.loadFailed} />
-  if (!tools.enabled) return null
-  return (
-    <>
-      {model.error !== null && (
-        <p role="alert" className={s.failed}>
-          {model.error}
-        </p>
-      )}
-      <AgentTools
-        kind={kind}
-        rows={(kind === 'server' ? tools.servers : tools.skills).map(toolRowOf)}
-        sync={kind === 'server' ? tools.serverSync : tools.skillSync}
-        {...(kind === 'server' ? { scope: { projects: model.projects, value: model.projectId, onChange: model.setProjectId } } : {})}
-        onRoles={(name, roles) => model.setRoles(kind, name, roles)}
-        onSync={(on, takeBack) => model.setSync(kind, on, takeBack)}
-        onKeep={(agent, name, out) => model.keep(kind, agent, name, out)}
-        onPick={(name, way) => model.pick(kind, name, way)}
-        onUndo={model.undo}
-        onSignIn={model.signIn}
-        when={sinceWhen}
-      />
-    </>
-  )
-}
-
-/** The person's MCP servers: which roles get each, and the switch that keeps their agents' the same. */
-function ServersSection() {
-  return <PersonsTools kind="server" model={useAgentTools()} />
-}
-
-/** The person's own skills and the switch that links them into each agent; then the skills every lead is given, the one review open, and installing from GitHub. */
-function SkillsSection() {
-  const skills = useSkills()
-  const persons = useAgentTools()
-  if (skills.rows === undefined) return <Failed when={skills.loadFailed} />
-  if (!skills.enabled) return <p className={s.quiet}>{text.skillsOff}</p>
-  return (
-    <div className={s.skills}>
-      <PersonsTools kind="skill" model={persons} />
-      {skills.card !== null ? (
-        <SkillReview card={skills.card} busy={skills.busy} onInstall={skills.install} onCancel={skills.cancel} />
-      ) : (
-        <SkillInstall found={skills.found} busy={skills.busy} error={skills.error} onFind={skills.find} onReview={skills.review} />
-      )}
-      {skills.card !== null && skills.error !== null && (
-        <p role="alert" className={s.failed}>
-          {skills.error}
-        </p>
-      )}
-      <div className={s.skillUpdates}>
-        <Button size="small" variant="quiet" disabled={skills.busy} onClick={skills.checkUpdates}>
-          {text.skillsCheck}
-        </Button>
-        {skills.checked && skills.available.length === 0 && skills.unchecked.length === 0 && (
-          <span className={s.quiet}>{text.skillsCurrent}</span>
-        )}
-        {skills.available.map((id) => (
-          <Button key={id} size="small" disabled={skills.busy} onClick={() => skills.reviewUpdate(id)}>
-            {text.skillsUpdate(id)}
-          </Button>
-        ))}
-        {skills.unchecked.map((one) => (
-          <span key={one.id} className={s.quiet}>
-            {text.skillsUnchecked(one.id, one.error)}
-          </span>
-        ))}
-      </div>
-      <SkillList
-        skills={skills.rows}
-        onToggle={skills.toggle}
-        onToggleAll={skills.toggleAll}
-        onRollBack={skills.rollBack}
-        onRemove={skills.remove}
-      />
-    </div>
-  )
-}
-
 /* ---- work on this computer --------------------------------------------------------- */
 
 /** The system lets Althar open at login: a Mac, and Windows. */
@@ -500,30 +395,9 @@ function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
         )}
       </SettingList>
       <Failed when={failed || atOnce?.failed === true || paused?.failed === true} />
-    </>
-  )
-}
-
-/* ---- plans and reviews ------------------------------------------------------------- */
-
-function PlansAndReviewsSection() {
-  const plansAndReviews = usePlansAndReviews()
-  return (
-    <>
-      {plansAndReviews !== null && <PlansAndReviews value={plansAndReviews.value} onChange={plansAndReviews.set} />}
-      <Failed when={plansAndReviews?.failed === true} />
-    </>
-  )
-}
-
-/* ---- new projects ------------------------------------------------------------------ */
-
-function NewProjectsSection() {
-  const defaults = useNewProjectDefaults()
-  return (
-    <>
-      {defaults !== null && <NewProjectDefaults value={defaults.value} onChange={defaults.set} />}
-      <Failed when={defaults?.failed === true} />
+      <SettingGroup title={text.dictation} headingLevel={2}>
+        <DictationSection />
+      </SettingGroup>
     </>
   )
 }
@@ -748,12 +622,15 @@ function AppearanceSection({ appIcon, edge }: Looks) {
 
 function EditorSection() {
   const { preferences, set, failed } = usePreferences()
-  const editors = useEditorList()
+  const { editors, loading, looking, again } = useEditorsRead()
   const pictures = useEditorPictures()
-  if (editors.length === 0) return <p className={s.quiet}>{text.noEditors}</p>
+  // Until they are read, none isn't known: nothing yet, not an empty state that gives way.
+  if (loading) return null
   return (
     <>
       <OpenFilesIn
+        onLookAgain={again}
+        looking={looking}
         editors={editors.map((editor) => ({
           value: editor.id,
           label: editor.name,

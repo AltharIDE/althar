@@ -16,7 +16,7 @@ import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
 import { openGuide, runtimeEntry, StartView } from '../src/renderer/features/start/StartView'
 import { type StartModel, useStart } from '../src/renderer/features/start/useStart'
 import { shortFolder } from '../src/renderer/shared/folders'
-import { agents, changed, fakeClient, fakeHost, installedSkill, project, streamed, usual, withoutOpenCode } from './fixtures'
+import { agents, changed, fakeClient, fakeHost, project, streamed, usual, withoutOpenCode } from './fixtures'
 import { withServices } from './render'
 import { openTheProject, seenTheTour, toTheProject } from './welcome'
 

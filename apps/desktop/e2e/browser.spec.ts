@@ -407,7 +407,7 @@ test('a task’s run opens beside its thread, isolated; a comment pointed on it 
     // Settings › Browser, from Change: where links open, how long cookies are kept, and clearing them all.
     await panel.getByRole('button', { name: 'Its own session' }).click()
     await page.getByRole('button', { name: 'Change' }).click()
-    await expect(page.getByRole('heading', { name: 'Browser' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Pages beside conversations' })).toBeVisible()
     await expect(page.getByRole('radio', { name: 'Beside the conversation' })).toBeChecked()
     await still(page)
     await page.screenshot({ path: 'test-results/browser-settings.png', animations: 'disabled', scale: 'css' })

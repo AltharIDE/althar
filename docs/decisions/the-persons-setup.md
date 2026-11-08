@@ -38,8 +38,22 @@ home (`agentConfigs`), so a test's runtime reads none.
 
 An outside author's repository never loads its MCP config.
 
-**Not built yet:** a repository's own `.mcp.json` is listed nowhere and loads
-nowhere yet, since whether to trust it is the agent's own call.
+**A repository's own `.mcp.json`** is listed as tiles in Settings, under the
+project it is in. Its servers run commands the person hasn't chosen, so each
+is off until they turn it on, for the roles they choose, and it is given only
+to sessions of that project; a server of the person's own with the same name
+wins. An outside author's review never gets one (`serversFor`'s
+`ownRepository`).
+
+**Each server's tile** shows what waits on the person first: why its last
+start failed, then that it runs two ways or isn't signed in. Opened, it shows
+who gets it (Leads, Reviewers, the coordinator), the projects whose marks are
+pressed out, and each agent's own file with the server's lines as that agent
+keeps them (values of env and headers that aren't references are masked).
+The person adds a server to the agents they choose, or to all three while sync
+is on, writing into each one's own file as theirs, and removes it from every
+file that has it. A project pressed out, or a role left off, holds a server
+back in a session (`rolesOf`, `serversFor`).
 
 **Calls are read against the irreversible list** (`mcpActs.ts`,
 `irreversible.ts`). Each call reaches Althar as a permission request, as a
@@ -88,8 +102,19 @@ starts. It writes through `claude mcp add-json --scope user` and
   variable's name.
 - It brings the agents in step as Settings reads them and as each session
   starts, rather than watching the files.
-- Sign-ins open each agent's own `mcp login` in a terminal. Whether an agent
-  is signed in to a server isn't read.
+- Sign-ins open each agent's own `mcp login` in a terminal.
+- **How each server stands is read** from each agent's own command, not from
+  its credentials: `claude mcp list`, `codex mcp list --json` and
+  `opencode mcp list` (`mcpHealth.ts`), as Settings opens and at most every five
+  minutes, and kept in Althar's own folder. Claude Code and OpenCode say
+  connected, needs sign-in or failed (with their words for why); Codex's list
+  doesn't start a server, so it says only whether one needs a sign-in. Anything
+  a command says that isn't recognised is unknown, never guessed. What a
+  session reports of a server's status is kept too.
+- **A server's tool count** is Althar's own check (`mcpProbe.ts`): it starts
+  the server, or calls its address, asks for its tools and stops it, as the
+  person opens the server. A server that needs a sign-in, doesn't start or
+  can't be asked says so in place of a count.
 
 ## Skills
 
@@ -131,8 +156,37 @@ carries.
 **The person's own skills.** A second switch (`skillSync.ts`) links each skill
 into Claude Code's and Codex's folders (OpenCode reads both). It never moves
 or copies one, and takes out only its own links. One name with two versions
-waits under To settle. The skills table has no role columns: a skill loads
-from each agent's own folders, and Althar can't hold one back by role.
+waits under To settle.
+
+**Skills by role and project.** Settings › Skills lists every skill the
+person has as one list (`agentTools.ts`): those in the agents' own folders,
+those of Claude Code's plugins that are on, those in Althar's store, and each
+project's repositories' own `.claude/skills`. One in the store and in an
+agent's folder under one name is one, the store's. Each loads in every role
+and every project until the person turns it off for a role, or presses a
+project out. A store skill is on while any role gets it: turning its last
+role off turns it off in the store. A session holds back each one its role or
+project doesn't get (`heldSkillsFor`). A store skill is left out of the run's
+copies and its brief. One the agent loads itself is held back in the agent,
+the way each documents (`provider-adapters/src/heldSkills.ts`, read against
+Claude Code 2.1.318, codex-acp 2.5.0 with Codex 0.165.0, and OpenCode 2.2.6):
+
+- Claude Code: a `Skill(<name>)` deny rule, a plugin's skill as
+  `<plugin>:<skill>`, and `skillOverrides` off, which takes its own folders'
+  skills off the list the model reads.
+- Codex: `skills.config` entries `{ name, enabled = false }`.
+- OpenCode: `permission.skill` `{ "<id>": "deny" }`.
+
+What isn't verified yet:
+
+- A plugin's skill held back in Claude Code is refused when loaded, but may
+  still be named in its list.
+- OpenCode 2.x's list may still name a denied skill. Only its `policies`
+  take one off the list, and Althar doesn't set them, since 1.x may refuse
+  a setting it doesn't know.
+- No logged-in session has run any of the three end to end.
+- Codex doesn't read a repository's `.claude/skills`, so it has nothing to
+  hold back there.
 
 **Skill text is not a boundary.** A person's own skill may tell an agent to
 push or merge. The irreversible list and git's guard are what hold.
@@ -145,7 +199,9 @@ push or merge. The irreversible list and git's guard are what hold.
 - `allowed-tools` frontmatter is refused at install (`skills/src/validate.ts`).
   It should be accepted, since nothing it would allow asks now.
 - Too many skills on is more than Codex may list in its fallback budget, and
-  nothing checks or reports that. There is no per-project selection.
+  nothing checks or reports that.
+- Codex's own plugins' skills aren't listed, nor a Claude Code plugin's
+  skills kept anywhere but its `skills/` folder.
 
 ## Skill and OpenSpec files in a change
 
@@ -209,4 +265,6 @@ goes on is open.
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: the limits sweep (#696) built: agents carry the person's own code-host sign-in, picked skills load in every ordinary role, and skill and OpenSpec files push like any other.
+- 8 Nov 2026: Settings rebuilt as direction A: tiles for MCP servers and skills (a repository's own too), adding and removing a server, how each server stands read from the agents' own commands, and a tool count from Althar's own check.
 - 8 Nov 2026: Althar ships no skills of its own. The curated catalog, its packaging and its install are removed, and the first start after the update takes the older installs out of the store.
+- 8 Nov 2026: skills have role and project holdings. Every skill the person has is one list, and a session holds back, in its agent, each one its role or project doesn't get.

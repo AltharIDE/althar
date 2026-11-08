@@ -462,8 +462,18 @@ and the catalog itself in the repository's, before this change.
   in each agent (section 4), the commit-time check before staging, and the
   one-time grant naming a destination. Today the push is the only barrier.
 - Guarding Althar's local merge into a default branch.
-- Per-project selection and bindings, name conflicts between sources, and
-  Codex's `[[skills.config]]` exclusions (stage 4).
+- Bindings beyond roles and projects (stage 4). Roles and projects are built
+  ([ADR-097](../decisions/the-persons-setup.md#skills)): every skill is one
+  list, the store's winning a name it shares with an agent's folder. A
+  session leaves a held store skill out of its copies. It holds one the agent
+  loads itself back there: Claude Code by `Skill(<name>)` deny rules and
+  `skillOverrides`, Codex by `[[skills.config]]` `{ name, enabled = false }`,
+  OpenCode by `permission.skill` deny (`heldSkills.ts`). Each was read from
+  the installed versions, not from a logged-in session. Not verified: whether
+  Claude Code still lists a held plugin skill, and whether OpenCode 2.x lists
+  a denied one.
+- A repository skill and one of the person's under one name are held back
+  together, as each agent holds by name.
 - The Codex size check: estimating the list against its budget, warning, and
   reporting what Codex left out (section 2).
 - Reporting skills a repository already has, and same-name collisions with
