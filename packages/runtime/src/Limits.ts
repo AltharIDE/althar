@@ -309,9 +309,44 @@ export class Limits extends Context.Service<
           const windows = JSON.parse(latest.windows) as ReadonlyArray<{ readonly resetsAt?: string }>
           const resetsAt = windows.find((window) => window.resetsAt !== undefined)?.resetsAt ?? null
           const until = resetsAt ?? new Date(Date.parse(latest.observedAt) + Duration.toMillis(UNKNOWN_RESET)).toISOString()
-          return until > (yield* timestamp)
-            ? Option.some<Out>({ agentId: account.agentId, accountId: account.id, resetsAt, until })
-            : Option.none<Out>()
+          if (until <= (yield* timestamp)) return Option.none<Out>()
+          // Marked out, and not yet back by its reset: unless the account has shown since that it works again.
+          return (yield* recovered(account, latest.observedAt))
+            ? Option.none<Out>()
+            : Option.some<Out>({ agentId: account.agentId, accountId: account.id, resetsAt, until })
+        })
+
+      /**
+       * Whether an account has shown that it works again since it was marked out at `since`, before its reset: the person reset
+       * their usage, topped up or changed plan. Either a reading of its plan taken after, whose every window that counts
+       * (those that limit any model, not past their reset) was read after and has room, or a turn that completed on it after.
+       * The one rule `outOf` ends an out state by, so the model list, picking an account, the pickers and the cards agree.
+       */
+      const recovered = (account: Account, since: string) =>
+        Effect.gen(function* () {
+          const [turn] = yield* sql<{ one: number }>`
+            SELECT 1 AS one FROM turn_deliveries d JOIN provider_sessions s ON s.id = d.provider_session_id
+            WHERE s.account_id = ${account.id} AND d.state = 'completed' AND d.ended_at > ${since} LIMIT 1`
+          if (turn !== undefined) return true
+          const [reading] = yield* sql<{ windows: string; observedAt: string }>`
+            SELECT windows, observed_at FROM plan_usage_readings WHERE account_id = ${account.id}`
+          if (reading === undefined) return false
+          const now = yield* Clock.currentTimeMillis
+          const after = Date.parse(since)
+          const windows = (JSON.parse(reading.windows) as ReadonlyArray<UsageWindow & { observedAt?: string }>).map((window) => ({
+            ...window,
+            readAt: Date.parse(window.observedAt ?? reading.observedAt),
+          }))
+          const fresh = tightestWindow(
+            windows.filter((window) => window.readAt > after),
+            now,
+          )
+          // A window read before the limit says nothing of whether it still holds.
+          const unknown = tightestWindow(
+            windows.filter((window) => !(window.readAt > after)),
+            now,
+          )
+          return fresh !== undefined && leftOf(fresh) > 0 && unknown === undefined
         })
 
       /** An account's room, from the windows PlanUsage last kept for it: a window past its reset has started again. */

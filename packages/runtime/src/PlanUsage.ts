@@ -157,6 +157,11 @@ export class PlanUsage extends Context.Service<
   {
     /** Every account's plan usage; `refresh` asks the sources again first. */
     readonly now: (refresh?: boolean) => Effect.Effect<PlanUsageView, Failure>
+    /**
+     * Asks the sources again for these accounts only and waits for the readings (at most once every few seconds each), for steering
+     * that finds an account marked out of usage: the person may have reset it since. Tells the view once they are read.
+     */
+    readonly refresh: (accountIds: ReadonlyArray<string>) => Effect.Effect<void, Failure>
     /** The windows Claude Code's adapter reported on a session of the account, from one event. */
     readonly heard: (accountId: string, agentId: string, windows: ReadonlyArray<UsageWindow>) => Effect.Effect<void, never>
     /**
@@ -557,7 +562,7 @@ export class PlanUsage extends Context.Service<
             })
           })
 
-        const readAll = (force: boolean) =>
+        const readAll = (force: boolean, only?: ReadonlyArray<string>) =>
           Effect.gen(function* () {
             yield* hydrate
             const now = yield* Clock.currentTimeMillis
@@ -565,6 +570,7 @@ export class PlanUsage extends Context.Service<
             for (const entry of agents.list) {
               // Each account at once: one agent slow to answer (up to its timeout) holds up none of the others.
               const due = (yield* accounts.of(entry.definition.id)).filter((account) => {
+                if (only !== undefined && !only.includes(account.id)) return false
                 const last = asked.get(account.id)
                 if (last !== undefined && now - last < Duration.toMillis(options.kept ?? (force ? LEAST : KEPT))) return false
                 asked.set(account.id, now)
@@ -673,6 +679,8 @@ export class PlanUsage extends Context.Service<
                   ),
                   view,
                 ),
+          refresh: (accountIds) =>
+            accountIds.length === 0 ? Effect.void : afterOpen(startup('plan-usage-read', Effect.andThen(readAll(true, accountIds), told))),
           // One event at a time, so two heard together don't write over each other; the session forks it, and never waits on it.
           heard: (accountId, agentId, said) =>
             hearing
