@@ -74,6 +74,14 @@ const codexAccount = Effect.gen(function* () {
   return account!
 })
 
+/** A Codex that has nothing to say: an out account's re-read by the model list asks it, never the machine's own binary. */
+const silent = {
+  every: Duration.zero,
+  kept: Duration.zero,
+  readAgent: async (): Promise<UsageRead> => ({ kind: 'failed', message: 'Not asked in this test.' }),
+  readVersion: async () => '2.0.29',
+}
+
 describe('an account marked out of usage', () => {
   it.live('is usable at once when a reading taken after shows room in every window, where the pickers show it too', () =>
     Effect.gen(function* () {
@@ -100,7 +108,7 @@ describe('an account marked out of usage', () => {
       assert.isAbove(rooms.length, 0)
       assert.isTrue(rooms.every((one) => one.leftPercent === 100 && one.accountId === account.id))
       assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId })).id, account.id)
-    }).pipe(Effect.provide(runtime())),
+    }).pipe(Effect.provide(runtime(':memory:', {}, { usage: silent }))),
   )
 
   it.live('stays out when a reading taken after still has a window with nothing left, or one not read since', () =>
@@ -116,7 +124,42 @@ describe('an account marked out of usage', () => {
       yield* read(account.id, [window(60, ago(1000)), window(70, ago(5 * MINUTE), 'weekly')], ago(1000))
       assert.isFalse(yield* codexUsable(projectId))
       assert.isTrue(Option.isSome(yield* limits.outAccount(account.id)))
-    }).pipe(Effect.provide(runtime())),
+    }).pipe(Effect.provide(runtime(':memory:', {}, { usage: silent }))),
+  )
+
+  it.live('stays out while a model’s own window, read since, has nothing left, though the plan’s has room', () =>
+    Effect.gen(function* () {
+      const projectId = yield* ready
+      const account = yield* codexAccount
+      yield* limitedAt(account.id, ago(MINUTE), from(DAY))
+      const own = { ...window(0, ago(1000), 'weekly'), model: 'gpt-6.1-sol' }
+      yield* read(account.id, [window(100, ago(1000)), own], ago(1000))
+      assert.isFalse(yield* codexUsable(projectId))
+      assert.isTrue(Option.isSome(yield* (yield* Limits).outAccount(account.id)))
+      // Once that one has room too, the account is back; and an account whose reading holds only a model’s window can come back.
+      yield* read(account.id, [window(100, ago(1000)), { ...own, usedPercent: 10 }], ago(1000))
+      assert.isTrue(yield* codexUsable(projectId))
+      yield* limitedAt(account.id, ago(500), from(DAY))
+      assert.isFalse(yield* codexUsable(projectId))
+      yield* read(account.id, [{ ...own, usedPercent: 10, observedAt: ago(100) }], ago(100))
+      assert.isTrue(yield* codexUsable(projectId))
+    }).pipe(Effect.provide(runtime(':memory:', {}, { usage: silent }))),
+  )
+
+  it.live('tells the pickers when the account is out, as steering sees it, whatever room it last read', () =>
+    Effect.gen(function* () {
+      const projectId = yield* ready
+      const account = yield* codexAccount
+      yield* read(account.id, [window(80, ago(5 * MINUTE))], ago(5 * MINUTE))
+      assert.isTrue((yield* modelRooms(projectId)).every((one) => one.outUntil === undefined))
+      const resetsAt = from(DAY)
+      yield* limitedAt(account.id, ago(MINUTE), resetsAt)
+      const rooms = (yield* modelRooms(projectId)).filter((one) => one.agentId === 'codex')
+      assert.isAbove(rooms.length, 0)
+      assert.isTrue(rooms.every((one) => one.outUntil === resetsAt))
+      yield* read(account.id, [window(100, ago(1000))], ago(1000))
+      assert.isTrue((yield* modelRooms(projectId)).every((one) => one.outUntil === undefined))
+    }).pipe(Effect.provide(runtime(':memory:', {}, { usage: silent }))),
   )
 
   it.live('is usable at once when a turn completed on it after it ran out', () =>
@@ -160,7 +203,7 @@ describe('an account marked out of usage', () => {
       yield* turn('completed', ago(500))
       assert.isTrue(Option.isNone(yield* limits.outAccount(account.id)))
       assert.isTrue(yield* codexUsable(projectId))
-    }).pipe(Effect.provide(runtime())),
+    }).pipe(Effect.provide(runtime(':memory:', {}, { usage: silent }))),
   )
 })
 
@@ -210,4 +253,60 @@ describe('the model list, while an account is marked out', () => {
       assert.strictEqual(asked.count, 1)
     }).pipe(Effect.provide(runtime(':memory:', {}, { usage }))),
   )
+})
+
+describe('the model list, asking the plans again', () => {
+  const homes: string[] = []
+  const reading = (left: number): UsageRead => ({
+    kind: 'usage',
+    usage: {
+      windows: [{ kind: 'five_hour', usedPercent: 100 - left, resetsAt: from(3 * 60 * MINUTE) }],
+      source: 'agent',
+      observedAt: new Date().toISOString(),
+      plan: 'plus',
+    },
+  })
+  const asking = (answer: (home: string) => UsageRead) => ({
+    every: Duration.zero,
+    kept: Duration.zero,
+    readAgent: async (_agent: unknown, home: Readonly<Record<string, string>>): Promise<UsageRead> => {
+      const one = JSON.stringify(home)
+      homes.push(one)
+      return answer(one)
+    },
+    readVersion: async () => '2.0.29',
+  })
+
+  it.live('keeps the account out when asking again fails or gives no windows', () => {
+    let kind: 'failed' | 'none' = 'failed'
+    return Effect.gen(function* () {
+      const projectId = yield* ready
+      const account = yield* codexAccount
+      yield* limitedAt(account.id, ago(MINUTE), from(DAY))
+      assert.isFalse(yield* codexUsable(projectId))
+      kind = 'none'
+      assert.isFalse(yield* codexUsable(projectId))
+      assert.isTrue(Option.isSome(yield* (yield* Limits).outAccount(account.id)))
+    }).pipe(
+      Effect.provide(
+        runtime(':memory:', {}, { usage: asking(() => (kind === 'failed' ? { kind: 'failed', message: 'Down.' } : { kind: 'none' })) }),
+      ),
+    )
+  })
+
+  it.live('asks again only the accounts that are out, not the agent’s others', () => {
+    homes.length = 0
+    return Effect.gen(function* () {
+      const projectId = yield* ready
+      const accounts = yield* Accounts
+      const [first] = yield* accounts.of('codex')
+      const second = yield* accounts.add({ agentId: 'codex', name: 'Work' })
+      // Only the first is out: the model list asks for its reading again, and not for its sibling's.
+      yield* limitedAt(first!.id, ago(MINUTE), from(DAY))
+      yield* usableModels(projectId)
+      assert.strictEqual(homes.length, 1)
+      assert.isTrue(Option.isSome(yield* (yield* Limits).outAccount(first!.id)))
+      assert.isTrue(Option.isNone(yield* (yield* Limits).outAccount(second.id)))
+    }).pipe(Effect.provide(runtime(':memory:', {}, { usage: asking(() => ({ kind: 'failed', message: 'Down.' })) })))
+  })
 })

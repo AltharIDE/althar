@@ -323,8 +323,8 @@ export class Limits extends Context.Service<
 
       /**
        * Whether an account has shown that it works again since it was marked out at `since`, before its reset: the person reset
-       * their usage, topped up or changed plan. Either a reading of its plan taken after, whose every window that counts
-       * (those that limit any model, not past their reset) was read after and has room, or a turn that completed on it after.
+       * their usage, topped up or changed plan. Either a reading of its plan taken after, whose every window that counts (plan-wide
+       * or a model's own, not past its reset) was read after and has room, or a turn that completed on it after.
        * The one rule `outOf` ends an out state by, so the model list, picking an account, the pickers and the cards agree.
        */
       const recovered = (account: Account, since: string) =>
@@ -338,20 +338,14 @@ export class Limits extends Context.Service<
           if (reading === undefined) return false
           const now = yield* Clock.currentTimeMillis
           const after = Date.parse(since)
-          const windows = (JSON.parse(reading.windows) as ReadonlyArray<UsageWindow & { observedAt?: string }>).map((window) => ({
-            ...window,
-            readAt: Date.parse(window.observedAt ?? reading.observedAt),
-          }))
-          const fresh = tightestWindow(
-            windows.filter((window) => window.readAt > after),
-            now,
-          )
-          // A window read before the limit says nothing of whether it still holds.
-          const unknown = tightestWindow(
-            windows.filter((window) => !(window.readAt > after)),
-            now,
-          )
-          return fresh !== undefined && leftOf(fresh) > 0 && unknown === undefined
+          // Every window that limits anything counts, a model's own (Opus's week) too: one still full keeps the account out,
+          // as the model it limits can't be offered. Money spent past the plan and a window past its reset count for nothing.
+          const counted = (JSON.parse(reading.windows) as ReadonlyArray<UsageWindow & { observedAt?: string }>)
+            .filter((window) => window.spend !== true)
+            .filter((window) => window.resetsAt === undefined || Date.parse(window.resetsAt) > now)
+            .map((window) => ({ window, readAt: Date.parse(window.observedAt ?? reading.observedAt) }))
+          // A window read before the limit says nothing of whether it still holds; none read since says nothing at all.
+          return counted.length > 0 && counted.every((one) => one.readAt > after && leftOf(one.window) > 0)
         })
 
       /** An account's room, from the windows PlanUsage last kept for it: a window past its reset has started again. */

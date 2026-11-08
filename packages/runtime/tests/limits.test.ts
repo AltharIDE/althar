@@ -15,6 +15,7 @@ import { Coordinator } from '../src/Coordinator'
 import { NotFound } from '../src/errors'
 import { type Failure, failureOf, Failures } from '../src/Failures'
 import { Instance } from '../src/Instance'
+import { Live } from '../src/Live'
 import { Limits, outWords, whenWords } from '../src/Limits'
 import { Models } from '../src/Models'
 import { Policies, usageLimitOf } from '../src/Policies'
@@ -183,6 +184,37 @@ describe('an agent out of usage', () => {
       const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.deepStrictEqual([ready?.lead, ready?.waits], ['claude-code', null])
       assert.include(yield* said(task.threadId), 'implement: Did the task.')
+    }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })), onTestClock)
+  })
+
+  it.effect('runs a held step again at once when a fresh reading shows its account has room, before the reset it waited for', () => {
+    const back = later()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const live = yield* Live
+      const { projectId, task, start } = yield* planned([lead('claude-code')])
+      yield* waits(projectId)
+      yield* start
+      const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null)
+      assert.strictEqual(held?.waits?.agentId, 'claude-code')
+      // The person resets their usage: a reading of the plan, taken after it ran out, shows room. The clock stays before the reset.
+      const [account] = yield* (yield* Accounts).of('claude-code')
+      const observedAt = new Date(Date.now() + 1000).toISOString()
+      const windows = [{ kind: 'weekly', usedPercent: 3, resetsAt: new Date(back + 7 * 24 * HOUR).toISOString(), observedAt }]
+      yield* sql`
+        INSERT INTO plan_usage_readings ${sql.insert({ accountId: account!.id, agentId: 'claude-code', source: 'agent', plan: 'max', windows: JSON.stringify(windows), observedAt })}
+        ON CONFLICT (account_id) DO UPDATE SET windows = excluded.windows, observed_at = excluded.observed_at`
+      yield* TestClock.adjust(Duration.seconds(2))
+      yield* live.publish({ _tag: 'PlanUsage', usage: { accounts: [] } })
+      // It goes on at once, with the clock still before the reset (its agent, out for the fake's own reasons, may stop it again).
+      yield* until(
+        sql<{ one: number }>`
+          SELECT 1 AS one FROM record_events f JOIN node_attempts a ON a.id = f.aggregate_id JOIN nodes n ON n.id = a.node_id
+          JOIN workflow_executions e ON e.id = n.execution_id JOIN runs r ON r.id = e.run_id
+          WHERE f.aggregate_type = 'node_attempt' AND f.type = 'node_attempt.resumed' AND r.task_id = ${task.taskId}`,
+        (rows) => rows.length > 0,
+      )
+      assert.isBelow(yield* Clock.currentTimeMillis, back)
     }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })), onTestClock)
   })
 
