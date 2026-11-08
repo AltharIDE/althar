@@ -50,6 +50,9 @@ const sessionId = 'sess_guarded'
 const runsOf = (line: string, worktree: string) => gitRunsOf(line, { worktree, defaultBranch: 'main', taskBranch: 'althar/retry' })
 const env = {
   ...process.env,
+  // A test's repositories are its own, not the live task's inherited guard scope.
+  ALTHAR_GUARD_REPOSITORIES: '',
+  ALTHAR_GUARD_REMOTES: '',
   ...guardEnv({ sessionId, taskBranch: 'althar/retry', defaultBranches: ['main'], count: 0, at }),
   GIT_AUTHOR_NAME: 'Try',
   GIT_AUTHOR_EMAIL: 'try@althar.test',

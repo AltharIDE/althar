@@ -14,6 +14,7 @@ import { Coordinator } from '../src/Coordinator'
 import { Errands } from '../src/Errands'
 import { Instance } from '../src/Instance'
 import { MergeLine } from '../src/MergeLine'
+import { Models } from '../src/Models'
 import { Plans } from '../src/Plans'
 import { setPlansAndReviews } from '../src/plansAndReviews'
 import { Projects } from '../src/Projects'
@@ -471,6 +472,75 @@ describe('answer_stuck_step', () => {
       assert.deepStrictEqual(
         started.map((one) => one.agentId),
         ['codex', 'claude-code'],
+      )
+    }).pipe(Effect.provide(withQueries()))
+  })
+
+  it.live(
+    'hands a step on by the agent’s name and the model’s name or id, and refuses an unknown one at the call, the step still waiting',
+    () => {
+      const root = repository()
+      return Effect.gen(function* () {
+        const c = yield* coordinatorOf(root)
+        const task = yield* planned(c.projectId, 'Cap retries', '[lead:finish]')
+        const call = yield* stuckCall(task.taskId)
+        const message = yield* c.turn('Review it with Claude instead')
+        // A model the agent doesn't offer, by name or id: said at the call, which models it does, and nothing is answered.
+        for (const model of ['Nonesuch 9', 'nonesuch-9']) {
+          const refused = yield* callTool(c.access, 'answer_stuck_step', {
+            task: task.slug,
+            answer: 'hand_on',
+            agent: 'Fake claude-code',
+            model,
+            message,
+          })
+          assert.match(refused, /doesn't offer Nonesuch 9|doesn't offer nonesuch-9/)
+          assert.match(refused, / It offers: /)
+          assert.deepInclude(yield* answered(call.id), { state: 'open' })
+        }
+        // The agent and the model by their names, kept as their ids.
+        assert.match(
+          yield* callTool(c.access, 'answer_stuck_step', {
+            task: task.slug,
+            answer: 'hand_on',
+            agent: 'Fake claude-code',
+            model: 'Large',
+            message,
+          }),
+          /review step goes to claude-code on large/,
+        )
+      }).pipe(Effect.provide(withQueries()))
+    },
+  )
+
+  it.live('hands a step on by the model’s own id, and keeps the agent it was handed to where the model is off for it', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const c = yield* coordinatorOf(root)
+      const task = yield* planned(c.projectId, 'Cap retries', '[lead:finish]')
+      const call = yield* stuckCall(task.taskId)
+      const message = yield* c.turn('Review it with Claude instead')
+      // Switched off for the agent it is handed to, it isn't taken to another agent that offers it: refused, naming the agent.
+      yield* (yield* Models).setModelBlocked({ agentId: 'claude-code', model: 'large', blocked: true })
+      const refused = yield* callTool(c.access, 'answer_stuck_step', {
+        task: task.slug,
+        answer: 'hand_on',
+        agent: 'claude-code',
+        model: 'large',
+        message,
+      })
+      assert.match(refused, /^The person switched large off for Fake claude-code\./)
+      assert.deepInclude(yield* answered(call.id), { state: 'open' })
+      yield* (yield* Models).setModelBlocked({ agentId: 'claude-code', model: 'large', blocked: false })
+      assert.match(
+        yield* callTool(c.access, 'answer_stuck_step', {
+          task: task.slug,
+          answer: 'hand_on',
+          agent: 'claude-code',
+          model: 'large',
+          message,
+        }),
+        /review step goes to claude-code on large/,
       )
     }).pipe(Effect.provide(withQueries()))
   })

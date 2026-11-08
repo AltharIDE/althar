@@ -56,6 +56,8 @@ describe("a run's process", () => {
         WAYLAND_DISPLAY: ALTHAR.WAYLAND_DISPLAY,
         XAUTHORITY: ALTHAR.XAUTHORITY,
         DBUS_SESSION_BUS_ADDRESS: ALTHAR.DBUS_SESSION_BUS_ADDRESS,
+        // The person's code-host identity comes along (ADR-097); the Electron process's own secrets do not.
+        SSH_AUTH_SOCK: ALTHAR.SSH_AUTH_SOCK,
         [WORK]: 'run:project',
       })
     }

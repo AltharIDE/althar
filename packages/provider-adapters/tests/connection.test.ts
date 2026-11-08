@@ -646,12 +646,22 @@ describe('AgentConnection', () => {
       }),
     )
 
+    it.live('carries on after a silent normal turn ending as well as a cancellation', () =>
+      Effect.gen(function* () {
+        const { one, two } = yield* twoTurns(scenarios.silentEndTurn, rules)
+        assert.lengthOf(find(one, 'Resumed'), 1)
+        assert.strictEqual(text(one), 'carrying on without it')
+        assert.strictEqual(text(two), 'echo: what next?')
+      }),
+    )
+
     it.live('puts a notice in the turn when the agent still says nothing after a refusal and the asks run out', () =>
       Effect.gen(function* () {
         const { one, two } = yield* twoTurns(scenarios.silentForever, rules)
         assert.lengthOf(find(one, 'Resumed'), 3)
         assert.lengthOf(find(one, 'AgentMessage'), 0)
         assert.lengthOf(find(one, 'Notice'), 1)
+        assert.include(find(one, 'Notice')[0]?.description ?? '', 'edits wait for review')
         assert.strictEqual(stopReason(one), 'cancelled')
         // The turn after it is a turn like any other.
         assert.strictEqual(text(two), 'echo: what next?')
@@ -664,6 +674,7 @@ describe('AgentConnection', () => {
         assert.lengthOf(find(one, 'Resumed'), 1)
         assert.lengthOf(find(one, 'AgentMessage'), 0)
         assert.lengthOf(find(one, 'Notice'), 1)
+        assert.include(find(one, 'Notice')[0]?.description ?? '', 'edits wait for review')
         assert.strictEqual(stopReason(one), 'end_turn')
         assert.strictEqual(text(two), 'echo: what next?')
       }),

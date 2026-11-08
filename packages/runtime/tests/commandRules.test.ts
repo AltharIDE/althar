@@ -72,10 +72,8 @@ describe('a wrapper with nothing after it, where the project asks about everythi
 })
 
 describe('a code host, without a subcommand', () => {
-  it('refuses `gh pr` alone as it would any change to the pull request, with how to reach it instead', () => {
-    const said = run('gh pr')
-    assert.strictEqual(said.verdict, 'deny')
-    assert.include(said.verdict === 'deny' ? said.reason : '', 'push_to_pull_request')
+  it('runs `gh pr` alone, which changes nothing, as any other line ADR-097 leaves to the agent', () => {
+    assert.deepStrictEqual(run('gh pr'), { verdict: 'allow' })
   })
 })
 
@@ -87,9 +85,14 @@ describe('package runners in their other forms', () => {
       'npx -p vercel vercel deploy',
       'npx --package=vercel vercel deploy',
       'npx -- vercel deploy',
-      'npx gh release create v1.2.0',
     ])
       assert.deepStrictEqual(run(line), { verdict: 'ask', reason: 'Deploying or publishing always asks.', held: true }, line)
+    // A release is named as what it is: publishing or deleting it can't be taken back.
+    assert.deepStrictEqual(run('npx gh release create v1.2.0'), {
+      verdict: 'ask',
+      reason: 'Publishing or deleting a release always asks.',
+      held: true,
+    })
     // A runner running something else is that, and nothing more.
     assert.deepStrictEqual(run('yarn dlx prettier --check .'), { verdict: 'allow' })
     // `timeout` with an option of its own that takes no value, before how long.

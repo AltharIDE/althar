@@ -30,54 +30,32 @@ const neverDeploys: RuleContext = {
   project: { mode: 'allow', ask: [], never: ['deploy'], allow: [], commands: [] },
 }
 
-/** Why Althar can't read the line, where a project that never allows a deploy refuses it so; none where it runs. */
-const unread = (line: string) => {
-  const verdict = decideInside(command(line), neverDeploys)
-  if (verdict.verdict === 'allow') return null
-  assert.strictEqual(verdict.verdict, 'deny', line)
-  const reason = (verdict as { readonly reason: string }).reason
-  assert.isTrue(reason.endsWith("so it's refused: run its commands written out, where Althar can read them."), line)
-  return reason.slice(0, reason.indexOf(' The project'))
-}
-
 describe('what Althar can’t read in a line its sandbox holds', () => {
-  it('is what the shell works out as it runs', () => {
-    assert.strictEqual(
-      unread('$(echo hi)'),
-      "Althar can't read what this runs: part of it is worked out only as it runs (`$(…)`, backticks, `eval`).",
-    )
-  })
-
-  it('is a script in another language, run by its language or a package runner, but not a project’s own script', () => {
-    const script = (name: string) => `Althar can't read what this runs: a \`${name}\` script does what its code says, not its words.`
-    for (const [line, name] of [
-      ['node fix.js', 'node'],
-      ['ts-node fix.ts', 'ts-node'],
-      ['npx tsx fix.ts', 'tsx'],
-      ['bunx --bun tsx fix.ts', 'tsx'],
-      ['bun fix.ts', 'bun'],
-      ['bun --watch fix.ts', 'bun'],
-      ['bun run tools/fix.ts', 'bun'],
-      ['bun -p 1', 'bun'],
-      ['deno eval 1', 'deno'],
-      ['deno repl', 'deno'],
-      ['deno fix.ts', 'deno'],
+  it('runs it anyway, even beside a project’s Never: only what the rules can read is refused (ADR-097)', () => {
+    for (const line of [
+      '$(echo hi)',
+      'node fix.js',
+      'ts-node fix.ts',
+      'npx tsx fix.ts',
+      'bunx --bun tsx fix.ts',
+      'bun fix.ts',
+      'bun --watch fix.ts',
+      'bun run tools/fix.ts',
+      'bun -p 1',
+      'deno eval 1',
+      'deno repl',
+      'deno fix.ts',
+      'sh fix.sh',
+      'zsh',
+      './x/run',
+      'FOO=1 ./fix.sh',
     ])
-      assert.strictEqual(unread(line ?? ''), script(name ?? ''), line)
-    // A project's own scripts and tools, and a package runner with nothing to run, are read as they are.
-    for (const line of ['bun run build', 'bun install', 'deno task build', 'npx', 'FOO=1']) assert.isNull(unread(line), line)
-  })
-
-  it('is a shell given a file or its input, not one given its script on the line', () => {
-    assert.strictEqual(unread('sh fix.sh'), "Althar can't read what this runs: `sh` runs a script from a file or its input.")
-    assert.strictEqual(unread('zsh'), "Althar can't read what this runs: `zsh` runs a script from a file or its input.")
-    assert.isNull(unread('bash -c "npm test"'))
-  })
-
-  it('is a program run from a file of the task’s, not one installed', () => {
-    assert.strictEqual(unread('./x/run'), "Althar can't read what this runs: `./x/run` does what its file says.")
-    assert.strictEqual(unread('FOO=1 ./fix.sh'), "Althar can't read what this runs: `./fix.sh` does what its file says.")
-    for (const line of ['/usr/bin/env ls', 'node_modules/.bin/vitest']) assert.isNull(unread(line), line)
+      assert.deepStrictEqual(decideInside(command(line), neverDeploys), { verdict: 'allow' }, line)
+    // Written out, the deploy the project never allows is read, and refused.
+    assert.deepStrictEqual(decideInside(command('npm publish'), neverDeploys), {
+      verdict: 'deny',
+      reason: "The project's rules never allow deploying and publishing.",
+    })
   })
 })
 
@@ -143,11 +121,12 @@ describe('what an ask or a refusal is counted as', () => {
     project: { mode: 'rules', ask: [], never: [], allow: [], commands: [{ pattern: 'ls', decision: 'ask' }] },
   }
 
-  it('is the firmest of what decided it: credentials, the code host, a command the project named, then the rest', () => {
+  it('is the firmest of what decided it: credentials, a command the project named, then the rest', () => {
     for (const [line, kind] of [
       ['security find-generic-password -w', 'credentials'],
       ['cat ~/.ssh/id_rsa', 'credentials'],
-      ['gh pr merge 1', 'code-host'],
+      // A merge is the irreversible kind it is now: no separate code-host wall keeps it.
+      ['gh pr merge 1', 'deploy'],
       ['ls', 'command'],
       ['git push --force origin main', 'force-push'],
       ['npm publish', 'deploy'],
@@ -368,6 +347,45 @@ describe('what a reader may run', () => {
       "`./bin/bash` runs what that folder holds, not the system's `bash`, and this role only reads.",
     )
     assert.strictEqual(said("bash -c 'cat f > out'"), 'It would write to out, and this role only reads.')
+  })
+})
+
+describe('a reader held in its own folder', () => {
+  const cwd = '/work/meridian/.coordinator'
+  const contained = (line: string) => decideReader(command(line), { cwd, trusted: true, contained: true })
+  const reads = { allowed: ['/work/meridian/.coordinator/secrets/notes'], denied: ['/work/meridian/.coordinator/secrets'] }
+  const reading = (path: string, kind: 'read' | 'search' = 'read', raw: Record<string, unknown> = {}) =>
+    decideReader({ ...command(''), kind, paths: [path], rawInput: { path, ...raw } }, { cwd, trusted: true, reads })
+
+  it('fetches only its own remote, plainly: its sandbox keeps the fetch in its copy', () => {
+    for (const line of ['git fetch', 'git fetch origin', 'git fetch --prune origin main'])
+      assert.strictEqual(contained(line).verdict, 'allow', line)
+    for (const line of ['git fetch --upload-pack=sh origin', 'git fetch upstream', 'git fetch origin main:elsewhere'])
+      assert.strictEqual(contained(line).verdict, 'deny', line)
+  })
+
+  it('fetches only where it has a network, and thinks without doing', () => {
+    const fetch = { ...command(''), kind: 'fetch' as const }
+    assert.strictEqual(decideReader(fetch, {}).verdict, 'allow')
+    assert.strictEqual(decideReader(fetch, { offline: true }).verdict, 'deny')
+    assert.strictEqual(decideReader({ ...command(''), kind: 'think' as const }, {}).verdict, 'allow')
+  })
+
+  it('reads and searches only what it is given, but for what is given back', () => {
+    assert.strictEqual(reading('/work/meridian/.coordinator/notes/a.md').verdict, 'allow')
+    assert.strictEqual(reading('/work/meridian/.coordinator/secrets/key').verdict, 'deny')
+    // Given back inside a place held from it, it reads there too.
+    assert.strictEqual(reading('/work/meridian/.coordinator/secrets/notes/a.md').verdict, 'allow')
+    // A `.env` outside its folder is held from it, as it is from any reader.
+    assert.strictEqual(reading('/work/meridian/other/.env').verdict, 'deny')
+    // A search from above a held place reaches into it, and one from a folder that holds it does too.
+    assert.strictEqual(reading('/work/meridian', 'search').verdict, 'deny')
+    assert.strictEqual(reading('/work/meridian/.coordinator', 'search').verdict, 'deny')
+    // One from a folder that doesn't hold it, or a given-back part, does not.
+    assert.strictEqual(reading('/work/meridian/.coordinator/notes', 'search').verdict, 'allow')
+    assert.strictEqual(reading('/work/meridian/.coordinator/secrets/notes', 'search').verdict, 'allow')
+    // A pattern that starts outside the folder is a search there.
+    assert.strictEqual(reading(cwd, 'search', { pattern: '/work/meridian/.coordinator/secrets/*' }).verdict, 'deny')
   })
 })
 

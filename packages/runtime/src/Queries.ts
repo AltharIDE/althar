@@ -632,6 +632,8 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       // Older threads kept the agent's explanation of a refusal as a notice; the refused call's own row says it now.
       const title = text(content, 'title')
       if (title === 'Resumed after a rejection.') return undefined
+      // A session's line of skills that said nothing new, kept for its list only: it never reaches the window.
+      if (role === 'skills' && field(content, 'hidden') === true) return undefined
       // Likewise the coordinator's receipt of a denial, kept by older threads.
       if (title?.startsWith('Denied ') && description?.startsWith('By the coordinator:') && text(content, 'about') === 'permission')
         return undefined

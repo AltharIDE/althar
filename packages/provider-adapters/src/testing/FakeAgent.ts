@@ -101,6 +101,7 @@ export const scenarios = {
   silentForever: 'silent-forever',
   /** Like `silentAfterRefusal`, but asked to carry on it ends its turn normally, with nothing said. */
   silentThenEnds: 'silent-then-ends',
+  silentEndTurn: 'silent-end-turn',
   /** Like `fileEdit`, but it asks again every time the turn is resumed. */
   stubborn: 'stubborn',
   /** Asks the person a plain question, as an MCP server's form does, and repeats the answer. */
@@ -714,6 +715,20 @@ const playStall = async (
 export const BUILT = 'Checkout retries once when the payment call fails, in `src/checkout.ts`. Try a checkout with the network off.'
 export const BUILT_SETTLED =
   'Checkout retries once when the payment call fails, in `src/checkout.ts`, and the README heading names it. Try a checkout with the network off.'
+/** The proposal a `[lead:points-back]` lead writes on the way, and its questions: long, as the compaction lead's was. */
+export const POINTED_PROPOSAL = [
+  '## Proposal: twelve current-state decisions',
+  '',
+  ...Array.from(
+    { length: 12 },
+    (_, index) => `${index + 1}. Decision ${index + 1}: what holds today, folding the ADRs that led to it, with their dates.`,
+  ),
+].join('\n')
+export const POINTED_QUESTIONS = [
+  '## Questions',
+  '',
+  ...Array.from({ length: 17 }, (_, index) => `${index + 1}. Question ${index + 1}: keep its history, or only where it stands now?`),
+].join('\n')
 /** The description it writes for the task's pull request, where the repository has no template. */
 export const DESCRIBED =
   'Checkout gave up on the first failed payment call, so a dropped connection lost the order. It now retries once before it says the payment failed.'
@@ -891,6 +906,11 @@ const playRole = async (
     readonly printsAfterEnd?: boolean
     readonly again?: boolean
   }) => Promise<void> = () => Promise.resolve(),
+  /** What it says on the way, and a step of work between, each in the thread as the turn goes. */
+  aloud: { readonly say: (said: string) => Promise<void>; readonly step: (title: string) => Promise<void> } = {
+    say: () => Promise.resolve(),
+    step: () => Promise.resolve(),
+  },
 ): Promise<string | undefined> => {
   for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
   const asked = session.markers.size > 0 || text.includes('Settle each') || text.startsWith('Round ') || text.startsWith('More to review')
@@ -1099,6 +1119,23 @@ const playRole = async (
           return await call('wait_for_person', { question: 'Which ADRs should the compaction keep?' })
         if (session.markers.has('[lead:edit]')) await commitIn(session.cwd, 'change.txt', 'Change it')
         return await finish()
+      }
+      // Shaped like the lead that compacted the ADRs, `[lead:points-back]`: progress lines, its whole proposal on the way,
+      // finish_step, then a short last message that only points at the proposal above. Told to say it again, it does, in full.
+      if (session.markers.has('[lead:points-back]') && available.has('finish_step')) {
+        if (text.startsWith('Your last message points back')) return `${POINTED_PROPOSAL}\n\n${POINTED_QUESTIONS}`
+        if (text.includes('[lead:points-back]')) {
+          await aloud.say('Reading the ADRs first.')
+          await aloud.step('Read docs/decisions')
+          await aloud.say('Grouping them by what each decides now.')
+          await aloud.step('Read docs/architecture')
+          await aloud.say(`${POINTED_PROPOSAL}\n\n${POINTED_QUESTIONS}`)
+          await aloud.step('Write the proposal')
+          // It built something, so its step has a review: nothing built runs none.
+          await commitIn(session.cwd, 'compact.md', 'Compact the ADRs')
+          await call('finish_step', { summary: 'Proposed a dozen current-state decisions; waiting on the answers.', built: BUILT })
+          return 'The proposal is above: answer the questions and I’ll compact the ADRs.'
+        }
       }
       // Fixes and pushes it itself, as a lead may while the person hasn't seen the change yet: each fix a commit of its own.
       // Started again for it, it reads its brief first: the failure is in what it is told, not always at the start.
@@ -1646,6 +1683,16 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         if (session.cancelled) return { stopReason: 'cancelled' }
       }
       const say = (said: string) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: said } })
+      // A step of work between what it says, so each is a message of its own, as an agent's tool call between them makes it.
+      let steps = 0
+      const aloud = {
+        say,
+        step: async (title: string) => {
+          const toolCallId = `aloud-${++steps}`
+          await update({ sessionUpdate: 'tool_call', toolCallId, title, kind: 'read', status: 'in_progress' })
+          await update({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' })
+        },
+      }
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
       // Signed out, as its account no longer is, where the prompt says `[signed-out]`.
       if (text.includes('[signed-out]')) throw acp.RequestError.authRequired()
@@ -1855,6 +1902,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           text,
           (how) => leaveRunning(params.sessionId, session, client, 'claude', how),
           (plan) => leaveTests(params.sessionId, session, client, plan),
+          aloud,
         )
         if (after !== undefined) await say(after)
         return ended()
@@ -1894,6 +1942,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             text,
             (how) => leaveRunning(params.sessionId, session, client, 'claude', how),
             (plan) => leaveTests(params.sessionId, session, client, plan),
+            aloud,
           )
       // Stopped while it played its part, the turn was cancelled, as an agent says.
       if (played !== undefined && session.cancelled) return { stopReason: 'cancelled' }
@@ -1926,6 +1975,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             : text
 
       switch (scenario) {
+        case scenarios.silentEndTurn:
         case scenarios.silentThenEnds:
         case scenarios.silentForever:
         case scenarios.silentAfterRefusal: {
@@ -1938,7 +1988,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             status: chosen.startsWith('allow') ? 'completed' : 'failed',
           })
           if (chosen.startsWith('allow')) await say('ran it')
-          return chosen.startsWith('allow') ? ended() : { stopReason: 'cancelled' }
+          return chosen.startsWith('allow') || scenario === scenarios.silentEndTurn ? ended() : { stopReason: 'cancelled' }
         }
         case scenarios.commandChoices:
         case scenarios.deniedThenWait:

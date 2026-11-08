@@ -26,10 +26,10 @@
   lead a review),
   [ADR-052](052-a-task-attaches-to-a-pull-request-it-didn-t-open.md) (forks),
   [ADR-057](057-a-lead-works-outside-its-sandbox-through-althar-s-tools.md)
-  (a review's lead gets no tools; screenshots of this computer only),
+  (a review's lead gets no tools; screenshots of any page over HTTP),
   [ADR-058](058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md)
-  (the coordinator installs nothing, reaches no network, loads nothing of the
-  person's),
+  (the coordinator installs nothing, loads nothing of the person's, and keeps
+  its edit tools denied; its commands reach the network),
   [ADR-066](066-althar-runs-any-branch-or-pull-request-and-fetches-for-leads.md)
   (leads carry none of the person's sign-ins),
   [ADR-067](067-allow-everything-asks-only-before-what-can-t-be-undone.md)
@@ -361,8 +361,8 @@ it comes to matter.
 Agents may use the person's own `gh`, `glab` and git sign-in where they have
 one set up: their `gh` and `glab` config, git's credential helpers and their
 SSH agent are no longer taken out of the agent's environment
-(`runtime/src/Config.ts`, ADR-011). A project switch, "Agents use my code
-host sign-in", on by default, turns it off.
+(`runtime/src/Config.ts`, ADR-011). The proposed project switch is not
+implemented by this sweep; the inherited environment is the default.
 
 In the Flatpak the person's sign-in is on the device, not in the sandbox
 (ADR-027, ADR-073). Agents that run on the device get it as their
@@ -777,8 +777,8 @@ this ADR or the prototype's README.
 | 043 | Allowing everything as an opt-in; the host only through Althar | The one switch, project and task; Never over it |
 | 050 | No review led by an agent a repository's settings can approve for | That rule for an outside author's review |
 | 052 | A branch on someone else's fork never attached | Never forced; attached one at a time |
-| 057 | A review's lead gets no tools; screenshots of this computer only | The tools themselves |
-| 058 | No installs in its copies; no network for its commands; none of the person's setup | Copies of its own, edit tools denied |
+| 057 | A review's lead gets no tools; screenshots of any page over HTTP | The tools themselves |
+| 058 | No installs in its copies; no network for its commands; none of the person's setup | Copies of its own, edit tools denied; the network is open |
 | 066 | Leads carry none of the person's sign-ins | `fetch_from_remote`, preferred |
 | 067 | The floor in the other modes | The irreversible kinds |
 | 071 | Today's rules where no sandbox holds; review steps' rules | The sandbox as the boundary; the guard |
@@ -791,3 +791,68 @@ this ADR or the prototype's README.
 | 089 | `reflog expire` and `gc --prune` asking in the other modes | The guard's reads, teardown and publishing asking |
 | 094 | Skills for leads only, off until turned on | One store, the catalog, reviewed installs |
 | 095 | The Repository files switches and the held push | – |
+
+## Enforcement sweep, 7 November 2026
+
+The sandbox, environment, coordinator and rules sweep is built on #684.
+The audit records the limits removed and each retained boundary. Review
+workspaces and the in-task reviewer's tool list are deliberately left to the
+task-as-parts work.
+
+The [limits audit](../plans/no-arbitrary-limits-audit.md) records every
+restriction found, its disposition and regression coverage. Sandboxed shell
+commands reach every host, without a project host list. Claude Code gets an
+open network; Codex gets it in both its session config and the adapter's
+per-turn policy; OpenCode has no OS sandbox and goes through the rules.
+An outside review remains offline.
+
+The coordinator may read ordinary files anywhere and reach the network;
+its OS sandbox still holds writes to its folder and temporary files.
+Secret-file protections remain. Common dev servers and test runners started
+by hand get the same sandbox exclusions as recorded project commands.
+
+The person's code-host identity is inherited: gh/glab config and tokens,
+git's credential helpers and the SSH agent. This completes the environment
+part of phase 3 here. Althar's sealed connection secrets and provider API
+keys are not inherited. Explicit credential-export commands still refuse.
+The git guard remains in place regardless of which sign-in pushes.
+
+Skill and OpenSpec files are ordinary repository files, with no separate
+push consent. Copilot's built-in tools remain available. Screenshots may
+visit any HTTP or HTTPS page, including redirects, in the existing isolated
+browser session; file URLs remain refused.
+
+A refusal that leaves an agent silent is followed up, and any final notice
+names the command and the reason Althar refused it. A review's lead of the
+repository's own people now has the full lead tool set; an outside author's
+review keeps the reading six tools, and its code does not run without the
+person's word. Review workspaces, the in-task reviewer's tool list and running
+the reviewed code remain with the task-as-parts work, by the coordinator's
+direction; they are not a separate path in this sweep.
+
+The coordinator uses the project rules, including the person's Never and Ask,
+rather than the strict reader whitelist. Without a sandbox only visible writes
+outside its folder are refused; unreadable commands run. Its edit tools stay
+denied, as the What stays table keeps them. A silent refusal is recovered in
+the same turn. Claude's native sandbox still refuses opening pipe descriptors
+under `/dev/fd`; the coordinator may run any command outside the sandbox when it
+asks to, and the same read-only rules decide it: a read such as `<(…)` runs, a
+visible write outside its folder is refused. Althar no longer refuses process
+substitution itself.
+
+Sandboxed commands reach Althar's rules so the list holds inside the sandbox
+too: each command is answered at once, a visible irreversible one asks the
+person, and an unreadable one runs. Approving an agent's own work or widening
+host access through `gh api` is refused, not asked. Claude Code's sandbox opens
+the network and the SSH agent's socket only. Codex's turn takes the `untrusted`
+approval policy through a patch to codex-acp, so the commands it doesn't read as
+safe, a merge, a release or a post among them, reach Althar and the irreversible
+list holds there too; commands its own safe list covers run unasked. Nothing of
+the network, the sign-in or the sandbox is left outside the list.
+
+The non-irreversible floor is gone in every mode. Code-host CLI changes and the
+Flatpak bridge are ordinary commands. Visible merges, releases, posts and
+credential exports remain held. Unknown host API mutations are allowed rather
+than treated as irreversible by default. Selected skills reach all ordinary
+roles, including the coordinator; outside reviews remain offline and load no
+executable skill plugins.

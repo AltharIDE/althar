@@ -68,7 +68,7 @@ describe('an agent’s command, as sync runs it', () => {
     )
     expect([env['HOME'], env['CODEX_HOME'], env['XDG_CONFIG_HOME'], env['CLAUDE_CONFIG_DIR'], env['LANG']]).toEqual([
       '/h',
-      '/h/.codex',
+      join('/h', '.codex'),
       undefined,
       undefined,
       'C',

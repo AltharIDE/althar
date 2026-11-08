@@ -4,7 +4,7 @@ import { basename, dirname, join } from 'node:path'
 
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Duration, Effect, Exit, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts } from '../src/Accounts'
@@ -151,6 +151,36 @@ const settledQuietly = Effect.gen(function* () {
   const call = yield* stuckCall(task.taskId)
   assert.deepStrictEqual([call.step, call.why], ['settle', 'no_report'])
   return { task, call }
+})
+
+describe('a stuck call whose answer can’t be carried out', () => {
+  it.live('is open again, the step waiting on it, and the window told, not left answered', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* planned('Do it. [lead:refuse]')
+      const call = yield* stuckCall(task.taskId)
+      const exit = yield* Effect.exit(
+        (yield* Runs).answerStuck({
+          envelope: yield* Runtime.envelope('attention.answer_stuck', {}),
+          attentionId: call.id,
+          answer: { kind: 'retry', agentId: 'missing' },
+        }),
+      )
+      assert.isTrue(Exit.isFailure(exit))
+      const [row] = yield* sql<{
+        state: string
+        answeredAt: string | null
+      }>`SELECT state, answered_at FROM attention_requests WHERE id = ${call.id}`
+      assert.deepStrictEqual([row?.state, row?.answeredAt], ['open', null])
+      assert.deepStrictEqual((yield* attempts(task.taskId)).at(-1)?.state, 'waiting_attention')
+      // The window hears of it: the last change told is the row's own revision.
+      const [told] = yield* sql<{ revision: number }>`
+        SELECT aggregate_revision AS revision FROM change_log WHERE aggregate_type = 'attention_request' AND aggregate_id = ${call.id}
+        ORDER BY cursor DESC LIMIT 1`
+      const [now] = yield* sql<{ revision: number }>`SELECT revision FROM attention_requests WHERE id = ${call.id}`
+      assert.strictEqual(told?.revision, now?.revision)
+    }).pipe(Effect.provide(withQueries(':memory:', {}, {}))),
+  )
 })
 
 describe('a lead’s step that needs the person, handed back to its own agent on another model', () => {
