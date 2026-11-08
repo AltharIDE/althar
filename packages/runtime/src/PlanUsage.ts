@@ -335,8 +335,8 @@ export class PlanUsage extends Context.Service<
               windows = excluded.windows, observed_at = excluded.observed_at`
           })
 
-        /* Reads one account from its agent's source and keeps what it said. */
-        const readAccount = (account: Account) =>
+        /* Reads one account from its agent's source and keeps what it said; `onDemand` where steering wants it read again, whatever a session said lately. */
+        const readAccount = (account: Account, onDemand = false) =>
           Effect.gen(function* () {
             const entry = agents.list.find((each) => each.definition.id === account.agentId)
             if (entry === undefined) return
@@ -479,6 +479,7 @@ export class PlanUsage extends Context.Service<
               const lately = now - Duration.toMillis(HEARD_LATELY)
               const windows = before?.windows ?? []
               if (
+                !onDemand &&
                 before?.source === 'acp_extension' &&
                 windows.length > 0 &&
                 windows.every((window) => !past(window.resetsAt, now) && Date.parse(window.observedAt) > lately)
@@ -578,7 +579,10 @@ export class PlanUsage extends Context.Service<
               })
               yield* Effect.forEach(
                 due,
-                (account) => readAccount(account).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not read plan usage', cause))),
+                (account) =>
+                  readAccount(account, only !== undefined).pipe(
+                    Effect.catchCause((cause) => Effect.logWarning('Could not read plan usage', cause)),
+                  ),
                 { concurrency: 'unbounded', discard: true },
               )
               read += due.length

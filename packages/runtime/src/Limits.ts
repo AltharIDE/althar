@@ -30,6 +30,11 @@ import { Installs, isInstalled } from './Installs'
  * and an agent whose accounts are all nearly out (under NEARLY_OUT percent of
  * their tightest window) is treated by the same rule for new steps. A step
  * already running is never stopped for it.
+ *
+ * An account marked out is back before its reset when it shows it works: a
+ * reading of its plan taken after, with room in every window, or a turn that
+ * completed on it after (`recovered`). That is the one rule every caller goes
+ * by, through `outOf`.
  */
 
 /**
