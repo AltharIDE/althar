@@ -45,6 +45,7 @@ import { installOf, usageData } from './usageData'
 import { masker } from '../logs/mask'
 import { outsideOf } from './browser/addresses'
 import { browserAgent } from './browser/devices'
+import { type Bridge, bridgeOf } from './browser/bridge'
 import { handlePages } from './browser/ipc'
 import { ownersOnDisk, partitionsIn, type Pages, startPages } from './browser/pages'
 // Where each editor is, from the runtime's list of them, so its icon can be drawn here.
@@ -279,6 +280,8 @@ interface RuntimeMessage {
   readonly crash?: unknown
   /** A screenshot an agent asked for (screenshots.ts). */
   readonly shot?: Shot
+  /** A page call from a tool of the runtime's (browser/bridge.ts): whose page, and what is asked of it. */
+  readonly call?: unknown
   /** Tasks over and projects removed (settled.ts), whose pages' cookies may go. */
   readonly owners?: unknown
   readonly event?: {
@@ -453,6 +456,8 @@ let edge: Edge | undefined
 
 /* The pages beside the conversations (browser/pages.ts), once the app is ready. */
 let pages: Pages | undefined
+/* How the runtime's tools reach them (browser/bridge.ts): the runtime's own process alone. */
+let bridge: Bridge | undefined
 /** Whether web contents are one of Althar's own windows: only they reach its bridge's calls. */
 const mine = (contents: WebContents) => [...windows].some((window) => !window.isDestroyed() && window.webContents === contents)
 
@@ -550,6 +555,16 @@ const screenshot = (child: UtilityProcess, message: RuntimeMessage) => {
       child.postMessage({ type: 'screenshot-taken', requestId, error: error instanceof Error ? error.message : String(error) }),
   )
 }
+/** A call from a tool of the runtime's on the page beside a conversation, answered in words (browser/bridge.ts). */
+const pageCall = (child: UtilityProcess, message: RuntimeMessage) => {
+  if (bridge?.handle(child, message) === true) return
+  if (typeof message.requestId === 'string' && bridge === undefined)
+    child.postMessage({ type: 'page-done', requestId: message.requestId, error: 'Althar’s pages aren’t ready yet.' })
+}
+/* The end-to-end tests drive a page as a tool of the runtime's does, through the same bridge. Packaged builds leave this out. */
+if (__ALTHAR_TEST_HOOKS__)
+  (globalThis as unknown as { drivePage: (owner: string, call: unknown) => Promise<unknown> }).drivePage = (owner, call) =>
+    bridge === undefined ? Promise.resolve({ error: 'Althar’s pages aren’t ready yet.' }) : bridge.request(owner, call)
 /* The end-to-end tests take one as an agent would, straight from the main process (e2e/screenshots.spec.ts). Packaged builds leave this out. */
 if (__ALTHAR_TEST_HOOKS__)
   (globalThis as unknown as { takeScreenshot: (shot: Shot) => Promise<unknown> }).takeScreenshot = (shot) =>
@@ -610,6 +625,7 @@ const startRuntime = () => {
     }
     if (message.type === 'seal' || message.type === 'open') return seal(child, message)
     if (message.type === 'screenshot') return screenshot(child, message)
+    if (message.type === 'page') return pageCall(child, message)
     if (message.type === 'facts') return facts.answer(message)
     if (message.type === 'names') return names.answer(message)
     if (message.type === 'work') return works.answer(message)
@@ -1071,8 +1087,25 @@ void ready.then(() => {
     },
     chrome: process.versions.chrome,
     agent: browserAgent(app.userAgentFallback),
+    // A page a lead opened, or woke, with no window showing it: the windows place it beside its conversation.
+    opened: (owner) => {
+      for (const window of windows) if (!window.isDestroyed()) window.webContents.send('althar:page-opened', owner)
+    },
+    windows: () => [...windows].filter((window) => !window.isDestroyed()).length,
+    quitting: () => quitting,
   })
   handlePages(pages, mine)
+  bridge = bridgeOf({
+    pages,
+    isRuntime: (from) => from !== undefined && from === runtime,
+    reply: (to, requestId, done) => {
+      try {
+        ;(to as UtilityProcess).postMessage({ type: 'page-done', requestId, ...done })
+      } catch {
+        // The runtime went with the question: nothing is left to hear the answer.
+      }
+    },
+  })
   void preferencesRead.then(() => pages?.moment('started')).catch(() => undefined)
   void showChosenIcon()
   // Plugged in or on battery changes whether the Mac is held awake.
