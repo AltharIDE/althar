@@ -1689,6 +1689,22 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await update({ sessionUpdate: 'tool_call_update', toolCallId: 'compact', status: 'failed' })
           return ended()
         }
+        // With `[lead:compact-reports]`, it reports the compaction as such (ACP's `compaction_update`), with its summary in
+        // pieces, as Claude Code, Codex and OpenCode do for a client that takes them.
+        if (session.markers.has('[lead:compact-reports]')) {
+          await update({ sessionUpdate: 'compaction_update', compactionId: 'compaction-1', status: 'in_progress' })
+          await update({
+            sessionUpdate: 'compaction_summary_chunk',
+            compactionId: 'compaction-1',
+            content: { type: 'text', text: 'We were ' },
+          })
+          await update({
+            sessionUpdate: 'compaction_summary_chunk',
+            compactionId: 'compaction-1',
+            content: { type: 'text', text: 'fixing the checkout retry.' },
+          })
+          await update({ sessionUpdate: 'compaction_update', compactionId: 'compaction-1', status: 'completed' })
+        }
         await update({ sessionUpdate: 'usage_update', used: Math.round(session.contextSize / 10), size: session.contextSize })
         await say('Compacted the conversation.')
         return ended()

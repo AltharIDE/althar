@@ -368,6 +368,8 @@ interface Running {
   settleBetween: Effect.Effect<void, never, Store>
   /** What records its events now: its turn's, or the one between turns. */
   recording: { readonly outputOf: (itemId: string) => OutputSoFar | undefined } | undefined
+  /** The person stopped the turn running (`interrupt`): its end says so. */
+  stoppedByPerson: boolean
   /**
    * The ports its process tree listened on as its latest turn began, once
    * read: what a command it leaves running in that turn is told apart from
@@ -543,6 +545,13 @@ export const asTold = (definition: AgentDefinition, prompt: string): string =>
 
 /** Tokens in a line: 412k, 1.2M. */
 const tokensWord = (tokens: number) => (tokens >= 1_000_000 ? `${Math.round(tokens / 100_000) / 10}M` : `${Math.round(tokens / 1000)}k`)
+
+/** How far a compaction took the context, from how full to how full, where the agent said both and it went down. */
+export const compactedSpan = (before: { readonly used: number } | null, after: { readonly used: number } | null) =>
+  before !== null && after !== null && after.used < before.used ? `${tokensWord(before.used)} → ${tokensWord(after.used)} tokens` : null
+
+/** What the thread says once the person stopped an agent's turn. */
+export const INTERRUPTED = 'Interrupted by you.'
 
 /** What the thread says once an agent compacted its context: from how full to how full, where it said both. */
 export const compactedWords = (name: string, before: { readonly used: number } | null, after: { readonly used: number } | null) =>
@@ -785,7 +794,7 @@ export class Sessions extends Context.Service<
       readonly byPerson?: boolean
     }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | PlanOnly | Failure>
     /** Stops the turn running, if there is one; the session waits for what comes next. */
-    interrupt(threadId: string): Effect.Effect<void, NoSession>
+    interrupt(threadId: string, by?: 'person'): Effect.Effect<void, NoSession>
     /** Stops the thread's session, after ending its turn. */
     stop(threadId: string): Effect.Effect<void, NoSession>
     /** Stops a command the thread's session left running; it goes from the list. Nothing, where the session or the command is gone already. */
@@ -1722,6 +1731,7 @@ export class Sessions extends Context.Service<
             )
           if (!compacting) running.brief = undefined
           running.turnRunning = true
+          running.stoppedByPerson = false
           running.turnStartedAt = yield* Clock.currentTimeMillis
           running.atBreak = false
           // What it did outside a turn before is over with: this turn is what it is at.
@@ -1856,7 +1866,13 @@ export class Sessions extends Context.Service<
             Effect.gen(function* () {
               if (event._tag === 'TurnEnded') ended = event
               // An agent may say its compaction failed in a call of its own, and end its turn as usual (Claude Code).
-              if (compacting && event._tag === 'ToolCallUpdate' && event.status === 'failed') compactFailed = true
+              // One that reports its compaction as such (ACP's `compaction_update`) says so there.
+              if (
+                compacting &&
+                ((event._tag === 'ToolCallUpdate' && event.status === 'failed') ||
+                  (event._tag === 'Compaction' && event.status === 'failed'))
+              )
+                compactFailed = true
               heardContext(running, event)
               yield* heardPlan(running, event)
               yield* record(event)
@@ -1963,8 +1979,20 @@ export class Sessions extends Context.Service<
           const resetsAt =
             Option.isSome(failure) && failure.value._tag === 'AgentRequestFailed' ? failure.value.resetsAt : ended?.failure?.resetsAt
           if (errorClass === 'usage_limit') yield* accountLimited(running, resetsAt)
-          // A compaction says how far it took the context, as the agent says it; or that it didn't.
-          if (compacting && state === 'completed')
+          // The person stopped it: the thread says so where it stopped.
+          if (state === 'interrupted' && running.stoppedByPerson)
+            yield* addItem(
+              { projectId: thread.projectId, threadId: thread.threadId, sessionId: running.sessionId, deliveryId: turnId },
+              'notice',
+              { source: 'runtime', severity: 'info', role: 'interrupted', title: INTERRUPTED },
+            )
+          running.stoppedByPerson = false
+          // A compaction the agent reported as one has its own line already: how far it took the context goes under it.
+          const reported = compacting && state === 'completed' ? items.compaction() : undefined
+          const span = compactedSpan(before, running.context)
+          if (reported !== undefined && span !== null) yield* Effect.ignore(items.describeCompaction(span))
+          // Otherwise a compaction says how far it took the context, as the agent says it; or that it didn't.
+          if (compacting && state === 'completed' && reported === undefined)
             yield* addItem(
               { projectId: thread.projectId, threadId: thread.threadId, sessionId: running.sessionId, deliveryId: turnId },
               'notice',
@@ -2725,6 +2753,7 @@ export class Sessions extends Context.Service<
             stopping: false,
             context: null,
             recording: undefined,
+            stoppedByPerson: false,
             settleBetween: Effect.void,
             listeningBefore: yield* Deferred.make<ReadonlySet<number>>().pipe(
               Effect.tap((before) => Deferred.succeed(before, new Set<number>())),
@@ -3895,10 +3924,12 @@ export class Sessions extends Context.Service<
             }).pipe(Effect.orDie),
           ),
         switchAgent: (input) => run(switchAgent(input)),
-        interrupt: (threadId) =>
+        interrupt: (threadId, by) =>
           Effect.suspend(() => {
             const running = threads.get(threadId)
             if (running === undefined) return Effect.fail(new NoSession({ threadId }))
+            // The person's stop, of a turn running: its end says so in the thread.
+            if (by === 'person' && running.turnRunning) running.stoppedByPerson = true
             // Asked to stop before the prompt has reached the agent, there is nothing to cancel yet: the agent would take
             // the stop for the turn before this one, or lose it, while its prompt goes on. Wait until it has the prompt.
             const sent = running.promptSent

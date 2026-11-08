@@ -731,7 +731,8 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
           // A way to ask only where someone answers: without it Claude Code turns AskUserQuestion off.
           ...(options.onQuestion === undefined ? {} : { elicitation: { form: {} } }),
           // What the agent says of itself, such as a command stopped, as a notice rather than in its own words.
-          session: { notices: {} },
+          // Its context compacting as a lifecycle of its own, with the summary it keeps, rather than a tool call or a notice.
+          session: { notices: {}, compaction: {} },
           _meta: {
             jetbrains: {
               air: {

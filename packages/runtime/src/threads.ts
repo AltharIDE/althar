@@ -70,6 +70,48 @@ const mcpKept = (
   }
 }
 
+/** How much of what a sub-agent reported back is kept on its call: what it found, at a glance. */
+const REPORT_KEPT = 600
+
+/** How much of the summary a compaction kept is kept on its line: enough to read what the agent still knows. */
+export const SUMMARY_KEPT = 20_000
+
+/**
+ * What a sub-agent's call keeps (`activity.ts`): what it was asked, its kind
+ * and model, and, once it ended, the start of what it reported back. Its
+ * prompt itself isn't kept.
+ */
+const subAgentKept = (
+  event: Extract<SessionEvent, { _tag: 'ToolCall' | 'ToolCallUpdate' }>,
+  stored: Readonly<Record<string, unknown>> | undefined,
+): { readonly subAgent?: Readonly<Record<string, unknown>> } => {
+  const had =
+    typeof stored?.subAgent === 'object' && stored.subAgent !== null ? (stored.subAgent as Readonly<Record<string, unknown>>) : undefined
+  if (event.subAgent === undefined && had === undefined) return {}
+  const ended = event.status === 'completed' || event.status === 'failed'
+  const report = ended
+    ? (event.content ?? [])
+        .flatMap((entry) => (entry._tag === 'Text' ? [entry.text] : []))
+        .join('\n')
+        .trim()
+    : ''
+  return {
+    subAgent: {
+      ...had,
+      ...event.subAgent,
+      ...(report === '' ? {} : { said: report.length > REPORT_KEPT ? `${report.slice(0, REPORT_KEPT - 1)}…` : report }),
+    },
+  }
+}
+
+/** What the thread says of a compaction, as it stands: its line draws its own words, and a transcript reads these. */
+const COMPACTION_TITLES = {
+  in_progress: 'Compacting the context.',
+  completed: 'Context compacted.',
+  failed: 'Couldn’t compact the context.',
+  cancelled: 'Compacting the context stopped.',
+} as const
+
 /** Where to see what an MCP call did: the first web address its result names, a review's or a comment's. */
 const linkIn = (output: unknown): string | undefined => {
   const text = typeof output === 'string' ? output : (JSON.stringify(output) ?? '')
@@ -374,6 +416,10 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   const servers = new Map<string, string>()
   /** Commands that ended, whose output is kept. */
   const finished = new Set<string>()
+  /** Each compaction the agent reported, by its id: its line, and what it says so far. */
+  const compactions = new Map<string, { id: string | undefined; content: Record<string, unknown>; summary: string }>()
+  /** The compaction reported last, by its id. */
+  let lastCompaction: string | undefined
   const folders = place.folders ?? []
   const where = (itemId: string) => ({ projectId: place.projectId, itemId, folders })
 
@@ -575,6 +621,9 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
             ...(event.skill === undefined ? {} : { skill: { names: [event.skill], reported: true } }),
             ...mcpKept(event, existing?.content),
             ...serverDown(event),
+            ...(event.web === undefined ? {} : { web: event.web }),
+            ...subAgentKept(event, existing?.content),
+            ...(yield* parentKept(event)),
           }
           // Only what it read of the skills its agent listed: an agent that says what it loads has said so.
           const read = (stored: Readonly<Record<string, unknown>>) =>
@@ -594,6 +643,9 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
             yield* updateItem(place.projectId, existing.id, { ...stored, ...extras })
           }
         })
+      case 'Compaction':
+      case 'CompactionSummary':
+        return compacted(event)
       case 'Plan':
         return Effect.gen(function* () {
           yield* flush
@@ -621,6 +673,64 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
         return Effect.void
     }
   }
+
+  /** The sub-agent's call a call is made by, by that call's item, where the agent says and the call is in the thread. */
+  const parentKept = (event: Extract<SessionEvent, { _tag: 'ToolCall' | 'ToolCallUpdate' }>) =>
+    event.parent === undefined
+      ? Effect.succeed({})
+      : Effect.map(toolItem(place.sessionId, event.parent), (parent) => (parent === undefined ? {} : { parent: parent.id }))
+
+  /**
+   * The agent compacting its context: one line in the thread, placed when it
+   * is first heard of and kept as it goes, with the summary it kept, whole
+   * or as it came in pieces, and why it failed. Pieces of the summary are
+   * written with how it ended, not one by one.
+   */
+  const compacted = (event: Extract<SessionEvent, { _tag: 'Compaction' | 'CompactionSummary' }>) =>
+    Effect.gen(function* () {
+      yield* flush
+      const known = compactions.get(event.compactionId) ?? { id: undefined, content: {}, summary: '' }
+      compactions.set(event.compactionId, known)
+      lastCompaction = event.compactionId
+      if (event._tag === 'CompactionSummary') {
+        known.summary = `${known.summary}${event.text}`.slice(0, SUMMARY_KEPT)
+        if (known.id !== undefined) return
+      } else if (event.summary !== undefined) known.summary = event.summary.slice(0, SUMMARY_KEPT)
+      const status = event._tag === 'Compaction' ? event.status : 'in_progress'
+      const had = typeof known.content.compaction === 'object' ? (known.content.compaction as Record<string, unknown>) : {}
+      const error = event._tag === 'Compaction' ? event.error : undefined
+      known.content = {
+        ...known.content,
+        source: 'runtime',
+        severity: status === 'failed' ? 'warning' : 'info',
+        role: 'compacted',
+        title: COMPACTION_TITLES[status],
+        compaction: {
+          ...had,
+          status,
+          ...(known.summary === '' ? {} : { summary: known.summary }),
+          ...(error === undefined ? {} : { error }),
+        },
+      }
+      if (known.id === undefined) known.id = yield* addItem(place, 'notice', known.content)
+      else yield* updateItem(place.projectId, known.id, known.content)
+    })
+
+  /** How the compaction reported last stands, where one was. */
+  const compaction = (): 'in_progress' | 'completed' | 'failed' | 'cancelled' | undefined => {
+    const known = lastCompaction === undefined ? undefined : compactions.get(lastCompaction)
+    const status = (known?.content.compaction as { readonly status?: unknown } | undefined)?.status
+    return status === 'in_progress' || status === 'completed' || status === 'failed' || status === 'cancelled' ? status : undefined
+  }
+
+  /** Says under the compaction reported last how far it took the context, as Althar knows it. */
+  const describeCompaction = (description: string) =>
+    Effect.suspend(() => {
+      const known = lastCompaction === undefined ? undefined : compactions.get(lastCompaction)
+      if (known?.id === undefined) return Effect.void
+      known.content = { ...known.content, description }
+      return updateItem(place.projectId, known.id, known.content)
+    })
 
   /** A call to a server that was down, once it failed: which, and how, for the thread to say under it. */
   const serverDown = (event: Extract<SessionEvent, { _tag: 'ToolCall' | 'ToolCallUpdate' }>) => {
@@ -650,7 +760,7 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
     return output === undefined ? undefined : { itemId, ...output.tail() }
   }
 
-  return { record, flush, end, current, outputsSoFar, outputOf }
+  return { record, flush, end, current, outputsSoFar, outputOf, compaction, describeCompaction }
 }
 
 /** How long an agent has to be quiet between turns before the message it was saying is closed. */
