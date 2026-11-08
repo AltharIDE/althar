@@ -6,6 +6,7 @@ import { SqlClient } from 'effect/sql'
 import { Busy } from './Busy'
 import { Changes } from './Changes'
 import { Installs } from './Installs'
+import { Accounts } from './Accounts'
 import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
 import { Models } from './Models'
@@ -19,6 +20,7 @@ import { commitsOf } from './git'
 import { Instance } from './Instance'
 import { answeredIn, quickIn } from './kinds'
 import { Plans } from './Plans'
+import { PlanUsage } from './PlanUsage'
 import { fact } from './records'
 import { Runs, type StuckAnswer, type StuckInfo } from './Runs'
 import { Sessions } from './Sessions'
@@ -146,6 +148,8 @@ type Store =
   | Installs
   | ModelFacts
   | Limits
+  | Accounts
+  | PlanUsage
   | SignIns
 
 /** What each move did, as a line says it of the task. */
