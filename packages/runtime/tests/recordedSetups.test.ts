@@ -203,13 +203,12 @@ describe('a setup the person edited', () => {
       const sql = yield* SqlClient.SqlClient
       const questions = yield* Questions
       const fiber = yield* Effect.forkChild(callTool(lead, 'record_setup', { commands, copy }))
-      let asked: { id: string; payload: string } | undefined
-      for (let i = 0; i < 200 && asked === undefined; i++) {
-        ;[asked] = yield* sql<{ id: string; payload: string }>`
-          SELECT id, payload FROM attention_requests WHERE kind = 'question' AND state = 'open' AND task_id = ${lead.taskId}`
-        if (asked === undefined) yield* Effect.sleep('25 millis')
-      }
-      assert.isDefined(asked, 'Althar asked the person')
+      const [asked] = yield* until(
+        sql<{ id: string; payload: string }>`
+          SELECT id, payload FROM attention_requests WHERE kind = 'question' AND state = 'open' AND task_id = ${lead.taskId}`,
+        (rows) => rows.length > 0,
+        'Althar asked the person',
+      )
       const payload = JSON.parse(asked?.payload ?? '{}') as { message: string }
       // Something done while the question waits: the person edits or clears the setup.
       if (meanwhile !== undefined) yield* meanwhile
