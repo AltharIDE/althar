@@ -6,6 +6,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
 import { addServer, removeServer, serverDetail } from '../src/mcpAdd'
+import { setToolRoles } from '../src/agentTools'
 import { claudeLines, codexLines, mask, openCodeLines } from '../src/mcpLines'
 import { keepOut, readRecord, reconcile, syncState, turnOn } from '../src/mcpSync'
 import { Projects } from '../src/Projects'
@@ -190,6 +191,34 @@ describe('a server opened out', () => {
       )
       assert.include(docs.files[0]?.lines.join('\n'), '"KEY": "••••"')
       assert.notInclude(JSON.stringify(docs), 'written-out')
+    }).pipe(Effect.provide(runtime(':memory:', {}, { agentConfigs: { homeDir: home, folder: io.folder, run: io.run, env: {} } })))
+  })
+
+  it.live('opens a repository’s own without running its command until the person turns it on', () => {
+    const home = homeWith({})
+    const { io } = fakeAgents(home)
+    const root = repository()
+    const marker = join(root, 'ran')
+    // A command that leaves a mark when it runs, so the test can tell whether merely opening the server ran it.
+    writeFileSync(
+      join(root, '.mcp.json'),
+      JSON.stringify({
+        mcpServers: {
+          docs: { command: process.execPath, args: ['-e', `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'ran')`] },
+        },
+      }),
+    )
+    return Effect.gen(function* () {
+      const { projectId } = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: root })
+      // Opened while it is in no role: its lines are read, and the command it names is not run.
+      const off = yield* serverDetail('docs', projectId)
+      assert.strictEqual(off.tools, null)
+      assert.strictEqual(off.toolsWhy, 'It isn’t turned on here, so Althar hasn’t run it.')
+      assert.isFalse(existsSync(marker))
+      // Turned on, Althar's own check asks it, which runs the command once.
+      yield* setToolRoles('server', 'docs', ['coordinator'], projectId, projectId)
+      yield* serverDetail('docs', projectId)
+      assert.isTrue(existsSync(marker))
     }).pipe(Effect.provide(runtime(':memory:', {}, { agentConfigs: { homeDir: home, folder: io.folder, run: io.run, env: {} } })))
   })
 })

@@ -159,6 +159,13 @@ export const repositoryServersOf = (projectId: string) =>
     return found
   })
 
+/**
+ * Whether the person has turned a repository's own server on in a project: it is in no role until they do, so its
+ * command is one nobody has chosen to run. What reads it stays passive until then (`mcpAdd.ts`).
+ */
+export const repositoryServerOn = (name: string, projectId: string) =>
+  Effect.map(readRoles, (roles) => rolesOf(roles, 'server', toolKey(name, projectId), projectId, []).length > 0)
+
 /** Whether an agent that runs a server is signed in to it, as its own check last said; unknown for one that doesn't run it. */
 export const signInOf = (health: HealthRecord, spec: ServerSpec | undefined, agent: SyncedAgent): ToolSignIn => {
   if (spec === undefined) return 'unknown'

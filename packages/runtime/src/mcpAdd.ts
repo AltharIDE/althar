@@ -2,7 +2,7 @@ import type { NewServer, ServerDetail, ToolFile } from '@althar/contracts'
 import { agentServers, runsOf, sameServer, type ServerSpec, SYNCED_AGENTS, type SyncedAgent } from '@althar/provider-adapters'
 import { Duration, Effect, Option, Schema } from 'effect'
 
-import { expandedSpec, FILES, repositoryServersOf, signInOf, syncIo } from './agentTools'
+import { expandedSpec, FILES, repositoryServerOn, repositoryServersOf, signInOf, syncIo } from './agentTools'
 import { probeServer, type Probed, readHealth } from './mcpHealth'
 import { asCodexWrites, claudeLines, codexLines, mask, openCodeLines } from './mcpLines'
 import * as mcp from './mcpSync'
@@ -69,6 +69,7 @@ const refused = () => new ServerRefused({ message: 'This Althar doesn’t read y
 /**
  * One server opened out: for one of the person's, each agent's own file as it keeps it, or would where it isn't
  * there; for a repository's own, its `.mcp.json`. With the count of its tools, where Althar's own check could read it.
+ * A repository's own is only asked once the person has turned it on: reading it never runs a command nobody chose.
  */
 export const serverDetail = (name: string, repository: string | null) =>
   Effect.gen(function* () {
@@ -87,7 +88,9 @@ export const serverDetail = (name: string, repository: string | null) =>
         why: null,
         signIn: 'unknown',
       }
-      const probed = yield* probe(spec)
+      const probed: Probed = (yield* repositoryServerOn(name, repository))
+        ? yield* probe(spec)
+        : { tools: null, why: 'It isn’t turned on here, so Althar hasn’t run it.' }
       return {
         name,
         runs: runsOf(spec),
