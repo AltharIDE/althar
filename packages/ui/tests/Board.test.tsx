@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
+import { Profiler } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { Board, BoardColumn, boardText, NO_FOLDS, RAIL, railsOf } from '../src/board/Board/Board'
@@ -108,6 +109,53 @@ describe('a board that measures itself', () => {
     width = 1600
     act(() => observers.forEach((heard) => heard()))
     expect(screen.queryByRole('button', { name: 'Expand Settled, 40' })).not.toBeInTheDocument()
+  })
+
+  it('is drawn again as it widens or narrows only where that changes which lanes are rails, as while a divider beside it is dragged', () => {
+    width = 1008
+    measured()
+    const drawn = vi.fn()
+    render(
+      <Profiler id="board" onRender={drawn}>
+        <Board label="Meridian’s work">
+          <BoardColumn lane={BoardLane.Next} count={2} />
+          <BoardColumn lane={BoardLane.Running} count={3} />
+          <BoardColumn lane={BoardLane.Yours} count={1} />
+          <BoardColumn lane={BoardLane.Settled} count={40} />
+        </Board>
+      </Profiler>,
+    )
+    const times = drawn.mock.calls.length
+    for (const each of [1000, 960, 1020, 900]) {
+      width = each
+      act(() => observers.forEach((heard) => heard()))
+    }
+    expect(drawn).toHaveBeenCalledTimes(times)
+    expect(screen.getByRole('button', { name: 'Expand Settled, 40' })).toBeInTheDocument()
+    width = 1600
+    act(() => observers.forEach((heard) => heard()))
+    expect(drawn.mock.calls.length).toBeGreaterThan(times)
+    expect(screen.queryByRole('button', { name: 'Expand Settled, 40' })).not.toBeInTheDocument()
+  })
+
+  it('lays out lanes that came since by the width it measured last, not the one it was drawn at', () => {
+    width = 1100
+    measured()
+    const lanes = (settled: boolean) => (
+      <Board label="Meridian’s work">
+        <BoardColumn lane={BoardLane.Next} count={2} />
+        <BoardColumn lane={BoardLane.Running} count={3} />
+        <BoardColumn lane={BoardLane.Yours} count={1} />
+        {settled && <BoardColumn lane={BoardLane.Settled} count={40} />}
+      </Board>
+    )
+    const { rerender } = render(lanes(false))
+    // Three lanes fit 1030 as they fit 1100: nothing is drawn again.
+    width = 1030
+    act(() => observers.forEach((heard) => heard()))
+    // Four don't: Settled comes as a rail, as 1030 says, though the board was last drawn at 1100.
+    rerender(lanes(true))
+    expect(screen.getByRole('button', { name: 'Expand Settled, 40' })).toBeInTheDocument()
   })
 
   it('keeps Settled open once the person opens it from its rail, and collapses Up next instead', () => {

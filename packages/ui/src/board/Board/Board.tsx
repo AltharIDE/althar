@@ -126,23 +126,58 @@ const chose = (folds: BoardFolds, lane: BoardLane, collapse: boolean): BoardFold
     : { collapsed: without(folds.collapsed), opened: [...without(folds.opened), lane] }
 }
 
-/** How wide the board is, and a lane's narrowest there (its container's `--lane-min`); 0 wide until it is measured. */
-function useRoom(ref: RefObject<HTMLElement | null>) {
-  const [room, setRoom] = useState({ width: 0, narrowest: NARROWEST })
+/** How wide the board is, and a lane's narrowest there (its container's `--lane-min`). */
+interface Room {
+  readonly width: number
+  readonly narrowest: number
+}
+
+/** Which lanes a room makes rails of, as one string: two rooms that make the same rails say the same. */
+const railsKey = (rails: ReadonlySet<BoardLane>) => [...rails].toSorted().join(' ')
+
+/** The rails a room makes of these lanes, so folded. */
+const railsAt = (lanes: ReadonlyArray<LaneCount>, folds: BoardFolds) => (room: Room) => railsOf(lanes, folds, room.width, room.narrowest)
+
+/**
+ * The lanes shown as rails, by the board's room (`railsOf`). A new width draws the board again only where it changes
+ * them, so a divider dragged beside the board doesn't draw it on each frame (nor have its cards measured and set
+ * moving, ListMotion). The room it draws by may lag the one measured where both make the same rails, so it is kept
+ * here and not given out: it is good for the rails and nothing else. 0 wide until it is measured.
+ */
+function useRails(ref: RefObject<HTMLElement | null>, lanes: ReadonlyArray<LaneCount>, folds: BoardFolds): ReadonlySet<BoardLane> {
+  const [room, setRoom] = useState<Room>({ width: 0, narrowest: NARROWEST })
+  // As last measured.
+  const measured = useRef<Room | null>(null)
+  /*
+   * The room drawn and the lanes and folds drawn, for the observer, which outlives a render. Its first value is the
+   * first render's, so the observer's first measure has it whichever of the two effects runs first; after, the first
+   * effect keeps it.
+   */
+  const drawn = useRef({ room, at: railsAt(lanes, folds) })
+  // Drawn with other lanes or folds, the room last measured may make other rails than the one drawn: drawn again with it.
+  useLayoutEffect(() => {
+    const at = railsAt(lanes, folds)
+    drawn.current = { room, at }
+    const now = measured.current
+    if (now !== null && now !== room && railsKey(at(now)) !== railsKey(at(room))) setRoom(now)
+  }, [room, lanes, folds])
   useLayoutEffect(() => {
     const element = ref.current
     if (element === null || typeof ResizeObserver === 'undefined') return
     const measure = () => {
       const width = element.clientWidth
       const narrowest = Number.parseFloat(getComputedStyle(element).getPropertyValue('--lane-min')) || NARROWEST
-      setRoom((was) => (was.width === width && was.narrowest === narrowest ? was : { width, narrowest }))
+      const now = { width, narrowest }
+      measured.current = now
+      const { room: shown, at: rails } = drawn.current
+      if (railsKey(rails(now)) !== railsKey(rails(shown))) setRoom(now)
     }
     measure()
     const observer = new ResizeObserver(measure)
     observer.observe(element)
     return () => observer.disconnect()
   }, [ref])
-  return room
+  return railsAt(lanes, folds)(room)
 }
 
 interface Folding {
@@ -197,13 +232,12 @@ export function Board({ children, label, folds, defaultFolds = NO_FOLDS, onFolds
     },
     [],
   )
-  const room = useRoom(ref)
   const lanes: ReadonlyArray<LaneCount> = Children.toArray(children).flatMap((child) =>
     isValidElement<BoardColumnProps>(child) && child.type === BoardColumn
       ? [{ lane: child.props.lane, count: child.props.count, ...(child.props.filled === undefined ? {} : { filled: child.props.filled }) }]
       : [],
   )
-  const rails = railsOf(lanes, chosen, room.width, room.narrowest)
+  const rails = useRails(ref, lanes, chosen)
   const style: CSSProperties | undefined =
     lanes.length === 0
       ? undefined
