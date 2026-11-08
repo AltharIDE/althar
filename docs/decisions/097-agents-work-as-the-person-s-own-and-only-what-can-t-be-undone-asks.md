@@ -26,7 +26,7 @@
   lead a review),
   [ADR-052](052-a-task-attaches-to-a-pull-request-it-didn-t-open.md) (forks),
   [ADR-057](057-a-lead-works-outside-its-sandbox-through-althar-s-tools.md)
-  (a review's lead gets no tools; screenshots of this computer only),
+  (a review's lead gets no tools; screenshots of any page over HTTP),
   [ADR-058](058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md)
   (the coordinator installs nothing, loads nothing of the person's, and keeps
   its edit tools denied; its commands reach the network),
@@ -777,7 +777,7 @@ this ADR or the prototype's README.
 | 043 | Allowing everything as an opt-in; the host only through Althar | The one switch, project and task; Never over it |
 | 050 | No review led by an agent a repository's settings can approve for | That rule for an outside author's review |
 | 052 | A branch on someone else's fork never attached | Never forced; attached one at a time |
-| 057 | A review's lead gets no tools; screenshots of this computer only | The tools themselves |
+| 057 | A review's lead gets no tools; screenshots of any page over HTTP | The tools themselves |
 | 058 | No installs in its copies; no network for its commands; none of the person's setup | Copies of its own, edit tools denied; the network is open |
 | 066 | Leads carry none of the person's sign-ins | `fetch_from_remote`, preferred |
 | 067 | The floor in the other modes | The irreversible kinds |

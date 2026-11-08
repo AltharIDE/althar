@@ -101,9 +101,10 @@
        ([ADR-011](011-own-connectors-for-hosts-and-trackers.md)). Since
        ADR-097, reading credentials; the code host is read as the rest is.
     2. What is never allowed, any kind of it or a command.
-    3. Allowing everything. While Never lists anything, a request the rules
-       can't read (`eval`, `$(…)`) is refused, saying how to spell it out:
-       there is no one to ask.
+    3. Allowing everything. A request the rules can't read (`eval`, `$(…)`)
+       runs; only what its words plainly show is refused by Never, since
+       the agent is trusted with what the rules can't see (ADR-097's
+       amendment to ADR-067).
     4. What asks: a kind on the always-ask list, a request the rules can't
        tell, or a command the project asks about.
     5. Asking about everything beyond the task's own files: reads and

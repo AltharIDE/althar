@@ -355,7 +355,7 @@ describe('the agent registry', () => {
     const reads = { allowed: [folder, '/work/meridian/.coordinator-mirrors', '/home/dana/.bun'], denied: ['/home/dana', '/work/meridian'] }
     const contained = optionsOf({ contained: { folder, reads } })
     // Only where its sandbox can start: there, failing to start it fails the session rather than running commands without it.
-    const starts = process.platform === 'darwin' || (process.platform === 'linux' && process.env.FLATPAK_ID === undefined)
+    const starts = claudeSandboxStarts()
     assert.deepInclude(contained.settings.sandbox, {
       enabled: starts,
       autoAllowBashIfSandboxed: false,

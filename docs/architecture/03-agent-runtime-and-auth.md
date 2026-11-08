@@ -997,9 +997,9 @@ command that doesn't ask to leave it, and starts as none of the commands
 that run outside from the start, is allowed in every mode without the
 rules reading what it does (`runsInside`, `decideInside`). Only what the
 project said itself holds there: a command or kind it never allows, where
-the line plainly is one, is refused; what Althar can't read is refused too
-where Never lists what the boundary doesn't stop (a deploy, a named
-command); a command it asks about asks; and no one reads the keychain or
+the line plainly is one, is refused, and what Althar can't read runs, even
+beside Never (ADR-067's amendment); a command it asks about asks; and no
+one reads the keychain or
 git's stored passwords where the words show it, whose service a Mac's
 sandbox still reaches (ADR-071's trade-off). What crosses meets the rules
 as any request does: with everything allowed, what Althar can't read goes

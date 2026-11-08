@@ -41,9 +41,8 @@ const within = (value: unknown, least: number, most: number, otherwise: number) 
   typeof value === 'number' && Number.isFinite(value) ? Math.min(most, Math.max(least, Math.round(value))) : otherwise
 
 /**
- * What a screenshot asked for is, or why it can't be: a page on this
- * computer, or one of the runs Althar started (`running`, where they
- * answer), over http; at the viewport asked, kept within what a screen is.
+ * What a screenshot asked for is, or why it can't be: an HTTP(S) page,
+ * anywhere (ADR-097), at the viewport asked, kept within what a screen is.
  */
 export const shotOf = (input: unknown, running: ReadonlyArray<string>): Shot | string => {
   const asked = (typeof input === 'object' && input !== null ? input : {}) as Readonly<Record<string, unknown>>
