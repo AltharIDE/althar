@@ -161,6 +161,24 @@ export const outWords = (input: {
   return input.nothingFree === true ? `${out}. No other model is free: ${waits} ${until}.` : `${out}. ${capitalized(waits)} ${until}.`
 }
 
+/**
+ * What a thread says when a step's agent ended twice without its report (once
+ * after it was reminded), and Althar handed the step on: who failed, and who
+ * takes the work over. Each named by its model where known; by its agent too
+ * where the two are the same model, as through two of OpenCode's providers.
+ */
+export const noReportWords = (input: {
+  readonly from: { readonly agent: string; readonly model: string | null }
+  readonly to: { readonly agent: string; readonly model: string | null }
+  readonly step?: keyof typeof outStep
+}): string => {
+  const same = input.from.model !== null && input.from.model === input.to.model
+  const name = (who: { readonly agent: string; readonly model: string | null }) =>
+    who.model === null ? who.agent : same ? `${who.model} on ${who.agent}` : who.model
+  const work = input.step === undefined ? 'the step' : outStep[input.step].work
+  return `${name(input.from)} ended twice without a report. ${name(input.to)} takes ${work} over.`
+}
+
 /** Words that open a sentence. */
 export const capitalized = (words: string) => `${words.charAt(0).toUpperCase()}${words.slice(1)}`
 

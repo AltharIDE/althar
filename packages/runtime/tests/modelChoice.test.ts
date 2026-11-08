@@ -212,6 +212,18 @@ describe('the models as the coordinator reads them', () => {
     )
   })
 
+  it('says how often a way to a model ended steps without their report this week, and through which agent', () => {
+    const go = route({ agentId: 'opencode', agentName: 'OpenCode', model: 'opencode-go/deepseek-v4.1-flash', plan: true, missed: 3 })
+    const zen = route({ agentId: 'codex', agentName: 'Codex', model: 'deepseek-v4.1-flash' })
+    const said = describeModels([{ name: 'DeepSeek V4.1 Flash', maker: 'DeepSeek', fact: null, routes: [go, zen] }], 0)
+    assert.include(said, 'Where a model ended steps without their report this week')
+    assert.include(said, '; through OpenCode, ended 3 steps without a report this week')
+    assert.notInclude(said, 'through Codex')
+    const alone = describeModels([{ name: 'GLM-5.3', maker: 'Z.ai', fact: null, routes: [route({ model: 'glm-5.3', missed: 1 })] }], 0)
+    assert.include(alone, '- GLM-5.3: no scores known; per use; no effort to set; ended a step without a report this week')
+    assert.notInclude(describeModels([{ name: 'GLM-5.3', maker: 'Z.ai', fact: null, routes: [zen] }], 0), 'without their report')
+  })
+
   it('takes a model the way the agent named goes, else the best way, and nothing where it has none', () => {
     const usable = [
       {

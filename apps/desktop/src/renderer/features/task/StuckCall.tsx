@@ -118,6 +118,7 @@ export const text = {
     carried_on: { what: 'Told it to carry on', result: 'it stopped again' },
     restarted: { what: `Started ${agent} again from the start`, result: 'it stopped again' },
     redirected: { what: 'Told it to try another way', result: 'it did the same again' },
+    handed_on: { what: 'Handed it to another model', result: 'that one stopped without a report too' },
   }),
   /** Althar crashed on the step twice in a row; quitting or restarting it never pauses a step. */
   crashed: 'Althar stopped unexpectedly twice while this step ran.',
@@ -285,7 +286,11 @@ function StuckCard({
     )
   const tried: ReadonlyArray<StuckAttempt> =
     stuck.why === 'no_report'
-      ? [{ id: 'reminded', ...text.reminded }]
+      ? [
+          { id: 'reminded', ...text.reminded },
+          // Handed on by Althar after the first agent missed too, so the card's agent is the second.
+          ...(stuck.tried?.includes('handed_on') === true ? [{ id: 'handed_on', ...text.tried(agent).handed_on }] : []),
+        ]
       : stuck.why === 'transient'
         ? [{ id: 'waited', what: text.waited.what, result: text.waited.result }]
         : (stuck.tried ?? []).map((each) => ({ id: each, ...text.tried(agent)[each] }))

@@ -41,6 +41,7 @@ export const keys = {
   planUsage: ['planUsage'] as const,
   /** Each model's room where work on it would start, in a project or (null) anywhere: read again as plan usage changes. */
   modelRooms: (projectId: string | null) => ['modelRooms', projectId] as const,
+  missedReports: ['missedReports'] as const,
   /** A project's automations, for its Automations tab and the dot on it. */
   automations: (projectId: string) => ['automations', projectId] as const,
   /** One automation, for its own page. */
@@ -155,6 +156,8 @@ export const reads = (client: Client) => ({
       queryFn: () => client.getModelRooms(projectId),
       staleTime: 30_000,
     }),
+  // Shared by every picker in the window: a week's count, which a step without its report adds to now and then.
+  missedReports: () => queryOptions({ queryKey: keys.missedReports, queryFn: () => client.getMissedReports(), staleTime: 60_000 }),
   automations: (projectId: string) =>
     queryOptions({ queryKey: keys.automations(projectId), queryFn: () => client.getAutomations(projectId) }),
   automation: (automationId: string) =>

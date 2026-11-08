@@ -432,7 +432,7 @@ describe('answer_stuck_step', () => {
     const root = repository()
     return Effect.gen(function* () {
       const c = yield* coordinatorOf(root)
-      // Its reviewer never reports, so the review waits on the person.
+      // Its reviewer never reports, and no other agent is free, so the review waits on the person.
       const task = yield* planned(c.projectId, 'Cap retries', '[lead:finish]')
       const call = yield* stuckCall(task.taskId)
       assert.deepStrictEqual([call.step, call.why], ['review', 'no_report'])
@@ -446,7 +446,7 @@ describe('answer_stuck_step', () => {
         started.map((one) => one.agentId),
         ['codex', 'claude-code'],
       )
-    }).pipe(Effect.provide(withQueries()))
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { perUse: ['claude-code', 'opencode'] })))
   })
 
   it.live(

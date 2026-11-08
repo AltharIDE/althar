@@ -433,6 +433,19 @@ every running turn instead, every 30 seconds.
 - **The agent's own limits.** A turn cut off at the agent's output or step
   limit carries on where it was, a few times, before the step is reminded to
   report. A refusal goes to the person at once.
+- **A step without its report.** A turn that ends without the step's report
+  (`finish_step`, or a review's `report_review`) gets the agent reminded once:
+  report, or say what blocks it, and say so where the tool isn't among its
+  tools. Ending again without it, the step goes by itself to the best model
+  of another agent that is free, by the rules a usage limit hands work on by
+  (room, a plan, a review away from the lead's maker), briefed from the
+  thread so far; the thread says who missed and who takes over, and the
+  home counts it as something Althar dealt with. Only with no other agent
+  free, or handed on for this once already in the step's round, is the
+  person asked, the call saying it was handed on. An automation's run goes
+  the same way. Each miss is in the record (`node_attempt.no_report`, by
+  agent and model), and a week's count is beside each model in list_models
+  and in the pickers, so a model that keeps missing can be left out.
 - **A turn that did nothing.** A turn that ended having used no tokens and
   said nothing never reached the agent's model: Claude Code's turns end so
   while another of its processes renews the sign-in they share, as an agent

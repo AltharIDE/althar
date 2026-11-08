@@ -225,6 +225,19 @@ export const ModelRoom = Schema.Struct({
 })
 export type ModelRoom = typeof ModelRoom.Type
 
+/**
+ * How often a model ended a step without its report in the last week, even
+ * once reminded, by agent and model: Althar handed each to another model, or
+ * it needed the person. Pickers say it beside the model.
+ */
+export const MissedReports = Schema.Struct({
+  agentId: Schema.String,
+  /** The model's id at the agent; null for the agent's own default. */
+  model: Schema.NullOr(Schema.String),
+  count: Schema.Number,
+})
+export type MissedReports = typeof MissedReports.Type
+
 /** The percent of a plan left at which a warning is told. */
 export const USAGE_WARN_AT = [50, 25, 10, 5] as const
 
@@ -2873,8 +2886,8 @@ export const StuckStep = Schema.Struct({
   round: Schema.Number,
   /** Review findings the lead hasn't settled. */
   open: Schema.Number,
-  /** What Althar did before asking: told the agent to carry on, started it afresh, or told it to try another way. */
-  tried: Schema.optional(Schema.Array(Schema.Literals(['carried_on', 'restarted', 'redirected']))),
+  /** What Althar did before asking: told the agent to carry on, started it afresh, told it to try another way, or handed the step to another model. */
+  tried: Schema.optional(Schema.Array(Schema.Literals(['carried_on', 'restarted', 'redirected', 'handed_on']))),
   /** For a usage limit: the account that reached it, and when it resets, where it said, and who could take the step over. */
   limit: Schema.optional(LimitCall),
   /** For a service that kept failing: its name. */
@@ -4666,6 +4679,8 @@ export const Api = RpcGroup.make(
   call('GetPlanUsage', { refresh: Schema.optional(Schema.Boolean) }, PlanUsage),
   /** Each model's room where work on it would start, in the project where given (its rule for moving work through accounts): read again as plan usage changes. */
   call('GetModelRooms', { projectId: Schema.optional(Schema.String) }, Schema.Array(ModelRoom)),
+  /** Each model that ended steps without its report in the last week, once reminded, with how often. */
+  call('GetMissedReports', {}, Schema.Array(MissedReports)),
   /** Downloads an agent's latest release for the person, checks it against the digest its release publishes, and keeps it for Althar to run; done once it is ready. */
   command('InstallAgent', { agentId: Schema.String }, Schema.Void),
   /** Opens a task's folder in an editor, at one of its files and a line where given; whether it could. The path is the task's, as its changes list it. */

@@ -29,6 +29,12 @@ import { runtimeWith, connect, ask, cards, tipOf, git, pushByHand } from './chan
  * settles the task.
  */
 
+/**
+ * Agents Althar won't hand a step on to by itself. Leads here commit and end their turn without their report, which
+ * hands the step to another free agent; these tests are about what goes up, not who takes the step on.
+ */
+const NOT_FREE = ['codex', 'opencode']
+
 describe('the Push button', () => {
   /** An agent's commit, as Claude Code makes one: with its own credit line, which Althar makes again without. */
   const agentCommit = (cwd: string, subject: string) =>
@@ -120,7 +126,7 @@ describe('the Push button', () => {
       held.head = null
       yield* looked
       assert.strictEqual((yield* cards(projectId))[0]?.change?.unpushed, 0)
-    }).pipe(Effect.provide(runtimeWith({ github })))
+    }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', undefined, NOT_FREE)))
   })
 
   it.live('leaves only what the lead committed during the push, credited onto what went, for the next push', () => {
@@ -149,7 +155,7 @@ describe('the Push button', () => {
       yield* changes.push(taskId, left?.change?.localHead ?? '')
       assert.strictEqual(tip(), git(here, 'rev-parse', 'HEAD'))
       assert.strictEqual((yield* cards(projectId))[0]?.change?.unpushed, 0)
-    }).pipe(Effect.provide(runtimeWith({ github })))
+    }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', undefined, NOT_FREE)))
   })
 
   it.live(
@@ -190,7 +196,7 @@ describe('the Push button', () => {
         assert.strictEqual(git(bare, 'log', '-1', '--format=%s', `${branch}~1`), `Merge branch 'main' into ${branch}`)
         assert.strictEqual(git(bare, 'log', '-1', '--format=%s', `${branch}~1^2`), 'On main')
         assert.notInclude(git(bare, 'log', '--format=%B', `${branch}~5..${branch}`), 'Claude')
-      }).pipe(Effect.provide(runtimeWith({ github })))
+      }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', undefined, NOT_FREE)))
     },
   )
 
@@ -220,7 +226,7 @@ describe('the Push button', () => {
       yield* changes.push(taskId, still?.change?.localHead ?? '')
       assert.strictEqual((yield* cards(projectId))[0]?.change?.unpushed, 0)
       assert.strictEqual(tip(), git(here, 'rev-parse', 'HEAD'))
-    }).pipe(Effect.provide(runtimeWith({ github })))
+    }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', undefined, NOT_FREE)))
   })
 })
 
@@ -405,7 +411,7 @@ describe('a push the lead asks the person for', () => {
       yield* sql`UPDATE external_links SET connection_id = NULL WHERE kind = 'change'`
       commit(task.path, 'Last')
       assert.include(yield* callTool(task.lead, 'push_to_pull_request', {}), 'Althar isn’t connected to this repository’s host')
-    }).pipe(Effect.provide(runtimeWith({ github })))
+    }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', undefined, NOT_FREE)))
   })
 
   it.live('closes what it asked once the pull request merges, and is refused after', () => {
@@ -425,7 +431,7 @@ describe('a push the lead asks the person for', () => {
         yield* callTool(task.lead, 'push_to_pull_request', {}),
         "PR #1 is merged, so there's nothing to push to. What you committed after it goes in a new pull request, which Althar opens as a draft once you call finish_step: if you haven't, call it with your summary.",
       )
-    }).pipe(Effect.provide(runtimeWith({ github })))
+    }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', undefined, NOT_FREE)))
   })
 
   /** The commit a branch is on in the remote's repository. */
@@ -497,7 +503,7 @@ describe('a push the lead asks the person for', () => {
       // The lead is handed the steps to bring them in, not sent to the person.
       assert.include(behind, 'Call fetch_from_remote with pull_request 1, merge what it says it got into your branch')
       assert.notInclude(behind, 'Tell the person')
-    }).pipe(Effect.provide(runtimeWith({ github })))
+    }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', undefined, NOT_FREE)))
   })
 
   it.live('shows what is on the branch now where it moved, without what already went up, or why it can’t go up', () => {
@@ -532,7 +538,7 @@ describe('a push the lead asks the person for', () => {
       assert.deepInclude(blocked, { moved: true, count: 0, blocked: 'rewritten', state: 'open' })
       assert.lengthOf(blocked?.commits ?? [], 0)
       assert.notInclude(git(bare, 'log', '--format=%s', task.branch), 'Instead')
-    }).pipe(Effect.provide(runtimeWith({ github })))
+    }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', undefined, NOT_FREE)))
   })
 
   it.live('is refused where the branch no longer has what the pull request has', () => {
@@ -544,7 +550,7 @@ describe('a push the lead asks the person for', () => {
       // The lead rewrites the commit that went up: pushing would need forcing.
       commit(task.path, 'Change it, better', '--amend')
       assert.include(yield* callTool(task.lead, 'push_to_pull_request', {}), "Your branch no longer has PR #1's head")
-    }).pipe(Effect.provide(runtimeWith({ github })))
+    }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', undefined, NOT_FREE)))
   })
 })
 
@@ -664,7 +670,7 @@ describe('what a lead commits after the person has looked', () => {
         (log) => log.includes('Tidy up before pushing'),
       )
       assert.lengthOf(yield* pushRequests(task.threadId), 0)
-    }).pipe(Effect.provide(runtimeWith({ github })))
+    }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', undefined, NOT_FREE)))
   })
 
   it.live('wait for the person’s push where the project leaves every push to them, as before', () => {
@@ -680,7 +686,7 @@ describe('what a lead commits after the person has looked', () => {
       assert.notInclude(git(bare, 'log', '--format=%s', task.branch), 'Tidy up')
       assert.isUndefined(card?.change?.pushing)
       assert.strictEqual((yield* cards(task.projectId))[0]?.change?.unpushed, 1)
-    }).pipe(Effect.provide(runtimeWith({ github })))
+    }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', undefined, NOT_FREE)))
   })
 
   it.live('wait for the person’s push where they were made outside a turn, which nothing pushes: Ready, not going up (DEV-173)', () => {
@@ -699,7 +705,7 @@ describe('what a lead commits after the person has looked', () => {
       yield* Effect.sleep(Duration.seconds(1))
       assert.notInclude(git(bare, 'log', '--format=%s', task.branch), 'By hand')
       assert.strictEqual((yield* cards(task.projectId))[0]?.phase, 'ready')
-    }).pipe(Effect.provide(runtimeWith({ github })))
+    }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', undefined, NOT_FREE)))
   })
 
   it.live('wait for the person, saying why, where someone pushed to the pull request outside Althar', () => {
@@ -718,7 +724,7 @@ describe('what a lead commits after the person has looked', () => {
       assert.strictEqual(git(bare, 'rev-parse', task.branch), theirs)
       assert.strictEqual(card?.change?.pushing?.held, 'Someone else pushed to PR #1')
       assert.lengthOf(yield* pushRequests(task.threadId), 0)
-    }).pipe(Effect.provide(runtimeWith({ github })))
+    }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', undefined, NOT_FREE)))
   })
 
   it.live('have its lead bring in what someone else pushed to the pull request, told once', () => {
@@ -751,7 +757,7 @@ describe('what a lead commits after the person has looked', () => {
       assert.strictEqual(git(task.path, 'rev-parse', `refs/althar/pull-request/${task.branch}`), theirs)
       yield* Effect.sleep(Duration.seconds(1))
       assert.lengthOf(yield* told, 1)
-    }).pipe(Effect.provide(runtimeWith({ github })))
+    }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', undefined, NOT_FREE)))
   })
 
   it.live('wait for the person, saying why, where its host can’t be reached as the turn ends, until they push', () => {
@@ -786,6 +792,6 @@ describe('what a lead commits after the person has looked', () => {
       const [after] = yield* until(cards(task.projectId), (all) => all[0]?.change?.unpushed === 0)
       assert.isNull(after?.change?.pushing?.held ?? null)
       assert.include(git(bare, 'log', '--format=%s', task.branch).split('\n'), 'Tidy up')
-    }).pipe(Effect.provide(runtimeWith({ github })))
+    }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', undefined, NOT_FREE)))
   })
 })

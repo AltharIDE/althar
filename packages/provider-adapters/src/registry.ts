@@ -635,12 +635,19 @@ const loggedInField = (output: string): boolean | undefined => {
  *
  * OpenCode also stops its loop when a request is rejected, unless told to
  * carry on, so a rejection works as it does for the other agents.
+ *
+ * And OpenCode 2.2 unloads a folder's services after an hour with no session
+ * activity, and loads them again at the next prompt with only the MCP servers
+ * its config names: Althar's, given over ACP as the session started, never
+ * comes back, so a lead left idle an hour, or a reviewer between rounds, has
+ * no finish_step or report_review and can't report (#692). It keeps them
+ * loaded (`location_idle_timeout`, which older versions leave out).
  */
 const asks = { edit: 'ask', bash: 'ask', webfetch: 'ask' }
 const openCodeBase = {
   permission: asks,
   agent: { build: { permission: asks }, plan: { permission: asks } },
-  experimental: { continue_loop_on_deny: true },
+  experimental: { continue_loop_on_deny: true, location_idle_timeout: false },
 }
 const openCodeConfig = JSON.stringify(openCodeBase)
 
