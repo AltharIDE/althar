@@ -4280,7 +4280,69 @@ export class Runs extends Context.Service<
           if (current === undefined) return
           const info = JSON.parse(call.payload) as StuckInfo
           if (answer.kind === 'wait') return yield* waitForReset(current, call.attemptId, info, input.envelope)
-          yield* carryOnPlaced(current, call.attemptId, info, answer, input.envelope, input.sender)
+          // Not half applied: where carrying on fails before the step is under way, the call is open again, to answer anew.
+          yield* carryOnPlaced(current, call.attemptId, info, answer, input.envelope, input.sender).pipe(
+            Effect.tapCause(() =>
+              reopenStuck(current, call.attemptId, input.attentionId, info).pipe(
+                Effect.catchCause((cause) => Effect.logWarning('Could not reopen a stuck call whose answer failed', cause)),
+              ),
+            ),
+          )
+        })
+
+      /**
+       * A stuck call whose answer failed to carry on, open again with its step waiting on it, and the window told: a
+       * review the hand-over had ended is waiting again. Left alone where the step is under way, or its run stopped.
+       */
+      const reopenStuck = (run: RunRow, attemptId: string | null, attentionId: string, info: StuckInfo) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const reopened = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              if (!(yield* going(run))) return false
+              const [call] = yield* sql<{ state: string }>`SELECT state FROM attention_requests WHERE id = ${attentionId}`
+              if (call?.state !== 'answered') return false
+              if (attemptId !== null) {
+                const [attempt] = yield* sql<{ nodeId: string; state: string }>`
+                  SELECT node_id, state FROM node_attempts WHERE id = ${attemptId}`
+                if (attempt === undefined) return false
+                if (attempt.state === 'failed') {
+                  // Ended by the hand-over; no other attempt of its step took its place.
+                  const [other] = yield* sql<{ id: string }>`
+                    SELECT id FROM node_attempts WHERE node_id = ${attempt.nodeId} AND id != ${attemptId}
+                      AND state NOT IN ('failed', 'cancelled', 'succeeded') LIMIT 1`
+                  if (other !== undefined) return false
+                  const revision = yield* change('node_attempts', attemptId, {
+                    state: 'waiting_attention',
+                    holdReason: null,
+                    endedAt: null,
+                  })
+                  yield* change('nodes', attempt.nodeId, { state: 'running' })
+                  yield* fact({
+                    projectId: run.projectId,
+                    aggregateType: 'node_attempt',
+                    aggregateId: attemptId,
+                    revision,
+                    type: 'node_attempt.waiting_attention',
+                    payload: info,
+                    actorId: instance.systemId,
+                  })
+                } else if (attempt.state !== 'waiting_attention') return false
+              }
+              const revision = yield* change('attention_requests', attentionId, { state: 'open', answeredAt: null })
+              yield* fact({
+                projectId: run.projectId,
+                aggregateType: 'attention_request',
+                aggregateId: attentionId,
+                revision,
+                type: 'attention_request.opened',
+                payload: info,
+                actorId: instance.systemId,
+              })
+              return true
+            }),
+          )
+          if (reopened) yield* touchCard(run.taskId)
         })
 
       /**
