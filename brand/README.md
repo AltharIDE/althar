@@ -18,6 +18,7 @@ The mark is the section through an architect's triangular scale ruler, bored thr
 | [`export/web`](export/web) | The favicon kit: SVG, `.ico`, Apple touch icon, and the 192 and 512 icons | |
 | [`export/screenshots`](export/screenshots) | Screens of the app on the demo projects, at twice their size: five whole screens at 2880 × 1800, and the coordinator's plan and a review cut to their own box. In [`framed/`](export/screenshots/framed), each as a window on the Aurora wallpaper at night, for the README and posts | PNG; JPEG framed |
 | [`export/reels`](export/reels) | Short loops of the app on the demo projects, for the README: the island dropping open, and its details (the launch, agents and accounts, the app icon, the home at rest) | GIF |
+| [`export/drawings`](export/drawings) | The landing page's feature drawings (accounts in turn, work that starts itself, conflicts settled, worktrees, workspaces), each still, at 1600 × 1000, light and `-dark`, for the README | JPEG |
 | [`export/crew`](export/crew) | The crew, one figure each: project, coordinator, task, lead and a step (the reviewer). They blink and fidget, in an `<img>` too. The `-dark` copies stand in a pool of paper light, for dark pages. Drawn by the site's docs figures, not this package: `bun apps/site/scripts/figures-svg.ts brand/export/crew` | SVG |
 | [`export/palette`](export/palette) | The colours, with what each is for | JSON |
 
@@ -86,10 +87,11 @@ bun --filter @althar/brand export:banners     # just the banners and the printed
 bun --filter @althar/brand export:wallpapers  # just the wallpapers
 bun --filter @althar/brand export:screenshots # the screenshots (builds the UI package's Storybook first if it isn't built)
 bun --filter @althar/brand export:reels       # the reels, recorded from the same Storybook; needs ffmpeg
+bun --filter @althar/brand export:drawings    # the landing page's feature drawings, from apps/site, light and dark
 ```
 
 Change the drawing, run the export, and commit what it writes: `bun run test` fails while `export/` doesn't match the code. It also fails if a copy of the mark elsewhere in the repository (the UI package's Logo, a favicon) stops matching [`src/geometry.ts`](src/geometry.ts), if the colours stop matching the interface's, or if the app icons differ from the desktop app's.
 
 The banners, the printed avatar, the wallpapers and the screenshots are drawn in a browser, so they are not byte-for-byte reproducible between machines; the rest is. Draw the wallpapers again when the launch's light or dots change.
 
-Screenshots and reels show the app as it is when they are taken. Take them again when a screen changes, and before a launch.
+Screenshots and reels show the app as it is when they are taken. Take them again when a screen changes, and before a launch. Draw the drawings again when the landing page's change too.

@@ -197,7 +197,7 @@ Tired of juggling terminals, re-explaining your project and babysitting agents? 
       <p>When one runs out, Althar goes on with the next, in the order you set, on the same thread and branch.</p>
     </td>
     <td width="56%" valign="top">
-      <img src="brand/export/screenshots/framed/first-run.jpg" width="100%" alt="The first screen: Your agents. Claude Code, Codex, GitHub Copilot and OpenCode are signed in, each on its own plan, and Kimi Code and Junie aren't on this computer yet." />
+      <picture><source media="(prefers-color-scheme: dark)" srcset="brand/export/drawings/accounts-dark.jpg" /><img src="brand/export/drawings/accounts.jpg" width="100%" alt="Four accounts in turn: Claude Code on Max is back at 14:00, Claude Code on Team is in use at 62%, Codex on ChatGPT Pro is next, and OpenCode on an API key is ready." /></picture>
     </td>
   </tr>
   <tr>
@@ -208,6 +208,53 @@ Tired of juggling terminals, re-explaining your project and babysitting agents? 
     </td>
     <td valign="top">
       <img src="brand/export/screenshots/framed/board.jpg" width="100%" alt="A project's board: up next, running, needs you, and settled, with each running task's steps and its lead." />
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>Work that starts itself.</h3>
+      <p>Ask once, for a time or for when something happens. It runs on your computer while Althar is open, and not until you turn it on.</p>
+    </td>
+    <td valign="top">
+      <picture><source media="(prefers-color-scheme: dark)" srcset="brand/export/drawings/automations-dark.jpg" /><img src="brand/export/drawings/automations.jpg" width="100%" alt="Weekdays at 07:00, review each new pull request: it starts task 441, and Opus 5.5 is reading the diff of pull request 1192." /></picture>
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>Conflicts, settled.</h3>
+      <p>Agents work fast, and merging shouldn't be what holds them up.</p>
+      <p>Each lead settles its own conflicts with the default branch; only the odd one needs you.</p>
+    </td>
+    <td valign="top">
+      <picture><source media="(prefers-color-scheme: dark)" srcset="brand/export/drawings/conflicts-dark.jpg" /><img src="brand/export/drawings/conflicts.jpg" width="100%" alt="Task 432 on the new main: a conflict in retry.ts, settled by its lead, Opus 5.5, and its checks passed." /></picture>
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>One home for everything.</h3>
+      <p>What needs you, across every project, in one place, answered where it is. And what happened since you looked.</p>
+    </td>
+    <td valign="top">
+      <img src="brand/export/screenshots/framed/home.jpg" width="100%" alt="Althar's home: a release to publish in Halyard, a pull request to accept and a decision in Meridian, every project beside them, and what happened since you last looked." />
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>Ten at once. None in each other's way.</h3>
+      <p>Run as many tasks as you like side by side. Each gets a worktree of its own, so no two agents ever work in the same files.</p>
+    </td>
+    <td valign="top">
+      <picture><source media="(prefers-color-scheme: dark)" srcset="brand/export/drawings/worktrees-dark.jpg" /><img src="brand/export/drawings/worktrees.jpg" width="100%" alt="Four tasks on tally-api, each in its own worktree: Opus 5.5 ready to accept, GPT-6.1 Sol in review, Gemini 3 Pro in a security review, Qwen3 Coder implementing." /></picture>
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>Every workspace, side by side.</h3>
+      <p>Day job on Linear, a client on Jira, side projects on GitHub? Plug them all in, and every issue lands in the right project.</p>
+      <p>Pull requests go out to GitHub, GitLab or Bitbucket.</p>
+    </td>
+    <td valign="top">
+      <picture><source media="(prefers-color-scheme: dark)" srcset="brand/export/drawings/workspaces-dark.jpg" /><img src="brand/export/drawings/workspaces.jpg" width="100%" alt="Linear's Work workspace bound to the Tally project, Jira's Client workspace to Halyard, and GitHub Issues connected: a new Linear issue lands in Tally." /></picture>
     </td>
   </tr>
   <tr>
@@ -224,21 +271,13 @@ Tired of juggling terminals, re-explaining your project and babysitting agents? 
     <td valign="top">
       <h3>The craft of a paid app. The freedom of open source.</h3>
       <p>The window opens in its own light. Every agent and account sits in one place. You pick the app's icon. When nothing needs you, it says so and gets out of the way.</p>
+      <p>Your projects, threads and history live in a local database on your computer. No Althar account, no Althar cloud.</p>
     </td>
     <td valign="top">
       <img src="brand/export/reels/details.gif" width="100%" alt="Details: the launch rising out of its own light, the agents and their accounts, choosing the app icon, and the home at rest." />
     </td>
   </tr>
 </table>
-
-### And the rest
-
-- **Ten at once. None in each other's way.** Run as many tasks as you like side by side. Each gets a worktree of its own, so no two agents ever work in the same files.
-- **Conflicts, settled.** Each lead settles its own conflicts with the default branch; only the odd one needs you.
-- **Work that starts itself.** Ask once, for a time or for when something happens. It runs on your computer while Althar is open, and not until you turn it on.
-- **Every workspace, side by side.** Day job on Linear, a client on Jira, side projects on GitHub? Plug them all in, and every issue lands in the right project. Pull requests go out to GitHub, GitLab or Bitbucket.
-- **One home for everything.** What needs you, across every project, in one place, answered where it is. And what happened since you looked.
-- **Your computer, your data.** Projects, threads and history live in a local database on your machine. No Althar account, no Althar cloud.
 
 <br />
 
@@ -256,6 +295,8 @@ brew install --cask altharide/tap/althar
 ```
 
 Open it. The first screen finds the agents on your computer and shows which are signed in; then you pick the repositories your first project works in.
+
+<img src="brand/export/screenshots/framed/first-run.jpg" width="100%" alt="The first screen: Your agents. Claude Code, Codex, GitHub Copilot and OpenCode are signed in, each on its own plan, and Kimi Code and Junie aren't on this computer yet." />
 
 Claude Code, Codex and Google Antigravity sign in from inside Althar. The others sign in with their own tools:
 
