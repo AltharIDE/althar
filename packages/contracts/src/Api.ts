@@ -2875,6 +2875,8 @@ export const StuckStep = Schema.Struct({
     'transient',
     // Its agent's account is signed out: signing it in again in Settings, then trying again, is the way on.
     'signed_out',
+    // The lead stopped to wait for the person's answer: its detail is the question, and the answer starts it again.
+    'waiting_on_person',
   ]),
   /** What went wrong, in the agent's or Althar's words; for the last round, the lead's summary. */
   detail: Schema.NullOr(Schema.String),

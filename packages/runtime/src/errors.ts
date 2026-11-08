@@ -197,6 +197,7 @@ export class CantMerge extends Schema.TaggedError<CantMerge>()('CantMerge', {
     'untracked',
     'moved',
     'missing',
+    'nothing',
   ]),
   detail: Schema.String,
   /** The branch it would merge into, named by its repository in a task of several: main, web’s main. */

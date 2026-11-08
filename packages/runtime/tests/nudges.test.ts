@@ -331,6 +331,10 @@ describe('nudges', () => {
       stuck({ step: 'review', why: 'usage_limit', agentId: 'aider' }),
       'Needs you: aider ran out of usage during the review',
     )
+    assert.strictEqual(
+      stuck({ step: 'implement', why: 'waiting_on_person', detail: 'Which ADRs should the compaction keep?' }),
+      'Needs you: Which ADRs should the compaction keep?',
+    )
     assert.strictEqual(readyWords(''), 'Ready to look at')
     assert.strictEqual(readyWords('Did it.\nAnd more.'), 'Ready: Did it.')
   })

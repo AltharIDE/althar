@@ -43,7 +43,7 @@ const served = Effect.gen(function* () {
     envelope: yield* Runtime.envelope('task.create', {}),
     projectId: project.projectId,
     title: 'Fix the heading',
-    description: 'Serve it, then finish. [lead:serve] [lead:finish] [review:findings]',
+    description: 'Serve it, then finish. [lead:serve] [lead:finish] [lead:edit] [review:findings]',
     draft: true,
   })
   const planId = yield* plans.propose({

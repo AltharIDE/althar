@@ -112,7 +112,7 @@ describe('a task’s findings', () => {
         envelope: yield* Runtime.envelope('task.create', {}),
         projectId: project.projectId,
         title: 'Placed findings',
-        description: 'Do it. [lead:finish] [review:wait]',
+        description: 'Do it. [lead:finish] [lead:edit] [review:wait]',
         draft: true,
       })
       const planId = yield* plans.propose({

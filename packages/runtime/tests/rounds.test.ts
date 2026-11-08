@@ -26,7 +26,7 @@ import { Sessions } from '../src/Sessions'
 import type { ToolAccess } from '../src/ToolServer'
 import { Tasks } from '../src/Tasks'
 import { withoutReview } from './changesSupport'
-import { callTool, fakeConnectors, HOST, hosted, items, notices, repository, runtime, turns, until } from './support'
+import { callTool, fakeConnectors, HOST, hosted, items, notices, repository, runtime, turns, until, withWork } from './support'
 
 /*
  * A task goes back to work whenever its lead does, and ships again
@@ -1276,7 +1276,7 @@ describe('changing the team of a task that has begun', () => {
       const coordinator = yield* Coordinator
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
       const threadId = yield* coordinator.thread(project.projectId)
-      const body = `Add a retry. [coordinator:plan] ${markers}`
+      const body = `Add a retry. [coordinator:plan] ${withWork(markers, true)}`
       yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
       const [card] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'running')
       const task = card ?? assert.fail('no card')

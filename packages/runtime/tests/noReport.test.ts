@@ -119,7 +119,8 @@ describe('a step that ends without its report', () => {
   it.live('hands a review that ends without its report to another reviewer, away from the lead', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { projectId, task } = yield* planned('Fix the heading. [lead:finish] [review:pass]', [
+      // The lead commits, so the branch has something built and the review runs.
+      const { projectId, task } = yield* planned('Fix the heading. [lead:commit] [lead:finish] [review:pass]', [
         { key: 'implement', agentId: 'claude-code' },
         { key: 'review', agentId: 'codex' },
       ])
