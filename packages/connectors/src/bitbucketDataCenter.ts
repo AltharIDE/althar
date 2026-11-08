@@ -4,6 +4,7 @@ import { type Access, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { updateInCopy } from './branchUpdate'
 import { ConnectorFailed } from './errors'
+import { DataCenterMerge, dataCenterRulesOf } from './bitbucketRules'
 import { type Http, makeHttp } from './http'
 import { makeBitbucketDataCenterReleases } from './bitbucketDataCenterReleases'
 import type {
@@ -599,6 +600,14 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
         // Whether it is set to merge by itself: asked only where the server has auto-merge; unsaid where it couldn't say.
         const set = yield* autoMergeOf(repository, number)
         return set === null ? change : { ...change, autoMerge: set }
+      }),
+    mergeRules: (repository, change) =>
+      Effect.gen(function* () {
+        const url = pull(repository, change.number)
+        const [now, merge] = yield* Effect.all([http.cached(PullAnswer, url), http.json(DataCenterMerge, 'GET', `${url}/merge`)], {
+          concurrency: 'unbounded',
+        })
+        return dataCenterRulesOf({ reviewers: now.reviewers ?? [], merge })
       }),
     markReady: (repository, change) =>
       Effect.gen(function* () {

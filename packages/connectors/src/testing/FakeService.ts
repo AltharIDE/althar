@@ -22,6 +22,7 @@ import type {
   IssueField,
   ListedChange,
   MergeMethod,
+  MergeRules,
   NewReview,
   Person,
   Product,
@@ -85,6 +86,8 @@ export interface FakeServiceOptions {
   readonly headOf?: (number: number) => string | null
   /** Whether a change conflicts with its target, as the host works it out now; without it, the host doesn't say. */
   readonly conflictsOf?: (number: number) => boolean | undefined
+  /** What merging a change needs, as the host says now (DEV-204); without it, the host doesn't read it at all. */
+  readonly rulesOf?: (number: number) => MergeRules
   /** The checks a change's commit has, by the commit, as a host runs them on each; without it, or where it says nothing, those `setChecks` gave. */
   readonly checksFor?: (number: number, sha: string) => ReadonlyArray<FakeCheck> | undefined
   /** The checks a commit that is no change's head has, such as its default branch's latest: none without it. */
@@ -673,6 +676,14 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           ...(autoMerges && (product === 'gitlab' || ask?.queue === true) ? { autoMerge: autoMerging.has(number) } : {}),
         })
       }),
+    ...(options.rulesOf === undefined
+      ? {}
+      : {
+          mergeRules: (_repository: Repository, change: ChangeRequest) =>
+            Effect.andThen(called('mergeRules'), () =>
+              Effect.succeed(options.rulesOf?.(change.number) ?? { requiredChecks: null, needs: [] }),
+            ),
+        }),
     listChanges: (repository, query) =>
       Effect.andThen(called('listChanges'), () => {
         if (options.lists === false) return Effect.fail(noListing(product, service.words))
