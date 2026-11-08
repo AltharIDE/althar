@@ -1401,20 +1401,6 @@ export class Queries extends Context.Service<
           const pictures = wants.changed ? yield* evidencePaths(taskId) : () => false
           const shown = (worktree: string) => (file: ChangedFile) =>
             !(file.uncommitted && file.status === 'added' && pictures(worktree, file.path))
-          // A repository is merged here only where Althar recorded that it merged it: a branch that is in the default
-          // branch, or was there already, isn't one. Older task.done facts carry the same list in `here`.
-          const recordedMerged = wants.here
-            ? new Set(
-                (yield* sql<{ name: string }>`
-                    SELECT json_extract(payload, '$.repository') AS name FROM record_events
-                    WHERE aggregate_type = 'task' AND aggregate_id = ${taskId} AND type = 'task.merged_here'
-                    UNION
-                    SELECT json_extract(merged.value, '$.repository') AS name
-                    FROM record_events e, json_each(json_extract(e.payload, '$.here')) merged
-                    WHERE e.aggregate_type = 'task' AND e.aggregate_id = ${taskId} AND e.type = 'task.done'
-                      AND json_extract(merged.value, '$.already') = 0`).map((one) => one.name),
-              )
-            : new Set<string>()
           const each = yield* Effect.forEach(
             worktrees.filter((worktree) => worktree.branched === 1),
             (worktree) =>
@@ -1431,7 +1417,7 @@ export class Queries extends Context.Service<
                     })
                   : [[], '']
                 const merges = wants.here && worktree.opened === 0
-                const [changed, inDefault] = yield* Effect.all(
+                const [changed, merged] = yield* Effect.all(
                   [
                     wants.changed && head !== null && worktree.baseCommit !== null
                       ? changedIn(owner, { head, base, index }, worktree.baseCommit, lead?.calls ?? '', wants.fresh === true)
@@ -1442,15 +1428,14 @@ export class Queries extends Context.Service<
                   ],
                   { concurrency: 'unbounded' },
                 )
-                // Merged here, once Althar recorded it and the branch holds work of its own: whether its default branch is on its remote yet.
-                const mergedHere =
-                  merges && inDefault && recordedMerged.has(worktree.name) && head !== worktree.baseCommit && worktree.root !== null
+                // Merged here, once it holds work of its own: whether its default branch is on its remote yet.
+                const mergedHere = merges && merged && head !== worktree.baseCommit && worktree.root !== null
                 const remote = mergedHere && worktree.root !== null ? yield* aheadOf(worktree.root, worktree.defaultBranch) : null
                 return {
                   worktree,
                   changed,
                   here:
-                    merges && !inDefault
+                    merges && !merged
                       ? [
                           {
                             repository: worktree.slug,

@@ -172,7 +172,7 @@ test('asks the coordinator, which plans a task that is implemented, reviewed, se
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
 
     const box = page.getByRole('textbox', { name: /^(Tell the coordinator something|Add to the queue)/ })
-    await box.fill('Add a retry to the checkout call. [coordinator:plan] [lead:finish] [review:findings]')
+    await box.fill('Add a retry to the checkout call. [coordinator:plan] [lead:edit] [lead:finish] [review:findings]')
     await box.press('Enter')
 
     // The plan, with the time it starts on its own; held, it waits. Up next on the board beside says the same.

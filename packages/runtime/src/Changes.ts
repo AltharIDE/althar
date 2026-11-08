@@ -4669,23 +4669,6 @@ export class Changes extends Context.Service<
           // A round of work under way settles it when it ends, by what it left (ADR-034).
           const [working] = yield* sql<{ id: string }>`SELECT id FROM runs WHERE task_id = ${taskId} AND state = 'running' LIMIT 1`
           if (working !== undefined) return yield* touchCard(taskId)
-          // Each repository merged here is recorded as merged here, not left to be read from a branch that may already have been in the default branch.
-          if (task.state === 'open' && by.here !== undefined) {
-            const recorded = by.here.filter((one) => !one.already)
-            if (recorded.length > 0) {
-              const [now] = yield* sql<{ revision: number }>`SELECT revision FROM tasks WHERE id = ${taskId}`
-              for (const one of recorded)
-                yield* fact({
-                  projectId: task.projectId,
-                  aggregateType: 'task',
-                  aggregateId: taskId,
-                  revision: now?.revision ?? 1,
-                  type: 'task.merged_here',
-                  payload: { repository: one.repository, branch: one.branch },
-                  actorId: by.actorId,
-                })
-            }
-          }
           const { open, unmerged } = yield* mergeOf(taskId)
           // Commits after a merged pull request are in none yet: a new one takes them.
           const after =

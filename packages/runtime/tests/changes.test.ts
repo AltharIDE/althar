@@ -315,7 +315,7 @@ describe('a task that ends in a pull request', () => {
       // Main moves on, and the task's branch takes it in without a commit of its own: behind main, not ahead of it.
       writeFileSync(join(working, 'moved.txt'), 'moved\n')
       git(working, 'add', '.')
-      git(working, 'commit', '-q', '-m', 'Move on')
+      git(working, '-c', 'user.name=Test', '-c', 'user.email=test@althar.test', 'commit', '-q', '-m', 'Move on')
       git(worktree?.path ?? '', 'merge', '-q', '--ff-only', 'refs/heads/main')
       // The person answers, and the lead finishes having built nothing of its own.
       yield* (yield* Sessions).send({
