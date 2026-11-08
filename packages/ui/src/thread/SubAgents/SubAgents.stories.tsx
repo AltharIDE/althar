@@ -49,6 +49,21 @@ type Story = StoryObj<typeof meta>
 
 export const TwoAgents: Story = {}
 
+/** Where the agent doesn't say which model a sub-agent runs on, as Claude Code's Task: its kind stands in its place. */
+export const WithoutModel: Story = {
+  args: {
+    list: [
+      {
+        id: 'explore',
+        label: 'Find the readers of the MCP servers',
+        state: ToolState.Done,
+        meta: 'Explore · 4 calls',
+        calls: <Tool kind={ToolKind.Read} verb="Read" target="src/agentServers.ts" />,
+      },
+    ],
+  },
+}
+
 export const AllStates: Story = {
   parameters: statesOn({ hover: 'li:first-child button', focus: 'li:first-child button', pressed: 'li:first-child button' }),
   render: (args) => (

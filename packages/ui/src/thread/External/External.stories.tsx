@@ -47,6 +47,17 @@ export const Search: Story = {
     />
   ),
 }
+/** As Althar keeps a search: what was searched for, without what it found. */
+export const SearchQueryOnly: Story = {
+  render: () => <WebSearch query="Retry-After seconds or HTTP date 429" />,
+}
+/** As Althar keeps a page: where it is, without its title or what was read of it. */
+export const PageAddressOnly: Story = {
+  args: { title: undefined, excerpt: undefined, url: 'https://www.rfc-editor.org/rfc/rfc9110' },
+}
+export const PageAddressOnlyOpen: Story = {
+  args: { title: undefined, excerpt: undefined, url: 'https://www.rfc-editor.org/rfc/rfc9110', defaultOpen: true },
+}
 export const Mcp: Story = {
   render: () => (
     <McpCall

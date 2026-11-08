@@ -39,3 +39,25 @@
   font-size: 13px;
   line-height: 1.55;
 }
+
+/* What a sub-agent reported back, under its calls. */
+.reported {
+  margin-top: 6px;
+  color: var(--t-2);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* The summary a compaction kept, under its line, opened. */
+.summary {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--paper) 60%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--t-2);
+  font-size: 13px;
+  line-height: 1.55;
+  max-height: 360px;
+  overflow-y: auto;
+}

@@ -28,6 +28,10 @@ import {
   You,
   McpAct,
   McpServer,
+  Interrupted,
+  SubAgents,
+  WebFetch,
+  WebSearch,
 } from '@althar/ui'
 
 import { CommandOutput } from './CommandOutput'
@@ -93,6 +97,24 @@ export const text = {
     signIn: 'Sign in',
   },
   readSkill: (names: ReadonlyArray<string>) => `read skill ${names.join(', ')}`,
+  /** A sub-agent's row, after what it was asked: its kind, where the agent says, and how many calls it has made. */
+  subAgent: (type: string | undefined, calls: number) =>
+    [type, calls === 0 ? null : calls === 1 ? '1 call' : `${calls} calls`].filter((one) => one != null).join(' · '),
+  compaction: {
+    summary: 'Show summary',
+    hide: 'Hide summary',
+    /** A compaction's line, as it stands, with how far it took the context where Althar knows. */
+    line: (status: Extract<Block, { kind: 'compacted' }>['status'], span: string | null, error: string | null) => {
+      const words = {
+        in_progress: 'Compacting context…',
+        completed: 'Context compacted',
+        failed: 'Couldn’t compact the context',
+        cancelled: 'Compacting the context stopped',
+      }[status]
+      const after = status === 'completed' ? span : status === 'failed' ? error : null
+      return after === null || after === '' ? words : `${words} · ${after}`
+    },
+  },
   shell: 'Shell',
   step: { implement: 'Implement', review: 'Review', settle: 'Settle', publish: 'Pull request' } satisfies Record<
     StepResult['step'],
@@ -211,7 +233,85 @@ const serverName = (name: string) => {
   return word.charAt(0).toUpperCase() + word.slice(1)
 }
 
+/**
+ * A web call that went through, as from outside the repository: a search by
+ * what it searched for, a page by where it is. While it runs, or where it
+ * didn't go through, it is a call like any other, saying how it stands.
+ */
+function WebView({ web }: { web: NonNullable<Extract<Part, { kind: 'tool' }>['web']> }) {
+  return web.action === 'search' ? <WebSearch query={web.query} /> : <WebFetch url={web.url} />
+}
+
+/**
+ * A sub-agent the agent started, by what it was asked: how it stands, its
+ * kind and how many calls it has made, opening to those calls and the start
+ * of what it reported back.
+ */
+function SubAgentView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; threadId: string }) {
+  const agent = part.subAgent
+  if (agent === undefined) return null
+  return (
+    <SubAgents
+      list={[
+        {
+          id: part.id,
+          label: agent.label,
+          state: part.state,
+          meta: text.subAgent(agent.type, agent.calls.length),
+          calls: (
+            <>
+              {agent.calls.map((call) => (
+                <PartView key={call.id} part={call} threadId={threadId} />
+              ))}
+              {agent.said !== undefined && (
+                <div className={s.reported}>
+                  <Markdown source={agent.said} />
+                </div>
+              )}
+            </>
+          ),
+        },
+      ]}
+    />
+  )
+}
+
+/** The agent compacting its context: a line across the thread, with the summary it kept behind Show summary. */
+function CompactedView({ block }: { block: Extract<Block, { kind: 'compacted' }> }) {
+  const [open, setOpen] = useState(false)
+  const line = text.compaction.line(block.status, block.span, block.error)
+  return (
+    <>
+      {block.summary === null ? (
+        <ThreadDivider icon="compress" data-item={block.id}>
+          {line}
+        </ThreadDivider>
+      ) : (
+        <ThreadDivider
+          icon="compress"
+          data-item={block.id}
+          action={open ? text.compaction.hide : text.compaction.summary}
+          onAction={() => setOpen((was) => !was)}
+        >
+          {line}
+        </ThreadDivider>
+      )}
+      {open && block.summary !== null && (
+        <div className={s.summary}>
+          <Markdown source={block.summary} />
+        </div>
+      )}
+    </>
+  )
+}
+
 function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; threadId: string }) {
+  if (part.subAgent !== undefined) return <SubAgentView part={part} threadId={threadId} />
+  if (part.web !== undefined && part.state === ToolState.Done) return <WebView web={part.web} />
+  return <CallView part={part} threadId={threadId} />
+}
+
+function CallView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; threadId: string }) {
   const [open, setOpen] = useState(part.state === ToolState.Running && part.ran !== null)
   /* once opened, what it printed stays, so it doesn't vanish as the call folds */
   const [seen, setSeen] = useState(open)
@@ -608,6 +708,10 @@ export function ThreadBlocks({
             {block.text}
           </ThreadDivider>
         )
+      case 'compacted':
+        return <CompactedView key={block.id} block={block} />
+      case 'interrupted':
+        return <Interrupted key={block.id} />
       case 'step':
         // A step's report is a task's, and its thread draws it in its rounds (TaskThread, ADR-042).
         return null
