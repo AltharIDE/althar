@@ -101,8 +101,8 @@ jobs:
     needs: [changes, desktop, harness, ui, site, brand, report]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
-    # Long enough to wait out a stress run still going, whose own jobs take 30 minutes at most.
-    timeout-minutes: 40
+    # Long enough to wait out a stress run still going, whose own jobs take 75 minutes at most.
+    timeout-minutes: 80
     permissions:
       actions: read
       checks: read

@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import type { ProjectId } from '@althar/domain'
+import { Ids, newId, type ProjectId } from '@althar/domain'
 import { holds, type FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Option } from 'effect'
@@ -239,18 +239,35 @@ describe('automatic usage takeover by model', () => {
 
   it.live('moves work planned for an agent out of usage only where the project’s rule is move; under wait it is left to the run', () =>
     Effect.gen(function* () {
-      const task = yield* startTask()
-      yield* task.start
-      yield* ready(task.projectId)
+      // No task runs: only where work planned for the agent stands.
+      const models = yield* Models
+      yield* until(models.catalog, (catalog) => catalog.every((agent) => !agent.probing))
+      const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const projectId = project.projectId as ProjectId
       const limits = yield* Limits
       const policies = yield* Policies
       const instance = yield* Instance
-      const planned = { agentId: 'claude-code', model: null, projectId: task.projectId as ProjectId }
+      // Claude Code said it ran out of usage a moment ago, until an hour on.
+      const [account] = yield* (yield* Accounts).of('claude-code')
+      const sql = yield* SqlClient.SqlClient
+      const principalId = yield* newId(Ids.principal)
+      const at = new Date().toISOString()
+      yield* sql`INSERT INTO principals ${sql.insert({ id: principalId, agentId: 'claude-code', accountId: account!.id, deviceId: instance.deviceId, subjectHint: 'Fake sign-in', authMode: 'vendor_cli', observedAt: at })}`
+      yield* sql`INSERT INTO account_statuses ${sql.insert({
+        id: yield* newId(Ids.accountStatus),
+        principalId,
+        state: 'limited',
+        windows: JSON.stringify([{ kind: 'usage', resetsAt: new Date(Date.now() + 3_600_000).toISOString() }]),
+        source: 'error',
+        observedAt: at,
+      })}`
+      const planned = { agentId: 'claude-code', model: null, projectId }
       const moving = yield* limits.standing(planned)
-      assert.strictEqual(moving.kind === 'ok' ? undefined : moving.kind === 'instead' ? moving.because.why : moving.unable.why, 'out')
-      yield* policies.setUsageLimit(task.projectId as ProjectId, 'wait', instance.personId)
+      assert.strictEqual(moving.kind, 'instead')
+      assert.strictEqual(moving.kind === 'instead' ? moving.because.why : undefined, 'out')
+      yield* policies.setUsageLimit(projectId, 'wait', instance.personId)
       assert.deepStrictEqual(yield* limits.standing(planned), { kind: 'ok' })
-    }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: Date.now() + 3_600_000 } } }))),
+    }).pipe(Effect.provide(withAgents({}))),
   )
 
   it.live('reviews with a third maker even when its agent also offers a stronger model from the lead’s maker', () => {
