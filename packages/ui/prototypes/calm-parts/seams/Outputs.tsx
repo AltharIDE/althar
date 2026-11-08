@@ -1,7 +1,7 @@
 // Scrappy: a task's Outputs, as the direction has it, once the task has changes of its own. Today's page reads a second pull request
 // in one repository as one that came before; phase 5's changes are each their own. Made of the kit's WhatItMade and ChangeSet, in the
 // real page's layout. A task with no change of its own (a chat, a review) keeps today's page.
-import { type ComponentProps, useState } from 'react'
+import type { ComponentProps } from 'react'
 
 import * as real from '../../../../../apps/desktop/src/renderer/features/task/Outputs'
 import s from '../../../../../apps/desktop/src/renderer/features/task/Task.module.css'
@@ -11,11 +11,11 @@ import { ChangeState, CheckState } from '../../../src/foundations/vocabulary'
 import { ChangeSet } from '../../../src/outputs/ChangeSet/ChangeSet'
 import { WhatItMade } from '../../../src/outputs/WhatItMade/WhatItMade'
 import { Button } from '../../../src/primitives/Button/Button'
+import { Caret, Disclosure, DisclosureTrigger, Fold } from '../../../src/primitives/Fold/Fold'
 import type { ChangeCheck } from '../../../src/primitives/Checks/Checks'
 import { type Case, type Change, changeIn } from '../cases'
-import { VIEWS } from '../directions'
 import { act } from '../moves'
-import { commits, nameOf, needOf, open } from '../need'
+import { commits, nameOf, needOf, open, prOf } from '../need'
 import { ChangeMark, css, markOf, standingOf } from '../parts'
 import { proto, useProto } from '../state'
 import { SOL } from '../team'
@@ -153,7 +153,7 @@ function Where({ c, change, ship }: { c: Case; change: Change; ship: boolean }) 
 }
 
 /** One change, as the kit's card: its pull request or branch, where it goes, its checks and review, and its one press. */
-function ChangeCard({ c, change, ship = true }: { c: Case; change: Change; ship?: boolean }) {
+function ChangeCard({ c, change, ship = true, signal }: { c: Case; change: Change; ship?: boolean; signal: boolean }) {
   const stands = standingOf(c, change)
   const press = stands.act === undefined || (!ship && stands.act === 'Ship') ? undefined : stands.act
   const reviewed = c.reviewer != null && (change.waiting ?? 0) === 0 && change.pr !== undefined && change.state !== 'merged'
@@ -176,7 +176,7 @@ function ChangeCard({ c, change, ship = true }: { c: Case; change: Change; ship?
         ? {}
         : {
             actions: (
-              <Button variant={stands.tone === 'you' || stands.tone === 'bad' ? 'signal' : 'default'} onClick={act(press, change.id)}>
+              <Button variant={signal && (stands.tone === 'you' || stands.tone === 'bad') ? 'signal' : 'default'} onClick={act(press, change.id)}>
                 {press}
               </Button>
             ),
@@ -186,107 +186,78 @@ function ChangeCard({ c, change, ship = true }: { c: Case; change: Change; ship?
   )
 }
 
-/** The other changes, a line each: its mark, its name and branch, where it stands, and its one press; pressing the line shows it. */
-function Others({ c, others, onPick }: { c: Case; others: ReadonlyArray<Change>; onPick: (id: string) => void }) {
-  if (others.length === 0) return null
+/** One change's outputs: what it changes, its pictures, and its card beside them. */
+function OneChange({ c, change, named, signal }: { c: Case; change: Change; named: boolean; signal: boolean }) {
   return (
-    <section className={css.outOthers} aria-label="This task’s other changes">
-      <span className={css.outOthersHead}>{others.length === 1 ? '1 more change' : `${others.length} more changes`}</span>
-      <ul className={css.outRows}>
-        {others.map((change) => {
-          const stands = standingOf(c, change)
-          return (
-            <li key={change.id} className={css.outRow}>
-              <button type="button" className={css.outPick} onClick={() => onPick(change.id)}>
-                <ChangeMark mark={markOf(c, change)} />
-                <span className={css.outName}>{nameOf(change)}</span>
-                {change.pr !== undefined && <code className={css.outRowBranch}>{change.branch}</code>}
-                <span className={css.outDetail} data-tone={stands.tone}>
-                  {stands.detail}
-                </span>
-              </button>
-              {stands.act !== undefined && (
-                // One thing asks at a time: the card above has the violet press; these are quiet.
-                <Button size="small" onClick={act(stands.act, change.id)}>
-                  {stands.act}
-                </Button>
-              )}
-            </li>
-          )
-        })}
-      </ul>
-    </section>
+    <div className={s.outputsWide}>
+      <WhatItMade
+        story={storyOf(change)}
+        shots={shotsOf(change)}
+        checked={[]}
+        unverified={[]}
+        text={{ story: named ? `What ${nameOf(change)} changes` : 'What changed' }}
+      />
+      <aside className={s.side}>
+        <ChangeCard c={c} change={change} signal={signal} />
+      </aside>
+    </div>
   )
 }
 
-/** C: what waits for Ship, first, as one card: each change's commits, and Ship. */
-function NotShipped({ c }: { c: Case }) {
-  const waiting = c.changes.filter((one) => open(one) && (one.waiting ?? 0) > 0)
-  if (waiting.length === 0) return null
+/** What a change touched, in a line: its files and lines. */
+const sizeOf = (change: Change) => {
+  const files = filesOf(change)
+  const add = files.reduce((sum, one) => sum + one.add, 0)
+  const del = files.reduce((sum, one) => sum + one.del, 0)
+  return `${files.length === 1 ? '1 file' : `${files.length} files`} · +${add} −${del}`
+}
+
+/** Settled: merged or closed, with nothing its review after the merge found. It folds to a line once the task has others. */
+const settled = (change: Change) => !open(change) && change.found === undefined
+
+/** A settled change, a line that opens to all it made. */
+function Settled({ c, change }: { c: Case; change: Change }) {
   return (
-    <section className={css.outShip} aria-label="Not shipped">
-      <span className={css.outOthersHead}>Not shipped</span>
-      <ul className={css.outRows}>
-        {waiting.map((change) => (
-          <li key={change.id} className={css.outRow}>
-            <span className={css.outPick}>
-              <span className={css.outName}>{nameOf(change)}</span>
-              <span className={css.outDetail}>{commits(change.waiting ?? 0)}</span>
-            </span>
-            <Button size="small" variant="signal" onClick={act('Ship', change.id)}>
-              Ship
-            </Button>
-          </li>
-        ))}
-      </ul>
-    </section>
+    <Disclosure className={css.outSettled}>
+      <DisclosureTrigger>
+        <button type="button" className={css.outSettledLine}>
+          <ChangeMark mark={markOf(c, change)} />
+          <span className={css.outName}>{nameOf(change)}</span>
+          <span className={css.outSettledWhat}>{`${prOf(change)} ${change.state === 'merged' ? 'merged' : 'closed'}`}</span>
+          <span className={css.outSettledSize}>{sizeOf(change)}</span>
+          <Caret />
+        </button>
+      </DisclosureTrigger>
+      <Fold bleed={false}>
+        <OneChange c={c} change={change} named signal={false} />
+      </Fold>
+    </Disclosure>
   )
 }
 
+/**
+ * Every direction: the task's changes one under another, as one piece of work, in the task's order so nothing moves while agents
+ * work. A settled one folds to a line in its place; one its after-merge review found something in stays open. One change: today's page.
+ */
 export function Outputs(props: ComponentProps<typeof real.Outputs>) {
   const p = useProto()
   const c = proto.current()
-  const [picked, setPicked] = useState<string | null>(null)
   if (c.changes.length === 0) return <real.Outputs {...props} />
-  const view = VIEWS[p.direction].outputs
+  const several = c.changes.length > 1
   const need = needOf(c, p.answered)
-  // A: one change at a time, the one that most needs the person first (ADR § the task's diff); the rest a line each.
-  const shown = changeIn(c, picked ?? undefined) ?? need.change ?? c.changes.find(open) ?? c.changes[0]!
-  const merged = c.changes.filter((one) => !open(one) && (view !== 'one' || one !== shown))
-  const others = c.changes.filter((one) => open(one) && one !== shown)
-  const lead = view === 'one' ? shown : (need.change ?? c.changes.find(open) ?? c.changes[0]!)
+  // One thing asks at a time: violet only on the change the task's one fact is about.
+  const signal = (change: Change) => !several || change.id === need.change?.id
   return (
     <div className={s.outputs}>
-      <div className={s.outputsWide}>
-        <WhatItMade
-          story={storyOf(lead)}
-          shots={shotsOf(lead)}
-          checked={[]}
-          unverified={[]}
-          text={{ story: c.changes.length > 1 ? `What ${nameOf(lead)} changes` : 'What changed' }}
-        />
-        <aside className={s.side}>
-          {view === 'one' ? (
-            <>
-              <ChangeCard c={c} change={shown} />
-              <Others c={c} others={others} onPick={setPicked} />
-            </>
+      {c.changes.map((change) => (
+        <section key={change.id} className={css.outSection} aria-label={nameOf(change)}>
+          {several && settled(change) ? (
+            <Settled c={c} change={change} />
           ) : (
-            <>
-              {view === 'outbox' && <NotShipped c={c} />}
-              {c.changes.filter(open).map((change) => (
-                <ChangeCard key={change.id} c={c} change={change} ship={view === 'all'} />
-              ))}
-            </>
+            <OneChange c={c} change={change} named={several} signal={signal(change)} />
           )}
-          {merged.length > 0 && (
-            <p className={s.quiet}>
-              {merged.map((one) => `${nameOf(one)} ${one.state === 'merged' ? 'merged' : 'closed'}`).join(' · ')}
-              {merged.some((one) => one.found !== undefined) ? '. Its review after the merge found something.' : '.'}
-            </p>
-          )}
-        </aside>
-      </div>
+        </section>
+      ))}
     </div>
   )
 }

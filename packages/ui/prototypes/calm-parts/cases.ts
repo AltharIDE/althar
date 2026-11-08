@@ -10,6 +10,8 @@ export interface Change {
   readonly pr?: number
   readonly state?: 'draft' | 'open' | 'merged' | 'closed'
   readonly title: string
+  /** Its name in a few words, once the task has two: whoever starts it names it, as a task is named. */
+  readonly short?: string
   readonly checks?: Checks
   readonly failing?: ReadonlyArray<string>
   /** Commits not shipped: the branch is held for Ship. */
@@ -246,13 +248,13 @@ export const CASES: ReadonlyArray<Case> = [
       {
         kind: 'part',
         who: 'lead',
-        text: 'Started a second change, althar/rename-later, toward main, to keep the rename apart.',
+        text: 'Started a second change, Rename, on althar/rename-later toward main, to keep it apart.',
         change: 'later',
         act: 'Keep them together',
       },
       { kind: 'review', findings: 0, change: 'still' },
       { kind: 'review', findings: 0, change: 'later' },
-      { kind: 'line', text: 'Opened #714 and #715, as drafts.' },
+      { kind: 'line', text: 'Opened #714 for Lane heights and #715 for Rename, as drafts.' },
     ],
     adr: 'Where none needs them, it says what the changes wait on: “Waiting for checks on #714, #715”.',
   },
@@ -276,7 +278,7 @@ export const CASES: ReadonlyArray<Case> = [
       ...opening,
       {
         kind: 'line',
-        text: 'e2e (board.spec.ts) still fails on #714 after the lead’s fix: it times out only on CI. Over to you.',
+        text: 'e2e (board.spec.ts) still fails on Lane heights after the lead’s fix: it times out only on CI. Over to you.',
         change: 'still',
         tone: 'warning',
       },
@@ -300,10 +302,10 @@ export const CASES: ReadonlyArray<Case> = [
       { kind: 'you', text: 'Now make a card slide to its new lane, but keep it apart so I can merge the fix first.' },
       {
         kind: 'lead',
-        text: 'The slide needs the held heights, so it stacks on #714: #716 targets althar/board-still, and moves to main once #714 merges.',
+        text: 'The slide needs the held heights, so it builds on Lane heights, and goes into main once that merges.',
         took: { work: 162, tools: 40 },
         commits: { n: 2, change: 'motion' },
-        part: { text: 'Started althar/board-motion on althar/board-still, as it needs #714’s code.', change: 'motion' },
+        part: { text: 'Started Card slide on top of Lane heights, as it needs its code.', change: 'motion' },
       },
       { kind: 'review', findings: 0, change: 'motion' },
     ],
@@ -354,7 +356,7 @@ export const CASES: ReadonlyArray<Case> = [
       ...opening,
       {
         kind: 'line',
-        text: '#714 merged. Its folder goes in a day; the task carries on with #715 and althar/board-motion.',
+        text: 'Lane heights (#714) merged. The task carries on with Rename and Card slide.',
         change: 'still',
       },
       { kind: 'you', text: 'Good. Start the slide now, on main.' },
@@ -362,7 +364,7 @@ export const CASES: ReadonlyArray<Case> = [
         kind: 'lead',
         text: 'A helper is making the slide in its own worktree. Ask me anything meanwhile.',
         took: { wait: 0, start: 4, work: 18 },
-        part: { text: 'Handed althar/board-motion to a helper, Sonnet 5.5.', change: 'motion' },
+        part: { text: 'Handed Card slide to a helper, Sonnet 5.5.', change: 'motion' },
       },
     ],
     adr: 'A merge ends only its own change, never the task, its session or what runs.',
@@ -381,11 +383,11 @@ export const CASES: ReadonlyArray<Case> = [
     reviewer: SOL,
     thread: [
       ...opening,
-      { kind: 'part', who: 'lead', text: 'Handed #716 to a helper, Sonnet 5.5.', change: 'motion' },
+      { kind: 'part', who: 'lead', text: 'Handed Card slide to a helper, Sonnet 5.5.', change: 'motion' },
       { kind: 'you', text: 'While that runs: does the held height survive a window resize?' },
       {
         kind: 'lead',
-        text: 'It didn’t: a resize mid-move kept the old height. Fixed on althar/board-still, one commit. Not shipped yet.',
+        text: 'It didn’t: a resize mid-move kept the old height. Fixed in Lane heights, one commit. Not shipped yet.',
         took: { work: 71, tools: 19 },
         commits: { n: 1, change: 'still' },
       },
@@ -419,7 +421,7 @@ export const CASES: ReadonlyArray<Case> = [
       {
         kind: 'part',
         who: 'lead',
-        text: 'Started a second change, althar/rename-later, toward main, to keep the rename apart.',
+        text: 'Started a second change, Rename, on althar/rename-later toward main, to keep it apart.',
         change: 'later',
         act: 'Keep them together',
       },
@@ -463,7 +465,7 @@ export const CASES: ReadonlyArray<Case> = [
       {
         kind: 'part',
         who: 'althar',
-        text: 'althar/try-virtual-lanes is a change of this task now, toward main. #714 keeps its pull request, with no folder until it’s worked on again.',
+        text: 'Virtual lanes, the lead’s althar/try-virtual-lanes, is a change of this task now, toward main. Lane heights keeps #714, with no folder until it’s worked on again.',
         change: 'virtual',
         act: 'Drop it',
       },
@@ -487,7 +489,7 @@ export const CASES: ReadonlyArray<Case> = [
       {
         kind: 'part',
         who: 'althar',
-        text: 'Found #717, from althar/rename-later into main, opened on GitHub. It’s that change’s now.',
+        text: 'Found #717, from althar/rename-later into main, opened on GitHub. It’s Rename’s now.',
         change: 'later',
       },
     ],
@@ -1112,13 +1114,13 @@ export const CASES: ReadonlyArray<Case> = [
     preset: 'Change',
     changes: [ch(STILL), ch(LATER, { checks: 'failed', failing: ['lint'] })],
     reviewer: SOL,
-    still: { why: 'Fixing #715’s checks waits for one of the 4 agents at work' },
+    still: { why: 'Fixing Rename’s checks waits for one of the 4 agents at work' },
     thread: [
       ...opening,
-      { kind: 'line', text: 'lint fails on #715.', change: 'later', tone: 'warning' },
-      { kind: 'live', text: 'Fixing #715’s checks starts when one of the 4 agents at work is free.', change: 'later' },
+      { kind: 'line', text: 'lint fails on Rename.', change: 'later', tone: 'warning' },
+      { kind: 'live', text: 'Fixing Rename’s checks starts when one of the 4 agents at work is free.', change: 'later' },
       { kind: 'you', text: 'Does the rename reach the edge’s menu too?' },
-      { kind: 'lead', text: 'Yes: the task menu and the edge’s menu both say Later on #715.', took: { work: 14, tools: 4 } },
+      { kind: 'lead', text: 'Yes: the task menu and the edge’s menu both say Later, in Rename.', took: { work: 14, tools: 4 } },
     ],
     adr: 'What the person says to an agent already never waits for a place among the agents at work. What Althar’s own course starts does.',
   },
@@ -1180,6 +1182,30 @@ export const CASES: ReadonlyArray<Case> = [
 export const GROUPS: ReadonlyArray<Group> = [...new Set(CASES.map((one) => one.group))]
 
 export const caseOf = (key: string | null): Case => CASES.find((one) => one.key === key) ?? CASES[2]!
+
+/** Each change's name in words, as the lead gave it when it started the change. */
+const SHORT: Record<string, string> = {
+  still: 'Lane heights',
+  later: 'Rename',
+  motion: 'Card slide',
+  virtual: 'Virtual lanes',
+}
+
+/**
+ * Once a task has two changes, each goes by its name in words: a task that never splits is named by its title, as today. A change
+ * started here without one is named from its title's first words.
+ */
+export const withWords = (c: Case): Case =>
+  c.changes.length < 2 || c.changes.every((one) => one.short !== undefined)
+    ? c
+    : {
+        ...c,
+        changes: c.changes.map((one) =>
+          one.short !== undefined
+            ? one
+            : { ...one, short: SHORT[one.id] ?? one.title.replace(/[,.:;“”"]/g, '').split(' ').slice(0, 2).join(' ') },
+        ),
+      }
 
 /** The change by its id, in a case. */
 export const changeIn = (c: Case, id: string | undefined): Change | undefined => c.changes.find((one) => one.id === id)

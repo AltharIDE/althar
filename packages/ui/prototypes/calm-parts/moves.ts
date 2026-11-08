@@ -1,7 +1,7 @@
 // Scrappy: what a press does. Each is an edit to the case on screen (its changes, parts, access, thread), so the bar, the card, the
 // parts and the thread all read the same case after it; and what takes time (a Ship) goes step by step, in place. Nothing real happens.
 import { type Ask, type Beat, type Case, type Change, changeIn, type Preset, type Who } from './cases'
-import { askNeed, askOf, commits, nameOf, open } from './need'
+import { askNeed, askOf, commits, nameOf, open, recordOf } from './need'
 import { type Edit, proto } from './state'
 
 const STEP = 1100
@@ -166,8 +166,8 @@ const shipping = (c: Case, id: string, options: ShipOptions): ReadonlyArray<Edit
     const words = fresh
       ? `Shipped: ${now.branch} is up as #${pr}, into ${now.toward ?? 'main'}, with the ${commits(n)}.`
       : n === 0
-        ? `Shipped: ${name} went up on top of what was just shipped below it.`
-        : `Shipped: ${name} has the ${commits(n)}${(now.replies ?? 0) > 0 ? ' and the answer to the reply on it' : ''}. Its checks are running${again ? ' again' : ''}.`
+        ? `Shipped: ${recordOf(now)} went up on top of what was just shipped below it.`
+        : `Shipped: ${recordOf(now)} has the ${commits(n)}${(now.replies ?? 0) > 0 ? ' and the answer to the reply on it' : ''}. Its checks are running${again ? ' again' : ''}.`
     return compose(
       change(id, (x) => ({
         ...x,
@@ -213,10 +213,11 @@ export const ship = (id?: string, options: ShipOptions = {}) => {
 
 /* ——— Merge ——— */
 
-export const merge = (id?: string, then?: Edit) => {
+export const merge = (id?: string, then?: Edit, all = false) => {
   const c = proto.current()
-  const ready = c.changes.filter((one) => open(one) && one.ready === true)
-  const stacked = ready.length > 1 && ready.some((one) => one.on !== undefined)
+  const ready = c.changes.filter((one) => open(one) && one.ready === true && (one.waiting ?? 0) === 0)
+  // All of them: each ready one, the bottom of a stack before what stands on it.
+  const stacked = (all && ready.length > 1) || (ready.length > 1 && ready.some((one) => one.on !== undefined))
   const target = changeIn(c, id) ?? ready[0]
   const order = stacked
     ? [...ready.filter((one) => one.on === undefined), ...ready.filter((one) => one.on !== undefined)]
@@ -235,7 +236,7 @@ export const merge = (id?: string, then?: Edit) => {
             : other,
       ),
     }
-    return compose(calm, line(`${nameOf(one)} merged.${above === undefined ? '' : ` ${nameOf(above)} goes into main now.`}`, one.id))(next)
+    return compose(calm, line(`${recordOf(one)} merged.${above === undefined ? '' : ` ${nameOf(above)} goes into main now.`}`, one.id))(next)
   })
   list.push((cc) => {
     const left = cc.changes.filter(open)
@@ -506,11 +507,13 @@ export const setPreset = (to: Preset) =>
 
 export const savePreset = () => proto.edit(part('you', 'You saved its parts as a preset, “Board fix”.'))
 
-/** The conversation turns to another change: what the person says next, and “Ship it”, go there. */
+/**
+ * The change the window is about: what you say next, and “Ship it”, go to it. A view, not news: no line in the thread, and the
+ * card still works out what most needs the person each time it is drawn.
+ */
 export const workOn = (id: string) => {
-  const one = changeIn(proto.current(), id)
-  if (one === undefined) return
-  proto.edit(compose((c) => ({ ...c, working: id }), part('you', `You turned the conversation to ${nameOf(one)}, ${one.branch}.`, id)))
+  if (changeIn(proto.current(), id) === undefined) return
+  proto.edit((c) => ({ ...c, working: id }))
 }
 
 /* ——— A line's way on ——— */
@@ -691,6 +694,7 @@ export const act = (label: string, id?: string) => () => {
   if (asked !== null && askNeed(c, asked).act === label && (id === undefined || !('change' in asked) || asked.change === id))
     return answerAsk(c, asked, PRIMARY[asked.kind])
   if (label === 'Ship' || label === 'Ship them all') return ship(label === 'Ship them all' ? undefined : id)
+  if (label === 'Merge both' || label.startsWith('Merge all')) return merge(undefined, undefined, true)
   if (label.startsWith('Merge')) return merge(id)
   if (label === 'Fix it') return lineAct('Fix it', id)
   if (label === 'Post it') return postReview()

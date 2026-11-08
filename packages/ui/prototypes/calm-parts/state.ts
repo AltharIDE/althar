@@ -2,7 +2,7 @@
 // per case, so the parts, the access and the changes move with the thread, and every screen reads the same case.
 import { useSyncExternalStore } from 'react'
 
-import { caseOf, type Case } from './cases'
+import { caseOf, type Case, withWords } from './cases'
 import { needOf } from './need'
 
 export type Direction = 'A' | 'B' | 'C'
@@ -69,7 +69,8 @@ export const proto = {
   current: (): Case => {
     const list = state.edits[state.key]
     if (made !== null && made.list === list && made.key === state.key && made.answered === state.answered) return made.out
-    const edited = (list ?? []).reduce((c, edit) => edit(c), caseOf(state.key))
+    // Each press reads the case as it is drawn, its changes named in words once it has two.
+    const edited = withWords((list ?? []).reduce((c, edit) => edit(withWords(c)), caseOf(state.key)))
     const out = list === undefined ? edited : inItsLane(edited)
     made = { list, key: state.key, answered: state.answered, out }
     return out

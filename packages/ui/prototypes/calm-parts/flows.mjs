@@ -32,100 +32,106 @@ const press = async (name, scope = page) => {
 }
 const settle = (ms) => page.waitForTimeout(ms)
 
+const dock = () => page.locator('section[aria-label="This task’s changes"]')
+const switcher = () => page.getByRole('button', { name: /^Showing / })
+
 /* ——— Ship, on the change it is pressed for ——— */
 
-// B: the held #716 in a stack: its card's Ship ships #714 first, then #716, and stays in this case.
-await open('B', 'stack-held')
-await page.getByRole('button', { name: /^#716/ }).first().click()
-await settle(300)
-await page.locator('[role=dialog], [role=region]').getByRole('button', { name: 'Ship', exact: true }).first().click()
-await settle(500)
-let t = await text()
-check((await titled()).includes('A hold reaching up a stack'), 'B stack-held: Ship stays in the case')
-check(t.includes('Shipping #714, then #716'), 'B stack-held: the scope ask is answered bottom-up')
-await settle(5200)
-t = await text()
-check(t.includes('Shipped: #714 has the 2 commits'), 'B stack-held: #714 went up with its 2 commits')
-check(t.includes('#716 went up on top of'), 'B stack-held: #716 went up after it')
-
-// A: the same from the bar's chip.
+// A · As one: the held stack's chip ships the change below first, then the one on it, and stays in this case.
 await open('A', 'stack-held')
 await press('Ship')
 await settle(500)
-t = await text()
+let t = await text()
 check((await titled()).includes('A hold reaching up a stack'), 'A stack-held: the chip’s Ship stays in the case')
-check(t.includes('Shipping #714, then #716'), 'A stack-held: the chip answers the ask')
+check(t.includes('Shipping Lane heights, then Card slide'), 'A stack-held: the chip answers the ask, bottom up')
 await settle(5200)
 t = await text()
-check(t.includes('Shipped: #714 has the 2 commits') && t.includes('#716 went up'), 'A stack-held: both went up, in order')
+check(
+  t.includes('Shipped: Lane heights (#714) has the 2 commits') && t.includes('Card slide (#716) went up on top of'),
+  'A stack-held: both went up, in order, each naming its pull request',
+)
 
-// C: the outbox, one change's row.
-await open('C', 'held-beside')
-await page
-  .getByRole('button', { name: /not shipped/ })
-  .first()
-  .click()
+// B · One at a time: the window opens on the change the ask is about; the switch turns it to the one below, whose Ship ships it alone.
+await open('B', 'stack-held')
+check((await switcher().getAttribute('aria-label')) === 'Showing Card slide', 'B stack-held: opens on Card slide, which the ask is about')
+await switcher().click()
+await settle(250)
+await page.getByRole('menuitem', { name: /Lane heights/ }).click()
+await settle(400)
+check((await switcher().getAttribute('aria-label')) === 'Showing Lane heights', 'B stack-held: the switch turns the window to Lane heights')
+check(!(await text()).includes('You turned'), 'B stack-held: turning it writes nothing in the thread')
+check(
+  (await page.locator('header[aria-label]').first().innerText()).includes('2 commits not shipped'),
+  'B stack-held: the chip is Lane heights’ own: 2 commits not shipped',
+)
+await press('Ship')
+await settle(4600)
+check((await text()).includes('Shipped: Lane heights (#714) has the 2 commits'), 'B stack-held: its Ship ships Lane heights')
+
+// C · Where you talk: a tab picks the change; pressed again, its card, whose Ship ships it.
+await open('C', 'stack-held')
+check((await dock().getByRole('button', { pressed: true }).innerText()).includes('Card slide'), 'C stack-held: the tab picked is Card slide')
+await dock().getByRole('button', { name: /^Lane heights/ }).click()
+await settle(300)
+check((await dock().getByRole('button', { pressed: true }).innerText()).includes('Lane heights'), 'C stack-held: pressing Lane heights picks it')
+await dock().getByRole('button', { pressed: true }).click()
 await settle(300)
 await page.locator('[role=dialog]').getByRole('button', { name: 'Ship', exact: true }).first().click()
-await settle(300)
-t = await text()
-check((await titled()).includes('Fixes and replies waiting beside'), 'C held-beside: Ship stays in the case')
-await settle(4200)
-t = await text()
+await settle(4600)
+check((await text()).includes('Shipped: Lane heights (#714) has the 2 commits'), 'C stack-held: the tab’s card ships Lane heights')
+
+// One change, waiting beside a reply and a failing check: the chip's Ship takes them all.
+await open('A', 'held-beside')
+await press('Ship')
+await settle(4600)
 check(
-  t.includes('Shipped: #714 has the 3 commits and the answer to the reply on it'),
-  'C held-beside: shipped with the reply, checks running again',
+  (await text()).includes('Shipped: #714 has the 3 commits and the answer to the reply on it'),
+  'A held-beside: shipped with the reply, checks running again',
 )
 
 // The retargeted branch: Ship keeps its target, opens its pull request, then asks about the old one.
-await open('B', 'retarget')
-await page
-  .getByRole('button', { name: /^althar\/board-still-2/ })
-  .first()
-  .click()
-await settle(300)
-await page.locator('[role=dialog], [role=region]').getByRole('button', { name: 'Ship', exact: true }).first().click()
+await open('A', 'retarget')
+await press('Ship')
 await settle(5200)
 t = await text()
-check((await titled()).includes('A new target while held'), 'B retarget: Ship stays in the case')
+check((await titled()).includes('A new target while held'), 'A retarget: Ship stays in the case')
 check(
   t.includes('althar/board-still-2 is up as #719, into release/0.8.0'),
-  'B retarget: the new pull request goes into release/0.8.0, not main',
+  'A retarget: the new pull request goes into release/0.8.0, not main',
 )
-check(t.includes('#714') && t.includes('is still open'), 'B retarget: only then asks about the old #714')
+check(t.includes('#714') && t.includes('is still open'), 'A retarget: only then asks about the old #714')
 
-/* ——— Parts: added, removed ——— */
+/* ——— Parts: added, removed; a second change, in each direction's place ——— */
 
+const startOne = async () => {
+  await page.locator('button[aria-label^="Parts,"]').first().click()
+  await settle(250)
+  await press('Add')
+  await page
+    .getByRole('button', { name: /^A change/ })
+    .first()
+    .click()
+  await press('Start one')
+  await settle(500)
+  await page.keyboard.press('Escape')
+  await settle(300)
+}
 await open('A', 'one')
-const before = await parts()
-await page.locator('button[aria-label^="Parts,"]').first().click()
-await settle(250)
-await press('Add')
-await page
-  .getByRole('button', { name: /^A change/ })
-  .first()
-  .click()
-await press('Start one')
-await settle(500)
+await startOne()
 t = await text()
-check((await parts()) === before + 1, `A one: Start one adds a part (${before} → ${await parts()})`)
-check(t.includes('You started a change, althar/board-still-tests'), 'A one: and says so in the thread')
-check(/2 changes|althar\/board-still-tests/.test(t), 'A one: the new change is on the task')
-
+check(t.includes('You started a change, althar/board-still-tests'), 'A one: Start one says so in the thread')
+check(
+  ((await page.getByRole('button', { name: /^2 changes:/ }).count()) ?? 0) === 1,
+  'A one: the chip now holds a mark for each of the 2 changes',
+)
 await open('B', 'one')
-await page.locator('button[aria-label^="Parts,"]').first().click()
-await settle(250)
-await press('Add')
-await page
-  .getByRole('button', { name: /^A change/ })
-  .first()
-  .click()
-await press('Start one')
-await settle(500)
-await page.keyboard.press('Escape')
-await settle(300)
-t = await text()
-check(t.includes('althar/board-still-tests'), 'B one: a strip appears with the new change')
+check((await switcher().count()) === 0, 'B one: one change, no switch after the title (as today)')
+await startOne()
+check((await switcher().count()) === 1, 'B one: a second change brings the switch after the title')
+await open('C', 'one')
+check((await dock().count()) === 0, 'C one: one change, no tabs over the composer (as today)')
+await startOne()
+check((await dock().getByRole('button').count()) === 2, 'C one: a second change brings a tab each over the composer')
 
 await open('A', 'one')
 const withReviewer = await parts()
@@ -180,10 +186,13 @@ const inCase = async (label, what) => check((await titled()).includes(label), `$
 
 // Merge a ready stack, bottom up.
 await open('A', 'stack')
-await press('Merge #714, then #716')
+await press('Merge both')
 await settle(3600)
 t = await text()
-check(t.includes('#714 merged. #716 goes into main now.') && t.includes('#716 merged.'), 'A stack: Merge merges #714, then #716')
+check(
+  t.includes('Lane heights (#714) merged. Card slide goes into main now.') && t.includes('Card slide (#716) merged.'),
+  'A stack: Merge both merges Lane heights, then Card slide',
+)
 await inCase('A stack, ready to merge', 'A stack')
 
 // Fix a failing check: its commit waits for Ship, as the ADR has it.
@@ -192,7 +201,7 @@ await press('Fix it')
 await settle(2600)
 t = await text()
 check(
-  t.includes('One commit, not shipped: e2e (board.spec.ts) still fails on #714'),
+  t.includes('One commit, not shipped: e2e (board.spec.ts) still fails on Lane heights'),
   'A needs-one: Fix it writes a commit that waits beside the failing head',
 )
 
@@ -262,7 +271,7 @@ t = await text()
 check(t.includes('Started althar/rename-later-fix, after #715, for the 2 findings.'), 'A after-merge: Fix it starts a change after #715')
 
 // A removed review with a draft asks first; answering removes it.
-await open('B', 'reviewing-related')
+await open('C', 'reviewing-related')
 await page.locator('button[aria-label^="Parts,"]').first().click()
 await settle(250)
 await page.locator('[role=dialog]').getByRole('button', { name: /#698/ }).first().click()
@@ -272,13 +281,13 @@ await settle(700)
 t = await text()
 check(
   t.includes('Remove the review of #698') && (await titled()).includes('A change reviewing a related PR'),
-  'B reviewing-related: Remove asks first, in the same case',
+  'C reviewing-related: Remove asks first, in the same case',
 )
 await page.getByRole('button', { name: 'Remove without posting' }).first().click()
 await settle(600)
 await page.locator('button[aria-label^="Parts,"]').first().click()
 await settle(250)
-check(!(await page.locator('[role=dialog]').innerText()).includes('#698'), 'B reviewing-related: and the review is gone from the parts')
+check(!(await page.locator('[role=dialog]').innerText()).includes('#698'), 'C reviewing-related: and the review is gone from the parts')
 await page.keyboard.press('Escape')
 
 // Failures, each with its way out.
@@ -300,9 +309,10 @@ check((await text()).includes('Shipped: #714 has the 3 commits'), 'A refused: Se
 await open('A', 'unmatched')
 await page.getByRole('button', { name: 'Attach it as its own change' }).first().click()
 await settle(500)
-await page.locator('button[aria-label^="Parts,"]').first().click()
+await page.getByRole('button', { name: /^2 changes:/ }).click()
 await settle(250)
-check((await page.locator('[role=dialog]').innerText()).includes('#718'), 'A unmatched: Attach adds #718 as a change')
+check((await page.locator('[role=dialog]').innerText()).includes('#718'), 'A unmatched: Attach adds #718 as a change, a mark in the chip')
+await page.keyboard.press('Escape')
 await page.keyboard.press('Escape')
 
 // A chat takes a worktree; a part's Remove takes the folder.
@@ -328,7 +338,7 @@ await page.getByRole('button', { name: /Undo/ }).first().click()
 await settle(2500)
 t = await text()
 check(
-  t.includes('Ship #716, and the 2 commits on #714') && !t.includes('Shipped: #714'),
+  t.includes('Ship Card slide, and the 2 commits on Lane heights') && !t.includes('Shipped: Lane heights'),
   'A stack-held: Undo gives the ask back and stops the Ship',
 )
 
@@ -339,38 +349,60 @@ await page
   .click()
   .catch(() => undefined)
 
-/* ——— Round two: Outputs, the branch the conversation is on, the plan card's preset, the pickers on the error cards ——— */
+/* ——— Round three: Outputs and the change in view, as each direction has them; the plan card's preset; the error cards' pickers ——— */
 
-// Outputs: the change that most needs you, the rest a line each; a line shows its change.
-await page.goto('http://localhost:5374/?d=A&s=needs-one&face=out#/threads/th1')
-await settle(1200)
-t = (await text()).toLowerCase()
-check(t.includes('what #714 changes') && t.includes('2 more changes'), 'A needs-one Outputs: #714 first, then 2 more changes')
-await page.getByRole('button', { name: /#715/ }).first().click()
-await settle(400)
-check((await text()).toLowerCase().includes('what #715 changes'), 'A needs-one Outputs: pressing #715’s line shows #715')
-
-// The branch the conversation is on, in the composer, and turning it to another.
-await open('A', 'needs-one')
-check(
-  await page.getByRole('button', { name: 'On althar/board-still' }).isVisible(),
-  'A needs-one: the composer names the branch the conversation is on',
-)
-await page.getByRole('button', { name: 'On althar/board-still' }).click()
-await settle(250)
-await page.getByRole('menuitem', { name: /althar\/rename-later/ }).click()
+const outputs = async (d, k = 'needs-one') => {
+  await page.goto(`http://localhost:5374/?d=${d}&s=${k}&face=out#/threads/th1`)
+  await settle(1200)
+  return (await text()).toLowerCase()
+}
+for (const d of ['A', 'B', 'C']) {
+  t = await outputs(d)
+  check(
+    t.includes('what lane heights changes') && t.includes('what rename changes') && t.includes('what card slide changes'),
+    `${d} needs-one Outputs: every change, one under another`,
+  )
+}
+// A merged change folds to a line while another is open, and opens on a press; the open one stays as it was.
+t = await outputs('A', 'merged-one')
+check(t.includes('#714 merged') && !t.includes('what lane heights changes'), 'A merged-one Outputs: the merged change is a line')
+check(t.includes('what card slide changes'), 'A merged-one Outputs: the open change is in full')
+await page.getByRole('button', { name: /#714 merged/ }).click()
 await settle(500)
-t = await text()
-check(t.includes('You turned the conversation to #715, althar/rename-later.'), 'A needs-one: turning it to #715 says so')
-check(await page.getByRole('button', { name: 'On althar/rename-later' }).isVisible(), 'A needs-one: and the composer names its branch')
-await open('A', 'one')
-check((await page.getByRole('button', { name: /^On althar\// }).count()) === 0, 'A one: one change, no branch chip (as today)')
+check((await text()).toLowerCase().includes('what lane heights changes'), 'A merged-one Outputs: its line opens to all it made')
+
+// One at a time: the composer says which change what you say goes to; a name in a line is a way to it.
+await open('B', 'needs-one')
+const field = () => page.locator('textarea, [contenteditable=true]').last()
+check(
+  ((await field().getAttribute('placeholder')) ?? (await field().getAttribute('aria-placeholder')) ?? (await text())).includes('about Lane heights'),
+  'B needs-one: the composer says what you say goes to Lane heights',
+)
+await switcher().click()
+await settle(250)
+await page.getByRole('menuitem', { name: /Rename/ }).click()
+await settle(400)
+await page.getByRole('button', { name: 'Lane heights', exact: true }).first().click()
+await settle(400)
+check((await switcher().getAttribute('aria-label')) === 'Showing Lane heights', 'B needs-one: “Lane heights” in a line turns the window back to it')
+
+// As one: the chip's marks open to every change, each with its branch and where it stands.
+await open('A', 'needs-one')
+await page.getByRole('button', { name: /^3 changes:/ }).click()
+await settle(300)
+t = await page.locator('[role=dialog]').innerText()
+check(
+  t.includes('althar/board-still') && t.includes('althar/rename-later') && t.includes('althar/board-motion') && t.includes('Ready to merge'),
+  'A needs-one: the marks open to each change, its branch and where it stands',
+)
+await page.keyboard.press('Escape')
 
 // The plan card names the preset; another preset changes its steps.
 await page.goto('http://localhost:5374/?d=A&s=needs-one#/projects/p1?room=talk')
 await settle(1500)
 const launch = page.locator('[class*="TaskLaunch-module__launch"]').first()
 check((await launch.innerText()).includes('Review'), 'Plan card: Change has a review step')
+check((await launch.innerText()).startsWith('Change · Task'), 'Plan card: the preset is the kicker’s first word')
 await launch.getByRole('button', { name: 'Preset: Change' }).click()
 await settle(250)
 await page.getByRole('menuitem', { name: /^Prototype/ }).click()

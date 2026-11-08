@@ -14,11 +14,18 @@ export interface Need {
   readonly more: number
 }
 
-export const nameOf = (change: Change) => (change.pr === undefined ? change.branch : `#${change.pr}`)
+/** Its pull request, or its branch where it has none: “#714”. */
+export const prOf = (change: Change) => (change.pr === undefined ? change.branch : `#${change.pr}`)
+/** How a change is named: in words once the task has two (“Lane heights”), else by its pull request, as today. */
+export const nameOf = (change: Change) => change.short ?? prOf(change)
+/** A change as a line of record names it, a push or a merge: “Lane heights (#714)”, or “#714” where it has no words. */
+export const recordOf = (change: Change) => (change.short === undefined ? prOf(change) : `${change.short} (${prOf(change)})`)
+/** A change and where it stands, as one fact: “Lane heights: checks failing”, or “#714 checks failing” where it has no words. */
+export const about = (change: Change, rest: string) => (change.short === undefined ? `${prOf(change)} ${rest}` : `${change.short}: ${rest}`)
 export const open = (change: Change) => change.state !== 'merged' && change.state !== 'closed'
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 export const commits = (n: number) => plural(n, 'commit')
-const list = (names: ReadonlyArray<string>) =>
+export const list = (names: ReadonlyArray<string>) =>
   names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')}${names.length > 2 ? ',' : ''} and ${names.at(-1) ?? ''}`
 export const listOf = (names: ReadonlyArray<string>) => names.join(', ')
 
@@ -98,10 +105,10 @@ export const needOf = (c: Case, answered: Readonly<Record<string, string>>): Nee
       ...(c.still.act === undefined ? {} : { act: c.still.act }),
     })
   const failing = live.find((one) => one.checks === 'failed' && (one.waiting ?? 0) === 0)
-  if (failing !== undefined) return with_({ tone: 'bad', says: `${nameOf(failing)} checks failing`, act: 'Fix it', change: failing })
+  if (failing !== undefined) return with_({ tone: 'bad', says: about(failing, 'checks failing'), act: 'Fix it', change: failing })
   const conflict = live.find((one) => one.conflict === true)
   if (conflict !== undefined)
-    return with_({ tone: 'bad', says: `${nameOf(conflict)} conflicts with main`, act: 'Resolve it', change: conflict })
+    return with_({ tone: 'bad', says: about(conflict, 'conflicts with main'), act: 'Resolve it', change: conflict })
   const ready = live.filter((one) => one.ready === true)
   if (ready.length > 1 && ready.some((one) => one.on !== undefined)) {
     const bottom = ready.find((one) => one.on === undefined) ?? ready[0]!
@@ -115,7 +122,7 @@ export const needOf = (c: Case, answered: Readonly<Record<string, string>>): Nee
     }
   }
   if (ready.length > 0 && (ready[0]?.waiting ?? 0) === 0)
-    return with_({ tone: 'you', says: `${nameOf(ready[0]!)} ready to merge`, act: 'Merge', change: ready[0]! })
+    return with_({ tone: 'you', says: about(ready[0]!, 'ready to merge'), act: 'Merge', change: ready[0]! })
   const shipping = live.find((one) => one.shipping !== undefined)
   if (shipping !== undefined)
     return with_({
@@ -147,7 +154,7 @@ export const needOf = (c: Case, answered: Readonly<Record<string, string>>): Nee
   if (helped !== undefined) return with_({ tone: 'live', says: `A helper on ${nameOf(helped)}`, change: helped })
   const checking = live.filter((one) => one.checks === 'running' && one.pr !== undefined)
   if (checking.length > 0)
-    return { tone: 'live', says: `Waiting for checks on ${listOf(checking.map(nameOf))}`, more: live.length - checking.length }
+    return { tone: 'live', says: `Waiting for checks on ${list(checking.map(nameOf))}`, more: live.length - checking.length }
   return with_({ tone: c.status === 'running' ? 'live' : 'quiet', says: c.word })
 }
 

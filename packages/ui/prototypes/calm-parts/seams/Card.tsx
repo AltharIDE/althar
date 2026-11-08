@@ -1,9 +1,9 @@
 // Scrappy: the plan card, as the coordinator shows it before a task runs, naming the preset it starts from: the one place a preset
-// shows (the person's call). Picking another changes the plan's starting parts: its steps and how it ends. Once it runs, a task's parts
-// are what it has, and the preset is gone from it.
+// shows (the person's call). It is the kicker's first word, in the kicker's own type, as a board card names a task's kind; it opens
+// only on a press, and on hover shows it can. Picking another changes the plan's starting parts: its steps and how it ends. Once it runs, a task's parts are
+// what it has, and the preset is gone from it.
 import { useState } from 'react'
 
-import { Icon } from '../../../src/foundations/Icon/Icon'
 import { TaskEnd } from '../../../src/foundations/vocabulary'
 import { TaskLaunch as RealTaskLaunch, type TaskLaunchProps, type TaskLaunchText } from '../../../src/coordinator/TaskLaunch/TaskLaunch'
 import { Menu, MenuItem } from '../../../src/primitives/Menu/Menu'
@@ -37,9 +37,8 @@ function PresetChip({ value, onChange }: { value: PlanPreset; onChange: (to: Pla
       width={340}
       note="Sets what it starts with. Once it runs, its parts are what it has."
       trigger={
-        <button type="button" className={css.scratchChip} aria-label={`Preset: ${value}`}>
+        <button type="button" className={css.presetWord} aria-label={`Preset: ${value}`}>
           {value}
-          <Icon name="chevronD" size={10} />
         </button>
       }
     >

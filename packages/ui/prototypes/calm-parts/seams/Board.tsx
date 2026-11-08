@@ -21,7 +21,8 @@ export function BoardCard(props: BoardCardProps) {
   const p = useProto()
   const c = proto.current()
   if (props.title !== c.title || c.lane === 'scratch' || c.lane === 'settled') return <RealBoardCard {...props} />
-  const over = VIEWS[p.direction].card(c, needOf(c, p.answered))
+  const view = VIEWS[p.direction]
+  const over = view.card(c, view.need(c, needOf(c, p.answered)))
   const { why: _why, object: _object, foot: _foot, next: _next, ...rest } = props
   return (
     <RealBoardCard

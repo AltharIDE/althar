@@ -12,8 +12,8 @@ import { Menu, MenuItem } from '../../src/primitives/Menu/Menu'
 import { Popover } from '../../src/primitives/Popover/Popover'
 import type { PartAction, PartKind, PartTone, TaskPartModel } from '../../src/chrome/TaskParts/TaskParts'
 import { BranchChip, PullChip } from '../../src/board/BoardCard/Chips'
-import { type Case, type Change, changeIn, type Timing } from './cases'
-import { commits, nameOf, open, partsOfTime, said } from './need'
+import { type Case, caseOf, type Change, changeIn, type Timing } from './cases'
+import { commits, nameOf, needOf, open, partsOfTime, prOf, said } from './need'
 import {
   act as doAct,
   addChange,
@@ -383,11 +383,14 @@ export const chipOf = (change: Change | undefined) =>
 
 /* ——— B: a change's mark, its track on the card, its strip under the bar ——— */
 
-type Mark = 'bad' | 'you' | 'live' | 'ok' | 'quiet' | 'merged'
+type Mark = 'bad' | 'you' | 'ready' | 'live' | 'ok' | 'quiet' | 'merged'
 export const markOf = (c: Case, change: Change): Mark => {
   if (change.state === 'merged') return change.found === undefined ? 'merged' : 'you'
-  const tone = standingOf(c, change).tone
+  const stands = standingOf(c, change)
+  const tone = stands.tone
   if (tone === 'bad') return 'bad'
+  // Ready to merge waits on the person as much as commits held for Ship: both violet, told apart by their mark.
+  if (tone === 'you' && stands.act === 'Merge') return 'ready'
   if (tone === 'you') return 'you'
   if (tone === 'live') return 'live'
   return change.checks === 'passed' ? 'ok' : 'quiet'
@@ -400,7 +403,8 @@ export function ChangeMark({ mark }: { mark: Mark }) {
         <LiveDot />
       </span>
     )
-  const icon: IconName = mark === 'bad' ? 'close' : mark === 'ok' ? 'check' : mark === 'you' ? 'after' : mark === 'merged' ? 'pr' : 'branch'
+  const icon: IconName =
+    mark === 'bad' ? 'close' : mark === 'ok' || mark === 'ready' ? 'check' : mark === 'you' ? 'after' : mark === 'merged' ? 'pr' : 'branch'
   return (
     <span className={css.mark} data-mark={mark}>
       <Icon name={icon} size={11} />
@@ -515,12 +519,10 @@ export function ChangesStrip({ c, opened }: { c: Case; opened: string | null }) 
   )
 }
 
-/* ——— A: the change the conversation is on, in the composer ——— */
+/* ——— The change the window is about ——— */
 
-/** The change the conversation is on: where the person turned it, else where the lead's last turn worked, else the first open one. */
+/** Where the lead's last turn worked, else the first open one. */
 export const workingOf = (c: Case): Change | undefined => {
-  const turned = changeIn(c, c.working)
-  if (turned !== undefined && open(turned)) return turned
   for (const beat of [...c.thread].reverse()) {
     const one = changeIn(
       c,
@@ -531,38 +533,210 @@ export const workingOf = (c: Case): Change | undefined => {
   return c.changes.find(open)
 }
 
-/** Its branch, beside the model, once the task has two changes open: the one what you say next goes to, and the way to another. */
-export function WorkingOn({ c }: { c: Case }) {
-  const live = c.changes.filter(open)
-  const now = workingOf(c)
-  if (live.length < 2 || now === undefined) return null
+/**
+ * The change the window is about: the one the person picked; else the one that most needed them when they opened the task (as
+ * Needs you opens it), so it doesn't move while agents work; else where the lead last worked.
+ */
+export const focusOf = (c: Case): Change | undefined => {
+  const picked = changeIn(c, c.working)
+  if (picked !== undefined && open(picked)) return picked
+  const first = changeIn(c, needOf(caseOf(c.key), {}).change?.id)
+  if (first !== undefined && open(first)) return first
+  return workingOf(c)
+}
+
+/** Another change than the one in view needs the person: the violet dot on the way to it. */
+const othersNeed = (c: Case, now: Change | undefined) =>
+  c.changes.some((one) => one !== now && open(one) && (standingOf(c, one).tone === 'you' || standingOf(c, one).tone === 'bad'))
+
+/* ——— As one: the changes as one piece of work, a mark each, opening to the list ——— */
+
+/** Each of the task's changes, a row: its mark, its name, its pull request and branch, where it stands, and its quiet press. */
+export function ChangesList({ c, onPick }: { c: Case; onPick?: (id: string) => void }) {
   return (
-    <Menu
-      label="The change you’re talking about"
-      placement="above"
+    <ul className={css.outRows}>
+      {c.changes.map((change) => {
+        const stands = standingOf(c, change)
+        const row = (
+          <>
+            <ChangeMark mark={markOf(c, change)} />
+            <span className={css.outName}>{nameOf(change)}</span>
+            <code className={css.outRowBranch}>
+              {change.pr === undefined ? change.branch : `#${change.pr} · ${change.branch}`}
+            </code>
+            <span className={css.outDetail} data-tone={stands.tone}>
+              {stands.detail}
+              {change.place === 'local' ? ' · in your checkout' : ''}
+            </span>
+          </>
+        )
+        return (
+          <li key={change.id} className={css.outRow}>
+            {onPick === undefined ? (
+              <span className={css.outPick}>{row}</span>
+            ) : (
+              <button type="button" className={css.outPick} onClick={() => onPick(change.id)}>
+                {row}
+              </button>
+            )}
+            {stands.act !== undefined && (
+              <Button size="small" onClick={doAct(stands.act, change.id)}>
+                {stands.act}
+              </Button>
+            )}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+/** As one: the changes' marks inside the task's chip, before its sentence; they open to every change. */
+export function SetMarks({ c, says }: { c: Case; says: string }) {
+  return (
+    <Popover
+      label="This task’s changes"
+      placement="below"
       align="start"
-      width={360}
-      note="What you say next, and “Ship it”, go to it."
+      width={460}
       trigger={
-        <button type="button" className={css.working} aria-label={`On ${now.branch}`}>
-          <Icon name="branch" size={12} />
-          <span className={css.workingName}>{now.branch}</span>
-          <Icon name="chevronD" size={10} />
+        <button type="button" className={css.setChip} aria-label={`${c.changes.length} changes: ${says}`}>
+          <span className={css.setMarks}>
+            {c.changes.map((change) => (
+              <ChangeMark key={change.id} mark={markOf(c, change)} />
+            ))}
+          </span>
+          <span className={css.chipWords}>{says}</span>
         </button>
       }
     >
-      {live.map((one) => (
-        <MenuItem
-          key={one.id}
-          {...(one.id === now.id ? { icon: 'check' as const } : {})}
-          hint={nameOf(one) === one.branch ? undefined : nameOf(one)}
-          description={standingOf(c, one).detail}
-          onSelect={() => workOn(one.id)}
-        >
-          {one.branch}
-        </MenuItem>
-      ))}
-    </Menu>
+      <ChangesList c={c} />
+    </Popover>
+  )
+}
+
+/* ——— One at a time: the change in view, after the task's title ——— */
+
+/** After the title: the change the window is about, and the way to another. A violet dot where another needs the person. */
+export function ChangeSwitch({ c }: { c: Case }) {
+  const now = focusOf(c)
+  if (c.changes.length < 2 || now === undefined) return null
+  const live = c.changes.filter(open)
+  const done = c.changes.filter((one) => !open(one))
+  return (
+    <span className={css.crumb}>
+      <span className={css.crumbSep} aria-hidden="true">
+        /
+      </span>
+      <Menu
+        label="This task’s changes"
+        align="start"
+        width={380}
+        {...(done.length === 0 ? {} : { note: `${done.map(nameOf).join(', ')} merged.` })}
+        trigger={
+          <button type="button" className={css.crumbButton} aria-label={`Showing ${nameOf(now)}`}>
+            <ChangeMark mark={markOf(c, now)} />
+            <span>{nameOf(now)}</span>
+            <span className={css.crumbCount}>{`${live.indexOf(now) + 1} of ${live.length}`}</span>
+            {othersNeed(c, now) && <span className={css.crumbDot} aria-label="Another needs you" />}
+            <Icon name="chevronD" size={10} />
+          </button>
+        }
+      >
+        {live.map((one) => (
+          <MenuItem
+            key={one.id}
+            {...(one.id === now.id ? { icon: 'check' as const } : {})}
+            hint={prOf(one)}
+            description={standingOf(c, one).detail}
+            onSelect={() => workOn(one.id)}
+          >
+            {nameOf(one)}
+          </MenuItem>
+        ))}
+      </Menu>
+    </span>
+  )
+}
+
+/* ——— Where you talk: the changes as tabs over the composer ——— */
+
+/** Over the composer, a tab each: the one picked is what you say next goes to, and says where it stands; pressed again, its card. */
+export function ChangeDock({ c, opened, card = true }: { c: Case; opened: boolean; card?: boolean }) {
+  const now = focusOf(c)
+  if (c.changes.length < 2 || now === undefined) return null
+  const live = c.changes.filter(open)
+  const done = c.changes.filter((one) => !open(one))
+  return (
+    <section className={css.dock} aria-label="This task’s changes">
+      {live.map((one) => {
+        const stands = standingOf(c, one)
+        if (one !== now || !card)
+          return (
+            <button
+              key={one.id}
+              type="button"
+              className={css.tab}
+              onClick={() => workOn(one.id)}
+              aria-pressed={one === now}
+              {...(one === now ? { 'data-on': '' } : {})}
+            >
+              <ChangeMark mark={markOf(c, one)} />
+              <span>{nameOf(one)}</span>
+              {one === now && (
+                <span className={css.tabDetail} data-tone={stands.tone}>
+                  {stands.detail}
+                </span>
+              )}
+            </button>
+          )
+        return (
+          <Popover
+            key={one.id}
+            label={nameOf(one)}
+            placement="above"
+            align="start"
+            width={380}
+            padded={false}
+            defaultOpen={opened}
+            trigger={
+              <button type="button" className={css.tab} data-on="" aria-pressed="true">
+                <ChangeMark mark={markOf(c, one)} />
+                <span>{nameOf(one)}</span>
+                <span className={css.tabDetail} data-tone={stands.tone}>
+                  {stands.detail}
+                </span>
+                <Icon name="chevronU" size={10} />
+              </button>
+            }
+          >
+            <ChangeCard c={c} change={one} />
+          </Popover>
+        )
+      })}
+      {done.length > 0 && <span className={css.dockDone}>{`${done.map(nameOf).join(', ')} merged`}</span>}
+    </section>
+  )
+}
+
+/** A line's words, each change named in them a way to it. */
+export function Linked({ c, text }: { c: Case; text: string }) {
+  const names = c.changes.filter(open).map((one) => [one.short, one.id] as const).filter((one): one is readonly [string, string] => one[0] !== undefined)
+  if (names.length < 2) return <>{text}</>
+  const pattern = new RegExp(`(${names.map(([name]) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`)
+  return (
+    <>
+      {text.split(pattern).map((bit, at) => {
+        const id = names.find(([name]) => name === bit)?.[1]
+        return id === undefined ? (
+          bit
+        ) : (
+          <LinkButton key={`${bit}${at}`} onClick={() => workOn(id)}>
+            {bit}
+          </LinkButton>
+        )
+      })}
+    </>
   )
 }
 
