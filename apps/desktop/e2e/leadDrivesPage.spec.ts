@@ -225,6 +225,46 @@ test('a lead opens the page beside its task, reads it, types and clicks, and its
     const stale = await drive(electronApp, owner, { op: 'click', target: { ref: approve }, button: 'left', double: false })
     expect(stale.error).toContain('isn’t on the page any more')
 
+    // A confirm the page opens as the lead presses: the lead hears what it asks, the page waits on it, and the lead answers it.
+    await inPage(
+      electronApp,
+      `document.getElementById('far').insertAdjacentHTML('beforebegin', '<button id="remove" type="button">Remove</button>');
+      document.getElementById('remove').onclick = () => { document.getElementById('status').textContent = confirm('Remove the note?') ? 'Removed' : 'Kept' }; true`,
+    )
+    await electronApp.evaluate(({ BrowserWindow }) => {
+      const sheets: Array<string> = []
+      ;(globalThis as unknown as { sheets: Array<string> }).sheets = sheets
+      for (const window of BrowserWindow.getAllWindows()) {
+        window.on('sheet-begin', () => sheets.push('begin'))
+        window.on('sheet-end', () => sheets.push('end'))
+      }
+    })
+    const confirming = await drive(electronApp, owner, { op: 'click', target: { selector: '#remove' }, button: 'left', double: false })
+    expect(confirming.value?.text).toContain('As you acted, the page opened a confirm dialog saying “Remove the note?”')
+    expect((await drive(electronApp, owner, { op: 'snapshot', target: null })).error).toContain(
+      'The page shows a confirm dialog saying “Remove the note?”',
+    )
+    const accepted = await drive(electronApp, owner, { op: 'dialog', accept: true, text: null })
+    expect(accepted.value?.text).toContain('Answered OK to the confirm dialog “Remove the note?”.')
+    await expect.poll(() => inPage<string>(electronApp, 'document.getElementById("status").textContent')).toBe('Removed')
+    // Electron's own sheet of the dialog on the window goes with the lead's answer, which it doesn't undo.
+    if (process.platform === 'darwin')
+      await expect
+        .poll(() => electronApp.evaluate(() => (globalThis as unknown as { sheets: Array<string> }).sheets))
+        .toEqual(['begin', 'end'])
+
+    // A page that asks to stay, as one with something unsaved does, is left as the lead goes on, and the lead hears it;
+    // a ref from before it loaded again is refused, as it may name something else now.
+    await drive(electronApp, owner, { op: 'snapshot', target: null })
+    await inPage(electronApp, `addEventListener('beforeunload', (event) => { event.preventDefault(); event.returnValue = '' }); true`)
+    const reloaded = await drive(electronApp, owner, { op: 'move', move: 'reload' })
+    expect(reloaded.value?.text).toContain(
+      'The page asked to stay, as a page does when something in it isn’t saved; it was left all the same.',
+    )
+    await expect.poll(() => inPage<string>(electronApp, 'document.getElementById("status").textContent')).toBe('Waiting')
+    const before = await drive(electronApp, owner, { op: 'click', target: { ref: approve }, button: 'left', double: false })
+    expect(before.error).toContain('before it loaded again')
+
     // Under a phone's viewport, drawn smaller than its size, a press lands on the element it names.
     expect((await drive(electronApp, owner, { op: 'viewport', viewport: 'phone' })).value?.text).toContain('phone')
     await expect.poll(() => inPage<number>(electronApp, 'innerWidth')).toBe(390)

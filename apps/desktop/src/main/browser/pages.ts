@@ -18,10 +18,13 @@ import { type CookieKeep, clearsAt, type Moment, type Owner, ownerOf, ownerOfFol
 import { deviceOf, mobileAgent, placed, type Rect, type Viewport } from './devices'
 import {
   acted,
+  answeredWords,
   answerOf,
   chosenOf,
   chordOf,
   coveredWords,
+  dialogOf,
+  dialogWords,
   doneOf,
   filledOf,
   type Hand,
@@ -39,6 +42,7 @@ import {
   PACE,
   type Pace,
   pageHeader,
+  type PageDialog,
   type PageFacts,
   personUsed,
   type Place,
@@ -163,7 +167,30 @@ interface Page {
   driving: boolean
   /* What an agent asked of the page, one at a time. */
   queue: Promise<unknown>
+  /* How many of an agent's calls are under way or wait their turn: a page with any isn't put to sleep. */
+  calls: number
+  /* How many times the person's input stopped an agent's action: a call that waited its turn behind one isn't done. */
+  yields: number
+  /* What the call under way came with, which ends where the runtime gave up on it. */
+  signal: AbortSignal | null
+  /*
+   * Which document the page shows, counted as each loads; and the one the agent's last snapshot, with its refs, was of:
+   * null before any, -1 for refs of a document gone (a page that slept and woke, one that loaded as it was read).
+   */
+  document: number
+  refsDocument: number | null
+  /* A dialog the page opened, which holds everything in it until it is answered; seen while the debugger is attached for an agent. */
+  dialog: PageDialog | null
+  /* What waits on an agent's call into the page, which a dialog stops: the page answers nothing until it is answered. */
+  readonly dialogWaiters: Set<() => void>
+  /* Whether the debugger tells of the page's dialogs now. */
+  watching: boolean
+  /* The page asked to stay (its beforeunload) as an agent's action left it, and was left all the same. */
+  leftUnsaved: boolean
 }
+
+/** A dialog the page opened while an agent's call waited on it: the call goes no further, and the agent hears why. */
+class DialogOpen extends Error {}
 
 /* Partitions whose rules are set: each session is guarded once, the first time a page of it is made. */
 const guarded = new Set<string>()
@@ -275,7 +302,7 @@ export const startPages = (options: PagesOptions) => {
   /* How many times a page was hidden, so the one hidden longest is known without a clock. */
   let hidings = 0
   /* What a page closed while hidden was showing, to open it again where it was. */
-  const asleep = new Map<string, { readonly address: string; readonly title: string; readonly viewport: Viewport }>()
+  const asleep = new Map<string, { readonly address: string; readonly title: string; readonly viewport: Viewport; readonly mark: number }>()
 
   const stateOf = (page: Page): PageState => {
     const history = page.contents.navigationHistory
@@ -301,8 +328,9 @@ export const startPages = (options: PagesOptions) => {
   }
   const byContents = (contents: WebContents) => [...pages.values()].find((page) => page.contents === contents)
 
+  // Without a user gesture: Althar reading the page, or drawing on it, gives its scripts no activation to open pop-ups or play sound with.
   const run = <T>(page: Page, code: string): Promise<T> =>
-    page.contents.executeJavaScriptInIsolatedWorld(WORLD, [{ code }], true) as Promise<T>
+    page.contents.executeJavaScriptInIsolatedWorld(WORLD, [{ code }], false) as Promise<T>
   /* The overlay, in the page's isolated world: once per document, as each load starts the world afresh. */
   const overlaid = (page: Page) => run<boolean>(page, `${options.overlay()}\n;true`)
   const call = async <T>(page: Page, code: string): Promise<T> => {
@@ -432,7 +460,7 @@ export const startPages = (options: PagesOptions) => {
     }
   }
 
-  const make = (owner: Owner): Page => {
+  const make = (owner: Owner, logFrom = 0): Page => {
     const session = sessionFor(
       owner,
       options,
@@ -487,9 +515,18 @@ export const startPages = (options: PagesOptions) => {
       where: null,
       working: false,
       workTimer: null,
-      logs: logsOf(),
+      logs: logsOf(500, logFrom),
       driving: false,
       queue: Promise.resolve(),
+      calls: 0,
+      yields: 0,
+      signal: null,
+      document: 0,
+      refsDocument: null,
+      dialog: null,
+      dialogWaiters: new Set(),
+      watching: false,
+      leftUnsaved: false,
     }
     contents.setWindowOpenHandler(({ url }) => {
       const verdict = popUp(url)
@@ -522,7 +559,15 @@ export const startPages = (options: PagesOptions) => {
     contents.on('did-navigate', (_event, url) => {
       page.committed = url
       page.starting = null
+      // A new document: the refs of a snapshot of the last name nothing in it.
+      page.document += 1
       tell(page)
+    })
+    // A page that asks to stay as an agent's action leaves it is left, and the agent hears it; the person's own leaving is the page's to stop.
+    contents.on('will-prevent-unload', (event) => {
+      if (!page.working) return
+      event.preventDefault()
+      page.leftUnsaved = true
     })
     contents.on('did-start-loading', () => tell(page))
     contents.on('did-stop-loading', () => tell(page))
@@ -544,6 +589,18 @@ export const startPages = (options: PagesOptions) => {
     contents.debugger.on('detach', () => {
       page.emulating = null
       page.driving = false
+      page.watching = false
+      page.dialog = null
+    })
+    // A dialog holds the page until it is answered: what waits on the page hears it at once, rather than when it gives up.
+    contents.debugger.on('message', (_event, method, params) => {
+      if (method === 'Page.javascriptDialogClosed') page.dialog = null
+      if (method !== 'Page.javascriptDialogOpening') return
+      const dialog = dialogOf(params)
+      if (dialog === null) return
+      page.dialog = dialog
+      for (const wake of page.dialogWaiters) wake()
+      page.dialogWaiters.clear()
     })
     contents.on('before-input-event', (event, input) => keys(page, event, input))
     contents.on('select-bluetooth-device', (event, _devices, choose) => {
@@ -596,9 +653,17 @@ export const startPages = (options: PagesOptions) => {
    * where it was, its session as it was, so nothing it kept is cleared.
    */
   const sleep = () => {
-    const hidden = [...pages.values()].filter((page) => page.panel === null).sort((a, b) => a.hiddenSince - b.hiddenSince)
+    // A page an agent is at work on stays awake, whatever is hidden.
+    const hidden = [...pages.values()]
+      .filter((page) => page.panel === null && page.calls === 0)
+      .sort((a, b) => a.hiddenSince - b.hiddenSince)
     for (const page of hidden.slice(0, Math.max(0, hidden.length - KEPT_HIDDEN))) {
-      asleep.set(page.owner.id, { address: page.contents.getURL(), title: page.contents.getTitle(), viewport: page.viewport })
+      asleep.set(page.owner.id, {
+        address: page.contents.getURL(),
+        title: page.contents.getTitle(),
+        viewport: page.viewport,
+        mark: page.logs.mark(),
+      })
       close(page)
     }
   }
@@ -622,10 +687,12 @@ export const startPages = (options: PagesOptions) => {
   const pageOf = (owner: Owner) => {
     const found = pages.get(owner.id)
     if (found !== undefined && !found.contents.isDestroyed()) return found
-    const made = make(owner)
     const woke = asleep.get(owner.id)
+    const made = make(owner, woke?.mark ?? 0)
     asleep.delete(owner.id)
     if (woke !== undefined) {
+      // The refs the agent holds are of the page as it was before it slept.
+      made.refsDocument = -1
       made.viewport = woke.viewport
       if (woke.address !== '') void made.contents.loadURL(woke.address).catch(() => undefined)
     }
@@ -707,6 +774,30 @@ export const startPages = (options: PagesOptions) => {
       )
     })
 
+  /**
+   * What a call into the page gives, unless the page opens a dialog first: a dialog holds everything in the page until
+   * it is answered, so the call stops there, and the agent hears what the dialog says rather than that nothing answered.
+   */
+  const heldBy = <T>(page: Page, work: Promise<T>): Promise<T> =>
+    new Promise((resolve, reject) => {
+      if (page.dialog !== null) {
+        work.catch(() => undefined)
+        return reject(new DialogOpen())
+      }
+      const wake = () => reject(new DialogOpen())
+      page.dialogWaiters.add(wake)
+      work.then(
+        (value) => {
+          page.dialogWaiters.delete(wake)
+          resolve(value)
+        },
+        (error: unknown) => {
+          page.dialogWaiters.delete(wake)
+          reject(error instanceof Error ? error : new Error(String(error)))
+        },
+      )
+    })
+
   /** Waits for the page to stop loading, up to `ms`; whether it did. */
   const settled = (page: Page, ms: number): Promise<boolean> =>
     new Promise((resolve) => {
@@ -745,9 +836,44 @@ export const startPages = (options: PagesOptions) => {
     tell(page)
   }
 
-  /** What an agent asks of a page goes one at a time: two calls made together would press over each other. */
-  const alone = <T>(page: Page, work: () => Promise<T>): Promise<T> => {
-    const next = page.queue.then(work, work)
+  /** The ref a call names its element by, where it names one so. */
+  const refIn = (call: PageCall): string | null =>
+    'target' in call && call.target !== null && call.target.ref !== undefined ? call.target.ref : null
+
+  /**
+   * Why a call can't go on the page now, or null where it can: the person pointing at it, a dialog it holds for, a ref
+   * from a document it no longer shows. Asked as a call is made, and again as its turn comes.
+   */
+  const heldUp = (page: Page, call: PageCall): string | null => {
+    if (page.pointing !== null && call.op !== 'snapshot' && call.op !== 'screenshot' && call.op !== 'wait') return words.pointing
+    if (page.dialog !== null && call.op !== 'dialog') return dialogWords(page.dialog)
+    const ref = refIn(call)
+    if (ref !== null && page.refsDocument !== null && page.refsDocument !== page.document) return words.staleRef(ref)
+    return null
+  }
+
+  /**
+   * What an agent asks of a page goes one at a time: two calls made together would press over each other. A call whose
+   * turn comes once the runtime gave up on it isn't done, nor one queued behind an action the person's input stopped.
+   */
+  const alone = (page: Page, call: PageCall, signal: AbortSignal | null, work: () => Promise<PageDone>): Promise<PageDone> => {
+    const yields = page.yields
+    page.calls += 1
+    const turn = async (): Promise<PageDone> => {
+      if (signal?.aborted === true) return { error: words.gaveUp }
+      if (page.yields !== yields) return { error: words.yieldedQueued }
+      const held = page.contents.isDestroyed() ? null : heldUp(page, call)
+      if (held !== null) return { error: held }
+      page.signal = signal
+      try {
+        return await work()
+      } finally {
+        page.signal = null
+      }
+    }
+    const next = page.queue.then(turn, turn).finally(() => {
+      page.calls -= 1
+    })
     page.queue = next.then(
       () => undefined,
       () => undefined,
@@ -758,13 +884,17 @@ export const startPages = (options: PagesOptions) => {
   /** The in-page driver (src/overlay/driver.ts), in the page's isolated world: asked for something, answers with plain data to be read as untrusted. */
   const ask = (page: Page, method: string, ...args: ReadonlyArray<unknown>): Promise<unknown> =>
     answered(
-      overlaid(page).then(() =>
-        run<unknown>(page, `globalThis.__altharDriver.${method}(${args.map((one) => JSON.stringify(one ?? null)).join(', ')})`),
+      heldBy(
+        page,
+        overlaid(page).then(() =>
+          run<unknown>(page, `globalThis.__altharDriver.${method}(${args.map((one) => JSON.stringify(one ?? null)).join(', ')})`),
+        ),
       ),
       'Althar’s reading of it',
     )
   /** Real input through the debugger, as Chromium takes a device's. */
-  const input = (page: Page, method: string, params: Record<string, unknown>) => answered(cdp(page, method, params), 'the input sent to it')
+  const input = (page: Page, method: string, params: Record<string, unknown>) =>
+    answered(heldBy(page, cdp(page, method, params)), 'the input sent to it')
   const targetOf = (target: PageTarget) => ({
     ...(target.ref === undefined ? {} : { ref: target.ref }),
     ...(target.selector === undefined ? {} : { selector: target.selector }),
@@ -777,15 +907,27 @@ export const startPages = (options: PagesOptions) => {
   /** How many presses, keys and wheel turns from a real device the page has had; null where it can't say. */
   const inputNow = (page: Page) => ask(page, 'input').then(inputOf, () => null)
   const outline = (page: Page, rect: Picked['rect']) => void ask(page, 'mark', rect).catch(() => undefined)
-  const holds = async (page: Page, query: { text?: string; selector?: string; ref?: string }): Promise<boolean> =>
-    ask(page, 'has', query).then(
-      (found) => found === true,
-      () => false,
+  /** Whether the page has what is asked for; null where it didn't answer within `ms`, which is neither. */
+  const holds = async (page: Page, query: { text?: string; selector?: string; ref?: string }, ms: number): Promise<boolean | null> =>
+    within(ask(page, 'has', query), ms).then(
+      (found) => (found === undefined ? null : found === true),
+      () => null,
     )
 
   /** The debugger an agent drives by stays attached for it, with the emulation (`emulate`) cleared when the viewport is the panel's own. */
   const debugging = (page: Page) => {
     page.driving = true
+  }
+  /** The debugger attached for an agent, telling of the page's dialogs, which hold it until answered. */
+  const watch = async (page: Page) => {
+    debugging(page)
+    if (page.watching) return
+    await answered(cdp(page, 'Page.enable'), 'for its dialogs').then(
+      () => {
+        page.watching = true
+      },
+      () => undefined,
+    )
   }
   /** Where the page takes a point in the viewport's CSS pixels, for input: the page is drawn `scale` times its size in a smaller viewport. (The e2e checks this under a phone's viewport.) */
   const viewPoint = (page: Page, at: { readonly x: number; readonly y: number }) => ({ x: at.x * page.scale, y: at.y * page.scale })
@@ -827,39 +969,58 @@ export const startPages = (options: PagesOptions) => {
   const doing = async (page: Page, body: (run: Run) => Promise<PageDone>): Promise<PageDone> => {
     busy(page)
     debugging(page)
-    await answered(cdp(page, 'Emulation.setFocusEmulationEnabled', { enabled: true }), 'for its focus').catch(() => undefined)
+    page.leftUnsaved = false
+    // While a dialog holds the page, what is sent to it isn't answered: it is sent, and not waited for.
+    const emulation = async (method: string, params: Record<string, unknown>, what: string) => {
+      const sent = cdp(page, method, params)
+      if (page.dialog !== null) return void sent.catch(() => undefined)
+      await answered(heldBy(page, sent), what).catch(() => undefined)
+    }
+    await emulation('Emulation.setFocusEmulationEnabled', { enabled: true }, 'for its focus')
     // On a touch screen's viewport the person's mouse is made a finger; the lead's presses go in as they are, as pointing's do.
     const touch = page.mobile
-    if (touch) await answered(cdp(page, 'Emulation.setEmitTouchEventsForMouse', { enabled: false }), 'for its touch').catch(() => undefined)
+    if (touch) await emulation('Emulation.setEmitTouchEventsForMouse', { enabled: false }, 'for its touch')
     try {
       const baseline = (await inputNow(page)) ?? 0
       return await body({ hand: { baseline, injected: 0 }, address: page.contents.getURL(), line: page.line, mark: page.logs.mark() })
+    } catch (error) {
+      // The action opened a dialog (a confirm on Delete, an alert on submit): it went as far as that, and the lead hears what the dialog asks.
+      if (error instanceof DialogOpen && page.dialog !== null) return { value: { text: dialogWords(page.dialog, true) } }
+      throw error
     } finally {
-      await answered(cdp(page, 'Emulation.setFocusEmulationEnabled', { enabled: false }), 'for its focus').catch(() => undefined)
+      await emulation('Emulation.setFocusEmulationEnabled', { enabled: false }, 'for its focus')
       if (touch && page.mobile && page.pointing === null)
-        await answered(
-          cdp(page, 'Emulation.setEmitTouchEventsForMouse', { enabled: true, configuration: 'mobile' }),
-          'for its touch',
-        ).catch(() => undefined)
+        await emulation('Emulation.setEmitTouchEventsForMouse', { enabled: true, configuration: 'mobile' }, 'for its touch')
       if (page.working) fade(page)
     }
   }
 
-  /** The person used the page since this action began: it stops there, and the page stops saying the lead is at work. */
+  /**
+   * The person used the page since this action began, or started pointing at it to comment: it stops there, the page
+   * stops saying the lead is at work, and what waited its turn behind it isn't done either. It stops too where the
+   * runtime gave up on the call.
+   */
   const yielded = async (page: Page, run: Run, done: string): Promise<PageDone | null> => {
-    if (!personUsed(run.hand, await inputNow(page))) return null
+    if (page.signal?.aborted === true) {
+      stood(page)
+      return { error: words.gaveUp }
+    }
+    if (page.pointing === null && !personUsed(run.hand, await inputNow(page))) return null
+    page.yields += 1
     stood(page)
-    return { error: words.yielded(done) }
+    return { error: page.pointing === null ? words.yielded(done) : words.pointing }
   }
 
-  /** What an action set going, once it has had a moment: a page that went on, what the guards did, what went wrong in the page. */
+  /** What an action set going, once it has had a moment: a page that went on, what the guards did, what went wrong in the page, a dialog it opened. */
   const aftermath = async (page: Page, run: Run): Promise<ReadonlyArray<string>> => {
     await pause(pace.settle)
     if (page.contents.isLoading()) await settled(page, pace.load)
     return [
       movedWords(run.address, { address: page.contents.getURL(), title: page.contents.getTitle() }),
+      page.leftUnsaved ? words.leftUnsaved : '',
       (page.line === run.line ? null : lineWords(page.line)) ?? '',
       troubleSince(page.logs, run.mark),
+      page.dialog === null ? '' : dialogWords(page.dialog, true),
     ]
   }
 
@@ -884,12 +1045,22 @@ export const startPages = (options: PagesOptions) => {
         forward: state.forward,
         line: state.line,
         mark: page.logs.mark(),
+        dialog: page.dialog,
       }
     }
     const kept = asleep.get(owner.id)
-    const none = { loading: false, back: false, forward: false, line: null, mark: 0 }
+    const none = { loading: false, back: false, forward: false, line: null, mark: 0, dialog: null }
     if (kept !== undefined)
-      return { ...base, ...none, open: true, address: kept.address, title: kept.title, viewport: kept.viewport, place: 'asleep' }
+      return {
+        ...base,
+        ...none,
+        open: true,
+        address: kept.address,
+        title: kept.title,
+        viewport: kept.viewport,
+        place: 'asleep',
+        mark: kept.mark,
+      }
     return { ...base, ...none, open: false, address: '', title: '', viewport: 'fit', place: 'waiting' }
   }
 
@@ -906,12 +1077,20 @@ export const startPages = (options: PagesOptions) => {
   /** The page an agent works on: alive, or woken where it was; null where nothing is open. A page woken is shown beside its conversation by the windows. */
   const forAgent = async (owner: Owner): Promise<Page | null> => {
     const found = live(owner.id)
-    if (found !== null) return found
+    if (found !== null) return used(found)
     if (!asleep.has(owner.id)) return null
     const woke = pageOf(owner)
     await settled(woke, pace.load)
     await offer(woke)
-    return woke
+    return used(woke)
+  }
+  /** A page an agent works on while no conversation shows it is the one hidden last, so the last put to sleep. */
+  const used = (page: Page) => {
+    if (page.panel === null) {
+      hidings += 1
+      page.hiddenSince = hidings
+    }
+    return page
   }
 
   const goOutsideAsked = (page: Page | null, verdict: Extract<Verdict, { kind: 'sign-in' }>, address: string) => {
@@ -927,7 +1106,11 @@ export const startPages = (options: PagesOptions) => {
     }
   }
 
-  const opening = async (owner: Owner, url: string): Promise<PageDone> => {
+  const opening = async (owner: Owner, call: Extract<PageCall, { op: 'open' }>, signal: AbortSignal | null): Promise<PageDone> => {
+    const url = call.url
+    const present = live(owner.id)
+    const held = present === null ? null : heldUp(present, call)
+    if (held !== null) return { error: held }
     const typed = typedAddress(url)
     if (typed === null) return { error: words.notAnAddress }
     const verdict = navigation(typed)
@@ -938,10 +1121,12 @@ export const startPages = (options: PagesOptions) => {
       goOutsideAsked(page, verdict, typed)
       return { error: signInWords(verdict.service, 'open') }
     }
-    const page = pageOf(owner)
-    return alone(page, async () => {
+    const page = used(pageOf(owner))
+    return alone(page, call, signal, async () => {
       busy(page)
       try {
+        await watch(page)
+        page.leftUnsaved = false
         const mark = page.logs.mark()
         page.line = null
         await within(
@@ -961,8 +1146,10 @@ export const startPages = (options: PagesOptions) => {
             text: [
               `Opened ${shownOf(state.address, state.title)}, ${placeWords(placeOf(page))}.`,
               ...(state.loading ? [words.stillLoading] : []),
+              ...(page.leftUnsaved ? [words.leftUnsaved] : []),
               ...(line === null ? [] : [lineWords(line) ?? '']),
               troubleSince(page.logs, mark),
+              ...(page.dialog === null ? [] : [dialogWords(page.dialog, true)]),
               `Log mark: ${page.logs.mark()}.`,
             ]
               .filter((part) => part !== '')
@@ -985,13 +1172,15 @@ export const startPages = (options: PagesOptions) => {
     if (page.line?.kind === 'failed' || page.line?.kind === 'gone') said(page, null)
   }
 
-  const moving = (page: Page, goTo: PageMove): Promise<PageDone> =>
-    alone(page, async () => {
+  const moving = (page: Page, call: Extract<PageCall, { op: 'move' }>, signal: AbortSignal | null): Promise<PageDone> =>
+    alone(page, call, signal, async () => {
+      const goTo = call.move
       const history = page.contents.navigationHistory
       if (goTo === 'back' && !history.canGoBack()) return { error: 'There is no earlier page to go back to.' }
       if (goTo === 'forward' && !history.canGoForward()) return { error: 'There is no later page to go forward to.' }
       busy(page)
       try {
+        page.leftUnsaved = false
         const before = { address: page.contents.getURL(), line: page.line, mark: page.logs.mark() }
         going(page, goTo)
         await pause(pace.settle)
@@ -1002,8 +1191,10 @@ export const startPages = (options: PagesOptions) => {
           value: {
             text: [
               `${{ back: 'Went back to', forward: 'Went forward to', reload: 'Reloaded', stop: 'Stopped loading' }[goTo]} ${shownOf(state.address, state.title)}.`,
+              page.leftUnsaved ? words.leftUnsaved : '',
               guard ?? '',
               troubleSince(page.logs, before.mark),
+              page.dialog === null ? '' : dialogWords(page.dialog, true),
               `Log mark: ${page.logs.mark()}.`,
             ]
               .filter((part) => part !== '')
@@ -1015,8 +1206,9 @@ export const startPages = (options: PagesOptions) => {
       }
     })
 
-  const viewing = (page: Page, viewport: Viewport): Promise<PageDone> =>
-    alone(page, async () => {
+  const viewing = (page: Page, call: Extract<PageCall, { op: 'viewport' }>, signal: AbortSignal | null): Promise<PageDone> =>
+    alone(page, call, signal, async () => {
+      const viewport = call.viewport
       busy(page)
       try {
         page.viewport = viewport
@@ -1032,9 +1224,12 @@ export const startPages = (options: PagesOptions) => {
 
   const reading = async (page: Page, target: PageTarget | null): Promise<PageDone> => {
     const loaded = await settled(page, pace.load)
+    const document = page.document
     const snapshot = snapshotOf(await ask(page, 'snapshot', target === null ? null : targetOf(target), SNAPSHOT_LIMIT))
     if (snapshot === null) return { error: words.unreadable }
     if (!snapshot.ok) return { error: snapshot.why }
+    // Its refs name elements of the document it read; one that loaded while it read gets read again before they are used.
+    page.refsDocument = page.document === document ? document : -1
     const state = stateOf(page)
     return {
       value: {
@@ -1087,7 +1282,8 @@ export const startPages = (options: PagesOptions) => {
     }
     // The lead's own outlines aren't the page: they go first, and the page is drawn again without them.
     const outlines = await ask(page, 'unmark').catch(() => 0)
-    if (typeof outlines === 'number' && outlines > 0) await run(page, REPAINTED).catch(() => undefined)
+    if (typeof outlines === 'number' && outlines > 0)
+      await answered(heldBy(page, run(page, REPAINTED)), 'as it drew itself again').catch(() => undefined)
     const state = stateOf(page)
     const where = page.panel === null ? 'off screen' : 'beside the conversation'
     const head = `A screenshot of ${shownOf(state.address, state.title)}, as drawn ${where}`
@@ -1103,7 +1299,7 @@ export const startPages = (options: PagesOptions) => {
       if (layout === null) return { error: words.unreadable }
       const crop = cropOf(found.rect, { width: layout.width, height: layout.height }, 0, TALLEST)
       if (crop === null) return { error: `${named_(found)} takes up no space on the page, or none of it shows in the viewport.` }
-      picture = await page.contents.capturePage(scaled(crop, page.scale)).catch(() => null)
+      picture = await answered(heldBy(page, page.contents.capturePage(scaled(crop, page.scale))), 'for a picture of it').catch(() => null)
       wanted = Math.ceil(crop.width * page.scale)
       what = `, the element ${targetWords(call.target)}`
     } else if (call.fullPage) {
@@ -1113,9 +1309,10 @@ export const startPages = (options: PagesOptions) => {
       note = ' The whole page couldn’t be taken, so this is what shows.'
     }
     if (picture === null && call.target === null) {
-      picture = await page.contents.capturePage().catch(() => null)
+      picture = await answered(heldBy(page, page.contents.capturePage()), 'for a picture of it').catch(() => null)
       wanted = page.view.getBounds().width
     }
+    if (page.dialog !== null) return { error: dialogWords(page.dialog) }
     if (picture === null || picture.isEmpty())
       return { error: 'The page drew nothing to take a picture of. If it is loading or blank, wait a moment and try again.' }
     // At 1×: a screen at 2× draws twice as many pixels, which the agent would read for nothing.
@@ -1191,19 +1388,27 @@ export const startPages = (options: PagesOptions) => {
       if (early !== null) return early
       let notes: ReadonlyArray<string> = []
       if (call.text !== '') {
+        const valueNow = () =>
+          ask(page, 'valueOf', targetOf(call.target)).then(
+            (one) => (typeof one === 'string' ? one : null),
+            () => null,
+          )
+        const before = await valueNow()
         await input(page, 'Input.insertText', { text: call.text })
         const stopped = await yielded(page, started, 'some of it was typed')
         if (stopped !== null) return stopped
-        // Typing that didn't take (a field that ignores inserted text) is set the way typing sets it, and said.
-        const value = await ask(page, 'valueOf', targetOf(call.target)).then(
-          (one) => (typeof one === 'string' ? one : null),
-          () => null,
-        )
-        if (value !== null && !value.includes(call.text)) {
+        const after = await valueNow()
+        // Typing that didn't change the field at all (one that ignores inserted text) is set the way typing sets it, and
+        // said. A field that took it its own way (a mask, an editor's formatting) is left as it took it.
+        const ignored = before !== null && after === before && !(call.replace && before === call.text)
+        if (ignored) {
           const filled = filledOf(await ask(page, 'fill', targetOf(call.target), call.text, call.replace))
           if (filled === null || !filled.ok) return { error: filled === null ? words.unreadable : filled.why }
           notes = ['The field ignored typing, so its value was set instead.']
-        }
+        } else if (after !== null && !after.includes(call.text))
+          notes = [
+            'The field changed what was typed as it took it (a mask, or an editor’s own formatting). page_snapshot shows what it holds now.',
+          ]
       } else if (call.replace) {
         // Nothing to type over what is selected: it is deleted, as a person would.
         const clear = chordOf('Backspace', mac)
@@ -1300,37 +1505,54 @@ export const startPages = (options: PagesOptions) => {
       }
     })
 
-  /** What a wait still lacks, in words; nothing where all it was asked for holds. */
-  const unmet = async (page: Page, call: Extract<PageCall, { op: 'wait' }>): Promise<ReadonlyArray<string>> => {
+  /**
+   * What a wait still lacks, in words; nothing where all it was asked for holds. Each look has until `until`; one the
+   * page didn't answer in time is neither there nor gone.
+   */
+  const unmet = async (page: Page, call: Extract<PageCall, { op: 'wait' }>, until: number): Promise<ReadonlyArray<string>> => {
     const lacking: Array<string> = []
-    if (call.text !== null && !(await holds(page, { text: call.text }))) lacking.push(`the words “${call.text}” haven’t shown`)
-    if (call.gone !== null && (await holds(page, { text: call.gone }))) lacking.push(`the words “${call.gone}” are still there`)
-    if (call.target !== null && !(await holds(page, targetOf(call.target)))) lacking.push(`${targetWords(call.target)} isn’t on the page`)
+    let unanswered = false
+    const look = async (query: { text?: string; selector?: string; ref?: string }) => {
+      const found = await holds(page, query, Math.max(1, until - Date.now()))
+      if (found === null) unanswered = true
+      return found
+    }
+    if (call.text !== null && (await look({ text: call.text })) === false) lacking.push(`the words “${call.text}” haven’t shown`)
+    if (call.gone !== null && (await look({ text: call.gone })) === true) lacking.push(`the words “${call.gone}” are still there`)
+    if (call.target !== null && (await look(targetOf(call.target))) === false) lacking.push(`${targetWords(call.target)} isn’t on the page`)
+    if (unanswered) lacking.push(words.unanswered)
     return lacking
   }
 
-  const waiting = async (page: Page, call: Extract<PageCall, { op: 'wait' }>): Promise<PageDone> => {
+  const waiting = async (page: Page, call: Extract<PageCall, { op: 'wait' }>, signal: AbortSignal | null): Promise<PageDone> => {
+    const seconds = `${call.seconds} second${call.seconds === 1 ? '' : 's'}`
     if (call.text === null && call.gone === null && call.target === null) {
       await pause(call.seconds * 1_000)
-      return { value: { text: `Waited ${call.seconds} second${call.seconds === 1 ? '' : 's'}.` } }
+      return { value: { text: `Waited ${seconds}.` } }
     }
+    // The time asked for is the time it takes, however long each look at the page takes.
+    const until = Date.now() + call.seconds * 1_000
     const every = Math.max(1, pace.poll)
-    let lacking = await unmet(page, call)
-    for (let waited = 0; lacking.length > 0 && waited < call.seconds * 1_000; waited += every) {
-      await pause(every)
+    let lacking = await unmet(page, call, until)
+    while (lacking.length > 0 && Date.now() < until) {
+      await pause(Math.min(every, Math.max(1, until - Date.now())))
       if (page.contents.isDestroyed()) return { error: 'The page closed while waiting.' }
-      lacking = await unmet(page, call)
+      if (signal?.aborted === true) return { error: words.gaveUp }
+      if (page.dialog !== null) return { error: dialogWords(page.dialog) }
+      lacking = await unmet(page, call, until)
     }
-    if (lacking.length > 0) return { error: `After ${call.seconds} second${call.seconds === 1 ? '' : 's'}, ${lacking.join(' and ')}.` }
+    if (page.dialog !== null) return { error: dialogWords(page.dialog) }
+    if (lacking.length > 0) return { error: `After ${seconds}, ${lacking.join(' and ')}.` }
     return { value: { text: 'It is there now.' } }
   }
 
   const evaluating = (page: Page, script: string): Promise<PageDone> =>
     doing(page, async (started) => {
       const late = Symbol('late')
-      const racing = async (code: string): Promise<unknown> => {
+      // The agent's own script runs as a press of the person's would let it (a video played, a field focused); the probe only compiles.
+      const racing = async (code: string, gesture: boolean): Promise<unknown> => {
         const result = await Promise.race([
-          page.contents.executeJavaScriptInIsolatedWorld(WORLD_EVAL, [{ code }], true) as Promise<unknown>,
+          heldBy(page, page.contents.executeJavaScriptInIsolatedWorld(WORLD_EVAL, [{ code }], gesture) as Promise<unknown>),
           pause(pace.script).then(() => late),
         ])
         if (result === late)
@@ -1341,18 +1563,49 @@ export const startPages = (options: PagesOptions) => {
       }
       // An expression is run as one; anything else as statements that `return` what they give back. Which it is, is found by compiling, never by running.
       const body = script.replace(/[\s;]+$/, '')
-      const expression = await racing(`(() => { void (async () => (${body}\n)); return true })()`).then(
+      const expression = await racing(`(() => { void (async () => (${body}\n)); return true })()`, false).then(
         () => true,
         () => false,
       )
       let value: unknown
       try {
-        value = await racing(expression ? `(async () => (${body}\n))()` : `(async () => {${script}\n})()`)
+        value = await racing(expression ? `(async () => (${body}\n))()` : `(async () => {${script}\n})()`, true)
       } catch (error) {
+        if (error instanceof DialogOpen) throw error
         return { error: `The script threw: ${error instanceof Error ? error.message : String(error)}` }
       }
       const hint = !expression && value === undefined ? ['(A script of statements gives back what it `return`s.)'] : []
       return { value: { text: [answerOf(value), ...hint, ...(await aftermath(page, started))].filter((part) => part !== '').join('\n') } }
+    })
+
+  /** Answers the dialog the page shows, as its buttons would, and says what that set going. */
+  const answering = (page: Page, call: Extract<PageCall, { op: 'dialog' }>, signal: AbortSignal | null): Promise<PageDone> =>
+    alone(page, call, signal, async () => {
+      const dialog = page.dialog
+      if (dialog === null) return { error: words.noDialog }
+      busy(page)
+      try {
+        page.leftUnsaved = false
+        const run: Run = { hand: { baseline: 0, injected: 0 }, address: page.contents.getURL(), line: page.line, mark: page.logs.mark() }
+        await answered(
+          cdp(page, 'Page.handleJavaScriptDialog', { accept: call.accept, ...(call.text === null ? {} : { promptText: call.text }) }),
+          'the answer to its dialog',
+        )
+        page.dialog = null
+        // Electron draws the dialog on the window as well (a sheet on a Mac), which the debugger's answer leaves there:
+        // its own handler of the page's dialogs takes it away at this word, the answer already given. (The e2e sees it go.)
+        ;(page.contents as unknown as { emit: (name: string) => boolean }).emit('-cancel-dialogs')
+        const after = await aftermath(page, run)
+        return {
+          value: {
+            text: [answeredWords(dialog, call.accept, call.text), ...after, `Log mark: ${page.logs.mark()}.`]
+              .filter((part) => part !== '')
+              .join('\n'),
+          },
+        }
+      } finally {
+        fade(page)
+      }
     })
 
   const logging = (page: Page, call: Extract<PageCall, { op: 'logs' }>): PageDone => {
@@ -1360,50 +1613,60 @@ export const startPages = (options: PagesOptions) => {
     return { value: { text: logWords(read, call.since, call.kind) } }
   }
 
-  const driven = async (ownerId: string, call: PageCall): Promise<PageDone> => {
+  const driven = async (ownerId: string, call: PageCall, signal: AbortSignal | null): Promise<PageDone> => {
     const owner = ownerOf(ownerId)
     if (owner === null) return { error: words.noPage }
     if (options.quitting()) return { error: words.quitting }
     if (call.op === 'state') return { value: { text: stateWords(factsOf(owner)) } }
     if (options.windows() === 0) return { error: words.noWindow(owner.kind) }
-    if (call.op === 'open') return opening(owner, call.url)
+    if (call.op === 'open') return opening(owner, call, signal)
     const page = await forAgent(owner)
     if (page === null) return { error: words.nothingOpen(owner.kind) }
+    if (call.op === 'logs') return logging(page, call)
+    // Reading needs the debugger too: it tells of a dialog that holds the page, which nothing else can.
+    await watch(page)
+    const held = heldUp(page, call)
+    if (held !== null) return { error: held }
     switch (call.op) {
-      case 'logs':
-        return logging(page, call)
       case 'wait':
-        return waiting(page, call)
+        return waiting(page, call, signal)
       case 'move':
-        return moving(page, call.move)
+        return moving(page, call, signal)
       case 'viewport':
-        return viewing(page, call.viewport)
+        return viewing(page, call, signal)
+      case 'dialog':
+        return answering(page, call, signal)
       case 'snapshot':
-        return alone(page, () => reading(page, call.target))
+        return alone(page, call, signal, () => reading(page, call.target))
       case 'screenshot':
-        return alone(page, () => shooting(page, call))
+        return alone(page, call, signal, () => shooting(page, call))
       case 'click':
-        return alone(page, () => clicking(page, call))
+        return alone(page, call, signal, () => clicking(page, call))
       case 'hover':
-        return alone(page, () => hovering(page, call))
+        return alone(page, call, signal, () => hovering(page, call))
       case 'type':
-        return alone(page, () => typing(page, call))
+        return alone(page, call, signal, () => typing(page, call))
       case 'press':
-        return alone(page, () => pressing(page, call))
+        return alone(page, call, signal, () => pressing(page, call))
       case 'scroll':
-        return alone(page, () => scrolling(page, call))
+        return alone(page, call, signal, () => scrolling(page, call))
       case 'select':
-        return alone(page, () => selecting(page, call))
+        return alone(page, call, signal, () => selecting(page, call))
       case 'evaluate':
-        return alone(page, () => evaluating(page, call.script))
+        return alone(page, call, signal, () => evaluating(page, call.script))
     }
   }
 
-  /** What an agent asks of the page beside its conversation; never throws: what can't be done is said in words. */
-  const drive = async (ownerId: string, call: PageCall): Promise<PageDone> => {
+  /**
+   * What an agent asks of the page beside its conversation; never throws: what can't be done is said in words.
+   * `signal` ends where the runtime gave up on the call: what hasn't begun isn't done, and an action stops at its next step.
+   */
+  const drive = async (ownerId: string, call: PageCall, signal?: AbortSignal): Promise<PageDone> => {
     try {
-      return await driven(ownerId, call)
+      return await driven(ownerId, call, signal ?? null)
     } catch (error) {
+      const dialog = live(ownerId)?.dialog ?? null
+      if (error instanceof DialogOpen && dialog !== null) return { error: dialogWords(dialog) }
       return { error: words.couldNot(error instanceof Error ? error.message : String(error)) }
     }
   }

@@ -301,9 +301,10 @@ const oneLine = (text: string): string => {
   return line.length > LONGEST_ENTRY ? `${line.slice(0, LONGEST_ENTRY - 1)}…` : line
 }
 
-export const logsOf = (capacity = 500): Logs => {
+/** A page's log; `from` carries on the count of a page that went to sleep, so a mark an agent holds still reads on. */
+export const logsOf = (capacity = 500, from = 0): Logs => {
   let entries: Array<LogEntry> = []
-  let last = 0
+  let last = from
   return {
     add: (kind, level, text) => {
       last += 1
@@ -568,7 +569,66 @@ export const words = {
   couldNot: (why: string) => `The page couldn’t do that: ${why}`,
   yielded: (done: string) =>
     `The person clicked, typed or scrolled in the page while you acted on it, so the action stopped${done === '' ? '' : ` (${done})`}. Take a new snapshot to see where the page is now.`,
+  /** A call that waited its turn behind one the person's input stopped. */
+  yieldedQueued:
+    'The person clicked, typed or scrolled in the page while this waited its turn, so it wasn’t done. Take a new snapshot to see where the page is now.',
+  /** The person is pointing at the page to comment, and every press in it is theirs. */
+  pointing:
+    'The person is pointing at the page to comment on it, so Althar left the page alone. Try again once their comment is sent or closed.',
+  /** What the runtime gave up on before its turn came: nobody hears this, but it is said all the same. */
+  gaveUp: 'This was stopped before it was done: the call it came with was over.',
+  staleRef: (ref: string) =>
+    `${ref} is from a snapshot of the page as it was before it loaded again, so it may name something else now. Take a new snapshot and use its refs.`,
+  noDialog: 'No dialog is open on the page now.',
+  /** The page's beforeunload asked to stay, as an agent's action left it. */
+  leftUnsaved: 'The page asked to stay, as a page does when something in it isn’t saved; it was left all the same.',
+  /** A wait whose looks at the page went unanswered. */
+  unanswered: 'the page didn’t answer when Althar looked',
   stillLoading: 'The page was still loading when this was read, so it may change.',
+}
+
+/** A dialog the page opened: an alert, a confirm or a prompt, which holds everything in the page until it is answered. */
+export interface PageDialog {
+  readonly type: 'alert' | 'confirm' | 'prompt'
+  readonly message: string
+  /** What a prompt offers to start with. */
+  readonly defaultPrompt: string
+}
+
+const DIALOG_NAME: Readonly<Record<PageDialog['type'], string>> = { alert: 'an alert', confirm: 'a confirm dialog', prompt: 'a prompt' }
+const LONGEST_DIALOG = 500
+
+/** A dialog's type as the debugger says it, and what it says, cut where it is long; null for one this page never shows (a leave-page one). */
+export const dialogOf = (params: unknown): PageDialog | null => {
+  if (typeof params !== 'object' || params === null) return null
+  const { type, message, defaultPrompt } = params as Record<string, unknown>
+  if (type !== 'alert' && type !== 'confirm' && type !== 'prompt') return null
+  const said = typeof message === 'string' ? message : ''
+  return {
+    type,
+    message: said.length > LONGEST_DIALOG ? `${said.slice(0, LONGEST_DIALOG)}…` : said,
+    defaultPrompt: typeof defaultPrompt === 'string' ? defaultPrompt.slice(0, LONGEST_DIALOG) : '',
+  }
+}
+
+/** That the page shows a dialog, which nothing in it gets past until it is answered; `during` where the lead's own action opened it. */
+export const dialogWords = (dialog: PageDialog, during = false): string => {
+  const what = `${DIALOG_NAME[dialog.type]}${dialog.message === '' ? '' : ` saying “${dialog.message}”`}`
+  const how =
+    dialog.type === 'alert'
+      ? 'page_dialog closes it'
+      : dialog.type === 'confirm'
+        ? 'page_dialog answers it, OK with accept or Cancel without'
+        : 'page_dialog answers it, with text to give it, or cancels it'
+  return `${during ? `As you acted, the page opened ${what}` : `The page shows ${what}`}, and nothing in it runs until it is answered: ${how}. The person can answer it too.`
+}
+
+/** What answering a dialog did, in words. */
+export const answeredWords = (dialog: PageDialog, accept: boolean, text: string | null): string => {
+  const about = dialog.message === '' ? '' : ` “${dialog.message}”`
+  if (dialog.type === 'alert') return `Closed the alert${about}.`
+  if (dialog.type === 'confirm') return `Answered ${accept ? 'OK' : 'Cancel'} to the confirm dialog${about}.`
+  return accept ? `Answered the prompt${about} with “${text ?? dialog.defaultPrompt}”.` : `Cancelled the prompt${about}.`
 }
 
 /** Why an address or a move to one is refused, for the lead: `open` is the lead asking to go there, `action` is something its action would have caused. */
@@ -651,6 +711,8 @@ export interface PageFacts {
   readonly forward: boolean
   readonly line: PageLine | null
   readonly mark: number
+  /** A dialog the page shows now, which holds it until answered. */
+  readonly dialog: PageDialog | null
 }
 
 export const shown = (address: string, title: string) =>
@@ -670,6 +732,7 @@ export const stateWords = (facts: PageFacts): string => {
       ? []
       : [`${facts.loading ? 'Loading now. ' : ''}History: ${history.length === 0 ? 'none' : history.join(', ')}`]),
     ...(says === null ? [] : [`The page says: ${says}`]),
+    ...(facts.dialog === null ? [] : [dialogWords(facts.dialog)]),
     ...window,
     `Log mark: ${facts.mark}`,
   ].join('\n')

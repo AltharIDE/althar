@@ -142,13 +142,19 @@ export const callOf = (value: unknown): PageCall | string => {
       const script = textOf(value.script, LONGEST_SCRIPT, 1)
       return script === null ? MALFORMED : { op, script }
     }
+    case 'dialog': {
+      if (typeof value.accept !== 'boolean') return MALFORMED
+      if (value.text === undefined || value.text === null) return { op, accept: value.accept, text: null }
+      const text = textOf(value.text, LONGEST_TEXT)
+      return text === null ? MALFORMED : { op, accept: value.accept, text }
+    }
     default:
       return MALFORMED
   }
 }
 
 export interface BridgeOptions {
-  /** The pages, as far as an agent reaches them: only `drive`. */
+  /** The pages, as far as an agent reaches them: only `drive`, with a signal that ends where the runtime gave up on the call. */
   readonly pages: Pick<Pages, 'drive'>
   /** Whether a message came from the runtime process main started: its only sender. */
   readonly isRuntime: (from: unknown) => boolean
@@ -157,14 +163,17 @@ export interface BridgeOptions {
 }
 
 export const bridgeOf = (options: BridgeOptions) => {
+  /** The calls under way, by the runtime's request: each ends where the runtime gives up on it (`page-cancel`). */
+  const going = new Map<string, AbortController>()
+
   /** A page call in words: the owner and the call read, then driven; never throws. */
-  const request = async (owner: unknown, call: unknown): Promise<PageDone> => {
+  const request = async (owner: unknown, call: unknown, signal?: AbortSignal): Promise<PageDone> => {
     const named = typeof owner === 'string' ? ownerOf(owner) : null
     if (named === null) return { error: words.noPage }
     const checked = callOf(call)
     if (typeof checked === 'string') return { error: checked }
     try {
-      return await options.pages.drive(named.id, checked)
+      return await options.pages.drive(named.id, checked, signal)
     } catch (error) {
       return { error: words.couldNot(error instanceof Error ? error.message : String(error)) }
     }
@@ -172,15 +181,28 @@ export const bridgeOf = (options: BridgeOptions) => {
 
   /**
    * A message that came to main: whether it was a page call from the
-   * runtime, which is then answered. A message from anywhere else is
-   * ignored, as is one with no request to answer.
+   * runtime, which is then answered, or the runtime giving up on one (its
+   * agent stopped, or it waited too long), which then ends: what hasn't
+   * begun isn't done. A message from anywhere else is ignored, as is one
+   * with no request to answer.
    */
   const handle = (from: unknown, message: unknown): boolean => {
     if (!options.isRuntime(from)) return false
-    if (!isRecord(message) || message.type !== 'page') return false
+    if (!isRecord(message) || (message.type !== 'page' && message.type !== 'page-cancel')) return false
     const { requestId } = message
     if (typeof requestId !== 'string' || requestId === '' || requestId.length > 100) return true
-    void request(message.owner, message.call).then((done) => options.reply(from, requestId, done))
+    if (message.type === 'page-cancel') {
+      going.get(requestId)?.abort()
+      going.delete(requestId)
+      return true
+    }
+    if (going.has(requestId)) return true
+    const controller = new AbortController()
+    going.set(requestId, controller)
+    void request(message.owner, message.call, controller.signal).then((done) => {
+      going.delete(requestId)
+      if (!controller.signal.aborted) options.reply(from, requestId, done)
+    })
     return true
   }
 

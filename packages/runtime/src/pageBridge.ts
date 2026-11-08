@@ -59,6 +59,11 @@ export type PageCall =
     }
   /** Runs a script in an isolated world of the page: its DOM, none of its scripts' variables, nothing of Althar's. */
   | { readonly op: 'evaluate'; readonly script: string }
+  /**
+   * Answers the dialog the page shows (an alert, a confirm, a prompt), which holds everything in the page until it is
+   * answered: `accept` is OK, else Cancel; `text` is a prompt's answer, its own text where null.
+   */
+  | { readonly op: 'dialog'; readonly accept: boolean; readonly text: string | null }
 
 /** The least and most a wait may last, in seconds, and what it lasts without being told. */
 export const WAIT = { least: 1, most: 60, usual: 10 } as const
@@ -97,4 +102,5 @@ export const PAGE_OPS: ReadonlyArray<PageCall['op']> = [
   'select',
   'wait',
   'evaluate',
+  'dialog',
 ]

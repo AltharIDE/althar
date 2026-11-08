@@ -312,8 +312,9 @@ stays, for a page nobody has open: it draws a URL headless in a fresh session.
 - **The tools** are one more part of the shared pool (ADR-097), served to both
   roles: `page_state`, `page_open`, `page_move`, `page_viewport`,
   `page_snapshot`, `page_screenshot`, `page_logs`, `page_click`, `page_hover`,
-  `page_type`, `page_press`, `page_scroll`, `page_select`, `page_wait` and
-  `page_evaluate`. A review's lead and a reviewer don't have them.
+  `page_type`, `page_press`, `page_scroll`, `page_select`, `page_wait`,
+  `page_evaluate` and `page_dialog`. A review's lead and a reviewer don't have
+  them.
 - **Whose page** is never an argument. The runtime reads it from the session:
   a lead reaches its task's page (`persist:task-<id>`), the coordinator its
   project's (`persist:project-<id>`), and nothing else.
@@ -327,7 +328,10 @@ stays, for a page nobody has open: it draws a URL headless in a fresh session.
   device, whether it is shown beside the conversation, in a tab, waiting out of
   sight, or asleep). `page_snapshot` is the page's accessibility tree with a
   reference on each element (`e12`), built by the overlay's driver in the
-  page's isolated world; a reference holds while its element stays on the page.
+  page's isolated world; a reference holds while its element stays on the page,
+  and only in the document it was read from: once the page loads again (a dev
+  server's reload, a navigation, a page that slept and woke), its old
+  references are refused, with words to take a new snapshot.
   `page_screenshot` is the page at its current viewport as it is drawn, the
   same pixels the person sees, its whole length, or one element. `page_logs`
   gives console messages and failed requests since a mark.
@@ -337,7 +341,17 @@ stays, for a page nobody has open: it draws a URL headless in a fresh session.
   isolated world of the page (its DOM, none of its scripts' variables), apart
   from the overlay's and never Althar's. Clicks, keys and text go in as real
   input through the debugger, so the page sees what it would from a person,
-  and the lead never takes the keyboard from the window.
+  and the lead never takes the keyboard from the window. Althar reading the
+  page gives it no user gesture: only the lead's own input and script do.
+- **Dialogs.** An alert or a confirm the page opens holds everything in it
+  until it is answered. The debugger tells of it, so the action that opened it
+  ends there and says what it asks, every later call says so at once rather
+  than waiting on a page that answers nothing, and `page_dialog` answers it, OK
+  or Cancel (Electron answers `prompt()` itself). Electron also shows it on the
+  window, as a sheet on a Mac, which the person may answer instead; answered by
+  the lead, the sheet goes. A page that asks to stay as the lead leaves it (its
+  `beforeunload`, as for something unsaved) is left, and the lead hears it; as
+  the person leaves it, it stays the page's to stop.
 - **Open and wake.** `page_open` at an address opens a page beside the
   conversation where none is open, as Run's card would, and wakes one that
   went to sleep. The element words are the comment's (`describe`, the
@@ -350,7 +364,18 @@ stays, for a page nobody has open: it draws a URL headless in a fresh session.
   and a quiet line under the bar says who is at work there. A click, key or
   scroll the person makes in the page stops the lead's action in flight: the
   page counts the presses, keys and wheel turns it has from real input, and
-  the lead's own are known, so any more is the person.
+  the lead's own are known, so any more is the person, in the page and in its
+  frames of the same origin (Storybook's preview); a frame of another origin
+  can't be listened to. What waited its turn behind the stopped action isn't
+  done either. While the person points at the page to comment, the lead's
+  actions wait for them, and its reads go on.
+- **A call the runtime gave up on** (its agent stopped, or it waited two
+  minutes) is said to the main process: what hasn't begun isn't done, and an
+  action under way stops at its next step. Every call into the page is
+  bounded, so no page holds a lead or the calls behind it.
+- **Asleep.** A page an agent works on while no conversation shows it is the
+  one hidden last, so the last of the hidden pages put to sleep, and one with
+  a call under way isn't. Woken, its log goes on from the mark it had.
 - **When it isn't there,** the tool says so: no window of Althar's open,
   Althar quitting, nothing open beside the conversation, a task that is done.
   A call that only asks what is open (`page_state`) still answers.

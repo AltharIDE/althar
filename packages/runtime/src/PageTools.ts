@@ -111,6 +111,7 @@ export const PAGE_TOOLS = [
   'page_select',
   'page_wait',
   'page_evaluate',
+  'page_dialog',
 ] as const
 
 export type PageToolName = (typeof PAGE_TOOLS)[number]
@@ -204,6 +205,8 @@ const parse = (tool: PageToolName, input: Input): PageCall => {
       if (script === null || script.trim() === '') throw new Unclear('Give the script to run.')
       return { op: 'evaluate', script }
     }
+    case 'page_dialog':
+      return { op: 'dialog', accept: flagIn(input, 'accept', true), text: stringIn(input, 'text', LONGEST_TEXT) }
   }
 }
 
@@ -237,7 +240,7 @@ const definitions: Readonly<
 > = {
   page_state: {
     description:
-      "Says what is open in the page beside this conversation: its address and title, its viewport, whether it is shown beside the conversation, in a tab of its own or asleep, and any note under its bar. It is the person's own page for this work, in a session of its own that may be signed in to the dev app or a company's single sign-on; you read and drive it without asking, and the person sees you at work. Opens nothing. page_open opens or moves it; page_snapshot, page_screenshot and page_logs read it; page_click, page_type, page_press, page_hover, page_scroll, page_select, page_wait, page_move, page_viewport and page_evaluate drive it. For a page nobody has open, or to look at one without the person's, use screenshot.",
+      "Says what is open in the page beside this conversation: its address and title, its viewport, whether it is shown beside the conversation, in a tab of its own or asleep, and any note under its bar. It is the person's own page for this work, in a session of its own that may be signed in to the dev app or a company's single sign-on; you read and drive it without asking, and the person sees you at work. Opens nothing. page_open opens or moves it; page_snapshot, page_screenshot and page_logs read it; page_click, page_type, page_press, page_hover, page_scroll, page_select, page_wait, page_move, page_viewport, page_evaluate and page_dialog drive it. For a page nobody has open, or to look at one without the person's, use screenshot.",
   },
   page_open: {
     description:
@@ -327,6 +330,14 @@ const definitions: Readonly<
     description: `Runs a script in an isolated world of the page: its DOM and what the browser gives every script, not the page's own variables, and nothing of Althar's. Give an expression, or statements that return a value; it comes back as JSON, cut at 20,000 characters. The guards hold for anything it does.`,
     properties: { script: { type: 'string', description: `At most ${LONGEST_SCRIPT.toLocaleString('en')} characters.` } },
     required: ['script'],
+  },
+  page_dialog: {
+    description:
+      'Answers the dialog the page shows (an alert or a confirm), which holds everything in the page until it is answered: the other page tools say when one is open, and what it says. accept is OK (unless you say, as it is for an alert); false is Cancel. (Althar answers a prompt() itself, with nothing.)',
+    properties: {
+      accept: { type: 'boolean', description: 'OK where true (unless you say), Cancel where false.' },
+      text: { type: 'string', description: 'For a prompt: the answer typed into it. Its own text where you give none.' },
+    },
   },
 }
 

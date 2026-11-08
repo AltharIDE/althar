@@ -29,7 +29,9 @@ const PROJECT = `proj_${'b2'.repeat(16)}`
 const RUNTIME = { name: 'the runtime' }
 const OTHER = { name: 'a window or anything else' }
 
-const setup = (drive: (owner: string, call: PageCall) => Promise<PageDone> = async () => ({ value: { text: 'done' } })) => {
+const setup = (
+  drive: (owner: string, call: PageCall, signal?: AbortSignal) => Promise<PageDone> = async () => ({ value: { text: 'done' } }),
+) => {
   const driven = vi.fn(drive)
   const reply = vi.fn()
   const bridge = bridgeOf({ pages: { drive: driven }, isRuntime: (from) => from === RUNTIME, reply })
@@ -44,8 +46,49 @@ describe('who reaches the pages', () => {
     const { bridge, driven, reply } = setup()
     expect(bridge.handle(RUNTIME, { type: 'page', requestId: 'r1', owner: TASK, call: { op: 'state' } })).toBe(true)
     await answered(reply)
-    expect(driven).toHaveBeenCalledWith(TASK, { op: 'state' })
+    expect(driven).toHaveBeenCalledWith(TASK, { op: 'state' }, expect.any(AbortSignal))
     expect(reply).toHaveBeenCalledWith(RUNTIME, 'r1', { value: { text: 'done' } })
+  })
+
+  it('ends a call the runtime gave up on, and answers it no more', async () => {
+    let release = () => undefined as void
+    const signals: Array<AbortSignal> = []
+    const { bridge, reply } = setup(
+      (_owner, _call, signal) =>
+        new Promise((resolve) => {
+          if (signal !== undefined) signals.push(signal)
+          release = () => resolve({ value: { text: 'done late' } })
+        }),
+    )
+    bridge.handle(RUNTIME, { type: 'page', requestId: 'r1', owner: TASK, call: { op: 'state' } })
+    await vi.waitFor(() => expect(signals).toHaveLength(1))
+    // Only the runtime ends one; anyone else's word is nothing.
+    expect(bridge.handle(OTHER, { type: 'page-cancel', requestId: 'r1' })).toBe(false)
+    expect(signals[0]?.aborted).toBe(false)
+    expect(bridge.handle(RUNTIME, { type: 'page-cancel', requestId: 'r1' })).toBe(true)
+    expect(signals[0]?.aborted).toBe(true)
+    release()
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    expect(reply).not.toHaveBeenCalled()
+    // Ending one nobody asked for, or one twice, is nothing too.
+    expect(bridge.handle(RUNTIME, { type: 'page-cancel', requestId: 'r1' })).toBe(true)
+    expect(bridge.handle(RUNTIME, { type: 'page-cancel', requestId: 'nobody' })).toBe(true)
+  })
+
+  it('drives a request once, where the same one comes twice while it is under way', async () => {
+    let release = () => undefined as void
+    const { bridge, driven, reply } = setup(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ value: { text: 'done' } })
+        }),
+    )
+    bridge.handle(RUNTIME, { type: 'page', requestId: 'r1', owner: TASK, call: { op: 'state' } })
+    bridge.handle(RUNTIME, { type: 'page', requestId: 'r1', owner: TASK, call: { op: 'state' } })
+    await vi.waitFor(() => expect(driven).toHaveBeenCalledTimes(1))
+    release()
+    await answered(reply)
+    expect(reply).toHaveBeenCalledTimes(1)
   })
 
   it('ignores every other sender: nothing is driven and nothing is answered', async () => {
@@ -123,7 +166,7 @@ describe('whose page', () => {
   it('gives the test hook the same path, with no sender to check', async () => {
     const { bridge, driven } = setup()
     expect(await bridge.request(TASK, { op: 'open', url: 'http://localhost:5173/' })).toEqual({ value: { text: 'done' } })
-    expect(driven).toHaveBeenCalledWith(TASK, { op: 'open', url: 'http://localhost:5173/' })
+    expect(driven).toHaveBeenCalledWith(TASK, { op: 'open', url: 'http://localhost:5173/' }, undefined)
     expect(await bridge.request('nobody', { op: 'state' })).toEqual({ error: 'That isn’t a page Althar can open.' })
   })
 })
@@ -146,6 +189,8 @@ const CALLS: ReadonlyArray<PageCall> = [
   { op: 'select', target: { ref: 'e8' }, values: ['es'] },
   { op: 'wait', text: 'Saved', gone: null, target: null, seconds: 10 },
   { op: 'evaluate', script: 'document.title' },
+  { op: 'dialog', accept: true, text: null },
+  { op: 'dialog', accept: false, text: 'a prompt’s answer' },
 ]
 
 describe('a call, field by field', () => {
@@ -231,6 +276,12 @@ describe('a call, field by field', () => {
     expect(callOf({ op: 'evaluate', script: 'x'.repeat(20_000) })).toMatchObject({ op: 'evaluate' })
     expect(callOf({ op: 'evaluate', script: 'x'.repeat(20_001) })).toBe(bad)
     expect(callOf({ op: 'evaluate', script: 7 })).toBe(bad)
+    expect(callOf({ op: 'dialog', accept: true })).toEqual({ op: 'dialog', accept: true, text: null })
+    expect(callOf({ op: 'dialog', accept: true, text: '' })).toEqual({ op: 'dialog', accept: true, text: '' })
+    expect(callOf({ op: 'dialog', accept: 'yes' })).toBe(bad)
+    expect(callOf({ op: 'dialog' })).toBe(bad)
+    expect(callOf({ op: 'dialog', accept: true, text: 7 })).toBe(bad)
+    expect(callOf({ op: 'dialog', accept: true, text: 'x'.repeat(20_001) })).toBe(bad)
   })
 
   it('keeps the choices to a hundred strings, and a wait to the seconds it may last', () => {

@@ -3,10 +3,13 @@ import { describe, expect, it } from 'vitest'
 
 import {
   acted,
+  answeredWords,
   answerOf,
   chordOf,
   chosenOf,
   describedOf,
+  dialogOf,
+  dialogWords,
   doneOf,
   filledOf,
   inputOf,
@@ -19,8 +22,8 @@ import {
   logWords,
   MODIFIER,
   movedWords,
-  pngSize,
   personUsed,
+  pngSize,
   readLogs,
   refusalWords,
   scrolledOf,
@@ -371,6 +374,7 @@ describe('what is said to the lead', () => {
       forward: false,
       line: null,
       mark: 12,
+      dialog: null,
     }
     expect(stateWords(base)).toBe(
       [
@@ -384,10 +388,48 @@ describe('what is said to the lead', () => {
     expect(stateWords({ ...base, place: 'asleep', viewport: 'fit' })).toContain('Shown: asleep; it wakes where it was when a tool needs it')
     expect(stateWords({ ...base, place: 'waiting', loading: true, line: { kind: 'gone' }, window: false })).toContain('Loading now.')
     expect(stateWords({ ...base, window: false })).toContain('Althar’s window: not open')
+    expect(stateWords({ ...base, dialog: { type: 'confirm', message: 'Delete it?', defaultPrompt: '' } })).toContain(
+      'The page shows a confirm dialog saying “Delete it?”, and nothing in it runs until it is answered: page_dialog answers it, OK with accept or Cancel without. The person can answer it too.',
+    )
     expect(stateWords({ ...base, open: false, whose: 'project' })).toBe(
       'Nothing is open beside this project’s conversation. page_open opens it at an address.',
     )
     expect(viewportWords('fit')).toBe('fit (the panel’s own size)')
+  })
+
+  it('reads a dialog the debugger tells of, and says it and its answer', () => {
+    expect(dialogOf({ type: 'alert', message: 'Saved.', defaultPrompt: '' })).toEqual({
+      type: 'alert',
+      message: 'Saved.',
+      defaultPrompt: '',
+    })
+    expect(dialogOf({ type: 'prompt', message: 'Name?', defaultPrompt: 'Ada' })?.defaultPrompt).toBe('Ada')
+    // A leave-page one never shows here (Electron settles it), and what can't be read is no dialog.
+    for (const params of [{ type: 'beforeunload', message: '' }, { type: 'other' }, null, 'alert', 7]) expect(dialogOf(params)).toBeNull()
+    expect(dialogOf({ type: 'alert', message: 'x'.repeat(600) })?.message).toHaveLength(501)
+    expect(dialogOf({ type: 'alert', message: 7 })?.message).toBe('')
+
+    const alert = { type: 'alert', message: 'Saved.', defaultPrompt: '' } as const
+    const confirm = { type: 'confirm', message: 'Delete it?', defaultPrompt: '' } as const
+    const prompt = { type: 'prompt', message: 'Name?', defaultPrompt: 'Ada' } as const
+    expect(dialogWords(alert, true)).toBe(
+      'As you acted, the page opened an alert saying “Saved.”, and nothing in it runs until it is answered: page_dialog closes it. The person can answer it too.',
+    )
+    expect(dialogWords({ ...prompt, message: '' })).toContain('The page shows a prompt, and')
+    expect(answeredWords(alert, true, null)).toBe('Closed the alert “Saved.”.')
+    expect(answeredWords(confirm, true, null)).toBe('Answered OK to the confirm dialog “Delete it?”.')
+    expect(answeredWords(confirm, false, null)).toBe('Answered Cancel to the confirm dialog “Delete it?”.')
+    expect(answeredWords(prompt, true, 'Grace')).toBe('Answered the prompt “Name?” with “Grace”.')
+    expect(answeredWords(prompt, true, null)).toBe('Answered the prompt “Name?” with “Ada”.')
+    expect(answeredWords(prompt, false, null)).toBe('Cancelled the prompt “Name?”.')
+  })
+
+  it('carries a log on from where a page that slept left it', () => {
+    const logs = logsOf(500, 41)
+    expect(logs.mark()).toBe(41)
+    expect(logs.add('console', 'info', 'woke')).toBe(42)
+    expect(readLogs(logs, 41, 'all').entries.map((entry) => entry.text)).toEqual(['woke'])
+    expect(readLogs(logs, 41, 'all').lost).toBe(false)
   })
 
   it('names what it acted on, with the words a comment uses for the element', () => {

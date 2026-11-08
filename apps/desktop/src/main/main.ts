@@ -558,7 +558,7 @@ const screenshot = (child: UtilityProcess, message: RuntimeMessage) => {
 /** A call from a tool of the runtime's on the page beside a conversation, answered in words (browser/bridge.ts). */
 const pageCall = (child: UtilityProcess, message: RuntimeMessage) => {
   if (bridge?.handle(child, message) === true) return
-  if (typeof message.requestId === 'string' && bridge === undefined)
+  if (typeof message.requestId === 'string' && bridge === undefined && message.type === 'page')
     child.postMessage({ type: 'page-done', requestId: message.requestId, error: 'Althar’s pages aren’t ready yet.' })
 }
 /* The end-to-end tests drive a page as a tool of the runtime's does, through the same bridge. Packaged builds leave this out. */
@@ -625,7 +625,7 @@ const startRuntime = () => {
     }
     if (message.type === 'seal' || message.type === 'open') return seal(child, message)
     if (message.type === 'screenshot') return screenshot(child, message)
-    if (message.type === 'page') return pageCall(child, message)
+    if (message.type === 'page' || message.type === 'page-cancel') return pageCall(child, message)
     if (message.type === 'facts') return facts.answer(message)
     if (message.type === 'names') return names.answer(message)
     if (message.type === 'work') return works.answer(message)

@@ -618,7 +618,42 @@ export const installDriver = (hooks: DriverHooks, trusted: (event: Event) => boo
   const count = (event: Event) => {
     if (trusted(event)) input += 1
   }
-  for (const kind of ['pointerdown', 'keydown', 'wheel']) window.addEventListener(kind, count, { capture: true, passive: true })
+  const INPUTS = ['pointerdown', 'keydown', 'wheel'] as const
+  for (const kind of INPUTS) window.addEventListener(kind, count, { capture: true, passive: true })
+
+  /**
+   * The frames of the page's own origin (Storybook's preview, an editor's frame) are listened to as well, each time the
+   * count is asked for: the person's press or key in one is theirs as much as one in the page. A frame of another
+   * origin can't be listened to from here.
+   */
+  const heard = new WeakSet<Window>()
+  const listenToFrames = (within: Document, depth: number) => {
+    if (depth > 4) return
+    for (const frame of within.querySelectorAll('iframe, frame')) {
+      let inner: Window | null = null
+      let document_: Document | null = null
+      try {
+        inner = (frame as HTMLIFrameElement).contentWindow
+        document_ = inner?.document ?? null
+      } catch {
+        continue
+      }
+      if (inner === null || document_ === null) continue
+      if (!heard.has(inner)) {
+        heard.add(inner)
+        for (const kind of INPUTS) inner.addEventListener(kind, count, { capture: true, passive: true })
+      }
+      listenToFrames(document_, depth + 1)
+    }
+  }
+  const counted = (): number => {
+    try {
+      listenToFrames(document, 0)
+    } catch {
+      // A frame that went as it was looked at is listened to next time, if it comes back.
+    }
+    return input
+  }
 
   /* ---------------------------------------------- the snapshot */
 
@@ -1141,7 +1176,7 @@ export const installDriver = (hooks: DriverHooks, trusted: (event: Event) => boo
     scroll,
     has,
     describe: describing,
-    input: () => input,
+    input: counted,
     layout,
     mark: (rect) => hooks.mark(rect),
     unmark: () => hooks.unmark(),

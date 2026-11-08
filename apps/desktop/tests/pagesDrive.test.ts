@@ -61,6 +61,15 @@ const electron = vi.hoisted(() => {
       goForward: this.goForward,
     }
     readonly captures: Array<unknown> = []
+    /** Whether each script was run as a user gesture would let it, in order. */
+    readonly gestures: Array<{ world: number; gesture: boolean }> = []
+    /** What a DevTools command does before it answers: an answer of its own where it gives one (a promise that never settles, say). */
+    onCommand: (method: string, params: Record<string, any>) => unknown = () => undefined
+    readonly debuggerListeners = new Map<string, Array<Listener>>()
+    /** The debugger telling of something in the page, as Chromium's DevTools does. */
+    tellsOf(method: string, params: Record<string, unknown> = {}) {
+      for (const listener of this.debuggerListeners.get('message') ?? []) listener({}, method, params)
+    }
     readonly debugger = {
       isAttached: () => this.attached,
       attach: () => {
@@ -72,11 +81,15 @@ const electron = vi.hoisted(() => {
       },
       sendCommand: async (method: string, params?: Record<string, any>) => {
         this.commands.push({ method, params: params ?? {} })
+        const own = this.onCommand(method, params ?? {})
+        if (own !== undefined) return own
         const answer = this.answers[method]
         if (answer instanceof Error) throw answer
         return answer ?? {}
       },
-      on: () => {},
+      on: (name: string, listener: Listener) => {
+        this.debuggerListeners.set(name, [...(this.debuggerListeners.get(name) ?? []), listener])
+      },
     }
     readonly focus = vi.fn()
     readonly reload = vi.fn()
@@ -115,13 +128,16 @@ const electron = vi.hoisted(() => {
       this.loaded.push(url)
       this.url = url
     }
+    /** How the compositor answers for a picture; a test makes it never answer. */
+    capturing: (rect?: unknown) => Promise<Image> = async () => this.shot
     async capturePage(rect?: unknown) {
       this.captures.push(rect)
-      return this.shot
+      return this.capturing(rect)
     }
-    async executeJavaScriptInIsolatedWorld(world: number, sources: ReadonlyArray<{ code: string }>) {
+    async executeJavaScriptInIsolatedWorld(world: number, sources: ReadonlyArray<{ code: string }>, gesture = false) {
       const code = sources[0]?.code ?? ''
       this.worlds.push({ world, code })
+      this.gestures.push({ world, gesture })
       const driving = /^globalThis\.__altharDriver\.(\w+)\((.*)\)$/s.exec(code)
       if (world === 7_301 && driving !== null) {
         const method = driving[1] ?? ''
@@ -528,13 +544,21 @@ describe('driving by real input, under the same guards', () => {
     )
     const sent = contents.commands.map((command) => `${command.method} ${String(command.params.type ?? command.params.enabled ?? '')}`)
     expect(sent).toEqual([
+      // Once, as the agent first reached the page: the debugger tells of the dialogs it opens from then on.
+      'Page.enable ',
       'Emulation.setFocusEmulationEnabled true',
       'Input.dispatchMouseEvent mouseMoved',
       'Input.dispatchMouseEvent mousePressed',
       'Input.dispatchMouseEvent mouseReleased',
       'Emulation.setFocusEmulationEnabled false',
     ])
-    expect(contents.commands[2]?.params).toMatchObject({ x: 50, y: 36, button: 'left', buttons: 1, clickCount: 1 })
+    expect(contents.commands.find((command) => command.params.type === 'mousePressed')?.params).toMatchObject({
+      x: 50,
+      y: 36,
+      button: 'left',
+      buttons: 1,
+      clickCount: 1,
+    })
     expect(contents.focus).not.toHaveBeenCalled()
     // The lead’s outline, on the element the press goes to, and the debugger kept for it.
     expect(contents.asks.find((ask) => ask.method === 'mark')?.args).toEqual([{ x: 10, y: 20, width: 80, height: 32 }])
@@ -932,7 +956,7 @@ describe('typing, keys, scrolling and choosing', () => {
 })
 
 describe('waiting', () => {
-  beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }))
+  beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] }))
 
   it('waits until words show, and says when they didn’t in time', async () => {
     const { pages, id, contents } = await shown()
@@ -1245,8 +1269,9 @@ describe('moving through the page and sizing it', () => {
       scale: 1,
     })
     expect(text(await pages.drive(id, { op: 'viewport', viewport: 'fit' }))).toContain('fit (the panel’s own size)')
-    // Back to its own size, nothing drives it, and its debugger goes.
-    expect(contents.attached).toBe(false)
+    // Back to its own size, the emulation is cleared; the debugger stays for the agent, to hear of the page's dialogs.
+    expect(contents.commands.some((command) => command.method === 'Emulation.clearDeviceMetricsOverride')).toBe(true)
+    expect(contents.attached).toBe(true)
   })
 
   it('keeps the debugger the lead drives by when the viewport goes back to the panel’s own', async () => {
@@ -1277,6 +1302,374 @@ describe('one thing at a time', () => {
       .map((command) => command.params.type)
     expect(order).toEqual(['locate e1', 'locate e2'])
     expect(presses).toEqual(['mouseMoved', 'mousePressed', 'mouseMoved', 'mousePressed'])
+  })
+})
+
+const click: PageCall = { op: 'click', target: { ref: 'e12' }, button: 'left', double: false }
+const snapshotted = { ok: true, text: '- button "Save" [ref=e12]', nodes: 1, truncated: false }
+/** Something the page is asked that never answers, and the way to let it answer. */
+const held = () => {
+  let release: (value?: unknown) => void = () => undefined
+  const promise = new Promise((resolve) => {
+    release = resolve
+  })
+  return { promise, release: () => release({}) }
+}
+
+describe('the person pointing at the page to comment', () => {
+  /** The person starts pointing; it lasts until `done` is called. */
+  const pointing = (pages: ReturnType<typeof started>['pages'], id: string, contents: InstanceType<typeof electron.Contents>) => {
+    const stop = held()
+    const original = contents.executeJavaScriptInIsolatedWorld.bind(contents)
+    contents.executeJavaScriptInIsolatedWorld = async (world, sources, gesture) =>
+      sources[0]?.code.includes('__altharOverlay.point()') === true ? stop.promise.then(() => null) : original(world, sources, gesture)
+    const ended = pages.point(id)
+    return {
+      done: async () => {
+        stop.release()
+        await ended
+      },
+    }
+  }
+
+  it('leaves the page alone to act on while the person points at it, and reads it all the same', async () => {
+    const { pages, id, contents } = await shown()
+    const person = pointing(pages, id, contents)
+    expect((await pages.drive(id, click)).error).toBe(
+      'The person is pointing at the page to comment on it, so Althar left the page alone. Try again once their comment is sent or closed.',
+    )
+    expect((await pages.drive(id, { op: 'open', url: 'http://localhost:5173/other' })).error).toContain('pointing at the page to comment')
+    expect((await pages.drive(id, { op: 'evaluate', script: '1' })).error).toContain('pointing at the page to comment')
+    expect(contents.commands.some((command) => command.params.type === 'mousePressed')).toBe(false)
+    expect(contents.loaded).toEqual([BASE])
+    expect((await pages.drive(id, { op: 'screenshot', target: null, fullPage: false })).value?.picture).toBeDefined()
+    await person.done()
+    expect(text(await pages.drive(id, click))).toContain('Clicked button “Save”.')
+  })
+
+  it('stops an action under way where the person starts pointing, before it presses', async () => {
+    const { pages, id, contents } = await shown()
+    contents.onCommand = (method, params) => {
+      if (method === 'Input.dispatchMouseEvent' && params.type === 'mouseMoved') pointing(pages, id, contents)
+      return undefined
+    }
+    expect((await pages.drive(id, click)).error).toContain('pointing at the page to comment')
+    expect(contents.commands.some((command) => command.params.type === 'mousePressed')).toBe(false)
+    expect(pages.states()[0]?.working).toBe(false)
+  })
+})
+
+describe('a page an agent works on, as the person goes between conversations', () => {
+  it('puts the one an agent used last to sleep last, and never one an agent is at work on', async () => {
+    const { pages } = started()
+    const window = windowOf()
+    const lead = nextOwner()
+    await pages.drive(lead, { op: 'open', url: 'http://localhost:5173/lead' })
+    const others = [nextOwner(), nextOwner(), nextOwner()]
+    const look = async (id: string, n: number) => {
+      await pages.drive(id, { op: 'open', url: `http://localhost:5173/${n}` })
+      pages.show(window, id, PLACE)
+      pages.show(window, id, null)
+    }
+    await look(others[0] as string, 0)
+    await look(others[1] as string, 1)
+    // The lead reads its page, off screen, after the person looked at the first two.
+    await pages.drive(lead, { op: 'logs', since: 0, kind: 'all' })
+    await look(others[2] as string, 2)
+    expect(viewOf('http://localhost:5173/0').webContents.destroyed).toBe(true)
+    expect(viewOf('http://localhost:5173/lead').webContents.destroyed).toBe(false)
+
+    // An action under way keeps its page awake, however long ago the agent began it.
+    const contents = viewOf('http://localhost:5173/lead').webContents
+    contents.driver = { locate: () => found(), input: () => 0 }
+    const moving = held()
+    contents.onCommand = (method, params) =>
+      method === 'Input.dispatchMouseEvent' && params.type === 'mouseMoved' ? moving.promise : undefined
+    const clicking = pages.drive(lead, click)
+    await vi.waitFor(() => expect(contents.commands.some((command) => command.params.type === 'mouseMoved')).toBe(true))
+    for (const n of [3, 4, 5]) await look(nextOwner(), n)
+    expect(contents.destroyed).toBe(false)
+    moving.release()
+    expect(text(await clicking)).toContain('Clicked button “Save”.')
+  })
+
+  it('wakes a page with its log carried on, and the refs of the page as it was before it slept stale', async () => {
+    const { pages } = started()
+    const window = windowOf()
+    const ids = [nextOwner(), nextOwner(), nextOwner(), nextOwner()]
+    for (const [n, id] of ids.entries()) {
+      await pages.drive(id, { op: 'open', url: `http://localhost:5173/${n}` })
+      pages.show(window, id, PLACE)
+      if (n === 0) {
+        const first = viewOf('http://localhost:5173/0').webContents
+        first.emit('console-message', { level: 'info', message: 'one', lineNumber: 0, sourceId: '', frame: { parent: null } })
+        first.emit('console-message', { level: 'info', message: 'two', lineNumber: 0, sourceId: '', frame: { parent: null } })
+        first.driver = { snapshot: () => snapshotted, locate: () => found(), input: () => 0 }
+        await pages.drive(id, { op: 'snapshot', target: null })
+      }
+      pages.show(window, id, null)
+    }
+    const first = ids[0] as string
+    expect(text(await pages.drive(first, { op: 'state' }))).toContain('Log mark: 2')
+    expect(text(await pages.drive(first, { op: 'logs', since: 2, kind: 'all' }))).toContain('nothing new since 2')
+    const revived = electron.views.findLast((view) => view.webContents.url === 'http://localhost:5173/0')?.webContents
+    revived?.emit('console-message', { level: 'info', message: 'three', lineNumber: 0, sourceId: '', frame: { parent: null } })
+    const read = text(await pages.drive(first, { op: 'logs', since: 2, kind: 'all' }))
+    expect(read).toContain('three')
+    expect(read).not.toContain('dropped')
+    expect((await pages.drive(first, click)).error).toBe(
+      'e12 is from a snapshot of the page as it was before it loaded again, so it may name something else now. Take a new snapshot and use its refs.',
+    )
+  })
+})
+
+describe('references, of one document at a time', () => {
+  it('says a ref from before the page loaded again is stale, and takes the new snapshot’s', async () => {
+    const { pages, id, contents } = await shown()
+    contents.driver.snapshot = () => snapshotted
+    await pages.drive(id, { op: 'snapshot', target: null })
+    expect(text(await pages.drive(id, click))).toContain('Clicked button “Save”.')
+    // The dev server reloads the page: its new document's refs start again, and e12 may be anything in it.
+    contents.emit('did-navigate', {}, BASE)
+    for (const call of [
+      click,
+      { op: 'type', target: { ref: 'e12' }, text: 'x', replace: true, submit: false },
+      { op: 'snapshot', target: { ref: 'e12' } },
+      { op: 'wait', text: null, gone: null, target: { ref: 'e12' }, seconds: 1 },
+    ] satisfies ReadonlyArray<PageCall>)
+      expect((await pages.drive(id, call)).error, call.op).toContain('e12 is from a snapshot of the page as it was before it loaded again')
+    // A selector names what is there now.
+    expect(text(await pages.drive(id, { ...click, target: { selector: 'button.save' } }))).toContain('Clicked button “Save”.')
+    await pages.drive(id, { op: 'snapshot', target: null })
+    expect(text(await pages.drive(id, click))).toContain('Clicked button “Save”.')
+  })
+
+  it('reads again a snapshot taken as the page loaded, before its refs are used', async () => {
+    const { pages, id, contents } = await shown()
+    contents.driver.snapshot = () => {
+      contents.emit('did-navigate', {}, BASE)
+      return snapshotted
+    }
+    await pages.drive(id, { op: 'snapshot', target: null })
+    expect((await pages.drive(id, click)).error).toContain('e12 is from a snapshot of the page as it was before it loaded again')
+  })
+})
+
+describe('dialogs the page opens', () => {
+  const confirm = { type: 'confirm', message: 'Delete it?', defaultPrompt: '' }
+  /** The page opens `dialog` as the press is let go, and answers nothing more while it holds the page. */
+  const opensOnPress = (contents: InstanceType<typeof electron.Contents>, dialog: Record<string, unknown>) => {
+    contents.onCommand = (method, params) => {
+      if (method !== 'Input.dispatchMouseEvent' || params.type !== 'mouseReleased') return undefined
+      contents.tellsOf('Page.javascriptDialogOpening', dialog)
+      return new Promise(() => undefined)
+    }
+  }
+
+  it('stops an action at the dialog it opened, says what it asks, and answers it as the agent says', async () => {
+    const { pages, id, contents } = await shown()
+    opensOnPress(contents, confirm)
+    expect(text(await pages.drive(id, click))).toBe(
+      'As you acted, the page opened a confirm dialog saying “Delete it?”, and nothing in it runs until it is answered: page_dialog answers it, OK with accept or Cancel without. The person can answer it too.',
+    )
+    // What else is asked of the page hears of it at once, rather than waiting on a page that answers nothing.
+    contents.onCommand = () => undefined
+    for (const call of [click, { op: 'snapshot', target: null }, { op: 'open', url: BASE }] satisfies ReadonlyArray<PageCall>)
+      expect((await pages.drive(id, call)).error, call.op).toContain('The page shows a confirm dialog saying “Delete it?”')
+    expect(text(await pages.drive(id, { op: 'state' }))).toContain('The page shows a confirm dialog saying “Delete it?”')
+    expect(text(await pages.drive(id, { op: 'logs', since: 0, kind: 'all' }))).toContain('nothing new')
+
+    const sheet = vi.fn()
+    contents.on('-cancel-dialogs', sheet)
+    const answered = await pages.drive(id, { op: 'dialog', accept: false, text: null })
+    expect(text(answered)).toContain('Answered Cancel to the confirm dialog “Delete it?”.')
+    // Electron's own sheet of it on the window goes too.
+    expect(sheet).toHaveBeenCalledTimes(1)
+    expect(
+      contents.commands.filter((command) => command.method === 'Page.handleJavaScriptDialog').map((command) => command.params),
+    ).toEqual([{ accept: false }])
+    expect((await pages.drive(id, { op: 'dialog', accept: true, text: null })).error).toBe('No dialog is open on the page now.')
+    expect(text(await pages.drive(id, click))).toContain('Clicked button “Save”.')
+  })
+
+  it('answers a prompt with the agent’s words', async () => {
+    const { pages, id, contents } = await shown()
+    opensOnPress(contents, { type: 'prompt', message: 'Name?', defaultPrompt: 'Ada' })
+    await pages.drive(id, click)
+    contents.onCommand = () => undefined
+    expect(text(await pages.drive(id, { op: 'dialog', accept: true, text: 'Grace' }))).toContain(
+      'Answered the prompt “Name?” with “Grace”.',
+    )
+    expect(contents.commands.find((command) => command.method === 'Page.handleJavaScriptDialog')?.params).toEqual({
+      accept: true,
+      promptText: 'Grace',
+    })
+  })
+
+  it('ends a call the page holds up with a dialog it opened, such as a script’s alert', async () => {
+    const { pages, id, contents } = await shown()
+    contents.evaluated = (code) => {
+      if (!code.startsWith('(async () => (')) return true
+      setTimeout(() => contents.tellsOf('Page.javascriptDialogOpening', { type: 'alert', message: 'Saved.' }), 1)
+      return new Promise(() => undefined)
+    }
+    expect(text(await pages.drive(id, { op: 'evaluate', script: 'alert("Saved.")' }))).toContain(
+      'As you acted, the page opened an alert saying “Saved.”',
+    )
+  })
+
+  it('hears a dialog the page opened on its own, and that the person answered it', async () => {
+    const { pages, id, contents } = await shown()
+    contents.tellsOf('Page.javascriptDialogOpening', { type: 'alert', message: 'Session ending.' })
+    expect((await pages.drive(id, { op: 'snapshot', target: null })).error).toContain('The page shows an alert saying “Session ending.”')
+    contents.tellsOf('Page.javascriptDialogClosed', { result: true })
+    contents.driver.snapshot = () => snapshotted
+    expect(text(await pages.drive(id, { op: 'snapshot', target: null }))).toContain('button "Save" [ref=e12]')
+    // A leave-page one never shows here, so it is no dialog to answer.
+    contents.tellsOf('Page.javascriptDialogOpening', { type: 'beforeunload', message: '' })
+    expect(text(await pages.drive(id, { op: 'snapshot', target: null }))).toContain('button "Save" [ref=e12]')
+  })
+
+  it('leaves a page that asks to stay as the lead’s action leaves it, and says so; the person’s own leaving stays the page’s to stop', async () => {
+    const { pages, id, contents } = await shown()
+    const asked: Array<{ preventDefault: ReturnType<typeof vi.fn> }> = []
+    const unload = () => {
+      const event = { preventDefault: vi.fn() }
+      asked.push(event)
+      contents.emit('will-prevent-unload', event)
+    }
+    contents.onCommand = (method, params) => {
+      if (method === 'Input.dispatchMouseEvent' && params.type === 'mouseReleased') unload()
+      return undefined
+    }
+    expect(text(await pages.drive(id, click))).toContain(
+      'The page asked to stay, as a page does when something in it isn’t saved; it was left all the same.',
+    )
+    expect(asked[0]?.preventDefault).toHaveBeenCalled()
+    await new Promise((resolve) => setTimeout(resolve, NOW.fade + 20))
+    unload()
+    expect(asked[1]?.preventDefault).not.toHaveBeenCalled()
+    contents.onCommand = () => undefined
+    expect(text(await pages.drive(id, click))).not.toContain('asked to stay')
+  })
+})
+
+describe('what the page gets from Althar reading it', () => {
+  it('reads it without a user gesture, so its scripts get no activation from it, and runs the agent’s own script with one', async () => {
+    const { pages, id, contents } = await shown()
+    await pages.drive(id, click)
+    const reads = contents.gestures.filter((one) => one.world === 7_301)
+    expect(reads.length).toBeGreaterThan(3)
+    expect(reads.every((one) => !one.gesture)).toBe(true)
+    contents.evaluated = (code) => (code.startsWith('(async () => (') ? 2 : true)
+    await pages.drive(id, { op: 'evaluate', script: '1 + 1' })
+    // The probe that only compiles it, then the script itself.
+    expect(contents.gestures.filter((one) => one.world === 7_302).map((one) => one.gesture)).toEqual([false, true])
+  })
+})
+
+describe('a call the runtime gave up on', () => {
+  it('isn’t done where its turn comes after, and stops at its next step where it was under way', async () => {
+    const { pages, id, contents } = await shown()
+    const moving = held()
+    contents.onCommand = (method, params) =>
+      method === 'Input.dispatchMouseEvent' && params.type === 'mouseMoved' ? moving.promise : undefined
+    const first = pages.drive(id, click)
+    const given = new AbortController()
+    const second = pages.drive(id, { op: 'type', target: { ref: 'e3' }, text: 'refund', replace: true, submit: false }, given.signal)
+    await vi.waitFor(() => expect(contents.commands.some((command) => command.params.type === 'mouseMoved')).toBe(true))
+    given.abort()
+    moving.release()
+    expect(text(await first)).toContain('Clicked button “Save”.')
+    expect((await second).error).toBe('This was stopped before it was done: the call it came with was over.')
+    expect(contents.commands.some((command) => command.method === 'Input.insertText')).toBe(false)
+
+    const under = new AbortController()
+    contents.onCommand = (method, params) => {
+      if (method === 'Input.dispatchMouseEvent' && params.type === 'mouseMoved') under.abort()
+      return undefined
+    }
+    const presses = contents.commands.filter((command) => command.params.type === 'mousePressed').length
+    expect((await pages.drive(id, click, under.signal)).error).toBe('This was stopped before it was done: the call it came with was over.')
+    expect(contents.commands.filter((command) => command.params.type === 'mousePressed')).toHaveLength(presses)
+  })
+
+  it('does nothing of what waited its turn behind an action the person’s input stopped, and goes on after', async () => {
+    const { pages, id, contents } = await shown()
+    let n = 0
+    const counts = [0, 2]
+    contents.driver.input = () => counts[Math.min(n++, counts.length - 1)]
+    const moving = held()
+    contents.onCommand = (method, params) =>
+      method === 'Input.dispatchMouseEvent' && params.type === 'mouseMoved' ? moving.promise : undefined
+    const first = pages.drive(id, click)
+    const second = pages.drive(id, { op: 'type', target: { ref: 'e3' }, text: 'refund', replace: true, submit: false })
+    await vi.waitFor(() => expect(contents.commands.some((command) => command.params.type === 'mouseMoved')).toBe(true))
+    moving.release()
+    expect((await first).error).toContain('so the action stopped')
+    expect((await second).error).toBe(
+      'The person clicked, typed or scrolled in the page while this waited its turn, so it wasn’t done. Take a new snapshot to see where the page is now.',
+    )
+    expect(contents.commands.some((command) => command.method === 'Input.insertText')).toBe(false)
+    contents.onCommand = () => undefined
+    expect(text(await pages.drive(id, click))).toContain('Clicked button “Save”.')
+  })
+})
+
+describe('a page that doesn’t answer', () => {
+  it('gives up on a picture the compositor never gives, and says so', async () => {
+    const { pages, id, contents } = await shown()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    contents.capturing = () => new Promise(() => undefined)
+    const shot = pages.drive(id, { op: 'screenshot', target: null, fullPage: false })
+    await vi.advanceTimersByTimeAsync(16_000)
+    expect((await shot).error).toBe('The page drew nothing to take a picture of. If it is loading or blank, wait a moment and try again.')
+    // And what waited its turn behind it goes on.
+    contents.capturing = async () => contents.shot
+    const next = pages.drive(id, { op: 'screenshot', target: null, fullPage: false })
+    await vi.advanceTimersByTimeAsync(100)
+    expect((await next).value?.picture).toBeDefined()
+  })
+
+  it('keeps a wait to the time it was given, however long a look takes, and takes a look unanswered for neither there nor gone', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    const { pages, id, contents } = await shown()
+    contents.driver.has = () => new Promise(() => undefined)
+    const began = Date.now()
+    const done = await finishing(pages.drive(id, { op: 'wait', text: null, gone: 'Loading…', target: null, seconds: 1 }))
+    expect(done.error).toBe('After 1 second, the page didn’t answer when Althar looked.')
+    expect(Date.now() - began).toBeLessThan(1_100)
+    // A look that answers late, still in time, counts; the next one finds the words gone.
+    let looks = 0
+    contents.driver.has = () => (++looks === 1 ? new Promise((resolve) => setTimeout(() => resolve(true), 1_500)) : false)
+    const from = Date.now()
+    const slow = await finishing(pages.drive(id, { op: 'wait', text: null, gone: 'Loading…', target: null, seconds: 2 }))
+    expect(text(slow)).toBe('It is there now.')
+    expect(Date.now() - from).toBeLessThan(2_000)
+  })
+})
+
+describe('a field that takes typing its own way', () => {
+  it('leaves what a mask or an editor made of the typing as it is, and says so', async () => {
+    const { pages, id, contents } = await shown()
+    let value = ''
+    contents.driver.locate = () => found({ role: 'textbox', name: 'Phone', editable: true })
+    contents.driver.valueOf = () => value
+    contents.onCommand = (method) => {
+      if (method === 'Input.insertText') value = '(555) 123-4567'
+      return undefined
+    }
+    const done = await pages.drive(id, { op: 'type', target: { ref: 'e3' }, text: '5551234567', replace: true, submit: false })
+    expect(text(done)).toContain(
+      'The field changed what was typed as it took it (a mask, or an editor’s own formatting). page_snapshot shows what it holds now.',
+    )
+    expect(contents.asks.some((ask) => ask.method === 'fill')).toBe(false)
+    // A field that already held exactly what is typed over it hasn't ignored the typing.
+    value = 'refund'
+    contents.onCommand = () => undefined
+    const same = await pages.drive(id, { op: 'type', target: { ref: 'e3' }, text: 'refund', replace: true, submit: false })
+    expect(text(same)).not.toContain('ignored typing')
+    expect(contents.asks.some((ask) => ask.method === 'fill')).toBe(false)
   })
 })
 

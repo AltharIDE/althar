@@ -139,6 +139,10 @@ describe('what an agent asks of its page', () => {
       seconds: WAIT.least,
     })
     assert.deepStrictEqual(ask('page_evaluate', { script: 'document.title' }), { op: 'evaluate', script: 'document.title' })
+    // OK unless the agent says, as an alert's only button is; a prompt's answer as given, or its own text.
+    assert.deepStrictEqual(ask('page_dialog', {}), { op: 'dialog', accept: true, text: null })
+    assert.deepStrictEqual(ask('page_dialog', { accept: false }), { op: 'dialog', accept: false, text: null })
+    assert.deepStrictEqual(ask('page_dialog', { accept: true, text: 'Grace' }), { op: 'dialog', accept: true, text: 'Grace' })
   })
 
   it('reads a reference as the snapshot prints it', () => {
@@ -186,6 +190,7 @@ describe('what an agent asks of its page', () => {
       'Say what to wait for: text that shows, gone for text that goes, or an element by ref or selector.',
     )
     assert.strictEqual(ask('page_evaluate', {}), 'Give the script to run.')
+    assert.strictEqual(ask('page_dialog', { text: 7 }), 'text should be text.')
     assert.strictEqual(ask('page_evaluate', { script: '  ' }), 'Give the script to run.')
     assert.match(ask('page_evaluate', { script: 'x'.repeat(LONGEST_SCRIPT + 1) }) as string, /^script is 20001 characters long/)
     assert.strictEqual(ask('page_logs', { kind: 'all', since: 'then' }), 'since should be a number.')

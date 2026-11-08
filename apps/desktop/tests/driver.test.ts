@@ -722,6 +722,41 @@ describe('what a real device did', () => {
     expect(counting.input()).toBe(3)
   })
 
+  it('counts the person’s input in a frame of the page’s own origin too, such as Storybook’s preview, and in one within it', () => {
+    const counting = installDriver({ mark: () => undefined, unmark: () => 0 }, () => true)
+    document.body.innerHTML = '<iframe id="preview"></iframe>'
+    const preview = (document.getElementById('preview') as HTMLIFrameElement).contentWindow!
+    // A frame is listened to from when the count is next asked for: the start of each of the lead's actions, and each step.
+    expect(counting.input()).toBe(0)
+    preview.dispatchEvent(new Event('pointerdown'))
+    preview.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))
+    expect(counting.input()).toBe(2)
+    // Asked again, it isn't listened to twice.
+    preview.dispatchEvent(new Event('wheel'))
+    expect(counting.input()).toBe(3)
+    preview.document.body.innerHTML = '<iframe id="inner"></iframe>'
+    expect(counting.input()).toBe(3)
+    const inner = (preview.document.getElementById('inner') as HTMLIFrameElement).contentWindow!
+    inner.dispatchEvent(new Event('pointerdown'))
+    expect(counting.input()).toBe(4)
+  })
+
+  it('goes past a frame of another origin, which can’t be listened to from the page', () => {
+    const counting = installDriver({ mark: () => undefined, unmark: () => 0 }, () => true)
+    document.body.innerHTML = '<iframe id="other"></iframe>'
+    const frame = document.getElementById('other') as HTMLIFrameElement
+    Object.defineProperty(frame, 'contentWindow', {
+      get: () => ({
+        get document(): Document {
+          throw new DOMException('Blocked a frame from accessing a cross-origin frame.', 'SecurityError')
+        },
+      }),
+    })
+    expect(counting.input()).toBe(0)
+    window.dispatchEvent(new Event('pointerdown'))
+    expect(counting.input()).toBe(1)
+  })
+
   it('hears them first, whatever the page does to them below', () => {
     const counting = installDriver({ mark: () => undefined, unmark: () => 0 }, () => true)
     document.body.innerHTML = '<button id="b">x</button>'
