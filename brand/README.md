@@ -92,6 +92,6 @@ bun --filter @althar/brand export:drawings    # the landing page's feature drawi
 
 Change the drawing, run the export, and commit what it writes: `bun run test` fails while `export/` doesn't match the code. It also fails if a copy of the mark elsewhere in the repository (the UI package's Logo, a favicon) stops matching [`src/geometry.ts`](src/geometry.ts), if the colours stop matching the interface's, or if the app icons differ from the desktop app's.
 
-The banners, the printed avatar, the wallpapers and the screenshots are drawn in a browser, so they are not byte-for-byte reproducible between machines; the rest is. Draw the wallpapers again when the launch's light or dots change.
+The banners, the printed avatar, the wallpapers, the screenshots, the reels and the landing page's drawings are drawn in a browser, so they are not byte-for-byte reproducible between machines; the rest is. Draw the wallpapers again when the launch's light or dots change.
 
-Screenshots and reels show the app as it is when they are taken. Take them again when a screen changes, and before a launch. Draw the drawings again when the landing page's change too.
+No test checks the screenshots, the reels or the drawings against what they show: they show the app, and the landing page's drawings, as they were when taken. Take the screenshots and reels again when a screen changes, and before a launch, and draw the drawings again (`export:drawings`) when one in `apps/site` changes.
