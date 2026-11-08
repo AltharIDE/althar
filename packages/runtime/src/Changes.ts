@@ -1456,7 +1456,12 @@ export class Changes extends Context.Service<
           const pictures = yield* evidencePaths(input.taskId)
           const left = (yield* uncommittedFiles(task.path)).filter((file) => !pictures(task.path, file))
           const base = task.baseCommit ?? task.baseRef ?? own.defaultBranch
-          if ((yield* commitsAhead(task.path, base)) === 0) return { kind: 'nothing', left } as const
+          // Nothing of its own to propose: not ahead of where it started, or wholly in the branch it goes into already (a branch
+          // that took main in without a commit of its own is behind it, not ahead of it).
+          const headNow = yield* commitOf(task.path, 'HEAD').pipe(Effect.orElseSucceed(() => ''))
+          const inTarget =
+            headNow !== '' && (yield* gitOutcome(task.path, 'merge-base', '--is-ancestor', headNow, `refs/heads/${target}`)).code === 0
+          if (inTarget || (yield* commitsAhead(task.path, base)) === 0) return { kind: 'nothing', left } as const
           const [sent] = yield* sql<{ head: string | null }>`
             SELECT head_commit AS head FROM repository_changes WHERE workspace_id = ${task.workspaceId} ORDER BY updated_at DESC LIMIT 1`
           const end = yield* commitOf(task.path, 'HEAD')

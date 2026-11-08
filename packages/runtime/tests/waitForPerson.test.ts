@@ -8,10 +8,11 @@ import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
+import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
 import { Tasks } from '../src/Tasks'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, repository, runtime, toolDescriptions, until, withWork } from './support'
+import { callTool, notices, repository, runtime, toolDescriptions, until, withWork } from './support'
 
 /*
  * A lead that can't go on without the person ends its turn waiting, rather
@@ -130,6 +131,50 @@ describe('a lead waiting on the person', () => {
       )
     }).pipe(Effect.provide(withQueries()))
   })
+
+  it.live('is answered by the person writing in the thread, which starts the lead again', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* planned('Ask first. [lead:wait-for-person] [lead:finish] [lead:edit] [review:pass]')
+      const call = yield* stuckCall(task.taskId)
+      // The person writes in the task's thread, rather than answering its card.
+      const sessions = yield* Sessions
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', { threadId: task.threadId }),
+        threadId: task.threadId,
+        body: 'Keep the dozen current-state decisions.',
+      })
+      // Their words close the call and start the lead again, which finishes and is reviewed.
+      yield* until(
+        Effect.map(attempts(task.taskId), (rows) => rows.filter((row) => row.step === 'review')),
+        (rows) => rows.length === 1,
+      )
+      const [answered] = yield* sql<{ state: string }>`SELECT state FROM attention_requests WHERE id = ${call.id}`
+      assert.strictEqual(answered?.state, 'answered')
+      yield* until(phaseOf(task.projectId, task.taskId), (phase) => phase === 'ready')
+      assert.include(
+        (yield* sql<{ prompt: string | null }>`
+          SELECT prompt FROM turn_deliveries WHERE thread_id = ${task.threadId} ORDER BY requested_at DESC LIMIT 1`)[0]?.prompt ?? '',
+        'Keep the dozen current-state decisions.',
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('says the review stopped when it is skipped, rather than vanishing', () =>
+    Effect.gen(function* () {
+      const task = yield* planned('Build it. [lead:finish] [lead:edit] [review:wait]')
+      yield* until(
+        Effect.map(attempts(task.taskId), (rows) => rows.filter((row) => row.step === 'review')),
+        (rows) => rows.length === 1,
+      )
+      yield* (yield* Runs).skipReview({ envelope: yield* Runtime.envelope('task.skip_review', {}), taskId: task.taskId })
+      const said = yield* until(notices(task.threadId), (all) => all.some((notice) => notice.title?.includes('review stopped') === true))
+      assert.include(
+        said.map((notice) => notice.title),
+        'The review stopped: skipped, with what it found left open.',
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
 
   it.live('runs no review when it built nothing', () =>
     Effect.gen(function* () {

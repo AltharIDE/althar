@@ -199,6 +199,18 @@ describe('merging a task here', () => {
     }).pipe(Effect.provide(runtime()))
   })
 
+  it.live('counts files left uncommitted as built, even where the branch is in the default branch', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const { task, worktrees } = yield* taskIn([root], root)
+      const worktree = worktrees[0]?.path ?? ''
+      commit(root, 'moved.txt', 'moved\n')
+      git(worktree, 'merge', '-q', '--ff-only', 'refs/heads/main')
+      writeFileSync(join(worktree, 'draft.md'), 'A first draft.\n')
+      assert.isFalse(yield* (yield* Changes).nothingBuilt(task.taskId))
+    }).pipe(Effect.provide(runtime()))
+  })
+
   it.live('says what the remote doesn’t have once merged, pushes it with the person’s own git, and says when the remote has moved on', () =>
     Effect.gen(function* () {
       const root = repository()
