@@ -344,6 +344,8 @@ export const runtime = (
     readonly automations?: AutomationOptions
     /** The disk finished tasks' folders are on; a roomy one unless a test says, so no test removes them for the Mac it runs on being full. */
     readonly disk?: RuntimeOptions['disk']
+    /** Which device a path is on; the system's own unless a test says. */
+    readonly device?: RuntimeOptions['device']
     /** Whether agents' services answer, and how long a step waits to try one again; no service answers any test unless it says. */
     readonly connectivity?: RuntimeOptions['connectivity']
     /** When what settled tasks left running is first looked for, and how often after; not within a test unless it says. */
@@ -392,6 +394,7 @@ export const runtime = (
     busy: { machine: ROOMY, ...more.busy },
     ...(more.automations === undefined ? {} : { automations: more.automations }),
     disk: more.disk ?? (() => Effect.succeed(ROOMY_DISK)),
+    ...(more.device === undefined ? {} : { device: more.device }),
     // No test reaches a real service: one asked about answers, as it would online, unless the test says.
     connectivity: { answers: () => Effect.succeed(true), ...more.connectivity },
     leftFirst: more.leftFirst ?? Duration.hours(1),
