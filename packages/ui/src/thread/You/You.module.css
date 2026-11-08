@@ -61,6 +61,14 @@
 .said + .unfurl {
   margin-top: 10px;
 }
+/* What the person said of lines of the diff, after their words: as wide as the bubble, which takes the width it can for the code. */
+.body:has(.comments) {
+  width: min(78%, 540px);
+}
+.said + .comments,
+.unfurl + .comments {
+  margin-top: 10px;
+}
 
 .attach {
   display: flex;
