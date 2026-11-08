@@ -36,11 +36,16 @@ const PLAIN: Readonly<Record<string, string>> = {
     'the disk’s legend, the whole of which opens the list of folders; a folder’s row, which opens its task',
   'thread/Reviewer/Reviewer.tsx': 'a finding’s row, which opens it under its line in the code',
   'thread/Reviewer/FindingNote.tsx': 'a finding’s title, which opens it under its line in the code',
+  'chrome/TaskParts/TaskParts.tsx':
+    'the parts’ marks in the bar, the whole of which opens them; a part’s row or chip, which opens it in place; Add and Back, a popover’s own head',
+  'setup/AgentTools/AgentTools.tsx':
+    'a server’s marks, which open its menu; a server’s chip in a file, the whole of which takes it out or puts it back',
   /* opens and closes what is below it */
   'thread/Reasoning/Reasoning.tsx': 'the row that folds the reasoning',
   'outputs/Usage/Usage.tsx': 'the card’s head, which folds its lines',
   'thread/WorkedFor/WorkedFor.tsx': 'the row that folds the work',
   'thread/SkillsSeen/SkillsSeen.tsx': 'the line that folds what a lead could see',
+  'thread/ReviewLine/ReviewLine.tsx': 'the line that folds a review round’s findings and words',
   'thread/WorkLine/WorkLine.tsx': 'the line that folds a round’s work; what it looked at, as thumbnails',
   'thread/Checked/Checked.tsx': 'the row of a check, which folds what it printed',
   'thread/Tool/Tool.tsx': 'the rows that fold a call or a run of them, and the path as a link',

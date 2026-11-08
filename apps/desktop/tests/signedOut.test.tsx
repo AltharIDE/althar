@@ -46,7 +46,9 @@ describe('a signed-out coordinator, in its thread', () => {
   it('leads to signing its agent in again, then trying the turn again', async () => {
     const settingsWays = ways()
     const { client } = fakeClient({
-      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.you('What is left on the checkout?'), signedOut] })),
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({ retryable: true, items: [items.you('What is left on the checkout?'), signedOut] }),
+      ),
     })
     withServices(<Project settingsWays={settingsWays} />, client)
     expect(await screen.findByText('Claude Code is signed out.')).toBeTruthy()

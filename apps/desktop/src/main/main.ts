@@ -14,6 +14,7 @@ import { FIRST_SCHEME_WAIT, firstScheme, followDesktopScheme, type Scheme, theme
 import { CHROME_ARG, decideChrome, type DesktopChrome, parseHexAccent } from './desktop'
 import { chromeOf, FIRST_CHROME_WAIT, type FollowedChrome, followDesktopChrome, systemSources } from './desktopChrome'
 import { keepingAwake } from './awake'
+import { bringForward as raiseWindow, focusedLast, openFromEdge } from './bringForward'
 import { attachedOf, clipboardPaths, pastedOf, rawFormat } from './attachments'
 import { tokenIn } from './clipboard'
 import { childKind, type CrashReports, crashReports, goneBadly, type HiddenNames, namesLearned, newDumps } from './crashReports'
@@ -484,18 +485,7 @@ const ownersIn = (said: unknown): ReadonlyArray<string> =>
 
 /** Brings Althar's window forward, a window there is or a new one, from wherever the person is. */
 const bringForward = () => {
-  const existing = [...windows][0]
-  const window = existing ?? openWindow()
-  if (window.isMinimized()) window.restore()
-  if (quiet) {
-    window.showInactive()
-    return { window, fresh: existing === undefined }
-  }
-  // Asked from the edge, Althar isn't the active app: it becomes it.
-  app.focus({ steal: true })
-  window.show()
-  window.focus()
-  return { window, fresh: existing === undefined }
+  return raiseWindow(windows, openWindow, () => app.focus({ steal: true }), quiet)
 }
 
 /** Opens the window on a thread, as a notification or the edge asks. */
@@ -836,6 +826,7 @@ const openWindow = () => {
     window.setIgnoreMouseEvents(true)
   }
   windows.add(window)
+  window.on('focus', () => focusedLast(windows, window))
   keepingOn = false
   // The window's own buttons say maximize or restore by what the window is (windowOptions.ts).
   window.on('maximize', () => window.webContents.send('althar:maximized', true))
@@ -1123,9 +1114,13 @@ ipcMain.on('althar:edge-size', (event, height: unknown) => {
   if (window !== null && typeof height === 'number') edge?.sized(window, height)
 })
 ipcMain.on('althar:edge-open', (_event, threadId: unknown) => {
-  edge?.settle()
-  if (typeof threadId === 'string' && threadId !== '') openThread(threadId)
-  else bringForward()
+  openFromEdge(
+    () => {
+      if (typeof threadId === 'string' && threadId !== '') openThread(threadId)
+      else bringForward()
+    },
+    () => edge?.settle(),
+  )
 })
 
 void ready.then(() => {

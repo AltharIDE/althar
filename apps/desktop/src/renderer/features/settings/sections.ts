@@ -1,3 +1,4 @@
+import { SETTINGS_SECTIONS } from '@althar/contracts'
 import type { IconName } from '@althar/ui'
 
 import { device } from '../../shared/device'
@@ -12,20 +13,8 @@ import { device } from '../../shared/device'
  * section to come between those it sits among.
  */
 
-export const SECTIONS = [
-  'agents',
-  'skills',
-  'code-hosts',
-  'this-mac',
-  'plans-and-reviews',
-  'new-projects',
-  'reviews',
-  'notifications',
-  'appearance',
-  'editor',
-  'browser',
-  'about',
-] as const
+/** As contracts lists them, so the agents' read_settings names the same sections (ADR-097). */
+export const SECTIONS = SETTINGS_SECTIONS
 
 export type Section = (typeof SECTIONS)[number]
 
@@ -37,13 +26,14 @@ export const FIRST_SECTION: Section = 'agents'
 
 /** The sections in their groups, a little apart down the side. */
 export const GROUPS: ReadonlyArray<ReadonlyArray<Section>> = [
-  ['agents', 'skills', 'code-hosts'],
+  ['agents', 'mcp-servers', 'skills', 'code-hosts'],
   ['this-mac', 'plans-and-reviews', 'new-projects', 'reviews', 'notifications', 'appearance', 'editor', 'browser'],
   ['about'],
 ]
 
 export const sectionText: Readonly<Record<Section, { readonly title: string; readonly icon: IconName }>> = {
   agents: { title: 'Agents', icon: 'agents' },
+  'mcp-servers': { title: 'MCP servers', icon: 'plug' },
   skills: { title: 'Skills', icon: 'knowledge' },
   'code-hosts': { title: 'Code hosts and trackers', icon: 'plug' },
   'this-mac': { title: `Work on ${device.this}`, icon: 'load' },

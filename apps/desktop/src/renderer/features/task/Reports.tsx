@@ -24,12 +24,16 @@ export const reportText = {
  */
 export const OpenFinding = createContext<((review: string, index?: number) => void) | null>(null)
 
-/** A review's report: its verdict and each finding in a line, opening it in the code; then what the reviewer said. */
-export function ReviewReport({ id, result }: { id: string; result: StepResult }) {
+/**
+ * A review's report: its verdict and each finding in a line, opening it in the code; then what the reviewer said. Under its
+ * line in the thread (`said` off), which says its verdict already, the findings and words alone.
+ */
+export function ReviewReport({ id, result, said = true }: { id: string; result: StepResult; said?: boolean }) {
   const open = useContext(OpenFinding)
   return (
     <>
       <Reviewer
+        said={said}
         verdict={result.verdict === 'pass' ? Verdict.Pass : Verdict.Changes}
         findings={result.findings.map((finding, index) => ({
           id: `${id}-${index}`,

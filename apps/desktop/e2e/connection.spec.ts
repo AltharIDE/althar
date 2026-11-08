@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { expect, type ElectronApplication, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, planTask, say } from './support'
+import { launch, openFirstProject, planTask, say, still } from './support'
 
 /*
  * A step that loses its connection, as the person sees it (ADR-060). The fake
@@ -119,7 +119,12 @@ test('offers Try again in the coordinator’s chat where its turn failed on the 
     await expect(page.getByText("Claude Code couldn't answer.")).toBeVisible()
     const again = page.getByRole('button', { name: 'Try again' })
     await expect(again).toBeVisible()
-    await page.screenshot({ path: 'test-results/connection-coordinator-try-again.png', scale: 'css', animations: 'disabled' })
+    await still(page)
+    await page
+      .getByRole('article')
+      .filter({ hasText: "Claude Code couldn't answer." })
+      .last()
+      .screenshot({ path: 'test-results/connection-coordinator-try-again.png', scale: 'css', animations: 'disabled' })
     // Back, Try again sends what the person said again, and it is answered.
     writeFileSync(connection, '')
     await again.click()
@@ -127,6 +132,79 @@ test('offers Try again in the coordinator’s chat where its turn failed on the 
     await expect(page.getByText(/^echo: /)).toBeVisible()
     await expect(page.getByText('What is left on the checkout?', { exact: true })).toHaveCount(2)
     await expect(again).toHaveCount(0)
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('an idle worker loss leaves completed work alone and the next message starts a fresh session', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const signal = join(home, 'connection')
+  writeFileSync(signal, '')
+  const { electronApp, page } = await launch(home, { ALTHAR_FAKE_CONNECTION: signal })
+  try {
+    await openFirstProject(electronApp, page, repository(home))
+    await say(page, 'hello')
+    await expect(page.getByText(/^echo: /)).toBeVisible()
+    await say(page, 'idle-loss')
+    await expect(page.getByText('Committed and pushed.', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Interrupt the lead' })).toHaveCount(0)
+    writeFileSync(signal, 'lost')
+    await expect.poll(() => existsSync(`${signal}.closed`)).toBe(true)
+    await expect(page.getByText('The connection to Claude was lost.')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0)
+    await still(page)
+    await page
+      .getByRole('article')
+      .filter({ hasText: 'Committed and pushed.' })
+      .last()
+      .screenshot({ path: 'test-results/connection-idle.png', scale: 'css', animations: 'disabled' })
+    writeFileSync(signal, '')
+    await say(page, 'Carry on with the checkout')
+    const reply = page.getByRole('article').filter({ hasText: 'Carry on with the checkout' }).last()
+    await expect(reply).toContainText('echo: You are the coordinator')
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('a stale Try again explains its refusal in the window', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const signal = join(home, 'connection')
+  writeFileSync(signal, 'offline')
+  const { electronApp, page } = await launch(home, { ALTHAR_FAKE_CONNECTION: signal })
+  try {
+    await openFirstProject(electronApp, page, repository(home))
+    await say(page, 'What is left on the checkout?')
+    const again = page.getByRole('button', { name: 'Try again' })
+    await expect(again).toBeVisible()
+    // Hold just the retry request: the person sends a new message while this click is still on its way.
+    await page.evaluate(() => {
+      const delayed: Array<() => void> = []
+      // oxlint-disable-next-line typescript/unbound-method -- applied to the same port
+      const post = MessagePort.prototype.postMessage
+      MessagePort.prototype.postMessage = function (this: MessagePort, ...args: Parameters<MessagePort['postMessage']>) {
+        if (JSON.stringify(args[0])?.includes('"tag":"TryAgain"')) delayed.push(() => post.apply(this, args))
+        else post.apply(this, args)
+      } as MessagePort['postMessage']
+      Object.assign(window, {
+        releaseRetry: () => {
+          MessagePort.prototype.postMessage = post
+          for (const send of delayed) send()
+          return delayed.length
+        },
+      })
+    })
+    await again.click()
+    writeFileSync(signal, '')
+    await say(page, 'Carry on with the checkout')
+    await expect(page.getByText(/^echo: /)).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Interrupt the lead' })).toHaveCount(0)
+    expect(await page.evaluate(() => (window as unknown as { releaseRetry: () => number }).releaseRetry())).toBe(1)
+    const refusal = page.getByRole('alert').filter({ hasText: 'There is no failed turn or lost connection to try again.' })
+    await expect(refusal).toBeVisible()
+    await still(page)
+    await refusal.screenshot({ path: 'test-results/connection-retry-refused.png', scale: 'css', animations: 'disabled' })
   } finally {
     await electronApp.close()
   }

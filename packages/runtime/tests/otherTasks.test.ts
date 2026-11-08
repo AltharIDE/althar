@@ -96,8 +96,10 @@ describe('a lead reading another task', () => {
 
       const lead = leadOf(projectId, mine)
       assert.includeMembers(yield* listTools(lead), ['list_tasks', 'find_tasks', 'read_task', 'read_thread', 'read_task_diff'])
-      // Read-only: nothing that messages another lead or changes another task.
-      assert.notIncludeMembers(yield* listTools(lead), ['message_lead', 'draft_task', 'rename_task'])
+      // One tool set with the coordinator (ADR-097): it messages other leads and moves tasks too.
+      assert.includeMembers(yield* listTools(lead), ['message_lead', 'draft_task', 'rename_task'])
+      // A task's reviewer only reads.
+      assert.notIncludeMembers(yield* listTools({ ...lead, role: 'reviewer' }), ['message_lead', 'draft_task', 'rename_task'])
 
       const listed = yield* callTool(lead, 'list_tasks')
       assert.match(listed, new RegExp(`- ${mine.slug}: Retry the checkout [^\\n]*\\n {2}Yours: the task you are on; works in a worktree;`))
@@ -290,6 +292,18 @@ describe('a heads-up of another task changing the same files', () => {
       assert.lengthOf(yield* told(first.threadId), 1)
       assert.lengthOf(yield* told(second.threadId), 1)
       assert.lengthOf(yield* told(idle.threadId), 0)
+      // Each thread says it too, as Althar's line naming the other task: once, and nothing on the idle one.
+      const lines = (threadId: string) =>
+        sql<{ title: string; situation: string }>`
+          SELECT json_extract(content, '$.title') AS title, json_extract(content, '$.situation.kind') AS situation
+          FROM thread_items WHERE thread_id = ${threadId} AND kind = 'notice' AND json_extract(content, '$.situation') IS NOT NULL`
+      assert.deepStrictEqual(yield* lines(first.threadId), [
+        { title: 'Go service for payments changes `README.md` too. Both leads were told.', situation: 'overlap' },
+      ])
+      assert.deepStrictEqual(yield* lines(second.threadId), [
+        { title: 'Retry the checkout changes `README.md` too. Both leads were told.', situation: 'overlap' },
+      ])
+      assert.deepStrictEqual(yield* lines(idle.threadId), [])
       const kept = yield* sql<{ taskId: string }>`
         SELECT aggregate_id AS task_id FROM record_events WHERE type = 'task.overlap_noticed' ORDER BY sequence`
       assert.sameMembers(
@@ -402,6 +416,8 @@ describe('a lead’s brief', () => {
   it('says what it can read of other tasks, and when to', () => {
     assert.include(OTHER_TASKS, 'read_task_diff')
     assert.include(OTHER_TASKS, 'before you change code another open task changes, and where your brief names another task')
-    assert.include(OTHER_TASKS, "you can't message another task's lead")
+    assert.include(OTHER_TASKS, 'draft it with draft_task and plan it with propose_plan')
+    assert.include(OTHER_TASKS, 'Accepting and merging stay on the person')
+    assert.include(OTHER_TASKS, 'read_settings and change_settings')
   })
 })

@@ -61,6 +61,8 @@ const sawFile = (block: acp.ContentBlock): string => {
 export const scenarios = {
   /** Two message chunks, then the turn ends with usage. */
   hello: 'hello',
+  /** Answers, then reports an idle worker loss once connection() reads lost. */
+  idleLoss: 'idle-loss',
   /** A thought, then a message. */
   think: 'think',
   /** A tool call that asks permission, then succeeds or fails on the answer. */
@@ -93,6 +95,12 @@ export const scenarios = {
   deniedThenWait: 'denied-then-wait',
   /** A file edit, with Codex's options: the only rejection stops the turn. */
   fileEdit: 'file-edit',
+  /** A command; refused, it ends its turn cancelled without a word, as OpenCode's interrupted step does. */
+  silentAfterRefusal: 'silent-after-refusal',
+  /** Like `silentAfterRefusal`, but it stays silent when asked to carry on, every time. */
+  silentForever: 'silent-forever',
+  /** Like `silentAfterRefusal`, but asked to carry on it ends its turn normally, with nothing said. */
+  silentThenEnds: 'silent-then-ends',
   /** Like `fileEdit`, but it asks again every time the turn is resumed. */
   stubborn: 'stubborn',
   /** Asks the person a plain question, as an MCP server's form does, and repeats the answer. */
@@ -247,6 +255,9 @@ export const codexLikeMeanings = {
 }
 
 export interface FakeAgentOptions {
+  /** Lets a test deliver a connection failure between turns, or close ACP during one. */
+  readonly sessionControls?: (controls: { readonly lose: () => Promise<void>; readonly close: () => void }) => void
+
   /** Hold `session/new` open to exercise startup timeout cleanup. */
   readonly beforeNewSession?: () => Promise<void>
   /** Hold `initialize` open, the first thing a connection asks, to exercise the same cleanup. */
@@ -314,7 +325,7 @@ export interface FakeAgentOptions {
    * nothing; `waits`, as Codex waits for the network, its turn not ending
    * until the connection is back, when it carries on, or it is cancelled.
    */
-  readonly connection?: () => 'offline' | 'server' | 'waits' | undefined
+  readonly connection?: () => 'offline' | 'server' | 'waits' | 'lost' | undefined
   /**
    * Offer effort as OpenCode does: as a model's variants, with a `default`
    * that leaves it at its own. The small model has none, and a third, huge
@@ -375,6 +386,10 @@ interface SessionState {
   /** Closed with `session/close`, or its connection gone: nothing it was still at goes on. */
   closed: boolean
   stubborn: boolean
+  /** It never answers a resume with a word (`silentForever`). */
+  mute: boolean
+  /** It ends a resumed turn normally and says nothing (`silentThenEnds`). */
+  endsQuietly: boolean
   abort: AbortController | undefined
   directories: number
   mcpServers: number
@@ -1440,6 +1455,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         cancelled: false,
         closed: false,
         stubborn: false,
+        mute: false,
+        endsQuietly: false,
         abort: undefined,
         directories: params.additionalDirectories?.length ?? 0,
         mcpServers: params.mcpServers.length,
@@ -1466,6 +1483,22 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         leftForGood: false,
       }
       sessions.set(sessionId, session)
+      options.sessionControls?.({
+        lose: () =>
+          client.notify(acp.methods.client.session.update, {
+            sessionId,
+            update: {
+              sessionUpdate: 'session_info_update',
+              _meta: failureMeta({
+                category: 'connection',
+                severity: 'error',
+                title: 'The connection to Claude was lost.',
+                actions: ['new_session'],
+              }),
+            },
+          }),
+        close: () => connections.get(shared(client))?.close(),
+      })
       // Its connection going stops it too: what a session works at until stopped doesn't outlive the agent.
       connections.get(shared(client))?.signal.addEventListener('abort', () => (session.closed = true), { once: true })
       return {
@@ -1864,6 +1897,10 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         return ended()
       }
       const resumed = /Althar's rules refused this|not allowed by the coordinator|The person declined/.test(text)
+      if (resumed && session.mute) return { stopReason: 'cancelled' }
+      if (resumed && session.endsQuietly) return ended()
+      if (text === scenarios.silentThenEnds) session.endsQuietly = true
+      if (text === scenarios.silentForever) session.mute = true
       if (resumed && !session.stubborn) {
         await say('carrying on without it')
         return ended()
@@ -1878,6 +1915,20 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             : text
 
       switch (scenario) {
+        case scenarios.silentThenEnds:
+        case scenarios.silentForever:
+        case scenarios.silentAfterRefusal: {
+          const toolCall = { toolCallId: 'call-3', title: 'Run git grep x', kind: 'execute' as const, rawInput: { command: 'git grep x' } }
+          await update({ sessionUpdate: 'tool_call', ...toolCall, status: 'pending' })
+          const chosen = await ask(toolCall, commandOptions)
+          await update({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: toolCall.toolCallId,
+            status: chosen.startsWith('allow') ? 'completed' : 'failed',
+          })
+          if (chosen.startsWith('allow')) await say('ran it')
+          return chosen.startsWith('allow') ? ended() : { stopReason: 'cancelled' }
+        }
         case scenarios.commandChoices:
         case scenarios.deniedThenWait:
         case scenarios.fileEdit:
@@ -2154,6 +2205,24 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await update({ sessionUpdate: 'current_mode_update', currentModeId: session.mode })
           await update({ sessionUpdate: 'available_commands_update', availableCommands: [] })
           return ended()
+        case scenarios.idleLoss: {
+          await say('Committed and pushed.')
+          const later = async () => {
+            while (!session.closed && options.connection?.() !== 'lost') await pause(10)
+            if (!session.closed)
+              await update({
+                sessionUpdate: 'session_info_update',
+                _meta: failureMeta({
+                  category: 'connection',
+                  severity: 'error',
+                  title: 'The connection to Claude was lost.',
+                  actions: ['new_session'],
+                }),
+              })
+          }
+          void later().catch(() => undefined)
+          return ended()
+        }
         case scenarios.slow:
           await say('Starting')
           await untilStopped(session, scenarios.slow)

@@ -67,3 +67,75 @@
 .tallyLine {
   display: block;
 }
+
+/* What asks (ADR-097): the kinds of what can't be undone, a row each, then the person's own commands */
+.whatAsks {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+.asksTitle {
+  margin: 8px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.asksLede {
+  margin: 0;
+  max-width: 62ch;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+.kinds {
+  display: grid;
+  margin: 4px 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.kind {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.kind:last-child {
+  border-bottom: 1px solid var(--line);
+}
+.kind > :last-child {
+  flex: none;
+  white-space: nowrap;
+}
+.kindText {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.kindName {
+  font-size: 14px;
+  font-weight: 540;
+  color: var(--t-1);
+}
+.catches {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+.catches code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t-2);
+}
+.fixedWord {
+  font-size: 13.5px;
+  color: var(--t-2);
+}
+.yours {
+  margin-top: 0;
+}
+.askMore {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+}

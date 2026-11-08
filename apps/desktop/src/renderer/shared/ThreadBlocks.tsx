@@ -1,17 +1,18 @@
-import { Fragment, useState, type ReactNode } from 'react'
+import { createContext, Fragment, useContext, useState, type ReactNode } from 'react'
 
 import type { FieldAnswer, Unfurl } from '@althar/contracts'
 import {
+  AltharLine,
   Arrived,
   CodeBlock,
   FailedLogs,
   Gallery,
+  glyphOf,
   Issue,
   IssueRef,
   LinkButton,
   Markdown,
   Plan,
-  Prose,
   Question,
   type QuestionAnswer,
   Reasoning,
@@ -23,10 +24,14 @@ import {
   ToolState,
   Turn,
   WorkedFor,
+  WorkNow,
   You,
+  McpAct,
+  McpServer,
 } from '@althar/ui'
 
 import { CommandOutput } from './CommandOutput'
+import { SettingChangeOf } from './SettingChangeOf'
 import { shotsOf } from './evidence'
 import { HandedBack } from './HandedBack'
 import { documentVersions } from './handed'
@@ -34,6 +39,7 @@ import { fileAttachments } from './files'
 import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
 import { WayOut } from './WayOut'
+import { serverBrand } from './mcpServers'
 import { keyOf, pastedIn } from './pasted'
 import { RuleReceipt } from './RuleReceipt'
 import { SaidIn } from './code/CodeHost'
@@ -48,6 +54,8 @@ import type {
   ReviewDraftContent,
   Part,
   PushRequestContent,
+  ModelMoveContent,
+  SmallChangeContent,
   TaskAskContent,
   QuestionContent,
   RunContent,
@@ -59,19 +67,31 @@ import s from './ThreadBlocks.module.css'
 
 /*
  * A thread's blocks as the kit draws them, the same in a task and in the
- * coordinator's thread. A turn's work folds under how long it worked, or is
- * working, with its last message open under it; a step's result stands open
- * under the work that led to it. Before the agent says anything, its turn
- * stands under its name, thinking, where its words will take its place. A
- * task's card is the host's to draw, since what it can do with one is the
- * host's.
+ * coordinator's thread. A turn's work folds under how long it worked, with
+ * its last message open under it; a step's result stands open under the
+ * work that led to it. Before the agent says anything, its turn stands
+ * under its name, thinking, where its words will take its place. While it
+ * works, as in Codex's app (ADR-099): how long it has worked so far, what it
+ * said on the way, one line for what it does now, and what it is writing,
+ * streaming in at an even pace, where its answer will stand; once the turn
+ * ends, the rest folds away under how long it worked. Its thinking shows
+ * only in its work, opened. A task's card is the host's to draw, since what
+ * it can do with one is the host's.
  */
 
 /** How long a command can be before its row, at the thread's width, clips it. */
 const LONG_COMMAND = 72
 
 export const text = {
-  thought: 'Thought',
+  /** Under a call the person's own rule refused: what the lead was told, and the way to the rules. */
+  refused: (words: string) => `${words} The lead was told so.`,
+  rules: 'Rules',
+  /** Under a call to a server that was down: what it was, and the way in. */
+  server: {
+    'needs-auth': (agent: string, server: string) => `${agent} isn’t signed in to ${server}, so this didn’t go through.`,
+    failed: (_agent: string, server: string) => `${server} didn’t start, so this didn’t go through.`,
+    signIn: 'Sign in',
+  },
   readSkill: (names: ReadonlyArray<string>) => `read skill ${names.join(', ')}`,
   shell: 'Shell',
   step: { implement: 'Implement', review: 'Review', settle: 'Settle', publish: 'Pull request' } satisfies Record<
@@ -162,6 +182,35 @@ function SetupView({ setup }: { setup: SetupContent }) {
  * or the file it works on). One from before Althar kept output, too long for
  * its row, opens to show it whole.
  */
+/**
+ * What a round's calls to the person's MCP servers did outside, each a card
+ * under its work (ADR-097): what acted on the world stands out of what only
+ * read, which stays folded in the work.
+ */
+export function McpActs({ parts }: { parts: ReadonlyArray<Part> }) {
+  const acts = parts.flatMap((part) =>
+    part.kind === 'tool' && part.mcp?.acts === true && part.state === ToolState.Done ? [{ id: part.id, mcp: part.mcp }] : [],
+  )
+  return acts.map(({ id, mcp }) => (
+    <McpAct key={id} server={mcp.server} brand={serverBrand(mcp.server)} did={mcp.did} words={mcp.words} link={mcp.link} />
+  ))
+}
+
+/** Where Althar's lines under a call lead: the project's rules, an agent's sign-in. The host that can open them provides it. */
+export interface ThreadWays {
+  readonly onRules?: () => void
+  readonly onSignIn?: (agentId: string) => void
+}
+export const ThreadWaysContext = createContext<ThreadWays>({})
+
+const AGENT_NAMES: Readonly<Record<string, string>> = { 'claude-code': 'Claude Code', codex: 'Codex', opencode: 'OpenCode' }
+
+/** A server's name as a person says it: the first letter capital, "linear-server" as "Linear". */
+const serverName = (name: string) => {
+  const word = name.replace(/[-_](server|mcp)$/i, '').replace(/^(mcp)[-_]/i, '')
+  return word.charAt(0).toUpperCase() + word.slice(1)
+}
+
 function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; threadId: string }) {
   const [open, setOpen] = useState(part.state === ToolState.Running && part.ran !== null)
   /* once opened, what it printed stays, so it doesn't vanish as the call folds */
@@ -188,13 +237,15 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
     ) : long ? (
       <></>
     ) : undefined
-  return (
+  const ways = useContext(ThreadWaysContext)
+  const tool = (
     <Tool
       kind={part.toolKind}
       verb={part.verb}
       target={part.target}
       state={part.state}
       {...(part.toolKind === ToolKind.Run && part.skills !== undefined ? { meta: text.readSkill(part.skills.names) } : {})}
+      {...(part.mcp === undefined ? {} : { meta: <McpServer name={part.mcp.server} brand={serverBrand(part.mcp.server)} /> })}
       {...(part.why === undefined ? {} : { why: part.why })}
       {...(part.command === null ? {} : { copy: part.command })}
       {...(part.state === ToolState.Failed && part.exit !== null ? { exit: part.exit } : {})}
@@ -207,6 +258,26 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
       {body}
     </Tool>
   )
+  if (part.refused === undefined && part.server === undefined) return tool
+  const { server } = part
+  return (
+    <>
+      {tool}
+      {part.refused !== undefined && (
+        <AltharLine>
+          {text.refused(part.refused)} {ways.onRules && <LinkButton onClick={ways.onRules}>{text.rules}</LinkButton>}
+        </AltharLine>
+      )}
+      {server !== undefined && (
+        <AltharLine tone="warning">
+          {text.server[server.down](AGENT_NAMES[server.agentId ?? ''] ?? 'The agent', serverName(server.name))}{' '}
+          {server.down === 'needs-auth' && server.agentId !== undefined && ways.onSignIn && (
+            <LinkButton onClick={() => ways.onSignIn?.(server.agentId ?? '')}>{text.server.signIn}</LinkButton>
+          )}
+        </AltharLine>
+      )}
+    </>
+  )
 }
 
 /** A part of a turn as the thread draws it: what it said, a thought, a tool call, its plan, a notice. */
@@ -216,14 +287,14 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
       // Its names are read as they were when it was said.
       return (
         <SaidIn.Provider value={part.id}>
-          <Markdown source={part.text} />
+          <Markdown source={part.text} streaming={part.live === true} />
         </SaidIn.Provider>
       )
     case 'thought':
       return (
-        <Reasoning took="" text={{ thought: () => text.thought }}>
-          <Prose dim>{part.text}</Prose>
-        </Reasoning>
+        <SaidIn.Provider value={part.id}>
+          <Reasoning source={part.text} live={part.live === true} {...(part.took == null ? {} : { took: part.took })} />
+        </SaidIn.Provider>
       )
     case 'tool':
       return <ToolView part={part} threadId={threadId} />
@@ -426,7 +497,10 @@ export function ThreadBlocks({
   review,
   automation,
   taskAsk,
+  smallChange,
+  modelMove,
   queued,
+  retryable,
   onTryAgain,
   onSignIn,
   onCompact,
@@ -468,8 +542,14 @@ export function ThreadBlocks({
   automation?: (automation: AutomationCardContent, itemId: string) => ReactNode
   /** Draws the coordinator's card asking to stop, hold, restart or settle a task, by its item, which answering it names. */
   taskAsk?: (ask: TaskAskContent, itemId: string) => ReactNode
+  /** Draws a small change's card, by its item, which Merge and Make it a full task name. */
+  smallChange?: (card: SmallChangeContent, itemId: string) => ReactNode
+  /** Draws Auto's line on moving the lead to a lighter model, by its item, which Keep and Undo name. */
+  modelMove?: (move: ModelMoveContent, itemId: string) => ReactNode
   /** What a message still waiting says: who reads it next. */
   queued?: string
+  /** The runtime's retry eligibility, refreshed with the thread's head. */
+  retryable?: boolean | undefined
   /** Tries the last turn again, where it ended in an error, as on the connection: Try again under it. Without it, none. */
   onTryAgain?: () => void
   /** Opens Settings at an agent's sign-in, where the last turn failed for it being signed out: Sign in again. Without it, none. */
@@ -558,6 +638,12 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{automation?.(block.automation, block.id)}</Fragment>
       case 'task_ask':
         return <Fragment key={block.id}>{taskAsk?.(block.ask, block.id)}</Fragment>
+      case 'small_change':
+        return <Fragment key={block.id}>{smallChange?.(block.card, block.id)}</Fragment>
+      case 'model_move':
+        return <Fragment key={block.id}>{modelMove?.(block.move, block.id)}</Fragment>
+      case 'setting':
+        return <SettingChangeOf key={block.id} change={block.change} itemId={block.id} />
       case 'waiting':
         return (
           <Turn key={block.id} model={turnModel(session?.agentId ?? null)}>
@@ -567,6 +653,10 @@ export function ThreadBlocks({
       case 'turn': {
         // What Copy takes: what it said, open under its work.
         const said = block.said.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part.text] : [])).join('\n\n')
+        // At work, what it said on the way so far, as it said it; once it answers, that folds with the rest of its work.
+        const working = block.live && !block.answering
+        const onTheWay = working ? block.work.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part] : [])) : []
+        const doing = block.doing
         return (
           <Turn
             key={block.id}
@@ -575,7 +665,22 @@ export function ThreadBlocks({
             {...(said === '' || block.live ? {} : { copy: said })}
           >
             {block.work.length > 0 && (
-              <WorkedFor took={block.took} live={block.live} {...(block.doing === null ? {} : { summary: block.doing })}>
+              <WorkedFor
+                took={block.took}
+                live={working}
+                {...(onTheWay.length === 0
+                  ? {}
+                  : {
+                      said: onTheWay.map((part) => (
+                        <SaidIn.Provider key={part.id} value={part.id}>
+                          <Markdown source={part.text} />
+                        </SaidIn.Provider>
+                      )),
+                    })}
+                {...(doing === null
+                  ? {}
+                  : { now: <WorkNow {...(doing.tool === null ? {} : { icon: glyphOf(doing.tool) })}>{doing.text}</WorkNow> })}
+              >
                 {block.work.map((part) => (
                   <PartView key={part.id} part={part} threadId={threadId} />
                 ))}
@@ -586,7 +691,12 @@ export function ThreadBlocks({
               <PartView key={part.id} part={part} threadId={threadId} />
             ))}
             {block.id === failed && ending?.kind === 'notice' && (
-              <WayOut failure={ending.failure} onTryAgain={onTryAgain} onSignIn={signInAs(block.agentId)} onCompact={onCompact} />
+              <WayOut
+                failure={ending.failure}
+                onTryAgain={retryable === true ? onTryAgain : undefined}
+                onSignIn={signInAs(block.agentId)}
+                onCompact={onCompact}
+              />
             )}
             <HandedBack handed={block.handed} threadId={threadId} versionOf={versionOf} {...(openFile === undefined ? {} : { openFile })} />
           </Turn>

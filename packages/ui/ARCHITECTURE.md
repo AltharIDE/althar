@@ -172,6 +172,7 @@ The helpers, in `src/lib`:
 - `useControlled`: a value a parent may drive, or leave to the component.
 - `useOnScreen`: a clock that runs only while someone can see it.
 - `useStickToBottom`: a thread that follows new content until you scroll away.
+- `usePacedText`: text an agent is still writing, shown at an even pace on the screen's frames, a whole word at a time (ADR-099); `Markdown` fades each stretch in as it shows (`thread/Markdown/fresh.tsx`).
 - `useRefocus`: focus back on the button a form replaced, when the form closes.
 - `useDragOver`: files held over a part of the page and dropped on it: folders, for the first screen, a new project and a project's repositories; files and folders, for the composer.
 - `safeHref`: the one test for whether an address becomes a link.

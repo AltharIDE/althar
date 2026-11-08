@@ -1,6 +1,8 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
+import type { Brand } from '../../foundations/brands/brands'
 import { Icon } from '../../foundations/Icon/Icon'
+import { BrandMark } from '../../foundations/Marks/Marks'
 import { Model, type ModelInfo } from '../../primitives/Model/Model'
 import { AllowedBy, Decision, PermissionScope, unreachable } from '../../foundations/vocabulary'
 import { useControlled } from '../../lib/controlled'
@@ -68,6 +70,8 @@ export interface PermissionRequest {
    * under the answers.
    */
   held?: ReactNode
+  /** For a call that waits while the person is away: how long, and where else it reached them. */
+  waited?: ReactNode
   /** The model asking. */
   agent?: ModelInfo
   /** The step it is on. */
@@ -85,6 +89,29 @@ export interface PermissionRequest {
    * offered.
    */
   scopes?: Partial<Record<AlwaysDecision, readonly PermissionScope[]>>
+  /**
+   * What can't be undone (ADR-097): the card says so, the action on its
+   * button, what can't be taken back in one line, the words it would post and
+   * where the call goes; its answers are Not now and the action. No
+   * "always": it asks each time.
+   */
+  irreversible?: IrreversibleWords
+}
+
+/** Where a call that can't be undone goes: one of the person's MCP servers, by name and mark, and its tool; or a command. */
+export type IrreversibleThrough = { server: string; brand?: Brand; tool: string } | { command: string }
+
+/** What a card that can't be undone says. */
+export interface IrreversibleWords {
+  /** The action, as its button says it: Merge #635. */
+  verb: string
+  /** What it did, once allowed: Merged #635. */
+  done: string
+  /** What can't be taken back, in one line. */
+  stays: string
+  /** The words it would post, for one that speaks for the person. */
+  words?: string
+  through: IrreversibleThrough
 }
 
 /** How the scopes of an "always" read as choices: this exact command, and commands starting a prefix. A kind is its own words. */
@@ -160,6 +187,11 @@ export interface PermissionText {
   /** After an answer someone else gave. */
   answeredByRule: (rule: string) => string
   answeredByLead: string
+  /** The kicker of a card that can't be undone. */
+  irreversible: string
+  /** Its no, on the button and once said. */
+  notNow: string
+  notNowSaid: string
 }
 
 export const permissionText: PermissionText = {
@@ -199,6 +231,9 @@ export const permissionText: PermissionText = {
     [rules > 0 && `${rules} by ${project}’s rules`, lead > 0 && `${lead} by the lead`].filter(Boolean).join(', '),
   answeredByRule: (rule) => `by ${rule}`,
   answeredByLead: 'by the lead',
+  irreversible: 'Can’t be undone',
+  notNow: 'Not now',
+  notNowSaid: 'Not now.',
 }
 
 const OFFERS: readonly Decision[] = [Decision.AllowOnce, Decision.AllowAlways, Decision.Deny]
@@ -250,12 +285,14 @@ function Card({
   cmd,
   why,
   held,
+  waited,
   agent,
   step,
   prefix,
   kind,
   offers: asked,
   scopes: allowed,
+  irreversible,
   project,
   defaultDecision,
   defaultScope = PermissionScope.Exact,
@@ -351,6 +388,24 @@ function Card({
     )
   }
 
+  if (irreversible !== undefined)
+    return (
+      <IrreversibleCard
+        words={irreversible}
+        what={what}
+        agent={agent}
+        step={step}
+        pos={pos}
+        total={total}
+        phase={phase}
+        focusOnMount={focusOnMount}
+        onAnswer={(decision) => onAnswer(decision === Decision.AllowOnce ? { decision, cmd } : { decision, cmd, note: '' })}
+        onAll={onAll}
+        waited={waited}
+        t={t}
+      />
+    )
+
   return (
     <AskCard
       icon="lock"
@@ -436,6 +491,12 @@ function Card({
             </div>
           ))}
         </fieldset>
+        {waited && (
+          <p className={s.waited}>
+            <Icon name="clock" size={12} />
+            <span>{waited}</span>
+          </p>
+        )}
         {held && <p className={s.why}>{held}</p>}
         <AskFoot>
           <Button type="submit" variant="signal" kbd="↵">
@@ -451,6 +512,113 @@ function Card({
           </span>
         </AskFoot>
       </form>
+    </AskCard>
+  )
+}
+
+/** Where a call that can't be undone goes, quietly: the server's mark, its name and the tool; or the command. */
+function Through({ through }: { through: IrreversibleThrough }) {
+  if ('command' in through)
+    return (
+      <code className={s.throughCommand} tabIndex={0}>
+        {through.command}
+      </code>
+    )
+  return (
+    <span className={s.through}>
+      {through.brand === undefined ? <Icon name="plug" size={11} /> : <BrandMark brand={through.brand} size={11} />}
+      {through.server}
+      <span className={s.tool}>{through.tool}</span>
+    </span>
+  )
+}
+
+/** The card of what can't be undone: the action, what can't be taken back, the words it would post, where it goes; Not now or the action. */
+function IrreversibleCard({
+  words,
+  what,
+  agent,
+  step,
+  pos,
+  total,
+  phase,
+  focusOnMount,
+  onAnswer,
+  onAll,
+  waited,
+  t,
+}: {
+  words: IrreversibleWords
+  what: string
+  agent: ModelInfo | undefined
+  step: string | undefined
+  pos: number
+  total: number
+  phase: Phase
+  focusOnMount: PermissionFocus
+  onAnswer: (decision: Decision.AllowOnce | Decision.Deny) => void
+  onAll: (() => void) | undefined
+  /** How long it has waited, and where else it reached the person. */
+  waited: ReactNode
+  t: PermissionText
+}) {
+  const act = useRef<HTMLButtonElement>(null)
+  const takes = useRef(focusOnMount)
+  useEffect(() => {
+    const how = takes.current
+    if (!how) return
+    let live = true
+    queueMicrotask(() => {
+      if (live && (how !== 'idle' || focusIsIdle())) focusQuietly(act.current)
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+  return (
+    <AskCard
+      icon="lock"
+      kicker={
+        <>
+          {t.irreversible}
+          {total > 1 && <span className={s.pos}> · {t.position(pos, total)}</span>}
+        </>
+      }
+      who={
+        (step || agent) && (
+          <>
+            {step && <span>{step} ·</span>}
+            {agent && <Model model={agent} short />}
+          </>
+        )
+      }
+      what={what}
+      className={cx(s.card, phase && s[phase])}
+    >
+      <p className={s.stays}>{words.stays}</p>
+      {words.words !== undefined && <blockquote className={s.words}>{words.words}</blockquote>}
+      <p className={s.from}>
+        <Through through={words.through} />
+      </p>
+      {waited && (
+        <p className={s.waited}>
+          <Icon name="clock" size={12} />
+          <span>{waited}</span>
+        </p>
+      )}
+      <AskFoot>
+        <Button variant="quiet" disabled={phase !== null} onClick={() => onAnswer(Decision.Deny)}>
+          {t.notNow}
+        </Button>
+        <Button ref={act} variant="signal" kbd="↵" disabled={phase !== null} onClick={() => onAnswer(Decision.AllowOnce)}>
+          {words.verb}
+        </Button>
+        {total > 1 && onAll && (
+          <Button variant="quiet" onClick={onAll}>
+            {t.allowAll(total - pos + 1)}
+          </Button>
+        )}
+      </AskFoot>
     </AskCard>
   )
 }
@@ -577,7 +745,13 @@ export function Permission({
       <AskAnswered
         className={className}
         denied={refuses(answer.decision)}
-        said={t.decided[answer.decision]}
+        said={
+          request.irreversible === undefined
+            ? t.decided[answer.decision]
+            : refuses(answer.decision)
+              ? t.notNowSaid
+              : request.irreversible.done
+        }
         onUndo={
           answeredBy || !onUndo
             ? undefined
@@ -590,7 +764,7 @@ export function Permission({
         undo={t.undo}
         focusOnMount={answeredHere}
       >
-        <Said answer={answer} request={request} project={project} t={t} />
+        {request.irreversible === undefined && <Said answer={answer} request={request} project={project} t={t} />}
         {answeredBy && <By who={answeredBy} t={t} />}
       </AskAnswered>
     )

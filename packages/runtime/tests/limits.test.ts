@@ -25,7 +25,8 @@ import { type PlanStep, Runs, type StuckAnswer } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { RULES } from '../src/rules'
 import { Sessions } from '../src/Sessions'
-import { atReset, fakeAgents, items, later, onTestClock, repository, runtime, until } from './support'
+import { atReset, callTool, fakeAgents, items, later, onTestClock, repository, runtime, until } from './support'
+import type { ToolAccess } from '../src/ToolServer'
 
 /*
  * An agent out of usage (docs/architecture/05): its work moves on to the
@@ -948,5 +949,66 @@ describe('limits', () => {
       outWords({ from: 'Codex', resetsAt: null, now, to: { agent: 'Claude Code', model: null } }),
       'Codex ran out of usage. Claude Code takes over.',
     )
+  })
+})
+
+describe('change_lead on a task with a step held for a usage limit', () => {
+  /** The coordinator's access, and the task's slug and plan, as the tool reads them. */
+  const asCoordinator = (projectId: string, taskId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const [row] = yield* sql<{ slug: string }>`SELECT slug FROM tasks WHERE id = ${taskId}`
+      const threadId = yield* (yield* Coordinator).thread(projectId)
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      const steps = () =>
+        Effect.map(
+          sql<{
+            parameters: string
+          }>`SELECT parameters FROM task_plans WHERE task_id = ${taskId} AND state = 'accepted' ORDER BY proposed_at DESC LIMIT 1`,
+          ([plan]) =>
+            (
+              JSON.parse(plan?.parameters ?? '{}') as { steps: ReadonlyArray<{ key: string; agentId: string; skipped: boolean }> }
+            ).steps.map((one) => [one.key, one.agentId, one.skipped]),
+        )
+      return { access, slug: row?.slug ?? '', steps }
+    })
+
+  it.live('hands the lead’s own held step to the lead named at once, on the effort asked', () => {
+    const back = Date.now() + HOUR
+    return Effect.gen(function* () {
+      const { projectId, task, start } = yield* planned([lead('claude-code')])
+      yield* waits(projectId)
+      yield* start
+      yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null)
+      const { access, slug } = yield* asCoordinator(projectId, task.taskId)
+      assert.match(yield* callTool(access, 'change_lead', { task: slug, lead: { agent: 'codex' } }), /goes to .* now\./)
+      const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready')
+      assert.deepStrictEqual([ready?.lead, ready?.waits], ['codex', null])
+    }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })))
+  })
+
+  it.live('changes the lead from its next turn when it is the review that is held, and leaves the review held', () => {
+    const back = Date.now() + HOUR
+    return Effect.gen(function* () {
+      const { projectId, task, start } = yield* planned(
+        [lead('claude-code'), { key: 'review', agentId: 'codex', model: null, skipped: false }],
+        'Retry the checkout [lead:finish] [review:pass]',
+      )
+      yield* waits(projectId)
+      yield* start
+      yield* until(cardOf(projectId), (cards) => cards[0]?.waits?.agentId === 'codex')
+      const { access, slug, steps } = yield* asCoordinator(projectId, task.taskId)
+      const told = yield* callTool(access, 'change_lead', { task: slug, lead: { agent: 'opencode' } })
+      assert.match(told, /changed the lead to/)
+      assert.notMatch(told, /held for a usage limit/)
+      // The plan's lead is the one named, the review is still the one held, and nothing was handed over to the lead named.
+      assert.deepStrictEqual(yield* steps(), [
+        ['implement', 'opencode', false],
+        ['review', 'codex', false],
+      ])
+      const [still] = yield* cardOf(projectId)
+      assert.deepStrictEqual([still?.phase === 'ready', still?.waits?.agentId], [false, 'codex'])
+      assert.isFalse((yield* said(task.threadId)).some((line) => line.startsWith('Handed')))
+    }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: { until: back } } })))
   })
 })
