@@ -53,11 +53,11 @@
     ahead, short of what is never allowed. Turning it off changes only what
     comes next.
   - **What allow everything never allows holds:** what Never lists is still
-    refused, and, while it lists anything, a command Althar can't read is
-    refused too, so a Never can't be slipped past by writing it unreadably.
-    No agent reads the person's credentials or reaches the code host except
-    through Althar, whatever the switch says. Since ADR-097 the first holds;
-    the host may be reached with the person's own sign-in.
+    refused, where the line's words show it. Since ADR-097's amendment a
+    command Althar can't read runs beside a Never, the agent trusted with
+    what the rules can't see. No agent reads the person's credentials,
+    whatever the switch says. Since ADR-097 the code host may be reached
+    with the person's own sign-in.
   - **It shows wherever the task does** (no longer: the person found the
     label meaningless on 16 October, and it went): "Unrestricted" beside the task's
     menu in its header, with what it means on hover, and at the foot of its

@@ -27,6 +27,17 @@
   whether skill and OpenSpec files may be in its repository and be pushed.
   Each off unless the person turns it on.
 - **Owner:** Repository maintainers
+- **Current enforcement (7 November 2026):** [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md)
+  and the [limits audit](../plans/no-arbitrary-limits-audit.md) define the boundary.
+  Allow everything is the default. Sandboxed commands reach the rules, which
+  answer ordinary ones at once; a visible irreversible act and the person's Ask
+  rules ask, inside the sandbox or outside it. Never rules and
+  secret protections remain. An unreadable command is not refused merely
+  because a Never rule exists. The non-irreversible floor is gone. gh, glab
+  and the Flatpak bridge have no blanket refusal. The coordinator uses the
+  project rules, with only visible outside-folder writes refused without a
+  sandbox. The earlier mode descriptions apply when the person chooses
+  Ask about more; superseded historical restrictions below are not enforced.
 - **Context:** Every permission request reaches Althar
   ([ADR-007](007-permission-requests-reach-althar.md)), which answers it
   from its own rules. In the MVP those were fixed in code: everything
@@ -90,9 +101,10 @@
        ([ADR-011](011-own-connectors-for-hosts-and-trackers.md)). Since
        ADR-097, reading credentials; the code host is read as the rest is.
     2. What is never allowed, any kind of it or a command.
-    3. Allowing everything. While Never lists anything, a request the rules
-       can't read (`eval`, `$(…)`) is refused, saying how to spell it out:
-       there is no one to ask.
+    3. Allowing everything. A request the rules can't read (`eval`, `$(…)`)
+       runs; only what its words plainly show is refused by Never, since
+       the agent is trusted with what the rules can't see (ADR-097's
+       amendment to ADR-067).
     4. What asks: a kind on the always-ask list, a request the rules can't
        tell, or a command the project asks about.
     5. Asking about everything beyond the task's own files: reads and
@@ -127,9 +139,7 @@
     request opens. A doc that offers several patterns is a judgement left
     to the person. The rules screen says, for each repository, where its
     names come from.
-  - **They hold for what reaches Althar:** what an agent asks to do beyond
-    its sandbox, which is the network or outside the task. The screen says
-    so.
+  - **They hold for what reaches Althar:** every Claude Code shell command, every OpenCode one, and every Codex command its own safe list doesn't cover. Since ADR-097 a rule fires inside the sandbox too, not only for what crosses it.
   - **Each change is a revision, recorded as the person's.** The rules as
     they are decide the next request; a run cites the revision it started
     under. (Since [ADR-097](097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md#settings), recorded as whoever
@@ -152,12 +162,11 @@
   - **Regular expressions** (VS Code). They are harder to read and to get
     right. A prefix with `*` is what most tools offer.
 - **Trade-off:**
-  - **Rules don't see what an agent does inside its sandbox.** Codex's
-    `workspace-write` and Claude Code's sandboxed commands run without
-    asking, so a rule for a command that stays in the worktree never fires.
-    Giving each agent the project's command rules in its own form would
-    close that gap: Claude Code's ask rules, OpenCode's bash patterns, and
-    Codex's rules.
+  - **Codex runs the commands on its own safe list without asking**, so a
+    project rule for one of those never fires. Since ADR-097 that list is
+    only what Codex reads as safe; a merge, a release or a post reaches
+    Althar through its `untrusted` approval policy, as every Claude Code and
+    OpenCode command does.
   - **The rules live in Althar's store, not the repository**, so a team
     can't share them yet.
 - **Revisit when:**
