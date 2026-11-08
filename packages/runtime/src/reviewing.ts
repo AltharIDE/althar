@@ -5,6 +5,7 @@ import { SqlClient } from 'effect/sql'
 import { Connections } from './Connections'
 import { NotFound } from './errors'
 import { addReadCopy } from './git'
+import { LAST_MESSAGE_REVIEWING } from './lastMessage'
 import { logForLead, readLog } from './checkLogs'
 import { checksLine, checksOf, commentLine, reviewLine, standing } from './pullRequestWords'
 
@@ -108,6 +109,7 @@ export const reviewBrief = (task: { readonly cwd: string; readonly review: Revie
     "Read what it says, what people said on it, and how its checks went with Althar's read_pull_request tool.",
     "Look for what would make it wrong or unsafe to merge: bugs, missed cases, broken behaviour, security, tests that don't test it. Not style the repository doesn't ask for. Then call Althar's draft_review tool once: your verdict (approve, changes, or comment), a summary of a few lines saying what it does and what you found, and your comments, each on a line of the change as it now reads (a file's path and a line number in the new file), with what is wrong or worth saying and its severity (blocking, major, minor or nit).",
     "Nothing reaches the code host until the person posts it from the draft's card, where they keep or drop each comment and choose the verdict: yours is a suggestion. You don't post, comment or push yourself, and gh can't. Once drafted, say in a sentence or two what you found; the person reads the card for the rest. Asked for more, draft again: the card shows your latest draft.",
+    LAST_MESSAGE_REVIEWING,
   ]
 }
 

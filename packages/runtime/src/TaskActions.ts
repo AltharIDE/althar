@@ -5,6 +5,13 @@ import { SqlClient } from 'effect/sql'
 
 import { Busy } from './Busy'
 import { Changes } from './Changes'
+import { Installs } from './Installs'
+import { Accounts } from './Accounts'
+import { Limits } from './Limits'
+import { ModelFacts } from './ModelFacts'
+import { Models } from './Models'
+import { SignIns } from './SignIns'
+import { stepOf } from './stepPick'
 import { Agents } from './Config'
 import { envelope } from './envelope'
 import { Errands } from './Errands'
@@ -13,6 +20,7 @@ import { commitsOf } from './git'
 import { Instance } from './Instance'
 import { answeredIn, quickIn } from './kinds'
 import { Plans } from './Plans'
+import { PlanUsage } from './PlanUsage'
 import { fact } from './records'
 import { Runs, type StuckAnswer, type StuckInfo } from './Runs'
 import { Sessions } from './Sessions'
@@ -123,7 +131,26 @@ const TOOL_OF: Partial<Record<TaskMove, string>> = {
 /** Done, or nothing to do and why: the task already stands so, or the move doesn't apply where it stands. */
 type Outcome = { readonly done: true; readonly said: string } | { readonly done: false; readonly said: string }
 
-type Store = SqlClient.SqlClient | Ledger | Instance | Crypto.Crypto | Tasks | Plans | Changes | Sessions | Runs | Errands | Busy
+type Store =
+  | SqlClient.SqlClient
+  | Ledger
+  | Instance
+  | Crypto.Crypto
+  | Tasks
+  | Plans
+  | Changes
+  | Sessions
+  | Runs
+  | Errands
+  | Busy
+  | Agents
+  | Models
+  | Installs
+  | ModelFacts
+  | Limits
+  | Accounts
+  | PlanUsage
+  | SignIns
 
 /** What each move did, as a line says it of the task. */
 const DID: Readonly<Record<TaskMove, (task: string) => string>> = {
@@ -185,6 +212,8 @@ export const cantMerge = (slug: string, error: CantMerge) => {
       return `${error.detail} moved while it merged: nothing was merged. Accept it again.`
     case 'missing':
       return `${slug} has no ${error.detail} here to merge into.`
+    case 'nothing':
+      return `${slug} has nothing to merge: its work is already in ${into}.`
   }
 }
 
@@ -235,7 +264,6 @@ export class TaskActions extends Context.Service<
       const sessions = yield* Sessions
       const runs = yield* Runs
       const errands = yield* Errands
-      const agents = yield* Agents
       const busy = yield* Busy
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
 
@@ -684,7 +712,17 @@ export class TaskActions extends Context.Service<
                 ? Effect.fail(error)
                 : Effect.andThen(
                     Effect.logWarning('A task action did not succeed', error),
-                    Effect.fail(new ToolRefused({ message: 'Althar could not do that. Try again, or tell the person.' })),
+                    Effect.fail(
+                      new ToolRefused({
+                        message: (() => {
+                          // What failed, in the window's words; a failure with none of its own is named by its kind.
+                          const said = words(error, (agentId) => agentId)
+                          return said.reason === 'Unknown' || said.message.startsWith("Althar's runtime couldn't do that")
+                            ? `Althar could not do that${said.reason === 'Unknown' ? '' : ` (${said.reason})`}, and what it did is in its log. Try again, or tell the person.`
+                            : `Nothing was done: ${said.message}`
+                        })(),
+                      }),
+                    ),
                   ),
             ),
           ),
@@ -773,6 +811,9 @@ export class TaskActions extends Context.Service<
           // As the card's buttons, at once: none of them can't be undone (ADR-097).
           const on = (move: TaskMove, answer: StuckAnswer) =>
             act(access, task, move, { args: { attentionId: call.id, answer }, why: asked.why })
+          // A lead waiting on the person is answered by them, with the answer they give it; none of the card's other ways apply.
+          if (info.why === 'waiting_on_person')
+            return yield* cant('it waits for the person’s answer: they answer it in the task, and their answer starts it again.')
           switch (asked.answer) {
             case 'as_is':
             case 'skip_review':
@@ -793,15 +834,22 @@ export class TaskActions extends Context.Service<
             case 'hand_on': {
               if (info.step === 'publish') return yield* cant('Althar opens the pull request itself: try it again instead.')
               if (asked.agent === undefined) return yield* cant('name the agent to hand it to (agent), and its model where it has several.')
-              if (!agents.list.some((entry) => entry.definition.id === asked.agent))
-                return yield* new ToolRefused({
-                  message: `Althar has no agent ${asked.agent}. It has: ${agents.list.map((entry) => entry.definition.id).join(', ')}.`,
-                })
+              // The agent by its name or its id, and its model as list_models writes it or by the agent's id: refused here, not on a card.
+              const handed = yield* stepOf(
+                access.projectId,
+                {
+                  agent: asked.agent,
+                  ...(asked.model === undefined ? {} : { model: asked.model }),
+                  ...(asked.effort === undefined ? {} : { effort: asked.effort }),
+                },
+                undefined,
+                true,
+              )
               return yield* on('hand_on', {
                 kind: 'retry',
-                agentId: asked.agent,
-                ...(asked.model === undefined ? {} : { model: asked.model }),
-                ...(asked.effort === undefined ? {} : { effort: asked.effort }),
+                agentId: handed.agentId,
+                ...(handed.model === null ? {} : { model: handed.model }),
+                ...('effort' in handed ? { effort: handed.effort } : {}),
               })
             }
           }
@@ -1087,8 +1135,15 @@ export class TaskActions extends Context.Service<
               task,
               why,
               answer: { type: 'string', enum: ['as_is', 'skip_review', 'again', 'hand_on'] },
-              agent: { type: 'string', description: 'For hand_on: the agent it goes to.' },
-              model: { type: 'string', description: 'For hand_on: its model.' },
+              agent: {
+                type: 'string',
+                description: 'For hand_on: the agent it goes to, by its name or its id (Claude Code, claude-code).',
+              },
+              model: {
+                type: 'string',
+                description:
+                  'For hand_on: its model, as list_models writes it or by the agent’s own id for it. One the agent doesn’t offer is refused, with the ones it does.',
+              },
               effort: { type: 'string', description: 'For hand_on: how hard it thinks, where the model offers it.' },
             },
             required: ['task', 'answer'],

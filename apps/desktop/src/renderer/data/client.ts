@@ -58,6 +58,7 @@ import {
   type NewProjectDefaultsChange,
   type IssueList,
   type Load,
+  type MissedReports,
   type ModelRoom,
   type PlanUsage,
   type OutputText,
@@ -171,7 +172,7 @@ export interface Client {
   readonly getFileDiff: (taskId: string, path: string, untouched?: boolean) => Promise<FileDiff>
   /** What the reviews of a task's run found, each where it is in the change now: the run of the review reported in `review`, else the latest. */
   readonly getTaskFindings: (taskId: string, review?: string) => Promise<TaskFindings>
-  /** The comments the person sent on lines of a task's diff, each where it is now and whether a commit since addressed it (ADR-105). */
+  /** The comments the person sent on lines of a task's diff, each where it is now and whether a commit since addressed it (decisions: desktop-app § Comments on the diff). */
   readonly getLineComments: (taskId: string) => Promise<TaskLineComments>
   /** What the names in a thread's messages name where its agent works, each message by its item where it has one. */
   readonly findCode: (
@@ -352,7 +353,7 @@ export interface Client {
     readonly files?: ReadonlyArray<SentFile>
     /** Any of its words came from dictation, even if edited after. */
     readonly dictated?: boolean
-    /** Comments on lines of the task's diff, each with its file, lines and code (ADR-105). */
+    /** Comments on lines of the task's diff, each with its file, lines and code (decisions: desktop-app § Comments on the diff). */
     readonly comments?: ReadonlyArray<LineComment>
   }) => Promise<void>
   /** Takes back a message still waiting its turn, by its item. */
@@ -536,6 +537,8 @@ export interface Client {
   readonly getPlanUsage: (options?: { readonly refresh?: boolean }) => Promise<PlanUsage>
   /** Each model's room where work on it would start, in a project (its rule for moving work through accounts) or anywhere. */
   readonly getModelRooms: (projectId: string | null) => Promise<ReadonlyArray<ModelRoom>>
+  /** Each model that ended steps without its report in the last week, once reminded, with how often. */
+  readonly getMissedReports: () => Promise<ReadonlyArray<MissedReports>>
   /** Downloads an agent for the person, checks it, and keeps it for Althar to run; done once it is ready. */
   readonly installAgent: (agentId: string) => Promise<void>
   /** Opens a task's folder in an editor, at one of its files and a line; whether it could. */
@@ -917,6 +920,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getLoad: () => settle(api.GetLoad({})),
     getPlanUsage: (options = {}) => settle(api.GetPlanUsage(options.refresh === undefined ? {} : { refresh: options.refresh })),
     getModelRooms: (projectId) => settle(api.GetModelRooms(projectId === null ? {} : { projectId })),
+    getMissedReports: () => settle(api.GetMissedReports({})),
     openInEditor: (input) => command((commandId) => api.OpenInEditor({ commandId, ...input })),
     openCode: (input) => command((commandId) => api.OpenCode({ commandId, ...input })),
     installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),

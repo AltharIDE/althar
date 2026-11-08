@@ -565,6 +565,15 @@ export const toolsOf = (access: ToolAccess) =>
 export const toolDescriptions = (access: ToolAccess) =>
   Effect.map(toolsOf(access), (tools): Record<string, string> => Object.fromEntries(tools.map((tool) => [tool.name, tool.description])))
 
+/**
+ * A test task's description, with `[lead:edit]` where its plan has a review and it doesn't say otherwise: a task
+ * with nothing built runs no review, so a test about a review builds something first unless it asks for `[lead:nothing]`.
+ */
+export const withWork = (description: string, review: boolean) =>
+  review && !description.includes('[lead:edit]') && !description.includes('[lead:commit]') && !description.includes('[lead:nothing]')
+    ? `${description} [lead:edit]`
+    : description
+
 /** Calls one of Althar's tools as an agent with this access would: over MCP, with the session's token. */
 export const callTool = (access: ToolAccess, name: string, args?: Record<string, unknown>) =>
   Effect.map(callToolAtOnce(access, name, [args]), (said) => said[0] ?? '')

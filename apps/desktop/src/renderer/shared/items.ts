@@ -29,7 +29,7 @@ export const sending = (
     readonly pictures?: ReadonlyArray<Picture>
     /** The files and folders sent with it. */
     readonly files?: ReadonlyArray<AttachedFile>
-    /** Its comments on lines of the diff (ADR-105). */
+    /** Its comments on lines of the diff (decisions: desktop-app § Comments on the diff). */
     readonly comments?: ReadonlyArray<LineComment>
   },
 ): { readonly id: string; readonly items: ReadonlyArray<ThreadItem> } => {
@@ -212,7 +212,7 @@ export const queuedOf = (
   readonly pictures: ReadonlyArray<Picture>
   readonly files: ReadonlyArray<AttachedFile>
   readonly dictated?: boolean
-  /** Its comments on lines of the diff, as they went (ADR-105). */
+  /** Its comments on lines of the diff, as they went (decisions: desktop-app § Comments on the diff). */
   readonly comments?: ReadonlyArray<LineComment>
 }> =>
   !shown

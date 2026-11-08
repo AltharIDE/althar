@@ -1,7 +1,7 @@
 import { Schema } from 'effect'
 
 /*
- * Comments the person makes on lines of a task's diff (DEV-175, ADR-105): a
+ * Comments the person makes on lines of a task's diff (DEV-175; decisions: desktop-app § Comments on the diff): a
  * line or a range of one file, what they said about it, and the code as it
  * showed, quoted, so the lead never has to guess which line is meant. Sent
  * with a message (`Send`'s `comments`), kept on the person's message as

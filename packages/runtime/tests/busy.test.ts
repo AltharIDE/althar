@@ -22,7 +22,7 @@ import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, repository, runtime, until } from './support'
+import { callTool, repository, runtime, until, withWork } from './support'
 
 /*
  * How many tasks are at work at once on this machine (Busy.ts, ADR-032).
@@ -163,7 +163,7 @@ const reviewed = (projectId: ProjectId, title: string, description: string) =>
       envelope: yield* Runtime.envelope('task.create', { title }),
       projectId,
       title,
-      description,
+      description: withWork(description, true),
       draft: true,
     })
     const actor = yield* person

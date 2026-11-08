@@ -74,6 +74,7 @@ import { PlanUsage } from './PlanUsage'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
+import { missedReports } from './missedReports'
 import { PullRequestScreenshots } from './PullRequestScreenshots'
 import {
   accountsOf,
@@ -308,7 +309,7 @@ export const handlers = Api.toLayer(
           )
     /** What a message's command says of its files: how many, never their names or paths; nothing where it has none. */
     const filesSaid = (kept: ReadonlyArray<InputFile>) => (kept.length === 0 ? {} : { files: kept.length })
-    /** A message's comments on the diff, kept with the files as they are now (ADR-105); none where it has none. */
+    /** A message's comments on the diff, kept with the files as they are now (decisions: desktop-app § Comments on the diff); none where it has none. */
     const commentsFor = (threadId: string, comments: ReadonlyArray<LineComment> | undefined) =>
       comments === undefined || comments.length === 0 ? Effect.succeed([]) : queries.keepLineComments(threadId, comments)
     const commentsSaid = (kept: ReadonlyArray<unknown>) => (kept.length === 0 ? {} : { comments: kept.length })
@@ -1821,6 +1822,7 @@ export const handlers = Api.toLayer(
             Effect.provideService(Accounts, accounts),
           ),
         ),
+      GetMissedReports: () => api(missedReports),
       // Done once the copy is ready; its version and its models are asked again, as it is a new one.
       InstallAgent: ({ agentId }) =>
         api(

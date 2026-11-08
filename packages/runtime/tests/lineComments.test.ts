@@ -20,7 +20,7 @@ import { hunksOf } from '../src/taskFindings'
 import { fakeAgents, fakeConnectors, repository, ROOMY } from './support'
 
 /*
- * Comments on lines of a task's diff (ADR-105): what the lead reads of them,
+ * Comments on lines of a task's diff (decisions: desktop-app § Comments on the diff): what the lead reads of them,
  * each with its file, its lines and the code quoted; how the thread keeps
  * them; and, once a commit changes their lines, that they are addressed.
  */

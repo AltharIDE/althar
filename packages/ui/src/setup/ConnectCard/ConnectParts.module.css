@@ -47,7 +47,7 @@
 }
 .found > svg {
   flex: none;
-  color: var(--ok);
+  color: var(--ok-ink);
 }
 .foundNo,
 .foundNo > svg {
@@ -304,7 +304,7 @@
   height: 18px;
 }
 .isCan .glyph {
-  color: var(--ok);
+  color: var(--ok-ink);
 }
 .todo,
 .unknown {

@@ -199,6 +199,10 @@ describe('run_project and stop_project, for a lead', () => {
       const projectId = project.projectId
 
       assert.strictEqual(yield* callTool(lead, 'stop_project', {}), 'Nothing runs in your worktree, so there was nothing to stop.')
+      assert.strictEqual(
+        yield* callTool(lead, 'stop_project', { task: 'no-such-task' }),
+        'This project has no task no-such-task. list_tasks shows them.',
+      )
       // Its default, in its worktree, once it says where it answers.
       const ran = yield* callTool(lead, 'run_project', {})
       assert.match(ran, /^Running `npm run dev` in your worktree, at http:\/\/localhost:5199\/\. Read it there, or take a screenshot of it/)
@@ -262,7 +266,7 @@ describe('run_project and stop_project, for a lead', () => {
 })
 
 describe('screenshot', () => {
-  it('takes only a page served on this computer, or by a run Althar started, over http, at a viewport kept within a screen', () => {
+  it('takes any HTTP page at a bounded viewport, keeping file URLs refused', () => {
     for (const host of ['localhost', 'app.localhost', '127.0.0.1', '127.1.2.3', '[::1]', '0.0.0.0']) assert.isTrue(isLocal(host), host)
     for (const host of ['example.com', 'localhost.example.com', '10.0.0.4', '192.168.1.2']) assert.isFalse(isLocal(host), host)
 
@@ -290,13 +294,10 @@ describe('screenshot', () => {
     // What the page goes on to is held to the same: this computer, or the runs' origins.
     assert.isTrue(mayDraw('http://localhost:6006/iframe.html', []))
     assert.isTrue(mayDraw('http://studio.lan:3000/b', ['http://studio.lan:3000']))
-    assert.isFalse(mayDraw('http://studio.lan:4000/', ['http://studio.lan:3000']))
-    assert.isFalse(mayDraw('https://example.com/', []))
+    assert.isTrue(mayDraw('http://studio.lan:4000/', ['http://studio.lan:3000']))
+    assert.isTrue(mayDraw('https://example.com/', []))
     assert.isFalse(mayDraw('file:///etc/hosts', []))
-    assert.strictEqual(
-      shotOf({ url: 'https://example.com/' }, ['http://studio.lan:3000/']),
-      "Althar takes screenshots only of what is served on this computer, such as a run's or a dev server's on localhost: not example.com.",
-    )
+    assert.deepInclude(shotOf({ url: 'https://example.com/' }, []) as object, { url: 'https://example.com/' })
     assert.match(shotOf({ url: 'file:///etc/hosts' }, []) as string, /web pages only, over http: not file: addresses/)
     assert.strictEqual(shotOf({}, []), 'Give the url of the page, such as http://localhost:5173/.')
     assert.strictEqual(shotOf({ url: 'http://' }, []), "http:// isn't an address Althar can open.")
@@ -342,15 +343,15 @@ describe('screenshot', () => {
         { url: 'http://localhost:5173/settings', width: 800, height: 600, fullPage: false, selector: null, origins: [] },
         { url: 'http://localhost:6006/', width: 1280, height: 800, fullPage: true, selector: '#root', origins: [] },
       ])
-      // A page out on the internet isn't taken; one that won't load says why.
+      // Remote pages are taken too; one that won't load says why.
       const outside = yield* callToolWhole(lead, 'screenshot', { url: 'https://example.com' })
-      assert.isTrue(outside.isError)
-      assert.match(String(outside.content[0]?.text), /only of what is served on this computer/)
+      assert.isFalse(outside.isError)
+      assert.strictEqual(outside.content[1]?.type, 'image')
       assert.strictEqual(
         yield* callTool(lead, 'screenshot', { url: 'http://localhost:1/down' }),
         'Althar couldn’t take it: the page didn’t load: ERR_CONNECTION_REFUSED',
       )
-      assert.lengthOf(asked, 2)
+      assert.lengthOf(asked, 3)
     }).pipe(Effect.provide(runtime(undefined, undefined, { screenshot })))
   })
 

@@ -9,7 +9,7 @@ import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, notices, repository, runtime, turns, until } from './support'
+import { callTool, notices, repository, runtime, turns, until, withWork } from './support'
 
 /*
  * A task's review and the lead settling it, where coordinator.test.ts and
@@ -32,7 +32,7 @@ const reviewed = (title: string, description: string) =>
       envelope: yield* Runtime.envelope('task.create', {}),
       projectId: project.projectId,
       title,
-      description,
+      description: withWork(description, true),
       draft: true,
     })
     const planId = yield* plans.propose({

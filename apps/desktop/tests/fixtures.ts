@@ -1105,6 +1105,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getLoad: vi.fn(async () => load),
     getPlanUsage: vi.fn(async () => ({ accounts: [] })),
     getModelRooms: vi.fn(async () => []),
+    getMissedReports: vi.fn(async () => []),
     openInEditor: vi.fn(async () => true),
     openCode: vi.fn(async () => true),
     // Names no code, unless a test says what they name.

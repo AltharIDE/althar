@@ -203,7 +203,7 @@
   display: block;
 }
 .plus {
-  color: var(--ok);
+  color: var(--ok-ink);
 }
 .minus {
   color: var(--danger);

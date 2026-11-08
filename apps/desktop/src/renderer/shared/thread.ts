@@ -130,7 +130,7 @@ export type Block =
       readonly pictures: ReadonlyArray<Picture>
       /** The files and folders the person sent with it. */
       readonly files: ReadonlyArray<AttachedFile>
-      /** What they said of lines of the task's diff, each with its code (ADR-105). */
+      /** What they said of lines of the task's diff, each with its code (decisions: desktop-app § Comments on the diff). */
       readonly comments?: ReadonlyArray<SentLineComment>
     }
   | {

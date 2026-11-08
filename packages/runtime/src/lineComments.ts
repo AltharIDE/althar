@@ -9,7 +9,7 @@ import { gitExactly, treeOf } from './git'
 import { carriedLine, type Hunk, hunksOf } from './taskFindings'
 
 /*
- * Comments the person makes on lines of a task's diff (DEV-175, ADR-105).
+ * Comments the person makes on lines of a task's diff (DEV-175; decisions: desktop-app § Comments on the diff).
  * Sent with a message, each is kept on the person's message item with the
  * files of its worktree as they were then (a tree git keeps, `treeOf`), and
  * the lead reads it after the person's words: its file, its lines and the

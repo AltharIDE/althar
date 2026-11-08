@@ -221,8 +221,23 @@ export const ModelRoom = Schema.Struct({
   resetsAt: Schema.NullOr(Schema.String),
   kind: UsageWindowKind,
   label: Schema.NullOr(Schema.String),
+  /** The account is marked out of usage, as steering sees it (no fresh reading since shows room): until when. The room above is its last read. */
+  outUntil: Schema.optional(Schema.String),
 })
 export type ModelRoom = typeof ModelRoom.Type
+
+/**
+ * How often a model ended a step without its report in the last week, even
+ * once reminded, by agent and model: Althar handed each to another model, or
+ * it needed the person. Pickers say it beside the model.
+ */
+export const MissedReports = Schema.Struct({
+  agentId: Schema.String,
+  /** The model's id at the agent; null for the agent's own default. */
+  model: Schema.NullOr(Schema.String),
+  count: Schema.Number,
+})
+export type MissedReports = typeof MissedReports.Type
 
 /** The percent of a plan left at which a warning is told. */
 export const USAGE_WARN_AT = [50, 25, 10, 5] as const
@@ -1452,7 +1467,7 @@ export const UserMessageItem = Schema.Struct({
     links: Schema.Array(Unfurl),
     pictures: Schema.Array(Picture),
     files: Schema.Array(AttachedFile),
-    /** What they said of lines of the task's diff, each with the code it is on (ADR-105). */
+    /** What they said of lines of the task's diff, each with the code it is on (decisions: desktop-app § Comments on the diff). */
     comments: Schema.optional(Schema.Array(SentLineComment)),
   }),
   input: Schema.NullOr(
@@ -2863,6 +2878,8 @@ export const StuckStep = Schema.Struct({
     'transient',
     // Its agent's account is signed out: signing it in again in Settings, then trying again, is the way on.
     'signed_out',
+    // The lead stopped to wait for the person's answer: its detail is the question, and the answer starts it again.
+    'waiting_on_person',
   ]),
   /** What went wrong, in the agent's or Althar's words; for the last round, the lead's summary. */
   detail: Schema.NullOr(Schema.String),
@@ -2874,8 +2891,8 @@ export const StuckStep = Schema.Struct({
   round: Schema.Number,
   /** Review findings the lead hasn't settled. */
   open: Schema.Number,
-  /** What Althar did before asking: told the agent to carry on, started it afresh, or told it to try another way. */
-  tried: Schema.optional(Schema.Array(Schema.Literals(['carried_on', 'restarted', 'redirected']))),
+  /** What Althar did before asking: told the agent to carry on, started it afresh, told it to try another way, or handed the step to another model. */
+  tried: Schema.optional(Schema.Array(Schema.Literals(['carried_on', 'restarted', 'redirected', 'handed_on']))),
   /** For a usage limit: the account that reached it, and when it resets, where it said, and who could take the step over. */
   limit: Schema.optional(LimitCall),
   /** For a service that kept failing: its name. */
@@ -4003,7 +4020,7 @@ export const Api = RpcGroup.make(
    */
   call('GetTaskFindings', { taskId: Schema.String, review: Schema.optional(Schema.String) }, TaskFindings),
   /**
-   * The comments the person sent on lines of a task's diff (ADR-105), each
+   * The comments the person sent on lines of a task's diff (decisions: desktop-app § Comments on the diff), each
    * where its lines are in the change now, and addressed once a commit since
    * it was made changed them.
    */
@@ -4188,7 +4205,7 @@ export const Api = RpcGroup.make(
       files: Schema.optional(SentFiles),
       /** Any of what the person said came from dictation. */
       dictated: Schema.optional(Schema.Boolean),
-      /** Comments on lines of the task's diff sent with what the person said (ADR-105). */
+      /** Comments on lines of the task's diff sent with what the person said (decisions: desktop-app § Comments on the diff). */
       comments: Schema.optional(LineComments),
     },
     Schema.String,
@@ -4436,7 +4453,7 @@ export const Api = RpcGroup.make(
       files: Schema.optional(SentFiles),
       /** Any of its words came from dictation, even if the person edited them after: the agent is told, so it reads past what was misheard. */
       dictated: Schema.optional(Schema.Boolean),
-      /** Comments on lines of a task's diff (ADR-105): the agent reads each with its file, its lines and the code quoted, after the words. */
+      /** Comments on lines of a task's diff (decisions: desktop-app § Comments on the diff): the agent reads each with its file, its lines and the code quoted, after the words. */
       comments: Schema.optional(LineComments),
     },
     Schema.Void,
@@ -4678,6 +4695,8 @@ export const Api = RpcGroup.make(
   call('GetPlanUsage', { refresh: Schema.optional(Schema.Boolean) }, PlanUsage),
   /** Each model's room where work on it would start, in the project where given (its rule for moving work through accounts): read again as plan usage changes. */
   call('GetModelRooms', { projectId: Schema.optional(Schema.String) }, Schema.Array(ModelRoom)),
+  /** Each model that ended steps without its report in the last week, once reminded, with how often. */
+  call('GetMissedReports', {}, Schema.Array(MissedReports)),
   /** Downloads an agent's latest release for the person, checks it against the digest its release publishes, and keeps it for Althar to run; done once it is ready. */
   command('InstallAgent', { agentId: Schema.String }, Schema.Void),
   /** Opens a task's folder in an editor, at one of its files and a line where given; whether it could. The path is the task's, as its changes list it. */

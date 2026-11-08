@@ -85,6 +85,7 @@ import { Instance } from './Instance'
 import { Launches } from './Launches'
 import type { ChangeTarget } from '@althar/domain'
 import { commitOf, commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRemotes, PUSHED, branchRemoteIn } from './git'
+import { reachedRemote } from './sshHosts'
 import { commandIn, shortCommand } from './rules'
 import { reviewBriefOf } from './Reviews'
 import { Sessions } from './Sessions'
@@ -354,7 +355,8 @@ export const stuckOf = (payload: unknown): StuckStep => {
       why === 'over_budget' ||
       why === 'refused' ||
       why === 'transient' ||
-      why === 'signed_out'
+      why === 'signed_out' ||
+      why === 'waiting_on_person'
         ? why
         : 'failed_to_start',
     detail: typeof detail === 'string' ? detail : null,
@@ -637,6 +639,8 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       // Older threads kept the agent's explanation of a refusal as a notice; the refused call's own row says it now.
       const title = text(content, 'title')
       if (title === 'Resumed after a rejection.') return undefined
+      // A session's line of skills that said nothing new, kept for its list only: it never reaches the window.
+      if (role === 'skills' && field(content, 'hidden') === true) return undefined
       // Likewise the coordinator's receipt of a denial, kept by older threads.
       if (title?.startsWith('Denied ') && description?.startsWith('By the coordinator:') && text(content, 'about') === 'permission')
         return undefined
@@ -900,7 +904,7 @@ export class Queries extends Context.Service<
     fileDiff(taskId: string, path: string, untouched?: boolean): Effect.Effect<FileDiff, unknown>
     /** What the reviews of a task's latest run found, each where it is in the change now and what became of it. */
     findings(taskId: string, review?: string): Effect.Effect<TaskFindings, unknown>
-    /** The comments the person sent on a task's diff, each where its lines are now and whether a commit since changed them (ADR-105). */
+    /** The comments the person sent on a task's diff, each where its lines are now and whether a commit since changed them (decisions: desktop-app § Comments on the diff). */
     lineComments(taskId: string): Effect.Effect<TaskLineComments, unknown>
     /** Comments on a task's diff about to be sent in a thread, each with the tree of its worktree's files as they are now; none for a thread with no task. */
     keepLineComments(threadId: string, comments: ReadonlyArray<LineComment>): Effect.Effect<ReadonlyArray<KeptLineComment>, unknown>
@@ -1380,7 +1384,9 @@ export class Queries extends Context.Service<
             branch,
             pushed: there !== null || pushed !== null,
             ahead,
-            newPullRequest: url === undefined ? null : newPullRequestLink(url, branch, base, HOSTED),
+            // An SSH alias of a known host (github.com-work) opens its page on that host.
+            newPullRequest:
+              url === undefined ? null : newPullRequestLink(yield* reachedRemote(url, (host) => HOSTED.has(host)), branch, base, HOSTED),
           }
         }).pipe(Effect.orElseSucceed(() => null))
 

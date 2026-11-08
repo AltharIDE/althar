@@ -201,7 +201,7 @@ export function McpActs({ parts }: { parts: ReadonlyArray<Part> }) {
 export interface ThreadWays {
   readonly onRules?: () => void
   readonly onSignIn?: (agentId: string) => void
-  /** Opens the task's diff on a comment the person sent on its lines (ADR-105). */
+  /** Opens the task's diff on a comment the person sent on its lines (decisions: desktop-app § Comments on the diff). */
   readonly onOpenComment?: (id: string, path: string) => void
 }
 export const ThreadWaysContext = createContext<ThreadWays>({})

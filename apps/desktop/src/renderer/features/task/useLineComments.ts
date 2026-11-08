@@ -7,7 +7,7 @@ import { useServices } from '../../data/services'
 import { ago } from '../../shared/time'
 
 /*
- * The person's comments on lines of a task's diff (DEV-175, ADR-105): those
+ * The person's comments on lines of a task's diff (DEV-175; decisions: desktop-app § Comments on the diff): those
  * they wrote and gathered, waiting to go, kept for each task while the window
  * is open; and those sent, read from the runtime each time the Changes view
  * opens and as the change moves, each where it is now and addressed once a

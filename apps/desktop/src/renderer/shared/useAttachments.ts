@@ -51,7 +51,7 @@ export interface Outgoing {
   readonly attached: ReadonlyArray<AttachedFile>
   /** Some of its words were dictated, even if edited after: the agent is told so. Set with the images, so each send carries it. */
   readonly dictated?: boolean
-  /** Comments on lines of the task's diff (ADR-105), sent with it from the Changes view. */
+  /** Comments on lines of the task's diff (decisions: desktop-app § Comments on the diff), sent with it from the Changes view. */
   readonly comments?: ReadonlyArray<LineComment>
 }
 

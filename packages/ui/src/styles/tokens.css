@@ -25,7 +25,7 @@
   /* ---- Ink ---------------------------------------------------------------*/
   --t-1: #141417; /* primary */
   --t-2: #45454c; /* secondary */
-  --t-3: #6f6f77; /* tertiary — metadata */
+  --t-3: #63636b; /* tertiary — metadata */
   --t-4: #9a99a0; /* quaternary — disabled, faint scaffolding */
 
   /* ---- Lines -------------------------------------------------------------
@@ -34,11 +34,14 @@
   --line: rgba(20, 20, 28, 0.07);
   --line-2: rgba(20, 20, 28, 0.11);
   --line-3: rgba(20, 20, 28, 0.18);
+  --field-edge: #85858b; /* a field's edge: 3:1 against the page (WCAG 1.4.11) */
+  --field-edge-hover: #6c6c73;
 
   /* ---- Signal ------------------------------------------------------------
      Violet means exactly one thing: this requires a person.                 */
   --signal: #7a3ff0;
   --signal-bright: #6a2fd6;
+  --signal-ink: #6a2fd6; /* violet as words on its own wash (a status chip): --signal itself reads 4.3:1 there */
   --signal-dim: rgba(122, 63, 240, 0.1);
   --selection: rgba(122, 63, 240, 0.1); /* selected text */
   --signal-line: rgba(122, 63, 240, 0.32);
@@ -63,6 +66,7 @@
   --danger-dim: rgba(196, 64, 47, 0.07);
   --danger-hover: rgba(196, 64, 47, 0.12);
   --ok: #2e8c46;
+  --ok-ink: #237a3a; /* green as words: --ok is for marks, this reads at 4.5:1 */
 
   /* ---- Roles on paper -----------------------------------------------------
      What sits on a raised sheet, by what it does. On paper each is a shade

@@ -299,6 +299,38 @@ describe('a task that ends in a pull request', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('proposes nothing when its branch took main in and has no commit of its own', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:wait-for-person] [lead:finish]',
+      )
+      const [waiting] = yield* until(cards(projectId), (all) => all[0]?.phase === 'waiting')
+      const sql = yield* SqlClient.SqlClient
+      const [worktree] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${waiting?.taskId ?? ''}`
+      // Main moves on, and the task's branch takes it in without a commit of its own: behind main, not ahead of it.
+      writeFileSync(join(working, 'moved.txt'), 'moved\n')
+      git(working, 'add', '.')
+      git(working, '-c', 'user.name=Test', '-c', 'user.email=test@althar.test', 'commit', '-q', '-m', 'Move on')
+      git(worktree?.path ?? '', 'merge', '-q', '--ff-only', 'refs/heads/main')
+      // The person answers, and the lead finishes having built nothing of its own.
+      yield* (yield* Sessions).send({
+        envelope: yield* Runtime.envelope('thread.send', { threadId: waiting?.threadId ?? '' }),
+        threadId: waiting?.threadId ?? '',
+        body: 'Go on.',
+      })
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+      assert.isNull(ready?.change)
+      assert.lengthOf(github.changes, 0)
+      const published = (yield* items(ready?.threadId ?? '')).find((item) => item.kind === 'step_result' && item.content.step === 'publish')
+      assert.strictEqual(published?.content.summary, 'The branch has no commits to propose, so nothing was pushed.')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('pushes a fork’s branch to the fork, and opens its pull request where the project says: on the fork, or upstream', () => {
     const { working, bare } = hosted(['you', 'api'])
     git(working, 'remote', 'add', 'upstream', `${HOST}/meridian/api.git`)

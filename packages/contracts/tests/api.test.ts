@@ -514,6 +514,7 @@ describe('the API', () => {
                 }),
               GetPlanUsage: () => Effect.succeed({ accounts: [] }),
               GetModelRooms: () => Effect.succeed([]),
+              GetMissedReports: () => Effect.succeed([]),
               InstallAgent: () => Effect.die('unused'),
               OpenInEditor: () => Effect.die('unused'),
               SetEffort: () => Effect.die('unused'),
