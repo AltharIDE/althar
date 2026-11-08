@@ -105,7 +105,11 @@ import { RpcClient } from 'effect/rpc'
  */
 
 /** What may change of a project's rules at once: any of it. */
-export type ProjectRulesChange = { readonly projectId: string } & Partial<Omit<ProjectRulesView, 'projectId' | 'revision' | 'sandbox'>> & {
+export type ProjectRulesChange = { readonly projectId: string } & Partial<
+  Omit<ProjectRulesView, 'projectId' | 'revision' | 'sandbox' | 'trustedBots' | 'suggestedBots'>
+> & {
+    /** The bots its leads hear, by their accounts, the list whole (ADR-104). */
+    readonly trustedBots?: ReadonlyArray<string>
     /** What the person changed of what leads' sandboxes let through: each list's edits, whole. */
     readonly sandbox?: { readonly commands?: SandboxEdits; readonly hosts?: SandboxEdits }
     /** The revision a change that replaces a list was made against: refused where the rules have moved on since. */
@@ -481,6 +485,8 @@ export interface Client {
   readonly getVocabulary: (projectId: string) => Promise<ReadonlyArray<string>>
   /** Changes what is given of a project's rules; the rules as they are after it. */
   readonly setProjectRules: (input: ProjectRulesChange) => Promise<ProjectRulesView>
+  /** Trusts a bot in a task's project, from the thread where it spoke: its leads hear it from then on (ADR-104). */
+  readonly trustBot: (taskId: string, login: string) => Promise<void>
   /** Adds an account to an agent: in the folder a grant names, or one Althar makes. */
   readonly addAccount: (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => Promise<AccountStatus>
   readonly renameAccount: (accountId: string, name: string) => Promise<void>
@@ -885,6 +891,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     editProjectNote: (projectId, noteId, body) => command((commandId) => api.EditProjectNote({ commandId, projectId, noteId, body })),
     getVocabulary: (projectId) => settle(api.GetVocabulary({ projectId })),
     setProjectRules: (input) => command((commandId) => api.SetProjectRules({ commandId, ...input })),
+    trustBot: (taskId, login) => command((commandId) => api.TrustBot({ commandId, taskId, login })),
     addAccount: (input) => command((commandId) => api.AddAccount({ commandId, ...input })),
     renameAccount: (accountId, name) => command((commandId) => api.RenameAccount({ commandId, accountId, name })),
     removeAccount: (accountId, anyway) =>

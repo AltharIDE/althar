@@ -1207,6 +1207,8 @@ describe('project rules, through the API', () => {
           resolveConflicts: true,
           pushCommits: true,
           postScreenshots: false,
+          trustedBots: [],
+          suggestedBots: [],
           leadsReachWeb: true,
           usageLimit: 'move',
           rotateAccounts: false,

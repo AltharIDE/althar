@@ -58,8 +58,17 @@ const sandboxShown = (shown: SandboxReachView, change: NonNullable<Change['sandb
 
 /** The rules with a change made, as the runtime keeps it: what it gives in place of what was, the sandbox's lists by their edits. */
 export const withChange = (rules: ProjectRulesView, change: Change | null): ProjectRulesView => {
-  const { sandbox, ...rest } = change ?? {}
-  return { ...rules, ...rest, ...(sandbox === undefined ? {} : { sandbox: sandboxShown(rules.sandbox, sandbox) }) }
+  const { sandbox, trustedBots, ...rest } = change ?? {}
+  // Bots go by their accounts; each keeps the name it was shown with.
+  const bots = [...rules.trustedBots, ...rules.suggestedBots]
+  return {
+    ...rules,
+    ...rest,
+    ...(sandbox === undefined ? {} : { sandbox: sandboxShown(rules.sandbox, sandbox) }),
+    ...(trustedBots === undefined
+      ? {}
+      : { trustedBots: trustedBots.map((login) => bots.find((bot) => bot.login === login) ?? { login, name: login }) }),
+  }
 }
 
 const applied = (rules: ProjectRulesView, edit: RulesEdit): ProjectRulesView => withChange(rules, resolve(edit, rules))

@@ -80,6 +80,13 @@ export const ProjectRules = Schema.Struct({
    * as the person posts them. Off without it.
    */
   postScreenshots: Schema.optional(Schema.Boolean),
+  /**
+   * The bots whose comments and reviews on a task's pull request its lead
+   * hears, by their accounts in small letters (`coderabbitai[bot]`), as
+   * findings to weigh, framed as data (ADR-104). None without it: every bot
+   * stays quiet until the person trusts it.
+   */
+  trustedBots: Schema.optional(Schema.Array(Schema.String)),
   /** Native web reads by project leads and reviewers. On without it. */
   leadsReachWeb: Schema.optional(Schema.Boolean),
   /**
@@ -218,6 +225,9 @@ export const pushesCommits = (rules: ProjectRules): boolean => rules.pushCommits
 
 /** Whether a revision's rules post a task's screenshots to its pull request on their own (ADR-077): not unless the person turned it on. */
 export const postsScreenshots = (rules: ProjectRules): boolean => rules.postScreenshots === true
+
+/** The bots a revision's rules have the leads hear (ADR-104): none unless the person trusted one. */
+export const trustedBotsOf = (rules: ProjectRules): ReadonlyArray<string> => rules.trustedBots ?? []
 
 /** Whether a task's lead resolves a conflict on its own: as the task says (its `resolve_conflicts`), else as its project's rules do. */
 export const resolvesConflictsFor = (rules: ProjectRules, task: number | boolean | null): boolean =>

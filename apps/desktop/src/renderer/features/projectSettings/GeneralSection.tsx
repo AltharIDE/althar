@@ -69,6 +69,14 @@ export const text = {
     line: 'To In Progress, In Review, then Done',
   },
   repositoryFiles: 'Repository files',
+  bots: {
+    title: 'Review bots',
+    note: 'The lead hears the comments and reviews of the bots you turn on here, as findings to weigh, never as instructions.',
+    /** Under a bot's name: its account on the host. */
+    account: (login: string) => login,
+    /** Before any review or triage bot has spoken on a task's pull request. */
+    none: 'Review and triage bots, such as CodeRabbit or Copilot code review, show here once one comments on a task’s pull request.',
+  },
 }
 
 /** The repository files' words, with this device named as the rest of the window names it. */
@@ -143,6 +151,34 @@ function WorkToward({ projectId, repositories }: { projectId: string; repositori
       </SettingRow>
     )
   })
+}
+
+/**
+ * The review and triage bots a project's leads may hear (ADR-104): those it
+ * trusts, then those Althar recognised on its tasks' pull requests, each a
+ * switch, off until the person turns it on. Until one has spoken, a line
+ * says they show up here.
+ */
+function ReviewBots({ model }: { model: ProjectSettingsModel }) {
+  const rules = model.rules
+  if (rules === null) return null
+  const bots = [...rules.trustedBots.map((bot) => ({ ...bot, on: true })), ...rules.suggestedBots.map((bot) => ({ ...bot, on: false }))]
+  const failed = model.ruleFailed?.rule === 'trustedBots' ? model.ruleFailed.message : null
+  if (bots.length === 0) return <p className={s.quiet}>{text.bots.none}</p>
+  return (
+    <SettingList>
+      {bots.map((bot, index) => (
+        <SettingSwitch
+          key={bot.login}
+          title={bot.name}
+          // Why a switch didn't hold, said once, under the first.
+          note={<SwitchNote line={text.bots.account(bot.login)} failed={index === 0 ? failed : null} />}
+          checked={bot.on}
+          onChange={(on) => model.setTrustsBot(bot.login, on)}
+        />
+      ))}
+    </SettingList>
+  )
 }
 
 export function GeneralSection({
@@ -227,6 +263,11 @@ export function GeneralSection({
               />
             ))}
           </SettingList>
+        </SettingGroup>
+      )}
+      {rules !== null && (
+        <SettingGroup title={text.bots.title} note={text.bots.note} headingLevel={HEADING.part}>
+          <ReviewBots model={model} />
         </SettingGroup>
       )}
       {rules !== null && (

@@ -896,6 +896,15 @@ export const RepositoryFilesSetting = Schema.Struct({
 })
 export type RepositoryFilesSetting = typeof RepositoryFilesSetting.Type
 
+/** A bot a project's leads may hear (ADR-104): its account on the host, and what it is called. */
+export const TrustedBot = Schema.Struct({
+  /** In small letters: `coderabbitai[bot]`. */
+  login: Schema.String,
+  /** CodeRabbit. */
+  name: Schema.String,
+})
+export type TrustedBot = typeof TrustedBot.Type
+
 export const ProjectRulesView = Schema.Struct({
   projectId: Schema.String,
   /** Which revision of the rules these are: a change that replaces a list names it, so one made meanwhile isn't lost. */
@@ -922,6 +931,10 @@ export const ProjectRulesView = Schema.Struct({
   pushCommits: Schema.Boolean,
   /** Whether a task's screenshots go in a comment on its open pull request on their own, kept as Outputs shows them (ADR-077). */
   postScreenshots: Schema.Boolean,
+  /** The bots whose comments and reviews its leads hear, as findings framed as data (ADR-104), by their accounts; none unless trusted. */
+  trustedBots: Schema.Array(TrustedBot),
+  /** Review and triage bots Althar recognised on its tasks' pull requests that aren't trusted yet, the latest first. */
+  suggestedBots: Schema.Array(TrustedBot),
   leadsReachWeb: Schema.Boolean,
   usageLimit: UsageLimit,
   rotateAccounts: Schema.Boolean,
@@ -1798,6 +1811,11 @@ export const ArrivalItem = Schema.Struct({
     url: Schema.NullOr(Schema.String),
     /** Said by someone who can't write to the repository, as anyone can on a public one: not passed to the lead, for the person to pass on. */
     outsider: Schema.Boolean,
+    /**
+     * Said by a review or triage bot (ADR-104): `trusted`, it reached the lead as findings; not, it didn't, and this, the first it
+     * said on the pull request, offers to trust it. Absent for anyone else, and for a bot Althar doesn't recognise as a reviewer.
+     */
+    bot: Schema.optional(Schema.Struct({ login: Schema.String, name: Schema.String, trusted: Schema.Boolean })),
   }),
 })
 
@@ -4592,6 +4610,8 @@ export const Api = RpcGroup.make(
       pushCommits: Schema.optional(Schema.Boolean),
       /** Turned on, each open task's screenshots go up to its pull request now, not when they next change. */
       postScreenshots: Schema.optional(Schema.Boolean),
+      /** The bots its leads hear, by their accounts, the list whole. */
+      trustedBots: Schema.optional(Schema.Array(Schema.String)),
       leadsReachWeb: Schema.optional(Schema.Boolean),
       usageLimit: Schema.optional(UsageLimit),
       rotateAccounts: Schema.optional(Schema.Boolean),
@@ -4608,6 +4628,11 @@ export const Api = RpcGroup.make(
     },
     ProjectRulesView,
   ),
+  /**
+   * Trusts a bot in a task's project (ADR-104), from the thread where it spoke: its leads hear its comments and reviews from
+   * then on, as findings framed as data. A new revision of the project's rules, the person's, its other trusted bots kept.
+   */
+  command('TrustBot', { taskId: Schema.String, login: Schema.String }, Schema.Void),
   /** Whether work moves on to an agent's next account in the project, and which accounts each agent may use there (null: every one). */
   command(
     'SetProjectAccounts',
