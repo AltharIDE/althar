@@ -1,4 +1,4 @@
-import type { AttachedFile, Picture, ThreadItem } from '@althar/contracts'
+import type { AttachedFile, ConversationView, Picture, ThreadItem } from '@althar/contracts'
 
 import { text as imagesText } from './images'
 import type { Streamed } from './thread'
@@ -60,6 +60,17 @@ export const unsent = (items: ReadonlyArray<ThreadItem>, id: string, text: strin
   return other === undefined ? items : items.filter((item) => item.id !== other.id)
 }
 
+/**
+ * Whether a place in the coordinator's thread is in the view the window shows, by its mark: a whole view takes every place; a
+ * cleared one those from the mark on, and, with the earlier conversation open, those before it.
+ */
+export const placedInView = (view: ConversationView, sequence: number): boolean =>
+  view.from === null || (view.earlierOpen ? sequence < view.from : sequence >= view.from)
+
+/** Whether an item belongs in that view. An item the window holds already (a card carried in from before the mark) always does, to be kept up to date. */
+export const inView = (view: ConversationView, held: ReadonlyArray<ThreadItem>, item: ThreadItem): boolean =>
+  placedInView(view, item.sequence) || held.some((one) => one.id === item.id)
+
 /** Items by id, oldest first: what arrives replaces what was there, and the store's copy of a message, the window's. */
 export const mergeItems = (current: ReadonlyArray<ThreadItem>, incoming: ReadonlyArray<ThreadItem>): ReadonlyArray<ThreadItem> => {
   const byId = new Map(current.map((item) => [item.id, item]))
@@ -115,12 +126,17 @@ export const settled = (item: ThreadItem): boolean => {
       return item.content.state !== 'open'
     case 'automation':
       return item.content.state === 'deleted' || item.content.ask?.done === true
+    case 'setting':
+      return item.content.state !== 'asked'
     case 'agent_message':
     case 'agent_thought':
     case 'notice':
     case 'step_result':
     case 'arrival':
     case 'pictures':
+    // A small change's card and Auto's line are read from the task or kept current; neither waits open.
+    case 'small_change':
+    case 'model_move':
       return true
   }
 }

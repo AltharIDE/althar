@@ -54,9 +54,9 @@ export const newProjectDefaultsText: NewProjectDefaultsText = {
   usageLimit: {
     title: 'When an account runs out',
     options: {
-      move: { label: 'Move to the next agent', note: 'With none free, the work waits for the reset.' },
+      move: { label: 'Move to the strongest model with usage left', note: 'With none left, the work waits for the reset.' },
       wait: { label: 'Wait for the reset', note: 'The work runs again at the reset.' },
-      ask: { label: 'Ask me', note: 'Move it to a free model, or wait for the reset.' },
+      ask: { label: 'Ask me', note: 'Move it to a model with usage left, or wait for the reset.' },
     },
   },
   rotate: { title: 'Try an agent’s other accounts first', note: 'Before the limit applies.' },

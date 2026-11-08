@@ -14,17 +14,21 @@ import s from './Tool.module.css'
 
 /*
  * One row per tool call, by kind: read, edit, search, run, fetch, and the
- * rest. ACP's statuses map to: pending and in progress (cobalt), completed
- * (ink), failed (the exit code in red, nothing else). A call that never ran
- * because someone said no, or was stopped with the turn, is neither: it is
- * set back and says so, without red. Waiting on you is a Permission, not a
- * tool call.
+ * rest. ACP's statuses map to: pending and in progress (cobalt, a spinner
+ * for its glyph), completed (ink, and nothing more said), failed (a red
+ * cross for its glyph, and the exit code in red where there is one). A call
+ * that never ran because someone said no, or was stopped with the turn, is
+ * neither: it is set back and says so, without red. Waiting on you is a
+ * Permission, not a tool call.
  *
- * Opened, a command or an edit becomes one sheet: the row is its header and
- * the output its body, so a command and what it printed read as one thing.
+ * A command stays a row like the others: it shows once, on one line, and
+ * whole once opened, with what it printed under it. Copy is an icon that
+ * shows on hover. An edit opened becomes one sheet: the row is its header and
+ * the diff its body.
  */
 
-function glyphOf(kind: ToolKind): IconName {
+/** The icon a tool call of a kind goes by: its row's, and its line while it is what a turn is doing now (WorkNow). */
+export function glyphOf(kind: ToolKind): IconName {
   switch (kind) {
     case ToolKind.Read:
       return 'file'
@@ -88,7 +92,7 @@ export interface ToolProps extends Disclosable {
   kind: ToolKind
   /** What it did: Read, Ran, Edited. */
   verb: string
-  /** What it did it to: a path, a command. The row shows one line of it; a command over several says there is more. */
+  /** What it did it to: a path, a command. The row shows one line of it, and a command over several says there is more; opened, a command shows whole. */
   target: string
   /** A trailing note: a count, lines changed. */
   meta?: ReactNode
@@ -100,7 +104,7 @@ export interface ToolProps extends Disclosable {
   took?: string
   /** For a command: what Copy puts on the clipboard. */
   copy?: string
-  /** Opens as a sheet, like a command does. */
+  /** Opens as a sheet, its row the header: for a diff. */
   sheet?: boolean
   /** The output. Without it the row does not open. */
   children?: ReactNode
@@ -136,15 +140,31 @@ export function Tool({
   const [open, setOpen] = useControlled(disclosure.open, disclosure.defaultOpen ?? false, disclosure.onOpenChange)
   const opens = children != null
   const run = kind === ToolKind.Run
-  const sheetable = sheet || run
-  const glyph = state === ToolState.Running ? <Spinner size="small" /> : <Icon name={glyphOf(kind)} size={12} />
+  const sheetable = sheet === true
+  const glyph =
+    state === ToolState.Running ? (
+      <Spinner size="small" />
+    ) : state === ToolState.Failed ? (
+      <Icon name="close" size={12} />
+    ) : (
+      <Icon name={glyphOf(kind)} size={12} />
+    )
   const linked = onOpenTarget != null
-  const shown = oneLine(target)
+  /* a command opened shows whole, wrapping under itself, so it needn't be said again over its output */
+  const whole = run && open && opens
+  const shown = whole ? target : oneLine(target)
   /* a linked target is its own button, beside the toggle rather than in it; the toggle still says it for its name */
   const head = (
     <>
       <span className={s.glyph}>{glyph}</span>
-      <span className={s.verb}>{verb}</span> {linked ? <VisuallyHidden>{shown}</VisuallyHidden> : <span className={s.target}>{shown}</span>}
+      <span className={s.verb}>{verb}</span>{' '}
+      {linked ? (
+        <VisuallyHidden>{shown}</VisuallyHidden>
+      ) : (
+        <span className={s.target} title={whole ? undefined : target}>
+          {shown}
+        </span>
+      )}
     </>
   )
   const note = (
@@ -173,11 +193,11 @@ export function Tool({
     <Disclosure
       open={open}
       onOpenChange={setOpen}
-      className={cx(s.tool, s[state], open && sheetable && s.sheet, sheetable && s.sheetable, run && s.run)}
+      className={cx(s.tool, s[state], open && sheetable && s.sheet, sheetable && s.sheetable)}
       rhythm={open && sheetable ? Rhythm.Sheet : Rhythm.Tool}
       busy={state === ToolState.Running}
     >
-      <div className={cx(s.row, linked && s.linked)}>
+      <div className={cx(s.row, linked && s.linked, whole && s.whole)}>
         {opens ? (
           <DisclosureTrigger>
             {/* its hit area stretches over the whole row, so the caret after Copy still opens it */}
@@ -196,9 +216,9 @@ export function Tool({
             {note}
           </>
         )}
-        {opens && copy && (
-          <span className={s.copy} inert={!open}>
-            <CopyButton value={copy} text={t.copy} />
+        {copy && (
+          <span className={s.copy}>
+            <CopyButton value={copy} text={t.copy} ghost />
           </span>
         )}
         {opens && <Caret className={s.caret} />}

@@ -2,6 +2,7 @@ import type {
   AccountSignInState,
   AgentModels,
   AgentStatus,
+  AgentTools,
   AutomationCard,
   AutomationDefinition,
   AutomationRun,
@@ -41,7 +42,7 @@ import { vi } from 'vitest'
 import { type AppPreferences, DEFAULT_PREFERENCES } from '../src/main/appPreferences'
 import type { Client, ProjectRulesChange } from '../src/renderer/data/client'
 import { withChange } from '../src/renderer/features/rules/useRules'
-import type { Host } from '../src/renderer/data/services'
+import type { Host, PagesHost } from '../src/renderer/data/services'
 
 /* What the runtime would say, as plain values, and a client that says it. */
 
@@ -688,6 +689,27 @@ export const items = {
       ...content,
     },
   }),
+  /** An agent's change to a setting: made, with Undo, unless said otherwise. */
+  setting: (content: Partial<Extract<ThreadItem, { kind: 'setting' }>['content']> = {}, id?: string): ThreadItem => ({
+    ...next(),
+    ...(id === undefined ? {} : { id }),
+    agentId: null,
+    kind: 'setting',
+    content: {
+      changeId: 'change1',
+      section: 'althar/plans-and-reviews',
+      title: 'Plans and reviews',
+      project: null,
+      moves: [{ key: 'rounds', label: 'Review rounds', before: '3', after: '5' }],
+      by: { kind: 'coordinator', taskId: null, title: null },
+      loosens: false,
+      words: null,
+      why: null,
+      state: 'done',
+      said: null,
+      ...content,
+    },
+  }),
 }
 
 /** What an automation is: the morning review, of each new pull request, every weekday at 9:00, led by Claude Code. */
@@ -806,6 +828,7 @@ export const coordinatorSnapshot = (overrides: Partial<CoordinatorSnapshot> = {}
   suggested: { agentId: 'claude-code', agentName: 'Claude Code', model: null, effort: null, available: true },
   items: [],
   earlier: false,
+  view: { cleared: false, earlierOpen: false, from: null, clearable: false, forgettable: false, version: 1 },
   host: null,
   runnables: [],
   launches: [],
@@ -1022,6 +1045,15 @@ export const skillCard: SkillReviewCard = {
 }
 
 /** A client whose every call resolves with the fixtures, and whose watch the test drives with `emit`. */
+/** The person's MCP servers and skills, as a profile that reads none has them. */
+export const agentTools: AgentTools = {
+  enabled: true,
+  servers: [],
+  skills: [],
+  serverSync: { on: false, settle: [], since: [], targets: [], errors: [] },
+  skillSync: { on: false, settle: [], since: [], targets: [], errors: [] },
+}
+
 export const fakeClient = (overrides: Partial<Client> = {}) => {
   const listeners = new Set<(event: WatchEvent) => void>()
   const watching: Array<number | undefined> = []
@@ -1098,6 +1130,13 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getModels: vi.fn(async () => models),
     setDefaultEffort: vi.fn(async () => {}),
     setModelBlocked: vi.fn(async () => {}),
+    getAgentTools: vi.fn(async () => agentTools),
+    setToolRoles: vi.fn(async () => {}),
+    setToolSync: vi.fn(async () => {}),
+    setToolKeptOut: vi.fn(async () => {}),
+    pickToolWay: vi.fn(async () => {}),
+    undoToolSync: vi.fn(async () => {}),
+    signInToolServer: vi.fn(async () => {}),
     getSettings: vi.fn(async () => ({
       coAuthor: { on: true, line: 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>' },
       reviewSeal: { on: true, style: 'ring' as const },
@@ -1120,8 +1159,14 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     pauseAutomation: vi.fn(async () => {}),
     runAutomationNow: vi.fn(async () => {}),
     answerTaskAsk: vi.fn(async () => {}),
+    makeItAFullTask: vi.fn(async () => {}),
+    keepTheModel: vi.fn(async () => {}),
+    undoTheModelMove: vi.fn(async () => {}),
     deleteAutomation: vi.fn(async () => {}),
     undoAutomationChange: vi.fn(async () => {}),
+    answerSettingChange: vi.fn(async () => {}),
+    undoSettingChange: vi.fn(async () => {}),
+    getSettingChanges: vi.fn(async () => []),
     setAutomationPostsReviews: vi.fn(async () => {}),
     setAutomationsPaused: vi.fn(async () => {}),
     listSkills: vi.fn(async () => ({ enabled: true, catalogRevision: 'fixture-1', skills: [installedSkill] })),
@@ -1144,6 +1189,10 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     interrupt: vi.fn(async () => {}),
     tryAgain: vi.fn(async () => {}),
     compact: vi.fn(async () => {}),
+    clearView: vi.fn(async () => {}),
+    showEarlier: vi.fn(async () => {}),
+    undoClearView: vi.fn(async () => {}),
+    forgetConversation: vi.fn(async () => {}),
     stopTask: vi.fn(async () => {}),
     setTaskResolveConflicts: vi.fn(async () => {}),
     resolveConflictsNow: vi.fn(async () => {}),
@@ -1165,6 +1214,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     startPlan: vi.fn(async () => {}),
     holdPlan: vi.fn(async () => {}),
     changePlan: vi.fn(async () => {}),
+    changeTeam: vi.fn(async () => {}),
     changeIssueDraft: vi.fn(async () => {}),
     fileIssueDraft: vi.fn(async () => {}),
     discardIssueDraft: vi.fn(async () => {}),
@@ -1301,6 +1351,30 @@ const keptPreferences = (): Pick<Host, 'preferences' | 'setPreference'> => {
   }
 }
 
+/** The main process's pages beside the conversations, doing nothing: a test sets what it looks at. */
+export const fakePagesHost = (overrides: Partial<PagesHost> = {}): PagesHost => ({
+  open: vi.fn(async () => null),
+  states: vi.fn(async () => []),
+  show: vi.fn(),
+  move: vi.fn(async () => {}),
+  viewport: vi.fn(async () => {}),
+  point: vi.fn(async () => null),
+  stopPointing: vi.fn(async () => {}),
+  pins: vi.fn(async () => {}),
+  find: vi.fn(async () => null),
+  still: vi.fn(async () => null),
+  cover: vi.fn(async () => {}),
+  outside: vi.fn(async () => {}),
+  dismiss: vi.fn(async () => {}),
+  close: vi.fn(async () => {}),
+  clear: vi.fn(async () => {}),
+  clearAll: vi.fn(async () => {}),
+  onState: () => () => {},
+  onKey: () => () => {},
+  onClosed: () => () => {},
+  ...overrides,
+})
+
 export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   ...keptPreferences(),
   platform: 'darwin',
@@ -1383,10 +1457,12 @@ export const streamed = (
   threadId = 'th1',
   kind: 'agent_message' | 'agent_thought' = 'agent_message',
   agentId = 'claude-code',
+  sequence = 1,
 ): WatchEvent => ({
   _tag: 'Streaming',
   threadId,
   itemId,
+  sequence,
   kind,
   agentId,
   text,

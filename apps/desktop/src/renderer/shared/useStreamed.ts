@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import type { ThreadItem } from '@althar/contracts'
+import type { ConversationView, ThreadItem } from '@althar/contracts'
 
 import { useServices, useWatch } from '../data/services'
-import { caughtUp } from './items'
+import { caughtUp, placedInView } from './items'
 import type { Streamed } from './thread'
 
 /*
@@ -18,12 +18,22 @@ import type { Streamed } from './thread'
  * stops or starts again, and the store's text shows until the next words
  * stream. What the store holds in full goes too, however its items arrive:
  * read one by one, or the whole thread again.
+ *
+ * On the coordinator's thread the view decides what is heard. Words of an item
+ * the view leaves out, before the mark of a cleared view, or after it while the
+ * earlier conversation shows, are not kept; and as the view is cleared, brought
+ * back, opened or closed, or the conversation wiped (its version moves), what
+ * was held goes: the words of an item still being written come again whole.
  */
 
 /* Nothing streamed: what a thread shows the moment another replaces it. */
 const NONE: ReadonlyMap<string, Streamed> = new Map()
 
-export const useStreamed = (threadId: string | null, items: ReadonlyArray<ThreadItem>): ReadonlyMap<string, Streamed> => {
+export const useStreamed = (
+  threadId: string | null,
+  items: ReadonlyArray<ThreadItem>,
+  view?: ConversationView,
+): ReadonlyMap<string, Streamed> => {
   const { feed } = useServices()
   const [streaming, setStreaming] = useState<ReadonlyMap<string, Streamed>>(NONE)
 
@@ -39,21 +49,25 @@ export const useStreamed = (threadId: string | null, items: ReadonlyArray<Thread
 
   useWatch((event) => {
     if (event._tag !== 'Streaming' || event.threadId !== threadId) return
+    if (view !== undefined && !placedInView(view, event.sequence)) return
     setStreaming((current) =>
       new Map(current).set(event.itemId, {
         kind: event.kind,
         agentId: event.agentId,
         text: event.text,
+        sequence: event.sequence,
         at: current.get(event.itemId)?.at ?? new Date().toISOString(),
       }),
     )
   })
 
   // Another thread's words aren't this one's.
-  const [shownFor, setShownFor] = useState(threadId)
-  const another = shownFor !== threadId
+  // Nor are the words of a thread before its view changed.
+  const version = view?.version
+  const [shownFor, setShownFor] = useState({ threadId, version })
+  const another = shownFor.threadId !== threadId || shownFor.version !== version
   if (another) {
-    setShownFor(threadId)
+    setShownFor({ threadId, version })
     setStreaming(NONE)
   }
 

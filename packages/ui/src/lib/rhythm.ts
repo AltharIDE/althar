@@ -25,6 +25,8 @@ export enum Rhythm {
   Allowed = 'allowed',
   /** A task's trace over time. */
   Mark = 'mark',
+  /** A quiet line standing for a round of its own, as a review does: closer to what came before than a round, and a run of them reads as one list. */
+  Line = 'line',
   /** A task's card, or the card that launches one. */
   Card = 'card',
 }

@@ -91,11 +91,31 @@ export interface RuntimeOptions {
     readonly list: () => ReadonlyArray<{ readonly id: string; readonly name: string }>
     readonly open: (editor: string, folder: string, file: string | null, line: number | null) => Effect.Effect<boolean>
   }
+  /**
+   * The person's own agents' settings (ADR-097): the home their MCP servers
+   * and skills are read from, which load in every role, and which sync keeps
+   * the same; and Althar's folder for sync's record and the copies of the
+   * files it changed. Without it, none is read or written: a test's runtime
+   * never touches the home it runs in.
+   */
+  readonly agentConfigs?: {
+    readonly homeDir: string
+    readonly folder: string
+    /** The environment that says where each agent keeps its settings (CODEX_HOME, XDG_CONFIG_HOME): Althar's own without it. */
+    readonly env?: Readonly<Record<string, string | undefined>>
+    /** Runs one of the person's agents' own commands, as sync writes through them; the agents' own on this computer without it. */
+    readonly run?: (command: string, args: ReadonlyArray<string>) => Promise<{ readonly code: number; readonly output: string }>
+  }
   readonly appVersion: string
   /** What this device is called, when the profile is new. */
   readonly deviceName: string
   /** How long a proposed plan waits before it starts on its own: 25 seconds unless a test says otherwise. */
   readonly countdown?: Duration.Duration
+  /**
+   * How long a task the coordinator drafted, with no plan yet, stays off the board before it is the person's: five
+   * minutes unless a test says otherwise. Its turn ending without a plan brings it to the person sooner.
+   */
+  readonly drafting?: Duration.Duration
   /** How often a task's pull requests are asked for news while it listens: 30 seconds unless a test says otherwise. */
   readonly listenEvery?: Duration.Duration
   /** How often the merge line is swept, and whether at all (not with an infinite one): 30 seconds unless a test says otherwise (MergeLine.ts). */

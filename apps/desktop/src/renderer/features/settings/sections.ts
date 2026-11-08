@@ -1,3 +1,4 @@
+import { SETTINGS_SECTIONS } from '@althar/contracts'
 import type { IconName } from '@althar/ui'
 
 import { device } from '../../shared/device'
@@ -7,24 +8,13 @@ import { device } from '../../shared/device'
  * down its side and its address names them: the agents and the code hosts
  * Althar works with, and the skills the agents are given; then its own ways (work on this computer, how long it
  * goes on alone, what a new project starts with, reviews and pull requests,
- * notifications, how it looks, the editor); then which
+ * notifications, how it looks, the editor, the pages beside conversations); then which
  * Althar this is. A setting to come goes in the section it is about, and a
  * section to come between those it sits among.
  */
 
-export const SECTIONS = [
-  'agents',
-  'skills',
-  'code-hosts',
-  'this-mac',
-  'plans-and-reviews',
-  'new-projects',
-  'reviews',
-  'notifications',
-  'appearance',
-  'editor',
-  'about',
-] as const
+/** As contracts lists them, so the agents' read_settings names the same sections (ADR-097). */
+export const SECTIONS = SETTINGS_SECTIONS
 
 export type Section = (typeof SECTIONS)[number]
 
@@ -36,13 +26,14 @@ export const FIRST_SECTION: Section = 'agents'
 
 /** The sections in their groups, a little apart down the side. */
 export const GROUPS: ReadonlyArray<ReadonlyArray<Section>> = [
-  ['agents', 'skills', 'code-hosts'],
-  ['this-mac', 'plans-and-reviews', 'new-projects', 'reviews', 'notifications', 'appearance', 'editor'],
+  ['agents', 'mcp-servers', 'skills', 'code-hosts'],
+  ['this-mac', 'plans-and-reviews', 'new-projects', 'reviews', 'notifications', 'appearance', 'editor', 'browser'],
   ['about'],
 ]
 
 export const sectionText: Readonly<Record<Section, { readonly title: string; readonly icon: IconName }>> = {
   agents: { title: 'Agents', icon: 'agents' },
+  'mcp-servers': { title: 'MCP servers', icon: 'plug' },
   skills: { title: 'Skills', icon: 'knowledge' },
   'code-hosts': { title: 'Code hosts and trackers', icon: 'plug' },
   'this-mac': { title: `Work on ${device.this}`, icon: 'load' },
@@ -52,5 +43,6 @@ export const sectionText: Readonly<Record<Section, { readonly title: string; rea
   notifications: { title: 'Notifications', icon: 'bell' },
   appearance: { title: 'Appearance', icon: 'image' },
   editor: { title: 'Editor', icon: 'file' },
+  browser: { title: 'Browser', icon: 'globe' },
   about: { title: 'About Althar', icon: 'down' },
 }

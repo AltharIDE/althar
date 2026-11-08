@@ -1260,7 +1260,7 @@ describe('a task’s pull request', () => {
     opened.mockRestore()
   })
 
-  it('shows what it changed, file by file, from its header, its outputs, or ⌘D', async () => {
+  it('shows what it changed, file by file, from its worktree’s part, its outputs, or ⌘D', async () => {
     const file = (path: string, more: Partial<ThreadSnapshot['task']['files'][number]> = {}) => ({
       path,
       from: null,
@@ -1298,7 +1298,11 @@ describe('a task’s pull request', () => {
       ),
     })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: /^2 files/ }))
+    // From its worktree, among its parts before the faces (ADR-097).
+    await userEvent.click(await screen.findByRole('button', { name: /^Parts, / }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Worktree' }))
+    expect(await screen.findByText('2 files changed')).toBeTruthy()
+    await userEvent.click(await screen.findByRole('button', { name: /^See the changes/ }))
     const view = await screen.findByRole('dialog', { name: 'Changes' })
     expect(within(view).getByText('althar/retry into main')).toBeTruthy()
     // The first file, read from the runtime when you get to it.
@@ -1506,9 +1510,12 @@ describe('a project, reaching outside', () => {
       getThread: vi.fn(async () => snapshot({ task: { ...snapshot().task, phase: 'ready', changes: [change(), web] } })),
     })
     withServices(<Task />, client)
-    expect((await screen.findByRole('link', { name: 'Open meridian/api #12 on GitHub' })).textContent).toBe('api #12')
-    expect(screen.getByRole('link', { name: 'Open meridian/web #4 on GitHub' }).textContent).toBe('web #4')
-    await userEvent.click(screen.getByRole('button', { name: 'Mark web ready for review' }))
+    expect((await screen.findByRole('link', { name: 'Open api #12 on GitHub' })).textContent).toBe('api #12')
+    expect(screen.getByRole('link', { name: 'Open web #4 on GitHub' }).textContent).toBe('web #4')
+    // Both drafts: one press marks both ready, and each on its own is a menu away.
+    expect(screen.getByRole('button', { name: 'Mark both ready for review' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Each on its own' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Mark web ready for review' }))
     expect(ready).toHaveBeenCalledWith('t1', 'https://github.com/meridian/web/pull/4')
   })
 
@@ -1522,24 +1529,46 @@ describe('a project, reaching outside', () => {
       head: 'def456',
     })
     const ready = { ...snapshot().task, phase: 'ready' as const, changes: [api, web], commits: 2 }
-    // The first waits until the test says: the second isn't asked for meanwhile, and Accept stays busy.
+    // The first waits until the test says: the second isn't asked for meanwhile, and Accept stays busy. Once the first has
+    // merged, as the runtime then says, the second merges.
     let finish: () => void = () => undefined
+    let landed = false
     const merge = vi.fn(
       (_taskId: string, head: string) =>
         new Promise<void>((resolve) => {
-          if (head === 'abc123') finish = resolve
+          if (head === 'abc123')
+            finish = () => {
+              landed = true
+              resolve()
+            }
           else resolve()
         }),
     )
-    const { client } = fakeClient({ merge, getThread: vi.fn(async () => snapshot({ task: ready })) })
+    const getThread = vi.fn(async () =>
+      snapshot({ task: landed ? { ...ready, changes: [{ ...api, state: 'merged' as const }, web] } : ready }),
+    )
+    const { client } = fakeClient({ merge, getThread })
     const view = withServices(<Task />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Accept and merge both' }))
     await waitFor(() => expect(merge).toHaveBeenCalledTimes(1))
     expect(merge).toHaveBeenLastCalledWith('t1', 'abc123', 'https://github.com/meridian/api/pull/12')
     expect(screen.getByRole('button', { name: 'Accept and merge both' }).getAttribute('aria-busy')).toBe('true')
+    // api merges now, web after it.
+    const order = within(screen.getByRole('list', { name: 'In the order they merge' })).getAllByRole('listitem')
+    expect(order[0]?.textContent).toMatch(/Merging into main/)
+    expect(order[1]?.textContent).toMatch(/Merges after api/)
     act(() => finish())
     await waitFor(() => expect(merge).toHaveBeenLastCalledWith('t1', 'def456', 'https://github.com/meridian/web/pull/4'))
     view.unmount()
+
+    // Taken by its host but not landed yet, as in its merge queue, the first holds the second back: pressed again, it goes.
+    const queued = vi.fn(async () => undefined)
+    const held = fakeClient({ merge: queued, getThread: vi.fn(async () => snapshot({ task: ready })) })
+    const again = withServices(<Task />, held.client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Accept and merge both' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Accept and merge both' }).getAttribute('aria-busy')).toBeNull())
+    expect(queued).toHaveBeenCalledTimes(1)
+    again.unmount()
 
     // Refused, the first stops it there: the second waits, and the refusal is said.
     const refused = vi.fn(async () => {
@@ -1548,7 +1577,13 @@ describe('a project, reaching outside', () => {
     const second = fakeClient({ merge: refused, getThread: vi.fn(async () => snapshot({ task: ready })) })
     withServices(<Task />, second.client)
     await userEvent.click(await screen.findByRole('button', { name: 'Accept and merge both' }))
-    expect(await screen.findByText(/It moved on since you looked/)).toBeTruthy()
+    // Said on the one refused.
+    await waitFor(() =>
+      expect(within(screen.getByRole('list', { name: 'In the order they merge' })).getAllByRole('listitem')[0]?.textContent).toMatch(
+        /Not merged: It moved on since you looked/,
+      ),
+    )
+    expect(screen.queryByRole('alert')).toBeNull()
     expect(refused).toHaveBeenCalledTimes(1)
   })
 

@@ -28,6 +28,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'chrome/WindowButtons/WindowButtons.tsx': 'the traffic lights, whose shape is the system’s own',
   'chrome/WorkStatus/WorkStatus.tsx': 'a row of what needs you, in the count’s preview; the bare count, the words of the chip it sits in',
   'chrome/LoadMeter/LoadPeek.tsx': 'a piece of work’s row, which opens it',
+  'composer/Comments/Comments.tsx': 'a comment’s chip, the whole of which opens it again on the page',
   'thread/StepGraph/StepGraph.tsx': 'a step’s card, the whole of which opens its report; a round’s marker, a pill over the lanes',
   'screens/Automations/Automations.tsx': 'an automation’s name, stretched over its card, which opens its page',
   'screens/Automations/AutomationPage.tsx': 'a run’s row, which opens its task',
@@ -35,14 +36,20 @@ const PLAIN: Readonly<Record<string, string>> = {
     'the disk’s legend, the whole of which opens the list of folders; a folder’s row, which opens its task',
   'thread/Reviewer/Reviewer.tsx': 'a finding’s row, which opens it under its line in the code',
   'thread/Reviewer/FindingNote.tsx': 'a finding’s title, which opens it under its line in the code',
+  'chrome/TaskParts/TaskParts.tsx':
+    'the parts’ marks in the bar, the whole of which opens them; a part’s row or chip, which opens it in place; Add and Back, a popover’s own head',
+  'setup/AgentTools/AgentTools.tsx':
+    'a server’s marks, which open its menu; a server’s chip in a file, the whole of which takes it out or puts it back',
   /* opens and closes what is below it */
   'thread/Reasoning/Reasoning.tsx': 'the row that folds the reasoning',
   'outputs/Usage/Usage.tsx': 'the card’s head, which folds its lines',
   'thread/WorkedFor/WorkedFor.tsx': 'the row that folds the work',
   'thread/SkillsSeen/SkillsSeen.tsx': 'the line that folds what a lead could see',
+  'thread/ReviewLine/ReviewLine.tsx': 'the line that folds a review round’s findings and words',
   'thread/WorkLine/WorkLine.tsx': 'the line that folds a round’s work; what it looked at, as thumbnails',
   'thread/Checked/Checked.tsx': 'the row of a check, which folds what it printed',
   'thread/Tool/Tool.tsx': 'the rows that fold a call or a run of them, and the path as a link',
+  'thread/Terminal/Terminal.tsx': 'the line over a command’s output that folds its earlier lines',
   'thread/Permission/Permission.tsx': 'the allowed line, which folds',
   'thread/Document/Document.tsx': 'the fold at the foot of a document',
   'thread/Step/Step.tsx': 'the caret that opens a step',

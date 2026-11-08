@@ -137,6 +137,20 @@ export const ManyOpen: Story = { args: { initial: MANY, current: 'billing-web' }
 export const TwentyOpen: Story = { args: { initial: TWENTY, current: 'tessera-14' } }
 /** Nothing open yet but the home. */
 export const OnlyHome: Story = { args: { initial: [], current: null } }
+
+/** Home has a close button where there is somewhere else to go: a project's tab, or the settings'. */
+export const HomeClosable: Story = { args: { current: null, onCloseHome: fn() } }
+
+/** Home dismissed: its mark at the bar's end reopens it, with the dot while calls wait in any project. */
+export const HomeDismissed: Story = {
+  args: { home: false, onOpenHome: fn() },
+  play: async ({ canvasElement, args }) => {
+    const bar = within(canvasElement)
+    await expect(bar.queryByRole('button', { name: 'Close Home' })).toBeNull()
+    await userEvent.click(bar.getByRole('button', { name: /^Home/ }))
+    await expect(args.onOpenHome).toHaveBeenCalled()
+  },
+}
 /** Every project open: the + starts a new project at once. */
 export const EveryProjectOpen: Story = { args: { initial: ALL } }
 /** In the app the system draws the lights; the bar keeps their space. */
@@ -241,6 +255,21 @@ export const WithSettings: Story = {
     await expect(nav.queryByRole('button', { name: 'Settings' })).toBeNull()
   },
 }
+
+/** A page in a tab of its own, after the projects': named by its title, with the window while it is pressed; its × closes it. */
+export const WithAPage: Story = {
+  args: {
+    current: null,
+    pages: [{ id: 'task_refunds', title: 'Refunds · Acme', current: true, onSelect: fn(), onClose: fn() }],
+  },
+  play: async ({ canvasElement }) => {
+    const nav = within(within(canvasElement).getByRole('navigation', { name: 'Projects' }))
+    const pages = within(nav.getByRole('list', { name: 'Pages' }))
+    await expect(pages.getByRole('button', { name: 'Refunds · Acme' })).toHaveAttribute('aria-current', 'page')
+    await expect(nav.getByRole('button', { name: /^Home/ })).not.toHaveAttribute('aria-current')
+  },
+}
+export const WithAPageDark: Story = { ...WithAPage, globals: { theme: 'dark' } }
 
 /** With another project to open, New project is the + menu's last item; with none, the + starts one at once. */
 export const StartingANewProject: Story = {

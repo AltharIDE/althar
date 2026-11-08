@@ -290,7 +290,11 @@ const findingsOf = (reviewing: ReviewBrief) => {
 type Card = Omit<BoardCardProps, 'onOpen' | 'current' | 'text'>
 
 /** The automation whose run a task is, as its card says it, quietly. */
-const fromOf = (work: BoardTask): Pick<Card, 'from'> => (work.automation == null ? {} : { from: work.automation.name })
+/** Where it came from, at its foot: the automation whose run it is, or the task whose lead started it (ADR-097). */
+const fromOf = (work: BoardTask): Pick<Card, 'from' | 'startedBy'> => ({
+  ...(work.automation == null ? {} : { from: work.automation.name }),
+  ...(work.startedBy === undefined ? {} : { startedBy: work.startedBy.title }),
+})
 
 /** A running task's card: its step and its track, or Working; its branch or pull request; and why it stands still, where it does. */
 export const runningCardOf = (work: BoardTask, now: string, name: (id: string | null) => string, actions?: CardActions): Card => {
@@ -795,7 +799,8 @@ export function BoardView({
   // A plan that hasn't begun starts, or changes who does it, from its row; one starting offers Start no more until it has.
   const teamOf = (work: BoardTask) => {
     const change = team === undefined ? null : teamChangeOf(work)
-    if (team === undefined || change === null || work.plan === null) return {}
+    // A task that has begun changes its team from its own menu, not from its row.
+    if (team === undefined || change === null || change === 'begun' || work.plan === null) return {}
     const planId = work.plan.id
     const start =
       change === 'starts' && !starting.has(planId)

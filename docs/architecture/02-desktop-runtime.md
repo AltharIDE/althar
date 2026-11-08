@@ -1,5 +1,10 @@
 # Desktop Application and Local Runtime
 
+[ADR-103](../decisions/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
+proposes remote project homes and worker pools alongside this local topology.
+Its persistent headless service is a proposed exception to the no-service
+deployment below; the local utility process stays. No remote host is built yet.
+
 ## Purpose
 
 This document explains how the local desktop application is divided, why that
@@ -94,6 +99,7 @@ flowchart LR
 | Runtime | Commands, queries, policy, workflow scheduling, persistence, process supervision | Provider model loop or window state |
 | Provider child | Provider-native conversation, model/tool loop, provider context | Althar project or workflow truth |
 | Speech process | Dictation's speech model: bringing it down, and turning speech into text on this machine (ADR-017) | Anything but speech; it starts when someone dictates and stops when idle |
+| Page beside a conversation | A web page the person looks at with a lead: a task's run, a link from its thread (ADR-100) | Althar's bridge, the runtime's port, any of Althar's sessions, cookies or credentials, file or other schemes, web permissions |
 | SQLite | Canonical local structured state | Large blobs or live process streams |
 | Artifact store | Content-addressed immutable bytes | Mutable domain authority |
 
@@ -228,6 +234,65 @@ folder, and starts a speech utility process to bring it down and to turn
 what was said into text. That process runs a native addon (sherpa-onnx), so
 it is kept apart from the runtime, and stops once it has sat idle. Nothing
 said leaves the machine (ADR-017).
+
+### A page beside the conversation
+
+A task's run, and a link in its thread, open on the conversation's
+workbench, beside the thread and its composer (ADR-100). The page is not
+part of the window's page. It is a `WebContentsView` the main process lays
+over the window, at the place the window measures and sends each frame. It
+runs in the task's own persistent partition (`persist:task-<id>`; beside
+the coordinator, the project's), with no preload, sandboxed and
+context-isolated, so nothing in it reaches the bridge, the runtime or what
+Althar keeps.
+
+```mermaid
+flowchart LR
+    Window["Window<br/>PagePanel: bar, frame, comment box"]
+    Main["Main process<br/>browser/: pages, guards, devices"]
+    View["WebContentsView<br/>persist:task-id, no preload"]
+    Overlay["Overlay<br/>isolated world, closed shadow root"]
+    Runtime["Runtime"]
+
+    Window -- "open, place each frame, point, viewport" --> Main
+    Main -- "state, keys pressed in the page" --> Window
+    Main --> View
+    Main -- "executeJavaScriptInIsolatedWorld" --> Overlay
+    Overlay -- "element pointed at" --> Main
+    Main -- "capturePage: crop, still" --> Window
+    Window -- "Send: words, comments, crops" --> Runtime
+    Runtime -- "tasks settled" --> Main
+```
+
+- **Its rules are the main process's** (`browser/guards.ts`):
+  - **What loads.** Only `http:` and `https:` load, on navigation,
+    redirect, frame and pop-up. A pop-up opens in the same view.
+  - **What is sent out.** Sign-ins of Claude, GitHub, GitLab and Linear go
+    to the person's browser. Downloads are refused, and offered to the
+    person's browser.
+  - **Permissions.** Every web permission is refused, but writing to the
+    clipboard what the person copies.
+- **Pointing at the page** runs an overlay script in an isolated world of
+  the page. It hands back the element's selector, words, place and look,
+  checked as untrusted. The main process crops the spot with `capturePage`.
+  The comment is written in the window, over a picture of the page, and
+  waits in the composer to go with the person's words.
+- **The window's own menus and dialogs** would draw under the native view.
+  While one is over the page's place, the window shows a picture of the
+  page there, and the view steps aside.
+- **Viewport** lays the page out at a device's size, drawn whole and
+  smaller, through the DevTools protocol, with touch and a mobile browser's
+  user agent for a tablet or a phone.
+- **Cookies** are kept as the person chooses (Settings › Browser). The
+  runtime tells the main process as tasks are done or abandoned and
+  projects removed, and the main process clears their partitions where the
+  person keeps cookies only that long. Their pages close then, and the
+  windows hear it.
+- **Pages are the main process's, not a window's.** A window that closes
+  or reloads (as when the runtime restarts) leaves its pages hidden. The
+  window keeps where each shows in its storage; one opened or reloaded
+  after asks the main process which it still has and how each stands, and
+  shows those where they were.
 
 ### Window close and application quit
 

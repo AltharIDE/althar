@@ -85,3 +85,103 @@ describe('a quick task’s lead making it a change', () => {
     }).pipe(Effect.provide(runtime())),
   )
 })
+
+describe('the buttons on a task’s lead, as tools', () => {
+  it.live('change its lead, try it again, compact it and set its issue part, from the coordinator or another lead', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const projects = yield* Projects
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const threadId = yield* (yield* Coordinator).thread(project.projectId)
+      const coordinator: ToolAccess = { role: 'coordinator', projectId: project.projectId, threadId, sessionId: 'none', taskId: null }
+      const quick = (title: string) =>
+        Effect.gen(function* () {
+          yield* callTool(coordinator, 'start_task', { title, description: '[lead:finish]', lead: { agent: 'codex' } })
+          const [task] = yield* sql<{ taskId: string; threadId: string; slug: string }>`
+            SELECT k.id AS task_id, k.slug, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+            WHERE k.project_id = ${project.projectId} AND k.title = ${title}`
+          if (task === undefined) return assert.fail('no task')
+          yield* until(
+            turns(task.threadId),
+            (rows) => rows.length >= 1 && rows.every((row) => !['pending', 'delivered'].includes(row.state)),
+          )
+          return task
+        })
+      const one = yield* quick('Sketch the settings')
+      const other = yield* quick('Read the logs')
+      const lead: ToolAccess = {
+        role: 'lead',
+        projectId: project.projectId,
+        threadId: other.threadId,
+        sessionId: 'none',
+        taskId: other.taskId,
+      }
+      const titles = (thread: string) => Effect.map(notices(thread), (rows) => rows.map((row) => row.title ?? ''))
+
+      // From its next turn, by the hand-over of the model picker: said in both threads with why, and when it takes effect.
+      assert.match(
+        yield* callTool(coordinator, 'change_lead', {
+          task: one.slug,
+          lead: { agent: 'claude-code' },
+          message: 'Carry on from the sketch.',
+          why: 'codex is out',
+        }),
+        /^sketch-the-settings: changed the lead to Fake claude-code's default model\. It takes over from its next turn\. Both threads have a line saying so\.$/,
+      )
+      assert.include(
+        yield* titles(one.threadId),
+        "The coordinator changed the lead to Fake claude-code's default model: codex is out. It takes over from its next turn.",
+      )
+      assert.match(
+        yield* callTool(lead, 'change_lead', { task: other.slug, lead: { agent: 'codex' } }),
+        /is your own task: the person changes who leads it/,
+      )
+      assert.match(
+        yield* callTool(coordinator, 'change_lead', { task: one.slug, lead: { agent: 'nobody' } }),
+        /^Althar has no agent nobody/,
+      )
+
+      // Try again: only a turn that failed.
+      assert.strictEqual(
+        yield* callTool(coordinator, 'try_again', { task: one.slug }),
+        "Nothing changed: sketch-the-settings's lead's last turn didn't fail.",
+      )
+
+      // Compact, from another task's lead, signed with its task.
+      assert.match(yield* callTool(lead, 'compact_lead', { task: one.slug, why: 'its context is full' }), /lead compacts its context/)
+      assert.include(yield* titles(one.threadId), 'The lead of “Read the logs” had its lead compact its context: its context is full')
+      assert.include(yield* titles(other.threadId), 'Compacted the context of “Sketch the settings”: its context is full')
+
+      // Its issue's switch: refused for a task that came from none, set and set back for one that did.
+      assert.strictEqual(
+        yield* callTool(coordinator, 'set_part_of_issue', { task: one.slug, part_of: true }),
+        "sketch-the-settings didn't come from an issue: there is nothing to set.",
+      )
+      const at = new Date().toISOString()
+      yield* sql`INSERT INTO external_links ${sql.insert({
+        id: 'xlink_a5500000000000000000000000000001',
+        projectId: project.projectId,
+        taskId: one.taskId,
+        connectionId: null,
+        product: 'linear',
+        kind: 'issue',
+        externalId: 'MER-231',
+        ref: 'MER-231',
+        key: 'MER-231',
+        url: 'https://linear.app/meridian/issue/MER-231',
+        snapshot: '{}',
+        createdAt: at,
+        updatedAt: at,
+      })}`
+      assert.match(
+        yield* callTool(coordinator, 'set_part_of_issue', { task: one.slug, part_of: true }),
+        /^sketch-the-settings does only part of its issue now: .*leaves it open/,
+      )
+      assert.match(
+        yield* callTool(lead, 'set_part_of_issue', { task: one.slug, part_of: false }),
+        /does all of its issue now: .*closes the issue/,
+      )
+      assert.include(yield* titles(one.threadId), 'The lead of “Read the logs” set this task as one that does all of its issue')
+    }).pipe(Effect.provide(runtime())),
+  )
+})

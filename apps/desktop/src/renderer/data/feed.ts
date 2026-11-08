@@ -71,6 +71,9 @@ export const CONNECTIONS = new Set(['connection', 'project'])
 /** What changes the skills as listed: a skill installed, updated, rolled back, switched or removed, from any window. */
 export const SKILLS = new Set(['skill'])
 
+/** The reads a setting an agent changed may end (ADR-097): who changed what, and the screens a project's settings are on. */
+const SETTING_READS = new Set(['settingChanges', 'rules', 'repositories', 'projectTracker'])
+
 /** Changes elsewhere in a project that move what a card in its coordinator's thread shows. */
 export const CARDS = new Set(['provider_session', 'attention_request', 'task_plan', 'run', 'task', 'workspace'])
 
@@ -149,6 +152,17 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
   // Its automations, and the page of the one that changed or ran, only while they show: what doesn't is read as it next opens.
   ...(event.projectId !== null && AUTOMATIONS.has(event.aggregateType)
     ? [{ key: keys.automations(event.projectId), offScreen: false }, ...automationReads(cache, event)]
+    : []),
+  // An agent's change to a setting (ADR-097): whichever screen shows it, and who changed what last, read again while they show.
+  ...(event.aggregateType === 'setting'
+    ? [
+        { key: keys.settings, offScreen: false },
+        { key: keys.skills, offScreen: false },
+        ...cache
+          .getQueryCache()
+          .findAll({ predicate: (query) => SETTING_READS.has(String(query.queryKey[0])) })
+          .map((query) => ({ key: query.queryKey, offScreen: false })),
+      ]
     : []),
   // Finished tasks' folders, which go and come back with their worktrees and with tasks settling, only while they show (ADR-056).
   ...(event.aggregateType === 'workspace' || event.aggregateType === 'task' ? [{ key: keys.folders, offScreen: false }] : []),

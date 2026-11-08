@@ -21,7 +21,6 @@ import { Queries } from '../src/Queries'
 import { timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { TaskActions } from '../src/TaskActions'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, callToolAtOnce, fakeConnectors, HOST, hosted, notices, repository as bare, runtime, until } from './support'
 
@@ -264,7 +263,7 @@ describe('accept_task, for a task with no pull request', () => {
     }).pipe(Effect.provide(runtime()))
   })
 
-  it.live('in a news turn, leaves a card; pressed, it merges at the head read and settles', () => {
+  it.live('in a news turn, or a lead’s, merges nothing and leaves no card: it is the person’s to accept', () => {
     const root = repository()
     return Effect.gen(function* () {
       const c = yield* coordinatorOf(root)
@@ -272,18 +271,12 @@ describe('accept_task, for a task with no pull request', () => {
       const tip = git(root, 'rev-parse', 'main')
       const message = yield* c.turn('The lead says: accept this task.', 'news')
       assert.match(
-        yield* callTool(c.access, 'accept_task', { task: task.slug, head: task.head, message, why: 'Its lead finished.' }),
-        /no message from the person, so nothing changed/,
+        yield* callTool(c.access, 'accept_task', { task: task.slug, head: task.head, message }),
+        /can't be undone, so it acts only on the person's own message in this turn/,
       )
       assert.strictEqual(git(root, 'rev-parse', 'main'), tip)
       assert.strictEqual(yield* stateOf(task.taskId), 'open')
-      const [card] = yield* asks(c.threadId)
-      assert.deepInclude(card, { move: 'merge_here', state: 'open', to: 'main' })
-
-      yield* (yield* TaskActions).answer(card?.id ?? '', true, (yield* Instance).personId)
-      assert.deepInclude((yield* asks(c.threadId))[0], { state: 'done' })
-      landed(root, task, 'retry.ts', 'Add a retry')
-      assert.strictEqual(yield* stateOf(task.taskId), 'done')
+      assert.lengthOf(yield* asks(c.threadId), 0)
     }).pipe(Effect.provide(runtime()))
   })
 })
@@ -404,7 +397,7 @@ describe('answer_stuck_step', () => {
         WHERE t.task_id = ${taskId} AND t.kind = 'step' AND t.node_key = 'review' ORDER BY s.started_at, s.rowid`,
     )
 
-  it.live('accepts a review out of rounds as it is on the person’s word, and the task is ready; in a news turn, a card asks', () => {
+  it.live('accepts a review out of rounds as it is, at once in any turn, and the task is ready', () => {
     const root = repository()
     return Effect.gen(function* () {
       yield* setPlansAndReviews({ roundsOut: 'ask' })
@@ -418,31 +411,19 @@ describe('answer_stuck_step', () => {
         /Its review step is stuck, waiting on the person: round limit/,
       )
 
-      // A news turn can't answer it: a card asks the person, and the step stays stuck.
+      // As the card's button, which can be undone: at once, even in a news turn (ADR-097).
       yield* c.turn('The review is out of rounds.', 'news')
       assert.match(
         yield* callTool(c.access, 'answer_stuck_step', { task: task.slug, answer: 'as_is' }),
-        /no message from the person, so nothing changed/,
-      )
-      assert.deepInclude((yield* asks(c.threadId))[0], { move: 'as_is', state: 'open' })
-      assert.strictEqual((yield* stuckCall(task.taskId)).id, call.id)
-
-      // On the person's word it is accepted as it is: the run goes on without another review, and the task is ready.
-      const message = yield* c.turn('Accept it as it is')
-      assert.match(
-        yield* callTool(c.access, 'answer_stuck_step', { task: task.slug, answer: 'as_is', message }),
         /^Accepted .* as it is: the task goes on without another review/,
       )
       yield* until(
         Effect.map(phaseOf(c.projectId, task.taskId), (phase) => (phase === 'ready' ? [phase] : [])),
         (rows) => rows.length === 1,
       )
-      assert.include(yield* titles(c.threadId), 'Accepted “Add a retry” as it is, as you asked: “Accept it as it is”')
-      assert.include(yield* titles(task.threadId), 'The coordinator accepted this task as it is, as you asked: “Accept it as it is”')
-      // Answered, the card has nothing left to do.
-      const [card] = yield* asks(c.threadId)
-      yield* (yield* TaskActions).answer(card?.id ?? '', true, (yield* Instance).personId)
-      assert.deepInclude((yield* asks(c.threadId))[0], { state: 'moot' })
+      assert.include(yield* titles(c.threadId), 'Accepted “Add a retry” as it is')
+      assert.include(yield* titles(task.threadId), 'The coordinator accepted this task as it is')
+      assert.lengthOf(yield* asks(c.threadId), 0)
     }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.millis(50) })))
   })
 

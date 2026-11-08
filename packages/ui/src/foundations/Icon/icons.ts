@@ -1,5 +1,6 @@
 import {
   Activity,
+  AppWindow,
   Archive,
   ArrowDown,
   ArrowRight,
@@ -8,18 +9,21 @@ import {
   Bell,
   Book,
   ChatBubble,
+  ChatPlusIn,
   Check,
   Clock,
   ClockRotateRight,
   CoffeeCup,
   Community,
   Compress,
+  Cookie,
   Copy,
   Download,
   Edit,
   EditPencil,
   Expand,
   Folder,
+  Frame,
   GitBranch,
   GitMerge,
   GitPullRequest,
@@ -46,9 +50,12 @@ import {
   Plus,
   Prohibition,
   Quote,
+  Refresh,
   Search,
   ServerConnection,
   Settings,
+  ShieldCheck,
+  SidebarExpand,
   SoundHigh,
   Square,
   TaskList,
@@ -164,6 +171,20 @@ export const ICONS = {
   /** Fetches something to this computer: an agent Althar can download. */
   download: Download,
   pr: GitPullRequest,
+  /** Loads a page again. */
+  reload: Refresh,
+  /** Points at something on a page, to comment on it for the lead. */
+  comment: ChatPlusIn,
+  /** A page's own session, kept apart from Althar's and the person's browser's. */
+  session: ShieldCheck,
+  /** The size a page is laid out at. */
+  viewport: Frame,
+  /** A page in a tab of its own. */
+  tab: AppWindow,
+  /** A page back beside the conversation it came from. */
+  beside: SidebarExpand,
+  /** What sites keep: cookies and storage. */
+  cookie: Cookie,
 } satisfies Record<string, ComponentType<SVGProps<SVGSVGElement> & { strokeWidth?: number | string }>>
 
 export type IconName = keyof typeof ICONS

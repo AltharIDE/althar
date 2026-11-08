@@ -27,7 +27,7 @@ describe('an edit outside the worktree, where the coordinator decides', () => {
       const sessions = yield* Sessions
       const permissions = yield* Permissions
       const sql = yield* SqlClient.SqlClient
-      yield* policies.set(project.projectId, { permissions: 'coordinator', alwaysAsk: [] }, instance.personId)
+      yield* policies.set(project.projectId, { permissions: 'coordinator', allowEverything: false, alwaysAsk: [] }, instance.personId)
       yield* sessions.start({ threadId: project.coordinatorThreadId, agentId: 'claude-code', model: 'small' })
       const sessionId = yield* sessions.start({ threadId: created.threadId, agentId: 'codex', model: 'large' })
       yield* until(turns(created.threadId), (rows) => rows.length > 0 && rows.every((row) => row.state === 'completed'))

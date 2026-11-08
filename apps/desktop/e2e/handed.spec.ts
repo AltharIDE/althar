@@ -33,14 +33,14 @@ test('shows what the lead hands back: output, a screenshot, a document, a file a
 
     // A command whose output streams until it is stopped: open in its tool call as it comes.
     await say(page, 'streams')
-    await page.getByRole('button', { name: /^Working · / }).click()
+    await page.getByRole('button', { name: /^Working for / }).click()
     await expect(page.getByText(/ready in \d+ ms/).first()).toBeVisible()
-    await expect(page.getByRole('button', { name: /^Working · / })).toHaveAttribute('aria-expanded', 'true')
+    await expect(page.getByRole('button', { name: /^Working for / })).toHaveAttribute('aria-expanded', 'true')
     await expect(page.getByRole('button', { name: /^Running npm run dev/ })).toHaveAttribute('aria-expanded', 'true')
     await still(page)
     await page.screenshot({ path: 'test-results/handed-streaming.png' })
     await page.getByRole('button', { name: 'Interrupt the lead', exact: true }).click()
-    await expect(page.getByRole('button', { name: /^Working · / })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /^Working for / })).toHaveCount(0)
 
     await say(page, 'hands-back')
     // The table in what it said, the kit's own.
@@ -81,12 +81,12 @@ test('shows what the lead hands back: output, a screenshot, a document, a file a
 
     // Each command's output, in its tool call: what passed, and what failed with its exit.
     await page
-      .getByRole('button', { name: /[Ww]orked \d/ })
+      .getByRole('button', { name: /[Ww]orked (for )?\d/ })
       .last()
       .click()
     await page.getByRole('button', { name: /Ran npm test/ }).click()
     await expect(page.getByText(/52 passed/)).toBeVisible()
-    await page.getByRole('button', { name: /Run npm run lint/ }).click()
+    await page.getByRole('button', { name: /Ran npm run lint/ }).click()
     await expect(page.getByText(/Unexpected any/)).toBeVisible()
     await expect(page.getByText('exit 1')).toBeVisible()
     await page.screenshot({ path: 'test-results/handed-output.png', fullPage: true })

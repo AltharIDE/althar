@@ -3,6 +3,7 @@ import { expect, within } from 'storybook/test'
 
 import { States } from '../../storybook/States'
 import { threadDecorator } from '../../storybook/ThreadFrame'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { AltharLine } from './AltharLine'
 
 const meta = {
@@ -27,6 +28,20 @@ export const Warning: Story = {
     tone: 'warning',
     children:
       'The lead couldn’t resolve the conflict with main, in 4 files. The merge isn’t committed: it’s yours to settle, or to ask the lead again.',
+  },
+}
+
+/** A task this task's lead started (ADR-097): its title opens it. */
+export const StartedATask: Story = {
+  args: {
+    children: (
+      <>
+        Started <LinkButton onClick={() => undefined}>Built-in browser beside the conversation</LinkButton>
+      </>
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('button', { name: 'Built-in browser beside the conversation' })).toBeVisible()
   },
 }
 

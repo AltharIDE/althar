@@ -79,6 +79,13 @@ export class NoSession extends Schema.TaggedError<NoSession>()('NoSession', {
   threadId: Schema.String,
 }) {}
 
+/** The coordinator's view has nothing in it to clear. */
+export class NothingToClear extends Schema.TaggedError<NothingToClear>()('NothingToClear', {
+  threadId: Schema.String,
+}) {}
+
+export class RetryRefused extends Schema.TaggedError<RetryRefused>()('RetryRefused', {}) {}
+
 /** The agent could not be started, or its session could not be set up. */
 export class SessionFailed extends Schema.TaggedError<SessionFailed>()('SessionFailed', {
   agentId: Schema.String,
@@ -310,10 +317,22 @@ export class FileRefused extends Schema.TaggedError<FileRefused>()('FileRefused'
  * And a finished task isn't done while what its agents left running, such as
  * a page, wouldn't stop. Its folder isn't removed by hand while something
  * runs from it, and doesn't come back where something else is in its place.
+ * Its team doesn't change once it merged, nor its reviewer once its review is
+ * done, nor without a lead in its plan to change.
  */
 export class TaskRefused extends Schema.TaggedError<TaskRefused>()('TaskRefused', {
   taskId: Schema.String,
-  why: Schema.Literals(['merged', 'branch_gone', 'abandoned', 'no_title', 'title_too_long', 'folder_in_use', 'folder_in_way']),
+  why: Schema.Literals([
+    'merged',
+    'branch_gone',
+    'abandoned',
+    'no_title',
+    'title_too_long',
+    'folder_in_use',
+    'folder_in_way',
+    'review_done',
+    'no_lead',
+  ]),
 }) {}
 
 /** A finished task's folder that couldn't be removed: its last commit couldn't be kept, or something of it is left (ADR-056). */

@@ -2,6 +2,8 @@ import type { AllowedBy, AlwaysScope, AttentionRequest, RuleKind } from '@althar
 import { titleOf } from './callCommand'
 import { Decision, type PermissionAnswer, type PermissionRequest, PermissionScope } from '@althar/ui'
 
+import { serverBrand } from './mcpServers'
+
 /*
  * A permission call as the kit asks it, and its answer as the runtime takes
  * it (ADR-018). The runtime says what an "always" would keep and the scopes
@@ -19,6 +21,7 @@ export const text = {
     'delete-branch': 'deleting branches that aren’t the task’s',
     deploy: 'deploying and publishing',
     outside: 'writing outside the task’s worktree',
+    speak: 'posting for you',
   } satisfies Record<RuleKind, string>,
   /** A rule that let a request through, as its receipt says it. */
   prefix: (pattern: string) => `commands starting “${pattern}”`,
@@ -53,6 +56,27 @@ export const permissionOf = (call: AttentionRequest): PermissionRequest => {
   const deny = call.always?.deny ?? []
   const prefix = call.always?.prefix ?? null
   const kind = call.always?.kind ?? null
+  const lasting = call.irreversible
+  // What can't be undone has its own card: the action, what stays, the words, where it goes; Not now or the action (ADR-097).
+  if (lasting !== undefined)
+    return {
+      id: call.id,
+      what: titleOf(call),
+      cmd: call.command ?? call.title,
+      irreversible: {
+        verb: lasting.verb,
+        done: lasting.done,
+        stays: lasting.stays,
+        ...(lasting.words === undefined ? {} : { words: lasting.words }),
+        through:
+          'command' in lasting.through
+            ? { command: lasting.through.command }
+            : (() => {
+                const brand = serverBrand(lasting.through.server)
+                return { server: lasting.through.server, tool: lasting.through.tool, ...(brand === undefined ? {} : { brand }) }
+              })(),
+      },
+    }
   return {
     id: call.id,
     what: titleOf(call),
@@ -93,3 +117,20 @@ export const replyOf = (answer: PermissionAnswer): Reply => {
 /** The rule that let a request through, in words. */
 export const ruleWordsOf = (rule: AllowedBy): string =>
   'kind' in rule ? text.kinds[rule.kind] : rule.match === 'exact' ? text.exact : text.prefix(rule.pattern)
+
+/** How long a call has waited, in the words a person uses: "40 min", "2 h 5 min". */
+export const waitedFor = (since: string, now: number): string => {
+  const minutes = Math.max(1, Math.floor((now - Date.parse(since)) / 60_000))
+  const hours = Math.floor(minutes / 60)
+  return hours === 0 ? `${minutes} min` : minutes % 60 === 0 ? `${hours} h` : `${hours} h ${minutes % 60} min`
+}
+
+/**
+ * What a call that waits while the person is away says: how long, and where else it reached them. Nothing for one that
+ * reached no other device, which waits where the person is looking.
+ */
+export const waitedWords = (request: Pick<AttentionRequest, 'createdAt' | 'reached'>, now: number): string | undefined => {
+  if (request.reached === undefined) return undefined
+  const at = new Date(request.reached.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+  return `Waiting ${waitedFor(request.createdAt, now)} · sent to your ${request.reached.device} at ${at}`
+}

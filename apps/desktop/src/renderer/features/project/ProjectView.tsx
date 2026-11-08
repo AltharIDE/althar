@@ -1,6 +1,7 @@
 import { EarlierTurns } from '../../shared/EarlierTurns'
 import { useQuery } from '@tanstack/react-query'
-import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 
 import type { ThreadItem } from '@althar/contracts'
 
@@ -41,7 +42,10 @@ import { ago, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { useThreadHost } from '../../shared/ThreadHost'
-import { outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
+import { type Outgoing, outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
+import { PageOpenerProvider, useOpener } from '../browser/opener'
+import { pages } from '../browser/pages'
+import { composerComment, cropsOf, drop, giveBack as giveCommentsBack, takeAll, useComments, withComments } from '../../shared/comments'
 import { AutomationInThread } from '../automations/AutomationInThread'
 import { AutomationsView } from '../automations/AutomationsView'
 import { useAutomationActions, useAutomations } from '../automations/useAutomations'
@@ -61,6 +65,7 @@ import { ForkOffer, useForkOffer } from '../repositories/ForkOffer'
 import type { ProjectSettingsModel } from '../projectSettings/useProjectSettings'
 import { kitInk } from '../../shared/inks'
 import { Card, type CardActions } from './Card'
+import { useClearChat } from './ClearChat'
 import { TaskAskOf } from './TaskAskOf'
 import { FirstConnectionsView } from './FirstConnectionsView'
 import { ChangesCard, type ChangesActions } from '../../shared/ChangesCard'
@@ -118,7 +123,14 @@ export const text = {
  */
 const WIDTH = { key: 'althar.both', start: 560, min: 340, board: 480, lane: 240 } as const
 
+/*
+ * The width last kept in this window where storage wouldn't take it: the column goes with a switch of room, and back
+ * it is as the person left it all the same. Null where storage holds it.
+ */
+let held: number | null = null
+
 const storedWidth = (): number => {
+  if (held !== null) return held
   try {
     const kept = Number(window.localStorage.getItem(WIDTH.key))
     return Number.isFinite(kept) && kept >= WIDTH.min ? kept : WIDTH.start
@@ -141,11 +153,56 @@ const useBothWidth = () => {
     setWidth(next)
     try {
       window.localStorage.setItem(WIDTH.key, String(next))
+      held = null
     } catch {
-      // Not kept; it still holds for this window.
+      // Not kept across launches; it still holds for this window.
+      held = next
     }
   }
   return { width: Math.min(width, max), min: WIDTH.min, max, room, set: setWidth, keep, reset: () => keep(WIDTH.start) }
+}
+
+/**
+ * The conversation's column, and beside the board its divider and what opens over the board against it. The width is
+ * its own: a drag draws this again and nothing else, the thread and the board given as made (`children`, `over`), so a
+ * long thread and a full board stay as they are while it moves. It is set as the column's `width`, not a custom
+ * property, which every element of the thread would inherit and have its style worked out again for each move. While
+ * its divider is dragged, the column is marked `data-resizing`, so the thread in it lays out only the turns on screen.
+ * What opens over the board (`over`) is drawn again on each move, as it is placed by the width and as wide as the room
+ * it leaves: with a file open on it, that file's panel is drawn again too.
+ */
+function TalkColumn({
+  beside,
+  children,
+  over,
+}: {
+  beside: boolean
+  children: ReactNode
+  /** What opens over the board, against the conversation: by the conversation's width and the window's (`room`). */
+  over: (width: number, room: number) => ReactNode
+}) {
+  const both = useBothWidth()
+  const column = useRef<HTMLDivElement>(null)
+  return (
+    <>
+      <div ref={column} className={s.talk} style={beside ? { width: both.width } : undefined}>
+        {children}
+        {beside && (
+          <ResizeHandle
+            value={both.width}
+            min={both.min}
+            max={both.max}
+            onChange={both.set}
+            onCommit={both.keep}
+            onReset={both.reset}
+            onResizing={(on) => column.current?.toggleAttribute('data-resizing', on)}
+            label={text.width}
+          />
+        )}
+      </div>
+      {beside && over(both.width, both.room)}
+    </>
+  )
 }
 
 /** The project's settings, and where they lead out of the project. */
@@ -210,10 +267,6 @@ export function ProjectView({
     if (settings.section !== undefined) setSection(settings.section)
   }
   useEffect(() => onRoomChange?.(room), [room, onRoomChange])
-  // A picture the coordinator handed back opens in the lightbox; it writes no documents, so none opens beside it.
-  // What the coordinator's thread opens: a picture in the lightbox, a file it names beside the thread.
-  const shown = useThreadHost(false, { threadId: model.coordinator?.threadId ?? null, taskId: null })
-  const both = useBothWidth()
   // The lanes the person collapsed, kept for every project, apart beside the conversation.
   const [folds, setFolds] = useFolds(room === Room.Both ? 'beside' : 'alone')
   const lanes = board.board === null ? null : lanesOf(board.board, board.merging)
@@ -240,6 +293,29 @@ export function ProjectView({
   const about = model.project?.id ?? model.coordinator?.project.id ?? null
   const draftOf = draftKey.coordinator(about ?? '')
   const [draft, setDraft] = useDraft(draftOf)
+  // A page beside the coordinator's conversation (ADR-100): the project goes to its conversation, the board stepping aside for it.
+  const showTalk = useCallback(() => setRoom(Room.Talk), [])
+  const opener = useOpener(about, showTalk)
+  const navigate = useNavigate()
+  const comments = useComments(draftOf)
+  // A picture the coordinator handed back opens in the lightbox; it writes no documents, so none opens beside it.
+  // What the coordinator's thread opens: a picture in the lightbox, a file it names beside the thread, a page.
+  const shown = useThreadHost(
+    false,
+    { threadId: model.coordinator?.threadId ?? null, taskId: null },
+    about === null
+      ? null
+      : {
+          owner: about,
+          kind: 'project',
+          draft: draftOf,
+          opener,
+          onDock: () => {
+            pages.place(about, 'tab', { kind: 'project', projectId: about, draft: draftOf })
+            void navigate({ to: '/pages/$owner', params: { owner: about } })
+          },
+        },
+  )
   const coordinatorThread = model.coordinator?.threadId ?? null
   const voice = useDictation(draftOf, {
     projectId: about,
@@ -324,21 +400,34 @@ export function ProjectView({
 
   // The agent what the person says goes to, and whether it takes images.
   const receiver = { name: agentName(chosen?.agentId ?? null), takes: takesImages(models, chosen?.agentId ?? null) }
+  const clearing = useClearChat(model)
   const send = (body: string, now: boolean) => {
+    // Asking to clear the chat is not said to the coordinator.
+    if (clearing.command(body)) {
+      setDraft('')
+      return
+    }
     // Images that can't go yet hold the message back, and the composer says why.
-    const outgoing = images.take(receiver)
-    if (outgoing === null) return
+    const own = images.take(receiver)
+    if (own === null) return
+    // The comments made on a page beside the conversation go after the person's words, their crops after the person's own pictures.
+    const gathered = takeAll(draftOf)
+    const pictures = receiver.takes !== false
+    const crops = pictures ? cropsOf(gathered) : { sent: [], pictures: [] }
+    const outgoing: Outgoing = { ...own, sent: [...own.sent, ...crops.sent], pictures: [...own.pictures, ...crops.pictures] }
+    const words = withComments(body, gathered, own.sent.length, pictures)
     setDraft('')
     images.clear()
     const picked = waiting
     if (picked !== null) setHandover(null)
     const said =
-      picked !== null ? model.handOver(picked, body, outgoing) : now ? model.sayNow(body, outgoing) : model.say(body, chosen, outgoing)
-    // One Althar doesn't take goes back in the composer: its words, its images, and the agent picked to take over.
+      picked !== null ? model.handOver(picked, words, outgoing) : now ? model.sayNow(words, outgoing) : model.say(words, chosen, outgoing)
+    // One Althar doesn't take goes back in the composer: its words, its images and comments, and the agent picked to take over.
     void said.then((accepted) => {
       if (accepted) return
       setDraft((current) => withQueued(current, body))
-      images.giveBack(outgoing)
+      images.giveBack(own)
+      giveCommentsBack(draftOf, gathered)
       if (picked !== null) setHandover(picked)
     })
   }
@@ -378,11 +467,11 @@ export function ProjectView({
         {text.handingOver(named(waiting.agentId, waiting.model).name, named(session.agentId, session.model).name)}{' '}
         <LinkButton onClick={() => setHandover(null)}>{text.keep(named(session.agentId, session.model).name)}</LinkButton>
       </>
-    ) : (session === null || !session.held) && model.agents.length === 0 ? (
+    ) : (session === null || !session.held) && model.agentsKnown && model.agents.length === 0 ? (
       <>
         {text.needsAgent} {ways !== undefined && <LinkButton onClick={ways.agents}>{text.signOneIn}</LinkButton>}
       </>
-    ) : (session === null || !session.held) && suggested !== null && !suggested.available && chosen !== null ? (
+    ) : (session === null || !session.held) && model.agentsKnown && suggested !== null && !suggested.available && chosen !== null ? (
       <>
         {text.signedOut(suggested.agentName, agentName(chosen.agentId))}{' '}
         {ways !== undefined && <LinkButton onClick={() => ways.signIn(suggested.agentId)}>{text.signIn}</LinkButton>}
@@ -424,7 +513,8 @@ export function ProjectView({
                 }}
                 onOpenUrl={(id) => {
                   const url = projectRuns.find((launch) => launch.id === runIdOf(id))?.url
-                  if (url != null) window.open(url, '_blank')
+                  // Beside the coordinator's conversation, the board stepping aside for it.
+                  if (url != null) opener.run(url)
                 }}
               />
             </>
@@ -433,6 +523,15 @@ export function ProjectView({
         onSubmit={(body) => send(body, false)}
         onSendNow={(body) => send(body, true)}
         {...images.props(receiver)}
+        comments={comments.map((comment, index) => composerComment(comment, index + 1))}
+        onOpenComment={(id) => {
+          if (about === null) return
+          // Pressed, a comment opens again on its page beside the conversation.
+          pages.place(about, 'beside')
+          setRoom(Room.Talk)
+          pages.reopen(about, id)
+        }}
+        onRemoveComment={(id) => drop(draftOf, id)}
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy}
         queued={queuedOf(coordinator?.items ?? [], queue)}
@@ -441,7 +540,7 @@ export function ProjectView({
         onUnqueue={(id) => void model.takeBack(id)}
         text={{ queued: text.queue, sendNowKey: modKey(keys.return) }}
         placeholder={busy ? text.placeholderBusy : text.placeholder}
-        meter={contextMeter(session, named, model.compact, { usage: coordinator?.usage, heading: text.usageHeading })}
+        meter={contextMeter(session, named, model.compact, { usage: coordinator?.usage, heading: text.usageHeading }, clearing.ring)}
         picker={
           model.agents.length > 0 &&
           chosen !== null && (
@@ -533,6 +632,7 @@ export function ProjectView({
                     .filter((task) => task.settledAt === null && task.branch !== null && task.reviewing == null)
                     .map((task) => ({ id: task.taskId, title: task.title })) ?? null
                 }
+                {...(ways === undefined ? {} : { onConnect: ways.connections })}
                 runnables={coordinator.runnables}
                 launches={coordinator.launches}
                 now={now}
@@ -547,194 +647,186 @@ export function ProjectView({
   )
 
   return (
-    <div className={s.window}>
-      {header}
-      {room === Room.Automations ? (
-        <AutomationsView
-          projectId={projectId}
-          project={kept.name ?? name}
-          agents={model.agents}
-          lead={usualLead(coordinator?.items ?? [], model.agents)}
-          open={automation}
-          onOpen={setAutomation}
-          onTask={onTask}
-        />
-      ) : room === Room.Settings ? (
-        <div className={s.settings}>
-          <ProjectSettingsPage
+    <PageOpenerProvider value={opener}>
+      <div className={s.window}>
+        {header}
+        {room === Room.Automations ? (
+          <AutomationsView
             projectId={projectId}
-            model={kept}
-            section={section}
-            onSection={setSection}
-            connections={connections}
-            trackers={trackers}
-            repositories={model.repositories}
-            connectionsNeedYou={settingsNeedYou}
-            runnables={coordinator?.runnables ?? null}
-            onConnections={settings.onConnections}
+            project={kept.name ?? name}
+            agents={model.agents}
+            lead={usualLead(coordinator?.items ?? [], model.agents)}
+            open={automation}
+            onOpen={setAutomation}
+            onTask={onTask}
           />
-        </div>
-      ) : (
-        <div className={room === Room.Both ? `${s.rooms} ${s.both}` : s.rooms}>
-          {talking && (
-            <div className={s.talk} style={room === Room.Both ? ({ '--talk-width': `${both.width}px` } as CSSProperties) : undefined}>
-              {coordinator === null ? (
-                model.error === null ? (
-                  <div className={s.reading}>
-                    <ThreadMeasure>
-                      <ThreadSkeleton label={pendingText.thread} />
-                    </ThreadMeasure>
-                  </div>
+        ) : room === Room.Settings ? (
+          <div className={s.settings}>
+            <ProjectSettingsPage
+              projectId={projectId}
+              model={kept}
+              section={section}
+              onSection={setSection}
+              connections={connections}
+              trackers={trackers}
+              repositories={model.repositories}
+              connectionsNeedYou={settingsNeedYou}
+              runnables={coordinator?.runnables ?? null}
+              onConnections={settings.onConnections}
+            />
+          </div>
+        ) : (
+          <div className={room === Room.Both ? `${s.rooms} ${s.both}` : s.rooms}>
+            {talking && (
+              <TalkColumn
+                beside={room === Room.Both}
+                /*
+                 * Beside the board, a file the coordinator names opens over the board, against the conversation, dragged by its far
+                 * edge; where it would leave less of the board than a lane, as in a small window, it covers the board to the window's edge.
+                 */
+                over={(width, windowWidth) =>
+                  shown.workbench(null, { room: windowWidth - width, keep: WIDTH.lane, className: s.over, style: { left: width } })
+                }
+              >
+                {coordinator === null ? (
+                  model.error === null ? (
+                    <div className={s.reading}>
+                      <ThreadMeasure>
+                        <ThreadSkeleton label={pendingText.thread} />
+                      </ThreadMeasure>
+                    </div>
+                  ) : (
+                    <div className={s.loading}>
+                      <p role="alert">{model.error}</p>
+                    </div>
+                  )
                 ) : (
-                  <div className={s.loading}>
-                    <p role="alert">{model.error}</p>
-                  </div>
-                )
-              ) : (
-                <TaskFace
-                  className={s.face}
-                  composer={composer}
-                  // Beside the board, the conversation has no room to share: what it opens goes over the board instead.
-                  {...(room === Room.Both ? {} : { panel: shown.workbench(null), panelWidth: shown.bench.width })}
-                >
-                  <Thread label={text.conversation} busy={busy}>
-                    {/* A new project's first word: what its tasks will need later, while its conversation hasn't begun. */}
-                    {coordinator.items.length === 0 && !coordinator.earlier && (
-                      <FirstConnectionsView
+                  <TaskFace
+                    className={s.face}
+                    composer={composer}
+                    head={clearing.head}
+                    // Beside the board, the conversation has no room to share: what it opens goes over the board instead.
+                    {...(room === Room.Both ? {} : { panel: shown.workbench(null), panelWidth: shown.bench.width })}
+                  >
+                    <Thread label={text.conversation} busy={busy}>
+                      {/* A new project's first word: what its tasks will need later, while its conversation hasn't begun. */}
+                      {coordinator.items.length === 0 && !coordinator.earlier && !coordinator.view.cleared && (
+                        <FirstConnectionsView
+                          projectId={projectId}
+                          project={model.project?.name ?? coordinator.project.name}
+                          model={connections}
+                          className={s.firstConnections}
+                        />
+                      )}
+                      <EarlierTurns
+                        key={coordinator.threadId}
+                        earlier={coordinator.earlier}
+                        load={model.loadEarlier}
+                        version={coordinator.items}
+                        loading={model.loadingEarlier}
+                      />
+                      {clearing.line}
+                      {/* The coordinator only reads: what it hands back is pictures, which open in the lightbox; it writes no documents. */}
+                      <ThreadShellProvider value={shown.shell}>
+                        <ThreadBlocks
+                          blocks={blocksOf(
+                            {
+                              items: coordinator.items,
+                              turnRunning: busy,
+                              turnStarted: session?.turnStartedAt ?? null,
+                              reading: readingNow(session, model.pending),
+                              turnEnded: session?.turnEndedAt ?? null,
+                              worktree: null,
+                              queue,
+                              outputs: model.outputs,
+                            },
+                            model.streaming,
+                            (iso) => ago(iso),
+                            now,
+                          )}
+                          threadId={coordinator.threadId}
+                          session={session}
+                          retryable={coordinator.retryable}
+                          {...(busy ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
+                          {...(ways === undefined ? {} : { onSignIn: ways.signIn })}
+                          card={(card) => <Card card={card} actions={actions} />}
+                          draft={(draft) => <DraftCard draft={draft} actions={draftActions} />}
+                          automation={(card, itemId) => (
+                            <AutomationInThread
+                              card={card}
+                              itemId={itemId}
+                              project={kept.name ?? name}
+                              agents={model.agents}
+                              actions={automationActions}
+                              onOpen={openAutomation}
+                            />
+                          )}
+                          taskAsk={(ask, itemId) => <TaskAskOf ask={ask} itemId={itemId} onOpen={onTask} />}
+                          changes={(changes) => <ChangesCard changes={changes} actions={changesActions} />}
+                          run={(run) => (
+                            <RunOf
+                              run={run}
+                              now={now}
+                              onStop={(id) => void model.stopLaunch(id)}
+                              onRunAgain={(taskId, runnableId, ref) => void model.runProject(taskId, runnableId, ref)}
+                            />
+                          )}
+                          queued={text.queued}
+                          onAnswerQuestion={model.answerQuestion}
+                        />
+                      </ThreadShellProvider>
+                    </Thread>
+                  </TaskFace>
+                )}
+                {shown.lightbox}
+                {clearing.dialog}
+              </TalkColumn>
+            )}
+            {boarding && (
+              <div className={s.board}>
+                {lanes !== null ? (
+                  <>
+                    {board.olderError !== null && (
+                      <p className={s.failure} role="alert">
+                        {text.olderFailed} {board.olderError}
+                      </p>
+                    )}
+                    <BoardView
+                      lanes={lanes}
+                      agents={model.agents}
+                      now={now}
+                      onOpen={onTask}
+                      closing={closing}
+                      actions={board}
+                      line={board.line}
+                      folds={folds}
+                      onFoldsChange={setFolds}
+                      onTalk={talkToCoordinator}
+                      team={{ projectId, start: (planId) => model.startPlan(planId), change: setTeamFor }}
+                      {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
+                    />
+                    {teamFor !== null && (
+                      <ChangeTeam
+                        key={teamFor}
                         projectId={projectId}
-                        project={model.project?.name ?? coordinator.project.name}
-                        model={connections}
-                        className={s.firstConnections}
+                        task={teamTask !== null && teamChangeOf(teamTask) !== null ? teamTask : null}
+                        agents={model.agents}
+                        onClose={() => setTeamFor(null)}
                       />
                     )}
-                    <EarlierTurns
-                      key={coordinator.threadId}
-                      earlier={coordinator.earlier}
-                      load={model.loadEarlier}
-                      version={coordinator.items}
-                      loading={model.loadingEarlier}
-                    />
-                    {/* The coordinator only reads: what it hands back is pictures, which open in the lightbox; it writes no documents. */}
-                    <ThreadShellProvider value={shown.shell}>
-                      <ThreadBlocks
-                        blocks={blocksOf(
-                          {
-                            items: coordinator.items,
-                            turnRunning: busy,
-                            turnStarted: session?.turnStartedAt ?? null,
-                            reading: readingNow(session, model.pending),
-                            turnEnded: session?.turnEndedAt ?? null,
-                            worktree: null,
-                            queue,
-                            outputs: model.outputs,
-                          },
-                          model.streaming,
-                          (iso) => ago(iso),
-                          now,
-                        )}
-                        threadId={coordinator.threadId}
-                        session={session}
-                        {...(busy ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
-                        {...(ways === undefined ? {} : { onSignIn: ways.signIn })}
-                        card={(card) => <Card card={card} actions={actions} />}
-                        draft={(draft) => <DraftCard draft={draft} actions={draftActions} />}
-                        automation={(card, itemId) => (
-                          <AutomationInThread
-                            card={card}
-                            itemId={itemId}
-                            project={kept.name ?? name}
-                            agents={model.agents}
-                            actions={automationActions}
-                            onOpen={openAutomation}
-                          />
-                        )}
-                        taskAsk={(ask, itemId) => <TaskAskOf ask={ask} itemId={itemId} onOpen={onTask} />}
-                        changes={(changes) => <ChangesCard changes={changes} actions={changesActions} />}
-                        run={(run) => (
-                          <RunOf
-                            run={run}
-                            now={now}
-                            onStop={(id) => void model.stopLaunch(id)}
-                            onRunAgain={(taskId, runnableId, ref) => void model.runProject(taskId, runnableId, ref)}
-                          />
-                        )}
-                        queued={text.queued}
-                        onAnswerQuestion={model.answerQuestion}
-                      />
-                    </ThreadShellProvider>
-                  </Thread>
-                </TaskFace>
-              )}
-              {shown.lightbox}
-              {room === Room.Both && (
-                <ResizeHandle
-                  value={both.width}
-                  min={both.min}
-                  max={both.max}
-                  onChange={both.set}
-                  onCommit={both.keep}
-                  onReset={both.reset}
-                  label={text.width}
-                />
-              )}
-            </div>
-          )}
-          {/*
-           * Beside the board, a file the coordinator names opens over the board, against the conversation, dragged by its far
-           * edge; where it would leave less of the board than a lane, as in a small window, it covers the board to the window's edge.
-           */}
-          {room === Room.Both &&
-            talking &&
-            shown.workbench(null, {
-              room: both.room - both.width,
-              keep: WIDTH.lane,
-              className: s.over,
-              style: { left: both.width },
-            })}
-          {boarding && (
-            <div className={s.board}>
-              {lanes !== null ? (
-                <>
-                  {board.olderError !== null && (
-                    <p className={s.failure} role="alert">
-                      {text.olderFailed} {board.olderError}
-                    </p>
-                  )}
-                  <BoardView
-                    lanes={lanes}
-                    agents={model.agents}
-                    now={now}
-                    onOpen={onTask}
-                    closing={closing}
-                    actions={board}
-                    line={board.line}
-                    folds={folds}
-                    onFoldsChange={setFolds}
-                    onTalk={talkToCoordinator}
-                    team={{ projectId, start: (planId) => model.startPlan(planId), change: setTeamFor }}
-                    {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
-                  />
-                  {teamFor !== null && (
-                    <ChangeTeam
-                      key={teamFor}
-                      projectId={projectId}
-                      task={teamTask !== null && teamChangeOf(teamTask) !== null ? teamTask : null}
-                      agents={model.agents}
-                      onClose={() => setTeamFor(null)}
-                    />
-                  )}
-                </>
-              ) : board.error === null ? (
-                <PartPending label={text.boardReading} />
-              ) : (
-                <p className={s.failure} role="alert">
-                  {text.boardFailed} {board.error}
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+                  </>
+                ) : board.error === null ? (
+                  <PartPending label={text.boardReading} />
+                ) : (
+                  <p className={s.failure} role="alert">
+                    {text.boardFailed} {board.error}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </PageOpenerProvider>
   )
 }

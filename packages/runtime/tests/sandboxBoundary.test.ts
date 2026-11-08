@@ -314,7 +314,7 @@ describe('a lead whose sandbox Althar holds', () => {
       const forced = yield* permissions.decide(requestContext, command('git push --force origin althar/retry'))
       assert.deepStrictEqual(forced, {
         decision: 'reject',
-        reason: "The project's rules never allow force pushes.",
+        reason: 'Refused by your rule against force pushes.',
         decidedBy: 'rules',
       })
       // A push to main asked to run outside the sandbox: a card, which the person allows.

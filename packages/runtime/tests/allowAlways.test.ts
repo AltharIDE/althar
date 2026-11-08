@@ -46,7 +46,7 @@ const asking = Effect.gen(function* () {
   const instance = yield* Instance
   const sessions = yield* Sessions
   const made = yield* task()
-  yield* policies.set(made.project.projectId, { permissions: 'ask' }, instance.personId)
+  yield* policies.set(made.project.projectId, { permissions: 'ask', allowEverything: false }, instance.personId)
   yield* sessions.start({ threadId: made.task.threadId, agentId: 'codex' })
   yield* until(turns(made.task.threadId), (rows) => rows.length >= 1 && rows.every(finished))
   return made
@@ -115,7 +115,7 @@ const separateLead = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const { project, task: created } = yield* task()
   const projectId = project.projectId as ProjectId
-  yield* policies.set(projectId, { permissions: 'ask' }, instance.personId)
+  yield* policies.set(projectId, { permissions: 'ask', allowEverything: false }, instance.personId)
   const sessionId = yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
   yield* until(turns(created.threadId), (rows) => rows.length >= 1 && rows.every(finished))
   const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${created.taskId}`
