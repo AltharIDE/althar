@@ -156,6 +156,13 @@ agent's words, and one live line (`WorkedFor`).
   code, is taken for the answer; a short one folds as the turn ends.
 - **What needs the person never folds:** a stuck step, a question, a
   permission, an error and its way out.
+- **What stands open carries the whole turn.** A lead's last message (or its
+  report, where nothing follows it) and the coordinator's answer hold
+  everything the person needs from the turn in full: the proposal, every
+  question, the findings, the decisions needed, what was built or not. They
+  never point back at what folded ("see above"). Each role's brief says so,
+  and a lead whose last message, shorter than what folded before it, only
+  points back is told once to say it again (`runtime/src/lastMessage.ts`).
 
 The person wanted something to watch while an agent works, without the
 thinking spilling into the thread. Codex's app was the reference.
@@ -474,3 +481,4 @@ way of what is done often. The tokens and their values are in
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 8 Nov 2026: what stands open after a turn folds carries everything the person needs, never "see above" (#699).

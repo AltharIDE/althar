@@ -2946,6 +2946,12 @@ describe('thread items', () => {
     createdAt: '2026-09-29T12:00:00.000Z',
   })
 
+  it('keeps a session’s skills line that said nothing new from the window', () => {
+    const line = { source: 'runtime', role: 'skills', title: 'Codex could see 2 skills', skills: [] }
+    assert.strictEqual(itemOf(row('notice', { ...line, hidden: true })), undefined)
+    assert.strictEqual(itemOf(row('notice', line))?.kind, 'notice')
+  })
+
   it('gives each kind its own content, and leaves out kinds the window has no use for yet', () => {
     assert.deepStrictEqual(itemOf(row('user_message', { text: 'Now' }, { state: 'queued', disposition: 'interrupt_and_continue' })), {
       id: 'i1',
