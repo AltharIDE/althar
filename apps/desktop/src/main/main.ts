@@ -22,7 +22,7 @@ import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
 import { loginItemOf, openedAtLogin, opensAtLogin } from './loginItem'
 import { startLogs } from './logs'
-import { isPlace, showPlace, storageSizes } from './storage'
+import { isPlace, showPlace } from './storage'
 import { setAppMenu } from './menu'
 import { dockCount, notificationsShown, soundOf, tells } from './notify'
 import { idle, isQuitAnswer, type QuitAnswer, type QuitQuestion, type Work, workIn } from './quitWork'
@@ -954,16 +954,12 @@ ipcMain.handle('althar:show-backup', () => {
   if (typeof backup === 'string') shell.showItemInFolder(backup)
 })
 
-// About › Storage (DEV-147): where Althar keeps its data, how big each place is (measured here, kept for the session, again on a refresh), and the system's file manager opened on one. The window names a place by id, never by path.
-const storage = storageSizes(() => ({ profile: locations().profile, logs: logs.dir, worktrees: locations().worktrees }))
-ipcMain.handle('althar:storage-places', () => storage.places())
-ipcMain.handle('althar:storage-size', (_event, place: unknown, refresh: unknown) => {
-  if (!isPlace(place)) throw new Error(`Althar keeps nothing in ${String(place)}.`)
-  return storage.size(place, refresh === true)
-})
+// About › Storage (DEV-147): where Althar keeps its data, and the system's file manager opened on one. How big each is, the runtime measures. The window names a place by id, never by path.
+const storagePlaces = () => ({ profile: locations().profile, logs: logs.dir, worktrees: locations().worktrees })
+ipcMain.handle('althar:storage-places', () => storagePlaces())
 ipcMain.handle('althar:storage-show', async (_event, place: unknown) => {
   if (!isPlace(place)) throw new Error(`Althar keeps nothing in ${String(place)}.`)
-  await showPlace(storage.places(), place, (path) => shell.openPath(path))
+  await showPlace(storagePlaces(), place, (path) => shell.openPath(path))
 })
 
 // The icon the person chose, or null where there is no Dock to show one; and a new one, shown on the Dock, then kept. Anything else fails, and the window says so.

@@ -35,7 +35,7 @@ const measuringAll = (): Record<StoragePlace, StorageFigure> => ({
 const remembered = new WeakMap<object, Record<StoragePlace, StorageFigure>>()
 
 export const useStorage = (): StorageModel => {
-  const { host } = useServices()
+  const { client, host } = useServices()
   const [paths, setPaths] = useState<Partial<Record<StoragePlace, string>>>({})
   const [figures, setFigures] = useState(() => {
     // Only a size is worth showing again: a place that wasn't there may be by now.
@@ -58,23 +58,30 @@ export const useStorage = (): StorageModel => {
   // Each round of measuring, so an answer to an earlier one doesn't overwrite a newer.
   const round = useRef(0)
 
+  // The walks of the round in hand: giving up on them (About closed, or measuring again) stops them in the runtime.
+  const giveUp = useRef<AbortController | null>(null)
   const forget = useCallback(() => {
     round.current++
+    giveUp.current?.abort()
+    giveUp.current = null
   }, [])
 
   const measure = useCallback(
     (refresh: boolean) => {
-      const mine = ++round.current
+      forget()
+      const mine = round.current
+      const stop = new AbortController()
+      giveUp.current = stop
       // Asked for anew, the old figures give way; asked as About opens, they stay until main answers (usually from its cache, at once).
       if (refresh) setFigures(measuringAll())
       for (const place of PLACES) {
-        host.storage.size(place, refresh).then(
+        client.getStorageSize(place, refresh, stop.signal).then(
           (size) => mine === round.current && keep(place, size),
           () => mine === round.current && keep(place, { state: 'failed' }),
         )
       }
     },
-    [host, keep],
+    [client, forget, keep],
   )
 
   useEffect(() => {

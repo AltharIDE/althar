@@ -565,6 +565,19 @@ export const TaskFolders = Schema.Struct({
 })
 export type TaskFolders = typeof TaskFolders.Type
 
+/** A place Althar keeps data, by the id the window asks for it with (About › Storage). */
+export const PLACES = ['profile', 'logs', 'worktrees'] as const
+export const PlaceId = Schema.Literals(PLACES)
+export type PlaceId = typeof PlaceId.Type
+
+/** What measuring a place came to: bytes (approximate where the time was up, a lower bound too where entries couldn't be read), or that it isn't there, or couldn't be read. */
+export const StorageSize = Schema.Union([
+  Schema.Struct({ state: Schema.Literal('done'), bytes: Schema.Number, approximate: Schema.Boolean, unreadable: Schema.Int }),
+  Schema.Struct({ state: Schema.Literal('missing') }),
+  Schema.Struct({ state: Schema.Literal('failed') }),
+])
+export type StorageSize = typeof StorageSize.Type
+
 /** What removing finished tasks' folders freed, in bytes, as they were measured just before they went; and how many it couldn't remove. */
 export const FoldersFreed = Schema.Struct({ freed: Schema.Number, failed: Schema.Int })
 export type FoldersFreed = typeof FoldersFreed.Type
@@ -4307,6 +4320,10 @@ export const Api = RpcGroup.make(
   ),
   /** Finished tasks' folders on this computer, with the disk they are on: sizes not yet measured start being measured. */
   call('GetTaskFolders', {}, TaskFolders),
+  /**
+   * What a place Althar keeps data in takes on disk, as the same walk counts what removing task folders frees. Kept for the session; `refresh` measures again, for longer. Giving up on the call (About closed) stops the walk when no one else waits on it.
+   */
+  call('GetStorageSize', { place: PlaceId, refresh: Schema.Boolean }, StorageSize),
   /** Removes every finished task's folder nothing holds, whatever its wait; their branches stay, and each comes back when its task needs it. */
   command('CleanUpFolders', {}, FoldersFreed),
   /**

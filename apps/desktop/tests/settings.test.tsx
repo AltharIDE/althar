@@ -851,7 +851,8 @@ describe('the Settings tab', () => {
 
   it('shows where Althar keeps its data under About Althar, with sizes, and opens a place in the file manager', async () => {
     const host = fakeHost()
-    withServices(<Settings at="about" />, fakeClient().client, host)
+    const { client } = fakeClient()
+    withServices(<Settings at="about" />, client, host)
     const main = screen.getByRole('main')
     expect(await within(main).findByText('/home/me/Althar')).toBeTruthy()
     expect(within(main).getByText('/home/me/.local/share/althar/logs')).toBeTruthy()
@@ -859,7 +860,7 @@ describe('the Settings tab', () => {
     await userEvent.click(within(main).getByRole('button', { name: /^Show in (Finder|Explorer|Files), Task folders$/ }))
     expect(host.storage.show).toHaveBeenCalledWith('worktrees')
     await userEvent.click(within(main).getByRole('button', { name: 'Measure again' }))
-    await waitFor(() => expect(host.storage.size).toHaveBeenCalledWith('profile', true))
+    await waitFor(() => expect(client.getStorageSize).toHaveBeenCalledWith('profile', true, expect.anything()))
   })
 
   it('says why a place could not be opened in the file manager, at its row', async () => {

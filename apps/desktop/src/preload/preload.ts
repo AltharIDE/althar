@@ -212,7 +212,6 @@ contextBridge.exposeInMainWorld('althar', {
   showBackup: (): Promise<void> => ipcRenderer.invoke('althar:show-backup'),
   storage: {
     places: (): Promise<Record<string, string>> => ipcRenderer.invoke('althar:storage-places'),
-    size: (place: string, refresh: boolean): Promise<unknown> => ipcRenderer.invoke('althar:storage-size', place, refresh),
     show: (place: string): Promise<void> => ipcRenderer.invoke('althar:storage-show', place),
   },
   tryAgain: (): Promise<void> => ipcRenderer.invoke('althar:try-again'),
