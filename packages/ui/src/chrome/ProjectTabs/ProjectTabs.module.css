@@ -221,6 +221,29 @@
 .plus {
   flex: none;
 }
+/* with Home dismissed, its mark at the bar's end reopens it; the dot says something waits in a project */
+.reopenHome {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r);
+  transition: background var(--fast) var(--ease);
+}
+.reopenHome:hover {
+  background: var(--line);
+}
+.reopenHome:hover .logo {
+  color: var(--t-1);
+}
+.reopenHome .yours {
+  position: absolute;
+  top: 4px;
+  right: 3px;
+}
 
 /* a desktop's buttons at the end sit a little closer to the window's edge, as their own bars have them */
 .end-gnome,
