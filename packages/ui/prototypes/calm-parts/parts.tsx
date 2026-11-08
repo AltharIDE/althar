@@ -11,9 +11,29 @@ import { LiveDot } from '../../src/primitives/LiveDot/LiveDot'
 import { Popover } from '../../src/primitives/Popover/Popover'
 import type { PartAction, PartKind, PartTone, TaskPartModel } from '../../src/chrome/TaskParts/TaskParts'
 import { BranchChip, PullChip } from '../../src/board/BoardCard/Chips'
-import { type Beat, type Case, type Change, changeIn, type Timing } from './cases'
+import { type Case, type Change, changeIn, type Timing } from './cases'
 import { commits, nameOf, open, partsOfTime, said } from './need'
-import { proto } from './state'
+import {
+  act as doAct,
+  addChange,
+  addCheckedBy,
+  addReview,
+  attachPr,
+  checkedWhen,
+  lineAct,
+  postReview,
+  removeCheckedBy,
+  removeFolder,
+  removeReview,
+  reviewNow,
+  runIt,
+  stopHelper,
+  stopRunning,
+  takeWorktree,
+  toLocal,
+  toWorktree,
+  trust,
+} from './moves'
 import css from './parts.module.css'
 
 export { css }
@@ -84,46 +104,28 @@ export const factsOf = (
     : []),
 ]
 
-/* ——— What a press does here: the line it writes, or the case it leads to ——— */
-
-const LEADS: Partial<Record<string, string>> = {
-  Ship: 'shipping',
-  'Move to your checkout': 'to-local',
-  'Move to a worktree': 'local-waits',
-  'Call it off': 'move-off',
-  'Run it': 'run-it',
-  'Run safely': 'runs-safely',
-}
-
-export const press = (label: string, line?: Omit<Extract<Beat, { kind: 'part' }>, 'kind'>) => () => {
-  if (line !== undefined) proto.say({ kind: 'part', ...line })
-  const next = LEADS[label]
-  if (next !== undefined && next !== proto.get().key) window.setTimeout(() => proto.go(next), line === undefined ? 0 : 500)
-}
-
 /** What can be done to a change, from its part or its card: its one press first. */
 export const actionsOf = (c: Case, change: Change, act?: string): ReadonlyArray<PartAction> => {
-  const name = nameOf(change)
   const done = change.state === 'merged' || change.state === 'closed'
   return [
-    ...(act === undefined ? [] : [{ label: act, variant: 'signal' as const, onClick: press(act) }]),
+    ...(act === undefined ? [] : [{ label: act, variant: 'signal' as const, onClick: doAct(act, change.id) }]),
     ...(done || change.place === 'none'
       ? []
       : change.place === 'local'
         ? [
             {
               label: 'Move to a worktree',
-              onClick: press('Move to a worktree', { who: 'you', text: `You moved ${change.branch} to a worktree.`, change: change.id }),
+              onClick: () => toWorktree(change.id),
             },
           ]
-        : [{ label: 'Move to your checkout', onClick: press('Move to your checkout') }]),
+        : [{ label: 'Move to your checkout', onClick: () => toLocal(change.id) }]),
     ...(change.helper === undefined
       ? []
       : [
           {
             label: 'Stop the helper',
             variant: 'quiet' as const,
-            onClick: press('Stop', { who: 'you', text: `You stopped the helper on ${name}. What it committed stays.`, change: change.id }),
+            onClick: () => stopHelper(change.id),
           },
         ]),
     ...(change.pr === undefined
@@ -141,11 +143,7 @@ export const actionsOf = (c: Case, change: Change, act?: string): ReadonlyArray<
               keep: 'Keep it',
               go: 'Remove',
             },
-            onClick: press('Remove', {
-              who: 'you',
-              text: `You removed ${name}’s worktree. ${change.branch} stays, here and on GitHub.`,
-              change: change.id,
-            }),
+            onClick: () => removeFolder(change.id),
           },
         ]),
   ]
@@ -160,7 +158,7 @@ export const changePart = (c: Case, change: Change, { mark = false }: { mark?: b
     name: nameOf(change),
     detail: stands.detail,
     ...(stands.tone === undefined ? {} : { tone: stands.tone }),
-    ...(stands.act === undefined ? {} : { act: { label: stands.act, onClick: press(stands.act) } }),
+    ...(stands.act === undefined ? {} : { act: { label: stands.act, onClick: doAct(stands.act, change.id) } }),
     facts: factsOf(c, change, { mark }),
     actions: actionsOf(c, change, stands.act),
   }
@@ -184,7 +182,7 @@ export const taskWide = (c: Case, { workspace = true }: { workspace?: boolean } 
               ? [
                   {
                     label: 'Take a worktree',
-                    onClick: press('Take a worktree', { who: 'you', text: 'You gave it a worktree. It’s on the board now.' }),
+                    onClick: takeWorktree,
                   },
                 ]
               : [],
@@ -199,7 +197,7 @@ export const taskWide = (c: Case, { workspace = true }: { workspace?: boolean } 
           icon: 'lock' as const,
           name: accessWords[c.access],
           detail: `#${c.reviewing?.pr ?? ''} is ${c.reviewing?.by ?? ''}’s, from outside the team`,
-          ...(c.access === 'read' ? { act: { label: 'Run it', onClick: press('Run it') } } : {}),
+          ...(c.access === 'read' ? { act: { label: 'Run it', onClick: runIt } } : {}),
           facts: [
             ['Author', `${c.reviewing?.by ?? ''}, outside the team`] as const,
             [
@@ -213,16 +211,13 @@ export const taskWide = (c: Case, { workspace = true }: { workspace?: boolean } 
           ],
           actions:
             c.access === 'read'
-              ? [{ label: 'Run it', variant: 'signal' as const, onClick: press('Run it') }]
+              ? [{ label: 'Run it', variant: 'signal' as const, onClick: runIt }]
               : [
                   ...(c.access === 'safe'
                     ? [
                         {
                           label: 'Trust fully',
-                          onClick: press('Trust fully', {
-                            who: 'you',
-                            text: `You trusted #${c.reviewing?.pr ?? ''} fully: install scripts and the network.`,
-                          }),
+                          onClick: trust,
                         },
                       ]
                     : []),
@@ -230,7 +225,7 @@ export const taskWide = (c: Case, { workspace = true }: { workspace?: boolean } 
                     label: 'Stop running it',
                     variant: 'quiet' as const,
                     end: true,
-                    onClick: press('Stop running it', { who: 'you', text: 'What ran stopped. Read only again.' }),
+                    onClick: stopRunning,
                   },
                 ],
         },
@@ -250,21 +245,18 @@ export const taskWide = (c: Case, { workspace = true }: { workspace?: boolean } 
           actions: [
             {
               label: 'Review now',
-              onClick: press('Review now', { who: 'you', text: 'You asked for a review of everything since the last one.' }),
+              onClick: reviewNow,
             },
             {
               label: c.reviewer.when === 'before' ? 'After it merges' : 'Before it ships',
               variant: 'quiet' as const,
-              onClick: press('when', {
-                who: 'you',
-                text: `You moved Checked by to ${c.reviewer.when === 'before' ? 'after it merges' : 'before it ships'}.`,
-              }),
+              onClick: checkedWhen,
             },
             {
               label: 'Remove',
               variant: 'quiet' as const,
               end: true,
-              onClick: press('Remove', { who: 'you', text: 'You removed Checked by. Its findings stay in the thread.' }),
+              onClick: removeCheckedBy,
             },
           ],
         },
@@ -281,7 +273,7 @@ export const taskWide = (c: Case, { workspace = true }: { workspace?: boolean } 
             ? {}
             : {
                 tone: 'you' as const,
-                act: { label: 'Post it', onClick: press('Post it', { who: 'you', text: `You posted the review on #${c.reviewing.pr}.` }) },
+                act: { label: 'Post it', onClick: postReview },
               }),
           facts: [
             ['Title', c.reviewing.title] as const,
@@ -291,8 +283,8 @@ export const taskWide = (c: Case, { workspace = true }: { workspace?: boolean } 
           actions: [
             ...(c.reviewing.draft === undefined
               ? []
-              : [{ label: `Post it on #${c.reviewing.pr}`, variant: 'signal' as const, onClick: press('Post it') }]),
-            { label: 'Remove', variant: 'quiet' as const, end: true, onClick: () => proto.go('removed') },
+              : [{ label: `Post it on #${c.reviewing.pr}`, variant: 'signal' as const, onClick: postReview }]),
+            { label: 'Remove', variant: 'quiet' as const, end: true, onClick: removeReview },
           ],
         },
       ]),
@@ -310,9 +302,9 @@ export const taskWide = (c: Case, { workspace = true }: { workspace?: boolean } 
     : []),
 ]
 
-/** What a task can take on from Add, at any time: each says what it does, and does it. */
+/** What a task can take on from Add, at any time: each says what it does, and does it, here. */
 export const kindsOf = (c: Case): ReadonlyArray<PartKind> => {
-  const form = (note: string, button: string, line: string) => (done: () => void) => (
+  const form = (note: string, button: string, apply: () => void) => (done: () => void) => (
     <div className={css.form}>
       <p className={css.note}>{note}</p>
       <div>
@@ -320,7 +312,7 @@ export const kindsOf = (c: Case): ReadonlyArray<PartKind> => {
           size="small"
           variant="signal"
           onClick={() => {
-            proto.say({ kind: 'part', who: 'you', text: line })
+            apply()
             done()
           }}
         >
@@ -335,11 +327,7 @@ export const kindsOf = (c: Case): ReadonlyArray<PartKind> => {
       icon: 'branch',
       name: 'A change',
       about: 'A branch and pull request of its own',
-      form: form(
-        'A branch from main, in a worktree beside the others.',
-        'Start one',
-        'You started a change, althar/board-still-tests, toward main.',
-      ),
+      form: form('A branch from main, in a worktree beside the others.', 'Start one', addChange),
     },
     ...(c.reviewer == null
       ? [
@@ -348,24 +336,32 @@ export const kindsOf = (c: Case): ReadonlyArray<PartKind> => {
             icon: 'answer' as IconName,
             name: 'Checked by',
             about: 'A reviewer, before it ships or after it merges',
-            form: form('GPT-6.1 Sol, before it ships.', 'Add', 'You added Checked by: GPT-6.1 Sol, before it ships.'),
+            form: form('GPT-6.1 Sol, before it ships.', 'Add', addCheckedBy),
           },
         ]
       : []),
-    {
-      kind: 'review',
-      icon: 'comment',
-      name: 'A review',
-      about: 'Of any pull request, drafted for you to post',
-      form: form('In a copy at its head, beside this task’s own work.', 'Review #698', 'You added a review of #698.'),
-    },
-    {
-      kind: 'pr',
-      icon: 'pr',
-      name: 'A pull request',
-      about: 'One that exists, as a change of its own',
-      form: form('It becomes a change of this task’s, followed on its own.', 'Attach #718', 'You attached #718, as a change of its own.'),
-    },
+    ...(c.reviewing === undefined
+      ? [
+          {
+            kind: 'review',
+            icon: 'comment' as IconName,
+            name: 'A review',
+            about: 'Of any pull request, drafted for you to post',
+            form: form('In a copy at its head, beside this task’s own work.', 'Review #698', addReview),
+          },
+        ]
+      : []),
+    ...(c.changes.some((one) => one.pr === 718)
+      ? []
+      : [
+          {
+            kind: 'pr',
+            icon: 'pr' as IconName,
+            name: 'A pull request',
+            about: 'One that exists, as a change of its own',
+            form: form('It becomes a change of this task’s, followed on its own.', 'Attach #718', () => attachPr()),
+          },
+        ]),
   ]
 }
 
@@ -509,7 +505,7 @@ export function ChangesStrip({ c, opened }: { c: Case; opened: string | null }) 
       })}
       <span className={css.grow} />
       {waiting.length > 1 && (
-        <Button size="small" variant="signal" onClick={press('Ship')}>
+        <Button size="small" variant="signal" onClick={doAct('Ship them all')}>
           Ship them all
         </Button>
       )}
@@ -555,7 +551,7 @@ export function Outbox({ c, opened }: { c: Case; opened: boolean }) {
                   <li className={css.rowBad}>{change.failing?.[0] ?? 'A check'} fails on what’s up now. Ship replaces it.</li>
                 )}
               </ul>
-              <Button size="small" variant={waiting.length === 1 ? 'signal' : 'default'} onClick={press('Ship')}>
+              <Button size="small" variant={waiting.length === 1 ? 'signal' : 'default'} onClick={doAct('Ship', change.id)}>
                 Ship
               </Button>
             </li>
@@ -566,7 +562,7 @@ export function Outbox({ c, opened }: { c: Case; opened: boolean }) {
         </p>
         {waiting.length > 1 && (
           <div className={css.acts}>
-            <Button size="small" variant="signal" onClick={press('Ship')}>
+            <Button size="small" variant="signal" onClick={doAct('Ship them all')}>
               Ship them all
             </Button>
           </div>
@@ -583,7 +579,7 @@ export function LiveLine({ text, act, name }: { text: string; act?: string; name
       <LiveDot pulse />
       {name !== undefined && <span className={css.lineName}>{name}</span>}
       <span>{text}</span>
-      {act !== undefined && <LinkButton onClick={press(act, act === 'Call it off' ? undefined : undefined)}>{act}</LinkButton>}
+      {act !== undefined && <LinkButton onClick={() => lineAct(act)}>{act}</LinkButton>}
     </p>
   )
 }

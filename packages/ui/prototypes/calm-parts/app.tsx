@@ -236,7 +236,7 @@ const services = { client, host, cache, feed: follow(client, cache) }
 let read = ''
 proto.subscribe(() => {
   const p = proto.get()
-  const now = `${p.direction}/${p.key}/${(p.added[p.key] ?? []).length}`
+  const now = `${p.direction}/${p.key}/${p.rev}`
   if (now === read) return
   read = now
   void cache.invalidateQueries({ queryKey: ['thread'] })
@@ -333,6 +333,7 @@ function Switcher() {
       />
       <LinkButton onClick={toBoard}>Board</LinkButton>
       <LinkButton onClick={() => window.location.assign('#/threads/th1')}>Task</LinkButton>
+      {proto.touched() && <LinkButton onClick={() => proto.go(p.key)}>Start over</LinkButton>}
       <span className={css.adr} title={c.adr}>
         {c.adr}
       </span>

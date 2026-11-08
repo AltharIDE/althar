@@ -14,6 +14,16 @@ then open `http://localhost:5374/`. The strip at the bottom switches
 direction (1–3, ← →), the case (its list, or [ and ]), and the screen (Board,
 Task). The URL keeps them: `?d=B&s=stack-held#/threads/th1`.
 
+Every press changes the case it is pressed in: the changes, the parts,
+Access and the thread move together, on the bar, the card and in Needs you.
+Ship acts on the change it is pressed for (bottom up in a stack, keeping a
+retargeted branch's target), one step at a time; Merge, Fix it, Add, Remove,
+Run safely, Trust fully, Move and Call it off, and every ask's buttons, do
+what they say; an answer's Undo takes it back. Start over, in the strip, puts
+the case back as it was; picking a case starts it fresh. `node flows.mjs`
+clicks through these headless, and `node narrow.mjs` checks the app's
+narrowest window (880 wide) for anything overflowing.
+
 ## The principles it was designed by
 
 1. **One thing asks at a time.** A task has one fact on its card, in its bar
@@ -95,6 +105,7 @@ directions differ in what the card, the bar and the composer say about them.
 | The move called off | Line "You called off the move. It stays in your checkout." | Named line | The line |
 | "Run it" on outside code | Chip "How far to trust #702's code · Run safely"; ask: Run safely / Trust fully / Not now; Access part "Read only" | The same ask; Access a task-wide part | The ask; Access in the parts |
 | Running safely, two didn't install | Line "electron and playwright didn't install… · Trust fully"; Access "Runs safely": Trust fully, Stop running it | The same | The same |
+| Trusted fully | Line "You trusted #702 fully: install scripts and the network.", then what ran; Access "Trusted": Stop running it puts it back to Read only | The same | The same |
 | Commits not shipped | Chip "3 commits not shipped · Ship" | Segment "3 commits not shipped"; Ship in its card | Outbox "3 commits not shipped, on #714 · Ship"; the card's foot says it |
 | Fixes and replies waiting beside | Chip "3 commits not shipped · lint fails on #714 · Ship"; a line for each | The segment says all of it; its card the rest | Outbox: 3 commits, what a reply asked for, "lint fails on what's up now. Ship replaces it." |
 | Ship under way | Chip "Shipping #714: reviewing"; line "Brought main in first…" | Segment "Shipping: the review", cobalt | Live line "Reviewing the 3 commits since #714's last review." |

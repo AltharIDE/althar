@@ -29,7 +29,7 @@ export const askOf = (c: Case, answered: Readonly<Record<string, string>>): Ask 
 }
 
 /** What an ask says on a card and in the header, and its button. */
-const askNeed = (c: Case, ask: Ask): Omit<Need, 'more'> => {
+export const askNeed = (c: Case, ask: Ask): Omit<Need, 'more'> => {
   const of = (id: string) => changeIn(c, id)
   switch (ask.kind) {
     case 'run-it':
@@ -89,6 +89,8 @@ export const needOf = (c: Case, answered: Readonly<Record<string, string>>): Nee
     // Held up a stack, the sentence names the change below as well.
     return ask.kind === 'ship-stack' ? { ...need, more: Math.max(0, live.length - 2) } : with_(need)
   }
+  // A settled task says so; what GitHub still runs for its pull requests is not its news.
+  if (c.status === 'done') return with_({ tone: 'quiet', says: c.word })
   if (c.still !== undefined)
     return with_({
       tone: c.status === 'queued' ? 'quiet' : 'bad',

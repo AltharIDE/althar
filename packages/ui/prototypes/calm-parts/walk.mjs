@@ -17,12 +17,24 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 let errors = []
 page.on('pageerror', (error) => errors.push(String(error).split('\n')[0]))
 page.on('console', (message) => message.type() === 'error' && errors.push(message.text().split('\n')[0]))
+/** The page rewrites its own address as it loads: a navigation that collides with that is tried again. */
+const go = async (url) => {
+  for (let tries = 0; tries < 3; tries += 1) {
+    try {
+      await page.goto(url)
+      return
+    } catch {
+      await page.waitForTimeout(400)
+    }
+  }
+  await page.goto(url)
+}
 let bad = 0
 for (const key of cases.filter((one) => only.length === 0 || only.includes(one))) {
   for (const d of ['A', 'B', 'C']) {
     for (const where of ['threads/th1', 'projects/p1?room=board']) {
       errors = []
-      await page.goto(`http://localhost:5374/?d=${d}&s=${key}&bare#/${where}`)
+      await go(`http://localhost:5374/?d=${d}&s=${key}&bare#/${where}`)
       await page.waitForTimeout(450)
       const chip = where.startsWith('threads')
         ? await page

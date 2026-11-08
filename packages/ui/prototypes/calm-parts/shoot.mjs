@@ -9,7 +9,6 @@ const { chromium } = require('@playwright/test')
 
 const TITLE = 'Hold the board still while agents work'
 const card = (title = TITLE) => ({ selector: `article:has-text("${title}")` })
-const bar = { clip: { x: 0, y: 44, width: 1440, height: 100 } }
 /** Around what it shows in the thread: from `before` px over it to `after` under it. */
 const around = (text, before = 160, after = 260) => ({ around: { text, before, after } })
 const top = (height) => ({ clip: { x: 0, y: 44, width: 1440, height } })

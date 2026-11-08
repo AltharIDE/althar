@@ -4,24 +4,16 @@ import { Button } from '../../src/primitives/Button/Button'
 import { LinkButton } from '../../src/primitives/LinkButton/LinkButton'
 import { type Ask, type Case, changeIn } from './cases'
 import { commits, nameOf } from './need'
+import { answerAsk } from './moves'
 import { proto, useProto } from './state'
 import { css } from './parts'
-
-/** The case an answer moves the page to, where there is one: so an answer shows what it leads to. */
-const NEXT: Partial<Record<string, string>> = {
-  'run-it:Run safely': 'runs-safely',
-  'switch:Stay in the worktree': '',
-}
 
 export function AskView({ c, ask }: { c: Case; ask: Ask }) {
   const { answered } = useProto()
   const key = `${c.key}:${ask.kind}`
   const said = answered[key]
-  const answer = (words: string) => {
-    proto.answer(key, words)
-    const next = NEXT[`${ask.kind}:${words}`]
-    if (next !== undefined && next !== '') window.setTimeout(() => proto.go(next), 700)
-  }
+  /** A button of this ask: the card says what was chosen, and the case changes to match. */
+  const answer = (choice: string) => answerAsk(c, ask, choice)
   if (said !== undefined) return <AskAnswered said={said} onUndo={() => proto.unanswer(key)} focusOnMount />
   const of = (id: string) => changeIn(c, id)
   switch (ask.kind) {
@@ -57,10 +49,10 @@ export function AskView({ c, ask }: { c: Case; ask: Ask }) {
           what={`Your checkout is on ${ask.own}, a branch of yours. It goes back to it when you settle this task.`}
         >
           <AskFoot>
-            <Button variant="signal" onClick={() => answer(`Switched to ${change?.branch ?? ''}`)}>
+            <Button variant="signal" onClick={() => answer('Switch')}>
               Switch to <code>{change?.branch}</code>
             </Button>
-            <Button onClick={() => answer('Stay in the worktree')}>Stay in the worktree</Button>
+            <Button onClick={() => answer('Stay')}>Stay in the worktree</Button>
           </AskFoot>
         </AskCard>
       )
@@ -77,7 +69,7 @@ export function AskView({ c, ask }: { c: Case; ask: Ask }) {
             <Button variant="signal" onClick={() => answer('Ship, then settle')}>
               Ship, then settle
             </Button>
-            <Button onClick={() => answer('Settled. The commits stay on the branch.')}>Leave them on the branch</Button>
+            <Button onClick={() => answer('Leave them')}>Leave them on the branch</Button>
           </AskFoot>
         </AskCard>
       )
@@ -112,13 +104,13 @@ export function AskView({ c, ask }: { c: Case; ask: Ask }) {
           what={`Its ${ask.findings} comments aren’t posted. Removed, they stay in this thread, and nothing reaches #${ask.pr}.`}
         >
           <AskFoot>
-            <Button variant="signal" onClick={() => answer(`Posted on #${ask.pr}, then removed`)}>
+            <Button variant="signal" onClick={() => answer('Post it first')}>
               Post it first
             </Button>
-            <Button variant="danger" onClick={() => answer('Removed. The draft stays in the thread.')}>
+            <Button variant="danger" onClick={() => answer('Remove without posting')}>
               Remove without posting
             </Button>
-            <LinkButton onClick={() => answer('Kept')}>Keep it</LinkButton>
+            <LinkButton onClick={() => answer('Keep it')}>Keep it</LinkButton>
           </AskFoot>
         </AskCard>
       )
@@ -131,10 +123,10 @@ export function AskView({ c, ask }: { c: Case; ask: Ask }) {
             ))}
           </ol>
           <AskFoot>
-            <Button variant="signal" onClick={() => answer(`Fix it: a new change, after #${ask.pr}`)}>
+            <Button variant="signal" onClick={() => answer('Fix it')}>
               Fix it
             </Button>
-            <Button onClick={() => answer('Left. The findings stay here.')}>Leave it</Button>
+            <Button onClick={() => answer('Leave it')}>Leave it</Button>
           </AskFoot>
         </AskCard>
       )
@@ -142,10 +134,10 @@ export function AskView({ c, ask }: { c: Case; ask: Ask }) {
       return (
         <AskCard icon="pr" kicker={`#${ask.now} is up`} what={`#${ask.old}, toward main, is still open with what it had.`}>
           <AskFoot>
-            <Button variant="signal" onClick={() => answer(`Closed #${ask.old}`)}>
+            <Button variant="signal" onClick={() => answer('Close it')}>
               Close #{ask.old}
             </Button>
-            <Button onClick={() => answer(`Kept #${ask.old} open`)}>Keep it open</Button>
+            <Button onClick={() => answer('Keep it open')}>Keep it open</Button>
           </AskFoot>
         </AskCard>
       )
@@ -158,10 +150,10 @@ export function AskView({ c, ask }: { c: Case; ask: Ask }) {
           what={`Claude’s plan is used up until ${ask.until}. Your message waits, and goes as soon as it resets.`}
         >
           <AskFoot>
-            <Button variant="signal" onClick={() => answer('Moved to DeepSeek V4.1 Flash')}>
+            <Button variant="signal" onClick={() => answer('Use another model')}>
               Use DeepSeek V4.1 Flash
             </Button>
-            <Button onClick={() => answer(`Waits until ${ask.until}`)}>Wait until {ask.until}</Button>
+            <Button onClick={() => answer('Wait')}>Wait until {ask.until}</Button>
           </AskFoot>
         </AskCard>
       )
@@ -170,11 +162,11 @@ export function AskView({ c, ask }: { c: Case; ask: Ask }) {
         <AskCard icon="hold" kicker="Stuck" who={ask.what} what={ask.why}>
           <AskNote>The 2 commits are still held. Nothing went up.</AskNote>
           <AskFoot>
-            <Button variant="signal" onClick={() => answer('Trying the review again')}>
+            <Button variant="signal" onClick={() => answer('Try again')}>
               Try again
             </Button>
-            <Button onClick={() => answer('Moved the review to DeepSeek V4.1 Flash')}>Review with DeepSeek V4.1 Flash</Button>
-            <LinkButton onClick={() => answer('Shipped without a review')}>Ship without it</LinkButton>
+            <Button onClick={() => answer('Review with another model')}>Review with DeepSeek V4.1 Flash</Button>
+            <LinkButton onClick={() => answer('Ship without it')}>Ship without it</LinkButton>
           </AskFoot>
         </AskCard>
       )
@@ -184,10 +176,10 @@ export function AskView({ c, ask }: { c: Case; ask: Ask }) {
         <AskCard icon="lock" kicker="Not shipped" who={change === undefined ? '' : nameOf(change)} what={ask.why}>
           <AskNote>Reviewed and ready: the {commits(change?.waiting ?? 0)} are still here, held.</AskNote>
           <AskFoot>
-            <Button variant="signal" onClick={() => answer('Signing set up. Shipped.')}>
+            <Button variant="signal" onClick={() => answer('Set up signing')}>
               Set up signing
             </Button>
-            <Button onClick={() => answer('Shipping again')}>Try again</Button>
+            <Button onClick={() => answer('Try again')}>Try again</Button>
           </AskFoot>
         </AskCard>
       )
@@ -202,8 +194,8 @@ export function AskView({ c, ask }: { c: Case; ask: Ask }) {
           what={`#${ask.pr} is from ${change?.branch ?? ''}, but into ${ask.base}, not main. It isn’t taken as ${change === undefined ? '' : nameOf(change)}’s.`}
         >
           <AskFoot>
-            <Button onClick={() => answer(`Attached #${ask.pr} as a change of its own`)}>Attach it as its own change</Button>
-            <LinkButton onClick={() => answer('Left alone')}>Leave it</LinkButton>
+            <Button onClick={() => answer('Attach it')}>Attach it as its own change</Button>
+            <LinkButton onClick={() => answer('Leave it')}>Leave it</LinkButton>
           </AskFoot>
         </AskCard>
       )
@@ -219,7 +211,7 @@ export function AskView({ c, ask }: { c: Case; ask: Ask }) {
         >
           <AskNote>{ask.holds}.</AskNote>
           <AskFoot>
-            <Button onClick={() => answer(`Kept as “${ask.name}”`)}>Keep it</Button>
+            <Button onClick={() => answer('Keep it')}>Keep it</Button>
             <LinkButton onClick={() => answer('Not now')}>Not now</LinkButton>
           </AskFoot>
         </AskCard>
@@ -234,12 +226,7 @@ export function AskView({ c, ask }: { c: Case; ask: Ask }) {
           what={`${change === undefined ? '' : nameOf(change)} carries the ${commits(below?.waiting ?? 0)} waiting on ${below === undefined ? '' : nameOf(below)} below it, so it goes up only with them.`}
         >
           <AskFoot>
-            <Button
-              variant="signal"
-              onClick={() =>
-                answer(`Shipping ${below === undefined ? '' : nameOf(below)}, then ${change === undefined ? '' : nameOf(change)}`)
-              }
-            >
+            <Button variant="signal" onClick={() => answer('Ship')}>
               Ship {change === undefined ? '' : nameOf(change)}, and the {commits(below?.waiting ?? 0)} on{' '}
               {below === undefined ? '' : nameOf(below)} below it
             </Button>

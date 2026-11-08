@@ -35,6 +35,8 @@ export interface Change {
   readonly found?: number
   /** How it got here, where it wasn't Althar's own way. */
   readonly came?: 'git' | 'outside'
+  /** The pull request this branch was made to take the place of: Ship asks about it once the new one is up. */
+  readonly replaces?: number
   readonly add?: number
   readonly del?: number
 }
@@ -95,7 +97,7 @@ export type Beat =
       readonly checked?: string
     }
   /** Something under way at the thread's end, changing in place. */
-  | { readonly kind: 'live'; readonly text: string; readonly change?: string; readonly act?: string }
+  | { readonly kind: 'live'; readonly text: string; readonly change?: string; readonly act?: string; readonly made?: true }
   | { readonly kind: 'ask'; readonly ask: Ask }
 
 export type Preset = 'Change' | 'Small change' | 'Chat' | 'Review a PR' | 'Prototype'
@@ -653,6 +655,29 @@ export const CASES: ReadonlyArray<Case> = [
     ],
     adr: 'The thread says what didn’t install, and Trust fully is one press away.',
   },
+  {
+    key: 'trusted',
+    group: 'Where it works',
+    label: 'Trusted fully',
+    lane: 'you',
+    word: 'Review drafted',
+    status: 'yours',
+    title: 'Review #702: Page the thread faster',
+    kind: 'review',
+    preset: 'Review a PR',
+    changes: [],
+    copy: { at: '#702', pr: 702 },
+    access: 'full',
+    reviewing: { pr: 702, title: 'Page the thread faster', by: 'dmitri-k', draft: 3, outside: true },
+    thread: [
+      { kind: 'you', text: 'Run its tests.' },
+      { kind: 'part', who: 'you', text: 'You ran #702 safely: offline, install scripts off.' },
+      { kind: 'line', text: 'electron and playwright didn’t install: they need their install scripts.', tone: 'warning' },
+      { kind: 'part', who: 'you', text: 'You trusted #702 fully: install scripts and the network.' },
+      { kind: 'line', text: 'Installed electron and playwright, install scripts on. The end-to-end tests ran: 38 of 38 pass.' },
+    ],
+    adr: 'Trust fully runs as the team’s code does. Access says “Trusted”, and Stop running it is one press away.',
+  },
 
   /* ——— Waiting for Ship ——— */
   {
@@ -752,6 +777,7 @@ export const CASES: ReadonlyArray<Case> = [
         pr: undefined,
         state: undefined,
         checks: undefined,
+        replaces: 714,
       }),
     ],
     reviewer: SOL,

@@ -14,7 +14,8 @@ import { ReviewLine } from '../../src/thread/ReviewLine/ReviewLine'
 import { AskView } from './asks'
 import { type Beat, type Case, changeIn, type Preset, type Timing } from './cases'
 import { type Need, commits, nameOf, open, partsOfTime, said } from './need'
-import { ChangesStrip, ChangeTrack, changePart, chipOf, css, kindsOf, LiveLine, Named, Outbox, press, taskWide, TimeParts } from './parts'
+import { act as doAct, lineAct, savePreset, setPreset } from './moves'
+import { ChangesStrip, ChangeTrack, changePart, chipOf, css, kindsOf, LiveLine, Named, Outbox, taskWide, TimeParts } from './parts'
 import type { Direction } from './state'
 
 export interface CardOver {
@@ -70,7 +71,7 @@ const named = (c: Case, need: Need) => need.change ?? c.changes.find(open) ?? c.
 
 const nextOf = (need: Need) =>
   need.act === undefined ? undefined : (
-    <NextStep signal={need.tone === 'you' || need.tone === 'bad'} onPress={press(need.act)}>
+    <NextStep signal={need.tone === 'you' || need.tone === 'bad'} onPress={doAct(need.act, need.change?.id)}>
       {need.act}
     </NextStep>
   )
@@ -99,28 +100,11 @@ const line = (c: Case, beat: Extract<Beat, { kind: 'part' | 'line' }>, { name = 
     {beat.text}
     {beat.act !== undefined && (
       <span className={css.lineAct}>
-        <LinkButton onClick={press(beat.act, { who: 'you', text: actLine(beat.act, c, beat.change) })}>{beat.act}</LinkButton>
+        <LinkButton onClick={() => lineAct(beat.act!, beat.change)}>{beat.act}</LinkButton>
       </span>
     )}
   </AltharLine>
 )
-
-/** What pressing a line's way on writes in the thread. */
-const actLine = (act: string, c: Case, id: string | undefined) => {
-  const change = changeIn(c, id)
-  switch (act) {
-    case 'Keep them together':
-      return 'You kept the rename with the fix. The lead carries its commits onto althar/board-still.'
-    case 'Drop it':
-      return `You dropped ${change?.branch ?? 'it'}. The branch stays.`
-    case 'Trust fully':
-      return 'You trusted #702 fully: its install scripts and the network.'
-    case 'Call it off':
-      return 'You called off the move. It stays in your checkout.'
-    default:
-      return `You chose ${act}.`
-  }
-}
 
 const review = (c: Case, beat: Extract<Beat, { kind: 'review' }>, { name = false }: { name?: boolean } = {}) => {
   const change = changeIn(c, beat.change)
@@ -156,15 +140,11 @@ const presetMenu = (c: Case) => (
     note="Switching changes its parts to match. Nothing is lost."
   >
     {(['Chat', 'Change', 'Small change', 'Review a PR', 'Prototype'] as ReadonlyArray<Preset>).map((one) => (
-      <MenuItem
-        key={one}
-        {...(one === c.preset ? { icon: 'check' as const } : {})}
-        onSelect={press(one, { who: 'you', text: `You switched it to ${one}.` })}
-      >
+      <MenuItem key={one} {...(one === c.preset ? { icon: 'check' as const } : {})} onSelect={() => setPreset(one)}>
         {one}
       </MenuItem>
     ))}
-    <MenuItem onSelect={press('save', { who: 'you', text: 'You saved its parts as a preset, “Board fix”.' })}>Save as preset…</MenuItem>
+    <MenuItem onSelect={savePreset}>Save as preset…</MenuItem>
   </Menu>
 )
 
@@ -192,7 +172,7 @@ const A: View = {
         ? {}
         : {
             beside: (
-              <button type="button" className={css.chipAct} data-tone={need.tone} onClick={press(need.act)}>
+              <button type="button" className={css.chipAct} data-tone={need.tone} onClick={doAct(need.act, need.change?.id)}>
                 {need.act}
               </button>
             ),
@@ -266,12 +246,12 @@ const B: View = {
               actions: [
                 {
                   label: 'Use Change',
-                  onClick: press('Change', { who: 'you', text: 'You switched it to Change: Checked by moves to before it ships.' }),
+                  onClick: () => setPreset('Change'),
                 },
                 {
                   label: 'Save as preset…',
                   variant: 'quiet' as const,
-                  onClick: press('save', { who: 'you', text: 'You saved its parts as a preset, “Board fix”.' }),
+                  onClick: savePreset,
                 },
               ],
             },
@@ -336,7 +316,7 @@ const C: View = {
       ),
       next:
         n > 0 && need.act !== undefined && need.act.startsWith('Ship') ? (
-          <NextStep signal onPress={press('Ship')}>
+          <NextStep signal onPress={doAct(waiting.length > 1 ? 'Ship them all' : 'Ship', waiting[0]?.id)}>
             Ship
           </NextStep>
         ) : (
