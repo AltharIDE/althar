@@ -258,7 +258,8 @@ const skillsLines = (threadId: string) =>
     return rows.map((row): SkillsLine => ({ id: row.id, sessionId: row.providerSessionId, content: JSON.parse(row.content) }))
   })
 
-const skillsLine = (threadId: string) => Effect.map(skillsLines(threadId), (lines) => lines[0])
+/** The line the marks read: the newest one the thread shows, which each session's report keeps current, not a hidden one it left behind. */
+const skillsLine = (threadId: string) => Effect.map(skillsLines(threadId), (lines) => lines.find((line) => line.content.hidden !== true))
 
 /** Whose line it is: the agent it names, which lines from before it said so have in their title. */
 const leadOfLine = (line: SkillsLine) => line.content.lead ?? line.content.title.split(' could see ')[0]

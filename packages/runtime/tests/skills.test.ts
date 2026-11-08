@@ -533,6 +533,21 @@ describe('what a lead could see', () => {
       yield* recorder(sixth).record(seen('a', 'b', 'deploy'))
       yield* recorder(sixth).record(seen('a', 'b'))
       assert.strictEqual((yield* lines(where.threadId)).filter((line) => line.hidden !== true).length, 3)
+      // After that hidden line, a session spelling the same names with other paths still gets its marks.
+      const seventh = yield* session(8)
+      yield* recorder(seventh).record({
+        _tag: 'SkillsSeen',
+        skills: ['a', 'b'].map((name) => ({ name, path: `/moved/${name}/SKILL.md` })),
+      })
+      yield* recorder(seventh).record({
+        _tag: 'ToolCall',
+        toolCallId: 'moved-again',
+        title: 'moved again',
+        kind: 'read',
+        status: 'completed',
+        locations: [{ path: '/moved/a/SKILL.md' }],
+      })
+      assert.deepStrictEqual((yield* toolContent(where.threadId, 'moved-again'))?.skill, { names: ['a'], reported: false })
     }).pipe(Effect.provide(runtime())),
   )
 
