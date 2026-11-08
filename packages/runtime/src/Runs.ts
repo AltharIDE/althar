@@ -1737,6 +1737,12 @@ export class Runs extends Context.Service<
           const on = yield* stepOn(event.threadId)
           // A turn the person interrupted is theirs to carry on; a round of work it left with nothing new goes back where it was.
           if (event._tag === 'TurnEnded' && event.state === 'interrupted') {
+            // Another agent is taking the thread over: its own session ending says so, and the step carries on there.
+            const [ended] = yield* sql<{ sessionId: string | null }>`
+              SELECT provider_session_id AS sessionId FROM turn_deliveries WHERE id = ${event.turnId}`
+            const [newer] = yield* sql<{ id: string }>`
+              SELECT id FROM provider_sessions WHERE thread_id = ${event.threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
+            if (ended?.sessionId != null && newer !== undefined && newer.id !== ended.sessionId) return
             // A person's message waiting in the queue interrupts the turn only to carry on: the review reads it next.
             const [waiting] = yield* sql<{ id: string }>`
               SELECT id FROM user_inputs WHERE thread_id = ${event.threadId} AND state = 'queued' LIMIT 1`

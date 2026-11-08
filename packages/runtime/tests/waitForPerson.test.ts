@@ -204,6 +204,36 @@ describe('a lead waiting on the person', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('says the review stopped when another agent takes it over, rather than vanishing', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* planned('Build it. [lead:finish] [lead:edit] [review:wait]')
+      yield* until(
+        Effect.map(attempts(task.taskId), (rows) => rows.filter((row) => row.step === 'review')),
+        (rows) => rows.length === 1,
+      )
+      const [thread] = yield* until(
+        sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${task.taskId} AND kind = 'step' AND node_key = 'review'`,
+        (rows) => rows.length === 1,
+      )
+      const reviewThread = thread?.id ?? ''
+      const sessions = yield* Sessions
+      yield* until(
+        Effect.map(sessions.running(reviewThread), (running) => Option.exists(running, (one) => one.turnRunning)),
+        (running) => running,
+      )
+      // Another agent takes the review's thread over, as a handover does: the one on it is superseded.
+      yield* sessions.switchAgent({ threadId: reviewThread, agentId: 'opencode' })
+      const said = yield* until(notices(task.threadId), (all) =>
+        all.some((notice) => notice.title?.includes('another agent took it over') === true),
+      )
+      assert.include(
+        said.map((notice) => notice.title),
+        'The review stopped: another agent took it over. It starts again there.',
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('carries the review on when the person writes in it, rather than saying it stopped', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
