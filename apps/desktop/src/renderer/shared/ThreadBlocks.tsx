@@ -285,8 +285,10 @@ function CompactedView({ block }: { block: Extract<Block, { kind: 'compacted' }>
 }
 
 function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; threadId: string }) {
-  if (part.subAgent !== undefined) return <SubAgentView part={part} threadId={threadId} />
-  if (part.web !== undefined && part.state === ToolState.Done) return <WebView web={part.web} />
+  // One Althar has something to say under, refused or to a server that was down, stays the call it is, saying it.
+  const plain = part.refused === undefined && part.server === undefined && part.why === undefined
+  if (plain && part.subAgent !== undefined) return <SubAgentView part={part} threadId={threadId} />
+  if (plain && part.web !== undefined && part.state === ToolState.Done) return <WebView web={part.web} />
   return <CallView part={part} threadId={threadId} />
 }
 

@@ -13,8 +13,11 @@ import { normalize } from '../src/events'
 const claude = (toolName: string, extra: Record<string, unknown> = {}) => ({ claudeCode: { toolName, ...extra } })
 
 describe('webCallOf', () => {
-  it('reads Claude Code’s web search and fetch by its tool’s name, before its input has come and after', () => {
-    assert.deepStrictEqual(webCallOf('fetch', undefined, claude('WebSearch')), { action: 'search', query: '' })
+  it('reads Claude Code’s web search and fetch by its tool’s name, once its input has come', () => {
+    // Without its input, as its first call and its updates after say it: nothing, so what came with the input stands.
+    assert.isUndefined(webCallOf('fetch', undefined, claude('WebSearch')))
+    assert.isUndefined(webCallOf('fetch', undefined, claude('WebFetch')))
+    assert.deepStrictEqual(webCallOf('fetch', {}, claude('WebSearch')), { action: 'search', query: '' })
     assert.deepStrictEqual(webCallOf('fetch', { query: 'effect schema optional' }, claude('WebSearch')), {
       action: 'search',
       query: 'effect schema optional',
@@ -80,7 +83,10 @@ describe('pageOf', () => {
 
 describe('subAgentOf', () => {
   it('reads Claude Code’s Task and Agent, by what it was asked to do', () => {
-    assert.deepStrictEqual(subAgentOf('Task', undefined, claude('Task')), { label: 'Task' })
+    // Without its input, as its updates say it: nothing, so what it was asked stands.
+    assert.isUndefined(subAgentOf('Task', undefined, claude('Task')))
+    assert.isUndefined(subAgentOf('', undefined, claude('Agent')))
+    assert.deepStrictEqual(subAgentOf('Task', {}, claude('Task')), { label: 'Task' })
     assert.deepStrictEqual(
       subAgentOf('Find the readers', { description: 'Find the readers', prompt: 'Look for…', subagent_type: 'Explore' }, claude('Agent')),
       { label: 'Find the readers', type: 'Explore' },

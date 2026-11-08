@@ -118,6 +118,15 @@ describe('what an agent does beyond the repository, in the thread', () => {
       assert.strictEqual(kept?.['type'], 'Explore')
       assert.isTrue(String(kept?.['said']).startsWith('Two readers: Queries and threads.'))
       assert.strictEqual(String(kept?.['said']).length, 600)
+      // An update that says less of what it was asked, as Claude Code's after the first, leaves what it was asked as it was.
+      yield* record.record({
+        _tag: 'ToolCallUpdate',
+        toolCallId: 'task',
+        status: 'completed',
+        subAgent: { label: 'Sub-agent' },
+      })
+      const after = read('tool_call', (yield* row(where.threadId, 'task'))?.content)?.['subAgent'] as Record<string, unknown> | undefined
+      assert.strictEqual(after?.['label'], 'Find the readers')
       const all = yield* items(where.threadId)
       const parentItem = all.findIndex((one) => one.toolCallId === 'task')
       const ids = yield* Effect.gen(function* () {
@@ -161,6 +170,17 @@ describe('what an agent does beyond the repository, in the thread', () => {
       assert.strictEqual(read('notice', third)?.['severity'], 'warning')
       assert.strictEqual(record.compaction(), 'failed')
       assert.lengthOf(yield* compacted(), 3)
+
+      // One its turn ended on without saying how it went is settled with the turn, with what of its summary came.
+      yield* record.record({ _tag: 'Compaction', compactionId: 'c4', status: 'in_progress' })
+      yield* record.record({ _tag: 'CompactionSummary', compactionId: 'c4', text: 'Half of it.' })
+      yield* record.settleCompaction('cancelled')
+      const fourth = (yield* compacted())[3]
+      assert.deepStrictEqual(read('notice', fourth)?.['compaction'], { status: 'cancelled', summary: 'Half of it.' })
+      assert.strictEqual(record.compaction(), 'cancelled')
+      // One that said how it went stays as it said.
+      yield* record.settleCompaction('completed')
+      assert.strictEqual(record.compaction(), 'cancelled')
     }).pipe(Effect.provide(runtime())),
   )
 

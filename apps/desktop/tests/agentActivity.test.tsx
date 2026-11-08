@@ -84,6 +84,17 @@ describe('a sub-agent, as its turn has it', () => {
     expect(parts[0]).toMatchObject({ toolKind: ToolKind.Agent, verb: 'Starting', target: 'Find the readers' })
   })
 
+  it('keeps a sub-agent’s own sub-agent’s calls under it', () => {
+    const agent = subAgent('in_progress')
+    const inner = items.tool({ title: 'Look deeper', toolKind: 'think', parent: agent.id, subAgent: { label: 'Look deeper' } })
+    const deep = items.tool({ title: 'Read d.ts', parent: inner.id })
+    const parts = tools(partsOf([agent, inner, deep], true))
+    expect(parts.map((part) => part.id)).toEqual([agent.id])
+    const under = parts[0]?.subAgent?.calls[0]
+    expect(under?.id).toBe(inner.id)
+    expect(under?.subAgent?.calls.map((call) => call.id)).toEqual([deep.id])
+  })
+
   it('leaves a call whose sub-agent isn’t in the turn where it is', () => {
     const lost = items.tool({ title: 'Read a.ts', parent: 'gone' })
     expect(nested(partsOf([lost])).map((part) => part.id)).toEqual([lost.id])
@@ -141,6 +152,22 @@ describe('drawn in the thread', () => {
     ])
     expect(screen.getByText('linear')).toBeTruthy()
     expect(screen.getByText('DEV-25')).toBeTruthy()
+  })
+
+  it('keeps a refused sub-agent the call it is, saying who refused it', async () => {
+    await opened([
+      items.tool({
+        title: 'Task',
+        toolKind: 'think',
+        status: 'failed',
+        declined: true,
+        declinedBy: 'rules',
+        declinedWhy: 'Not in this folder',
+        subAgent: { label: 'Find the readers' },
+      }),
+    ])
+    expect(screen.getAllByText(/Althar’s rules: Not in this folder/).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: /Find the readers, / })).toBeNull()
   })
 
   it('opens a page read to where it is, as a link out', async () => {

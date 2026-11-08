@@ -674,11 +674,12 @@ export const nested = (parts: ReadonlyArray<Part>): ReadonlyArray<Part> => {
       under.set(part.parent, calls)
     } else top.push(part)
   }
-  return top.map((part) =>
-    part.kind === 'tool' && part.subAgent !== undefined
-      ? { ...part, subAgent: { ...part.subAgent, calls: under.get(part.id) ?? [] } }
-      : part,
-  )
+  // A sub-agent's own sub-agents keep theirs under them, as deep as they go.
+  const withCalls = <P extends Part>(part: P, depth: number): P =>
+    part.kind === 'tool' && part.subAgent !== undefined && depth < 8
+      ? { ...part, subAgent: { ...part.subAgent, calls: (under.get(part.id) ?? []).map((call) => withCalls(call, depth + 1)) } }
+      : part
+  return top.map((part) => withCalls(part, 0))
 }
 
 /** The blocks of a thread, oldest first, with what is still being written but not yet read at the end. */

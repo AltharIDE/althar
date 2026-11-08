@@ -554,10 +554,10 @@ export const compactedSpan = (before: { readonly used: number } | null, after: {
 export const INTERRUPTED = 'Interrupted by you.'
 
 /** What the thread says once an agent compacted its context: from how full to how full, where it said both. */
-export const compactedWords = (name: string, before: { readonly used: number } | null, after: { readonly used: number } | null) =>
-  before !== null && after !== null && after.used < before.used
-    ? `Compacted ${name}'s context: ${tokensWord(before.used)} → ${tokensWord(after.used)} tokens.`
-    : `Compacted ${name}'s context.`
+export const compactedWords = (name: string, before: { readonly used: number } | null, after: { readonly used: number } | null) => {
+  const span = compactedSpan(before, after)
+  return span === null ? `Compacted ${name}'s context.` : `Compacted ${name}'s context: ${span}.`
+}
 
 /**
  * What a turn says to the agent: the brief when the session is new, then each
@@ -1979,6 +1979,8 @@ export class Sessions extends Context.Service<
           const resetsAt =
             Option.isSome(failure) && failure.value._tag === 'AgentRequestFailed' ? failure.value.resetsAt : ended?.failure?.resetsAt
           if (errorClass === 'usage_limit') yield* accountLimited(running, resetsAt)
+          // A compaction the agent left under way ends with its turn: done where the turn was, stopped otherwise.
+          yield* Effect.ignore(items.settleCompaction(state === 'completed' ? 'completed' : 'cancelled'))
           // The person stopped it: the thread says so where it stopped.
           if (state === 'interrupted' && running.stoppedByPerson)
             yield* addItem(

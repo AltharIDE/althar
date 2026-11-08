@@ -97,8 +97,9 @@ const subAgentKept = (
     : ''
   return {
     subAgent: {
-      ...had,
+      // What the first call said it was asked stands: a later update may say less of it.
       ...event.subAgent,
+      ...had,
       ...(report === '' ? {} : { said: report.length > REPORT_KEPT ? `${report.slice(0, REPORT_KEPT - 1)}…` : report }),
     },
   }
@@ -623,7 +624,7 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
             ...serverDown(event),
             ...(event.web === undefined ? {} : { web: event.web }),
             ...subAgentKept(event, existing?.content),
-            ...(yield* parentKept(event)),
+            ...(typeof existing?.content.parent === 'string' ? {} : yield* parentKept(event)),
           }
           // Only what it read of the skills its agent listed: an agent that says what it loads has said so.
           const read = (stored: Readonly<Record<string, unknown>>) =>
@@ -716,6 +717,24 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
       else yield* updateItem(place.projectId, known.id, known.content)
     })
 
+  /**
+   * Settles the compaction reported last, where it is still under way as the
+   * turn ends without saying how it went: as `status`, with what of its
+   * summary came in.
+   */
+  const settleCompaction = (status: 'completed' | 'cancelled') =>
+    Effect.suspend(() => {
+      const known = lastCompaction === undefined ? undefined : compactions.get(lastCompaction)
+      const had = known?.content.compaction as Record<string, unknown> | undefined
+      if (known?.id === undefined || had?.status !== 'in_progress') return Effect.void
+      known.content = {
+        ...known.content,
+        title: COMPACTION_TITLES[status],
+        compaction: { ...had, status, ...(known.summary === '' ? {} : { summary: known.summary }) },
+      }
+      return updateItem(place.projectId, known.id, known.content)
+    })
+
   /** How the compaction reported last stands, where one was. */
   const compaction = (): 'in_progress' | 'completed' | 'failed' | 'cancelled' | undefined => {
     const known = lastCompaction === undefined ? undefined : compactions.get(lastCompaction)
@@ -760,7 +779,7 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
     return output === undefined ? undefined : { itemId, ...output.tail() }
   }
 
-  return { record, flush, end, current, outputsSoFar, outputOf, compaction, describeCompaction }
+  return { record, flush, end, current, outputsSoFar, outputOf, compaction, describeCompaction, settleCompaction }
 }
 
 /** How long an agent has to be quiet between turns before the message it was saying is closed. */
