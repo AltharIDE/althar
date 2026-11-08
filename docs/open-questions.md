@@ -349,11 +349,9 @@ page.
   where the app shows the project's name. Does a project still have an
   intent, a sentence the coordinator works towards, beside its name? Not
   built until that is settled.
-- [ ] **Telling a fork from the host.** A fork is known from its clone's
-  remotes, an `upstream` beside `origin`. A fork cloned without an
-  `upstream` isn't seen as one; the host (GitHub's `parent`, GitLab's
-  `forked_from_project`) could say, but only once it is connected. Leaning:
-  ask the host when it is connected, and keep the remotes as the fallback.
+- [x] **Telling a fork from the host.** The host is asked where it is
+  connected, the remotes' names the fallback
+  ([code hosts](decisions/code-hosts.md#a-forks-branches)).
 - [ ] **Where a fork's pull requests open by default.** Today, on the fork,
   as before, until the person chooses the repository it came from. The
   prototype suggests the repository it came from. Leaning: suggest it once

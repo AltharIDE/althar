@@ -154,11 +154,38 @@ person's agent there ([packaging](packaging.md)).
 
 ### A fork's branches
 
-Althar knows a fork from its clone's remotes: an `upstream` beside
-`origin` on the same host. Where a fork's work goes is a per-project
-choice with three answers: pull requests on the fork, pull requests
-upstream from the fork's branches, or branches and pull requests both
-upstream.
+Althar knows a fork as its code host says, where one is connected
+(DEV-171). It asks `origin`'s host whether that repository is a fork, of
+what, and, where the host says (GitHub's `source`), what the root of its
+forks is. The answer is kept for the whole run of Althar, an hour before it
+is asked again; a host that gave none (it failed, hung, or doesn't say) is
+asked again only after five minutes, so it holds nothing up twice. Only an
+answer reached through `origin`'s own address counts, never a mirror's.
+Without an answer, the remotes' names say, as before: an `upstream` beside
+`origin` on the same host, naming another repository. Where a fork's work
+goes is a per-project choice with three answers: pull requests on the fork,
+pull requests upstream from the fork's branches, or branches and pull
+requests both upstream.
+
+- **The parent is found among the remotes by address**, whatever the remote
+  is called (`upstream`, `base`, an owner's name): at an address the host
+  gave for it, or at its path on `origin`'s host as the host's addresses
+  are written there, with exactly the server's own path in front (and
+  Bitbucket Data Center's `scm/` over HTTPS), never a path that only ends
+  in it. An SSH remote has neither in front. `upstream` wins where several
+  have it. Where none has the parent, a remote with the root is it, as for
+  a fork of a fork whose `upstream` is the root. Where none has either and
+  the host can't say the root (GitLab, Bitbucket), an `upstream` that names
+  another repository on the same host is it by its name, as before; where
+  the host said the root (GitHub), one that is neither isn't.
+- **Where no remote has it**, the fork is still one. The repository's
+  settings say so and offer to add it, as `upstream`, or `parent` where that
+  name is taken, by the host's address written as `origin`'s is. Only the
+  person adds it; nothing does for them. Until then, tasks start from the
+  fork, its conflict checks fetch the parent by address into
+  `refs/althar/parent/`, and its pull requests are listed and fetched from
+  the parent through its host's connection, or refused with a word to add
+  it where none reaches it, never the fork's instead.
 
 - **Branches upstream is offered only where the host says the account can
   push there.** That is read as the project's repositories are read, and
@@ -168,6 +195,8 @@ upstream.
 - **Remotes are never rewritten.** `origin` and `upstream` stay as they
   are; the clone and its scripts are the person's. A clone whose remotes
   were renamed by hand (`origin` the original, `fork` the fork) just works.
+  Adding the parent where the person asks is the one change Althar makes,
+  beside theirs: a remote is never renamed or removed.
 - **An open pull request stays where its branch is** until it closes,
   whatever the project says now, since a host can't move a pull request's
   source. Only new work follows the setting. Where the host says the fork

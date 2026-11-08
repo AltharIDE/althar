@@ -239,7 +239,9 @@ project again.
   asks it whether `origin`'s repository is a fork and of what, keeps the
   answer an hour, and finds that repository among the clone's remotes by its
   address, whatever the remote is called (`upstream`, `base`, an owner's
-  name). Where no remote has it, the repository's settings offer to add it,
+  name); for a fork of a fork, the root of its forks where no remote has its
+  parent, and an `upstream` by its name where the host can't say the root.
+  Where no remote has it, the repository's settings offer to add it,
   as `upstream`, or `parent` where that name is taken. Without a host's
   answer, it is known from its clone's remotes, an `upstream` beside
   `origin` on the same host. Its binding says where tasks' work goes: on the
