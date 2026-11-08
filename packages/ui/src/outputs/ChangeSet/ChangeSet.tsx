@@ -14,6 +14,7 @@ import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
 import { ModelList, type ModelInfo } from '../../primitives/Model/Model'
 import s from './ChangeSet.module.css'
+import { type MergeNeed, MergeNeeds, type MergeNeedsText } from './MergeNeeds'
 
 /*
  * What a task changed, beside what it is, for deciding on it: each thing
@@ -123,6 +124,15 @@ export interface ChangeSetProps {
   note?: ReactNode
   /** Its host's checks; without them, no line for them, and with none yet, a line saying so, unless it merged: none will run now. */
   checks?: readonly ChangeCheck[]
+  /**
+   * What merging it needs on its host, each ticked, crossed or waiting (DEV-204): in place of its checks' line, its checks'
+   * line among them, opening to its checks. Without it, its checks' line alone.
+   */
+  needs?: readonly MergeNeed[]
+  /** The branch it merges into, which its needs name: main. */
+  target?: string
+  /** Words for its needs. */
+  needsText?: Partial<MergeNeedsText>
   review?: ChangeReview
   /** What can be done with it now: one button, or two where it's a choice; the first is the one to press. */
   actions?: ReactNode
@@ -150,6 +160,9 @@ export function ChangeSet({
   push,
   note,
   checks,
+  needs,
+  target,
+  needsText,
   review,
   actions,
   error,
@@ -180,9 +193,18 @@ export function ChangeSet({
         <div className={s.facts}>
           <Head state={state} host={host} prs={prs} branch={branch} remote={remote} uncommitted={uncommitted} push={push} t={t} />
           {note !== undefined && <p className={s.note}>{note}</p>}
-          {(checked || review !== undefined) && (
+          {needs !== undefined && needs.length > 0 && (
+            <MergeNeeds
+              needs={needs}
+              host={host?.name ?? ''}
+              {...(target === undefined ? {} : { target })}
+              {...(checks === undefined ? {} : { checks })}
+              {...(needsText === undefined ? {} : { text: needsText })}
+            />
+          )}
+          {((checked && (needs === undefined || needs.length === 0)) || review !== undefined) && (
             <div className={s.lines}>
-              {checked && <ChecksLine checks={checks ?? []} t={t} />}
+              {checked && (needs === undefined || needs.length === 0) && <ChecksLine checks={checks ?? []} t={t} />}
               {review !== undefined && <ChangeReviewLine review={review} t={t} />}
             </div>
           )}
