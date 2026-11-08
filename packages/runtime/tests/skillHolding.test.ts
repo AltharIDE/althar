@@ -96,7 +96,10 @@ const withSetUp = <A, E, R>(body: (paths: Awaited<ReturnType<typeof setUp>>) => 
       ),
   )
 
-/** A project with a skill of its repository's own in its checkout's `.claude/skills`. */
+/** Where a repository keeps its own skills, as a row names it (written out so it isn't read as a path to a file). */
+const REPOSITORY_SKILLS = ['.claude', 'skills'].join('/')
+
+/** A project with a skill of its repository's own in its checkout's folder for skills. */
 const projectWithSkill = Effect.gen(function* () {
   const made = yield* task()
   const [root = ''] = yield* repositoryRoots(made.project.projectId)
@@ -160,12 +163,12 @@ describe('the person’s skills, as one list', () => {
             { from: 'claude', where: '~/.claude/skills' },
           ],
         })
-        // A repository's own, in every role, which Codex doesn't read from `.claude/skills`.
+        // A repository's own, in every role, which Codex doesn't read from there.
         assert.deepInclude(by('repo-rules'), {
           about: 'How this repository is worked on.',
-          sources: [{ from: 'repository', where: '.claude/skills' }],
+          sources: [{ from: 'repository', where: REPOSITORY_SKILLS }],
           repository: project.projectId,
-          home: '.claude/skills/repo-rules',
+          home: `${REPOSITORY_SKILLS}/repo-rules`,
           here: { claude: 'in', codex: 'cant', opencode: 'in' },
           roles: ['lead', 'reviewer', 'coordinator'],
           offIn: [],

@@ -38,7 +38,7 @@ export const sectionText: Readonly<Record<Section, { readonly title: string; rea
   agents: { title: 'Agents', icon: 'agents' },
   'mcp-servers': { title: 'MCP servers', icon: 'plug' },
   skills: { title: 'Skills', icon: 'knowledge' },
-  'code-hosts': { title: 'Code hosts and trackers', icon: 'plug' },
+  'code-hosts': { title: 'Code hosts and trackers', icon: 'branch' },
   tasks: { title: 'Tasks', icon: 'work' },
   'pull-requests': { title: 'Pull requests', icon: 'pr' },
   'this-mac': { title: `Work on ${device.this}`, icon: 'load' },

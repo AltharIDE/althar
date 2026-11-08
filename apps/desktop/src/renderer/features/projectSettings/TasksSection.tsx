@@ -204,21 +204,23 @@ function PullRequest({
   // What a task ends with is what the runtime does: a pull request only where a host Althar knows is there to open it.
   const finish = repositories == null ? { kind: 'end' as const, end: endOf(rules.end) } : finishOf(rules.end, repositories)
   return (
-    <SettingPreviews>
-      <PullRequestPreview
-        end={finish.kind === 'end' ? finish.end : TaskEnd.PushOnly}
-        screenshots={rules.postScreenshots}
-        issues={rules.moveIssues}
-        seal={seal?.on ?? true}
-        sample={{ ...PULL_REQUEST_PREVIEW_SAMPLE, base }}
-      />
+    <>
+      <SettingPreviews>
+        <PullRequestPreview
+          end={finish.kind === 'end' ? finish.end : TaskEnd.PushOnly}
+          screenshots={rules.postScreenshots}
+          issues={rules.moveIssues}
+          seal={seal?.on ?? true}
+          sample={{ ...PULL_REQUEST_PREVIEW_SAMPLE, base }}
+        />
+      </SettingPreviews>
       {finish.kind !== 'end' && (
         <p className={s.finishNote}>
           {text.onBranch}. {finish.kind === 'unconnected' ? text.unconnected(finish.host) : text.unknown}.{' '}
           {finish.kind === 'unconnected' && <LinkButton onClick={onCode}>{text.connect(finish.host)}</LinkButton>}
         </p>
       )}
-    </SettingPreviews>
+    </>
   )
 }
 
