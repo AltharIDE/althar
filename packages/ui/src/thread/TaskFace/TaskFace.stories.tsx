@@ -280,10 +280,12 @@ function scrolledUp(above?: ReactNode, opts: { width?: number; notice?: string }
       // What floats on the edge is one box, however its pills wrap; its top is what the pill must clear.
       const floats = canvasElement.querySelector('[class*="floats"]')!
       if (above || opts.notice) {
-        await expect(floats.childElementCount).toBeGreaterThan(0)
-        await expect(jump.getBoundingClientRect().bottom).toBeLessThan(floats.getBoundingClientRect().top)
+        await expect(floats).not.toBeNull()
+        await expect(floats!.childElementCount).toBeGreaterThan(0)
+        await expect(jump.getBoundingClientRect().bottom).toBeLessThan(floats!.getBoundingClientRect().top)
       } else {
-        await expect(floats.childElementCount).toBe(0)
+        // the composer draws no edge at all when nothing floats on it
+        await expect(floats?.childElementCount ?? 0).toBe(0)
       }
     },
   }
