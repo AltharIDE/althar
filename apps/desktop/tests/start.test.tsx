@@ -83,11 +83,12 @@ describe('accounts in settings', () => {
     expect(accountEntry({ ...usual('acc_4', 'unknown') }, now).state).toEqual({ kind: 'ready' })
   })
 
-  it('says quietly when a sign-in ends, where its agent says, and in the signal’s colour where the runtime says it ends soon', () => {
+  it('says when a sign-in ends only where the runtime says it ends soon, and nothing of an end further off', () => {
     const now = new Date('2026-10-03T12:00:00.000Z')
     const ends = (endsAt: string, endsSoon = false) => accountEntry({ ...usual('acc_1', 'signed_in'), endsAt, endsSoon }, now).ends
-    expect(ends('2026-11-02T12:00:00.000Z')).toEqual({ at: clock('2026-11-02T12:00:00.000Z', now) })
-    expect(ends('2026-10-08T12:00:00.000Z', true)).toEqual({ at: clock('2026-10-08T12:00:00.000Z', now), soon: true })
+    // A month off: all is well, so the row says nothing of it.
+    expect(ends('2026-11-02T12:00:00.000Z')).toBeUndefined()
+    expect(ends('2026-10-05T12:00:00.000Z', true)).toEqual({ at: clock('2026-10-05T12:00:00.000Z', now) })
     // Past its end, its row says it is signed out instead: no end to say.
     expect(ends('2026-10-01T12:00:00.000Z')).toBeUndefined()
     expect(accountEntry(usual('acc_1', 'signed_in'), now).ends).toBeUndefined()

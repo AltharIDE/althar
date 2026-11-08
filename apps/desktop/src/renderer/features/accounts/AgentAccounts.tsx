@@ -34,13 +34,13 @@ const providersOf = (account: AccountStatus): Pick<AccountEntry, 'providers'> =>
 }
 
 /**
- * When an account's sign-in ends, where its agent says; none once it has ended, as its row then says it is signed out. In the
- * signal's colour where the runtime says it ends soon, within the days it raises its one warning in.
+ * When an account's sign-in ends, where its agent says, only once it ends soon: within the days the runtime raises its one
+ * warning in. Quiet before then, and none once it has ended, as its row then says it is signed out.
  */
 const endsOf = (account: AccountStatus, now: Date): Pick<AccountEntry, 'ends'> => {
   const at = account.endsAt === undefined ? Number.NaN : Date.parse(account.endsAt)
-  if (account.endsAt === undefined || Number.isNaN(at) || at <= now.getTime()) return {}
-  return { ends: { at: clock(account.endsAt, now), ...(account.endsSoon === true ? { soon: true } : {}) } }
+  if (account.endsAt === undefined || account.endsSoon !== true || Number.isNaN(at) || at <= now.getTime()) return {}
+  return { ends: { at: clock(account.endsAt, now) } }
 }
 
 /** An account, as a line of the kit's list of an agent's accounts. */

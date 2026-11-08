@@ -50,10 +50,10 @@ export interface AccountEntry {
   /** The plan that pays for it, when the agent says: Claude Max. */
   plan?: string
   /**
-   * When its sign-in ends, where the agent says, as the person reads it: 12 Dec 14:00. Said quietly, before its plan's word;
-   * `soon` within its last days, when it says so in the signal's colour.
+   * When its sign-in ends, where the agent says, as the person reads it: Mon 09:30. Given only within its last days, and
+   * said then in the signal's colour, before its plan's word; nothing is said of an end further off.
    */
-  ends?: { at: string; soon?: boolean }
+  ends?: { at: string }
   /**
    * For an agent with a sign-in for each provider it reaches (OpenCode): those to say, each with how it is paid for, and
    * whether it refused work lately though the account is signed in. Said in place of the account's one word.
@@ -241,13 +241,13 @@ function Row({ account, number, first, last, busy, t, onSignIn, onRename, onMove
   const { state, place } = account
   // Who it is when the agent says; a folder another tool made, by where it is.
   const who = account.who ?? (place.kind === 'adopted' ? [place.folder, place.from].filter(Boolean).join(' · ') : null)
-  // When its sign-in ends, quietly before its one word, where the agent says.
+  // When its sign-in ends, before its one word, where it ends soon.
   const withEnds = (word: ReactNode): ReactNode =>
     account.ends === undefined ? (
       word
     ) : (
       <span className={s.endsWith}>
-        <span className={cx(s.ends, account.ends.soon === true && s.soon)}>{t.ends(account.ends.at)}</span>
+        <span className={s.ends}>{t.ends(account.ends.at)}</span>
         {word}
       </span>
     )
