@@ -64,7 +64,14 @@
     again on a click. A finished thread shows only the headers and the answers;
     a round's acknowledgement is part of its work now. What needs the
     person (a stuck step, a question, a permission, an error and its way
-    out) never folds.
+    out) never folds. The fold asks one thing of the agents: what stands
+    open, a lead's last message (or its report, where it writes nothing
+    after it) and the coordinator's answer, carries everything the person
+    needs from the turn in full, the proposal, every question, the
+    findings, the decisions needed and what was built or not, and never
+    points back at what folded ("see above"); each role's brief says so,
+    and a lead whose last message only points back is told once to say it
+    again (`lastMessage.ts`, 8 November).
   - **Thinking shows only in the trail.** Opened, every thought is a line,
     "Thought for 14s · what about", or what it is on while it thinks, and
     opens to its words; none shows unasked, and none has a row of its own
