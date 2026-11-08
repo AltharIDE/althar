@@ -121,9 +121,9 @@ const accountOf = (account: AccountUsage, several: boolean, now: Date, read: Acc
       ? text.read(ago(account.observedAt, now))
       : null,
   fault: passing(account) ? null : (account.fault?.message ?? null),
-  windows: [...read.windows, ...read.resetWindows].map((window): PlanWindow => {
+  windows: [...read.windows, ...(read.resetWindows ?? [])].map((window): PlanWindow => {
     // Reset by the runtime's clock (sent apart), or by this one, which has moved on since it was sent.
-    const reset = read.resetWindows.includes(window) || past(window.resetsAt, now)
+    const reset = (read.resetWindows ?? []).includes(window) || past(window.resetsAt, now)
     return {
       id: window.label === null ? window.kind : `${window.kind}:${window.label}`,
       label: windowName(window),
@@ -146,7 +146,7 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
   for (const read of usage?.accounts ?? []) {
     asRead.set(read.accountId, read)
     const account = current(read, now)
-    if (read.resetSince || read.resetWindows.length > 0 || read.windows.length > 0) wasRead.add(account.accountId)
+    if (read.resetSince || (read.resetWindows?.length ?? 0) > 0 || read.windows.length > 0) wasRead.add(account.accountId)
     byAgent.set(account.agentId, [...(byAgent.get(account.agentId) ?? []), account])
   }
   for (const [agentId, accounts] of byAgent) {
