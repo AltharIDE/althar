@@ -73,6 +73,7 @@ import { PlanUsage } from './PlanUsage'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
+import { missedReports } from './missedReports'
 import { PullRequestScreenshots } from './PullRequestScreenshots'
 import {
   accountsOf,
@@ -1813,6 +1814,7 @@ export const handlers = Api.toLayer(
             Effect.provideService(Accounts, accounts),
           ),
         ),
+      GetMissedReports: () => api(missedReports),
       // Done once the copy is ready; its version and its models are asked again, as it is a new one.
       InstallAgent: ({ agentId }) =>
         api(

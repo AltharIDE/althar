@@ -1,6 +1,6 @@
 # Desktop Application and Local Runtime
 
-[ADR-103](../decisions/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
+[ADR-103](../decisions/proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
 proposes remote project homes and worker pools alongside this local topology.
 Its persistent headless service is a proposed exception to the no-service
 deployment below; the local utility process stays. No remote host is built yet.
@@ -33,7 +33,7 @@ desktop product and communicate locally rather than over the public internet.
 ## The renderer
 
 The renderer is MVVM, organised by feature
-([ADR-010](../decisions/010-desktop-app-mvvm.md)):
+([ADR-010](../decisions/foundations.md#the-desktop-apps-layers)):
 
 ```mermaid
 flowchart TB
@@ -52,9 +52,9 @@ flowchart TB
 - **View models are hooks.** They turn data into what a view shows, and user
   intent into commands.
 - **The data layer** is the only code that talks to the runtime. It is written
-  with Effect ([ADR-009](../decisions/009-effect-on-the-runtime-side.md)), but
+  with Effect ([ADR-009](../decisions/foundations.md#effect-on-the-runtime-side)), but
   view models see plain values, promises and subscriptions.
-- **Features are folders.** `apps/desktop/src/features/<feature>/` holds a
+- **Features are folders.** `apps/desktop/src/renderer/features/<feature>/` holds a
   feature's routes (TanStack Router), views, view models and tests together.
 
 ## What a process is
@@ -127,11 +127,11 @@ A separate runtime gives Althar:
    the same typed contract.
 
 The runtime runs in an Electron utility process (`utilityProcess`), which main
-starts and supervises ([ADR-003](../decisions/003-electron-shell.md)). The
+starts and supervises ([ADR-003](../decisions/foundations.md#the-shell-and-the-runtime)). The
 runtime package imports nothing from Electron, so the same code runs under
 plain Node for tests, the CLI, and a headless host for the CLI and cloud
 runners (DEV-125). Althar installs no daemon or operating-system service: work
-outlives the window, not the app, and [ADR-048](../decisions/048-where-the-runtime-runs-and-who-may-reach-it.md)
+outlives the window, not the app, and [ADR-048](../decisions/foundations.md#where-the-runtime-runs-and-who-may-reach-it)
 says when a daemon would become worth it.
 
 ## Why Electron
@@ -173,7 +173,7 @@ Electrobun is too young to build a product on today.
 Main and runtime don't exchange versions: they ship as one binary, so they
 can't differ. A client that can (the CLI over the socket, a phone through the
 relay) says which API version it speaks as it connects, and is refused where
-it doesn't match (DEV-117, [ADR-048](../decisions/048-where-the-runtime-runs-and-who-may-reach-it.md)).
+it doesn't match (DEV-117, [ADR-048](../decisions/foundations.md#where-the-runtime-runs-and-who-may-reach-it)).
 
 If a migration fails, the runtime tells main what stopped it, serves nothing,
 and every window shows a recovery state (`store-failed`). It must not fall
@@ -420,7 +420,7 @@ one end to the runtime and the other to a renderer. Holding the port is the
 only credential. The CLI and a headless host will speak the same contract over
 a local socket in the profile (DEV-121, DEV-123), and a phone through a relay
 the runtime dials out to (DEV-131); none exists yet
-([ADR-048](../decisions/048-where-the-runtime-runs-and-who-may-reach-it.md)).
+([ADR-048](../decisions/foundations.md#where-the-runtime-runs-and-who-may-reach-it)).
 The domain API must not depend on any transport.
 
 Agents run as the person's OS user, so whatever a socket client can read, an
@@ -595,7 +595,7 @@ packages/
 ```
 
 Runtime-side packages are written with Effect; `ui` never uses it
-([ADR-009](../decisions/009-effect-on-the-runtime-side.md)).
+([ADR-009](../decisions/foundations.md#effect-on-the-runtime-side)).
 
 These are package boundaries, not network services:
 

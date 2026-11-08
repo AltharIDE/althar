@@ -1,4 +1,4 @@
-import { ChromeButton, ClearChatDialog, ClearedLine, type ClearKind, ThreadHead } from '@althar/ui'
+import { ClearChatDialog, ClearedLine, type ClearKind } from '@althar/ui'
 import { type ReactNode, useRef, useState } from 'react'
 
 import type { MeterClear } from '../../shared/ContextMeter'
@@ -6,25 +6,18 @@ import type { ProjectModel } from './useProject'
 
 /*
  * Clearing the coordinator's chat from the project's conversation. One
- * question, asked from three places: the bar above the thread and /clear in
- * the composer, which open it on clearing the view; and the context ring's
- * foot, which opens it on forgetting the conversation, so it reads as the
- * warning it is. Nothing is forgotten until the question's own button is
+ * question, asked from two places: /clear in the composer, which opens it on
+ * clearing the view; and the context ring's foot, which opens it on
+ * forgetting the conversation, so it reads as the warning it is. Nothing is forgotten until the question's own button is
  * pressed: there is no shortcut to it.
  */
 
 export const clearText = {
-  /** The bar above the thread. */
-  coordinator: 'Coordinator',
-  /** Its button. */
-  clear: 'Clear',
   /** What typed in the composer asks the same. */
   command: '/clear',
 }
 
 export interface ClearChat {
-  /** The bar above the thread; none until the thread is read. */
-  readonly head: ReactNode
   /**
    * Where the cleared view begins, at the top of the thread; none while the view is whole, or has more before it to read. With
    * the earlier conversation open it stays, its way back with it, whatever more of that conversation there is to read.
@@ -44,12 +37,6 @@ export function useClearChat(model: ProjectModel): ClearChat {
   const { coordinator } = model
   const view = coordinator?.view ?? null
   return {
-    head:
-      view === null ? null : (
-        <ThreadHead title={clearText.coordinator}>
-          <ChromeButton icon="remove" label={clearText.clear} disabled={!view.forgettable} onClick={() => setAsking('view')} />
-        </ThreadHead>
-      ),
     line:
       view?.cleared !== true || (coordinator?.earlier === true && !view.earlierOpen) ? null : (
         <ClearedLine

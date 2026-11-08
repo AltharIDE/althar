@@ -30,6 +30,11 @@ import { Installs, isInstalled } from './Installs'
  * and an agent whose accounts are all nearly out (under NEARLY_OUT percent of
  * their tightest window) is treated by the same rule for new steps. A step
  * already running is never stopped for it.
+ *
+ * An account marked out is back before its reset when it shows it works: a
+ * reading of its plan taken after, with room in every window, or a turn that
+ * completed on it after (`recovered`). That is the one rule every caller goes
+ * by, through `outOf`.
  */
 
 /** Why an agent can't take work now. */
@@ -167,6 +172,24 @@ export const outWords = (input: {
   if (input.waits === 'message') return `${out}. Your message waits ${until}.`
   const waits = `${step?.work ?? 'the step'} ${step?.waits ?? 'waits'}`
   return input.nothingFree === true ? `${out}. No other model is free: ${waits} ${until}.` : `${out}. ${capitalized(waits)} ${until}.`
+}
+
+/**
+ * What a thread says when a step's agent ended twice without its report (once
+ * after it was reminded), and Althar handed the step on: who failed, and who
+ * takes the work over. Each named by its model where known; by its agent too
+ * where the two are the same model, as through two of OpenCode's providers.
+ */
+export const noReportWords = (input: {
+  readonly from: { readonly agent: string; readonly model: string | null }
+  readonly to: { readonly agent: string; readonly model: string | null }
+  readonly step?: keyof typeof outStep
+}): string => {
+  const same = input.from.model !== null && input.from.model === input.to.model
+  const name = (who: { readonly agent: string; readonly model: string | null }) =>
+    who.model === null ? who.agent : same ? `${who.model} on ${who.agent}` : who.model
+  const work = input.step === undefined ? 'the step' : outStep[input.step].work
+  return `${name(input.from)} ended twice without a report. ${name(input.to)} takes ${work} over.`
 }
 
 /** Words that open a sentence. */
@@ -328,9 +351,38 @@ export class Limits extends Context.Service<
           const windows = JSON.parse(latest.windows) as ReadonlyArray<{ readonly resetsAt?: string }>
           const resetsAt = windows.find((window) => window.resetsAt !== undefined)?.resetsAt ?? null
           const until = resetsAt ?? new Date(Date.parse(latest.observedAt) + Duration.toMillis(UNKNOWN_RESET)).toISOString()
-          return until > (yield* timestamp)
-            ? Option.some<Out>({ agentId: account.agentId, accountId: account.id, resetsAt, until })
-            : Option.none<Out>()
+          if (until <= (yield* timestamp)) return Option.none<Out>()
+          // Marked out, and not yet back by its reset: unless the account has shown since that it works again.
+          return (yield* recovered(account, latest.observedAt))
+            ? Option.none<Out>()
+            : Option.some<Out>({ agentId: account.agentId, accountId: account.id, resetsAt, until })
+        })
+
+      /**
+       * Whether an account has shown that it works again since it was marked out at `since`, before its reset: the person reset
+       * their usage, topped up or changed plan. Either a reading of its plan taken after, whose every window that counts (plan-wide
+       * or a model's own, not past its reset) was read after and has room, or a turn that completed on it after.
+       * The one rule `outOf` ends an out state by, so the model list, picking an account, the pickers and the cards agree.
+       */
+      const recovered = (account: Account, since: string) =>
+        Effect.gen(function* () {
+          const [turn] = yield* sql<{ one: number }>`
+            SELECT 1 AS one FROM turn_deliveries d JOIN provider_sessions s ON s.id = d.provider_session_id
+            WHERE s.account_id = ${account.id} AND d.state = 'completed' AND d.ended_at > ${since} LIMIT 1`
+          if (turn !== undefined) return true
+          const [reading] = yield* sql<{ windows: string; observedAt: string }>`
+            SELECT windows, observed_at FROM plan_usage_readings WHERE account_id = ${account.id}`
+          if (reading === undefined) return false
+          const now = yield* Clock.currentTimeMillis
+          const after = Date.parse(since)
+          // Every window that limits anything counts, a model's own (Opus's week) too: one still full keeps the account out,
+          // as the model it limits can't be offered. Money spent past the plan and a window past its reset count for nothing.
+          const counted = (JSON.parse(reading.windows) as ReadonlyArray<UsageWindow & { observedAt?: string }>)
+            .filter((window) => window.spend !== true)
+            .filter((window) => window.resetsAt === undefined || Date.parse(window.resetsAt) > now)
+            .map((window) => ({ window, readAt: Date.parse(window.observedAt ?? reading.observedAt) }))
+          // A window read before the limit says nothing of whether it still holds; none read since says nothing at all.
+          return counted.length > 0 && counted.every((one) => one.readAt > after && leftOf(one.window) > 0)
         })
 
       /** An account's room, from the windows PlanUsage last kept for it: a window past its reset has started again. */

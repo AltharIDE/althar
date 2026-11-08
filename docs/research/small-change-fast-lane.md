@@ -1,7 +1,7 @@
 # The fast lane: what a small change's time went on, and what it cuts
 
 Measured 6 November 2026 against `6fa8c335ec25` and read again on 7 November
-from a copy of the profile's store, for [ADR-102](../decisions/102-a-small-change-is-one-step-reviewed-after-merge-and-auto-moves-to-a-lighter-model.md)
+from a copy of the profile's store, for [ADR-102](../decisions/tasks.md#the-small-change-lane)
 and the person's note of 6 November: a one-line fix
 ([#599](https://github.com/AltharIDE/althar/pull/599), one CSS width) took
 41 minutes from its task's creation to its merge, which they called
@@ -63,7 +63,7 @@ the checks and tests it ran by hand.
 **Read again on 7 November** from a copy of the store: the same twelve
 tasks, because no change of a few lines landed between. The wait for a
 place is cut for tasks planned small since 6 November
-([ADR-032](../decisions/032-agents-at-once-on-this-machine.md)'s
+([ADR-032](../decisions/scheduling.md#how-many-agents-work-at-once)'s
 follow-up), and the plan countdown, review and hand-offs are what this
 change cuts.
 

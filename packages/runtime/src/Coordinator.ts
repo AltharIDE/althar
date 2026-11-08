@@ -38,6 +38,7 @@ import { DRAFTING_MS } from './needsYou'
 import { Installs } from './Installs'
 import { Models } from './Models'
 import { Plans } from './Plans'
+import { PlanUsage } from './PlanUsage'
 import {
   closePullRequest,
   editPullRequest,
@@ -132,6 +133,7 @@ type Store =
   | Installs
   | ModelFacts
   | Limits
+  | PlanUsage
   | Busy
   | Accounts
   | Reviews

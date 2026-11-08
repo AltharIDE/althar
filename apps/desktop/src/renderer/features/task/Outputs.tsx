@@ -65,6 +65,11 @@ export const text = {
   /** Work with no pull request, its host not connected: what connecting it gives, beside the button that does. */
   connectFirst: (host: string) => `Althar opens its pull request once ${host} is connected.`,
   connect: (host: string) => `Connect ${host}`,
+  /** Work with no pull request, where Althar can tell no code host for it: why it can only merge here or push, by its remote. */
+  noHost: (remote: string | null) =>
+    remote === null
+      ? 'No code host: this repository has no remote Althar can open a pull request on.'
+      : `No code host: ${remote} isn’t on a host Althar can open a pull request on.`,
   closed: (change: ChangeSummary, host: string) => `${change.short} ${change.prefix}${change.number} was closed on ${host}.`,
   accept: (n: number) => (n > 2 ? `Accept and merge all ${n}` : n === 2 ? 'Accept and merge both' : 'Accept and merge'),
   /** In a task of several, what is left of it once some merged: by name. */
@@ -563,6 +568,8 @@ export function Outputs({
   // Opened by Althar on its host, connected; else connecting it is what to do, where Althar knows the host: by its name.
   const opens = opening && host?.connected === true
   const connects = opening && host !== null && !host.connected ? host.name : null
+  // Where Althar can tell no host for it, the card says so, rather than leave a merge here as all there is.
+  const hostless = opening && host === null
   const here =
     task.here.length > 0 || branchOnly
       ? (() => {
@@ -598,7 +605,11 @@ export function Outputs({
             <ChangeSet
               state={ChangeState.Branch}
               {...(task.branch === null ? {} : { branch: task.branch })}
-              {...(connects === null ? {} : { note: text.connectFirst(connects) })}
+              {...(connects !== null
+                ? { note: text.connectFirst(connects) }
+                : hostless
+                  ? { note: text.noHost(task.here.find((repo) => repo.remote != null)?.remote?.name ?? null) }
+                  : {})}
               prs={
                 task.here.length > 0
                   ? task.here.map((repo) => ({

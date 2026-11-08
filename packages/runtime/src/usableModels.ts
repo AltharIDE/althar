@@ -2,12 +2,15 @@ import { isAgentDefault, knownModelName } from '@althar/contracts'
 import type { AgentDefinition } from '@althar/provider-adapters'
 import { Effect, Option } from 'effect'
 
+import { Accounts } from './Accounts'
 import { Agents } from './Config'
 import { Installs, isInstalled } from './Installs'
 import { Limits, NEARLY_OUT, type Room, roomWords } from './Limits'
 import { type ModelFact, ModelFacts } from './ModelFacts'
+import { missedBy, missedReports, missedWords } from './missedReports'
 import { Models } from './Models'
 import { makerOf } from './modelMaker'
+import { PlanUsage } from './PlanUsage'
 import { SignIns } from './SignIns'
 
 /*
@@ -17,7 +20,8 @@ import { SignIns } from './SignIns'
  * only a route to a model: a step names the model, and Althar takes it the
  * best way, on a plan with room before one nearly out, and a plan before a
  * key. Each way says how much room its plan has, as last read, so the
- * coordinator can pick with that in mind.
+ * coordinator can pick with that in mind. An agent marked out is read again before it is left out, as the person may have reset it
+ * since, and a fresh reading with room ends the out state (Limits).
  */
 
 /** One way to a model: the agent that runs it, its id for it there, whether a plan pays, and how hard it can think there. */
@@ -39,6 +43,8 @@ export interface Route {
    * it. The same model through another provider the person is signed in to is the way to take instead.
    */
   readonly refusedProvider?: string
+  /** How many steps it ended without its report this way in the last week, once reminded (`missedReports`); none where it didn't. */
+  readonly missed?: number
 }
 
 export interface UsableModel {
@@ -60,14 +66,29 @@ export const usableModels = (projectId?: string) =>
     const signIns = yield* SignIns
     const installs = yield* Installs
     const limits = yield* Limits
+    const accounts = yield* Accounts
+    const planUsage = yield* PlanUsage
     const catalog = yield* models.catalog
+    const missed = yield* missedReports.pipe(Effect.orElseSucceed(() => []))
     const byKey = new Map<string, { name: string; maker: string | null; fact: ModelFact | null; routes: Route[] }>()
     // Per account, the providers within its agent that refused work lately, by id: read once for all its models.
     const refusing = new Map<string, ReadonlyMap<string, string>>()
     for (const entry of agents.list) {
       const agent = { id: entry.definition.id, name: entry.definition.name }
       if (!isInstalled(installs, entry.definition) || (yield* signIns.of(agent.id)) === 'signed_out') continue
-      if (Option.isSome(yield* limits.out(agent.id, projectId).pipe(Effect.orElseSucceed(() => Option.none())))) continue
+      const isOut = limits.out(agent.id, projectId).pipe(
+        Effect.map(Option.isSome),
+        Effect.orElseSucceed(() => false),
+      )
+      if (yield* isOut) {
+        // Marked out of usage: the person may have reset it since, so its plan is read again, only now, and only its accounts.
+        const marked: string[] = []
+        for (const account of yield* accounts.of(agent.id).pipe(Effect.orElseSucceed(() => []))) {
+          if (Option.isSome(yield* limits.outAccount(account.id).pipe(Effect.orElseSucceed(() => Option.none())))) marked.push(account.id)
+        }
+        yield* planUsage.refresh(marked).pipe(Effect.ignore)
+        if (yield* isOut) continue
+      }
       const offered = catalog.find((one) => one.agentId === agent.id)
       if (offered === undefined) continue
       for (const model of offered.models) {
@@ -94,6 +115,7 @@ export const usableModels = (projectId?: string) =>
         const refusedProvider = through === undefined ? undefined : refusing.get(starts.value.id)?.get(through)
         const fact = facts.of(agent, model)
         const key = fact?.slug ?? name.toLowerCase()
+        const misses = missedBy(missed, agent.id, model.id)
         const route: Route = {
           agentId: agent.id,
           agentName: agent.name,
@@ -104,6 +126,7 @@ export const usableModels = (projectId?: string) =>
           defaultEffort: offered.defaults.find((chosen) => chosen.model === model.id)?.effort ?? null,
           room,
           ...(refusedProvider === undefined ? {} : { refusedProvider }),
+          ...(misses === 0 ? {} : { missed: misses }),
         }
         const found = byKey.get(key)
         if (found === undefined) byKey.set(key, { name, maker: makerOf(fact, agent.id, model), fact, routes: [route] })
@@ -170,6 +193,11 @@ export const describeModels = (
   const lines: string[] = [
     `The models you can give work to now, by who makes them. Name one as it is written here, for ${use}, and, where you set one, an effort it lists. Without an effort, a step starts at the person's default for its model, or else at the model's own. The scores are Artificial Analysis's indices, higher is better: intelligence, coding, agentic.`,
     `Where a plan's usage is read, each says how much of its tightest limit is left and until when. A step on a plan with under ${NEARLY_OUT}% left goes elsewhere or waits, as the project's rule for usage limits says, so give work to one with room where you can.`,
+    ...(usable.some((model) => model.routes.some((route) => (route.missed ?? 0) > 0))
+      ? [
+          'Where a model ended steps without their report this week, even once reminded, it says how many: Althar handed each to another model, or it needed the person. Give work to another where one fits as well.',
+        ]
+      : []),
   ]
   let maker: string | null | undefined
   for (const model of usable) {
@@ -193,7 +221,12 @@ export const describeModels = (
           : `per use, $${fact.price.input.toFixed(2)} in and $${fact.price.output.toFixed(2)} out per million tokens`
     // Only through a provider that refused its sign-in: the person has to sign in to it again before work on this goes through.
     const signIn = best?.refusedProvider === undefined ? '' : `; needs ${best.refusedProvider} signed in again first`
-    lines.push(`- ${model.name}: ${scores}; ${paid}; ${effortWords(best)}${signIn}`)
+    // A way to it that keeps ending steps without their report is one to give work to only where nothing else does.
+    const missing = model.routes
+      .filter((route) => (route.missed ?? 0) > 0)
+      .map((route) => `; ${model.routes.length > 1 ? `through ${route.agentName}, ` : ''}${missedWords(route.missed ?? 0)}`)
+      .join('')
+    lines.push(`- ${model.name}: ${scores}; ${paid}; ${effortWords(best)}${signIn}${missing}`)
   }
   return lines.join('\n')
 }

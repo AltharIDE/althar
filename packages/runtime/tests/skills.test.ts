@@ -273,7 +273,7 @@ describe('skills for a task’s lead', () => {
             assert.isString(sessionMetas.at(-1)?.options?.skills)
           }
           assert.isTrue(
-            skillFilesUnder(skillsFolderOf(agentId, skills.root)).some((path) => path.endsWith('alpha/SKILL.md')),
+            skillFilesUnder(skillsFolderOf(agentId, skills.root)).some((path) => path.endsWith(join('alpha', 'SKILL.md'))),
             agentId,
           )
           assert.deepStrictEqual(
