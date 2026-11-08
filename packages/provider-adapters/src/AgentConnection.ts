@@ -23,6 +23,7 @@ import {
   takingBackground,
 } from './background'
 import { type CapturedFrame, type OwnedProcess, type ProcessExit, spawnOwned, type StopReport } from './process'
+import { type McpCall, mcpCallOf } from './mcpCalls'
 import { type Question, type QuestionAnswer, type QuestionField, questionFields } from './questions'
 import { type LaunchSpec, type PermissionMeanings, REFUSAL_META } from './registry'
 
@@ -72,6 +73,8 @@ export interface PermissionRequest {
   /** The files the action touches, as the agent reported them. */
   readonly paths: ReadonlyArray<string>
   readonly options: ReadonlyArray<PermissionOption>
+  /** The person's MCP server and tool it calls, where it is a call to one (`mcpCalls.ts`). */
+  readonly mcp?: McpCall
 }
 
 /**
@@ -346,20 +349,28 @@ class RawFailure extends Data.TaggedError('RawFailure')<{ readonly cause: unknow
 /** How many times one turn is resumed after rejections that stopped it, before it is left stopped. */
 const MAX_RESUMES = 3
 
+/** What an agent is told when a refusal ended its turn with nothing said, and Althar has no reason of its own to give. */
+const SILENT_AFTER_REFUSAL =
+  "Althar's rules refused this call of yours, and your turn ended without a reply. Carry on without it, and tell the person."
+
 const toolKinds: ReadonlyArray<string> = ['read', 'edit', 'delete', 'move', 'search', 'execute', 'think', 'fetch', 'switch_mode', 'other']
 
-const permissionRequest = (params: acp.RequestPermissionRequest): PermissionRequest => ({
-  sessionId: params.sessionId,
-  toolCallId: params.toolCall.toolCallId,
-  title: params.toolCall.title ?? '',
-  kind:
-    params.toolCall.kind !== null && params.toolCall.kind !== undefined && toolKinds.includes(params.toolCall.kind)
-      ? (params.toolCall.kind as ToolKind)
-      : 'other',
-  ...(params.toolCall.rawInput === undefined ? {} : { rawInput: params.toolCall.rawInput }),
-  paths: (params.toolCall.locations ?? []).map((location) => location.path),
-  options: params.options.map((option) => ({ optionId: option.optionId, name: option.name, kind: option.kind })),
-})
+const permissionRequest = (params: acp.RequestPermissionRequest): PermissionRequest => {
+  const mcp = mcpCallOf(params.toolCall.title ?? '', params.toolCall._meta)
+  return {
+    sessionId: params.sessionId,
+    toolCallId: params.toolCall.toolCallId,
+    title: params.toolCall.title ?? '',
+    kind:
+      params.toolCall.kind !== null && params.toolCall.kind !== undefined && toolKinds.includes(params.toolCall.kind)
+        ? (params.toolCall.kind as ToolKind)
+        : 'other',
+    ...(params.toolCall.rawInput === undefined ? {} : { rawInput: params.toolCall.rawInput }),
+    paths: (params.toolCall.locations ?? []).map((location) => location.path),
+    options: params.options.map((option) => ({ optionId: option.optionId, name: option.name, kind: option.kind })),
+    ...(mcp === undefined ? {} : { mcp }),
+  }
+}
 
 const mcpServer = (server: McpServer): acp.McpServer =>
   server.type === 'stdio'
@@ -386,6 +397,12 @@ interface Turn {
   resumes: number
   cancelled: boolean
   failure: Classified | undefined
+  /** Althar refused one of its calls in this turn. */
+  refused: boolean
+  /** The agent said something to the person in this turn. */
+  spoke: boolean
+  /** The agent was asked to carry on after a refusal that ended its turn: where it ends again with nothing said, the thread says so. */
+  recovering: boolean
 }
 
 /** What reaches a session from the agent, in the order it arrived. */
@@ -977,7 +994,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
               if (reported !== undefined) {
                 const turn = yield* Ref.get(state.current)
                 if (Option.isSome(turn) && reported.severity === 'error') turn.value.failure = reported.classified
-                return [{ _tag: 'AgentFailure' as const, severity: reported.severity, classified: reported.classified }]
+                return [{ _tag: 'AgentFailure' as const, ...reported }]
               }
             }
             return events
@@ -985,9 +1002,11 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
 
         /** Passes an event to the current turn, or to the between-turns stream. */
         const deliver = (event: SessionEvent) =>
-          Effect.flatMap(Ref.get(state.current), (turn) =>
-            Option.isSome(turn) ? Effect.asVoid(Queue.offer(turn.value.queue, event)) : Effect.asVoid(PubSub.publish(state.between, event)),
-          )
+          Effect.flatMap(Ref.get(state.current), (turn) => {
+            if (!Option.isSome(turn)) return Effect.asVoid(PubSub.publish(state.between, event))
+            if (event._tag === 'AgentMessage') turn.value.spoke = true
+            return Effect.asVoid(Queue.offer(turn.value.queue, event))
+          })
 
         const endTurn = (turn: Turn, ending: Effect.Effect<void>) =>
           Effect.gen(function* () {
@@ -1012,17 +1031,32 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         /** Explain pending refusals before ending the turn. ACP's permission response has no portable reason field. */
         const stopped = (turn: Turn, response: acp.PromptResponse) =>
           Effect.gen(function* () {
+            // A turn the agent cut short (stop reason cancelled, though the person did not) after a refusal, with no word to the person, is never left so: the agent is asked once more,
+            // where refusals go with the next prompt too, and where it still says nothing the thread says what happened.
+            const unanswered = !turn.cancelled && turn.refused && !turn.spoke
+            const cutShort = unanswered && response.stopReason === 'cancelled'
+            // Asked once to carry on, an agent that ends again with nothing said, however it ends, is not asked again: the thread says so.
+            const silent = cutShort || (unanswered && turn.recovering)
+            const again =
+              turn.cancelled || turn.resumes >= MAX_RESUMES
+                ? undefined
+                : sessionOptions.refusals === 'withNext'
+                  ? cutShort
+                    ? (turn.resumeWith ?? SILENT_AFTER_REFUSAL)
+                    : undefined
+                  : turn.resumeWith
+            if (again !== undefined) {
+              turn.resumeWith = undefined
+              turn.resumes += 1
+              if (turn.refused) turn.recovering = true
+              yield* Queue.offer(turn.queue, { _tag: 'Resumed', reason: again })
+              yield* send(again)
+              return
+            }
             if (sessionOptions.refusals === 'withNext') {
               // No turn of its own: one that stopped the turn goes with the next prompt, one it carried on past is dropped.
               carried = !turn.cancelled && turn.stoppedByRefusal ? turn.resumeWith : undefined
               turn.resumeWith = undefined
-            } else if (!turn.cancelled && turn.resumeWith !== undefined && turn.resumes < MAX_RESUMES) {
-              const reason = turn.resumeWith
-              turn.resumeWith = undefined
-              turn.resumes += 1
-              yield* Queue.offer(turn.queue, { _tag: 'Resumed', reason })
-              yield* send(reason)
-              return
             }
             const usage = normalizeUsage(response.usage)
             // Claude Code and Codex end a turn that failed as any other, `end_turn`, with the failure on the response itself.
@@ -1031,6 +1065,13 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
             yield* endTurn(
               turn,
               Effect.gen(function* () {
+                if (silent)
+                  yield* Queue.offer(turn.queue, {
+                    _tag: 'Notice',
+                    severity: 'warning',
+                    title: 'A command was refused and the agent stopped without saying anything.',
+                    description: 'Ask it to carry on, and it will go on without what was refused.',
+                  })
                 yield* Queue.offer(turn.queue, {
                   _tag: 'TurnEnded',
                   stopReason: response.stopReason,
@@ -1053,6 +1094,8 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
                   for (const event of yield* interpret(inbound.update)) yield* deliver(event)
                   return
                 case 'Event':
+                  if (turn !== undefined && inbound.event._tag === 'PermissionAnswered' && inbound.event.decision === 'reject')
+                    turn.refused = true
                   if (turn !== undefined && inbound.resumeWith !== undefined) {
                     turn.resumeWith = [turn.resumeWith, inbound.resumeWith]
                       .filter((line) => line !== undefined)
@@ -1095,6 +1138,9 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
                 resumes: 0,
                 cancelled: false,
                 failure: undefined,
+                refused: false,
+                spoke: false,
+                recovering: false,
               }
               const idle = yield* Ref.modify(state.current, (running) =>
                 Option.isSome(running) ? [false, running] : [true, Option.some(turn)],

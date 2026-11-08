@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
+import { useControlled } from '../../lib/controlled'
 import { cx } from '../../lib/cx'
 import { Disclosure, DisclosureTrigger, Fold, type Disclosable } from '../../primitives/Fold/Fold'
 import { Model, type ModelInfo } from '../../primitives/Model/Model'
@@ -49,8 +50,20 @@ export interface WorkLineProps extends Disclosable {
  * quiet sheet in the same column, what it said on the way among them; closed,
  * nothing is left under it. While the lead works, the line says what it is on.
  */
-export function WorkLine({ took, live = false, summary, who, children, className, text, ...disclosure }: WorkLineProps) {
+export function WorkLine({
+  took,
+  live = false,
+  summary,
+  who,
+  children,
+  className,
+  text,
+  open,
+  defaultOpen = false,
+  onOpenChange,
+}: WorkLineProps) {
   const t = { ...workLineText, ...text }
+  const [opened, setOpened] = useControlled(open, defaultOpen, onOpenChange)
   const words = who === undefined ? (live ? t.working(took) : t.worked(took)) : live ? t.workingBy(took) : t.workedBy(took)
   const line = (
     <>
@@ -76,7 +89,7 @@ export function WorkLine({ took, live = false, summary, who, children, className
       </div>
     )
   return (
-    <Disclosure {...disclosure} className={cx(s.work, className)}>
+    <Disclosure open={opened} onOpenChange={setOpened} className={cx(s.work, className)}>
       <DisclosureTrigger>
         <button type="button" className={s.row} aria-busy={live || undefined}>
           {line}

@@ -4,25 +4,28 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 
 import { type ProjectTab, Room } from '@althar/ui'
 
+import { useMerging } from '../../data/merges'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { kitInk } from '../../shared/inks'
+import { yoursByProject } from '../board/lanes'
 import { draftActions, draftsOf, inkOf } from '../newProject/draft'
 import { FIRST_SECTION, type Section } from '../settings/sections'
 import { useWelcoming } from '../start/welcome'
 import { arrived, closed, moved, settingsClosed, settingsOn, tabsStoreOf } from './store'
-import { afterClosing, firstOpen, type Place, tabOf, whereOf, yoursIn } from './tabs'
+import { afterClosing, firstOpen, type Place, tabOf, whereOf } from './tabs'
 import { useWarmHome, useWarmTabs } from './warm'
 
 /*
  * The window's tabs: one for each project the person keeps open, with where
  * in each they last were, so pressing a tab goes back there. Going into a
  * project, from anywhere, gives it a tab. Every project's tab says whether
- * a task is under way there and what waits on the person, as the window's
- * projects are read: again whenever a project, a task, a run, a session or a
- * call changes. A project being made has a tab of its own, at the end, as a
- * browser's new tab; made, it becomes the project's tab, which has the
- * project's id already. Althar's settings have a tab too, beside the home's,
+ * a task is under way there, from the projects, and what waits on the person
+ * there, as that project's board counts it, from the home: again whenever a
+ * project, a task, a run, a session or a call changes. A project being made
+ * has a tab of its own, at the end, as a browser's new tab; made, it becomes
+ * the project's tab, which has the project's id already. Althar's settings
+ * have a tab too, beside the home's,
  * from going into them until it is closed, which goes back to the section
  * it was on.
  */
@@ -32,7 +35,11 @@ export const text = {
   newProject: 'New project',
 }
 
+const EMPTY_PLACES: Readonly<Record<string, Place>> = {}
+
 export interface TabsModel {
+  readonly home: boolean
+  readonly closeHome: () => void
   readonly tabs: ReadonlyArray<ProjectTab>
   /** The projects without a tab. */
   readonly others: ReadonlyArray<ProjectTab>
@@ -76,10 +83,16 @@ export const useTabs = (): TabsModel => {
   const draft = useSyncExternalStore(drafts.subscribe, drafts.get)
   // Unread, or not read this time, the tabs keep what they last showed.
   const projects = useQuery(reads(client).projects()).data?.projects ?? null
+  // What waits on the person in each project, as its board counts it: the home has the same cards, with the phase each is in now,
+  // so a dot never lights for work the board puts in Running (a change whose checks run), or for a task kept for later.
+  const home = useQuery({ ...reads(client).home(), enabled: projects !== null && projects.length > 0 }).data ?? null
+  const { merging } = useMerging(home?.tasks ?? null)
+  const yours = useMemo(() => (home === null ? new Map<string, number>() : yoursByProject(home, merging)), [home, merging])
+  const yoursInProject = (projectId: string) => yours.get(projectId) ?? 0
 
   const where = whereOf(pathname)
   const known =
-    where.kind === 'home' || where.kind === 'new' || where.kind === 'settings'
+    where.kind === 'home' || where.kind === 'new' || where.kind === 'settings' || where.kind === 'page'
       ? null
       : where.kind === 'project'
         ? where.projectId
@@ -133,9 +146,9 @@ export const useTabs = (): TabsModel => {
   const open = (kept?.open ?? []).filter((id) => projects === null || byId.has(id))
   const tabs = open.flatMap((id) => {
     const project = byId.get(id)
-    return project === undefined ? [] : [tabOf(project)]
+    return project === undefined ? [] : [tabOf(project, yoursInProject(project.id))]
   })
-  const places = kept?.places ?? {}
+  const places = kept?.places ?? EMPTY_PLACES
   // Every open tab's place stays in the window's cache, read ahead, so going to one never waits on the runtime.
   const preview = useWarmTabs(open, places)
   // And the home's, once there are projects: going back to it never waits either.
@@ -169,15 +182,35 @@ export const useTabs = (): TabsModel => {
     leaving(draft.id, go(afterClosing([...open, draft.id], draft.id), places))
   }
 
+  const homeVisible = kept?.home !== false || (where.kind === 'home' && open.length === 0)
+  const first = open[0]
+  // With Home dismissed, the window never rests at /: a launch starts there, and so do the callers that go home on their own
+  // (ProjectScreen once its project is removed, TaskScreen, the browser route's redirect). Deliberately, all of them fall
+  // through to the first kept tab. This runs as an effect, after the store has filtered the kept tabs by the projects that
+  // still exist, which a route's beforeLoad can't know yet.
+  useEffect(() => {
+    if (where.kind === 'home' && kept?.home === false && first !== undefined) void go(first, places)
+  }, [where.kind, kept, first, go, places])
+
   return {
+    home: homeVisible,
+    closeHome: () => {
+      if (open.length === 0 && !onNew && kept?.settings === undefined) return
+      store.change((was) => ({ ...was, home: false }))
+      if (where.kind === 'home') {
+        if (first !== undefined) void go(first, places)
+        else if (kept?.settings !== undefined) void navigate({ to: '/settings/$section', params: { section: kept.settings } })
+      }
+    },
     tabs: making === null ? tabs : [...tabs, making],
-    others: (projects ?? []).filter((project) => !open.includes(project.id)).map(tabOf),
+    others: (projects ?? []).filter((project) => !open.includes(project.id)).map((project) => tabOf(project, yoursInProject(project.id))),
     current: onNew ? (draft?.id ?? null) : current,
-    yours: (projects ?? []).reduce((sum, project) => sum + yoursIn(project), 0),
+    yours: (projects ?? []).reduce((sum, project) => sum + yoursInProject(project.id), 0),
     // No project yet, or the welcome still on show over the one made on its way: the window is all page, with no tabs.
     none: (projects !== null && projects.length === 0) || welcoming,
     settings: { open: onSettings || kept?.settings !== undefined, current: onSettings },
     select: (id) => {
+      if (id === null && kept?.home === false) store.change((was) => ({ ...was, home: true }))
       if (id !== null && id === making?.id) return void navigate({ to: '/new' })
       void go(id, places)
     },
@@ -188,6 +221,8 @@ export const useTabs = (): TabsModel => {
     close: (id) => {
       if (id === making?.id) return closeNew()
       store.change(closed(id))
+      // The last project's tab gone, the window falls back to Home, which is shown again rather than still dismissed.
+      if (open.length === 1 && open[0] === id && kept?.home === false) store.change((was) => ({ ...was, home: true }))
       if (id === current && !onNew && !onSettings) void go(afterClosing(open, id), places)
     },
     reorder: (id, beforeId) => store.change(moved(id, beforeId)),

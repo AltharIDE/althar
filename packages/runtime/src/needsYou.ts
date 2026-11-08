@@ -7,7 +7,8 @@ import type { ChangeSummary } from '@althar/contracts'
  * itself instead, so its card stays under way: a ready change whose commits
  * go up on their own, or whose checks still run with nothing in their way;
  * and a task no agent is on, with nothing that says why, for a moment after
- * its last agent went, as the next one is on its way.
+ * its last agent went, as the next one is on its way; and a task just drafted,
+ * before its plan is proposed, off the board until the plan comes.
  */
 
 /** What a ready change's open pull request is doing by itself, where it is: its commits going up, then its checks running. */
@@ -50,3 +51,14 @@ export const BETWEEN_AGENTS_MS = 30_000
 /** Whether a task its last agent left at `since`, with nothing that says why, is still between agents at `now`, for `within` ms. */
 export const betweenAgents = (since: string | null, now: number, within: number = BETWEEN_AGENTS_MS): boolean =>
   since !== null && now - Date.parse(since) < within
+
+/**
+ * How long a task drafted with no plan stays off the board when no turn covers it: its plan is on its way if it was
+ * just made. The turn that made it is the better sign (its plan comes in that turn, or it is the person's when it
+ * ends); this is the fallback, for a draft made outside a turn, or a turn that never ended.
+ */
+export const DRAFTING_MS = 5 * 60_000
+
+/** Whether a task made at `createdAt` is still within `within` ms of being drafted, at `now`. */
+export const stillDrafting = (createdAt: string | null, now: number, within: number = DRAFTING_MS): boolean =>
+  createdAt !== null && now - Date.parse(createdAt) < within

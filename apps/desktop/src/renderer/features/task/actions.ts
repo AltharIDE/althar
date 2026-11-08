@@ -10,6 +10,8 @@ export const doing = {
   replace: (url: string): Doing => `replace:${url}`,
   bringIn: (url: string): Doing => `bring-in:${url}`,
   markReady: (url: string): Doing => `ready:${url}`,
+  /** Each of its drafts, in turn. */
+  markAllReady: 'ready-all',
   openChange: 'open',
   accept: 'accept',
   mergeHere: 'merge-here',

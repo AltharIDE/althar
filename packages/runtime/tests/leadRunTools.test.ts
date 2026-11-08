@@ -1,12 +1,14 @@
 import { execFileSync } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import type { Screenshot, Shot } from '../src/Config'
+import { RuntimeConfig, type Screenshot, type Shot } from '../src/Config'
+import { coordinatorFolderAt } from '../src/coordinatorFolder'
+import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { Launches } from '../src/Launches'
 import { Projects } from '../src/Projects'
@@ -137,9 +139,51 @@ describe('install_dependencies', () => {
         yield* callTool(bare.lead, 'install_dependencies', { repository: 'web' }),
         /^This task has no worktree of a repository called web\. Its repositories: /,
       )
-      // Only a task's lead has a worktree to set up.
-      assert.strictEqual(yield* callTool(bare.coordinator, 'install_dependencies', {}), 'Althar has no tool called install_dependencies.')
-      assert.strictEqual(yield* callTool({ ...bare.lead, taskId: null }, 'install_dependencies', {}), 'This tool is for a task’s lead.')
+      // The coordinator sets up its copies of the project's repositories (ADR-097); a lead with no task has nothing to set up.
+      assert.notInclude(yield* callTool(bare.coordinator, 'install_dependencies', {}), 'Althar has no tool called')
+      assert.strictEqual(
+        yield* callTool({ ...bare.lead, taskId: null }, 'install_dependencies', {}),
+        'This tool is for a task’s lead or the coordinator.',
+      )
+    }).pipe(Effect.provide(runtime())),
+  )
+})
+
+describe('install_dependencies, for the coordinator', () => {
+  it.live('sets up its copies as a worktree is, keeps nothing of it, and says so where a copy isn’t there yet', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const SETUP = `node -e "require('fs').writeFileSync('installed.txt','yes');console.log('added 3 packages')"`
+      const { project } = yield* taskIn(repository(), SETUP)
+      const threadId = yield* (yield* Coordinator).thread(project.projectId)
+      const coordinator: ToolAccess = { role: 'coordinator', projectId: project.projectId, threadId, sessionId: 'none', taskId: null }
+      const [binding] = yield* sql<{ slug: string; name: string; recorded: string | null }>`
+        SELECT b.slug, b.display_name AS name, b.recorded_setup AS recorded
+        FROM repository_bindings b WHERE b.project_id = ${project.projectId}`
+      const [{ slug } = { slug: '' }] = yield* sql<{ slug: string }>`SELECT slug FROM projects WHERE id = ${project.projectId}`
+      const copy = join(coordinatorFolderAt((yield* RuntimeConfig).worktreeRoot, slug), binding?.slug ?? '')
+
+      // Its copies are made as its turn starts: outside one, there is nothing to set up.
+      assert.strictEqual(
+        yield* callTool(coordinator, 'install_dependencies', {}),
+        `Your copy of ${binding?.name} isn't on this computer: your copies are made as each of your turns starts.`,
+      )
+      mkdirSync(copy, { recursive: true })
+      assert.strictEqual(
+        yield* callTool(coordinator, 'install_dependencies', { repository: binding?.name ?? '' }),
+        `Althar ran \`${SETUP}\` in the copy, outside your sandbox, and it went through. The end of what it printed:\n\`\`\`\nadded 3 packages\n\`\`\``,
+      )
+      assert.strictEqual(readFileSync(join(copy, 'installed.txt'), 'utf8'), 'yes')
+      // Shown in its thread; nothing kept of it, as the copy is made again next turn.
+      assert.lengthOf(yield* setupItems(threadId), 1)
+      const [after] = yield* sql<{
+        recorded: string | null
+      }>`SELECT recorded_setup AS recorded FROM repository_bindings WHERE project_id = ${project.projectId}`
+      assert.strictEqual(after?.recorded, binding?.recorded)
+      assert.match(
+        yield* callTool(coordinator, 'install_dependencies', { repository: 'web' }),
+        /^The project has no repository called web\. Its repositories: /,
+      )
     }).pipe(Effect.provide(runtime())),
   )
 })
@@ -197,7 +241,7 @@ describe('run_project and stop_project, for a lead', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('says how a run that ended at once ended, for the lead to fix; and is a lead’s only', () =>
+  it.live('says how a run that ended at once ended, for the lead to fix; and stops only its own task’s runs', () =>
     Effect.gen(function* () {
       const { lead } = yield* taskIn(repository())
       yield* callTool(lead, 'set_run_command', { command: `node -e "console.log('Error: Cannot find module vite'); process.exit(1)"` })
@@ -206,8 +250,11 @@ describe('run_project and stop_project, for a lead', () => {
         ended,
         /in your worktree ended at once, with exit code 1\. Its last lines, stdout and stderr:\n\nError: Cannot find module vite\n\nFix what stopped it/,
       )
-      assert.strictEqual(yield* callTool({ ...lead, taskId: null }, 'run_project', {}), 'This tool is for a task’s lead.')
-      assert.strictEqual(yield* callTool({ ...lead, taskId: null }, 'stop_project', {}), 'This tool is for a task’s lead.')
+      // One tool for both roles (ADR-097): with no task of its own, there is nothing of its to stop.
+      assert.strictEqual(
+        yield* callTool({ ...lead, taskId: null }, 'stop_project', {}),
+        'Nothing runs in your worktree, so there was nothing to stop.',
+      )
       const listed = yield* listTools(lead)
       for (const name of ['install_dependencies', 'run_project', 'stop_project', 'screenshot', 'rerun_check']) assert.include(listed, name)
     }).pipe(Effect.provide(runtime())),

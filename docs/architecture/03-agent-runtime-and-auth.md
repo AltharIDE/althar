@@ -620,6 +620,12 @@ principal for a bounded purpose.
 
 ### Vendor CLI and subscription login policy
 
+[ADR-103](../decisions/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
+proposes replacing rules 5–8's blanket device/remote split with verified
+provider support for sign-in on a personal host, separately from managed
+cloud support. It keeps provider-owned login and forbids copying vendor
+credential caches. This is a proposal, not a verified support matrix.
+
 Some providers offer a useful local CLI authenticated through a consumer or
 team subscription but no supported API equivalent. Presence of that CLI is a
 capability, not permission to extract or relay its session.

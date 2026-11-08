@@ -65,6 +65,11 @@ import { statements as findingTitles } from './0060_finding_titles'
 import { statements as localTasks } from './0061_local_tasks'
 import { statements as workToward } from './0062_work_toward'
 import { statements as skills } from './0063_skills'
+import { statements as taskParents } from './0064_task_parents'
+import { statements as settingChanges } from './0065_setting_changes'
+import { statements as clearedView } from './0066_cleared_view'
+import { statements as fastLane } from './0067_fast_lane'
+import { statements as reviewsAfterMerge } from './0068_reviews_after_merge'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -147,6 +152,11 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0061_local_tasks', statements: localTasks },
   { key: '0062_work_toward', statements: workToward },
   { key: '0063_skills', statements: skills },
+  { key: '0064_task_parents', statements: taskParents },
+  { key: '0065_setting_changes', statements: settingChanges },
+  { key: '0066_cleared_view', statements: clearedView },
+  { key: '0067_fast_lane', statements: fastLane },
+  { key: '0068_reviews_after_merge', statements: reviewsAfterMerge },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 
-import { type AgentStatus, MOST_AT_ONCE } from '@althar/contracts'
+import { type AgentStatus, MOST_AT_ONCE, type ToolRow } from '@althar/contracts'
 import {
   AgentInstall,
   AgentsAtOnce,
+  BrowserPreferences,
   type AgentTab,
   AgentTabList,
   AgentTabPanel,
@@ -43,6 +44,8 @@ import {
   TaskFolders,
   UpdateReady,
   UsageData,
+  AgentTools,
+  type ToolRowModel,
 } from '@althar/ui'
 
 import altharFace from '../../../../resources/faces/althar-ai.svg'
@@ -69,6 +72,7 @@ import type { StartModel } from '../start/useStart'
 import { EXAMPLE, IslandPicture, MenuPicture, shownGlance } from './EdgePicture'
 import { ModelsView } from './ModelsView'
 import { QuickCards } from './QuickCards'
+import { ChangedBy } from './ChangedBy'
 import { GROUPS, type Section, sectionText } from './sections'
 import s from './Settings.module.css'
 import { text } from './text'
@@ -84,6 +88,8 @@ import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
 import { usePostTeamReviews } from './usePostTeamReviews'
 import { useSkills } from './useSkills'
 import { PLACES, useStorage } from './useStorage'
+import { type AgentToolsModel, useAgentTools } from './useAgentTools'
+import { serverBrand } from '../../shared/mcpServers'
 import { useTaskFolders } from './useTaskFolders'
 
 /*
@@ -170,6 +176,7 @@ export function SettingsPage({ start, section, onSection, onTask, signIn }: Sett
         </>
       }
     >
+      <ChangedBy projectId={null} section={`althar/${section}`} />
       <SectionBody
         section={section}
         start={start}
@@ -210,6 +217,8 @@ function SectionBody({
   switch (section) {
     case 'agents':
       return <AgentsSection start={start} accounts={accounts} {...(asked === undefined ? {} : { asked })} />
+    case 'mcp-servers':
+      return <ServersSection />
     case 'skills':
       return <SkillsSection />
     case 'code-hosts':
@@ -228,6 +237,8 @@ function SectionBody({
       return <AppearanceSection {...looks} />
     case 'editor':
       return <EditorSection />
+    case 'browser':
+      return <BrowserSection />
     case 'about':
       return <AboutSection start={start} />
   }
@@ -320,13 +331,61 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
 
 /* ---- skills ----------------------------------------------------------------------- */
 
-/** The skills every lead is given, the one review open, and installing from GitHub. */
+/** A row of the person's servers or skills, as the kit's table takes it. */
+const toolRowOf = (row: ToolRow): ToolRowModel => {
+  const brand = serverBrand(row.name)
+  return { ...row, ...(brand === undefined ? {} : { brand }) }
+}
+
+/** When a line under Since happened, as the section says it. */
+const sinceWhen = (at: string) => {
+  const date = new Date(at)
+  return Number.isNaN(date.getTime()) ? at : date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+}
+
+/** The person's own servers or skills, the roles each gets, and the switch that keeps their agents the same (ADR-097). */
+function PersonsTools({ kind, model }: { kind: 'server' | 'skill'; model: AgentToolsModel }) {
+  const tools = model.tools
+  if (tools === undefined) return <Failed when={model.loadFailed} />
+  if (!tools.enabled) return null
+  return (
+    <>
+      {model.error !== null && (
+        <p role="alert" className={s.failed}>
+          {model.error}
+        </p>
+      )}
+      <AgentTools
+        kind={kind}
+        rows={(kind === 'server' ? tools.servers : tools.skills).map(toolRowOf)}
+        sync={kind === 'server' ? tools.serverSync : tools.skillSync}
+        {...(kind === 'server' ? { scope: { projects: model.projects, value: model.projectId, onChange: model.setProjectId } } : {})}
+        onRoles={(name, roles) => model.setRoles(kind, name, roles)}
+        onSync={(on, takeBack) => model.setSync(kind, on, takeBack)}
+        onKeep={(agent, name, out) => model.keep(kind, agent, name, out)}
+        onPick={(name, way) => model.pick(kind, name, way)}
+        onUndo={model.undo}
+        onSignIn={model.signIn}
+        when={sinceWhen}
+      />
+    </>
+  )
+}
+
+/** The person's MCP servers: which roles get each, and the switch that keeps their agents' the same. */
+function ServersSection() {
+  return <PersonsTools kind="server" model={useAgentTools()} />
+}
+
+/** The person's own skills and the switch that links them into each agent; then the skills every lead is given, the one review open, and installing from GitHub. */
 function SkillsSection() {
   const skills = useSkills()
+  const persons = useAgentTools()
   if (skills.rows === undefined) return <Failed when={skills.loadFailed} />
   if (!skills.enabled) return <p className={s.quiet}>{text.skillsOff}</p>
   return (
     <div className={s.skills}>
+      <PersonsTools kind="skill" model={persons} />
       {skills.card !== null ? (
         <SkillReview card={skills.card} busy={skills.busy} onInstall={skills.install} onCancel={skills.cancel} />
       ) : (
@@ -701,6 +760,39 @@ function EditorSection() {
         }))}
         value={editors.find((editor) => editor.id === preferences.editor)?.id ?? editors[0]?.id ?? null}
         onChange={(editor) => set('editor', editor)}
+      />
+      <Failed when={failed} />
+    </>
+  )
+}
+
+/* ---- the browser ------------------------------------------------------------------ */
+
+/**
+ * The pages beside conversations (ADR-100): where a thread's links open, how
+ * long pages keep cookies, and clearing what every page kept, at once.
+ */
+function BrowserSection() {
+  const { preferences, set, failed } = usePreferences()
+  const pages = useServices().host.pages
+  const [clearing, setClearing] = useState<'no' | 'clearing' | 'cleared'>('no')
+  return (
+    <>
+      <BrowserPreferences
+        links={preferences.browserLinks}
+        onLinks={(links) => set('browserLinks', links)}
+        keep={preferences.browserCookies}
+        onKeep={(keep) => set('browserCookies', keep)}
+        onClear={() => {
+          if (pages === undefined) return
+          setClearing('clearing')
+          void pages.clearAll().then(
+            () => setClearing('cleared'),
+            () => setClearing('no'),
+          )
+        }}
+        clearing={clearing === 'clearing'}
+        cleared={clearing === 'cleared'}
       />
       <Failed when={failed} />
     </>

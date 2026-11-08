@@ -511,11 +511,11 @@ export class Automations extends Context.Service<
 
       /**
        * Why a run's lead or reviewer can't run unwatched: none of its accounts
-       * is on a plan, as its agent's status says; null where one is. Each
+       * is paid by a plan for its model; null where one is. Each
        * session of the run is held to the same (`Limits.pick`).
        */
-      const offPlan = (agentId: string, projectId: string) =>
-        limits.pick({ agentId, projectId, planOnly: true }).pipe(
+      const offPlan = (agentId: string, projectId: string, model: string | null) =>
+        limits.pick({ agentId, projectId, planOnly: true, ...(model === null ? {} : { model }) }).pipe(
           Effect.as(null),
           Effect.catchTag('PlanOnly', (error) => Effect.succeed(error.message)),
           // An agent with no account at all is the run's to fail on, where its thread says why.
@@ -546,7 +546,7 @@ export class Automations extends Context.Service<
             definition.lead,
             ...(definition.work.kind === 'task' && definition.work.review !== null ? [definition.work.review] : []),
           ]) {
-            const why = yield* offPlan(step.agentId, row.projectId)
+            const why = yield* offPlan(step.agentId, row.projectId, step.model)
             if (why !== null) return why
           }
           return null

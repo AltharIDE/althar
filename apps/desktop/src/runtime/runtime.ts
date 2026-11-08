@@ -16,6 +16,8 @@ import {
   Nudges,
   Secrets,
   services,
+  settledAmong,
+  settling,
   startup,
   UsageData,
 } from '@althar/runtime'
@@ -185,6 +187,9 @@ const options = {
             path: device.path,
           }),
   },
+  // The person's own agents' settings, whose MCP servers and skills every role gets and sync keeps the same (ADR-097).
+  // ALTHAR_AGENT_HOME names another home for them, as a demo or a screenshot does, so the person's own aren't touched.
+  agentConfigs: { homeDir: process.env.ALTHAR_AGENT_HOME ?? homedir(), folder: join(profile, 'agent-sync') },
   appVersion: process.env.ALTHAR_APP_VERSION ?? '0.0.0',
   deviceName: hostname(),
   ...(agents === null ? {} : { agentStderr: agents.stderr }),
@@ -252,6 +257,12 @@ const program = Effect.gen(function* () {
           secrets: Secrets.memory(),
           // Nothing opens in Terminal while the tests drive the app.
           openTerminal: () => Effect.succeed(false),
+          // The person's agents' settings are a home of the profile's own, never this computer's.
+          agentConfigs: {
+            homeDir: process.env.ALTHAR_AGENT_HOME ?? join(profile, 'agent-home'),
+            folder: join(profile, 'agent-sync'),
+            env: {},
+          },
           openUrl: () => Effect.succeed(false),
           // How many agents work at once comes from the machine a test names (`cores,GB`), else a large one, never the one running them.
           busy: { machine: machineIn(process.env.ALTHAR_MACHINE) },
@@ -307,6 +318,12 @@ const program = Effect.gen(function* () {
   )
   yield* Effect.forkScoped(
     Stream.runForEach(Context.get(context, UsageData).events, (usage) => Effect.sync(() => parent.postMessage({ type: 'usage', usage }))),
+  )
+  // Tasks over and projects removed, for the main process to clear what their pages kept, where the person keeps it that long (ADR-100).
+  yield* Effect.forkScoped(
+    Stream.runForEach(settling, (owners) => Effect.sync(() => parent.postMessage({ type: 'settled', owners }))).pipe(
+      Effect.provideContext(context),
+    ),
   )
   // What the runtime kept to what it belonged to and carried on past goes too, as a handled crash report (crashes.ts, ADR-047).
   yield* Effect.forkScoped(
@@ -376,6 +393,17 @@ const tellWork = (requestId: string) => {
     )
 }
 
+/** Which of the tasks and projects whose pages kept something are over, for the main process to clear; none while the store isn't open. */
+const tellSettled = (requestId: string, owners: ReadonlyArray<string>) => {
+  if (!readyNow) return parent.postMessage({ type: 'settled-among', requestId, value: [] })
+  void ready
+    .then((context) => Effect.runPromise(settledAmong(owners).pipe(Effect.provideContext(context))))
+    .then(
+      (value) => parent.postMessage({ type: 'settled-among', requestId, value }),
+      () => parent.postMessage({ type: 'settled-among', requestId, value: [] }),
+    )
+}
+
 /** A folder the person chose, from the main process: its grant goes back, for the window to open it by. */
 const allowFolder = (requestId: string, path: string) =>
   void ready.then((context) =>
@@ -399,6 +427,7 @@ parent.on('message', (message) => {
     readonly threadId?: string
     readonly shot?: unknown
     readonly online?: boolean
+    readonly owners?: unknown
   } | null
   const port = message.ports[0]
   if (data?.type === 'sealed' && data.requestId !== undefined) {
@@ -411,6 +440,11 @@ parent.on('message', (message) => {
   if (data?.type === 'facts' && data.requestId !== undefined) tellFacts(data.requestId, data.threadId ?? null)
   if (data?.type === 'names' && data.requestId !== undefined) tellNames(data.requestId)
   if (data?.type === 'work' && data.requestId !== undefined) tellWork(data.requestId)
+  if (data?.type === 'settled-among' && data.requestId !== undefined && Array.isArray(data.owners))
+    tellSettled(
+      data.requestId,
+      (data.owners as ReadonlyArray<unknown>).filter((one): one is string => typeof one === 'string'),
+    )
   if (data?.type === 'online' && typeof data.online === 'boolean') tellOnline(data.online)
   // Interrupting the program closes its scope: every session is stopped and recorded first.
   if (data?.type === 'shutdown') {

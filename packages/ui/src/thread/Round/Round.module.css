@@ -9,6 +9,10 @@
 .round > .head + * {
   margin-top: 0;
 }
+/* under its work's header, its answer stands where what it said on the way stood */
+.round > [data-rhythm='fold'] + * {
+  margin-top: 12px;
+}
 .head {
   display: flex;
   align-items: center;

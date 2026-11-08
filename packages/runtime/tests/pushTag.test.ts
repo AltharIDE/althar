@@ -10,6 +10,8 @@ import { Effect, Fiber } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Permissions } from '../src/Permissions'
+import { Instance } from '../src/Instance'
+import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
@@ -36,6 +38,8 @@ const leadWithRemote = (origin: 'bare' | 'none' = 'bare') =>
     const projects = yield* Projects
     const sql = yield* SqlClient.SqlClient
     const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: root })
+    // Asking about more than what can't be undone, as pushing a tag asks there (ADR-097).
+    yield* (yield* Policies).set(project.projectId, { allowEverything: false }, (yield* Instance).personId)
     const task = yield* projects.createTask({
       envelope: yield* Runtime.envelope('task.create', {}),
       projectId: project.projectId,

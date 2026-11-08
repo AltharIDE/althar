@@ -27,6 +27,8 @@ import {
   type StallOptions,
 } from '../src/Config'
 import type { CliUnanswered } from '../src/errors'
+import { Instance } from '../src/Instance'
+import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
@@ -288,6 +290,8 @@ export const runtime = (
     readonly agents?: Layer.Layer<Agents>
     /** A plan's countdown; null leaves it to the person's setting (plansAndReviews.ts). */
     readonly countdown?: Duration.Duration | null
+    /** How long a drafted task waits for its plan before it is the person's: five minutes unless a test says. */
+    readonly drafting?: Duration.Duration
     readonly connectors?: Layer.Layer<Connectors>
     readonly listenEvery?: Duration.Duration
     /** How often the merge line is swept by itself; never, with an infinite one, where a test sweeps it. */
@@ -328,6 +332,8 @@ export const runtime = (
     readonly onDevice?: RuntimeOptions['onDevice']
     /** The skills store and local catalog; no run has Althar-selected skills without it. */
     readonly skills?: RuntimeOptions['skills']
+    /** The person's agents' settings, in a home of the test's own: none is read without it. */
+    readonly agentConfigs?: RuntimeOptions['agentConfigs']
     /** The machine how many agents are at work at once comes from; a large one unless a test says, so no test waits on the Mac it runs on. */
     readonly busy?: BusyOptions
     /** The keychain, kept across runtimes given the same one; else each its own. */
@@ -358,6 +364,7 @@ export const runtime = (
     deviceName: 'Test Mac',
     agents: more.agents ?? fakeAgents(options, more.signedOut, more.each, more.perUse, more.oneAccount, more.unsure),
     ...(more.countdown === null ? {} : { countdown: more.countdown ?? Duration.millis(300) }),
+    ...(more.drafting === undefined ? {} : { drafting: more.drafting }),
     secrets: Secrets.memory(more.keychain),
     connectors: more.connectors ?? fakeConnectors({}),
     ...(more.listenEvery === undefined ? {} : { listenEvery: more.listenEvery }),
@@ -365,6 +372,7 @@ export const runtime = (
     checksAppear: more.checksAppear ?? Duration.zero,
     ...(more.checksStuck === undefined ? {} : { checksStuck: more.checksStuck }),
     publishAgain: more.publishAgain ?? Duration.zero,
+    ...(more.agentConfigs === undefined ? {} : { agentConfigs: more.agentConfigs }),
     betweenAgents: more.betweenAgents ?? Duration.zero,
     ...(more.stalls === undefined ? {} : { stalls: more.stalls }),
     ...(more.stopGrace === undefined ? {} : { stopGrace: more.stopGrace }),
@@ -413,11 +421,14 @@ export const hosted = (path: ReadonlyArray<string> = ['meridian', 'api']) => {
   return { working, bare }
 }
 
-/** Opens a new repository as a project and creates a task in it. */
+/** Opens a new repository as a project, asking about more than what can't be undone, and creates a task in it. */
 export const task = (title = 'Retry checkout') =>
   Effect.gen(function* () {
     const projects = yield* Projects
     const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+    // Asking about more than what can't be undone, as these tests of asking were written for; a project allows everything else
+    // by default (ADR-097), which a test of that says itself.
+    yield* (yield* Policies).set(project.projectId, { allowEverything: false }, (yield* Instance).personId)
     const created = yield* projects.createTask({
       envelope: yield* Runtime.envelope('task.create', { title }),
       projectId: project.projectId,

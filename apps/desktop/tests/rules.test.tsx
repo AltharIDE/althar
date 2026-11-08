@@ -64,7 +64,7 @@ describe('a project’s rules', () => {
     expect(says('Ask me')).toBe('They ask you before deploying or publishing, and before running psql.')
     expect(says('Go ahead')).toBe('They go ahead with writing outside the task, bun test and exactly pnpm replay --env staging refunds.')
     expect(says('The rest')).toBe(
-      'Everything else, like pushing to the default branch, pushing several branches or tags and deleting other branches: allowed. What Althar can’t read comes to you.',
+      'Everything else, like pushing to the default branch, pushing several branches or tags, deleting other branches and posting for you: allowed. What Althar can’t read comes to you.',
     )
     expect(says('Finished')).toBe(
       'A finished task opens a draft pull request, on a branch named althar/MER-128-fix-login and titled Fix login, described in Althar’s own words.',
@@ -111,7 +111,43 @@ describe('a project’s rules', () => {
     // Allowing everything is the switch over the sentences, not what the rest gets.
     await userEvent.click(screen.getByRole('switch', { name: 'Allow everything' }))
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', allowEverything: true }))
-    expect(screen.getAllByText('Off while everything is allowed.')).toHaveLength(3)
+    // With everything allowed, the sentences give way to what asks (ADR-097).
+    expect(await screen.findByRole('heading', { name: 'What asks' })).toBeTruthy()
+    expect(screen.queryByRole('listitem', { name: 'The rest' })).toBeNull()
+  })
+
+  it('says what asks with everything allowed: each kind that can’t be undone asks or is never allowed, and the person’s own commands', async () => {
+    const { client } = fakeClient({
+      getProjectRules: rulesOf({
+        allowEverything: true,
+        alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside', 'speak'],
+        commands: [{ pattern: 'fly deploy', decision: 'ask' }],
+      }),
+    })
+    withServices(<Rules />, client)
+    expect(await screen.findByRole('heading', { name: 'What asks' })).toBeTruthy()
+    expect(screen.getByText('Lost work and history')).toBeTruthy()
+    expect(screen.getByText('Speaking for you')).toBeTruthy()
+    expect(says('Ask me')).toBe('Agents ask you before running fly deploy.')
+    expect(screen.queryByRole('switch', { name: 'Allow everything' })).toBeNull()
+    const publishing = screen.getByText('Publishing and merging').closest('li')
+    if (publishing === null) throw new Error('Publishing and merging has no row')
+    await choose(within(publishing).getByRole('button', { name: 'Asks you' }), 'Never')
+    await waitFor(() =>
+      expect(client.setProjectRules).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          never: ['deploy'],
+          alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'outside', 'speak'],
+        }),
+      ),
+    )
+  })
+
+  it('asks about more than what can’t be undone, where the person says so: the sentences, from Never to the rest', async () => {
+    const { client } = fakeClient({ getProjectRules: rulesOf({ allowEverything: true }) })
+    withServices(<Rules />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Ask about more' }))
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith(expect.objectContaining({ allowEverything: false })))
   })
 
   it('says what leads run outside their sandbox and the hosts they reach, and that hosts wait while the rest asks', async () => {
@@ -425,9 +461,9 @@ describe('a project’s rules', () => {
     expect(says('Finished')).toContain(
       'A finished task pushes its branch alone, named althar/MER-128-fix-login. A pull request opened from it is titled Fix login',
     )
-    await userEvent.click(screen.getByRole('button', { name: 'moves to the next agent free' }))
+    await userEvent.click(screen.getByRole('button', { name: 'moves to the strongest model with usage left' }))
     expect(screen.getAllByRole('menuitemradio').map((item) => item.textContent)).toEqual([
-      expect.stringContaining('Move the work to the next agent free'),
+      expect.stringContaining('Move to the strongest model with usage left'),
       expect.stringContaining('Wait for the reset'),
       expect.stringContaining('Ask me'),
     ])
@@ -439,7 +475,7 @@ describe('a project’s rules', () => {
     await choose(screen.getByRole('button', { name: 'waits for the reset' }), 'Ask me')
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', usageLimit: 'ask' }))
     expect(says('Limits')).toBe(
-      'When an account runs out, the work waits for you to move it to a model that’s free, or to wait for the reset.',
+      'When an account runs out, the work waits for you to move it to a model with usage left, or to wait for the reset.',
     )
   })
 
@@ -454,13 +490,13 @@ describe('a project’s rules', () => {
     })
     withServices(<Rules />, client)
     await waitFor(() =>
-      expect(says('Limits')).toBe('When an account runs out, the work moves to the next agent free. Codex works on main.'),
+      expect(says('Limits')).toBe('When an account runs out, the work moves to the strongest model with usage left. Codex works on main.'),
     )
     await userEvent.click(within(sentence('Limits')).getByRole('button', { name: 'main' }))
     await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Go on with the next' }))
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', rotateAccounts: true }))
     expect(says('Limits')).toBe(
-      'When an account runs out, the work goes on with the agent’s next account, then moves to the next agent free. Codex works on main, then work.',
+      'When an account runs out, the work goes on with the agent’s next account, then moves to the strongest model with usage left. Codex works on main, then work.',
     )
     await userEvent.click(within(sentence('Limits')).getByRole('button', { name: 'main, then work' }))
     await userEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'main' }))

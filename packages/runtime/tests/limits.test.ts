@@ -16,6 +16,7 @@ import { NotFound } from '../src/errors'
 import { type Failure, failureOf, Failures } from '../src/Failures'
 import { Instance } from '../src/Instance'
 import { Limits, outWords, whenWords } from '../src/Limits'
+import { Models } from '../src/Models'
 import { Policies, usageLimitOf } from '../src/Policies'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
@@ -24,7 +25,8 @@ import { type PlanStep, Runs, type StuckAnswer } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { RULES } from '../src/rules'
 import { Sessions } from '../src/Sessions'
-import { atReset, fakeAgents, items, later, onTestClock, repository, runtime, until } from './support'
+import { atReset, callTool, fakeAgents, items, later, onTestClock, repository, runtime, until } from './support'
+import type { ToolAccess } from '../src/ToolServer'
 
 /*
  * An agent out of usage (docs/architecture/05): its work moves on to the
@@ -305,6 +307,8 @@ describe('an agent out of usage', () => {
 
   /** A task planned on Claude Code with Codex reviewing, Codex already out from another task, and what its thread said once it is ready. */
   const reviewerOut = Effect.gen(function* () {
+    // Make the replacement model known before a takeover can be selected.
+    yield* until((yield* Models).catalog, (catalog) => catalog.every((agent) => !agent.probing))
     const sessions = yield* Sessions
     const projects = yield* Projects
     const limits = yield* Limits
@@ -330,7 +334,7 @@ describe('an agent out of usage', () => {
       const lines = yield* reviewerOut
       assert.include(
         lines,
-        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake opencode takes the review over.`,
+        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake opencode takes the review over, on Small.`,
       )
       assert.include(lines, 'review: The change holds.')
     }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: { until: back } } })))
@@ -342,7 +346,7 @@ describe('an agent out of usage', () => {
       const lines = yield* reviewerOut
       assert.include(
         lines,
-        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake claude-code takes the review over, on Small, and reviews its own work.`,
+        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake claude-code takes the review over, on Small, with the review by the same maker.`,
       )
     }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: { until: back } } }, ['opencode'])))
   })
@@ -369,6 +373,8 @@ describe('an agent out of usage', () => {
   it.live('moves the coordinator on, with what the person said waiting for the agent that takes over', () => {
     const back = Date.now() + HOUR
     return Effect.gen(function* () {
+      // Make the replacement model known before a takeover can be selected.
+      yield* until((yield* Models).catalog, (catalog) => catalog.every((agent) => !agent.probing))
       const projects = yield* Projects
       const coordinator = yield* Coordinator
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
@@ -386,7 +392,7 @@ describe('an agent out of usage', () => {
       assert.include(reply, 'Fake claude-code was working on this when it reached its usage limit, and may have done some of it already.')
       assert.include(
         yield* said(threadId),
-        `Fake claude-code ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake codex takes over.`,
+        `Fake claude-code ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake codex takes over, on Small.`,
       )
     }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })))
   })
@@ -868,7 +874,7 @@ describe('limits', () => {
       assert.isNull(out?.resetsAt)
       assert.closeTo(Date.parse(out?.until ?? '') - Date.now(), HOUR, 60_000)
       assert.isTrue(Option.isNone(yield* limits.out('opencode')))
-      assert.strictEqual(yield* limits.free(['claude-code']), 'opencode')
+      assert.strictEqual((yield* limits.free({ besides: ['claude-code'] }))?.agentId, 'opencode')
 
       // The rule is the project's: a revision of its rules each time the person changes it, recorded as theirs.
       const policies = yield* Policies
@@ -943,5 +949,66 @@ describe('limits', () => {
       outWords({ from: 'Codex', resetsAt: null, now, to: { agent: 'Claude Code', model: null } }),
       'Codex ran out of usage. Claude Code takes over.',
     )
+  })
+})
+
+describe('change_lead on a task with a step held for a usage limit', () => {
+  /** The coordinator's access, and the task's slug and plan, as the tool reads them. */
+  const asCoordinator = (projectId: string, taskId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const [row] = yield* sql<{ slug: string }>`SELECT slug FROM tasks WHERE id = ${taskId}`
+      const threadId = yield* (yield* Coordinator).thread(projectId)
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      const steps = () =>
+        Effect.map(
+          sql<{
+            parameters: string
+          }>`SELECT parameters FROM task_plans WHERE task_id = ${taskId} AND state = 'accepted' ORDER BY proposed_at DESC LIMIT 1`,
+          ([plan]) =>
+            (
+              JSON.parse(plan?.parameters ?? '{}') as { steps: ReadonlyArray<{ key: string; agentId: string; skipped: boolean }> }
+            ).steps.map((one) => [one.key, one.agentId, one.skipped]),
+        )
+      return { access, slug: row?.slug ?? '', steps }
+    })
+
+  it.live('hands the lead’s own held step to the lead named at once, on the effort asked', () => {
+    const back = Date.now() + HOUR
+    return Effect.gen(function* () {
+      const { projectId, task, start } = yield* planned([lead('claude-code')])
+      yield* waits(projectId)
+      yield* start
+      yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null)
+      const { access, slug } = yield* asCoordinator(projectId, task.taskId)
+      assert.match(yield* callTool(access, 'change_lead', { task: slug, lead: { agent: 'codex' } }), /goes to .* now\./)
+      const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready')
+      assert.deepStrictEqual([ready?.lead, ready?.waits], ['codex', null])
+    }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })))
+  })
+
+  it.live('changes the lead from its next turn when it is the review that is held, and leaves the review held', () => {
+    const back = Date.now() + HOUR
+    return Effect.gen(function* () {
+      const { projectId, task, start } = yield* planned(
+        [lead('claude-code'), { key: 'review', agentId: 'codex', model: null, skipped: false }],
+        'Retry the checkout [lead:finish] [review:pass]',
+      )
+      yield* waits(projectId)
+      yield* start
+      yield* until(cardOf(projectId), (cards) => cards[0]?.waits?.agentId === 'codex')
+      const { access, slug, steps } = yield* asCoordinator(projectId, task.taskId)
+      const told = yield* callTool(access, 'change_lead', { task: slug, lead: { agent: 'opencode' } })
+      assert.match(told, /changed the lead to/)
+      assert.notMatch(told, /held for a usage limit/)
+      // The plan's lead is the one named, the review is still the one held, and nothing was handed over to the lead named.
+      assert.deepStrictEqual(yield* steps(), [
+        ['implement', 'opencode', false],
+        ['review', 'codex', false],
+      ])
+      const [still] = yield* cardOf(projectId)
+      assert.deepStrictEqual([still?.phase === 'ready', still?.waits?.agentId], [false, 'codex'])
+      assert.isFalse((yield* said(task.threadId)).some((line) => line.startsWith('Handed')))
+    }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: { until: back } } })))
   })
 })

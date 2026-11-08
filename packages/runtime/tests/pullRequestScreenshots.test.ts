@@ -106,6 +106,36 @@ const commentSaying = (github: FakeService, words: string) =>
 const comments = (github: FakeService) => github.commentsOn(1).filter((comment) => comment.body.includes(SCREENSHOTS_MARK))
 
 describe('a task’s screenshots on its pull request', () => {
+  it.live('accepts host timestamps without milliseconds and clears a previous failure on retry', () => {
+    const { working, bare } = hosted()
+    const fake = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    fake.addRepository(['meridian', 'api'])
+    const reply = fake.reply
+    const editComment = fake.editComment!
+    let failEdit = false
+    const github = Object.assign(fake, {
+      reply: (...args: Parameters<typeof fake.reply>) =>
+        reply(...args).pipe(Effect.map((comment) => ({ ...comment, at: comment.at.replace(/\.\d{3}Z$/, 'Z') }))),
+      editComment: (...args: Parameters<NonNullable<typeof fake.editComment>>) =>
+        failEdit
+          ? Effect.die(new Error('private database detail'))
+          : editComment(...args).pipe(Effect.map((comment) => ({ ...comment, at: comment.at.replace(/\.\d{3}Z$/, 'Z') }))),
+    })
+    return Effect.gen(function* () {
+      const { taskId, threadId, url } = yield* opened(github, working)
+      const screenshots = yield* PullRequestScreenshots
+      yield* screenshots.post({ taskId, url, leftOut: [] })
+      failEdit = true
+      yield* Effect.exit(screenshots.post({ taskId, url }))
+      assert.strictEqual((yield* standing(threadId))?.failed, 'Althar couldn’t post the screenshots.')
+      failEdit = false
+      yield* screenshots.post({ taskId, url })
+      assert.isNull((yield* standing(threadId))?.failed)
+      assert.lengthOf(comments(github), 1)
+      assert.lengthOf(github.uploads, 1)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('go up by the person’s hand in one comment, written anew as they change, each picture uploaded once', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })

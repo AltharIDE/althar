@@ -647,11 +647,27 @@ room, so it plans with it.
 
 Under the default project rule, the paused work moves on, in this order:
 1. the same agent's next account that the project allows;
-2. the next free agent.
+2. the best free model on a plan, carrying its account and model together.
+
+Free routes must be signed in, allowed, unblocked and have usage left. A
+subscription on the model's provider counts even when the account otherwise
+pays per use; session startup uses the same rule for automation runs. First
+prefer models from a different maker than the other step, keeping review
+cross-maker whenever possible. Then prefer models not nearly out. Within
+five score points of the strongest model in that class, prefer a known
+other maker than the one being replaced, then higher score, then the plan's
+or person's recent choice. Strength uses the same Artificial Analysis
+coding, agentic and intelligence scores as `list_models`. Unknown scores
+and makers do not outrank substantially stronger scored models. An agent
+with only its own default is eligible unless that default is blocked.
 
 Either way the new session takes the work over from a brief in the same
-workspace (03, Switching model or agent), and the thread shows one line per
-move. Under the wait rule, or where nothing else was free to move it to, the
+workspace (03, Switching model or agent): the step's brief, commit subjects,
+changes and recent thread. The thread shows one line per move naming the
+agent, model and reason; a same-maker review fallback is said as such, not
+as an agent reviewing its own work. The replacement finishes the current
+step even if the original account resets meanwhile. At the next step the
+planned lead returns if it has room. Under the wait rule, or where nothing else was free to move it to, the
 work is held until the reset, and the thread says which it was. A held step
 keeps who could take it over, so the task offers them while it waits, without
 asking: the person can move it to one (as answering the call below would; a

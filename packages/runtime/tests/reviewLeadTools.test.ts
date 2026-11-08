@@ -85,9 +85,9 @@ describe('a review’s lead', () => {
         lead: { agentId: 'claude-code', model: null },
       })
       const lead: ToolAccess = { role: 'lead', projectId, threadId: started.threadId, sessionId: 'none', taskId: started.taskId }
-      assert.strictEqual(
+      assert.match(
         yield* callTool(lead, 'settle_task', { how: 'done' }),
-        'A review settles once its draft is posted: the person posts it, or discards it, on its draft. If they asked to set it aside, keep it for later instead.',
+        /^Nothing changed: .* reviews a pull request: it settles once its draft is posted, which the person does, or discards, on its draft\. To set it aside, keep it for later instead\.$/,
       )
       const sql = yield* SqlClient.SqlClient
       assert.deepStrictEqual(yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${started.taskId}`, [{ state: 'open' }])
@@ -162,9 +162,9 @@ describe('a quick task', () => {
         taskId: task?.taskId ?? '',
       }
       assert.match(yield* callTool(lead, 'draft_issue', { title: 'Partners left on v1' }), /^Drafted the issue “Partners left on v1”/)
-      assert.strictEqual(
+      assert.match(
         yield* callTool(lead, 'settle_task', { how: 'done' }),
-        'Althar couldn’t mark it done: something on it waits on the person first. Tell them.',
+        /^Nothing changed: .* can’t be marked done yet: it is still at work, or something on it waits on the person\.$/,
       )
       assert.deepStrictEqual(yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task?.taskId ?? ''}`, [{ state: 'open' }])
     }).pipe(Effect.provide(withQueries({ linear })))
@@ -206,9 +206,9 @@ describe('a quick task', () => {
         sessionId: 'none',
         taskId: task?.taskId ?? '',
       }
-      assert.strictEqual(
+      assert.match(
         yield* callTool(lead, 'settle_task', { how: 'done' }),
-        'Marked it done: it is in Settled, and what it left running, such as a page, stops. Say so in a sentence; writing to you again picks it up.',
+        /^Marked sketch-the-settings-page done: it is in Settled, and what it left running stops\. Its thread has a line saying so/,
       )
       assert.deepStrictEqual(yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task?.taskId ?? ''}`, [{ state: 'done' }])
       // What wouldn't stop is said in its thread, in one line.

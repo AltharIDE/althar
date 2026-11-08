@@ -108,7 +108,11 @@ const DESKTOP_NAMES = [
   'NIRI_SOCKET',
 ]
 
-export const launch = async (home: string, env: Record<string, string> = {}, { scheme }: { readonly scheme?: 'system' } = {}) => {
+export const launch = async (
+  home: string,
+  env: Record<string, string> = {},
+  { scheme, switches = [] }: { readonly scheme?: 'system'; readonly switches?: ReadonlyArray<string> } = {},
+) => {
   // Run from inside an Electron app, as a lead in Althar is, the shell says to run Electron as Node; the app must run as itself.
   // And from inside an agent's sandbox, git is configured for the agent (its proxy, its safe folders): the app's git is its own.
   // Windows names it Path, and a second spelling beside it would leave which one the app reads to chance.
@@ -123,7 +127,8 @@ export const launch = async (home: string, env: Record<string, string> = {}, { s
   const electronApp = await electron.launch({
     timeout: budget.medium,
     // Chromium refuses to run as root with its sandbox, as in a container: there, without it.
-    args: [app, ...(process.getuid?.() === 0 ? ['--no-sandbox'] : [])],
+    // And Chromium's switches a spec asks for, as for a camera where the machine has none.
+    args: [app, ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []), ...switches],
     ...(scheme === 'system' ? { colorScheme: null } : {}),
     env: {
       ...inherited,
@@ -298,6 +303,18 @@ export const backToWork = async (page: Page) => {
     .getByRole('radiogroup', { name: 'View' })
     .getByRole('radio', { name: /^Conversation/ })
     .click()
+}
+
+/**
+ * Has the project ask about more than what can't be undone, as it did before
+ * allowing everything was the default (ADR-097): from its Rules' What asks;
+ * then back to the conversation.
+ */
+export const askAboutMore = async (page: Page) => {
+  await projectSettings(page, 'Rules')
+  await page.getByRole('button', { name: 'Ask about more' }).click()
+  await page.getByRole('listitem', { name: 'The rest' }).waitFor()
+  await backToWork(page)
 }
 
 /** Leaves what the lead commits for the person's Push, as before it went up on its own (ADR-072); then back to the conversation. */

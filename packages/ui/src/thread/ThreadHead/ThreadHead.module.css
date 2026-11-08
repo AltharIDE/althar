@@ -1,0 +1,23 @@
+/* The page it sits on; a column raised off the page, like the conversation beside the board, sets --face-surface. */
+.bar {
+  flex: none;
+  background: var(--face-surface, var(--n-2));
+  border-bottom: 1px solid var(--line);
+}
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-block: 6px;
+}
+.title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--t-2);
+}
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}

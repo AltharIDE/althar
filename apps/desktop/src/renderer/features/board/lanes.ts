@@ -1,4 +1,4 @@
-import type { BoardCall, BoardSnapshot, BoardTask } from '@althar/contracts'
+import type { BoardCall, BoardSnapshot, BoardTask, HomeCall, HomeSnapshot, HomeTask } from '@althar/contracts'
 
 import { asMerging } from '../../data/merges'
 import { readyOf, standingCalls } from '../../shared/calls'
@@ -24,6 +24,9 @@ import { readyOf, standingCalls } from '../../shared/calls'
  * While the person points at Up next or Running, or drags a row of the line,
  * a task that would move between the two stays where it was (`Held`), and
  * moves once they look away.
+ *
+ * A task only drafted, before its plan is proposed, is on neither lane: it
+ * shows once its plan comes, as its card in the coordinator's thread does.
  */
 
 /** A task that waits on the person, with the call it waits on: the oldest, where it has several. One whose call isn't read yet isn't among them. */
@@ -210,3 +213,26 @@ export const holding = (lanes: Lanes, held: Held): Lanes => {
 
 /** How many cards are in Needs you: what waits on the person, each once. */
 export const yoursOf = (lanes: Lanes) => lanes.waiting.length + lanes.stopped.length + lanes.calls.length + lanes.ready.length
+
+/**
+ * What waits on the person in each project, as its board counts it: the same
+ * lanes, over the home's tasks and calls, which are the same cards. A
+ * project's dot, the switcher and Elsewhere take it, so none of them lights
+ * where a board's Needs you is empty, or stays dark where it isn't.
+ */
+export const yoursByProject = (home: HomeSnapshot, merging: ReadonlySet<string> = new Set()): ReadonlyMap<string, number> => {
+  const projects = new Map<string, { tasks: Array<HomeTask>; calls: Array<HomeCall> }>()
+  const place = (projectId: string) => {
+    const found = projects.get(projectId) ?? { tasks: [], calls: [] }
+    projects.set(projectId, found)
+    return found
+  }
+  for (const task of home.tasks) place(task.projectId).tasks.push(task)
+  for (const call of home.calls) place(call.projectId).calls.push(call)
+  return new Map(
+    [...projects].map(([projectId, { tasks, calls }]) => [
+      projectId,
+      yoursOf(lanesOf({ cursor: home.cursor, tasks, calls, settledTotal: 0 }, merging)),
+    ]),
+  )
+}

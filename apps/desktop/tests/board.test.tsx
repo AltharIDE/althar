@@ -168,6 +168,29 @@ describe('the board’s lanes', () => {
     expect(yoursOf(lanes)).toBe(3)
   })
 
+  it('keeps a task only drafted off the board until its plan comes', () => {
+    const drafted = task({
+      taskId: 't8',
+      threadId: 'th8',
+      title: 'Not planned yet',
+      slug: 'not-planned-yet',
+      phase: 'drafting',
+      state: 'draft',
+    })
+    const lanes = lanesOf(board({ tasks: [...board().tasks, drafted], calls: [] }))
+    const shown = [
+      ...lanes.next,
+      ...lanes.running,
+      ...lanes.waiting.map(({ task: work }) => work),
+      ...lanes.stopped,
+      ...lanes.ready,
+      ...lanes.kept,
+      ...lanes.settled,
+    ]
+    expect(shown.map((work) => work.taskId)).not.toContain('t8')
+    expect(yoursOf(lanes)).toBe(2)
+  })
+
   it('keeps a task under way, out of Needs you, until the call it waits on is read (DEV-173)', () => {
     const lanes = lanesOf(board({ calls: [] }))
     expect(lanes.waiting).toEqual([])
@@ -1207,6 +1230,34 @@ describe('the board', () => {
     await userEvent.click(within(dock).getByRole('button', { name: 'Send to the lead' }))
     expect(await screen.findByText('No lead to start. Pick an agent for it first.')).toBeTruthy()
     expect(send).not.toHaveBeenCalled()
+    expect(startSession).not.toHaveBeenCalled()
+  })
+
+  it('asks the coordinator to plan a draft that has no plan, rather than refusing Carry on for want of a lead', async () => {
+    const send = vi.fn(async () => {})
+    const startSession = vi.fn(async () => 's1')
+    const getCoordinator = vi.fn(async () => ({ threadId: 'coordinator-thread' }) as never)
+    const { client } = fakeClient({
+      send,
+      startSession,
+      getCoordinator,
+      getBoard: vi.fn(async () => board()),
+      getThread: vi.fn(async () =>
+        snapshot({ session: null, task: { ...snapshot().task, id: 't4', state: 'draft', planId: null, lead: null } }),
+      ),
+    })
+    withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
+    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
+    await userEvent.click(within(dock).getByRole('button', { name: 'Ask for changes' }))
+    await userEvent.type(within(dock).getByRole('textbox'), 'Please rename it.')
+    await userEvent.click(within(dock).getByRole('button', { name: 'Send to the lead' }))
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
+    expect(send).toHaveBeenCalledWith({
+      threadId: 'coordinator-thread',
+      body: expect.stringContaining('it is a draft with no plan. Call propose_plan for it'),
+      disposition: 'after_current',
+    })
+    expect(screen.queryByText('No lead to start. Pick an agent for it first.')).toBeNull()
     expect(startSession).not.toHaveBeenCalled()
   })
 

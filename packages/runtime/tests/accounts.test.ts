@@ -612,7 +612,7 @@ describe('accounts', () => {
       assert.isTrue((yield* limits.out('codex', ran.projectId))._tag === 'Some')
       assert.isTrue((yield* limits.outAccount(usual?.id ?? ''))._tag === 'Some')
       // Nor is Codex free there to take other work over.
-      assert.strictEqual(yield* limits.free(['claude-code', 'opencode'], [], ran.projectId), undefined)
+      assert.strictEqual(yield* limits.free({ besides: ['claude-code', 'opencode'], projectId: ran.projectId }), undefined)
     }).pipe(Effect.provide(withAccounts({ 'codex@usual': { outOfUsage: { until: back } } })))
   })
 

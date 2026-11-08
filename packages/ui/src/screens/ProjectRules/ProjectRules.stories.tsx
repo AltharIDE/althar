@@ -13,7 +13,16 @@ import {
   MERIDIAN_TITLES,
 } from '../../fixtures/rules'
 import { CommandMatch, LimitPolicy, PermissionPolicy, RuleKind, RulePlace, TaskEnd } from '../../foundations/vocabulary'
-import { type CommandPlace, type KindTally, ProjectRules, type ProjectRulesProps, type RuleCommand, type SandboxList } from './ProjectRules'
+import {
+  type AskKind,
+  type AskPlace,
+  type CommandPlace,
+  type KindTally,
+  ProjectRules,
+  type ProjectRulesProps,
+  type RuleCommand,
+  type SandboxList,
+} from './ProjectRules'
 
 /** What Meridian's leads' sandboxes let through: what its packages, scripts and setup say, and its code host, registry and tracker. */
 const MERIDIAN_SANDBOX = {
@@ -381,7 +390,7 @@ export const LimitAsks: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByRole('listitem', { name: 'Limits' })).toHaveTextContent(
-      'When an account runs out, the work waits for you to move it to a model that’s free, or to wait for the reset.',
+      'When an account runs out, the work waits for you to move it to a model with usage left, or to wait for the reset.',
     )
   },
 }
@@ -391,7 +400,7 @@ export const ChoosingALimit: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
     const page = within(document.body)
-    await userEvent.click(c.getByRole('button', { name: 'moves to the next agent free' }))
+    await userEvent.click(c.getByRole('button', { name: 'moves to the strongest model with usage left' }))
     await expect(await page.findAllByRole('menuitemradio')).toHaveLength(3)
     await userEvent.click(page.getByRole('menuitemradio', { name: 'Ask me' }))
     await expect(args.onLimitChange).toHaveBeenCalledWith(LimitPolicy.Ask)
@@ -481,4 +490,30 @@ export const RemovingAnOutsideCommand: Story = {
 /** A project that has nothing outside the sandbox: every command in it first, every host asking. */
 export const NothingOutside: Story = {
   args: { sandbox: { commands: [], hosts: [], onAdd: fn((): string | undefined => undefined), onRemove: fn() } },
+}
+
+/** What asks, with everything else allowed (ADR-097): the kinds of what can't be undone, each Asks you or Never, then your own commands. */
+function LiveAsks(args: ProjectRulesProps) {
+  const [places, setPlaces] = useState<Record<AskKind, AskPlace>>({ history: 'asks', publish: 'asks', speak: 'asks' })
+  return (
+    <Live
+      {...args}
+      allowAll
+      whatAsks={{
+        places,
+        onChange: (kind, place) => setPlaces({ ...places, [kind]: place }),
+        onAskMore: fn(),
+      }}
+    />
+  )
+}
+
+export const WhatAsks: Story = {
+  render: (args) => <LiveAsks {...args} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('heading', { name: 'What asks' })).toBeVisible()
+    await expect(c.getByText('Publishing and merging')).toBeVisible()
+    await expect(c.queryByText('The rest')).toBeNull()
+  },
 }
