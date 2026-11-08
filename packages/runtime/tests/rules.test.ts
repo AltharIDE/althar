@@ -437,6 +437,13 @@ describe('the always-ask list', () => {
         'gh api https://ci.example.com/runs',
       ])
         assert.strictEqual(run(line, { project }).verdict, 'deny', `${pattern}: ${line}`)
+      // A sandbox's network request is for a host too.
+      assert.strictEqual(
+        decide(request({ kind: 'other', title: 'api.example.com', rawInput: { host: 'api.example.com' } }), { ...context, project })
+          .verdict,
+        'deny',
+        pattern,
+      )
       // Not a lookalike, and not a host outside it.
       assert.strictEqual(run('curl https://notexample.com/x', { project }).verdict, 'allow', pattern)
       assert.strictEqual(run('curl https://example.com.evil.test/x', { project }).verdict, 'allow', pattern)

@@ -3490,7 +3490,7 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
   // A network request meets the person's named rules by its host, as a command meets them by its words.
   const named =
     network !== undefined
-      ? commandRule(network, project.commands, system)
+      ? (commandRule(network, project.commands, system) ?? hostRuleOf(network, project.commands, system))
       : request.kind === 'execute' || request.kind === 'other'
         ? (commandRule(commandOf(request), project.commands, system) ?? hostRuleOf(commandOf(request), project.commands, system))
         : undefined
