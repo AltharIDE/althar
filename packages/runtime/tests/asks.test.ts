@@ -5,6 +5,7 @@ import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
+import { Models } from '../src/Models'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
@@ -132,6 +133,9 @@ describe('what the lead is given shows where it reads it', () => {
 
   it.live('leaves what an agent cut short by its usage limit was given where it read it, when the next agent takes it', () =>
     Effect.gen(function* () {
+      // Takeover names the model once discovery has finished; do not race that discovery.
+      const models = yield* Models
+      yield* until(models.catalog, (catalog) => catalog.every((agent) => !agent.probing))
       const { task: created } = yield* task()
       yield* begin(created.threadId, 'claude-code')
       yield* say(created.threadId, scenarios.quota)
@@ -145,7 +149,7 @@ describe('what the lead is given shows where it reads it', () => {
         ['agent_message', 'Claude AI usage limit reached|1759075200'],
       ])
       assert.deepStrictEqual(shown.slice(3, 5), [
-        ['notice', 'Fake claude-code ran out of usage. Fake codex takes over.'],
+        ['notice', 'Fake claude-code ran out of usage. Fake codex takes over, on Small.'],
         ['agent_message', 'echo: You are taking over a task from Fake claude-code, in the same worktree. Its record so far is below.'],
       ])
     }).pipe(Effect.provide(withQueries())),
