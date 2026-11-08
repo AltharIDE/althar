@@ -37,7 +37,7 @@ export interface Fetched {
   readonly commit: string
   /** The ref here it is at now: refs/remotes/origin/feature/x, refs/tags/v1.2, refs/althar/pull/12. */
   readonly ref: string
-  /** The remote it came from, by name. */
+  /** The remote it came from, by name; for a fork's parent that is none of its remotes, the parent's path on its host. */
   readonly remote: string
   /** Its branch, where it has one: a pull request's, even a fork's. */
   readonly branch: string | null
@@ -137,6 +137,15 @@ export class Fetches extends Context.Service<
         Effect.gen(function* () {
           const url = (yield* namedRemotes(repository).pipe(Effect.orElseSucceed(() => []))).find((one) => one.name === remote)?.url
           if (url === undefined) return null
+          return yield* reachAt(remote, url, true)
+        })
+
+      /**
+       * How to reach a repository at an address, said as `remote`: through its host where a connection reaches it, then, for a
+       * remote of the clone (`named`), as the person's git does; a fork's parent that is none of them, only through its host.
+       */
+      const reachAt = (remote: string, url: string, named: boolean) =>
+        Effect.gen(function* () {
           const signed = yield* Effect.gen(function* () {
             const found = yield* connections.hostOf([url], { fromCli: true })
             if (found === null) return null
@@ -147,9 +156,19 @@ export class Fetches extends Context.Service<
             remote,
             url,
             signed,
-            sources: [...(signed === null ? [] : [signed.source]), { url: remote, header: null }],
+            sources: [...(signed === null ? [] : [signed.source]), ...(named ? [{ url: remote, header: null }] : [])],
           } satisfies Reach
         })
+
+      /** A fork's parent where it is none of the clone's remotes, its pull requests reached at its address: null for any other. */
+      const parentAway = (remotes: Parameters<typeof forkOf>[0]) => {
+        const fork = forkOf(remotes)
+        return fork !== null && fork.upstream.remote === null ? fork.upstream : null
+      }
+
+      /** Why a fork's pull requests can't be read where its parent is none of its remotes and no connection reaches it. */
+      const parentUnreached = (path: ReadonlyArray<string>) =>
+        `Its pull requests open on ${path.join('/')}, the repository it was forked from, which none of its remotes is and no connection reaches. Add it as a remote in the repository's settings, or connect its host in Settings.`
 
       /** Its remote's branches, from the first way to it that answers; null where none does. */
       const headsOf = (repository: string, reach: Reach) =>
@@ -240,10 +259,13 @@ export class Fetches extends Context.Service<
       const fetchPull = (repository: string, which: string) =>
         Effect.gen(function* () {
           const remotes = yield* namedRemotes(repository).pipe(Effect.orElseSucceed(() => []))
-          // A fork's pull requests open where it was forked from, by whatever name the clone has it.
-          const remote = parentRemote(forkOf(remotes)) ?? 'origin'
-          const reach = yield* reachOf(repository, remote)
+          // A fork's pull requests open where it was forked from, by whatever name the clone has it; where none has it, at its
+          // address through its host, never the fork's own instead.
+          const away = parentAway(remotes)
+          const remote = away === null ? (parentRemote(forkOf(remotes)) ?? 'origin') : away.path.join('/')
+          const reach = away === null ? yield* reachOf(repository, remote) : yield* reachAt(remote, away.url, false)
           if (reach === null) return yield* new FetchRefused({ message: `The repository has no remote called ${remote} to fetch from.` })
+          if (away !== null && reach.signed === null) return yield* new FetchRefused({ message: parentUnreached(away.path) })
           const asked = which.trim()
           let number = numberOf(asked)
           if (number === null && /^https?:\/\//i.test(asked)) {
@@ -274,15 +296,10 @@ export class Fetches extends Context.Service<
           // Its branch, where it is the repository's own; else, as for a fork's, the host's own ref for it.
           const own = change !== null && change.headRepository === null
           const into = `refs/althar/pull/${number}`
+          // A parent that is no remote of the clone has no remote-tracking branches: its branch goes where the host's ref would.
+          const ownInto = own ? (away === null ? `refs/remotes/${remote}/${change.source}` : into) : into
           const specs = [
-            ...(own
-              ? [
-                  {
-                    spec: `+refs/heads/${change.source}:refs/remotes/${remote}/${change.source}`,
-                    into: `refs/remotes/${remote}/${change.source}`,
-                  },
-                ]
-              : []),
+            ...(own ? [{ spec: `+refs/heads/${change.source}:${ownInto}`, into: ownInto }] : []),
             ...changeRefOf(signed?.host ?? null, number).map((from) => ({ spec: `+${from}:${into}`, into })),
           ]
           if (specs.length === 0)
@@ -359,9 +376,16 @@ export class Fetches extends Context.Service<
                 const branches = (heads ?? [])
                   .map((head) => head.name)
                   .toSorted((a, b) => (a === base ? -1 : b === base ? 1 : a.localeCompare(b)))
-                // A fork's pull requests are where it was forked from.
+                // A fork's pull requests are where it was forked from: at its address through its host, where none of its remotes is it.
+                const away = parentAway(remotes)
                 const parent = parentRemote(forkOf(remotes))
-                const signed = (parent === null ? origin : yield* reachOf(binding.repository, parent))?.signed ?? null
+                const toward =
+                  away !== null
+                    ? yield* reachAt(away.path.join('/'), away.url, false)
+                    : parent === null
+                      ? origin
+                      : yield* reachOf(binding.repository, parent)
+                const signed = toward?.signed ?? null
                 const listed =
                   signed === null
                     ? null
@@ -369,7 +393,7 @@ export class Fetches extends Context.Service<
                         .listChanges(signed.repository, { state: 'open', limit: LISTED, ...(words === '' ? {} : { text: words }) })
                         .pipe(Effect.orElseSucceed(() => null))
                 // A host Althar has no connection to is named, to connect; a listing that failed on a connected one is only said.
-                const unconnected = origin !== null && signed === null ? hostNameOf(origin.url) : null
+                const unconnected = origin !== null && origin.signed === null && signed === null ? hostNameOf(origin.url) : null
                 return {
                   repository: binding.name,
                   pullRequests: (listed?.changes ?? []).map((change) => ({
@@ -385,9 +409,11 @@ export class Fetches extends Context.Service<
                   note:
                     heads === null
                       ? `Althar couldn't reach ${binding.name}'s remote: this computer may be offline, or its host isn't connected.`
-                      : listed === null && unconnected === null
-                        ? `${binding.name}'s pull requests couldn't be listed just now.`
-                        : null,
+                      : away !== null && signed === null
+                        ? `${binding.name}: ${parentUnreached(away.path)}`
+                        : listed === null && unconnected === null
+                          ? `${binding.name}'s pull requests couldn't be listed just now.`
+                          : null,
                   unconnected,
                   more: listed?.more ?? false,
                 } satisfies Offered
