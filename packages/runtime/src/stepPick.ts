@@ -95,6 +95,15 @@ export const stepOf = (projectId: string, pick: typeof StepPick.Type, use?: stri
     // The model the agent offers by that name or id; refused, with the ones it offers, where it offers none such. An agent whose models aren't known takes it as named.
     let model = pick.model
     let known = pick.model === undefined ? undefined : offered?.models.find((one) => one.id === pick.model)
+    // A model the person switched off is off, whether or not the agent offers it: said so before what it offers.
+    if (
+      pick.model !== undefined &&
+      (yield* blockedModelsOf(agentId)).includes(pick.model) &&
+      !offered?.models.some((one) => one.id === pick.model)
+    )
+      return yield* new ToolRefused({
+        message: `The person switched ${pick.model} off${keepAgent ? ` for ${agent.name}` : ''}. ${describeModels(yield* usableModels(projectId), yield* Clock.currentTimeMillis, use)}`,
+      })
     if (pick.model !== undefined && offered !== undefined && offered.models.length > 0) {
       const wanted = pick.model.trim().toLowerCase()
       known =
