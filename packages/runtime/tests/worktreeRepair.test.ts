@@ -17,7 +17,7 @@ import { Queries } from '../src/Queries'
 import { repository, runtime } from './support'
 
 /*
- * Worktrees whose link to their repository broke (ADR-104): a `.git` file
+ * Worktrees whose link to their repository broke (decisions: workspaces-and-runs, A worktree whose link broke): a `.git` file
  * naming a place that isn't there, one naming where the repository was
  * before it moved, a repository whose record of a worktree names another
  * place, and the same with relative paths. Git can't open the first ones;

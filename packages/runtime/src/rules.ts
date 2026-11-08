@@ -2,29 +2,22 @@ import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'n
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, posix, resolve, win32 } from 'node:path'
 
-import { type PermissionRequest, SECRET_PLACES } from '@althar/provider-adapters'
+import { hostOf } from '@althar/contracts'
+import { type McpCall, type PermissionRequest, SECRET_PLACES } from '@althar/provider-adapters'
+
+import { mcpActOf } from './mcpActs'
 
 /*
- * The rules for agents' requests (ADR-013). What no project can change:
- * agents reach a code host only through Althar, and never read
- * credentials. Then the kinds of request the rules keep for the person:
- * pushes to the default branch, force pushes, pushes of every branch, tags
- * or patterns, deleting branches other than the task's, deploy and publish
- * commands, and writes outside the task's worktree; and what they can't
- * tell. A project's rules (Policies) say which of those ask and which are
- * never allowed, which commands it names, and what happens to the rest.
+ * ADR-097: permissive by default. A command inside an OS sandbox is answered
+ * at once from these rules; only secrets, the person's own rules and a visible
+ * irreversible act hold it, and an opaque one runs. Outside it, Allow
+ * everything asks only about visible irreversible actions. Opaque commands
+ * are not denied for what the rules cannot infer. Git's guard still holds
+ * hidden irreversible pushes and branch moves.
  *
- * Commands are read as a shell would split them, into commands and words, so
- * `cd x && git -C y push origin HEAD:refs/heads/main` is understood. Where
- * the rules can't tell where a push goes or where an edit writes, they ask.
- *
- * The agents' own sandboxes are the boundary for what commands write
- * (docs/architecture/03): Codex's and Claude Code's keep a command inside the
- * worktree, and a command that has to leave reaches Althar as a request.
- * Such a request is allowed unless its words name a place outside the
- * worktree, or it is on the list above; git's own writes for the task, such
- * as `git add` and `git commit`, are allowed, since a worktree's git data
- * lives in the main repository, outside the sandbox.
+ * The coordinator uses these same rules, with visible outside-folder writes
+ * refused where no sandbox holds them. The strict reader below is reserved
+ * for reviews, whose workspaces and tool lists are deferred to task-as-parts.
  */
 
 export type Verdict =
@@ -47,7 +40,7 @@ export type Verdict =
  * what a request does, it asks whatever the project says, short of
  * allowing everything.
  */
-export const RULES = ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'] as const
+export const RULES = ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside', 'speak'] as const
 export type RuleId = (typeof RULES)[number]
 
 /** What each kind is, in the words a refusal says it. */
@@ -58,16 +51,14 @@ const RULE_WORDS: Readonly<Record<RuleId, string>> = {
   'delete-branch': "deleting branches that aren't the task's",
   deploy: 'deploying and publishing',
   outside: "writing outside the task's worktree",
+  speak: 'posting for you on a pull request, an issue or another service',
 }
 
 /**
  * Why the rules keep a request for the person, and which kind it is: one a
- * project names, or one they can't tell. `floor` marks what could lose work
- * or a secret (docs/plans/safety-pass.md): what is `irreversible`, and
- * besides it git touching the stash every checkout shares or throwing away
- * what it keeps to recover lost work, and reading a `.env` outside the task's
- * worktree. The coordinator never answers it; only Never, or a kind the
- * person always allows while everything isn't allowed, settles it otherwise.
+ * project names, or one they can't tell. Only `irreversible` creates a
+ * built-in floor. Historical `floor` classifications remain ordinary kinds
+ * for the person's own Never and Ask lists; they create no extra ask.
  *
  * `irreversible` marks what can't be undone from the task (ADR-067): a force
  * push, a push to or a deletion of the default branch, deleting or moving by
@@ -90,11 +81,7 @@ interface Kept {
 type Floor = 'floor' | 'irreversible'
 
 const kept = (reason: string, rule: RuleId | 'unclear', floor?: Floor): Kept =>
-  floor === undefined
-    ? { reason, rule }
-    : floor === 'floor'
-      ? { reason, rule, floor: true }
-      : { reason, rule, floor: true, irreversible: true }
+  floor === undefined ? { reason, rule } : floor === 'floor' ? { reason, rule } : { reason, rule, floor: true, irreversible: true }
 
 /** The firmest of what kinds are kept: what a request standing for them all is. */
 const floorOf = (kinds: ReadonlyArray<Kept>): Floor | undefined =>
@@ -156,9 +143,11 @@ export const sayRules = (rules: ProjectRuleSet): string => {
       ? `The coordinator judges permission requests within these rules. Always ask the person: ${asks.length === 0 ? 'none' : asks.join('; ')}.`
       : rules.mode === 'ask'
         ? "Agents may read anything and change a task's own files; everything else waits for the person."
-        : rules.mode === 'allow' || asks.length === 0
-          ? 'Agents may do anything.'
-          : `Agents may do anything but these, which wait for the person: ${asks.join('; ')}.`,
+        : rules.mode === 'allow'
+          ? `Agents may do anything but what can't be undone, which waits for the person: losing work or history (a force push, a push to the default branch, deleting another branch), publishing, a release or a merge, and posting for the person${named('ask').length === 0 ? '' : `; and before running ${named('ask').join('; ')}`}.`
+          : asks.length === 0
+            ? 'Agents may do anything.'
+            : `Agents may do anything but these, which wait for the person: ${asks.join('; ')}.`,
     ...(rules.mode === 'allow' || allowed.length === 0 ? [] : [`Allowed without asking: ${allowed.join('; ')}.`]),
     ...(never.length === 0 ? [] : [`Never allowed: ${never.join('; ')}.`]),
   ].join(' ')
@@ -170,6 +159,8 @@ export const MVP_RULES: ProjectRuleSet = { mode: 'rules', ask: RULES, never: [],
 export interface RuleContext {
   /** Where the agent works: the task's worktree, a folder in it, or the task's folder that holds its worktrees. */
   readonly worktree: string
+  /** Coordinator commands may visibly write only within this folder; opaque commands run. */
+  readonly readOnly?: boolean
   /** The task's worktrees, one per repository, where it may write; just `worktree` unless the task has several. */
   readonly worktrees?: ReadonlyArray<string>
   /**
@@ -241,19 +232,9 @@ const ask = (reason: string, held: boolean): Verdict => ({ verdict: 'ask', reaso
 // ---- Code hosts --------------------------------------------------------------
 
 /*
- * Agents reach code hosts only through Althar (ADR-011): Althar pushes
- * and opens the task's pull request, and the lead reads and answers on it with
- * Althar's tools. So `gh` and `glab` may only look; anything else is
- * refused with what to do instead.
- *
- * The boundary is the agent's environment, not these words: agents run with
- * `gh` and `glab` signed out, git's credential helpers reset, and no SSH agent
- * (Config.ts), and Althar's own sign-ins are sealed where only the app can
- * open them. What is left within a shell's reach, the keychain through
- * `security` and git's helpers called directly, is refused here, for every
- * role. Files the person keeps credentials in, under their home folder, are
- * still readable by an agent that goes looking; only a sandbox closes that
- * (docs/open-questions.md).
+ * Agents inherit the person's code-host identity (ADR-097). Direct commands
+ * meet the same irreversible rules as Althar's tools. Explicit credential
+ * reads, including the keychain, remain refused in every role.
  */
 
 const CREDENTIALS_REFUSED =
@@ -282,6 +263,8 @@ const securityLooks = (args: ReadonlyArray<string>): boolean => {
 const credentialReason = (words: ReadonlyArray<string>): string | undefined => {
   const program = (words[0] ?? '').split('/').at(-1) ?? ''
   if (program === 'security') return securityLooks(words.slice(1)) ? undefined : CREDENTIALS_REFUSED
+  if ((program === 'gh' || program === 'glab') && words[1] === 'auth' && (words[2] === 'token' || words.includes('--show-token')))
+    return CREDENTIALS_REFUSED
   if (program.startsWith('git-credential')) return CREDENTIALS_REFUSED
   if (program !== 'git') return undefined
   // Git's own options before its command, and their values: `git -C dir -c k=v credential fill`.
@@ -450,179 +433,200 @@ const envFile = (path: string) => {
 const envKept = (path: string) =>
   kept(`Reading ${path}, outside the task's worktree, always asks: a .env file holds the person's secrets.`, 'outside', 'floor')
 
-const DEVICE_BRIDGE_REFUSED =
-  'Agents do not run commands on the device through Flatpak; Althar uses that bridge only for commands it prepares.'
-
-/**
- * The Flatpak grants the app a broad host bridge; agents must not invoke it
- * directly, nor the ssh Althar's own git runs through it, which signs in with
- * the person's SSH agent (ADR-073).
- */
-const deviceBridgeReason = (words: ReadonlyArray<string>): string | undefined =>
-  ['flatpak-spawn', 'althar-host-ssh'].includes((words[0] ?? '').split('/').at(-1) ?? '') ? DEVICE_BRIDGE_REFUSED : undefined
-
-/** That ssh, or the bridge itself, named in a command line. */
-const DEVICE_BRIDGE_NAMED = /althar-host-ssh|flatpak-spawn/i
-
-/**
- * It as an assignment's value, which the words a command is read as don't
- * keep: `GIT_SSH_COMMAND=…`, `-c core.sshCommand=…`, `GIT_CONFIG_VALUE_0=…`,
- * or `X=…` for a later `$X`.
- */
-const DEVICE_BRIDGE_ASSIGNED = /[\w.]=(?:['"`]|\$\()*[^\s;&|'"]*(?:althar-host-ssh|flatpak-spawn)/i
-
-/**
- * Or a value a substitution finds, whose spaces don't end it:
- * `core.sshCommand="$(command -v althar-host-ssh)"`, or with backticks.
- */
-const DEVICE_BRIDGE_SUBSTITUTED = /[\w.]=['"]?(?:\$\(|`)[^;&|]*?(?:althar-host-ssh|flatpak-spawn)/i
-
-/** A shell given a script to run, or `eval`, which runs single-quoted text after all. */
-const RUNS_A_SCRIPT = /\b(?:(?:ba|da|z|k)?sh\s+(?:-\w+\s+)*-\w*c\b|eval\b)/
-
-/**
- * A `git commit` or `git tag` message about to start: `-m `, `-am`,
- * `--message=`, after the command's start and nothing but its own words,
- * which may be quoted (`-c user.name='A Name'`, `--author="…"`) but not
- * substituted. Any other program may run the single-quoted text it's given
- * (`python3 -c '…'`, `echo '…' | sh`), and the list of those has no end.
- */
-const MESSAGE_FOLLOWS =
-  /(?:^\s*|[;&|(]\s*)git(?:\s+-[cC]\s+(?:[^\s;&|'"`$\\]|'[^']*'|"[^"`$\\]*")+)*\s+(?:commit|tag)\b(?:[^;&|'"`$\\]|'[^']*'|"[^"`$\\]*")*?\s(?:-[a-zA-Z]*m\s*|--message[=\s]\s*)$/
-
-/**
- * The line as the shell substitutes in it, as far as a message goes: a
- * `git commit` or `git tag` message in single quotes, such as one quoting
- * the command, substitutes nothing, unless the line hands it to a shell to
- * run. Other single-quoted text is kept, as source something may run. A
- * shell or `eval` named only in a message runs nothing. A comment is left
- * out as the shell leaves it, and a message never runs across a line, so
- * neither a comment, a heredoc's text nor a `$'…'` can fake its start.
- */
-const substitutedIn = (command: string): string => {
-  let kept = ''
-  let doubled = false
-  // Whether a word starts here: after a blank or operator the shell reads as
-  // one, not an escaped one such as `\ `.
-  let wordStarts = true
-  for (let at = 0; at < command.length; at++) {
-    const char = command.charAt(at)
-    if (char === '\\') {
-      // `\` and a newline join two lines, as if neither were there.
-      if (command[at + 1] !== '\n') {
-        kept += command.slice(at, at + 2)
-        wordStarts = false
-      }
-      at++
-    } else if (char === '"') {
-      doubled = !doubled
-      kept += char
-      wordStarts = false
-    } else if (char === '#' && !doubled && wordStarts) {
-      // A comment, to the line's end.
-      const end = command.indexOf('\n', at)
-      at = (end === -1 ? command.length : end) - 1
-    } else if (char === '$' && command[at + 1] === "'" && !doubled) {
-      // `$'…'`, where `\'` doesn't end it: kept as written.
-      let end = at + 2
-      while (end < command.length && command[end] !== "'") end += command[end] === '\\' ? 2 : 1
-      kept += command.slice(at, end + 1)
-      at = end
-      wordStarts = false
-    } else if (char === "'" && !doubled) {
-      // Single-quoted text, as far as its closing quote, or the line's end.
-      const closing = command.indexOf("'", at + 1)
-      const end = closing === -1 ? command.length : closing
-      const quoted = command.slice(at, end + 1)
-      kept += MESSAGE_FOLLOWS.test(kept) && !quoted.includes('\n') ? "''" : quoted
-      at = end
-      wordStarts = false
-    } else {
-      kept += char
-      wordStarts = !doubled && /[\s;&|()]/.test(char)
-    }
-  }
-  return RUNS_A_SCRIPT.test(kept) ? command : kept
-}
-
-/** git's ssh, or config from the environment, set on the line, whatever it is set to: `GIT_SSH_COMMAND=$(…)`. */
-const GIT_RUNS_SET = /\bGIT_(?:SSH\w*|CONFIG\w*)=/i
-
-/** A path in a git folder, or a git config file. */
-const GIT_CONFIG_PATH = /(?:^|\/)\.git(?:\/|$)|\.gitconfig$|(?:^|\/)git\/config$|config\.worktree$/
-
-/**
- * A command line that has git run the device's ssh, or the bridge, as it is
- * now or once it's kept in a config for a later plain `git fetch`: set as a
- * variable or with `-c`, with `git config` (its ssh settings, an alias), or
- * written into a git folder. A line that only names it, a search or a commit
- * message, sets nothing and runs nothing.
- */
-const deviceSshReason = (command: string): string | undefined => {
-  if (!DEVICE_BRIDGE_NAMED.test(command)) return undefined
+/** Visible irreversible code-host actions. Unknown operations run (ADR-097). */
+const hostKinds = (words: ReadonlyArray<string>): ReadonlyArray<Kept> => {
+  const program = (words[0] ?? '').split('/').at(-1)
+  if (program !== 'gh' && program !== 'glab') return []
+  const args = words
+    .slice(1)
+    .filter((word, i, all) => !word.startsWith('-') && !['-R', '--repo', '--hostname', '-H'].includes(all[i - 1] ?? ''))
+  const [command, action] = args
+  if (words.includes('--help') || words.includes('--version')) return []
+  if (command === 'auth' && action === 'token') return [kept('Exporting credentials always asks.', 'outside', 'irreversible')]
+  const publish = (reason: string) => [kept(reason, 'deploy', 'irreversible')]
+  const speak = () => [kept('Speaking for the person always asks.', 'speak', 'irreversible')]
+  if (['pr', 'mr'].includes(command ?? '') && action === 'merge') return publish('Merging always asks.')
+  if (command === 'release' && ['create', 'upload', 'delete'].includes(action ?? ''))
+    return publish('Publishing or deleting a release always asks.')
+  if (['pr', 'mr', 'issue'].includes(command ?? '') && ['create', 'comment', 'review', 'note'].includes(action ?? '')) return speak()
+  if (['issue', 'release'].includes(command ?? '') && action === 'delete')
+    return [kept('Deleting work on the host always asks.', 'deploy', 'irreversible')]
+  if (command === 'release' && action === 'edit' && /(?:^|\s)--draft(?:=|\s+)false(?:\s|$)/.test(words.join(' ')))
+    return publish('Publishing a release always asks.')
+  if (command === 'repo' && action === 'delete') return publish('Deleting a repository always asks.')
+  if (command !== 'api') return []
+  const value = (flag: string) =>
+    words.find((word) => word.startsWith(flag + '='))?.slice(flag.length + 1) ??
+    (words.indexOf(flag) < 0 ? undefined : words[words.indexOf(flag) + 1])
+  const explicit = words.some((word) => /^(-X|--method)(=|$)/.test(word))
+    ? (value('--method') ?? value('-X'))
+    : words.find((word) => /^-X[A-Z]+$/.test(word))?.slice(2)
+  const writes = words.some((word) => /^(-[fF]|--field|--raw-field|--input)(=|$)/.test(word))
+  const method = explicit?.toUpperCase() ?? (writes ? 'POST' : 'GET')
+  if (method === 'GET' || method === 'HEAD') return []
+  const input = words.join(' ')
+  if (/\/(merge|merges|releases)(?:\/|\s|$)|mergePullRequest|createRelease|deleteRepository/.test(input))
+    return publish('Publishing, merging or teardown always asks.')
   if (
-    [DEVICE_BRIDGE_ASSIGNED, GIT_RUNS_SET].some((pattern) => pattern.test(command)) ||
-    DEVICE_BRIDGE_SUBSTITUTED.test(substitutedIn(command))
+    /\/(comments|reviews)(?:\/|\s|$)|addComment|addPullRequestReview|createIssue/.test(input) ||
+    (method === 'POST' && /\/(issues|pulls)(?:\s|$)/.test(input))
   )
-    return DEVICE_BRIDGE_REFUSED
-  const sets = parseCommandLine(command).commands.some((written) => {
-    const words = unwrap(written)
-    return gitCall(words, '/')?.subcommand === 'config' || words.some((word) => GIT_CONFIG_PATH.test(word))
-  })
-  return sets ? DEVICE_BRIDGE_REFUSED : undefined
+    return speak()
+  // A ref written through the API moves a branch or makes a tag: git's own guard never sees it.
+  if (/\brefs\/tags\b/.test(input)) return publish('Publishing a tag always asks.')
+  if (/\brefs\b/.test(input) && /\/(git\/)?refs(?:\/|\s|$)/.test(input))
+    return [kept('Moving a branch or tag on the host always asks.', 'delete-branch', 'irreversible')]
+  if (method === 'DELETE' && /(^|\/|\s)(repos|refs|branches)\//.test(input))
+    return [kept('Deleting remote work always asks.', 'delete-branch', 'irreversible')]
+  return []
 }
 
-/** What `gh` and `glab` may do: their read-only commands, by command and subcommand. */
-const HOST_LOOKS: Readonly<Record<string, ReadonlySet<string>>> = {
-  pr: new Set(['view', 'list', 'diff', 'checks', 'status']),
-  mr: new Set(['view', 'list', 'diff']),
-  issue: new Set(['view', 'list', 'status']),
-  run: new Set(['view', 'list', 'watch']),
-  ci: new Set(['view', 'list', 'status', 'trace']),
-  workflow: new Set(['view', 'list']),
-  repo: new Set(['view', 'list']),
-  release: new Set(['view', 'list']),
-  search: new Set(['repos', 'issues', 'prs', 'code', 'commits']),
-}
+/** What an agent never does on the person's code host: approve its own work or widen what the host lets agents do. */
+const SELF_APPROVAL_REFUSED = "An agent doesn't approve its own work or widen what the host lets agents do. The person does that."
 
-const HOST_WRITE_FLAGS = new Set(['-f', '-F', '--field', '--raw-field', '--input', '-d', '--data'])
-
-/** Why an agent may not run a `gh` or `glab` command, or nothing when it only looks. */
-const hostReason = (words: ReadonlyArray<string>): string | undefined => {
-  const program = (words[0] ?? '').split('/').at(-1) ?? ''
+/** Why a `gh`/`glab` call is refused rather than asked: it would approve the agent's own work or widen access (ADR-097). */
+const hostRefusedReason = (words: ReadonlyArray<string>): string | undefined => {
+  const program = (words[0] ?? '').split('/').at(-1)
   if (program !== 'gh' && program !== 'glab') return undefined
-  const [command, subcommand] = words.slice(1).filter((word) => !word.startsWith('-'))
-  if (command === undefined || command === 'help' || command === 'version' || words.includes('--help') || words.includes('--version'))
-    return undefined
-  if (command === 'api') {
-    const method =
-      words
-        .map((word, index) =>
-          words[index - 1] === '-X' || words[index - 1] === '--method'
-            ? word
-            : word.startsWith('--method=')
-              ? word.slice('--method='.length)
-              : /^-X[A-Za-z]+$/.test(word)
-                ? word.slice(2)
-                : undefined,
-        )
-        .find((found) => found !== undefined) ?? 'GET'
-    if (method.toUpperCase() === 'GET' && !words.some((word) => HOST_WRITE_FLAGS.has(word.split('=')[0] ?? ''))) return undefined
-    return "Agents don't change things on the code host themselves; Althar does that for the task. Tell the person what's needed."
-  }
-  if (HOST_LOOKS[command]?.has(subcommand ?? '') === true) return undefined
-  if ((command === 'pr' || command === 'mr') && subcommand === 'merge')
-    return "Merging is the person's to do: they accept the change in Althar, or on the host."
-  if ((command === 'pr' || command === 'mr') && (subcommand === 'comment' || subcommand === 'review' || subcommand === 'note'))
-    return "Answer on the task's pull request with Althar's reply_on_pull_request tool."
-  if ((command === 'pr' && subcommand === 'edit') || (command === 'mr' && subcommand === 'update'))
-    return "Change the task's pull request's title or description with Althar's edit_pull_request tool."
-  if (command === 'pr' || command === 'mr')
-    return "Althar opens the task's pull request itself, and what you commit goes to it with push_to_pull_request, which pushes it, or asks the person to, as the project has it. Commit, then call it; read the pull request with read_pull_request."
-  if (command === 'issue')
-    return 'Althar changes issues through its own tools, not gh or glab. Read one with read_issue; on the issue this task came from, comment with comment_on_issue and propose a change with change_issue; for any other, tell the person what it needs.'
-  if (command === 'auth') return "Agents run without the person's sign-in to the code host; Althar's tools reach it for the task."
-  return "Agents don't change things on the code host themselves; Althar does that for the task. Tell the person what's needed."
+  if (words.includes('--help') || words.includes('--version')) return undefined
+  const args = words
+    .slice(1)
+    .filter((word, i, all) => !word.startsWith('-') && !['-R', '--repo', '--hostname', '-H'].includes(all[i - 1] ?? ''))
+  const [command, action] = args
+  const line = words.join(' ')
+  if (['pr', 'mr'].includes(command ?? '') && action === 'review' && /(?:^|\s)--approve(?:=|\s|$)/.test(line)) return SELF_APPROVAL_REFUSED
+  // GitLab approves with a command of its own, and a merge request's approval is the same self-approval.
+  if (command === 'mr' && action === 'approve') return SELF_APPROVAL_REFUSED
+  if ((command === 'secret' || command === 'variable') && action === 'set') return SELF_APPROVAL_REFUSED
+  if (command === 'repo' && action === 'edit' && /(?:^|\s)--visibility(?:=|\s+)public(?:\s|$)/.test(line)) return SELF_APPROVAL_REFUSED
+  if (command !== 'api') return undefined
+  const value = (flag: string) =>
+    words.find((word) => word.startsWith(flag + '='))?.slice(flag.length + 1) ??
+    (words.indexOf(flag) < 0 ? undefined : words[words.indexOf(flag) + 1])
+  const explicit = words.some((word) => /^(-X|--method)(=|$)/.test(word))
+    ? (value('--method') ?? value('-X'))
+    : words.find((word) => /^-X[A-Z]+$/.test(word))?.slice(2)
+  const writes = words.some((word) => /^(-[fF]|--field|--raw-field|--input)(=|$)/.test(word))
+  const method = (explicit ?? (writes ? 'POST' : 'GET')).toUpperCase()
+  if (method === 'GET' || method === 'HEAD') return undefined
+  // An approval, a commit status or a check run is the agent vouching for its own work, by REST, `glab`'s own path or GraphQL.
+  if (/\bpulls\/[^/\s]+\/reviews\b/.test(line) && /APPROVE|--approve/.test(line)) return SELF_APPROVAL_REFUSED
+  if (/\b(addPullRequestReview|mergeRequestApprove|mergeRequestAccept)\b/.test(line) && /approve/i.test(line)) return SELF_APPROVAL_REFUSED
+  if (/\bmerge_requests\/[^/\s]+\/approve\b/.test(line)) return SELF_APPROVAL_REFUSED
+  if (/\b(statuses|check-runs|check-suites|createCommitStatus|createCheckRun|commitStatusCreate)\b/.test(line)) return SELF_APPROVAL_REFUSED
+  // Protection, collaborators, secrets and a public visibility widen what the host lets agents do.
+  if (
+    /\bbranches\/[^/\s]+\/protection\b|BranchProtectionRule|\bprotected_(branches|tags|environments)\b/.test(line) ||
+    /\bcollaborators\b|\bmembers\b|\bdeploy_(tokens|keys)\b|\baccess_tokens\b|\bvariables\b|\bactions\/(permissions|secrets)\b|\bdependabot\/secrets\b|\bcodespaces\/secrets\b|\bci\/variables\b/.test(
+      line,
+    ) ||
+    /"visibility"\s*:\s*"public"|visibility(?:=|":\s*"?)public|--visibility(?:=|\s+)public/.test(line)
+  )
+    return SELF_APPROVAL_REFUSED
+  return undefined
+}
+
+/**
+ * A rule's pattern as a host, where it is one: a URL's host, a name with a
+ * wildcard for the hosts under it (`*.example.com`), or a bare host. A word
+ * that reads as a file a command runs (`deploy.sh`, `release.yml`) is a
+ * command, not a host, though `hostOf` can read either as a name.
+ */
+const hostPatternOf = (pattern: string): { readonly host: string; readonly under: boolean } | undefined => {
+  const typed = pattern.trim().toLowerCase()
+  const under = typed.startsWith('*.')
+  const name = under ? typed.slice(2) : typed
+  const host = hostOf(name)
+  if (host === null) return undefined
+  // A file name is what a command rule names more often than a host: its last label is an extension.
+  const extension = name.slice(name.lastIndexOf('.') + 1)
+  if (!typed.includes('://') && FILE_EXTENSIONS.has(extension)) return undefined
+  return { host, under }
+}
+
+/** The last labels of names that are files a command runs, not hosts. */
+const FILE_EXTENSIONS = new Set([
+  'bash',
+  'c',
+  'cfg',
+  'conf',
+  'cpp',
+  'cs',
+  'css',
+  'csv',
+  'cts',
+  'env',
+  'fish',
+  'go',
+  'h',
+  'html',
+  'ini',
+  'java',
+  'js',
+  'json',
+  'jsx',
+  'kt',
+  'less',
+  'lock',
+  'log',
+  'lua',
+  'md',
+  'mjs',
+  'mts',
+  'php',
+  'pl',
+  'py',
+  'rb',
+  'rs',
+  'sass',
+  'scss',
+  'sh',
+  'sql',
+  'svelte',
+  'swift',
+  'toml',
+  'ts',
+  'tsv',
+  'tsx',
+  'txt',
+  'vue',
+  'xml',
+  'yaml',
+  'yml',
+  'zsh',
+])
+
+/** Whether a host is the one a rule names, or one under it: its own name, or a name that ends in `.` and it. */
+const hostMatches = (rule: { readonly host: string }, host: string): boolean => host === rule.host || host.endsWith(`.${rule.host}`)
+
+/** The host a command's word names, where it names one: a URL's host, or a bare host that isn't a file name. */
+const namedHostOf = (word: string): string | undefined => {
+  const typed = word.trim()
+  if (typed === '') return undefined
+  const url = typed.includes('://')
+  const host = hostOf(url ? typed : typed.replace(/^['"]|['"]$/g, ''))
+  if (host === null) return undefined
+  // A path, an option or a file a command names isn't a host: `./deploy.sh`, `--host=x`, `cat deploy.sh`.
+  if (!url && (typed.startsWith('-') || /[/\\]/.test(typed) || typed.startsWith('.'))) return undefined
+  if (!url && FILE_EXTENSIONS.has(typed.slice(typed.lastIndexOf('.') + 1).toLowerCase())) return undefined
+  return host
+}
+
+/** The host a command names, where one of the person's own host rules matches it. */
+const hostRuleOf = (text: string, rules: ProjectRuleSet['commands'], system: System) => {
+  const named = new Set<string>()
+  for (const line of lineReadings(text, system))
+    for (const words of line.commands.flatMap((words) => [words, ...commandsIn(words)]))
+      for (const word of words) {
+        const host = namedHostOf(word)
+        if (host !== undefined) named.add(host)
+      }
+  if (named.size === 0) return undefined
+  const met = rules.filter((rule) => {
+    const pattern = hostPatternOf(rule.pattern)
+    return pattern !== undefined && [...named].some((host) => hostMatches(pattern, host))
+  })
+  return met.find((rule) => rule.decision === 'never') ?? met[0]
 }
 
 const field = (value: unknown, key: string): unknown =>
@@ -1459,6 +1463,18 @@ const unwrap = (written: ReadonlyArray<string>): ReadonlyArray<string> => {
   let index = 0
   while (index < command.length) {
     const word = command[index] ?? ''
+    // The Flatpak bridge is an ordinary wrapper; the visible command still meets the irreversible rules.
+    if (word.split('/').at(-1) === 'flatpak-spawn') {
+      index += 1
+      while ((command[index] ?? '').startsWith('-')) {
+        if (command[index] === '--') {
+          index += 1
+          break
+        }
+        index += ['--env', '--unset-env', '--directory', '--sandbox-expose', '--sandbox-expose-ro'].includes(command[index] ?? '') ? 2 : 1
+      }
+      continue
+    }
     // `timeout [options] 60 cmd`: its options, then how long, then the command.
     if (word === 'timeout') {
       index += 1
@@ -2931,6 +2947,7 @@ const kindsOf = (
     }
     return { kinds, redirected, ...(moved === undefined ? {} : { cwd: moved }) }
   }
+  kinds.push(...commandsIn(words).flatMap(hostKinds))
   if (commandsIn(words).some(destroys))
     kinds.push(
       kept(
@@ -2946,7 +2963,9 @@ const kindsOf = (
     const repository = [locate(where, cwd, git.cwd), ...git.elsewhere.map((path) => locate(where, cwd, path))]
     const elsewhere = repository.find((path) => outside(where, path))
     if (elsewhere !== undefined) {
-      kinds.push(kept(`Git in another folder always asks: ${elsewhere}`, 'outside'))
+      // A read of another repository changes nothing; a write there is a visible outside write the coordinator refuses.
+      if (context.readOnly !== true || !gitReadsElsewhere(git.subcommand, git.args))
+        kinds.push(kept(`Git in another folder always asks: ${elsewhere}`, 'outside'))
       // The person's own checkout, say: what they haven't committed there is nowhere else.
       const isPath = (name: string) =>
         repository.some((folder) => {
@@ -3067,6 +3086,100 @@ const unseenReadings = (words: ReadonlyArray<string>, where: Places, context: Ru
 }
 
 /** What a command line does that the rules keep for the person: every kind, in every command of it. */
+/** Git's subcommands that only look, wherever they run; `branch`, `tag`, `remote`, `worktree` and `stash` also have writing forms. */
+const GIT_READS_ELSEWHERE = new Set([
+  'status',
+  'log',
+  'show',
+  'diff',
+  'grep',
+  'ls-files',
+  'rev-parse',
+  'blame',
+  'cat-file',
+  'for-each-ref',
+  'describe',
+  'shortlog',
+  'show-ref',
+  'ls-tree',
+  'ls-remote',
+  'name-rev',
+  'merge-base',
+  'help',
+  'version',
+  'whatchanged',
+  'count-objects',
+  'verify-commit',
+  'verify-tag',
+  'fsck',
+  'check-ignore',
+  'check-attr',
+  'check-ref-format',
+  'diff-tree',
+  'diff-files',
+  'diff-index',
+  'rev-list',
+  'symbolic-ref',
+])
+
+/** Whether a git call in another folder only reads it: the coordinator may do that without asking, and nothing else. */
+const gitReadsElsewhere = (subcommand: string, args: ReadonlyArray<string>): boolean => {
+  if (GIT_READS_ELSEWHERE.has(subcommand)) return true
+  const words = args.filter((arg) => !arg.startsWith('-'))
+  const flags = args.filter((arg) => arg.startsWith('-'))
+  if (subcommand === 'config')
+    return (
+      flags.some((flag) => /^(--get(?:-all|-regexp|-urlmatch)?|--list|-l|--show-(origin|scope|name-only))$/.test(flag)) ||
+      words.length === 0
+    )
+  if (subcommand === 'reflog') return words.length === 0 || words[0] === 'show'
+  if (subcommand === 'worktree') return words[0] === 'list'
+  // `git stash` with no arguments saves the working tree; only its listing forms read.
+  if (subcommand === 'stash') return ['list', 'show'].includes(words[0] ?? '')
+  if (subcommand === 'notes') return words.length === 0 || ['list', 'show'].includes(words[0] ?? '')
+  if (subcommand === 'submodule') return words.length === 0 || ['status', 'summary'].includes(words[0] ?? '')
+  if (subcommand === 'bisect') return words.length === 0 || ['log', 'view'].includes(words[0] ?? '')
+  if (subcommand === 'replace') return flags.some((flag) => ['-l', '--list'].includes(flag))
+  if (subcommand === 'remote')
+    return (
+      words.length === 0 ||
+      ['show', 'get-url'].includes(words[0] ?? '') ||
+      (flags.some((flag) => ['-v', '--verbose'].includes(flag)) && words.length === 0)
+    )
+  if (subcommand === 'branch')
+    return (
+      (words.length === 0 && !flags.some((flag) => /^-(d|D|m|M|c|C|f)$/.test(flag))) ||
+      (flags.some((flag) =>
+        [
+          '--list',
+          '-l',
+          '-a',
+          '-r',
+          '-v',
+          '--verbose',
+          '--show-current',
+          '--contains',
+          '--merged',
+          '--no-merged',
+          '--points-at',
+          '--format',
+        ].includes(flag),
+      ) &&
+        !flags.some(
+          (flag) => /^-(d|D|m|M|c|C|f)$/.test(flag) || /^--(delete|move|copy|set-upstream-to|unset-upstream|edit-description)$/.test(flag),
+        ))
+    )
+  if (subcommand === 'tag')
+    return (
+      (words.length === 0 && !flags.some((flag) => /^-[adfsm]$/.test(flag))) ||
+      (flags.some((flag) =>
+        ['--list', '-l', '-n', '--contains', '--points-at', '--merged', '--no-merged', '--sort', '--format'].includes(flag),
+      ) &&
+        !flags.some((flag) => /^-[adfsm]$/.test(flag) || /^--(delete|force)$/.test(flag)))
+    )
+  return false
+}
+
 const commandKinds = (text: string, context: RuleContext): ReadonlyArray<Kept> => {
   const { commands, opaque } = eachCommand(text, context)
   // What a quoted heredoc holds is text: words in it say nothing of what the command does.
@@ -3260,6 +3373,8 @@ export const readsWeb = (command: string): boolean => {
 
 /** What the rules keep for the person in a request, whatever the project says of it: every kind it is, and why. */
 const keptOf = (request: PermissionRequest, context: RuleContext): ReadonlyArray<Kept> => {
+  // A call to one of the person's MCP servers is read by its tool and arguments, not as a command (ADR-097).
+  if (request.mcp !== undefined) return mcpKept(request.mcp, request.rawInput)
   if (request.kind === 'execute' || request.kind === 'other') {
     // A network request names a host: none of the command kinds (a deploy, a push) are what it does.
     if (networkHostOf(request) !== undefined) return []
@@ -3296,6 +3411,28 @@ const keptOf = (request: PermissionRequest, context: RuleContext): ReadonlyArray
   return secrets
 }
 
+/** What of an MCP call the rules keep for the person: one of the kinds that can't be undone, by what its tool does. */
+const mcpKept = (call: McpCall, input: unknown): ReadonlyArray<Kept> => {
+  const act = mcpActOf(call, input)
+  if (act.kind === undefined) return []
+  const rule: RuleId =
+    act.kind === 'publish' ? 'deploy' : act.kind === 'speak' ? 'speak' : call.tool.includes('force') ? 'force-push' : 'delete-branch'
+  return [kept(`${act.verb} through ${call.server} always asks: it can't be undone.`, rule, 'irreversible')]
+}
+
+/**
+ * What can't be undone in a request, as the rules read it: the kind it is
+ * and why it asks, for the card that says so (`irreversible.ts`); undefined
+ * where nothing in it is that, or only what the rules can't tell.
+ */
+export const lastingKept = (
+  request: PermissionRequest,
+  context: RuleContext,
+): { readonly rule: RuleId; readonly reason: string } | undefined => {
+  const found = keptOf(request, context).find((each) => each.irreversible === true && each.rule !== 'unclear' && each.blind !== true)
+  return found === undefined || found.rule === 'unclear' ? undefined : { rule: found.rule, reason: found.reason }
+}
+
 /** Why what can't be undone asks with everything allowed, in the card's one line. */
 const evenAllowed = (reason: string) => reason.replace(/ always asks/, ' asks even with everything allowed')
 
@@ -3309,7 +3446,7 @@ const evenAllowed = (reason: string) => reason.replace(/ always asks/, ' asks ev
 const lastingOf = (request: PermissionRequest, context: RuleContext): Kept | undefined => {
   const lasting = (kinds: ReadonlyArray<Kept>) =>
     kinds.find((each) => each.irreversible === true && each.rule !== 'unclear' && each.blind !== true)
-  if (request.kind !== 'execute' && request.kind !== 'other') return lasting(keptOf(request, context))
+  if (request.mcp !== undefined || (request.kind !== 'execute' && request.kind !== 'other')) return lasting(keptOf(request, context))
   // A host is no command, so none of what a command could do that can't be undone.
   if (networkHostOf(request) !== undefined) return undefined
   return lasting(commandKinds(withoutQuotedHeredocs(commandOf(request), takesScript), context))
@@ -3323,18 +3460,14 @@ const LOOKS: ReadonlyArray<PermissionRequest['kind']> = ['read', 'search', 'thin
 
 /**
  * Decides a permission request from the rules and the project's (ADR-013).
- * What no project can change comes first: a code host is reached only
- * through Althar, and no one reads credentials, in the keychain or in the
+ * Secret protections come first: no one reads credentials, in the keychain or in the
  * files people keep them in. A request can be several kinds at once (`git
  * push --force origin main` is a force push and a push to the default
  * branch), and every kind counts. Then, in order:
  * - what the project never allows is refused: any kind it is, or a command
  *   the project named;
- * - with everything allowed, anything else is allowed, short of what the
- *   rules can't read where the project never allows something: that is
- *   refused, with how to run it so they can; and short of what the rules
- *   read as what can't be undone from the task (`lastingOf`, ADR-067),
- *   which asks the person;
+ * - with everything allowed, opaque commands run; visible irreversible
+ *   operations (`lastingOf`) and the person's own Ask rules ask;
  * - a kind on the always-ask list, or a command the project asks about, is
  *   held for the person, whatever else would answer;
  * - what could lose work or a secret asks the person where the project would
@@ -3357,44 +3490,42 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
   // A network request meets the person's named rules by its host, as a command meets them by its words.
   const named =
     network !== undefined
-      ? commandRule(network, project.commands, system)
+      ? (commandRule(network, project.commands, system) ?? hostRuleOf(network, project.commands, system))
       : request.kind === 'execute' || request.kind === 'other'
-        ? commandRule(commandOf(request), project.commands, system)
+        ? (commandRule(commandOf(request), project.commands, system) ?? hostRuleOf(commandOf(request), project.commands, system))
         : undefined
   if (network === undefined && (request.kind === 'execute' || request.kind === 'other')) {
-    // A code host is reached through Althar: `gh` and `glab` only look, and no one reads credentials, wherever they are in the command.
-    const refused =
-      deviceSshReason(commandOf(request)) ??
-      lineReadings(commandOf(request), system)
-        .flatMap((line) => line.commands.flatMap((words) => readings(unwrap(words))))
-        .map((words) => credentialReason(words) ?? hostReason(words) ?? deviceBridgeReason(words))
-        .find((reason) => reason !== undefined)
+    // Explicit credential reads are refused, wherever they appear in the command.
+    const refused = lineReadings(commandOf(request), system)
+      .flatMap((line) => line.commands.flatMap((words) => readings(unwrap(words))))
+      .map(credentialReason)
+      .find((reason) => reason !== undefined)
     if (refused !== undefined) return { verdict: 'deny', reason: refused }
+    // Approving the agent's own work or widening access is refused, whoever asks.
+    const widened = lineReadings(commandOf(request), system)
+      .flatMap((line) => line.commands.flatMap((words) => [words, ...commandsIn(words)]))
+      .map(hostRefusedReason)
+      .find((reason) => reason !== undefined)
+    if (widened !== undefined) return { verdict: 'deny', reason: widened }
   }
   // Nor the files people keep keys and sign-ins in, whatever the request does with them.
   const secret = secretOf(request, context, system)
   if (secret !== undefined) return { verdict: 'deny', reason: secret }
   if (named?.decision === 'never') return { verdict: 'deny', reason: `The project's rules never allow \`${named.pattern.trim()}\`.` }
   const found = keptOf(request, context)
+  if (context.readOnly === true && found.some((each) => each.rule === 'outside'))
+    return { verdict: 'deny', reason: "This command visibly writes outside the coordinator's folder." }
   const never = found.find((each) => each.rule !== 'unclear' && project.never.includes(each.rule))
   if (never !== undefined && never.rule !== 'unclear')
     return { verdict: 'deny', reason: `The project's rules never allow ${RULE_WORDS[never.rule]}.` }
-  const unclear = found.find((each) => each.rule === 'unclear')
   if (project.mode === 'allow') {
-    // With no one to ask, what the rules can't read can't be let past what is never allowed: but for what git's guard stops
-    // whatever runs it, where it holds (an automation's run never pushes to the default branch).
-    const neverAny =
-      project.never.some((rule) => context.guarded !== true || !GUARDED.includes(rule)) ||
-      project.commands.some((rule) => rule.decision === 'never')
-    if (unclear !== undefined && neverAny)
-      return {
-        verdict: 'deny',
-        reason: `${unclear.reason.replace(/,? so it asks\.$/, '.')} The project's rules never allow some things, so it's refused: run it with its words spelled out, without \`eval\` or \`$(…)\`, naming the branch or file.`,
-      }
     // What can't be undone from the task still asks, where the rules read it as that: allowing everything is for what the person
     // could take back if it went wrong, and trusts the agent with what the rules can't read.
     const lasting = lastingOf(request, context)
-    return lasting === undefined ? ALLOW : ask(evenAllowed(lasting.reason), false)
+    if (lasting !== undefined) return ask(evenAllowed(lasting.reason), false)
+    // The person's own Ask me holds with everything allowed too: it is their answer given ahead (ADR-097).
+    if (named?.decision === 'ask') return ask(`The project's rules ask before \`${named.pattern.trim()}\`.`, true)
+    return ALLOW
   }
   const asked = found.find((each) => each.rule === 'unclear' || project.ask.includes(each.rule))
   // What always asks waits for the person, whatever the allow rules say.
@@ -3442,7 +3573,7 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
  * reading what it does, whatever the line is, a loop, `$(…)`, a heredoc or a
  * script. What it can't do there it can't do at all: write outside the task's
  * worktree or the coordinator's folder, read where the person keeps keys,
- * reach a host it isn't given, push without a sign-in. What crosses (a
+ * read a secret file. What crosses (a
  * command that runs outside it, an edit outside, a host it asks for) still
  * meets the rules as it did.
  */
@@ -3472,10 +3603,11 @@ export const runsInside = (request: PermissionRequest, hold: Hold): boolean => {
 
 /**
  * Decides a shell command its session's sandbox holds (ADR-071). Nothing is
- * read for what it does but what the project said itself: a command it never
- * allows, or a kind it never allows that the line plainly is, is refused; a
- * command it asks about asks. And no one reads the keychain or git's stored
- * passwords, which the sandbox reaches on a Mac. The rest runs.
+ * read for what it does but what the person and the irreversible list said:
+ * a command they never allow, or a kind they never allow that the line plainly
+ * is, is refused; a command they ask about asks; and an operation that can't
+ * be undone still asks, sandbox or not (ADR-097). Approving the agent's own
+ * work or widening access is refused. The rest runs.
  */
 export const decideInside = (request: PermissionRequest, context?: RuleContext): Verdict => {
   const system = systemOf(context)
@@ -3485,23 +3617,26 @@ export const decideInside = (request: PermissionRequest, context?: RuleContext):
     .map(credentialReason)
     .find((reason) => reason !== undefined)
   if (credentials !== undefined) return { verdict: 'deny', reason: credentials }
+  const widened = lineReadings(command, system)
+    .flatMap((line) => line.commands.flatMap((words) => [words, ...commandsIn(words)]))
+    .map(hostRefusedReason)
+    .find((reason) => reason !== undefined)
+  if (widened !== undefined) return { verdict: 'deny', reason: widened }
   const project = context?.project
-  if (context === undefined || project === undefined) return ALLOW
-  const named = commandRule(command, project.commands, system)
+  if (context === undefined) return ALLOW
+  const secret = secretOf(request, context, system)
+  if (secret !== undefined) return { verdict: 'deny', reason: secret }
+  if (project === undefined) return ALLOW
+  const named = commandRule(command, project.commands, system) ?? hostRuleOf(command, project.commands, system)
   if (named?.decision === 'never') return { verdict: 'deny', reason: `The project's rules never allow \`${named.pattern.trim()}\`.` }
-  const kinds = project.never.length > 0 || project.commands.length > 0 ? commandKinds(command, context) : []
+  const kinds = commandKinds(command, context)
   const never = kinds.find((each) => each.rule !== 'unclear' && project.never.includes(each.rule))
   if (never !== undefined && never.rule !== 'unclear')
     return { verdict: 'deny', reason: `The project's rules never allow ${RULE_WORDS[never.rule]}.` }
-  // What it can't read could be what the project never allows, where nothing at the boundary stops that: a deploy, a command it named.
-  const unheld = project.never.some((rule) => !HELD_INSIDE.includes(rule)) || project.commands.some((rule) => rule.decision === 'never')
-  const unread = unheld ? unreadOf(command, kinds) : undefined
-  if (unread !== undefined)
-    return {
-      verdict: 'deny',
-      reason: `${unread} The project's rules never allow some things that could be in it, so it's refused: run its commands written out, where Althar can read them.`,
-    }
-  if (named !== undefined) return ask(`The project's rules ask before \`${named.pattern.trim()}\`.`, true)
+  // The irreversible list asks in every role, sandbox or not (ADR-097).
+  const lasting = lastingOf(request, context)
+  if (lasting !== undefined) return ask(evenAllowed(lasting.reason), false)
+  if (named?.decision === 'ask') return ask(`The project's rules ask before \`${named.pattern.trim()}\`.`, true)
   return ALLOW
 }
 
@@ -3511,65 +3646,6 @@ const INSTALLED =
 
 /** What runs a package's program, the word after it naming what it runs (`bunx tsx fix.ts`). */
 const PACKAGE_RUNNERS = /^(bunx|npx|pnpx)$/
-
-/** Programs that run a script in another language, beyond the languages themselves. */
-const SCRIPT_RUNNERS = /^(tsx|ts-node|esno|vite-node)$/
-
-/** Bun's and Deno's ways of running code of the line's or a file's, not one of the project's scripts (`bun run test`) or tools. */
-const runsCode = (name: string, after: ReadonlyArray<string>): boolean => {
-  const [first = '', second = ''] = after.filter((word) => !/^--?(watch|hot|smol|bun|silent|quiet|allow-\S+|A)$/.test(word))
-  if (/^(-e|--eval|-p|--print)$/.test(first)) return true
-  const file = (word: string) => /\.(m?[jt]sx?|c[jt]s)$/.test(word) || word.includes('/')
-  if (name === 'deno') return ['run', 'eval', 'repl'].includes(first) || file(first)
-  return (first === 'run' && file(second)) || file(first)
-}
-
-/**
- * Why Althar can't read what a line does, where it can't: a part the shell
- * works out as it runs (`$(…)`, backticks, `eval`), a script in another
- * language (`python3 - <<'EOF'`, `node fix.js`, `bun -e '…'`, `bunx tsx
- * fix.ts`), a shell given a file or its input, a program run from a file
- * (`./fix.sh`, `/tmp/fix.sh`) rather than one installed, or what the rules
- * themselves can't tell.
- */
-const unreadOf = (command: string, kinds: ReadonlyArray<Kept>): string | undefined => {
-  const parsed = parseCommandLine(command)
-  if (parsed.opaque) return "Althar can't read what this runs: part of it is worked out only as it runs (`$(…)`, backticks, `eval`)."
-  for (const words of parsed.commands) {
-    const start = words.findIndex((word) => !assignment.test(word))
-    const wrapped = PACKAGE_RUNNERS.test((words[start] ?? '').slice((words[start] ?? '').lastIndexOf('/') + 1))
-    const at = wrapped ? words.findIndex((word, index) => index > start && !word.startsWith('-')) : start
-    const program = at < 0 ? '' : (words[at] ?? '')
-    const name = program.slice(program.lastIndexOf('/') + 1)
-    const after = words.slice(at + 1)
-    if (
-      (SCRIPT_LANGUAGES.test(name) && name !== 'bun' && name !== 'deno') ||
-      SCRIPT_RUNNERS.test(name) ||
-      (/^(bun|deno)$/.test(name) && runsCode(name, after))
-    )
-      return `Althar can't read what this runs: a \`${name}\` script does what its code says, not its words.`
-    // A shell given a script to run, from a file or its input, rather than one on the line (`sh -c '…'`, which the rules read).
-    if (SHELLS.test(name) && !after.some((word) => /^-\w*c\w*$/.test(word)))
-      return `Althar can't read what this runs: \`${name}\` runs a script from a file or its input.`
-    if (program.includes('/') && !INSTALLED.test(program))
-      return `Althar can't read what this runs: \`${program}\` does what its file says.`
-  }
-  const unclear = kinds.find((each) => each.rule === 'unclear')
-  return unclear?.reason.replace(/,? so it asks\.$/, '.')
-}
-
-/**
- * The kinds the boundary itself stops, whatever a command hides: the
- * sandbox a write outside the task's worktree, git's guard a push to the
- * default branch, a force push and deleting another branch (pushGuard.ts).
- * The guard lets a branch go, or move, where none of its commits is lost:
- * what can't be undone is stopped, and what a readable line does still meets
- * the Never. A project that never allows only these needn't read what runs inside.
- */
-const HELD_INSIDE: ReadonlyArray<RuleId> = ['outside', 'default-branch', 'force-push', 'delete-branch']
-
-/** What git's guard stops wherever a lead's git runs, inside its sandbox or out, a script's or a loop's (pushGuard.ts). */
-const GUARDED: ReadonlyArray<RuleId> = ['default-branch', 'force-push', 'delete-branch']
 
 /** A git command of a line: what a pass from the person lets past git's guard, and no other (pushGuard.ts). */
 export interface GitRun {
@@ -3642,8 +3718,7 @@ export const tallyKindOf = (request: PermissionRequest, context: RuleContext): T
   const runs = (request.kind === 'execute' || request.kind === 'other') && network === undefined
   if (runs) {
     const words = lineReadings(commandOf(request), system).flatMap((line) => line.commands.flatMap((each) => readings(unwrap(each))))
-    if (words.some((each) => credentialReason(each) !== undefined || deviceBridgeReason(each) !== undefined)) return 'credentials'
-    if (words.some((each) => hostReason(each) !== undefined)) return 'code-host'
+    if (words.some((each) => credentialReason(each) !== undefined)) return 'credentials'
   }
   if (secretOf(request, context, system) !== undefined) return 'credentials'
   const project = context.project ?? MVP_RULES
@@ -3797,8 +3872,8 @@ export const alwaysRuleOf = (
 // ---- Roles that only read ----------------------------------------------------
 
 /*
- * A role that only reads, such as the coordinator (docs/architecture/04) or a
- * reviewer, is never asked about and never asks: what it may do, it does, and
+ * Review roles that only read (workspaces/tool lists deferred to task-as-parts)
+ * are never asked about and never asks: what it may do, it does, and
  * the rest is refused with a reason it reads. It may read anything, search,
  * fetch from the web, and run commands that only look. It may call
  * Althar's own tools, which are how it changes anything. Every write, and
@@ -5108,10 +5183,10 @@ export interface ReaderOptions {
   readonly cwd?: string
   readonly trusted?: boolean
   /**
-   * A trusted reader whose agent runs every command in a sandbox held to its
-   * folder, never outside it, and reaching no network (ADR-058): what a
-   * command writes stays in its copies, so it may `git fetch` there wherever
-   * the command asks, as in a loop.
+   * A trusted reader whose agent runs its commands in a sandbox held to its
+   * folder (ADR-058): what a command writes stays in its copies, so it may
+   * `git fetch` there wherever the command asks, as in a loop. A read the
+   * sandbox cannot run may retry outside, against the reader's rules.
    */
   readonly contained?: boolean
   /**
@@ -5224,8 +5299,6 @@ const envOutsideIn = (command: string, cwd: string) => {
  * words the shell expands.
  */
 const readerLineReason = (command: string, options: ReaderOptions): string | undefined => {
-  const deviceSsh = deviceSshReason(command)
-  if (deviceSsh !== undefined) return deviceSsh
   if (options.trusted === true) {
     if (options.cwd !== undefined && envOutsideIn(command, options.cwd)) return ENV_REFUSED
     const found = substitutionsIn(command)
@@ -5246,7 +5319,7 @@ const plainReaderLineReason = (command: string, options: ReaderOptions): string 
   if (options.trusted === true && options.cwd !== undefined && envOutsideIn(command, options.cwd)) return ENV_REFUSED
   return (
     parseCommandLine(command)
-      .commands.map((words) => credentialReason(unwrap(words)) ?? deviceBridgeReason(unwrap(words)))
+      .commands.map((words) => credentialReason(unwrap(words)))
       .find((found) => found !== undefined) ??
     secretCommandReason(command, options.cwd) ??
     readerCommandReason(command, options.trusted === true ? (options.contained === true ? 'contained' : true) : false, (script) =>

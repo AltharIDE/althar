@@ -23,6 +23,8 @@ import {
 } from '@althar/ui'
 import {
   type CommandPlace,
+  type AskKind,
+  type AskPlace,
   ProjectRules,
   type RestMode,
   type RuleCommand,
@@ -108,7 +110,33 @@ const KINDS = [
   RuleKind.DeleteBranch,
   RuleKind.Deploy,
   RuleKind.Outside,
+  RuleKind.Speak,
 ] as const
+
+/**
+ * The kinds of what can't be undone, as What asks lists them, by the rule
+ * kinds each stands for (ADR-097). Deleting outside the task is lost work
+ * too, but its kind is all writing outside the worktree, which goes ahead:
+ * it keeps asking, and isn't made Never with the rest.
+ */
+export const ASK_RULES: Readonly<Record<AskKind, ReadonlyArray<ProjectRulesView['never'][number]>>> = {
+  history: ['default-branch', 'force-push', 'many-branches', 'delete-branch'],
+  publish: ['deploy'],
+  speak: ['speak'],
+}
+
+/** Where a kind of what can't be undone sits: Never once every rule kind of it is never allowed. */
+export const askPlaceOf = (rules: ProjectRulesView, kind: AskKind): AskPlace =>
+  ASK_RULES[kind].every((each) => rules.never.includes(each)) ? 'never' : 'asks'
+
+/** The rule lists with a kind of what can't be undone moved: to Never, off the others; back, on to what asks. */
+export const listsWithAsk = (rules: ProjectRulesView, kind: AskKind, place: AskPlace) => {
+  const moved = new Set<string>(ASK_RULES[kind])
+  const off = (list: ProjectRulesView['never']) => list.filter((each) => !moved.has(each))
+  return place === 'never'
+    ? { never: [...off(rules.never), ...ASK_RULES[kind]], alwaysAsk: off(rules.alwaysAsk), alwaysAllow: off(rules.alwaysAllow) }
+    : { never: off(rules.never), alwaysAsk: [...off(rules.alwaysAsk), ...ASK_RULES[kind]], alwaysAllow: off(rules.alwaysAllow) }
+}
 
 /** What a tally counts, as the kit names it: one of the kinds by its own name, or the rest by theirs. */
 const tallyKindOf = (kind: TallyKind): KitTallyKind =>
@@ -433,6 +461,20 @@ export function RulesSection({ model }: { model: RulesModel }) {
               ...each,
               kind: tallyKindOf(each.kind),
             }))}
+            // With everything else allowed, what asks is what can't be undone, and the person's own commands (ADR-097).
+            {...(rules.allowEverything
+              ? {
+                  whatAsks: {
+                    places: {
+                      history: askPlaceOf(rules, 'history'),
+                      publish: askPlaceOf(rules, 'publish'),
+                      speak: askPlaceOf(rules, 'speak'),
+                    },
+                    onChange: (kind: AskKind, place: AskPlace) => model.change((now) => listsWithAsk(now, kind, place)),
+                    onAskMore: () => model.change({ allowEverything: false }),
+                  },
+                }
+              : {})}
           />
         </>
       )}

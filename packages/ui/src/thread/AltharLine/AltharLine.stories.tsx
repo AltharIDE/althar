@@ -66,7 +66,7 @@ export const AllStates: Story = {
   ),
 }
 
-/** A task's folder whose link to its repository git couldn't repair: the fact, the way out, then what git said; the folder left as it was (ADR-104). */
+/** A task's folder whose link to its repository git couldn't repair: the fact, the way out, then what git said; the folder left as it was (decisions: workspaces-and-runs, A worktree whose link broke). */
 export const FolderNotRepaired: Story = {
   args: {
     tone: 'warning',

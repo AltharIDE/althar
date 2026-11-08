@@ -81,6 +81,8 @@ export type Part =
       readonly exit: number | null
       /** Every file it names, as it names them: what it touched, wrote or pointed at. */
       readonly touches: ReadonlyArray<string>
+      /** A call to one of the person's MCP servers: which, and what it did; one that acted outside stands out as a card (ADR-097). */
+      readonly mcp?: ToolMcp
     } & HandedParts)
   | {
       readonly kind: 'plan'
@@ -195,6 +197,15 @@ export type Block =
    * has been once that is worth saying, and whether that is longer than usual.
    */
   | { readonly kind: 'waiting'; readonly id: string; readonly took: string | null; readonly slow: boolean }
+
+/** What a call to one of the person's MCP servers did, as its row and card say it. */
+export interface ToolMcp {
+  readonly server: string
+  readonly acts: boolean
+  readonly did: string
+  readonly words?: string
+  readonly link?: string
+}
 
 /** ACP's tool kinds, as the kit's. */
 /** The notice earlier versions left in a thread when Althar restarted under its lead. */
@@ -386,6 +397,34 @@ const partOf = (
           }
     }
     case 'tool_call': {
+      const { mcp } = item.content
+      if (mcp !== undefined) {
+        const state = toolStateOf(item.content.status, turnRunning, item.content.declined)
+        const why = declinedWords(item.content.declinedBy, item.content.declinedWhy)
+        const space = mcp.did.indexOf(' ')
+        return {
+          kind: 'tool',
+          id: item.id,
+          toolKind: mcp.acts ? ToolKind.Comment : ToolKind.Mcp,
+          verb: space > 0 ? mcp.did.slice(0, space) : mcp.did,
+          target: space > 0 ? mcp.did.slice(space + 1) : '',
+          state,
+          command: null,
+          ...(state === ToolState.Declined && why !== undefined ? { why } : {}),
+          ran: null,
+          exit: null,
+          touches: [],
+          pictures: item.content.pictures,
+          files: item.content.files,
+          mcp: {
+            server: mcp.server,
+            acts: mcp.acts,
+            did: mcp.did,
+            ...(mcp.words === undefined ? {} : { words: mcp.words }),
+            ...(mcp.link === undefined ? {} : { link: mcp.link }),
+          },
+        }
+      }
       const ranKind = toolKindOf(item.content.toolKind)
       const { skill } = item.content
       // A load is a row of its own, naming the skill; a command that printed one stays what it ran, and says so.

@@ -20,7 +20,7 @@ import { addItem } from './threads'
 import { type BrokenWhy, type Link, linkOf, type Taken, takenFrom, worktreeAt } from './worktreeLinks'
 
 /*
- * Worktrees whose link to their repository broke, repaired (ADR-104). A
+ * Worktrees whose link to their repository broke, repaired (decisions: workspaces-and-runs, A worktree whose link broke). A
  * task's worktree, or the copy its reviews read, whose `.git` file names a
  * git directory that isn't there, or whose repository's record of it names
  * another place, as moving a profile from a Flatpak to a native build

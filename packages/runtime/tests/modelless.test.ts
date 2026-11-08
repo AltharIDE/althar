@@ -151,7 +151,7 @@ describe('an agent that offers no choice of model', () => {
       const instance = yield* Instance
       const sql = yield* SqlClient.SqlClient
       const { project, task: created } = yield* task('Run the checkout tests')
-      yield* policies.set(project.projectId, { permissions: 'coordinator', alwaysAsk: [] }, instance.personId)
+      yield* policies.set(project.projectId, { permissions: 'coordinator', allowEverything: false, alwaysAsk: [] }, instance.personId)
       yield* sessions.start({ threadId: project.coordinatorThreadId, agentId: 'opencode' })
       const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${created.taskId}`
       const projectId = Schema.decodeUnknownSync(Ids.project.schema)(project.projectId)

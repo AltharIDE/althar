@@ -1192,15 +1192,15 @@ export class Reviews extends Context.Service<
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not settle the reviews left posted on an open task', cause))),
       )
 
-      // A review's lead reads the pull request and drafts its review, and nothing else: every lead tool that isn't one a review
-      // is given (`inReview`) is refused to it, listed or not, as it could change the project or reach outside it (keep how the
-      // project runs, which Althar later runs outside any sandbox; reply or push; finish a step). Read from the task each call.
+      // A review of one of the repository's own people has every lead tool, as its lead has. One from an outside author
+      // (ADR-097's kept "outside authors' code doesn't run without the person's word") reads it and drafts its review:
+      // every lead tool that isn't one a review is given (`inReview`) is refused, listed or not. Read from the task each call.
       yield* toolServer.guard('lead', (tool, access) =>
         tool.inReview === true
           ? Effect.succeed(null)
           : provide(reviewOf(access.taskId ?? '')).pipe(
               Effect.map((review) =>
-                review === null
+                review === null || !review.outside
                   ? null
                   : `This task reviews someone else’s pull request: you read it, with read_pull_request for what it says, and finish it with draft_review, which the person posts. ${tool.name} isn’t for a review.`,
               ),
