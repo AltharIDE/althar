@@ -79,7 +79,7 @@ const withAgents = (
                         id: 'opencode-go',
                         name: 'OpenCode Go',
                         connections: 'subscription',
-                        ...(trouble.goRefused === true ? { needsSignIn: true } : {}),
+                        ...(trouble.goRefused === true ? { needsSignIn: true as const } : {}),
                       },
                       { id: 'opencode-zen', name: 'OpenCode Zen', connections: 'key' },
                     ],
