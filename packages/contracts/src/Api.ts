@@ -396,14 +396,20 @@ export const PLANS_AND_REVIEWS: PlansAndReviews = { countdown: 25, rounds: 3, ro
  * project afterwards on its rules screen.
  */
 export const NewProjectDefaults = Schema.Struct({
-  /** What no rule keeps: allowed, judged by the coordinator, or asked about. */
-  permissions: Schema.Literals(['rules', 'coordinator', 'ask']),
   /** What happens to the work when an agent's account runs out. */
   usageLimit: Schema.Literals(['move', 'wait', 'ask']),
   /** Whether work goes on with an agent's next account before the limit applies. */
   rotateAccounts: Schema.Boolean,
   /** How a task ends when its plan doesn't say. */
   end: Schema.Literals(['draft', 'ready', 'none']),
+  /** Whether a lead's commits go up to its pull request on their own. */
+  pushCommits: Schema.Boolean,
+  /** Whether a task's screenshots are posted to its pull request on their own. */
+  postScreenshots: Schema.Boolean,
+  /** Whether a lead resolves a conflict with the default branch on its own. */
+  resolveConflicts: Schema.Boolean,
+  /** Whether a task's issue moves along with it. */
+  moveIssues: Schema.Boolean,
 })
 export type NewProjectDefaults = typeof NewProjectDefaults.Type
 
@@ -411,7 +417,15 @@ export type NewProjectDefaults = typeof NewProjectDefaults.Type
 export type NewProjectDefaultsChange = { readonly [Key in keyof NewProjectDefaults]?: NewProjectDefaults[Key] | undefined }
 
 /** What a project's rules are made with when the person has chosen nothing. */
-export const NEW_PROJECT_DEFAULTS: NewProjectDefaults = { permissions: 'rules', usageLimit: 'move', rotateAccounts: false, end: 'draft' }
+export const NEW_PROJECT_DEFAULTS: NewProjectDefaults = {
+  usageLimit: 'move',
+  rotateAccounts: false,
+  end: 'draft',
+  pushCommits: true,
+  postScreenshots: false,
+  resolveConflicts: true,
+  moveIssues: true,
+}
 
 /** How the review seal on a pull request looks: a round engraved stamp, a pressed wax seal, or a printer's colophon. */
 export const SealStyle = Schema.Literals(['ring', 'wax', 'colophon'])
@@ -4412,10 +4426,13 @@ export const Api = RpcGroup.make(
   command(
     'SetNewProjectDefaults',
     {
-      permissions: Schema.optional(NewProjectDefaults.fields.permissions),
       usageLimit: Schema.optional(NewProjectDefaults.fields.usageLimit),
       rotateAccounts: Schema.optional(NewProjectDefaults.fields.rotateAccounts),
       end: Schema.optional(NewProjectDefaults.fields.end),
+      pushCommits: Schema.optional(NewProjectDefaults.fields.pushCommits),
+      postScreenshots: Schema.optional(NewProjectDefaults.fields.postScreenshots),
+      resolveConflicts: Schema.optional(NewProjectDefaults.fields.resolveConflicts),
+      moveIssues: Schema.optional(NewProjectDefaults.fields.moveIssues),
     },
     Schema.Void,
   ),

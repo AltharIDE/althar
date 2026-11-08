@@ -1100,12 +1100,28 @@ describe('finished tasks’ folders, through the API', () => {
         // How long work goes on alone, and what new projects start with: today's until changed, and a change leaves the rest.
         const before = yield* client.GetSettings({})
         assert.deepStrictEqual(before.plansAndReviews, { countdown: 25, rounds: 3, roundsOut: 'settled' })
-        assert.deepStrictEqual(before.newProjects, { permissions: 'rules', usageLimit: 'move', rotateAccounts: false, end: 'draft' })
+        assert.deepStrictEqual(before.newProjects, {
+          usageLimit: 'move',
+          rotateAccounts: false,
+          end: 'draft',
+          pushCommits: true,
+          postScreenshots: false,
+          resolveConflicts: true,
+          moveIssues: true,
+        })
         yield* client.SetPlansAndReviews({ commandId: commandId(), countdown: 10, rounds: 2, roundsOut: 'ask' })
         yield* client.SetNewProjectDefaults({ commandId: commandId(), usageLimit: 'wait', rotateAccounts: true })
         const after = yield* client.GetSettings({})
         assert.deepStrictEqual(after.plansAndReviews, { countdown: 10, rounds: 2, roundsOut: 'ask' })
-        assert.deepStrictEqual(after.newProjects, { permissions: 'rules', usageLimit: 'wait', rotateAccounts: true, end: 'draft' })
+        assert.deepStrictEqual(after.newProjects, {
+          usageLimit: 'wait',
+          rotateAccounts: true,
+          end: 'draft',
+          pushCommits: true,
+          postScreenshots: false,
+          resolveConflicts: true,
+          moveIssues: true,
+        })
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Add a retry' })
         const worktree = (yield* client.GetThread({ threadId: task.threadId })).task.worktree ?? ''
