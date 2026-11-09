@@ -1,0 +1,737 @@
+/* The section: its width decides how many tiles go across. */
+.section {
+  container-type: inline-size;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* ---- tiles ------------------------------------------------------------------------ */
+
+/* three across in six columns; two on a narrow page, one on a very narrow one */
+.grid {
+  min-width: 0;
+}
+@container (width < 560px) {
+  .grid.grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+@container (width < 340px) {
+  .grid.grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* the grid's item, which the list's motion moves: as round as the tile, so nothing square shows as it passes others */
+.cell {
+  grid-column: span 2;
+  display: grid;
+  min-width: 0;
+  border-radius: 15px;
+}
+.cell > * {
+  min-width: 0;
+}
+
+/* the quick cards' tile, on the page's paper rather than the panel's frost */
+.tile.tile {
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift-card);
+}
+.letter {
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1;
+}
+.lineFailed {
+  display: block;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--danger);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lineFailed::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 5px 1px 0;
+  border-radius: 99px;
+  background: var(--danger);
+  vertical-align: middle;
+}
+
+/* the dashed tile that adds one, and those often added */
+.add {
+  grid-column: span 2;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  min-height: 66px;
+  padding: 0 14px 0 12px;
+  border: 1px dashed var(--line-3);
+  border-radius: 15px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-2);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+.add:hover {
+  background: var(--paper);
+  color: var(--t-1);
+}
+.addCircle {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 99px;
+  background: var(--frost-well);
+}
+.addWords {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.starterLetter {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--chip);
+  color: var(--t-1);
+}
+.starterChip {
+  flex: none;
+}
+.starterWords {
+  flex: 1;
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.starterName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.starterLine {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.starterPlus {
+  flex: none;
+  color: var(--t-3);
+}
+.add:hover .starterPlus {
+  color: var(--t-1);
+}
+
+/* a group's place between the others is the section's gap */
+.group.group:not(:first-child) {
+  margin-top: 4px;
+}
+.code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+/* What it changed, beside Same servers everywhere: a module on paper, across the rest of the row */
+.changes.changes {
+  grid-column: span 4;
+  min-height: 66px;
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift-card);
+}
+.changes.changes:hover {
+  background: var(--hover-paper);
+}
+@container (width < 560px) {
+  .changes.changes {
+    grid-column: 1 / -1;
+  }
+}
+.errors {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--danger);
+}
+
+/* ---- none yet ----------------------------------------------------------------------- */
+
+.none {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.places {
+  flex: 1 1 100%;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 18px;
+  margin: 1px 0 0;
+  font-size: 12.5px;
+}
+.place {
+  display: contents;
+}
+.place dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--t-2);
+}
+.place dd {
+  min-width: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+}
+.place code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.placeMark {
+  display: inline-flex;
+  color: var(--t-2);
+}
+.kind {
+  margin: 4px 2px 0;
+  font-size: 11.5px;
+  font-weight: 560;
+  letter-spacing: 0.02em;
+  color: var(--t-3);
+}
+
+/* ---- while read, and when it can't be ------------------------------------------------- */
+
+.ghost {
+  display: block;
+  width: 100%;
+  border-radius: 15px;
+}
+.failed {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-radius: 15px;
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.failedWords {
+  margin: 0;
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+/* ---- an opened one ---------------------------------------------------------------------- */
+
+.opened {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.sheet {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 14px 16px 16px;
+  border-radius: 14px;
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift-card);
+}
+.sheet > * {
+  min-width: 0;
+}
+.fact {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  column-gap: 16px;
+  align-items: start;
+  padding: 10px 0;
+}
+.fact + .fact {
+  border-top: 1px solid var(--line);
+}
+@container (width < 480px) {
+  .fact {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 8px;
+  }
+}
+.factLabel {
+  padding-top: 2px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.factValue {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--t-1);
+  overflow-wrap: anywhere;
+}
+.danger {
+  color: var(--danger);
+}
+.runs {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t-1);
+}
+
+/* who gets it: three round switches, each named under it */
+.roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+}
+.role {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.roleCircle {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 99px;
+  background: var(--frost-well);
+  color: var(--t-2);
+  transition:
+    background var(--base) var(--ease),
+    color var(--base) var(--ease),
+    transform var(--base) var(--ease-fold);
+}
+.role:hover .roleCircle {
+  background: var(--frost-well-hover);
+}
+.role:active .roleCircle {
+  transform: scale(0.92);
+}
+.roleOn,
+.role:hover .roleOn {
+  background: var(--ink-fill);
+  color: var(--on-ink);
+}
+.roleName {
+  font-size: 11.5px;
+  color: var(--t-2);
+}
+
+/* projects, and agents: each by its mark and name, pressed in or out; as many as there are, wrapping */
+.picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  height: 28px;
+  padding: 0 10px 0 6px;
+  border: 0;
+  border-radius: 99px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  font: inherit;
+  font-size: 12px;
+  color: var(--t-1);
+  cursor: pointer;
+  transition:
+    box-shadow var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+.pick:hover {
+  box-shadow: inset 0 0 0 1px var(--line-3);
+}
+.pickOut {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--t-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--line-3);
+}
+.pickMark {
+  flex: none;
+  display: inline-flex;
+}
+.pickOut .pickMark {
+  opacity: 0.4;
+}
+.agentChip {
+  padding-left: 9px;
+  cursor: default;
+}
+.agentChip:hover {
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.agentChip.pickOut:hover {
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* each agent's own file, side by side */
+.filesPart {
+  display: grid;
+  min-width: 0;
+}
+.files {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+.file {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.fileHead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px 10px;
+  background: var(--n-1);
+  box-shadow: inset 0 -1px var(--line);
+  font-size: 12px;
+}
+.fileMark {
+  flex: none;
+  display: inline-flex;
+  color: var(--t-1);
+}
+.fileAgent {
+  flex: none;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.filePath {
+  flex: 1;
+  font: 10.5px var(--mono);
+  color: var(--t-3);
+}
+.lines {
+  flex: 1;
+  margin: 0;
+  padding: 8px 0;
+  overflow-x: auto;
+  font: 11px/1.6 var(--mono);
+  color: var(--t-1);
+}
+.line {
+  position: relative;
+  display: block;
+  padding: 0 10px 0 22px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.linesAdded .line {
+  background: var(--add-line);
+}
+.linesAdded .line::before {
+  content: '+';
+  position: absolute;
+  left: 9px;
+  color: var(--add-sign);
+}
+.linesOut .line {
+  color: var(--t-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--t-3);
+}
+.fileEmpty {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  min-height: 70px;
+  margin: 10px;
+  padding: 8px;
+  border: 1px dashed var(--line-3);
+  border-radius: 7px;
+  font-size: 11.5px;
+  color: var(--t-3);
+  text-align: center;
+}
+.fileFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-height: 36px;
+  padding: 4px 6px 4px 10px;
+  box-shadow: inset 0 1px var(--line);
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.fileTag {
+  min-width: 0;
+}
+.signedIn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ok-ink);
+}
+.foot {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.foot .danger,
+.foot .danger:hover:not(:disabled) {
+  color: var(--danger);
+  text-decoration-color: currentColor;
+}
+
+/* a skill's SKILL.md, as its agent reads it */
+.skillFile {
+  composes: file;
+  max-width: 560px;
+}
+.front {
+  margin: 0;
+  padding: 10px 12px 12px;
+  font: 11.5px/1.65 var(--mono);
+  color: var(--t-1);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.frontKey,
+.frontRule {
+  color: var(--t-3);
+}
+.fromLine {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* What it changed, opened */
+.changeList {
+  list-style: none;
+}
+.change {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: 12px;
+  padding: 9px 0;
+  font-size: 12.5px;
+  color: var(--t-1);
+}
+.change + .change {
+  border-top: 1px solid var(--line);
+}
+.changeAt {
+  font-size: 12px;
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
+.changeWords {
+  min-width: 0;
+}
+.struck {
+  color: var(--t-3);
+  text-decoration: line-through;
+}
+
+/* ---- dialogs ---------------------------------------------------------------------------- */
+
+.dialogBody {
+  display: grid;
+  gap: 16px;
+}
+.targets {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.target {
+  display: grid;
+  grid-template-columns: 16px max-content minmax(0, 1fr);
+  grid-template-areas:
+    'mark name where'
+    '. adds adds';
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 2px;
+  font-size: 12.5px;
+}
+.targetMark {
+  grid-area: mark;
+  display: inline-flex;
+}
+.targetName {
+  grid-area: name;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.targetWhere {
+  grid-area: where;
+  font: 11px var(--mono);
+  color: var(--t-3);
+}
+.targetAdds {
+  grid-area: adds;
+  color: var(--t-2);
+}
+.leaves {
+  display: grid;
+  gap: 6px;
+}
+.leavesLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--t-2);
+}
+.leaveList {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--t-2);
+}
+.quiet {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-3);
+}
+.error {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--danger);
+}
+.form {
+  display: grid;
+  gap: 16px;
+}
+.formRow {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.formBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.formLabel {
+  padding: 0;
+  font-size: 12px;
+  font-weight: 560;
+  color: var(--t-2);
+}
+.mono {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.pairs {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.pairs > legend {
+  margin-bottom: 6px;
+}
+.pairRow {
+  display: grid;
+  min-width: 0;
+}
+.pair {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+.pairFoot {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+/* long names, paths and commands end in … and show whole on hover */
+.truncate {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .role:active .roleCircle {
+    transform: none;
+  }
+}
+
+/* a tile's name, on one line, cut short with … (ControlToggle's words: its name, then its line) */
+.tile.tile > :last-child > :first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

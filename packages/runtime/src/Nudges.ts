@@ -67,6 +67,13 @@ export const callWords = (
       const agent = agents.find((entry) => entry.definition.id === stuck.agentId)?.definition.name ?? stuck.agentId
       return `Needs you: ${agent} ran out of usage${stuck.step === 'publish' ? '' : ` ${outStep[stuck.step].during}`}`
     }
+    // The lead asks, and waits for the answer: the question is what the person sees first.
+    if (stuck.why === 'waiting_on_person') {
+      const asked = (stuck.detail ?? '').replace(/\s+/g, ' ').trim()
+      return asked === ''
+        ? 'Needs you: A step waits on your answer'
+        : `Needs you: ${asked.length > 140 ? `${asked.slice(0, 139)}…` : asked}`
+    }
     return `Needs you: ${STEPS[stuck.step]} is stuck`
   }
   if (call.kind === 'question') {

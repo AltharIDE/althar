@@ -90,6 +90,21 @@
   gap: 6px;
 }
 
+/* with no folders yet: an empty key, the bar's own track in its outline, and the words wrapping under it on a narrow sheet */
+.none {
+  align-items: flex-start;
+  min-width: 0;
+  line-height: 1.45;
+}
+.emptyKey {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-top: 5px;
+  box-shadow: inset 0 0 0 1px var(--line-3);
+}
+
 .key b {
   font-weight: 500;
   color: var(--t-2);
@@ -223,7 +238,7 @@
 }
 
 .merged {
-  color: var(--ok);
+  color: var(--ok-ink);
 }
 
 /* it needs a hand, but nothing is lost yet: warm, never red */

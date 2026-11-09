@@ -4,8 +4,10 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Button } from '../../primitives/Button/Button'
 import { FieldArea, FieldError } from '../../primitives/Field/Field'
+import type { HeadingLevel } from '../../primitives/Heading/Heading'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { Markdown } from '../../thread/Markdown/Markdown'
+import { EmptyState } from '../EmptyState/EmptyState'
 import s from './ProjectNotes.module.css'
 
 /*
@@ -17,13 +19,16 @@ import s from './ProjectNotes.module.css'
  * session of the coordinator starts with them, so one is said in other
  * words where it is, with its pencil (Enter keeps it, Escape puts it back),
  * and one that no longer holds is taken out with its ×; focus goes on to
- * the next one's ×, or to the line saying there are none. Nothing here adds
- * one: the coordinator keeps them as the person decides.
+ * the next one's ×, or to what says there are none: what will be here, and
+ * that the coordinator keeps one as the person decides. Nothing here adds
+ * one.
  */
 
 export interface ProjectNotesText {
-  /** With none kept yet. */
+  /** With none kept yet: what will be here. */
   none: string
+  /** Under it: how one gets here. */
+  noneLine: string
   /** The pencil that changes one, by what it says. */
   edit: (note: string) => string
   /** The × that takes one out, by what it says. */
@@ -37,7 +42,8 @@ export interface ProjectNotesText {
 }
 
 export const projectNotesText: ProjectNotesText = {
-  none: 'None yet',
+  none: 'No notes yet',
+  noneLine: 'When you decide something with the coordinator that the code doesn’t show, it keeps a note of it here.',
   edit: (note) => `Edit “${note}”`,
   remove: (note) => `Remove “${note}”`,
   field: 'Note',
@@ -66,6 +72,8 @@ export type ProjectNotesProps = RootProps<
     limit?: number
     /** Why the last change to one didn't hold. */
     error?: string
+    /** The rank of the heading that says there are none, under the section's own. */
+    headingLevel?: HeadingLevel
     text?: Partial<ProjectNotesText>
   }
 >
@@ -77,7 +85,7 @@ const NEAR = 40
 const said = (draft: string) => draft.trim().replace(/\s+/g, ' ')
 
 /** A project's notes, a card each, each changed with its pencil and taken out with its ×. */
-export function ProjectNotes({ notes, onEdit, onRemove, limit, error, text, className, ...rest }: ProjectNotesProps) {
+export function ProjectNotes({ notes, onEdit, onRemove, limit, error, headingLevel = 3, text, className, ...rest }: ProjectNotesProps) {
   const t = { ...projectNotesText, ...text }
   const errorId = useId()
   const root = useRef<HTMLDivElement>(null)
@@ -105,9 +113,7 @@ export function ProjectNotes({ notes, onEdit, onRemove, limit, error, text, clas
   return (
     <div ref={root} className={cx(s.notes, className)} {...rest}>
       {notes.length === 0 ? (
-        <p tabIndex={-1} className={s.none} data-none="">
-          {t.none}
-        </p>
+        <EmptyState tabIndex={-1} data-none="" icon="quote" title={t.none} line={t.noneLine} headingLevel={headingLevel} />
       ) : (
         <ul className={s.list}>
           {notes.map((note, index) => (

@@ -1,0 +1,27 @@
+/* The privacy page: the thesis's cream paper and reading column, shorter
+   sections and smaller section titles, as a page you look things up in. */
+
+.page { background: var(--n-2); color: var(--t-1); overflow-x: clip; }
+.page :focus-visible { outline: 2px solid var(--live); outline-offset: 3px; }
+
+/* The window keeps to its title: the planet's edge close under it. */
+.window { padding-bottom: 196px; }
+@media (max-width: 640px) {
+  .window { padding-bottom: 150px; }
+}
+
+.article { box-sizing: border-box; width: 100%; max-width: calc(680px + 2 * var(--gut)); margin: 0 auto; padding: 72px var(--gut) 120px; font-size: 16.5px; line-height: 1.5; color: var(--t-1); }
+.article p { margin: 0 0 14px; text-wrap: pretty; }
+.article strong { font-weight: 650; }
+.article a { color: var(--t-1); text-decoration: underline; text-decoration-color: var(--live); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+.article a:hover { color: var(--live); }
+.article code { font: 500 0.84em var(--mono); color: var(--t-2); }
+
+.part { scroll-margin-top: 72px; }
+.part + .part { padding-top: 56px; }
+.h2 { display: grid; gap: 8px; margin: 0 0 16px; font-family: 'Inter Display', var(--display); font-size: 28px; line-height: 1.1; letter-spacing: -0.035em; font-weight: 640; text-wrap: balance; }
+.no { font: 500 12px var(--mono); letter-spacing: 0.06em; color: var(--live); }
+
+.ul { margin: 0 0 14px; padding: 0; list-style: none; }
+.ul li { position: relative; padding-left: 22px; margin: 0.35em 0; }
+.ul li::before { content: ''; position: absolute; left: 4px; top: 0.66em; width: 5px; height: 5px; border-radius: 50%; background: var(--live); }

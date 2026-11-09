@@ -7,7 +7,7 @@
   color: var(--t-1);
 }
 .merged .outcome svg {
-  color: var(--ok);
+  color: var(--ok-ink);
 }
 .abandoned .outcome {
   color: var(--t-3);

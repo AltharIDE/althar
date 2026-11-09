@@ -37,8 +37,22 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
+      # Electron's binary comes from GitHub's releases the first time the app is run, and a 502 or 504 from them failed
+      # a whole part. Kept between runs, by the lockfile that names its version, and fetched before the tests, again
+      # after a failure, so a bad minute on GitHub's side is waited out here.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron
+          key: linux-electron-${{ hashFiles('bun.lock') }}
+          restore-keys: linux-electron-
       - run: bun install --frozen-lockfile
         working-directory: .
+      - run: |
+          for wait in 5 15 45 0; do
+            node node_modules/electron/install.js && exit 0
+            [ "$wait" = 0 ] || { echo "Electron's download failed: trying again in ${wait}s"; sleep "$wait"; }
+          done
+          exit 1
       # Ubuntu 24.04 keeps unprivileged user namespaces from apps, and Chromium's sandbox needs them.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       # The end-to-end tests run the built app, with the fake agent, on a virtual display, with a keyring:

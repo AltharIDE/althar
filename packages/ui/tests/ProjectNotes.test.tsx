@@ -28,7 +28,7 @@ function Kept({ onRemove, onEdit = () => {} }: { onRemove: (id: string) => void;
 }
 
 describe('a project’s notes', () => {
-  it('take one out by its ×, and give focus to the next, then to the line saying none is left', () => {
+  it('take one out by its ×, and give focus to the next, then to what says none is left', () => {
     const onRemove = vi.fn()
     render(<Kept onRemove={onRemove} />)
     fireEvent.click(screen.getByRole('button', { name: 'Remove “Issue drafts need an approval card, on every tracker.”' }))
@@ -36,7 +36,7 @@ describe('a project’s notes', () => {
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Remove “Dependency setup runs outside the sandbox.”' }))
     fireEvent.click(screen.getByRole('button', { name: 'Remove “Dependency setup runs outside the sandbox.”' }))
     expect(screen.queryByRole('list')).toBeNull()
-    expect(document.activeElement).toBe(screen.getByText('None yet'))
+    expect(document.activeElement).toBe(screen.getByRole('region', { name: 'No notes yet' }))
   })
 
   it('say one in other words where it is: Enter keeps them on one line, Escape puts them back, and focus goes back to its pencil', () => {

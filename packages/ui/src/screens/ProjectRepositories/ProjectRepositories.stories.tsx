@@ -106,6 +106,20 @@ export const NoAdding: Story = {
   },
 }
 
+/** None: what will be here and how one gets here, in the map's place, under Add a folder. */
+export const NoneYet: Story = {
+  args: { repositories: [], worktrees: undefined },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement)
+    await expect(page.getByRole('heading', { level: 3, name: 'No repositories yet' })).toBeVisible()
+    await expect(page.queryByRole('heading', { name: `On ${device.this}` })).toBeNull()
+    await expect(page.getByRole('button', { name: 'Add a folder' })).toBeVisible()
+  },
+}
+
+/** The same at night. */
+export const NoneYetDark: Story = { ...NoneYet, globals: { theme: 'dark' } }
+
 /** The last change didn't happen, and says why. */
 export const Failed: Story = { args: { error: 'There’s no git repository in Downloads.' } }
 

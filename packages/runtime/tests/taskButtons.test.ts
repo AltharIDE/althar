@@ -275,6 +275,7 @@ describe('what an agent is told when a merge or push doesn’t go', () => {
     assert.strictEqual(merge('unreadable'), 'Althar couldn’t read a checkout: the checkout')
     assert.match(merge('moved'), /moved while it merged: nothing was merged/)
     assert.strictEqual(merge('missing'), 'fix-it has no the checkout here to merge into.')
+    assert.strictEqual(merge('nothing', { into: 'main' }), 'fix-it has nothing to merge: its work is already in main.')
 
     assert.match(
       pushRefused(new PushRefused({ taskId: 't', why: 'behind', remote: 'origin/main' })),

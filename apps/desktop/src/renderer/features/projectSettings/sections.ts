@@ -3,9 +3,9 @@ import type { IconName } from '@althar/ui'
 
 /*
  * A project's settings, by what each is about, as its Settings view lists
- * them down its side and its address names them: what it is and how its
- * tasks work, and what its code and issues are; what its agents may do,
- * and what it runs; then what its coordinator keeps. A setting to come goes
+ * them down its side and its address names them: what it is, and what its
+ * code and issues are; how its tasks start, go and end; what its agents may
+ * do, and what it runs; then what its coordinator keeps. A setting to come goes
  * in the section it is about. Taking the project out of Althar isn't a
  * section: it is the one thing to do at the foot of the side.
  */
@@ -25,12 +25,13 @@ export const HEADING = { title: 2, part: 3 } as const
 export const FIRST_PROJECT_SECTION: ProjectSection = 'general'
 
 /** The sections in their groups, a little apart down the side. */
-export const PROJECT_GROUPS: ReadonlyArray<ReadonlyArray<ProjectSection>> = [['general', 'code'], ['rules', 'running'], ['notes']]
+export const PROJECT_GROUPS: ReadonlyArray<ReadonlyArray<ProjectSection>> = [['general', 'code'], ['tasks', 'rules', 'running'], ['notes']]
 
 /** Each section's name and icon. */
 export const projectSectionText: Readonly<Record<ProjectSection, { readonly title: string; readonly icon: IconName }>> = {
   general: { title: 'General', icon: 'gear' },
   code: { title: 'Code and issues', icon: 'plug' },
+  tasks: { title: 'Tasks', icon: 'work' },
   rules: { title: 'Rules', icon: 'lock' },
   running: { title: 'Running', icon: 'play' },
   notes: { title: 'Notes', icon: 'quote' },

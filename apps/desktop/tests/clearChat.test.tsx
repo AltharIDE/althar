@@ -15,8 +15,8 @@ import { changed, coordinatorSnapshot, fakeClient, items, streamed } from './fix
 import { servicesFor, useSettingsOf, withServices } from './render'
 
 /*
- * Clearing the coordinator's chat from the project's conversation: the bar
- * above the thread and /clear ask the question on clearing the view; the
+ * Clearing the coordinator's chat from the project's conversation: /clear
+ * asks the question on clearing the view; the
  * context ring's foot asks it on forgetting; the line where a cleared view
  * begins reads the earlier conversation or takes the clear back; and what the
  * runtime rewrote under the thread is read whole again, here and in every
@@ -68,72 +68,6 @@ const modelOf = (client: ReturnType<typeof fakeClient>['client']) => {
   })
 }
 
-describe('the Coordinator bar', () => {
-  it('holds Clear, which asks on clearing the view and clears only that', async () => {
-    const { client } = fakeClient({ getCoordinator: vi.fn(async () => talk()) })
-    withServices(<Project />, client)
-    const bar = await screen.findByRole('region', { name: 'Coordinator' })
-    await userEvent.click(within(bar).getByRole('button', { name: 'Clear' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Clear chat' })
-    expect(
-      within(dialog)
-        .getByRole('radio', { name: /Clear only the view/ })
-        .getAttribute('aria-checked'),
-    ).toBe('true')
-    expect(client.clearView).not.toHaveBeenCalled()
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Clear the view' }))
-    await waitFor(() => expect(client.clearView).toHaveBeenCalledExactlyOnceWith('thc'))
-    expect(client.forgetConversation).not.toHaveBeenCalled()
-    // The focus is back on what asked.
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    expect(document.activeElement).toBe(within(bar).getByRole('button', { name: 'Clear' }))
-  })
-
-  it('forgets nothing until the red button is pressed', async () => {
-    const { client } = fakeClient({ getCoordinator: vi.fn(async () => talk()) })
-    withServices(<Project />, client)
-    await userEvent.click(within(await screen.findByRole('region', { name: 'Coordinator' })).getByRole('button', { name: 'Clear' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Clear chat' })
-    await userEvent.click(within(dialog).getByRole('radio', { name: /Forget the conversation too/ }))
-    await userEvent.keyboard('{Enter}')
-    await userEvent.keyboard('{Escape}')
-    expect(client.forgetConversation).not.toHaveBeenCalled()
-    await userEvent.click(within(await screen.findByRole('region', { name: 'Coordinator' })).getByRole('button', { name: 'Clear' }))
-    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('radio', { name: /Forget the conversation too/ }))
-    await userEvent.click(screen.getByRole('button', { name: 'Clear and forget' }))
-    await waitFor(() => expect(client.forgetConversation).toHaveBeenCalledExactlyOnceWith('thc'))
-    expect(client.clearView).not.toHaveBeenCalled()
-  })
-
-  it('is off while there is no conversation to clear', async () => {
-    const { client } = fakeClient({
-      getCoordinator: vi.fn(async () => coordinatorSnapshot({ view: { ...whole, clearable: false, forgettable: false } })),
-    })
-    withServices(<Project />, client)
-    expect(
-      (within(await screen.findByRole('region', { name: 'Coordinator' })).getByRole('button', { name: 'Clear' }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true)
-  })
-
-  it('offers forgetting, with the view already clear, and says so', async () => {
-    const { client } = fakeClient({
-      getCoordinator: vi.fn(async () => talk({ cleared: true, clearable: false }, { items: [] })),
-    })
-    withServices(<Project />, client)
-    await userEvent.click(within(await screen.findByRole('region', { name: 'Coordinator' })).getByRole('button', { name: 'Clear' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Clear chat' })
-    expect(
-      (within(dialog).getByRole('radio', { name: /Clear only the view.*The view is already clear\./ }) as HTMLButtonElement).disabled,
-    ).toBe(true)
-    expect(
-      within(dialog)
-        .getByRole('radio', { name: /Forget the conversation too/ })
-        .getAttribute('aria-checked'),
-    ).toBe('true')
-  })
-})
-
 describe('/clear in the composer', () => {
   it('asks the same question on clearing the view, and is not said to the coordinator', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => talk()) })
@@ -151,6 +85,51 @@ describe('/clear in the composer', () => {
     await userEvent.keyboard('{Escape}')
     expect(client.clearView).not.toHaveBeenCalled()
     expect(document.activeElement).toBe(composer)
+  })
+
+  it('clears only the view once that is pressed', async () => {
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => talk()) })
+    withServices(<Project />, client)
+    await userEvent.type(await screen.findByRole('textbox', { name: /Tell the coordinator something/ }), '/clear{Enter}')
+    const dialog = await screen.findByRole('dialog', { name: 'Clear chat' })
+    expect(client.clearView).not.toHaveBeenCalled()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Clear the view' }))
+    await waitFor(() => expect(client.clearView).toHaveBeenCalledExactlyOnceWith('thc'))
+    expect(client.forgetConversation).not.toHaveBeenCalled()
+  })
+
+  it('forgets nothing until the red button is pressed', async () => {
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => talk()) })
+    withServices(<Project />, client)
+    const composer = await screen.findByRole('textbox', { name: /Tell the coordinator something/ })
+    await userEvent.type(composer, '/clear{Enter}')
+    const dialog = await screen.findByRole('dialog', { name: 'Clear chat' })
+    await userEvent.click(within(dialog).getByRole('radio', { name: /Forget the conversation too/ }))
+    await userEvent.keyboard('{Enter}')
+    await userEvent.keyboard('{Escape}')
+    expect(client.forgetConversation).not.toHaveBeenCalled()
+    await userEvent.type(composer, '/clear{Enter}')
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('radio', { name: /Forget the conversation too/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Clear and forget' }))
+    await waitFor(() => expect(client.forgetConversation).toHaveBeenCalledExactlyOnceWith('thc'))
+    expect(client.clearView).not.toHaveBeenCalled()
+  })
+
+  it('offers forgetting, with the view already clear, and says so', async () => {
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => talk({ cleared: true, clearable: false }, { items: [] })),
+    })
+    withServices(<Project />, client)
+    await userEvent.type(await screen.findByRole('textbox', { name: /Tell the coordinator something/ }), '/clear{Enter}')
+    const dialog = await screen.findByRole('dialog', { name: 'Clear chat' })
+    expect(
+      (within(dialog).getByRole('radio', { name: /Clear only the view.*The view is already clear\./ }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    expect(
+      within(dialog)
+        .getByRole('radio', { name: /Forget the conversation too/ })
+        .getAttribute('aria-checked'),
+    ).toBe('true')
   })
 
   it('does nothing where there is no conversation, and still is not said', async () => {
@@ -210,12 +189,12 @@ describe('the line where the view was cleared', () => {
   it('is not drawn while the view is whole, or while more of the thread comes before it', async () => {
     const whole = fakeClient({ getCoordinator: vi.fn(async () => talk()) })
     const first = withServices(<Project />, whole.client)
-    await screen.findByRole('region', { name: 'Coordinator' })
+    await screen.findByRole('textbox', { name: /Tell the coordinator something/ })
     expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull()
     first.unmount()
     const paged = fakeClient({ getCoordinator: vi.fn(async () => talk({ cleared: true }, { earlier: true })) })
     withServices(<Project />, paged.client)
-    await screen.findByRole('region', { name: 'Coordinator' })
+    await screen.findByRole('textbox', { name: /Tell the coordinator something/ })
     expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull()
   })
 

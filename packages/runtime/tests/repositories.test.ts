@@ -285,11 +285,8 @@ describe('a task of several repositories', () => {
       assert.deepStrictEqual((yield* queries.thread(task.threadId, { limit: 0 })).task.here, [])
       const state = sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.taskId}`
       assert.strictEqual((yield* state)[0]?.state, 'open')
-      // Asked again, it's merged already.
-      assert.deepStrictEqual(
-        (yield* changes.mergeHere(task.taskId, heads)).map((one) => one.already),
-        [true],
-      )
+      // Asked again, there is nothing to merge.
+      assert.deepInclude(yield* Effect.flip(changes.mergeHere(task.taskId, heads)), { _tag: 'CantMerge', why: 'nothing' })
       github.mergeByHand(github.changes[0]?.number ?? 0)
       yield* changes.refresh(task.taskId)
       yield* until(state, (rows) => rows[0]?.state === 'done')

@@ -223,11 +223,19 @@ dependency bump.
   - every automation is paused ("Pause all automations" in Settings);
   - it has five pull requests open;
   - it is past 24 runs a day across automations;
-  - none of its agent's accounts is on a plan.
+  - its agent is signed out, out of usage or refused by its model's provider,
+    and no other agent on a plan could take its place.
 
-  A usage limit moves it to another agent on a plan, never to an account paid
-  per use. A run works at most its minutes, and three failures in a row pause
-  the automation, saying why.
+  A skipped run says which, and what would make it run ("OpenCode Go refused
+  its sign-in, and no other plan had room. Sign in to OpenCode Go in
+  Settings."). A second such skip in a row is one call in Needs you, not one a
+  night; its "Run it now" runs the automation. Where another plan could take
+  the run, it starts there, its line saying so. Out of usage, that holds only
+  where the project's rule is `move`: under `wait` or `ask` the run starts on
+  its own agent and holds for the reset or asks, as any task does. A run picks
+  its agent, account and model as any step does, per use included, under the
+  caps any task has. It works at most its minutes, and three failures in a row
+  pause the automation, saying why.
 - **With nobody there, it goes ahead.** Its task allows everything where the
   automation says, which is the default. An unattended run can never push to
   the default branch (`runRules` in `automated.ts`), because nobody is there
@@ -247,7 +255,7 @@ dependency bump.
 
 Not built yet: events as triggers (a review asked for, checks failing on main,
 a label), a run that carries on its open pull request instead of opening
-another, cost caps for models paid per use, and runs in the cloud.
+another, and runs in the cloud.
 
 ## Althar's share of the load
 

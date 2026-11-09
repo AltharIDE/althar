@@ -1,5 +1,8 @@
-import type { Picked } from '../main/browser/picked'
+import type { Driver } from '../main/browser/driving'
+import type { Box, Picked } from '../main/browser/picked'
 import { describe } from './describe'
+import { installDriver } from './driver'
+import { MARK_CLASS, MARK_FADING, markIn, unmarkIn } from './marks'
 
 /*
  * Point and comment, in a page beside the conversation (ADR-100). The main
@@ -12,6 +15,10 @@ import { describe } from './describe'
  * element under it outlined and named; and the numbered pins of the
  * comments made on this page. The comment itself is written in Althar's own
  * window, over a picture of the page, so the page never sees it typed.
+ *
+ * The lead's driver (driver.ts) is installed beside it, in the same world:
+ * it reads and prepares the page for the lead, and outlines in the overlay's
+ * own root the element the lead is acting on (marks.ts).
  */
 
 interface Pin {
@@ -51,10 +58,14 @@ const STYLE = `
   .pin { position: fixed; box-sizing: border-box; width: 22px; height: 22px; border-radius: 11px; border: 2px solid #fff;
     background: ${VIOLET}; color: #fff; font: 600 11px/18px ${FONT}; text-align: center; pointer-events: none;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); font-variant-numeric: tabular-nums; }
+  .${MARK_CLASS} { position: fixed; box-sizing: border-box; border: 2px dashed ${VIOLET}; border-radius: 4px;
+    background: rgba(122, 63, 240, 0.06); pointer-events: none; opacity: 1; transition: opacity 400ms ease-out; }
+  .${MARK_CLASS}.${MARK_FADING} { opacity: 0; }
+  @media (prefers-reduced-motion: reduce) { .${MARK_CLASS} { transition: none; } }
   [hidden] { display: none !important; }
 `
 
-const install = (): Overlay => {
+const install = (): { readonly overlay: Overlay; readonly mark: (rect: Box) => void; readonly unmark: () => number } => {
   const host = document.createElement('althar-overlay')
   const root = host.attachShadow({ mode: 'closed' })
   const style = document.createElement('style')
@@ -69,7 +80,8 @@ const install = (): Overlay => {
   name.className = 'name'
   name.hidden = true
   const pinLayer = document.createElement('div')
-  root.append(style, pinLayer, outline, name, catcher)
+  const markLayer = document.createElement('div')
+  root.append(style, pinLayer, markLayer, outline, name, catcher)
 
   /* Kept in the page: a page that rewrites its document can take the host out with it. */
   const mounted = () => {
@@ -157,7 +169,7 @@ const install = (): Overlay => {
     finish(outlined === null || !outlined.isConnected ? null : describe(outlined, window))
   }
 
-  return {
+  const overlay: Overlay = {
     point: () => {
       mounted()
       pointing?.settle(null)
@@ -208,11 +220,17 @@ const install = (): Overlay => {
       return describe(element, window)
     },
   }
+  return { overlay, mark: markIn(markLayer, mounted), unmark: unmarkIn(markLayer) }
 }
 
 declare global {
   // The overlay's handle, in its isolated world's own global: the page's world never sees it.
   var __altharOverlay: Overlay | undefined
+  // The lead's driver, beside it in the same world (driver.ts).
+  var __altharDriver: Driver | undefined
 }
 
-globalThis.__altharOverlay ??= install()
+/* Both are made once a world: the first run installs them, and a later run in the same world finds them there. */
+const installed = globalThis.__altharOverlay === undefined ? install() : null
+if (installed !== null) globalThis.__altharOverlay = installed.overlay
+globalThis.__altharDriver ??= installDriver({ mark: installed?.mark ?? (() => undefined), unmark: installed?.unmark ?? (() => 0) })

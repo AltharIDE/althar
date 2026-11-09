@@ -6,6 +6,7 @@ import { SqlClient } from 'effect/sql'
 import { Busy } from './Busy'
 import { Changes } from './Changes'
 import { Installs } from './Installs'
+import { Accounts } from './Accounts'
 import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
 import { Models } from './Models'
@@ -19,6 +20,7 @@ import { commitsOf } from './git'
 import { Instance } from './Instance'
 import { answeredIn, quickIn } from './kinds'
 import { Plans } from './Plans'
+import { PlanUsage } from './PlanUsage'
 import { fact } from './records'
 import { Runs, type StuckAnswer, type StuckInfo } from './Runs'
 import { Sessions } from './Sessions'
@@ -146,6 +148,8 @@ type Store =
   | Installs
   | ModelFacts
   | Limits
+  | Accounts
+  | PlanUsage
   | SignIns
 
 /** What each move did, as a line says it of the task. */
@@ -208,6 +212,8 @@ export const cantMerge = (slug: string, error: CantMerge) => {
       return `${error.detail} moved while it merged: nothing was merged. Accept it again.`
     case 'missing':
       return `${slug} has no ${error.detail} here to merge into.`
+    case 'nothing':
+      return `${slug} has nothing to merge: its work is already in ${into}.`
   }
 }
 
@@ -805,6 +811,9 @@ export class TaskActions extends Context.Service<
           // As the card's buttons, at once: none of them can't be undone (ADR-097).
           const on = (move: TaskMove, answer: StuckAnswer) =>
             act(access, task, move, { args: { attentionId: call.id, answer }, why: asked.why })
+          // A lead waiting on the person is answered by them, with the answer they give it; none of the card's other ways apply.
+          if (info.why === 'waiting_on_person')
+            return yield* cant('it waits for the person’s answer: they answer it in the task, and their answer starts it again.')
           switch (asked.answer) {
             case 'as_is':
             case 'skip_review':
