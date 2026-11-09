@@ -858,10 +858,10 @@ export class Sessions extends Context.Service<
      */
     /**
      * What happens as a lead's turn that delivers the person's own words
-     * begins, before the agent reads them: a round of work after its task's
-     * plan opens (Runs.ts, ADR-034), with the turn's delivery, which the
-     * round's first step is then known by. It is done once, and never fails
-     * the turn.
+     * begins, before the agent reads them: after its task's plan, where each
+     * of its worktrees stands is kept with the turn's delivery (Runs.ts; a
+     * task is a conversation plus parts), so what the turn commits waits for
+     * Ship. It is done once, and never fails the turn.
      */
     onPersonsTurn(
       next: (lead: {
@@ -1717,15 +1717,15 @@ export class Sessions extends Context.Service<
               )
             }),
           )
-          // What the person says to a task's lead after its plan opens a round of work, before the lead reads it, or its card says it
-          // works (ADR-034).
-          if (thread.role === 'task' && inputs.some((input) => input.shown === 1))
-            yield* personsTurn({ taskId: thread.taskId, threadId: thread.threadId, sessionId: running.sessionId, deliveryId: turnId }).pipe(
-              Effect.catchCause((cause) => Effect.logWarning('Could not open a round of work for the person’s turn', cause)),
-            )
           if (!compacting) running.brief = undefined
           running.turnRunning = true
           running.turnStartedAt = yield* Clock.currentTimeMillis
+          // What the person says to a task's lead after its plan is a turn: where its worktrees stand is kept before the lead reads
+          // it (Runs.ts), so what the turn commits can wait for Ship. Its card says it works meanwhile, as it does.
+          if (thread.role === 'task' && inputs.some((input) => input.shown === 1))
+            yield* personsTurn({ taskId: thread.taskId, threadId: thread.threadId, sessionId: running.sessionId, deliveryId: turnId }).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not keep where the person’s turn began', cause)),
+            )
           // What it did outside a turn before is over with: this turn is what it is at.
           running.callsOpen.clear()
           running.workedAt = null

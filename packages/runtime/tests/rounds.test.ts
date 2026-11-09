@@ -243,45 +243,49 @@ describe('a task that goes back to work', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
-  it.live('answers on a merged task as a turn: settled still, at the time it first settled, where the turn made nothing', () => {
-    const { working, bare, github } = onGitHub()
-    const slow = holds()
-    return Effect.gen(function* () {
-      const task = yield* merged(working, bare, github)
-      const before = yield* taskRow(task.taskId)
-      yield* say(task.threadId, 'What did you change? [lead:slowly]')
-      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'running')
-      slow.open('[lead:slowly]')
-      // It said nothing back and made nothing: settled as it was, with no reply waiting.
-      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'settled')
-      assert.isUndefined((yield* cards(task.projectId))[0]?.replied)
-      assert.deepStrictEqual(yield* taskRow(task.taskId), before)
-      // A turn, not a round: the plan's run is its only one, and nothing asked its lead to report.
-      assert.lengthOf(yield* runsOf(task.taskId), 1)
-      const sql = yield* SqlClient.SqlClient
-      const reminded = yield* sql<{ id: string }>`SELECT id FROM user_inputs WHERE body LIKE 'Your step isn''t done%'`
-      assert.lengthOf(reminded, 0)
-      // Its report with no step open is kept as its summary, and opens nothing.
-      const [lead] = yield* sql<{
-        id: string
-      }>`SELECT id FROM provider_sessions WHERE thread_id = ${task.threadId} ORDER BY started_at DESC LIMIT 1`
-      const said = yield* callTool(
-        { role: 'lead', projectId: task.projectId, threadId: task.threadId, sessionId: lead?.id ?? '', taskId: task.taskId },
-        'finish_step',
-        { summary: 'Looked again: nothing to change.' },
-      )
-      assert.strictEqual(said, 'Althar has your summary.')
-      assert.deepStrictEqual(yield* taskRow(task.taskId), before)
-      assert.strictEqual((yield* results(task.threadId)).at(-1)?.summary, 'Looked again: nothing to change.')
-      assert.lengthOf(yield* runsOf(task.taskId), 1)
-      // Settled still, its lead stops once its turn ends.
-      const sessions = yield* Sessions
-      yield* until(
-        Effect.map(sessions.running(task.threadId), (running) => (Option.isNone(running) ? [true] : [])),
-        (gone) => gone.length === 1,
-      )
-    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
-  })
+  it.live(
+    'answers on a merged task as a turn: its answer waits for the person, then settled still, at the time it first settled, where the turn made nothing',
+    () => {
+      const { working, bare, github } = onGitHub()
+      const slow = holds()
+      return Effect.gen(function* () {
+        const task = yield* merged(working, bare, github)
+        const before = yield* taskRow(task.taskId)
+        yield* say(task.threadId, 'What did you change? [lead:slowly]')
+        yield* until(cards(task.projectId), (all) => all[0]?.phase === 'running')
+        slow.open('[lead:slowly]')
+        // It answered and made nothing: its answer waits for the person, and read, the task is settled as it was.
+        yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].replied !== undefined)
+        yield* (yield* Tasks).see({ taskId: task.taskId })
+        yield* until(cards(task.projectId), (all) => all[0]?.phase === 'settled' && all[0].replied === undefined)
+        assert.deepStrictEqual(yield* taskRow(task.taskId), before)
+        // A turn, not a round: the plan's run is its only one, and nothing asked its lead to report.
+        assert.lengthOf(yield* runsOf(task.taskId), 1)
+        const sql = yield* SqlClient.SqlClient
+        const reminded = yield* sql<{ id: string }>`SELECT id FROM user_inputs WHERE body LIKE 'Your step isn''t done%'`
+        assert.lengthOf(reminded, 0)
+        // Its report with no step open is kept as its summary, and opens nothing.
+        const [lead] = yield* sql<{
+          id: string
+        }>`SELECT id FROM provider_sessions WHERE thread_id = ${task.threadId} ORDER BY started_at DESC LIMIT 1`
+        const said = yield* callTool(
+          { role: 'lead', projectId: task.projectId, threadId: task.threadId, sessionId: lead?.id ?? '', taskId: task.taskId },
+          'finish_step',
+          { summary: 'Looked again: nothing to change.' },
+        )
+        assert.strictEqual(said, 'Althar has your summary.')
+        assert.deepStrictEqual(yield* taskRow(task.taskId), before)
+        assert.strictEqual((yield* results(task.threadId)).at(-1)?.summary, 'Looked again: nothing to change.')
+        assert.lengthOf(yield* runsOf(task.taskId), 1)
+        // Settled still, its lead stops once its turn ends.
+        const sessions = yield* Sessions
+        yield* until(
+          Effect.map(sessions.running(task.threadId), (running) => (Option.isNone(running) ? [true] : [])),
+          (gone) => gone.length === 1,
+        )
+      }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
+    },
+  )
 
   it.live('is ready on the home as on the board when a merged task has commits after its pull request', () => {
     const { working, bare, github } = onGitHub()
@@ -919,27 +923,34 @@ describe('a merged task with commits after its pull request', () => {
     },
   )
 
-  it.live('settles a merged one whose lead committed in a turn once the person leaves the commit out, letting go of its hold', () => {
-    const { working, bare, github } = onGitHub()
-    return Effect.gen(function* () {
-      const tasks = yield* Tasks
-      const task = yield* merged(working, bare, github, '[review:pass] [lead:push]')
-      const before = yield* taskRow(task.taskId)
-      // A turn that committed holds its commit for Ship: the merged task waits on the person, offered to leave it out.
-      yield* say(task.threadId, 'Tidy it up, and push pls.')
-      yield* until(cards(task.projectId), (all) => all[0]?.held !== undefined)
-      const queries = yield* Queries
-      yield* until(
-        Effect.map(queries.thread(task.threadId), (header) => header.task.actions),
-        (actions) => actions.includes('leaveOut'),
-      )
+  it.live(
+    'settles a merged one whose lead committed in a turn once the person leaves the commit out and reads its answer, letting go of its hold',
+    () => {
+      const { working, bare, github } = onGitHub()
+      return Effect.gen(function* () {
+        const tasks = yield* Tasks
+        const task = yield* merged(working, bare, github, '[review:pass] [lead:push]')
+        const before = yield* taskRow(task.taskId)
+        // A turn that committed holds its commit for Ship: the merged task waits on the person, offered to leave it out.
+        yield* say(task.threadId, 'Tidy it up, and push pls.')
+        yield* until(cards(task.projectId), (all) => all[0]?.held !== undefined)
+        const queries = yield* Queries
+        yield* until(
+          Effect.map(queries.thread(task.threadId), (header) => header.task.actions),
+          (actions) => actions.includes('leaveOut'),
+        )
 
-      yield* tasks.leaveOut({ envelope: yield* Runtime.envelope('task.leave_out', {}), taskId: task.taskId })
-      const [settled] = yield* until(cards(task.projectId), (all) => all[0]?.phase === 'settled')
-      assert.isUndefined(settled?.held)
-      assert.deepStrictEqual(yield* taskRow(task.taskId), before)
-    }).pipe(Effect.provide(runtimeWith(github, ':memory:', {}, NOT_FREE)))
-  })
+        // Left out, nothing is held; what its lead answered still waits for the person, and read, the task is settled as it was.
+        yield* tasks.leaveOut({ envelope: yield* Runtime.envelope('task.leave_out', {}), taskId: task.taskId })
+        const [answered] = yield* until(cards(task.projectId), (all) => all[0]?.held === undefined && all[0]?.unshipped === null)
+        assert.deepStrictEqual([answered?.phase, answered?.replied !== undefined], ['ready', true])
+        yield* tasks.see({ taskId: task.taskId })
+        const [settled] = yield* until(cards(task.projectId), (all) => all[0]?.phase === 'settled')
+        assert.isUndefined(settled?.held)
+        assert.deepStrictEqual(yield* taskRow(task.taskId), before)
+      }).pipe(Effect.provide(runtimeWith(github, ':memory:', {}, NOT_FREE)))
+    },
+  )
 
   it.live('never ships what the person left out in its next pull request: after a merge its lead brought in, and after a close', () => {
     const { working, bare, github } = onGitHub()

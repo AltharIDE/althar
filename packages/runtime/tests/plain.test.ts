@@ -357,14 +357,18 @@ describe('a plain task', () => {
         assert.strictEqual((yield* state)[0]?.state, 'done')
         assert.isNull((yield* worktreeOf(task.id)).branchedAt)
         // Asked to write: as its turn ends, its branch is made with what it wrote, and its answer waits for the person too.
-        yield* say(task.threadId, 'Write it down. [lead:write]')
+        yield* sayAfterDone(task.threadId, 'Write it down. [lead:write]')
         const worktree = yield* branchedOnce(task.id)
         assert.strictEqual(gitIn(worktree.path, 'symbolic-ref', '--short', 'HEAD'), worktree.branch)
         assert.strictEqual(gitIn(worktree.path, 'status', '--porcelain'), '?? draft.md')
         assert.strictEqual((yield* cardOnce(task.id, (one) => one.phase === 'ready')).kind, 'plain')
         const [rounds] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL`
         assert.strictEqual(rounds?.n, 0)
-        yield* sessions.stop(task.threadId)
+        // Settled still, its lead stops once each turn ends.
+        yield* until(
+          Effect.map(sessions.running(task.threadId), (running) => (Option.isNone(running) ? [true] : [])),
+          (gone) => gone.length === 1,
+        )
       }).pipe(Effect.provide(withQueries())),
   )
 

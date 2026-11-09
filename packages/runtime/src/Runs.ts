@@ -1713,9 +1713,9 @@ export class Runs extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [thread] = yield* sql<{ projectId: ProjectId; taskId: string }>`
             SELECT project_id, task_id FROM threads WHERE id = ${threadId} AND kind = 'task'`
-          if (thread === undefined) return
+          if (thread === undefined) return false
           const inARow = yield* blanks(threadId, turnId)
-          if (inARow === 0) return
+          if (inARow === 0) return false
           if (inARow > BLANKS) {
             if (inARow === BLANKS + 1)
               yield* addItem({ projectId: thread.projectId, threadId }, 'notice', {
@@ -1724,7 +1724,7 @@ export class Runs extends Context.Service<
                 title: 'Its turns ended without doing anything. Write to it again to carry on.',
                 about: 'stall',
               })
-            return
+            return false
           }
           yield* addItem({ projectId: thread.projectId, threadId }, 'notice', {
             source: 'runtime',
@@ -1756,6 +1756,7 @@ export class Runs extends Context.Service<
             ),
           )
           yield* Effect.forkIn(provide(again), scope)
+          return true
         })
 
       /**
@@ -2079,11 +2080,14 @@ export class Runs extends Context.Service<
           }
           if (on === undefined) {
             // After its plan, a turn that did nothing at all is told to carry on too, as a step's is (a task is a conversation plus parts).
-            if (event._tag === 'TurnEnded' && event.state === 'completed' && event.errorClass === undefined)
-              yield* blankTalk(event.threadId, event.turnId)
+            const toldAgain =
+              event._tag === 'TurnEnded' && event.state === 'completed' && event.errorClass === undefined
+                ? yield* blankTalk(event.threadId, event.turnId)
+                : false
             // A settled task's lead, written to, stops once its turn ends, as it did when it settled: what it said stays, and the
-            // person's next words start it again.
-            if (event._tag === 'TurnEnded') yield* settledAgain(event.threadId)
+            // person's next words start it again. Not one about to be told to carry on: the turn that follows stops it, or, moved on
+            // meanwhile, whatever turn or run came instead.
+            if (event._tag === 'TurnEnded' && !toldAgain) yield* settledAgain(event.threadId)
             return
           }
           // Its connection or its service failed (ADR-060): not a missing report, so it isn't reminded. It waits, and is tried again.
@@ -4523,6 +4527,14 @@ export class Runs extends Context.Service<
           const [planned] =
             access.taskId === null ? [] : yield* sql<{ id: string }>`SELECT id FROM runs WHERE task_id = ${access.taskId} LIMIT 1`
           if (underWay === undefined) {
+            // After its plan, only the task's lead gives it a summary in a turn: a session of another thread's, or one handed over,
+            // keeps none, as none did before a turn could.
+            const [own] =
+              planned === undefined
+                ? [{ id: access.sessionId }]
+                : yield* sql<{ id: string }>`
+                    SELECT id FROM provider_sessions WHERE id = ${access.sessionId} AND thread_id = ${access.threadId} AND state != 'superseded'`
+            if (own === undefined) return yield* new ToolRefused({ message: 'No step is waiting on you, so Althar keeps no summary now.' })
             // After its plan, a lead's turn is a turn, not a round (a task is a conversation plus parts): a summary it gives is kept, its
             // evidence and descriptions with it, and opens nothing. What it committed waits for the person's Ship, which reviews it.
             // A task started without a plan has no steps: the summary is still what the person reads, and what it built, its end.

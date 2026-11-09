@@ -366,15 +366,23 @@ describe('a task’s course', () => {
       yield* tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId })
       yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
       // The round runs again, on a fresh reviewer told what the lead settled.
-      yield* until(secondRound, (rows) => rows.length === 2 && rows.some((row) => row.state === 'running'))
-      const [review] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${task.taskId} AND kind = 'step'`
-      const told = yield* until(
-        Effect.map(turns(review?.id ?? ''), (all) =>
-          all.filter((turn) => turn.prompt?.includes('The lead settled your findings') === true),
-        ),
-        (rows) => rows.length >= 2,
+      const [again] = yield* until(
+        sql<{ sessionId: string | null }>`
+          SELECT a.provider_session_id AS session_id FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+          WHERE n.node_key = 'review' AND n.iteration = 1 AND a.state = 'running'`,
+        (rows) => rows.length === 1 && rows[0]?.sessionId != null,
       )
-      assert.include(told.at(-1)?.prompt, 'Fixed the heading.')
+      const [review] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${task.taskId} AND kind = 'step'`
+      // Told so in its first turn, whether or not the round it takes up had been told before it stopped.
+      const [told] = yield* until(
+        Effect.map(turns(review?.id ?? ''), (all) =>
+          all.filter(
+            (turn) => turn.providerSessionId === again?.sessionId && turn.prompt?.includes('The lead settled your findings') === true,
+          ),
+        ),
+        (rows) => rows.length >= 1,
+      )
+      assert.include(told?.prompt, 'Fixed the heading.')
     }).pipe(Effect.provide(withQueries())),
   )
 
