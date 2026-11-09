@@ -259,6 +259,14 @@ with the same tool ([coordinator.md](coordinator.md#moving-a-task)).
 A round on a settled task that makes nothing new no longer drops silently
 back into Settled. Only a merged change goes back to done by itself.
 
+**A reply the person hasn't seen waits in Needs you** (a task is a
+conversation plus parts). Where a settled task's lead answers a turn the
+person's words began, after they last had it open, its card says "Replied"
+(a quick task's, Finished) until they open it, or press Done, which says
+they read it. One they watched arrive doesn't: the window marks a task seen
+as it becomes ready in front of them. Settling it, by Done, posting its
+review or merging, reads what came before.
+
 ## The small-change lane
 
 Small changes must be fast (the person's note of 6 November). A change of a
@@ -296,10 +304,13 @@ Two settings, under Settings › Tasks › Every task:
 
 - **The countdown before a plan starts on its own:** right away, 10 s, 25 s
   (the default) or 1 minute.
-- **Rounds of review:** 1, 2, 3 (the default) or 5. A further setting says
-  what happens when the rounds run out with fixes no review has seen. By
-  default the task goes on to its ending once the lead has settled every
-  finding; the other choice asks the person.
+- **When a check finds more:** what happens when the check of a fix reopens
+  a finding and the lead settles it again, a fix no review reads
+  ([reviews](reviews.md#how-a-review-round-runs)). By default the task goes
+  on to its ending once the lead has settled every finding; the other
+  choice asks the person. The old "Rounds of review" setting is gone from
+  the screen: a fix is checked once at most. What it kept is kept, and read
+  by nothing.
 
 Each is read where it applies, not when Althar starts, so a change holds
 from the next plan or round without a restart. A plan already counting down

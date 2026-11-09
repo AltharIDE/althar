@@ -47,21 +47,34 @@ started with, and the next round takes the new one.
   `finish_step`: fixed, with a line saying what changed and the commit that
   made it, or set aside, with the reason. A set-aside finding with no reason
   counts as unsettled.
-- **Another round runs only if settling changed the code,** up to the
-  person's review rounds setting (1, 2, 3 or 5; 3 by default).
-- **When rounds run out** with changes no review has seen, the person's
-  "When rounds run out" setting decides. By default, "Carry on when every
-  finding is settled": the task goes on to its ending with the last fixes
+- **A fix is checked only where it needs it, never by another whole review**
+  ([a task is a conversation plus parts](proposed/a-task-is-a-conversation-plus-parts.md#fixes-are-checked-by-the-same-reviewer-only-where-they-need-it)):
+  - **A tiny fix isn't read again:** ten changed lines or fewer, every one in
+    a file a finding of that review named, read against the copy the review
+    read. The task goes on to its ending, its seal kept, and the folded
+    review names the files.
+  - **A bigger fix gets one short check** by the same reviewer: told it is
+    a check of the fixes, not another review, it reads only what the fixes
+    changed (`git diff` from the copy it read) against its findings, and
+    reopens only one a fix didn't settle.
+  - **A finding the check reopened** goes back to the lead once more, and
+    that second fix isn't read again.
+- **When a check finds more** and the lead settles it, the person's "When a
+  check finds more" setting decides. By default, "Carry on when every
+  finding is settled": the task goes on to its ending with the second fix
   unreviewed, and the person decides on any merge. Its thread and pull
   request say the last fixes weren't reviewed, and it carries no seal. With
   "Ask me", or with findings still open, the task is stuck in Needs you for
-  the person to say.
+  the person to say. The old "Review rounds" setting is kept as it was and
+  read by nothing.
 - **The person can skip a round's review** from the task's menu: a review
   under way stops, and a round whose lead is done concludes. The next round
   has its review again.
-- **A follow-up round is reviewed as the plan says.** It reads from where the
-  last run left the task, so what the lead committed in between, such as a
-  fix for checks, is in it ([tasks](tasks.md)).
+- **Ship is reviewed as the plan says,** where it has a reviewer before the
+  work ships: one pass over what came after the commit the last review read,
+  found by its tree, as pushing may have credited it since. What the person's
+  turns with the lead committed and any fix for checks in between are in it
+  ([tasks](tasks.md#rounds-back-to-work-and-shipping-again)).
 - **No agent approves its own work.** Approving a pull request a task opened,
   making a commit status or a check run, and dismissing a review are refused
   to agents ([what agents may do](what-agents-may-do.md)).
@@ -151,7 +164,10 @@ matter to nobody. A commit is shown only where it is one the lead made
 settling that pass, and the sha is the one the host has after crediting. The
 commit the last pass read must hold the tree it read, or there is no seal.
 Where the code changed after the last pass, there is no seal either, and the
-folded review says the last fixes weren't reviewed.
+folded review says the last fixes weren't reviewed, unless every fix after
+it was tiny: then the seal stands, naming the commit the last pass read, and
+the folded review names the tiny fixes under "Fixed after it, too small to
+read again".
 
 - **The site draws the seal:** a Worker route, `/seal/<look>.svg`, renders
   the kit's pure drawing (`packages/ui/src/seal`) from its query, with glyph
@@ -215,3 +231,4 @@ A round that forgets `kept_views` shows less, never something stale.
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: the limits sweep (#696) built: a review of the repository's own people gets every lead tool and the network.
+- 9 Nov 2026: a fix is checked only where it needs it, tiny ones not at all, and Ship is reviewed from where the last review left off ([a task is a conversation plus parts](proposed/a-task-is-a-conversation-plus-parts.md)).

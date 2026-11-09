@@ -1,13 +1,15 @@
 # A task is a conversation plus parts, changeable at any time
 
-> A proposal, not built. It would fold into [tasks](../tasks.md),
+> A proposal, its core being built (#722, [Building it](#building-it)). It
+> folds into [tasks](../tasks.md),
 > [workspaces and runs](../workspaces-and-runs.md), [reviews](../reviews.md),
 > [code hosts](../code-hosts.md), [agents](../agents.md) and
 > [what agents may do](../what-agents-may-do.md).
 > [What this changes](#what-this-changes-in-the-decision-documents) lists
 > each section.
 
-- **Status:** Proposed
+- **Status:** Proposed; talking to a lead, Ship and checking fixes built
+  (#722)
 - **Date:** 2026-11-08; how it reads, 2026-11-09
 - **Owner:** Runtime and desktop maintainers
 - **Amends:** the sections in
@@ -117,7 +119,8 @@
   from the parts row, and nothing names the preset.
 - **Nothing new stores a task's kind.** Parts are read from the rows that
   already hold them. The [new data](#the-data-model) is small.
-- **It is built all together,** once this proposal is accepted.
+- **Its core is built first** (the person, 9 November): talking to a lead,
+  Ship and checking fixes, then the rest ([Building it](#building-it)).
 
 ## The parts
 
@@ -1164,10 +1167,51 @@ What is new:
 
 ## Building it
 
-The person's choice (8 November): this proposal ships first, and then all
-of it is built together, rather than in slices that each ship on their own.
-Within that build, recording each turn's time goes in first, so the rest can
-be measured against today's turns.
+The person's choice (8 November) was for this proposal to ship first, and
+then all of it to be built together. On 9 November they asked for its core
+to be built at once, with the design round (#722), keeping what clients and
+stores had working on upgrade. Built there, each in its area document:
+
+- **A message is a turn, not a round,** for the person's words and what the
+  coordinator passes on: no step, report, reminder or review; a
+  `finish_step` in it keeps its summary and opens nothing; a blank one is
+  told to carry on, as a step's is
+  ([tasks](../tasks.md#rounds-back-to-work-and-shipping-again)).
+- **A tweak waits for Ship:** the hold (`workspaces.held_at`, from where each
+  turn began, `turn_deliveries.heads`, so a restart keeps it), with every
+  push and publish but Ship's refused past it, failing checks and conflicts
+  waiting for Ship; Ship as a run of its own, its review reading only what
+  came after the last, its ending pushing to the open pull request, or
+  opening the next or the first; `ship_task`, the Ship command, and Ship on
+  the card, in the header's chip, on Home and in Outputs
+  ([code hosts](../code-hosts.md#a-leads-commits-go-up-as-its-turn-ends)).
+- **Fixes are checked only where they need it,** tiny ones not at all and
+  named on the pull request, the seal kept
+  ([reviews](../reviews.md#how-a-review-round-runs)).
+- **A reply the person hasn't seen waits in Needs you**
+  ([tasks](../tasks.md#needs-you-and-settling)).
+- **A lead starts afresh only when its context is full**
+  ([agents](../agents.md#keeping-context-small)).
+
+Compatibility: every change to the store is additive, with nullable
+columns an older build reads past; a run with no `ships` and a workspace
+with no `held_at` behave as before, so a round under way from before the
+update finishes as a round; the API only gains fields and a command; the
+old "Review rounds" setting is kept and read by nothing; the lead's tools
+keep their names, `make_it_a_change` included.
+
+Still to build, as the rest of this proposal says: several changes in a
+task, the review after a merge in the same task, each turn's time, the
+workspace moving up and between a worktree and Local, "Run it", the parts
+tools, Scratch and presets. Merge with commits not shipped merges the pull
+request as it is meanwhile, and what waited stays held, for Ship's next pull
+request; settling with commits not shipped leaves them on the branch,
+letting go of the hold. Commits the person makes by hand in the task's
+folder don't hold it yet.
+
+Where it was all to be built together, recording each turn's time went in
+first, so the rest could be measured against today's turns. It is the next
+to build.
 
 It is done when:
 
