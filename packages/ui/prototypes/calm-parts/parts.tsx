@@ -782,7 +782,7 @@ const STAMPS: Record<Stamp, { readonly word: string; readonly icon: IconName }> 
   change: { word: 'New change', icon: 'branch' },
 }
 
-/** What a step in the work is, before its line: Shipped and Merged in green, a new change in ink. */
+/** What a step in the work is, before its line: Shipped and Merged in green, a new change in cobalt, as work under way. */
 export function StampOf({ stamp }: { stamp: Stamp }) {
   const { word, icon } = STAMPS[stamp]
   return (
@@ -793,8 +793,11 @@ export function StampOf({ stamp }: { stamp: Stamp }) {
   )
 }
 
-/** A stamped line's words: the changes it names in ink, branches as code, pull requests by number in ink. */
-export function Marked({ c, text }: { c: Case; text: string }) {
+/**
+ * An Althar line's words: branches always as code; in a stamped line, a step in the work, the changes it names and pull requests
+ * by number in ink as well.
+ */
+export function Marked({ c, text, names: inked = true }: { c: Case; text: string; names?: boolean }) {
   const names = c.changes.map((one) => one.short).filter((one): one is string => one !== undefined)
   const escape = (one: string) => one.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const pattern = new RegExp(
@@ -806,9 +809,13 @@ export function Marked({ c, text }: { c: Case; text: string }) {
         at % 2 === 0 ? (
           bit
         ) : names.includes(bit) || bit.startsWith('#') ? (
-          <span key={`${bit}${at}`} className={css.lineName}>
-            {bit}
-          </span>
+          !inked ? (
+            bit
+          ) : (
+            <span key={`${bit}${at}`} className={css.lineName}>
+              {bit}
+            </span>
+          )
         ) : (
           <code key={`${bit}${at}`} className={css.lineCode}>
             {bit}

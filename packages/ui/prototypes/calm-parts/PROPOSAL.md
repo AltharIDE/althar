@@ -2,11 +2,10 @@
 
 A prototype for
 [a task is a conversation plus parts](https://github.com/AltharIDE/althar/pull/713)
-(the proposed ADR on `althar/adr-a-task-is-a-conversation-plus-parts-changeab`,
-still at `259de0e`). It shows how the window handles every situation the
+(proposed, merged into `docs/decisions/proposed/` on 9 November). It shows how the window handles every situation the
 proposal adds, on the real board, task bar, thread, composer, Outputs and the
-coordinator's plan card. It builds nothing of the feature, and goes once a
-direction is picked.
+coordinator's plan card. It builds nothing of the feature. A · As one is
+chosen (9 November); B and C stay on the page to compare.
 
 Run it from `packages/ui`:
 `./node_modules/.bin/vp dev --config prototypes/calm-parts/vite.config.mjs`,
@@ -17,13 +16,26 @@ Task, Outputs, Plan). The URL keeps them: `?d=B&s=stack-held#/threads/th1`.
 Every press changes the case it is pressed in: Ship, Merge, Fix it, Add,
 Remove, Run safely, Trust fully, Move, Call it off and every ask's buttons do
 what they say, and Undo takes an answer back. Start over, in the strip, puts
-the case back. `node flows.mjs` clicks through 74 of these headless.
+the case back. `node flows.mjs` clicks through 79 of these headless.
 
 ## Decided so far
 
-- **A's base.** A task is one sentence and one button, the same on its card,
-  in its bar's chip and in Needs you. All three directions below keep it; they
-  differ only in where a task's several changes show.
+- **A · As one** (9 November). A task is one sentence and one button, the
+  same on its card, in its bar's pill and in Needs you; a mark for each change
+  sits inside the pill and opens to a row for each.
+- **A step in the work is stamped in the thread** (9 November): "Shipped" and
+  "Merged" in green, "New change" in cobalt, a small tinted label before the
+  line, the changes it names in ink and branches as code. Everything else
+  Althar says stays a plain grey line.
+- **The pill is one colour.** Its marks sit in it with no white well; on hover
+  the pill's own colour deepens behind them, and its button is the same colour
+  a shade deeper.
+- **One violet at a time, marks too.** A change that waits on you but isn't
+  the one the sentence is about has an ink mark and ink words, in the list,
+  on the card's foot and in Outputs.
+- **A card never says its status twice.** "Working" under "Working" goes;
+  under "Review found 2" the line is "After #715 merged". The bar, with no
+  status word, keeps the whole sentence.
 - **The lead's own part changes fold into its work.** A line stands alone
   only where someone else made the change or it offers a way on.
 - **The preset shows only on the plan card,** as a word in the card's kicker
@@ -33,8 +45,12 @@ the case back. `node flows.mjs` clicks through 74 of these headless.
   today. Its card's word is "Not shipped".
 - **Out of usage and a stuck step use the kit's own cards,** with the models
   free to take the work over.
-- **Outputs is one page for every change** (this round): each change one
-  under another, a settled one folded to a line.
+- **Outputs is one page for every change:** each change a line (its mark,
+  name, pull request, where it stands, its size) that opens and folds. The one
+  the sentence is about starts open, the others folded, a settled one folded.
+  Hovered, the line goes a step louder, as the thread's folds do; no band.
+- **Out of usage offers GPT-6.1 Sol first,** then Terra; DeepSeek last, as
+  your notes say.
 - **Scratch is set aside** (9 November), a topic of its own for later. This
   round keeps only where a chat meets the rest: a chat is a task with no
   parts, kept off the board, and once it takes a worktree or makes something
@@ -51,23 +67,24 @@ the case back. `node flows.mjs` clicks through 74 of these headless.
 3. **Counts over lists.** "Both ready to merge", "3 changes", "· 2 more".
 4. **Changes have names.** Once a task has two, each goes by a few words
    ("Lane heights", "Rename"), as tasks do. The pull request's number stays in
-   lines of record: "Lane heights (#714) merged."
+   lines of record: "Merged · Lane heights (#714)."
 5. **Copy never narrates the screen.** A line only where the person needs to
    know, or can act.
 6. **Nothing fails quietly.** Every stop says what happened and offers the
    way out that fixes it, in place.
 7. **The window stays still while agents work.** Things change in place.
    Outputs keeps the task's order, and a settled change folds where it was.
+   Only the steps of the work stand out of the thread; the rest stays grey.
 8. **Act in place.** Ship, Merge, Call it off and Run it work from the card,
    the bar or the thread.
 9. **Lose nothing; ask only where something would be lost,** and before
    running a stranger's code.
-10. **Colour has one meaning:** violet waits on you, cobalt is under way, red
-    failed, green merged.
+10. **Colour has one meaning:** violet waits on you, cobalt is under way (a new
+    change included), red failed, green shipped or merged.
 
 ## Three ways to hold several changes
 
-Each hides the task's changes a different way: as one piece of work, as one
+A is chosen. Each hides the task's changes a different way: as one piece of work, as one
 change at a time, or as a choice made where you talk. A task with one change
 reads the same in all three, as today.
 
@@ -115,16 +132,16 @@ Outputs is the same in all three.
 | A stack, ready | "Both ready to merge · Merge both", the bottom first | "/ Lane heights"; chip "Lane heights and Card slide ready · Merge Lane heights, then Card slide" | The same chip; tabs |
 | A hold reaching up a stack | Chip "Held: 2 commits waiting on Lane heights below · Ship": ships Lane heights, then Card slide | Opens on Card slide; switched to Lane heights, its Ship ships it alone | Card slide's tab; Lane heights' tab card ships it alone |
 | (its ask, in all three) | "Ship Card slide, and the 2 commits on Lane heights below it" | | |
-| One merged, the rest carry on | Line "Lane heights (#714) merged. The task carries on with Rename and Card slide."; its mark turns green | The switch lists the two open ones, "Lane heights merged." under them | Tabs Rename and Card slide, "Lane heights merged" after them |
+| One merged, the rest carry on | Line "Merged · Lane heights (#714). Rename and Card slide carry on."; its mark turns green | The switch lists the two open ones, "Lane heights merged." under them | Tabs Rename and Card slide, "Lane heights merged" after them |
 | A helper on one, you on another | "Lane heights: 1 commit not shipped · Ship"; Card slide's row says "A helper on it" | On Lane heights: "1 commit not shipped · Ship" | "1 commit not shipped · 1 more"; Card slide's tab says the helper |
-| A second change starts | Line "Started a second change, Rename, on althar/rename-later toward main, to keep it apart · Keep them together"; a second mark | The switch appears, "1 of 2" | A second tab appears |
+| A second change starts | Line "New change · Rename, on althar/rename-later toward main, to keep it apart. Keep them together"; a second mark | The switch appears, "1 of 2" | A second tab appears |
 | A branch the lead made with git | Line "Virtual lanes, the lead's althar/try-virtual-lanes, is a change of this task now… · Drop it"; a mark appears | The window opens on Virtual lanes | Tab "Virtual lanes · Made with git, no pull request" |
 | A pull request opened elsewhere | Line "Found #717, from althar/rename-later into main, opened on GitHub. It's Rename's now."; chip "Waiting for checks on Rename" | "/ Rename"; chip "Checks running" | Rename's tab |
 | One it won't guess | A quiet card: "#718 is from althar/board-still, but into release/0.8.0… · Attach it as its own change"; the chip doesn't change. Attached, it becomes a mark | Attached, a second entry in the switch | Attached, a second tab |
 | Out of usage | "Claude is out of usage until 14:00 · Use another model" (it is the task's, not a change's) | The same | The same |
-| No place for an agent | "Fixing Rename's checks waits for one of the 4 agents at work" | Bar on Lane heights: "Open · checks pass"; only the card says it | The same as A |
+| No place for an agent | "Rename's fix waits for a free agent" | Bar on Lane heights: "Open · checks pass"; only the card says it | The same as A |
 | Where the commits went | Each turn's line: "Worked for 1m 11s · 1 commit to Lane heights" | The same | The same |
-| Outputs | Every change one under another, in the task's order. A settled change folds to a line ("Lane heights #714 merged · 3 files · +84 −31") that opens to all it made. One whose after-merge review found something stays open. Violet only on the change the chip names | The same | The same |
+| Outputs | Every change a line, in the task's order ("✕ Lane heights #714 e2e (board.spec.ts) failing · 3 files · +84 −31"), that opens to all it made and folds again. The one the pill names starts open; a settled one starts folded; one whose after-merge review found something starts open. Violet only on the change the pill names | The same | The same |
 
 ### Every other case: the same in all three
 
@@ -139,14 +156,14 @@ Outputs is the same in all three.
 | Trusted fully | Access "Trusted"; Stop running it puts it back to Read only | "You trusted #702 fully: install scripts and the network." |
 | Commits not shipped | "3 commits not shipped · Ship", in Needs you | — |
 | Fixes and replies waiting beside | "3 commits not shipped · lint fails on #714 · Ship" | A line for each |
-| Ship under way | "Shipping #714: reviewing" | "Brought main in first…" |
+| Ship under way | "Shipping #714: reviewing" | "Brought main in first…", then "Shipped · 3 commits to #714." |
 | A new target while held | "3 commits not shipped · Ship"; card "althar/board-still-2 → release/0.8.0" | Ship opens #719 into release/0.8.0, then asks about #714 |
 | Merge, with commits not shipped | "2 commits on #714 not shipped · Review and merge" | Ask: Review and merge / Merge now |
 | Settling, with commits not shipped | "4 commits not shipped · Ship" | Ask: Ship, then settle / Leave them on the branch |
 | Parts change, by anyone | Nothing changes on the card | "The coordinator added a review of #698…", "You moved Checked by to after it merges." |
 | A part removed, and what stays | "Your review of #698 isn't posted · Post it" | "You removed the worktree. althar/board-still stays, here and on GitHub."; ask: Post it first / Remove without posting / Keep it |
 | Fixes checked only where needed | "#714 ready to merge · Merge" | Review line "3 findings · 3 fixed", opening to "One fix checked again…; two were a line or two, not read again." |
-| After the merge, it found something | Back in Needs you: "The review of #715 found 2 · Fix it"; card word "Review found 2" | Ask: Fix it / Leave it |
+| After the merge, it found something | Back in Needs you: bar "Review found 2 after #715 merged · Fix it"; card "Review found 2", then "After #715 merged" | Ask: Fix it / Leave it; Fix it stamps "New change · althar/rename-later-fix, after #715, for its 2 findings" |
 | After the merge, nothing found | Stays Settled | The review's line |
 | A change reviewing a related PR | "Review of #698 drafted · Post it"; Reviewing part "2 comments drafted, not posted" | — |
 | Chats on Scratch | Set aside for now; the chip is a placeholder | — |
@@ -156,9 +173,9 @@ Outputs is the same in all three.
 | Out of usage | "Claude is out of usage until 14:00 · Use another model" | The kit's RateLimit card: the models free now, each with how it's reached, or Wait |
 | The host refuses the push | "GitHub refused the push · Sign and ship" | Ask: Set up signing / Try again; "the 3 commits are still here, held" |
 
-## Recommendation
+## Recommendation, and your pick
 
-**A · As one.** It is the only one of the three that adds no new place.
+**A · As one**, recommended and chosen (9 November). It is the only one of the three that adds no new place.
 The chip is already there; the marks sit inside it. You read a task the same
 way whether it holds one change or four: one sentence and one button. You
 never have to pick which change you're talking to, so there's no state to get
@@ -175,7 +192,7 @@ task has two changes, and each tab's state competes with the bar's sentence.
 
 - **A change has a name.** Once a task has two, whoever starts a change
   gives it a few words, as a task is named; the window uses those. Lines of
-  record add the number: "Lane heights (#714) merged."
+  record add the number: "Merged · Lane heights (#714)."
 - **The card's one fact needs an order:** an ask, then a failure, a
   conflict, ready to merge, commits not shipped, a draft to post, a move
   waiting, a helper, checks running. With several changes, it names a change
@@ -191,6 +208,8 @@ task has two changes, and each tab's state competes with the bar's sentence.
   line; one whose after-merge review found something stays open.
 - **A line for every part change** becomes: the lead's own fold into its
   work; a line stands alone where someone else made it, or it offers a way on.
+  The steps of the work (a new change, Shipped, Merged) are stamped, so they
+  stand out of the thread.
 - **No preset chip** in the bar or on the board card. The preset is named
   only on the plan card, as its kicker's first word.
 - **Commits not shipped keep a task in Needs you,** with "Not shipped" as its
@@ -200,8 +219,8 @@ task has two changes, and each tab's state competes with the bar's sentence.
 - **Your words go first** needs its order within one task: a round of
   Althar's own (fixing checks) waiting for a place is overtaken by your
   message to the same lead.
-- **After merge, back in Needs you:** the card says "Review found 2", naming
-  the merged pull request.
+- **After merge, back in Needs you:** "Review found 2 after #715 merged ·
+  Fix it", the card's word "Review found 2".
 - **A change can go first** (your release flow). The ADR has siblings, which
   merge in any order, and stacks. It needs a third: a change that waits for
   another to merge, toward the same target, without building on its code.
@@ -222,13 +241,14 @@ task has two changes, and each tab's state competes with the bar's sentence.
 - **Out of usage and a stuck step** offer the models free to take the work
   over, with how each is reached, not only Wait and Try again.
 
-The ADR's lead is still settling three points: a child push carrying a
-parent's held commits, the after-merge path settling the whole task, and
-finding a pull request by its head branch without matching its target. The
-text this follows already has a hold reaching up a stack and a merge settling
-only its change. If those change again, so do these cases: "A hold reaching
-up a stack", "One merged, the rest carry on", "After the merge, nothing
-found", "A pull request opened elsewhere" and "One it won't guess".
+The three points the ADR's lead was still settling are settled, as merged
+on 9 November, and each the way these cases already show: a change stacked on
+one with commits held is held too, and Ship ships the lower first, each after
+its own review ("A hold reaching up a stack"); a merge settles only its own
+change, and Fix it starts a new change after it ("One merged, the rest carry
+on", "After the merge"); a pull request is found by its head and its base,
+and where there isn't exactly one, Althar takes none and says so ("One it
+won't guess").
 
 ## Where it is hard
 
@@ -282,10 +302,10 @@ carry on with the release": the lead makes Fix main, toward main, and says
 in its own turn that the release waits for it. In A:
 
 1. "Fix main: 1 commit not shipped · Ship". The release's red checks don't
-   take the sentence, as Fix main is what fixes them. Its mark is grey, and
+   take the sentence, as Fix main is what fixes them. Its mark is a clock, and
    its row says "Waits for Fix main to merge".
 2. Ship: reviewed, up as #719, checks pass. "Fix main: ready to merge · Merge".
-3. Merge: "Fix main (#719) merged, and main came into Release 0.9.0." The
+3. Merge: "Merged · Fix main (#719). Release 0.9.0 took main in." The
    release's checks run again, and pass. "Release 0.9.0: ready to merge".
 
 Fix main isn't stacked under the release: that would point #710 at the
@@ -298,10 +318,10 @@ privacy page", then "pull in DEV-141 too, the terms page". Claude Code put
 them on two branches, and the person wanted one. In A:
 
 - Split, as Claude Code did: "4 commits not shipped, in 2 changes · Ship",
-  and the lead's line "Started a second change, Terms page… as DEV-141 is a
-  page of its own · Keep them together". One press joins them: "You kept
-  Terms page with Privacy page… and its pull request closes DEV-140 and
-  DEV-141." Ship opens one pull request.
+  and the lead's line "New change · Terms page, on althar/terms-page toward
+  main, as DEV-141 is a page of its own. Keep them together". One press joins
+  them: "You kept Terms page with Privacy page, on althar/privacy-page. Its
+  pull request closes DEV-140 and DEV-141." Ship opens one pull request.
 - Kept together from the start, as proposed: one change, "4 commits not
   shipped · Ship", the parts naming DEV-140 and DEV-141. The lead's own
   words say it's one branch; nothing else changes on screen.
@@ -321,41 +341,17 @@ What the flows changed in this design:
 
 These are in A only; B and C read the same rules their own way.
 
-## How to choose between A, B and C
+## B and C, for comparison
 
-Most cases look the same in all three; these six are where they differ. Open
-each at its address, press 1, 2 and 3 to swap the direction in place, and try
-the button and the message box. Each asks one question.
-
-1. **Can you tell in a second what needs you?** One needs you, two more
-   (`?s=needs-one`). A: "Lane heights: checks failing · Fix it", the marks in
-   the pill. B: "Checks failing · Fix it" for the change in view, a dot on the
-   switch. C: the same sentence with "· 2 more", and a row of tabs over the
-   message box.
-2. **Does a wait on another change reach you?** No place for an agent
-   (`?s=no-slot`). A and C: "Fixing Rename's checks waits for one of the 4
-   agents at work". B, on Lane heights: "Open · checks pass"; only the board
-   card says it. B's weak spot.
-3. **When you type, do you know which change it goes to, or care?** A helper
-   on one, you on another (`?s=helper`). A: "Tell Claude Code something"; the
-   lead picks, and the turn's line says "1 commit to Lane heights". B: "…
-   something about Lane heights". C: the picked tab.
-4. **Does the one button do what you expect?** A hold reaching up a stack
-   (`?s=stack-held`). A: Ship ships both, bottom up. B opens on Card slide, the
-   top; switched to Lane heights, Ship ships only it. C: each tab's own.
-5. **How much moves when a task gets its second change?** A second change
-   starts (`?s=split`). A: a second mark in the pill. B: a switch after the
-   title. C: a row of tabs over the message box.
-6. **What happens to a change that's done while the rest carry on?** One
-   merged (`?s=merged-one`). A: its mark turns green. B: the switch lists only
-   the two still open. C: tabs for the open ones, then "Lane heights merged".
-
-And one to confirm: a task with one change (`?s=one`) is the same in all
-three, as today.
+They stay on the page (press 2 and 3) so the choice can be seen again. Where
+they differ from A: B makes you keep a mode in mind (the window "on" a
+change) and hides a wait on another change behind its switch (`?s=no-slot`);
+C adds a row of tabs over the message box for as long as a task has two
+changes (`?s=needs-one`).
 
 ## Questions for the person
 
-1. Several changes: A · As one (recommended, and where you lean), B · One at
-   a time, or C · Where you talk?
-2. Two tickets in one task: one pull request closing both, unless something
+1. Two tickets in one task: one pull request closing both, unless something
    forces two (recommended), or one pull request per ticket?
+2. The ADR changes above: shall I pass them to a task that amends the
+   proposed ADR (recommended), or will you read them first?

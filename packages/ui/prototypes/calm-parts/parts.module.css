@@ -816,7 +816,7 @@
   text-decoration-color: var(--t-3);
 }
 
-/* A step in the work, stamped: Shipped and Merged in green, a new change in ink; the rest of its line a step louder */
+/* A step in the work, stamped: Shipped and Merged in green, a new change in cobalt, as work under way; the rest of its line a step louder */
 .stamped {
   color: var(--t-2);
 }
@@ -839,8 +839,8 @@
   color: var(--ok-ink);
 }
 .stamp[data-stamp='change'] {
-  background: color-mix(in srgb, var(--t-1) 7%, transparent);
-  color: var(--t-1);
+  background: var(--live-dim);
+  color: var(--live);
 }
 .lineName {
   font-weight: 550;

@@ -15,24 +15,24 @@ const top = (height) => ({ clip: { x: 0, y: 44, width: 1440, height } })
 
 /** Each shot: its id (ordered), the direction, the case, where, what to press first, what to take. */
 export const SHOTS = [
-  // One case, three ways: a task with three changes, one of which needs you.
+  // A · As one, chosen (9 November). The task's pill: the changes' marks inside it, one sentence, one button; the marks open to each change.
   { id: '01-A-needs-one-bar', d: 'A', s: 'needs-one', at: 'task', ...top(56) },
   { id: '02-A-needs-one-marks', d: 'A', s: 'needs-one', at: 'task', press: 'button[aria-label^="3 changes"]', pop: true },
-  { id: '03-B-needs-one-bar', d: 'B', s: 'needs-one', at: 'task', ...top(56) },
-  { id: '04-B-needs-one-switch', d: 'B', s: 'needs-one', at: 'task', press: 'button[aria-label^="Showing"]', pop: true },
-  { id: '05-C-needs-one-tabs', d: 'C', s: 'needs-one', at: 'task', clip: { x: 280, y: 750, width: 880, height: 110 } },
-  { id: '06-A-needs-one-card', d: 'A', s: 'needs-one', at: 'board', ...card() },
-  { id: '07-BC-needs-one-card', d: 'B', s: 'needs-one', at: 'board', ...card() },
-  // As one, on more of the cases with several changes
-  { id: '08-A-siblings-bar', d: 'A', s: 'siblings', at: 'task', ...top(56) },
-  { id: '09-A-stack-bar', d: 'A', s: 'stack', at: 'task', ...top(56) },
-  { id: '10-A-stack-held-card', d: 'A', s: 'stack-held', at: 'board', ...card() },
-  { id: '11-A-merged-one-thread', d: 'A', s: 'merged-one', at: 'task', ...around('Lane heights (#714) merged', 40, 200) },
-  // Outputs: every change one under another, in every direction; a settled one folds to a line
-  { id: '12-outputs-needs-one', d: 'A', s: 'needs-one', at: 'task', face: 'out', clip: { x: 0, y: 44, width: 1440, height: 760 } },
-  { id: '13-outputs-merged-folded', d: 'A', s: 'merged-one', at: 'task', face: 'out', clip: { x: 0, y: 44, width: 1440, height: 420 } },
+  { id: '03-A-siblings-bar', d: 'A', s: 'siblings', at: 'task', ...top(56) },
+  { id: '04-A-stack-bar', d: 'A', s: 'stack', at: 'task', ...top(56) },
+  // The board card: the same sentence, less what its status already says, the marks and a count at its foot
+  { id: '05-A-needs-one-card', d: 'A', s: 'needs-one', at: 'board', ...card() },
+  { id: '06-A-stack-held-card', d: 'A', s: 'stack-held', at: 'board', ...card() },
+  { id: '07-A-after-merge-card', d: 'A', s: 'after-merge', at: 'board', ...card('Rename “Keep for later” to “Later”') },
+  // The thread: a step in the work stamped, Shipped and Merged in green, a new change in cobalt
+  { id: '08-A-release-on-thread', d: 'A', s: 'release-on', at: 'task', ...around('took main in', 200, 60) },
+  { id: '09-A-split-thread', d: 'A', s: 'split', at: 'task', ...around('to keep it apart', 60, 60) },
+  { id: '10-A-merged-one-thread', d: 'A', s: 'merged-one', at: 'task', ...around('Rename and Card slide carry on', 40, 200) },
+  // Outputs: each change a line that opens and folds; the one the task's fact is about starts open, a settled one folded
+  { id: '11-outputs-needs-one', d: 'A', s: 'needs-one', at: 'task', face: 'out', clip: { x: 0, y: 44, width: 1440, height: 760 } },
+  { id: '12-outputs-merged-folded', d: 'A', s: 'merged-one', at: 'task', face: 'out', clip: { x: 0, y: 44, width: 1440, height: 420 } },
   {
-    id: '14-outputs-merged-opened',
+    id: '13-outputs-merged-opened',
     d: 'A',
     s: 'merged-one',
     at: 'task',
@@ -41,15 +41,17 @@ export const SHOTS = [
     clip: { x: 0, y: 44, width: 1440, height: 560 },
   },
   // The plan card: its preset, a quiet word in its kicker
-  { id: '15-plan-preset-word', d: 'A', s: 'needs-one', at: 'talk', selector: '[class*="TaskLaunch-module__launch"]' },
-  { id: '16-plan-preset-open', d: 'A', s: 'needs-one', at: 'talk', press: 'button[aria-label^="Preset"]', pop: true },
-  // Your two flows, in A: a release with main red, fixed first; two tickets on two branches, kept together.
-  { id: '17-A-release-red-bar', d: 'A', s: 'release-red', at: 'task', ...top(56) },
-  { id: '18-A-release-red-marks', d: 'A', s: 'release-red', at: 'task', press: 'button[aria-label^="2 changes"]', pop: true },
-  { id: '19-A-release-red-card', d: 'A', s: 'release-red', at: 'board', ...card('Cut 0.9.0') },
-  { id: '20-A-release-on-thread', d: 'A', s: 'release-on', at: 'task', ...around('Fix main (#719) merged', 260, 60) },
-  { id: '21-A-tickets-split-thread', d: 'A', s: 'tickets-split', at: 'task', ...around('as DEV-141 is a page of its own', 200, 60) },
-  { id: '22-A-tickets-one-parts', d: 'A', s: 'tickets-one', at: 'task', press: 'button[aria-label^="Parts,"]', pop: true },
+  { id: '14-plan-preset-word', d: 'A', s: 'needs-one', at: 'talk', selector: '[class*="TaskLaunch-module__launch"]' },
+  { id: '15-plan-preset-open', d: 'A', s: 'needs-one', at: 'talk', press: 'button[aria-label^="Preset"]', pop: true },
+  // Your two flows: a release with main red, fixed first; two tickets on two branches, kept together.
+  { id: '16-A-release-red-bar', d: 'A', s: 'release-red', at: 'task', ...top(56) },
+  { id: '17-A-release-red-marks', d: 'A', s: 'release-red', at: 'task', press: 'button[aria-label^="2 changes"]', pop: true },
+  { id: '18-A-release-red-card', d: 'A', s: 'release-red', at: 'board', ...card('Cut 0.9.0') },
+  { id: '19-A-tickets-split-thread', d: 'A', s: 'tickets-split', at: 'task', ...around('as DEV-141 is a page of its own', 200, 60) },
+  { id: '20-A-tickets-one-parts', d: 'A', s: 'tickets-one', at: 'task', press: 'button[aria-label^="Parts,"]', pop: true },
+  // The other two directions, kept on the page for comparison
+  { id: '21-B-needs-one-switch', d: 'B', s: 'needs-one', at: 'task', press: 'button[aria-label^="Showing"]', pop: true },
+  { id: '22-C-needs-one-tabs', d: 'C', s: 'needs-one', at: 'task', clip: { x: 280, y: 750, width: 880, height: 110 } },
 ]
 
 const only = process.argv.slice(2)

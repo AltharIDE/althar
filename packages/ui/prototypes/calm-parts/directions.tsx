@@ -108,7 +108,7 @@ const line = (c: Case, beat: Extract<Beat, { kind: 'part' | 'line' }>, { links =
         <StampOf stamp={beat.stamp} />{' '}
       </>
     )}
-    {links ? <Linked c={c} text={beat.text} /> : beat.stamp === undefined ? beat.text : <Marked c={c} text={beat.text} />}
+    {links ? <Linked c={c} text={beat.text} /> : <Marked c={c} text={beat.text} names={beat.stamp !== undefined} />}
     {beat.act !== undefined && (
       <span className={css.lineAct}>
         <LinkButton onClick={() => lineAct(beat.act!, beat.change)}>{beat.act}</LinkButton>

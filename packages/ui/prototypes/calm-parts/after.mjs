@@ -17,31 +17,26 @@ const partsButton = (page) => page.locator('button[aria-label^="Parts,"]').first
 
 const SHOTS = [
   {
-    id: '30-B-stack-held-shipped',
-    d: 'B',
+    // Ship from the pill: the change below first, then the one on it, each stamped as it goes up.
+    id: '30-A-stack-held-shipped',
+    d: 'A',
     s: 'stack-held',
     run: async (page) => {
-      await page.getByRole('button', { name: /^#716/ }).first().click()
-      await page.waitForTimeout(300)
-      await page.locator('[role=dialog]').getByRole('button', { name: 'Ship', exact: true }).first().click()
-      await page.waitForTimeout(5600)
+      await page.locator('header').getByRole('button', { name: 'Ship', exact: true }).first().click()
+      await page.waitForTimeout(9000)
     },
     around: ['on top of what shipped under it', 300, 120],
   },
   {
-    id: '31-B-retarget-shipped',
-    d: 'B',
+    // A new target while held: Ship opens the new pull request into it, then asks about the old one.
+    id: '31-A-retarget-shipped',
+    d: 'A',
     s: 'retarget',
     run: async (page) => {
-      await page
-        .getByRole('button', { name: /^althar\/board-still-2/ })
-        .first()
-        .click()
-      await page.waitForTimeout(300)
-      await page.locator('[role=dialog]').getByRole('button', { name: 'Ship', exact: true }).first().click()
+      await page.locator('header').getByRole('button', { name: 'Ship', exact: true }).first().click()
       await page.waitForTimeout(5600)
     },
-    around: ['is up as #719', 150, 230],
+    around: ['as #719, into release/0.8.0', 150, 230],
   },
   {
     id: '32-A-start-one-parts',
