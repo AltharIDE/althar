@@ -42,7 +42,6 @@ import {
   resolveRef,
   resolveTree,
   rollBack,
-  setActive,
   SkillRefused,
   stageFromGitHub,
   uninstall,
@@ -129,7 +128,9 @@ import { anyOf, SignIns } from './SignIns'
 import { describe, listSkills, type SkillsConfig } from './Skills'
 import { expected, words } from './words'
 import { makeBranch } from './newBranch'
-import { agentTools, setToolRoles, syncIo } from './agentTools'
+import { agentTools, forgetSkillRoles, setSkillRoles, setToolInProject, setToolRoles, syncIo } from './agentTools'
+import { addServer, removeServer, serverDetail } from './mcpAdd'
+import { checkHealth } from './mcpHealth'
 import * as mcpSync from './mcpSync'
 import * as skillSync from './skillSync'
 
@@ -1069,8 +1070,31 @@ export const handlers = Api.toLayer(
       SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       GetAgentTools: ({ projectId }) =>
         api(agentTools(projectId)).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.provideService(RuntimeConfig, config)),
-      SetToolRoles: ({ commandId, kind, name, roles, projectId }) =>
-        once(commandId, api(setToolRoles(kind, name, roles, projectId)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetToolRoles: ({ commandId, kind, name, roles, projectId, repository }) =>
+        once(
+          commandId,
+          api(
+            kind === 'server'
+              ? setToolRoles(kind, name, roles, projectId, repository ?? null)
+              : // A skill added from GitHub is on while any role gets it, which turns it on or off in the store, as a switch there did.
+                Effect.gen(function* () {
+                  const turned = yield* setSkillRoles(config.skills, name, roles, projectId, repository ?? null)
+                  if (turned !== undefined)
+                    yield* skillAct(commandId, turned.id, turned.active ? 'turned_on' : 'turned_off', { treeHash: turned.treeHash })
+                }),
+          ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+        ),
+      SetToolInProject: ({ commandId, kind, name, projectId, on }) =>
+        once(commandId, api(setToolInProject(kind, name, projectId, on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      GetServerDetail: ({ name, repository }) =>
+        api(serverDetail(name, repository)).pipe(
+          Effect.provideService(SqlClient.SqlClient, sql),
+          Effect.provideService(RuntimeConfig, config),
+        ),
+      AddServer: ({ commandId, server, agents }) =>
+        once(commandId, api(withSync((io) => addServer(io, server, agents))).pipe(Effect.provideService(RuntimeConfig, config))),
+      RemoveServer: ({ commandId, name }) =>
+        once(commandId, api(withSync((io) => removeServer(io, name))).pipe(Effect.provideService(RuntimeConfig, config))),
       SetToolSync: ({ commandId, kind, on, takeBack }) =>
         once(
           commandId,
@@ -1082,6 +1106,17 @@ export const handlers = Api.toLayer(
                   : mcpSync.turnOff(io, takeBack)
                 : mcpSync.serialized(io, () => (on ? skillSync.turnSkillsOn(io) : skillSync.turnSkillsOff(io, takeBack))),
             ),
+          ).pipe(Effect.provideService(RuntimeConfig, config)),
+        ),
+      // A read of how the person's servers stand in their agents, kept for the tiles; a runtime that doesn't read their agents asks none.
+      CheckServers: ({ commandId }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const io = yield* syncIo
+              if (io !== undefined) yield* Effect.promise(() => checkHealth(io))
+            }),
           ).pipe(Effect.provideService(RuntimeConfig, config)),
         ),
       SetToolKeptOut: ({ commandId, kind, agent, name, out }) =>
@@ -1931,9 +1966,7 @@ export const handlers = Api.toLayer(
         once(commandId, api(launches.orderRunnables({ projectId, ids, actorId: instance.personId }))),
       GetRepositoryScripts: ({ projectId }) => api(launches.scripts(projectId)),
       ListSkills: () =>
-        config.skills === undefined
-          ? Effect.succeed({ enabled: false, catalogRevision: null, skills: [] })
-          : skills((store) => listSkills(store)),
+        config.skills === undefined ? Effect.succeed({ enabled: false, skills: [] }) : skills((store) => listSkills(store)),
       FindSkills: ({ source, ref }) =>
         skills(() =>
           Effect.gen(function* () {
@@ -1995,24 +2028,16 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      SetSkillActive: ({ commandId, id, active }) =>
-        once(
-          commandId,
-          skills((store) =>
-            Effect.gen(function* () {
-              const install = yield* setActive(store.root, id, active)
-              yield* skillAct(commandId, id, active ? 'turned_on' : 'turned_off', { treeHash: install.treeHash })
-              return yield* describe(store.root, install)
-            }),
-          ),
-        ),
       UninstallSkill: ({ commandId, id }) =>
         once(
           commandId,
           skills((store) =>
             Effect.gen(function* () {
               const removed = yield* uninstall(store.root, id)
-              if (removed !== undefined) yield* skillAct(commandId, id, 'removed', versionSaid(removed))
+              if (removed !== undefined) {
+                yield* forgetSkillRoles(id).pipe(Effect.provideService(SqlClient.SqlClient, sql))
+                yield* skillAct(commandId, id, 'removed', versionSaid(removed))
+              }
             }),
           ),
         ),

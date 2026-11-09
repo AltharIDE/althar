@@ -159,7 +159,7 @@ folded review says the last fixes weren't reviewed.
   inks for light and dark, picked by `<picture>`, so **the seal goes only on
   GitHub**; GitLab's support for `<picture>` is uncertain. The folded review
   is plain HTML and goes on both.
-- **Settings › Reviews and pull requests** has "Review seal on pull
+- **Settings › Pull requests** has "Review seal on pull
   requests", on by default, with three looks to pick from (ring by default).
 - **Written once,** when the pull request opens; the hosts' connectors can't
   edit a description. Rounds after it opened don't change it. A failure to

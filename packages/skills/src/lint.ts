@@ -21,9 +21,8 @@ const textOf = (bytes: Uint8Array): string | null => {
 }
 
 /**
- * Text in a skill that undermines the no-push default. For the default catalog it rejects (such skills are
- * patched before they ship); for a person's own install it flags, and the boundary is Althar's push guard
- * and the harness's permission rules, not this lint.
+ * Text in a skill that undermines the no-push default. It flags (or rejects, where the caller asks) and the
+ * boundary is Althar's push guard and the harness's permission rules, not this lint.
  */
 export const lintPushes = (files: Files, level: Finding['level']): Finding[] => {
   const findings: Finding[] = []

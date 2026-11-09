@@ -1,10 +1,10 @@
-import { createRoute, useNavigate } from '@tanstack/react-router'
+import { createRoute, redirect, useNavigate } from '@tanstack/react-router'
 
 import { readFirst, reads } from '../../data/reads'
 import { rootRoute } from '../../root'
 import { PagePending } from '../../shared/Pending'
 import { useStart } from '../start/useStart'
-import { FIRST_SECTION, isSection } from './sections'
+import { FIRST_SECTION, sectionOf } from './sections'
 import { SettingsPage } from './SettingsPage'
 
 /** What the Settings tab's address can ask beyond its section: an agent to sign in again, as a signed-out agent's error asks. */
@@ -24,7 +24,7 @@ function Settings() {
   return (
     <SettingsPage
       start={start}
-      section={isSection(section) ? section : FIRST_SECTION}
+      section={sectionOf(section) ?? FIRST_SECTION}
       {...(signIn === undefined ? {} : { signIn })}
       onSection={(next) => void navigate({ to: '/settings/$section', params: { section: next } })}
       onTask={(threadId) => void navigate({ to: '/threads/$threadId', params: { threadId } })}
@@ -38,6 +38,11 @@ export const settingsRoute = createRoute({
   path: '/settings/$section',
   component: Settings,
   pendingComponent: PagePending,
+  // An old address opens where its settings went: /settings/reviews is /settings/pull-requests.
+  beforeLoad: ({ params: { section } }) => {
+    const moved = sectionOf(section)
+    if (moved !== undefined && moved !== section) throw redirect({ to: '/settings/$section', params: { section: moved }, replace: true })
+  },
   // What every section shows, and the skills too on their own section, read before it shows (ADR-014).
   loader: ({ params: { section }, context: { client, cache } }) => {
     const read = reads(client)

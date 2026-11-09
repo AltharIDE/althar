@@ -117,7 +117,8 @@ import { stopProcesses, treeOfCommand } from './stopping'
 import { outputText } from './reading'
 import { ToolServer } from './ToolServer'
 import { agentSaid, lostWords, startedAfreshWords, summarize } from './words'
-import { serversFor } from './agentTools'
+import { heldSkillsFor, serversFor, syncIo } from './agentTools'
+import { noteServerStatus } from './mcpHealth'
 
 /*
  * Agent sessions on a task's thread (docs/architecture/03). The runtime
@@ -945,10 +946,20 @@ export class Sessions extends Context.Service<
           ),
         )
       }
+      // What a session says of one of the person's servers, kept for Settings' tiles (mcpHealth.ts); Claude Code is who says it.
+      const heardServer = (event: SessionEvent) => {
+        const server = event._tag === 'Notice' ? event.server : undefined
+        if (event._tag !== 'Notice' || server === undefined) return Effect.void
+        return Effect.gen(function* () {
+          const io = yield* syncIo.pipe(Effect.provideService(RuntimeConfig, runtimeConfig))
+          const why = [event.title, event.description ?? ''].filter((words) => words.trim() !== '').join(' ')
+          if (io !== undefined) noteServerStatus(io, 'claude', server.name, server.status, why)
+        }).pipe(Effect.ignore)
+      }
       const heardPlan = (running: Running, event: SessionEvent) => {
         const windows = event._tag === 'PlanWindows' ? event.windows : event._tag === 'ContextUsage' ? event.planWindows : undefined
         return Effect.andThen(
-          heardCost(running, event),
+          Effect.andThen(heardServer(event), heardCost(running, event)),
           windows === undefined
             ? Effect.void
             : Effect.asVoid(Effect.forkIn(planUsage.heard(running.account.id, running.entry.definition.id, windows), sessionsScope)),
@@ -2341,9 +2352,16 @@ export class Sessions extends Context.Service<
           // Offline outside reviews omit executable plugins. Nothing goes in the repository, the account's home or
           // the person's own folders. A failure here costs the session its skills, not its start: the thread says so once it has
           // started, and what Althar didn't expect is reported, by the agent (ADR-047).
+          // The person's skills turned off for this role or this project (ADR-097): left out of Althar's selection, and held
+          // back in the agent itself where it loads them from its own folders, its plugins or the repository.
+          const turnedOff = yield* heldSkillsFor(toolRoleOf(thread), thread.projectId).pipe(
+            Effect.provideService(RuntimeConfig, runtimeConfig),
+            Effect.provideService(SqlClient.SqlClient, sessionsSql),
+          )
+          const heldSkills = turnedOff.agent.length === 0 ? {} : { heldSkills: turnedOff.agent }
           const setUp: { readonly skills: RunSkills | undefined; readonly failed?: string } =
             !offline && skillsConfig !== undefined && definition.skills !== null
-              ? yield* runSkills(skillsConfig, definition, sessionId, foldersOf(thread)).pipe(
+              ? yield* runSkills(skillsConfig, definition, sessionId, foldersOf(thread), turnedOff.names).pipe(
                   Effect.tap((run) => (run === undefined ? Effect.void : Scope.addFinalizer(scope, run.release.pipe(Effect.ignore)))),
                   Effect.map((run) => ({ skills: run })),
                   Effect.catchCause((cause) =>
@@ -2385,6 +2403,7 @@ export class Sessions extends Context.Service<
             ...(untrusted ? { untrusted } : {}),
             ...(untrusted && offline ? { offline } : {}),
             ...(skills === undefined ? {} : { skills: skills.folder }),
+            ...heldSkills,
           }
           const transport = entry.transport(cwdOf(thread), { ...accounts.env(account), [WORK]: work, ...guarded }, transportOptions)
           const processId = transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
@@ -2469,6 +2488,7 @@ export class Sessions extends Context.Service<
                   ? {}
                   : { sandbox: upFront }),
             ...(skills === undefined ? {} : { skills: skills.folder }),
+            ...heldSkills,
           }
           // Where the session's sandbox holds its shell commands, what it holds runs without being read (ADR-071).
           const hold = definition.holds?.(reads ? 'reader' : 'lead', sessionOptions)
@@ -2500,10 +2520,13 @@ export class Sessions extends Context.Service<
                     }),
               })
               // The person's own servers ticked for this role, whichever of their agents' settings they were found in (ADR-097).
-              const persons = yield* serversFor(toolRoleOf(thread), thread.projectId, connection.info.mcp.http).pipe(
-                Effect.provideService(RuntimeConfig, runtimeConfig),
-                Effect.provideService(SqlClient.SqlClient, sessionsSql),
-              )
+              // A repository's own `.mcp.json` is given only where the repository is the person's: an outside author's never loads its MCP config.
+              const persons = yield* serversFor(
+                toolRoleOf(thread),
+                thread.projectId,
+                connection.info.mcp.http,
+                !(thread.role === 'task' && thread.review?.outside === true),
+              ).pipe(Effect.provideService(RuntimeConfig, runtimeConfig), Effect.provideService(SqlClient.SqlClient, sessionsSql))
               const agent = yield* connection.newSession({
                 cwd: cwdOf(thread),
                 // The coordinator, a reviewer and a review's lead only read: in the agent's read-only mode where that still lets it call

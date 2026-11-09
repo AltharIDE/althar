@@ -267,7 +267,7 @@ are picked is in [agents.md](agents.md).
 
 ## Plan and review settings
 
-Two settings, under Plans and reviews:
+Two settings, under Settings › Tasks › Every task:
 
 - **The countdown before a plan starts on its own:** right away, 10 s, 25 s
   (the default) or 1 minute.
