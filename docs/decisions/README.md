@@ -10,7 +10,7 @@ matters, and says plainly what is decided but not built yet.
 | [Agents](agents.md) | ACP, which agents join, accounts, briefs and switching, how models are picked, keeping context small, plan usage and what a task used |
 | [The coordinator](coordinator.md) | Always on, one pool of tools with leads, directing leads, its copies, its notes and handover, moving tasks, clearing its chat |
 | [What agents may do](what-agents-may-do.md) | Allow everything, what asks, speaking for the person, the sandbox as the boundary, git's guard, the person's rules, the web, what stays and why |
-| [The person's setup](the-persons-setup.md) | The person's MCP servers, skills and sign-in in every role, and the skill catalog |
+| [The person's setup](the-persons-setup.md) | The person's MCP servers, skills and sign-in in every role; Althar ships no skills |
 | [Tasks](tasks.md) | What a task is, its kinds and card, questions, rounds and shipping again, Needs you, the small-change lane, plan settings, what agents hand back |
 | [Scheduling](scheduling.md) | Agents at once, what goes first, Running and Up next, lost connections, Althar's share of the load, automations |
 | [Workspaces and runs](workspaces-and-runs.md) | Worktree or Local, the branch a task works toward, setup, cleaning folders away, Run, running any branch or pull request, what agents leave running |
@@ -37,12 +37,27 @@ state, and add a dated line to that document's **Changes** list at its foot.
 There are no more numbered ADRs. A proposal that isn't decided yet lives in
 [`proposed/`](proposed/) until it is, and then folds into its area document.
 
+Proposals waiting now:
+
+- [A task is a conversation plus parts, changeable at any time](proposed/a-task-is-a-conversation-plus-parts.md):
+  the parts, as many changes and pull requests in a task as it needs, the
+  workspace moving up, reviews that run code, talking to a lead as plain
+  turns with a review only when the person ships, the review
+  after a merge in the same task, chats on Scratch and presets. It would fold
+  into [tasks](tasks.md), [workspaces and runs](workspaces-and-runs.md),
+  [reviews](reviews.md), [code hosts](code-hosts.md), [agents](agents.md)
+  and [what agents may do](what-agents-may-do.md).
+- [ADR-087](proposed/087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md):
+  a lead's helpers.
+- [ADR-103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md):
+  projects on a host, and work placed across pools.
+
 ## The old ADRs
 
 ADR-002 to ADR-102 were folded into the area documents and removed. The
 documents hold what is current; git history keeps the old texts, last
-under `docs/decisions/archive/` at commit `997f0e99b`. Two proposals,
-ADR-087 and ADR-103, are in [`proposed/`](proposed/).
+under `docs/decisions/archive/` at commit `997f0e99b`. Two of the old ADRs,
+ADR-087 and ADR-103, are still proposals in [`proposed/`](proposed/).
 
 Code and older docs cite decisions as `ADR-NNN`. This table resolves each
 one.
@@ -142,7 +157,7 @@ one.
 | 091 | A task works Local, in the person's own checkout, one task at a time, or in a worktree of its own: a project default the coordinator overrides per task; Althar asks before switching a checkout and never stashes or resets it | [workspaces-and-runs § Local](workspaces-and-runs.md#local) |
 | 092 | Conflicts and failed checks send a task back to work, one ask for both, on unless the person turned it off or stopped it; waiting on the person always says why | [code-hosts § Conflicts](code-hosts.md#conflicts) |
 | 093 | A task works toward a branch, the project's Work toward or its own from its plan card: it starts there, its pull request goes there, and keeping it current, conflicts, checks, diffs and the push guard go by it; release branches are made and brought back on the person's word | [workspaces-and-runs § The branch a task works toward](workspaces-and-runs.md#the-branch-a-task-works-toward) |
-| 094 | Skills are one store on the computer, from a curated catalog, given to each lead for its session | [the-persons-setup § Skills](the-persons-setup.md#skills) |
+| 094 | Skills are one store on the computer, of what the person added, given to each lead for its session (the curated catalog was dropped 8 Nov 2026) | [the-persons-setup § Skills](the-persons-setup.md#skills) |
 | 095 | Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them | [the-persons-setup § Skill and OpenSpec files in a change](the-persons-setup.md#skill-and-openspec-files-in-a-change) |
 | 096 | Runs show in the pill over the composer again, in a task's and the coordinator's, in the row the lead's processes have; ADR-090's removal of it is reversed | [workspaces-and-runs § Where runs show](workspaces-and-runs.md#where-runs-show) |
 | 097 | Agents work as the person's own: everything is allowed by default, their MCP servers, skills and sign-in in every role, and only what can't be undone asks; leads and the coordinator share one pool, the coordinator is always on with no way to turn it off, and tasks can also start without it | [what-agents-may-do § What asks](what-agents-may-do.md#what-asks), [the-persons-setup § In every role](the-persons-setup.md#in-every-role) |

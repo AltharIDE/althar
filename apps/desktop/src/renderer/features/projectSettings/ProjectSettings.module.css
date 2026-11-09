@@ -31,3 +31,11 @@
   min-width: 140px;
   max-width: 240px;
 }
+
+/* Under the pull request a finished task would open: why it stays on its branch, where it does. */
+.finishNote {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-3);
+}

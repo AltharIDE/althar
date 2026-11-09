@@ -40,7 +40,7 @@ test('a conflict its lead couldn’t resolve says why on its card and in its tas
     git(repo, 'commit', '-q', '-m', 'Main moves on')
 
     // On unless the person turned it off (ADR-092), every open task can be looked at again from there.
-    await projectSettings(page, 'General')
+    await projectSettings(page, 'Tasks')
     const conflicts = page.getByRole('switch', { name: 'Resolve merge conflicts automatically' })
     await expect(conflicts).toBeChecked()
     await page.getByRole('button', { name: 'Look for conflicts now' }).click()

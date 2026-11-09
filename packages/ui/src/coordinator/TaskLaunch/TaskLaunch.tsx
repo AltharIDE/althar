@@ -10,6 +10,7 @@ import { cssVars } from '../../lib/cssVars'
 import { cx } from '../../lib/cx'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { Button } from '../../primitives/Button/Button'
+import { CountdownRing } from '../../primitives/CountdownRing/CountdownRing'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { Menu, MenuRadioGroup, MenuRadioItem } from '../../primitives/Menu/Menu'
@@ -148,18 +149,6 @@ const whereLine = (worksIn: WorksIn, why: string | undefined, taken: string | nu
   const reason = why ?? (worksIn === WorksIn.Worktree && taken !== null ? t.localTaken(taken) : null)
   const note = worksIn === WorksIn.Local ? t.localNote(taken) : t.worktreeNote
   return reason === null ? note : `${reason.replace(/\.?$/, '.')} ${note}`
-}
-
-/** The countdown as a ring that empties. */
-function Ring({ left }: { left: number }) {
-  const r = 6.5
-  const c = 2 * Math.PI * r
-  return (
-    <svg className={s.ring} viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-      <circle cx="8" cy="8" r={r} className={s.ringBg} />
-      <circle cx="8" cy="8" r={r} className={s.ringFg} style={{ strokeDasharray: c, strokeDashoffset: c * (1 - left) }} />
-    </svg>
-  )
 }
 
 export interface TaskLaunchProps {
@@ -430,7 +419,7 @@ export function TaskLaunch({
             {estimate}
             {waiting.length > 0 && limited && <> · {t.alsoWaits(waiting.map((st) => st.label).join(', '), limited.until)}</>}
           </span>
-          {!held && <Ring left={share} />}
+          {!held && <CountdownRing left={share} />}
           {/* the countdown is not read out each second; that it starts on its own is said once, when it is first seen */}
           <span className={s.when}>{when}</span>
           <span aria-live="polite">{announced && !held && !started && <VisuallyHidden>{t.announce(wait)}</VisuallyHidden>}</span>

@@ -6,10 +6,13 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { useRefocus } from '../../lib/refocus'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
+import { Button } from '../../primitives/Button/Button'
 import { Field, FieldError } from '../../primitives/Field/Field'
+import type { HeadingLevel } from '../../primitives/Heading/Heading'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { Menu, MenuItem, MenuSeparator } from '../../primitives/Menu/Menu'
 import { Spinner } from '../../primitives/Spinner/Spinner'
+import { EmptyState } from '../EmptyState/EmptyState'
 import s from './Accounts.module.css'
 
 /*
@@ -109,6 +112,11 @@ export interface AccountsText {
   nameField: string
   emptyName: string
   add: string
+  /** With none yet: what will be here, and how one gets here. */
+  none: string
+  noneLine: (agent: string) => string
+  /** What signs the first one in, where it can start from here. */
+  firstSignIn: string
 }
 
 export const accountsText: AccountsText = {
@@ -134,6 +142,9 @@ export const accountsText: AccountsText = {
   nameField: 'Name',
   emptyName: 'Give it a name',
   add: 'Add an account',
+  none: 'No accounts yet',
+  noneLine: (agent) => `Sign in to ${agent}, and its work runs on that account.`,
+  firstSignIn: 'Sign in',
 }
 
 export type AccountsProps = RootProps<
@@ -152,6 +163,8 @@ export type AccountsProps = RootProps<
     onAdd?: () => void
     /** A sign-in under way, drawn in the list. While one is, there is no way to start another. */
     signIn?: AccountsSignIn
+    /** The rank of the heading that says there are none yet. */
+    headingLevel?: HeadingLevel
     text?: Partial<AccountsText>
   }
 >
@@ -166,6 +179,7 @@ export function Accounts({
   onRemove,
   onAdd,
   signIn,
+  headingLevel = 3,
   className,
   text,
   ...rest
@@ -179,6 +193,28 @@ export function Accounts({
       {signIn?.node}
     </li>
   )
+  // None yet, and none signing in: what will be here, and the press that signs the first one in, in place of the list.
+  if (accounts.length === 0 && signIn === undefined)
+    return (
+      <div className={cx(s.accounts, className)} {...rest}>
+        <EmptyState
+          variant="flush"
+          icon="agents"
+          title={t.none}
+          line={t.noneLine(agent)}
+          headingLevel={headingLevel}
+          {...(onAdd === undefined
+            ? {}
+            : {
+                actions: (
+                  <Button ref={add} size="small" onClick={onAdd}>
+                    {t.firstSignIn}
+                  </Button>
+                ),
+              })}
+        />
+      </div>
+    )
   return (
     <div className={cx(s.accounts, className)} {...rest}>
       <div className={s.top}>

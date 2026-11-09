@@ -8,6 +8,7 @@ import { RouterProvider } from '@tanstack/react-router'
 import { StrictMode, startTransition, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 
+import { API_VERSION_MISMATCH, ApiError } from '@althar/contracts'
 import { Launch, OpenFailed } from '@althar/ui/screens'
 
 import { receivePort } from './data/client'
@@ -15,6 +16,7 @@ import { openWindow } from './data/open'
 import { ServicesProvider, type StoreFailure } from './data/services'
 import { QuitDialog } from './features/quit/QuitDialog'
 import { ReportDialog } from './features/report/ReportDialog'
+import { ApiVersionMismatchView } from './features/update/ApiVersionMismatchView'
 import { ProfileInUseView } from './features/update/ProfileInUseView'
 import { UpdateStoppedView } from './features/update/UpdateStoppedView'
 import { followScheme } from './shared/scheme'
@@ -82,6 +84,7 @@ function Window() {
   useEffect(() => window.althar.onStartupStage?.(setStage), [])
   const [opened, setOpened] = useState<Awaited<typeof opening> | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
+  const [mismatch, setMismatch] = useState<ApiError | null>(null)
   const [storeFailure, setStoreFailure] = useState<StoreFailure | null>(null)
   useEffect(() => window.althar.onStoreFailed(setStoreFailure), [])
   useEffect(
@@ -89,12 +92,23 @@ function Window() {
       // Drawn as a transition, a little at a time, so the launch playing over it keeps every frame.
       void opening.then(
         (given) => startTransition(() => setOpened(given)),
-        (failure: unknown) => setFailed(failure instanceof Error && failure.message !== '' ? failure.message : String(failure)),
+        (failure: unknown) =>
+          failure instanceof ApiError && failure.reason === API_VERSION_MISMATCH
+            ? setMismatch(failure)
+            : setFailed(failure instanceof Error && failure.message !== '' ? failure.message : String(failure)),
       ),
     [],
   )
   if (storeFailure?.stopped === 'held') return <ProfileInUseView failure={storeFailure} host={window.althar} />
   if (storeFailure !== null) return <UpdateStoppedView failure={storeFailure} host={window.althar} />
+  if (mismatch?.runtimeVersion !== undefined)
+    return (
+      <ApiVersionMismatchView
+        windowVersion={mismatch.clientVersion ?? null}
+        runtimeVersion={mismatch.runtimeVersion}
+        host={window.althar}
+      />
+    )
   if (failed !== null) return <FailedOpen reason={failed} />
   return (
     <Launch

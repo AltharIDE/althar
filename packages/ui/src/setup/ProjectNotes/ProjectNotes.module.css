@@ -3,13 +3,6 @@
   display: grid;
   gap: 12px;
 }
-.none {
-  margin: 0;
-  outline: none;
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: var(--t-3);
-}
 
 .list {
   columns: 280px;
