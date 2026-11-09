@@ -230,8 +230,12 @@ describe('a server at an address', () => {
   })
 
   it('counts its tools from a JSON reply, with the headers it is given', async () => {
+    const before = seen.length
     expect(await probe(http('/json', { headers: { Authorization: 'Bearer abc' } }))).toEqual({ tools: 3 })
-    expect(seen.filter((one) => one.path === '/json').every((one) => one.auth === 'Bearer abc')).toBe(true)
+    // Only this call's requests: another test's `/json` calls stay in `seen` between repeats and shuffled orders.
+    const mine = seen.slice(before).filter((one) => one.path === '/json')
+    expect(mine.length).toBeGreaterThan(0)
+    expect(mine.every((one) => one.auth === 'Bearer abc')).toBe(true)
   })
 
   it('counts its tools from server-sent events, keeping the session it was given', async () => {
@@ -289,12 +293,18 @@ describe('a server at an address', () => {
 
   it('says an address that answered with no body, and gives a token by its variable', async () => {
     expect(await probe(http('/empty'))).toEqual({ tools: null, why: 'It answered with nothing.' })
+    const before = seen.length
     process.env.ALTHAR_PROBE_TOKEN = 'from-the-environment'
     try {
       expect(await probe(http('/json', { tokenVariable: 'ALTHAR_PROBE_TOKEN' }))).toEqual({ tools: 3 })
     } finally {
       delete process.env.ALTHAR_PROBE_TOKEN
     }
-    expect(seen.filter((one) => one.path === '/json').some((one) => one.auth === 'Bearer from-the-environment')).toBe(true)
+    expect(
+      seen
+        .slice(before)
+        .filter((one) => one.path === '/json')
+        .some((one) => one.auth === 'Bearer from-the-environment'),
+    ).toBe(true)
   })
 })
