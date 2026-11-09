@@ -259,7 +259,9 @@ export function Board({ children, label, folds, defaultFolds = NO_FOLDS, onFolds
       <FoldingContext.Provider
         value={{ rail: (lane) => rails.has(lane), fold: (lane, collapse) => setChosen(chose(chosen, lane, collapse)) }}
       >
-        <ListMotion within={ref}>{children}</ListMotion>
+        <ListMotion within={ref} steady>
+          {children}
+        </ListMotion>
       </FoldingContext.Provider>
     </section>
   )

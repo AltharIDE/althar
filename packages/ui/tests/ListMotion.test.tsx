@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { Activity, useRef, useState } from 'react'
+import { Activity, useInsertionEffect, useRef, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ListMotion } from '../src/lib/ListMotion'
@@ -63,8 +63,12 @@ function stubAnimations() {
   }
 }
 
-/** Where layout puts an item: its list across, its place down (the first narrower, where `narrowFirst`); a copy where it is laid; anything else, nowhere. */
+/**
+ * Where layout puts an item: its list across, its place down (the first narrower, where `narrowFirst`), from where the
+ * lists' room stands; the room itself (`data-room`) where `room` has it; a copy where it is laid; anything else, nowhere.
+ */
 const placed = (el: Element) => {
+  if (el.hasAttribute('data-room')) return new DOMRect(room.left, 0, room.width, 600)
   if (el.parentElement !== null && el.parentElement === layer()) {
     const { left, top, width, height } = (el as HTMLElement).style
     return new DOMRect(Number.parseFloat(left), Number.parseFloat(top), Number.parseFloat(width), Number.parseFloat(height))
@@ -73,9 +77,11 @@ const placed = (el: Element) => {
   if (list === null || !el.hasAttribute('data-move')) return new DOMRect(0, 0, 0, 0)
   const lists = [...(list.parentElement?.querySelectorAll('ol') ?? [])]
   const place = [...list.querySelectorAll('[data-move]')].indexOf(el)
-  return new DOMRect(lists.indexOf(list) * 300, place * 50, narrowFirst && place === 0 ? 200 : 280, 40)
+  return new DOMRect(room.left + lists.indexOf(list) * 300, place * 50, narrowFirst && place === 0 ? 200 : 280, 40)
 }
 
+/** Where the lists' room stands across the page, and how wide it is. */
+let room = { left: 0, width: 900 }
 let narrowFirst = false
 let reduced = false
 let visible = true
@@ -83,6 +89,7 @@ let visible = true
 beforeEach(() => {
   played = []
   live.clear()
+  room = { left: 0, width: 900 }
   narrowFirst = false
   reduced = false
   visible = true
@@ -103,11 +110,28 @@ afterEach(() => {
 })
 
 /** Lists of keys, each a list side by side. */
-function Lists({ lists, enter, still = false }: { lists: ReadonlyArray<ReadonlyArray<string>>; enter?: 'rise' | 'grow'; still?: boolean }) {
+function Lists({
+  lists,
+  enter,
+  still = false,
+  steady = false,
+  at,
+}: {
+  lists: ReadonlyArray<ReadonlyArray<string>>
+  enter?: 'rise' | 'grow'
+  still?: boolean
+  steady?: boolean
+  /** Where the lists' room stands once this is drawn: it moves in the same commit, as a divider dragged beside them has it. */
+  at?: typeof room
+}) {
   const ref = useRef<HTMLDivElement>(null)
+  // As the document changes, after the lists' places were taken.
+  useInsertionEffect(() => {
+    if (at !== undefined) room = at
+  })
   return (
-    <div ref={ref}>
-      <ListMotion within={ref} still={still} {...(enter === undefined ? {} : { enter })}>
+    <div ref={ref} data-room>
+      <ListMotion within={ref} still={still} steady={steady} {...(enter === undefined ? {} : { enter })}>
         {lists.map((keys, i) => (
           <ol key={i}>
             {keys.map((key) => (
@@ -183,6 +207,26 @@ describe('ListMotion', () => {
     c.finish()
     expect(item('c').style.zIndex).toBe('')
     expect(item('c').style.position).toBe('')
+  })
+
+  it('where its room is the page’s, moves nothing in an update that moved the list itself or changed its size', () => {
+    // A divider dragged beside a board, drawn in the same commit as the board: every card stands elsewhere on the page.
+    const { rerender } = render(<Lists lists={[['a', 'b'], ['c']]} steady />)
+    rerender(<Lists lists={[['a', 'b'], ['c']]} steady at={{ left: 120, width: 780 }} />)
+    expect(played).toEqual([])
+    // Nor where the board changed only its width, nor where its items changed places in that same commit.
+    rerender(<Lists lists={[['b', 'a'], ['c']]} steady at={{ left: 120, width: 700 }} />)
+    expect(played).toEqual([])
+    // Its room as it was, its items' own moves move them.
+    rerender(<Lists lists={[['a', 'b'], ['c']]} steady />)
+    expect(of(item('a'))[0]!.keyframes[0]).toEqual({ translate: '0px 50px' })
+  })
+
+  it('elsewhere, slides its items by as far as their room moved', () => {
+    // Where the room is the items' own, as a row of tabs that grows with them; the board's cards slid off their lanes so.
+    const { rerender } = render(<Lists lists={[['a', 'b']]} />)
+    rerender(<Lists lists={[['a', 'b']]} at={{ left: 120, width: 780 }} />)
+    expect(of(item('a'))[0]!.keyframes[0]).toEqual({ translate: '-120px 0px' })
   })
 
   it('lets a move on its way to the same place carry on, and turns one sent elsewhere from where it is', () => {
