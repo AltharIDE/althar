@@ -10,6 +10,7 @@
   body { background: #efeadf; position: relative; }
   canvas { position: absolute; left: 0; top: 0; mix-blend-mode: multiply; }
   .stock { mix-blend-mode: normal; }
+  .on-ink canvas:not(.stock) { mix-blend-mode: screen; }
 </style>
 <body>
   <!--
@@ -25,12 +26,16 @@
     const q = new URLSearchParams(location.search)
     const W = Number(q.get('w') ?? 1280), H = Number(q.get('h') ?? 400), LAYOUT = q.get('layout') ?? 'wide'
     const S = Number(q.get('scale') ?? 2) // drawn at this many times, the image's size
-    const STOCK = '#efeadf', COBALT = '#2b3bff', BLACK = '#1b1b20'
+    // ?print=ink prints light inks on a dark stock, for a page in dark mode; the plates then lighten, as ink darkens paper
+    const ON_INK = q.get('print') === 'ink'
+    const STOCK = ON_INK ? '#141417' : '#efeadf', COBALT = ON_INK ? '#5563ff' : '#2b3bff', BLACK = ON_INK ? '#efeadf' : '#1b1b20'
+    if (ON_INK) document.documentElement.classList.add('on-ink')
     const { SECTION, BORE } = window.ALTHAR_MARK
     const OFF = [1.6, -1.1] // how far the cobalt plate sits off the black
     const NAME = 'Althar'
-    const LINE1 = 'The project should persist.', LINE2 = 'The agents should not have to.'
-    const TAG = 'THE OPEN PROJECT LAYER FOR AGENTS'
+    // the two lines and the tag, unless the address gives its own (?line1=…&line2=…&tag=…)
+    const LINE1 = q.get('line1') ?? 'The project should persist.', LINE2 = q.get('line2') ?? 'The agents should not have to.'
+    const TAG = q.get('tag') ?? 'THE OPEN PROJECT LAYER FOR AGENTS'
 
     document.documentElement.style.width = document.body.style.width = W + 'px'
     document.documentElement.style.height = document.body.style.height = H + 'px'

@@ -704,7 +704,6 @@ export function ProjectView({
                   <TaskFace
                     className={s.face}
                     composer={composer}
-                    head={clearing.head}
                     // Beside the board, the conversation has no room to share: what it opens goes over the board instead.
                     {...(room === Room.Both ? {} : { panel: shown.workbench(null), panelWidth: shown.bench.width })}
                   >

@@ -40,6 +40,7 @@ import { contained } from './Failures'
 import { type CliTool, Connectors } from './Config'
 import { NotFound } from './errors'
 import { git, namedRemotes } from './git'
+import { reachedRemote } from './sshHosts'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
 import { Secrets, SecretsUnavailable } from './Secrets'
@@ -361,6 +362,12 @@ export class Connections extends Context.Service<
      * needing it again; null for a remote that names no host, such as a folder.
      */
     placeOf(remote: string): Effect.Effect<RemotePlace | null, unknown>
+    /**
+     * A remote with its host as Althar knows it, to look it up or match a
+     * link with: `github.com` for an SSH alias such as `github.com-work`
+     * (sshHosts.ts). Never kept, nor given to git.
+     */
+    reached(remote: string): Effect.Effect<string, unknown>
     /** What a link points at, and the connection that reaches it; null for a link no connection reaches. */
     resolve(link: string): Effect.Effect<({ readonly connectionId: string; readonly ref: LinkRef } & Adapters) | null, unknown>
     /** Every ready tracker: each connection's, with the workspace it reaches where it reaches one, for listing someone's issues. */
@@ -1213,7 +1220,12 @@ export class Connections extends Context.Service<
                         Effect.orElseSucceed(() => stored.map((url) => ({ name: null, url }))),
                       )
                     : stored.map((url) => ({ name: null as string | null, url }))
-                return { project: binding.project, path: binding.path, remotes }
+                // Each with its host as Althar knows it: an SSH alias of a known host is that host.
+                const knows = (host: string) => known.some((at) => hostnameOf(at.webUrl) === host)
+                const reachedUrls = yield* Effect.forEach(remotes, (remote) =>
+                  Effect.map(reachedRemote(remote.url, knows), (url) => ({ name: remote.name, url })),
+                )
+                return { project: binding.project, path: binding.path, remotes: reachedUrls }
               }),
             { concurrency: 4 },
           )
@@ -1626,13 +1638,20 @@ export class Connections extends Context.Service<
         return hosts
       })
 
+      /** A remote with its host as Althar knows it: as written where it knows that host, else where ssh's config takes it. */
+      const reached = (remote: string) =>
+        Effect.gen(function* () {
+          const known = yield* knownHosts
+          return yield* reachedRemote(remote, (host) => known.has(host))
+        })
+
       /** A connection's code host, where it is on a remote's host. */
       const hostAt = (row: Row, ref: RemoteRef) => (hostnameOf(row.webUrl) === ref.host ? adaptersOf(row).host : undefined)
 
       const hostOf = (remotes: ReadonlyArray<string>, options: { readonly fromCli?: boolean } = {}) =>
         Effect.gen(function* () {
           const all = yield* rows
-          const refs = remotes.flatMap((remote) => {
+          const refs = (yield* Effect.forEach(remotes, reached)).flatMap((remote) => {
             const ref = parseRemote(remote)
             return ref === null ? [] : [ref]
           })
@@ -1657,7 +1676,7 @@ export class Connections extends Context.Service<
 
       const placeOf = (remote: string) =>
         Effect.gen(function* () {
-          const ref = parseRemote(remote)
+          const ref = parseRemote(yield* reached(remote))
           if (ref === null) return null
           const here = (yield* rows).filter((row) => hostnameOf(row.webUrl) === ref.host && infoOf(row.product)?.host === true)
           const row = here.find((candidate) => candidate.state === 'ready') ?? here[0]
@@ -1741,6 +1760,7 @@ export class Connections extends Context.Service<
         adapters: (connectionId) => provide(Effect.map(rowOf(connectionId), (row) => ({ ...adaptersOf(row), info: toInfo(row) }))),
         hostOf: (remotes, options) => provide(hostOf(remotes, options)),
         placeOf: (remote) => provide(placeOf(remote)),
+        reached: (remote) => provide(reached(remote)),
         resolve: (link) => provide(resolve(link)),
         trackers: provide(
           Effect.map(rows, (all) =>

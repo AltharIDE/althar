@@ -1,0 +1,41 @@
+/* Office hours: the night window with the invitation and the booking in it;
+   on paper under it, examples of things to bring, then the few things worth
+   knowing. The buttons are the changelog's on the dark: white with the
+   light's cobalt, and a hairline. */
+
+.page { min-height: 100vh; background: var(--n-2); color: var(--t-1); }
+.page :focus-visible { outline: 2px solid var(--live); outline-offset: 3px; }
+
+.window { padding-bottom: 196px; }
+
+.ways { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 30px; }
+.primary, .secondary { display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 17px; border-radius: 8px; font: 600 14.5px var(--font); text-decoration: none; white-space: nowrap; }
+.primary { background: #fff; color: var(--live); }
+.primary:hover { background: #eef0ff; }
+.secondary { color: #fff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28); }
+.secondary:hover { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5); }
+
+/* ---- on paper ---- */
+
+.sheet { box-sizing: border-box; display: grid; gap: 72px; max-width: calc(860px + 2 * var(--gut)); margin: 0 auto; padding: 88px var(--gut) 128px; }
+.part { scroll-margin-top: 72px; }
+.h2 { margin: 0 0 22px; font-family: 'Inter Display', var(--display); font-size: 28px; line-height: 1.1; letter-spacing: -0.035em; font-weight: 640; }
+
+/* The topics: two columns of lines on hairlines, read down the left then the right; one column on a phone. */
+.topics { columns: 2; column-gap: 40px; margin: 0; padding: 0; list-style: none; font-size: 15.5px; line-height: 1.4; }
+.topics li { break-inside: avoid; padding: 11px 0; border-top: 1px solid var(--line-2); text-wrap: pretty; }
+
+.list { margin: 0; padding: 0; list-style: none; font-size: 16px; line-height: 1.45; }
+.list li { position: relative; padding-left: 22px; margin: 0 0 12px; }
+.list li::before { content: ''; position: absolute; left: 4px; top: 0.62em; width: 5px; height: 5px; border-radius: 50%; background: var(--live); }
+
+@media (max-width: 760px) {
+  .topics { columns: 1; }
+  .sheet { gap: 56px; padding: 56px var(--gut) 96px; }
+}
+
+@media (max-width: 640px) {
+  .window { padding-bottom: 150px; }
+  .ways { display: grid; width: 100%; gap: 10px; margin-top: 24px; }
+  .primary, .secondary { justify-content: center; height: 48px; }
+}

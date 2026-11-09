@@ -15,7 +15,7 @@ import { type Failure, Failures, failuresLayer } from '../src/Failures'
 import { onlyReads, Sessions } from '../src/Sessions'
 import { listSkills, runSkills } from '../src/Skills'
 import { recorder, transcript } from '../src/threads'
-import { fakeAgents, items, launches, notices, runtime, sessionMetas, task, turns, until } from './support'
+import { fakeAgents, items, launches, notices, runtime, sessionMetas, sessionsAsked, task, turns, until } from './support'
 
 /*
  * Althar-selected skills reach a task's lead on every agent the registry says how to give them to, from Althar's own
@@ -112,6 +112,11 @@ describe('skills for a task’s lead', () => {
         assert.isTrue(plugin.startsWith(join(skills.root, 'runs')), plugin)
         assert.include(readFileSync(join(plugin, 'skills', 'alpha', 'SKILL.md'), 'utf8'), 'name: alpha')
         assert.include(readFileSync(join(plugin, '.claude-plugin', 'plugin.json'), 'utf8'), '"name": "althar"')
+        // Its session is asked to load that folder as a local plugin, as Claude Code's own session options name it.
+        const asked = sessionsAsked.findLast((one) => one.agentId === 'claude-code')?.params._meta as
+          | { claudeCode?: { options?: { plugins?: unknown } } }
+          | undefined
+        assert.deepStrictEqual(asked?.claudeCode?.options?.plugins, [{ type: 'local', path: plugin }])
         // Beta needs subagents, which Claude Code has.
         assert.isTrue(existsSync(join(plugin, 'skills', 'beta', 'SKILL.md')))
         // Never in the worktree: no skill root, no copy of a skill file in it.
@@ -144,6 +149,8 @@ describe('skills for a task’s lead', () => {
         const [run = ''] = readdirSync(join(skills.root, 'runs'))
         const folder = join(skills.root, 'runs', run, 'codex')
         assert.include(readFileSync(join(folder, '.agents', 'skills', 'alpha', 'SKILL.md'), 'utf8'), 'name: alpha')
+        // Its session is asked to add that folder, whose `.agents/skills` codex-acp makes one of Codex's skill roots.
+        assert.deepStrictEqual(sessionsAsked.findLast((one) => one.agentId === 'codex')?.params.additionalDirectories, [folder])
         // Beta needs subagents, which Codex isn't counted on for: left out, and the thread says so.
         assert.isFalse(existsSync(join(folder, '.agents', 'skills', 'beta')))
         const said = yield* notices(created.threadId)
@@ -178,6 +185,10 @@ describe('skills for a task’s lead', () => {
         const folder = launches.at(-1)?.options?.skills ?? ''
         assert.isTrue(folder.startsWith(join(skills.root, 'runs')), folder)
         assert.deepStrictEqual(readdirSync(folder).toSorted(), ['alpha', 'beta'])
+        // The fake runs in this process, so what is read is the environment `Agents.fromRegistry` composes from this launch's
+        // arguments, not one a process received: OpenCode's own config, with that folder among its skills' paths.
+        const config = JSON.parse(launches.at(-1)?.launched?.OPENCODE_CONFIG_CONTENT ?? '{}') as { skills?: { paths?: Array<string> } }
+        assert.include(config.skills?.paths ?? [], folder)
         yield* sessions.stop(created.threadId)
         assert.isFalse(existsSync(folder))
       }),
@@ -261,7 +272,7 @@ describe('skills for a task’s lead', () => {
     ),
   )
 
-  it.live('gives the coordinator none, on any agent', () =>
+  it.live('gives the coordinator selected skills on every supported agent', () =>
     withStore({ alpha: skill('alpha') }, {}, (skills) =>
       Effect.gen(function* () {
         const sessions = yield* Sessions
@@ -270,11 +281,17 @@ describe('skills for a task’s lead', () => {
           yield* sessions.start({ threadId: project.coordinatorThreadId, agentId })
           if (agentId === 'claude-code') {
             assert.strictEqual(sessionMetas.at(-1)?.role, 'reader')
-            assert.isUndefined(sessionMetas.at(-1)?.options?.skills)
+            assert.isString(sessionMetas.at(-1)?.options?.skills)
           }
-          assert.isUndefined(launches.at(-1)?.options?.skills, agentId)
-          assert.isFalse(existsSync(join(skills.root, 'runs')) && readdirSync(join(skills.root, 'runs')).length > 0, agentId)
-          assert.deepStrictEqual(yield* givenTo(project.coordinatorThreadId), [], agentId)
+          assert.isTrue(
+            skillFilesUnder(skillsFolderOf(agentId, skills.root)).some((path) => path.endsWith(join('alpha', 'SKILL.md'))),
+            agentId,
+          )
+          assert.deepStrictEqual(
+            (yield* givenTo(project.coordinatorThreadId)).map(({ id }) => id),
+            ['alpha'],
+            agentId,
+          )
           yield* sessions.stop(project.coordinatorThreadId)
         }
       }),
@@ -418,6 +435,7 @@ describe('what a lead could see', () => {
           source: 'runtime',
           severity: 'info',
           role: 'skills',
+          lead: 'Codex',
           title: 'Codex could see 2 skills',
           skills: [
             { name: 'mine', path: '/h/.agents/skills/mine/SKILL.md', from: 'person' },
@@ -469,6 +487,84 @@ describe('what a lead could see', () => {
         (yield* lines(where.threadId)).map((line) => line.title),
         ['Codex could see a skill', 'OpenCode could see no skills'],
       )
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('says what a lead could see once across sessions, and later only which names changed', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const sql = yield* SqlClient.SqlClient
+      const session = (n: number) =>
+        Effect.gen(function* () {
+          const id = `sess_${String(n).repeat(32)}`
+          yield* sql`INSERT INTO provider_sessions (id, project_id, thread_id, agent_id, account_id, controller_generation, state, started_at)
+            SELECT ${id}, project_id, thread_id, agent_id, account_id, controller_generation, 'lost', started_at FROM provider_sessions WHERE id = ${where.sessionId}`
+          return { ...where, sessionId: id }
+        })
+      yield* recorder(where).record(seen('a', 'b'))
+      const second = yield* session(1)
+      yield* recorder(second).record(seen('a', 'b'))
+      const third = yield* session(2)
+      yield* recorder(third).record(seen('b', 'a'))
+      assert.deepStrictEqual(
+        (yield* lines(where.threadId)).map((line) => line.title),
+        ['Codex could see 2 skills'],
+      )
+      // A fourth hears of one more, after a shorter list at first: one short line, naming it.
+      const fourth = yield* session(3)
+      yield* recorder(fourth).record(seen('a'))
+      yield* recorder(fourth).record(seen('a', 'b', 'deploy'))
+      assert.deepStrictEqual(
+        (yield* lines(where.threadId)).map((line) => line.title),
+        ['Codex could see 2 skills', 'Codex can now also see deploy'],
+      )
+      // The same names, spelled with another path, give no line but the marks follow the newest spelling.
+      const spelled = yield* session(7)
+      yield* recorder(spelled).record({
+        _tag: 'SkillsSeen',
+        skills: ['a', 'b', 'deploy'].map((name) => ({ name, path: `/other/${name}/SKILL.md` })),
+      })
+      yield* recorder(spelled).record({
+        _tag: 'ToolCall',
+        toolCallId: 'moved',
+        title: 'moved',
+        kind: 'read',
+        status: 'completed',
+        locations: [{ path: '/other/a/SKILL.md' }],
+      })
+      assert.deepStrictEqual((yield* toolContent(where.threadId, 'moved'))?.skill, { names: ['a'], reported: false })
+      // One that hears of less says what it no longer sees; its own line is changed, not added to, as it hears more.
+      const fifth = yield* session(4)
+      yield* recorder(fifth).record(seen('a'))
+      yield* recorder(fifth).record(seen('a', 'b'))
+      assert.deepStrictEqual(
+        (yield* lines(where.threadId)).map((line) => [line.title, line.hidden === true]),
+        [
+          ['Codex could see 2 skills', false],
+          ['Codex can now also see deploy', false],
+          ['Codex no longer sees deploy', false],
+        ],
+      )
+      // And one that lets it go again, ending where the thread said, leaves no line to show.
+      const sixth = yield* session(5)
+      yield* recorder(sixth).record(seen('a', 'b', 'deploy'))
+      yield* recorder(sixth).record(seen('a', 'b'))
+      assert.strictEqual((yield* lines(where.threadId)).filter((line) => line.hidden !== true).length, 3)
+      // After that hidden line, a session spelling the same names with other paths still gets its marks.
+      const seventh = yield* session(8)
+      yield* recorder(seventh).record({
+        _tag: 'SkillsSeen',
+        skills: ['a', 'b'].map((name) => ({ name, path: `/moved/${name}/SKILL.md` })),
+      })
+      yield* recorder(seventh).record({
+        _tag: 'ToolCall',
+        toolCallId: 'moved-again',
+        title: 'moved again',
+        kind: 'read',
+        status: 'completed',
+        locations: [{ path: '/moved/a/SKILL.md' }],
+      })
+      assert.deepStrictEqual((yield* toolContent(where.threadId, 'moved-again'))?.skill, { names: ['a'], reported: false })
     }).pipe(Effect.provide(runtime())),
   )
 

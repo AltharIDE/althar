@@ -1,7 +1,7 @@
 # Agents work as the person's own, and only what can't be undone asks
 
 > **Decided, 6 November 2026,** and recorded in
-> [ADR-097](../decisions/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md),
+> [ADR-097](../decisions/what-agents-may-do.md#what-asks),
 > which supersedes the restrictive parts of the ADRs it lists. This is the
 > phased plan to build it, not architecture. Delete this file when the last
 > phase ships.
@@ -220,7 +220,7 @@ lasted of it).
   defaults. Its session starts when the person talks to it, or news it acts
   on wakes it. With the task "Small changes finish in minutes, not 40".
 - **Settings, as the person changes them** (ADR-097's
-  [Settings](../decisions/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md#settings)).
+  [Settings](../decisions/what-agents-may-do.md#what-asks)).
   One pair, `read_settings` and `change_settings`, in both roles, beside
   `keep_note`, `set_run_command`, `keep_run` and the automation tools
   (`Launches.ts:1151-1183`, `Coordinator.ts`), which stay.
@@ -293,6 +293,10 @@ stays the person's; a test reads the screens' calls against it.
 
 ### 3. Host tools
 
+The environment part (gh, glab, git credential helpers and the SSH agent)
+is implemented in the [7 November limits sweep](no-arbitrary-limits-audit.md).
+The remaining host-tool changes below build on it.
+
 - **The person's own sign-in.** Stop taking `gh`, `glab`, git's credential
   helpers and the SSH agent out of agents' environment (`Config.ts:329-386`,
   `process.ts`'s allowlist), behind a project switch, on by default. The
@@ -335,6 +339,12 @@ stays the person's; a test reads the screens' calls against it.
 
 ### 4. Reviews that run things
 
+> **Taken into phase 5** by
+> [a task is a conversation plus parts](../decisions/proposed/a-task-is-a-conversation-plus-parts.md#running-someone-elses-pull-request),
+> which supersedes this list where they differ. There, "run it" asks how
+> far to trust the code: Run safely, offline in the sandbox as below, or
+> Trust fully, with the recorded setup and the network on.
+
 - **A task's own review step** (ADR-071), moved here from phase 2: its
   reviewer gets a copy it can install in, with the project's setup
   replayed, and `install_dependencies` and `run_project`, to run the task's
@@ -362,6 +372,15 @@ stays the person's; a test reads the screens' calls against it.
 
 ### 5. The task as parts
 
+> **Superseded** by
+> [a task is a conversation plus parts](../decisions/proposed/a-task-is-a-conversation-plus-parts.md#the-parts)
+> where they differ. It has five parts, not three: Workspace, Checked by
+> (who reviews the task's own work), Reviewing (the pull requests it
+> reviews, which this list puts in Outputs), Outputs and Access. Each
+> changes at any time, by the person, the lead or the coordinator, and
+> only running an outside author's code and a removal that would lose
+> something wait for the person's word.
+
 ADR-035 already reads a task's kind from what it has. The next step is
 letting it have any mix of parts, each added or dropped on the person's
 word. Then no kind needs a hand-written path to another.
@@ -382,22 +401,22 @@ word. Then no kind needs a hand-written path to another.
 - Merging two tasks into one stays out (6 Nov).
 
 This phase is the largest. It changes ADR-035, ADR-052 and the change sets
-model (`change_sets`, `repository_changes`), so it gets an ADR of its own
-once phases 1 to 4 have shown what it needs.
+model (`change_sets`, `repository_changes`), so it gets an ADR of its own:
+[a task is a conversation plus parts](../decisions/proposed/a-task-is-a-conversation-plus-parts.md),
+proposed on 8 November. It takes in phase 4: a review that runs code is a
+review whose workspace moved up. It also makes talking to a lead quick: a
+message is a turn with no review, and a tweak is reviewed once, when the
+person ships it. And a task holds as many changes as it needs, each with
+its own branch, worktree and pull request. Once that ADR is accepted, all
+of it is built together.
 
 ## What stays, and why
 
-| Kept | Why |
-|---|---|
-| The OS sandbox writes only the worktree, temp and tool caches | It's why commands needn't ask |
-| The irreversible list asks in every mode, never judged | Lost work, a merge, a publish or a word to others can't be taken back |
-| Git guard hooks on pushes | A script can hide a force push |
-| Asked-for tools only on the person's own message (ADR-081); a command or an MCP call on the list on a card | News and PR text can't merge, publish or post, as far as Althar sees the call |
-| Secret files and the keychain are refused | Leaked credentials can't be taken back |
-| No agent answers its own permission request, approves its own work, or loosens what asks without the person's words | Otherwise none of the above holds |
-| An outside author's code doesn't run without the person's word, and none of its repository's settings or hooks load | A stranger's code on the person's machine |
-| Cost caps (40 turns, 6 hours, review rounds, helpers' counts) | Money, not safety |
-| The coordinator changes no code | Tidiness: a change is a task, with a branch, a review and a record |
+The table of what stays, and why, is kept in
+[What agents may do § What stays, and why](../decisions/what-agents-may-do.md#what-stays-and-why),
+where it is the current list. It adds two rows by name: running or
+resuming an automation goes on the person's word, and a lead's helpers push
+nothing.
 
 ## The docs this changed
 

@@ -21,7 +21,7 @@ import { type PlanStep, Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { actionsOf, Tasks } from '../src/Tasks'
-import { fakeConnectors, HOST, hosted, repository, runtime, turns, until } from './support'
+import { fakeConnectors, HOST, hosted, repository, runtime, turns, until, withWork } from './support'
 
 /** Windows, where what some tests stand on isn't (each says what). */
 const windows = process.platform === 'win32'
@@ -62,6 +62,10 @@ const planned = (
       envelope: yield* Runtime.envelope('task.create', {}),
       projectId: project.projectId,
       title,
+      description: withWork(
+        title,
+        steps.some((step) => step.key === 'review'),
+      ),
       draft: true,
     })
     const [person] = yield* sql<{ id: string }>`SELECT id FROM actors WHERE kind = 'person'`

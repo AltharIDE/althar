@@ -106,12 +106,14 @@ describe('a screenshot drawn offscreen', () => {
   })
 
   it('lets the page go only where the shot may be of, and says where it went instead of loading', async () => {
-    const window = windowOf({ fails: new Error('ERR_ABORTED (-3)'), strays: 'https://example.com/' })
+    const window = windowOf({ fails: new Error('ERR_ABORTED (-3)'), strays: 'file:///etc/passwd' })
     await expect(takeScreenshot({ ...shot, origins: ['http://studio.lan:3000'] }, window.open)).rejects.toThrow(
-      "the page went on to https://example.com/, which isn't served on this computer, so Althar didn't follow it",
+      "the page went on to file:///etc/passwd, which isn't an HTTP web page, so Althar didn't follow it",
     )
     expect(window.closed()).toBe(1)
     for (const url of [
+      'https://example.com/',
+      'http://studio.lan:4000/',
       'http://localhost:6006/',
       'http://127.0.0.1/a',
       'http://studio.lan:3000/b',
@@ -120,8 +122,7 @@ describe('a screenshot drawn offscreen', () => {
       'data:text/html,hi',
     ])
       expect(window.allows(url), url).toBe(true)
-    for (const url of ['https://example.com/', 'http://studio.lan:4000/', 'file:///etc/passwd', 'ftp://localhost/'])
-      expect(window.allows(url), url).toBe(false)
+    for (const url of ['file:///etc/passwd', 'ftp://localhost/']) expect(window.allows(url), url).toBe(false)
   })
 })
 
