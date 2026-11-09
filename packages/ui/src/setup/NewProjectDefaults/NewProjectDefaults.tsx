@@ -1,32 +1,46 @@
-import { Select } from '../../primitives/Select/Select'
+import type { ReactNode } from 'react'
+
+import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Select } from '../../primitives/Select/Select'
 import { SettingList, SettingRow, SettingSwitch } from '../Preferences/Preferences'
 
 /*
- * What the rules of a project start with when it is made, as four rows of the
- * Settings tab: who answers what no rule keeps, what an account running out
- * does, whether work tries an agent's next account first, and how a task
- * ends. Only a project made from now on starts with them; every project
- * changes its own on its rules screen, and one made earlier keeps what it
- * has. Allowing everything is a switch a project turns on for itself.
+ * What the rules of a project start with when it is made, as rows of the
+ * Settings tab: how a task ends, what it pushes, posts, resolves and moves
+ * along, what an account running out does and whether work tries an agent's
+ * next account first. Only a project made from now on starts with them; every
+ * project changes its own in its Tasks, and one made earlier keeps what it
+ * has. Allowing everything is the default of every project, so no request is
+ * asked about here. Where a project's own value is another, the row says so
+ * under its line (`differs`).
  */
 
-/** Who answers what no rule keeps. */
-export type NewPermissions = 'rules' | 'coordinator' | 'ask'
 /** What happens to the work when an agent's account runs out. */
 export type NewUsageLimit = 'move' | 'wait' | 'ask'
 /** How a task ends when its plan doesn't say. */
 export type NewTaskEnd = 'draft' | 'ready' | 'none'
 
 export interface NewProjectDefaultsValue {
-  permissions: NewPermissions
+  end: NewTaskEnd
+  pushCommits: boolean
+  postScreenshots: boolean
+  resolveConflicts: boolean
+  moveIssues: boolean
   usageLimit: NewUsageLimit
   rotateAccounts: boolean
-  end: NewTaskEnd
 }
 
 /** What a project starts with where nothing was chosen, which a row goes back to. */
-export const newProjectDefault: NewProjectDefaultsValue = { permissions: 'rules', usageLimit: 'move', rotateAccounts: false, end: 'draft' }
+export const newProjectDefault: NewProjectDefaultsValue = {
+  end: 'draft',
+  pushCommits: true,
+  postScreenshots: false,
+  resolveConflicts: true,
+  moveIssues: true,
+  usageLimit: 'move',
+  rotateAccounts: false,
+}
 
 interface Worded {
   readonly label: string
@@ -34,32 +48,18 @@ interface Worded {
 }
 
 export interface NewProjectDefaultsText {
-  permissions: { title: string; options: Record<NewPermissions, Worded> }
+  end: { title: string; options: Record<NewTaskEnd, Worded> }
+  pushCommits: { title: string; note: string }
+  postScreenshots: { title: string; note: string }
+  resolveConflicts: { title: string; note: string }
+  moveIssues: { title: string; note: string }
   usageLimit: { title: string; options: Record<NewUsageLimit, Worded> }
   rotate: { title: string; note: string }
-  end: { title: string; options: Record<NewTaskEnd, Worded> }
   /** Goes back to what a project starts with, named. */
   reset: (label: string) => string
 }
 
 export const newProjectDefaultsText: NewProjectDefaultsText = {
-  permissions: {
-    title: 'Permission requests',
-    options: {
-      rules: { label: 'Allow, except what you keep', note: '“Always ask me” waits for you; “Never” is refused.' },
-      coordinator: { label: 'The coordinator decides', note: 'What it can’t decide waits for you.' },
-      ask: { label: 'Ask me', note: 'Anything beyond the task’s own files waits for you.' },
-    },
-  },
-  usageLimit: {
-    title: 'When an account runs out',
-    options: {
-      move: { label: 'Move to the strongest model with usage left', note: 'With none left, the work waits for the reset.' },
-      wait: { label: 'Wait for the reset', note: 'The work runs again at the reset.' },
-      ask: { label: 'Ask me', note: 'Move it to a model with usage left, or wait for the reset.' },
-    },
-  },
-  rotate: { title: 'Try an agent’s other accounts first', note: 'Before the limit applies.' },
   end: {
     title: 'When a task is done',
     options: {
@@ -68,27 +68,67 @@ export const newProjectDefaultsText: NewProjectDefaultsText = {
       none: { label: 'Push the branch only', note: 'You open the pull request when you want one.' },
     },
   },
+  pushCommits: { title: 'Push the lead’s commits automatically', note: 'If someone else pushed there, it waits for you.' },
+  postScreenshots: { title: 'Post screenshots to pull requests automatically', note: '' },
+  resolveConflicts: { title: 'Resolve merge conflicts automatically', note: '' },
+  moveIssues: { title: 'Move issues along with their tasks', note: 'To In Progress, In Review, then Done.' },
+  usageLimit: {
+    title: 'When an account runs out',
+    options: {
+      move: { label: 'Move to the strongest model with usage left', note: 'With none left, the work waits for the reset.' },
+      wait: { label: 'Wait for the reset', note: 'The work runs again at the reset.' },
+      ask: { label: 'Ask me', note: 'Move it to a model with usage left, or wait for the reset.' },
+    },
+  },
+  rotate: { title: 'Try an agent’s other accounts first', note: '' },
   reset: (label) => `Use ${label}`,
+}
+
+/** Each row's glyph. */
+const GLYPHS: Readonly<Record<keyof NewProjectDefaultsValue, IconName>> = {
+  end: 'pr',
+  pushCommits: 'up',
+  postScreenshots: 'image',
+  resolveConflicts: 'conflict',
+  moveIssues: 'issues',
+  usageLimit: 'load',
+  rotateAccounts: 'reload',
 }
 
 export interface NewProjectDefaultsProps {
   value: NewProjectDefaultsValue
   /** What changed; the rest stays. */
   onChange: (change: Partial<NewProjectDefaultsValue>) => void
+  /** Under a row's line, where projects have another value: who has what, and the way to bring them in line (`DifferingProjects`). */
+  differs?: Partial<Record<keyof NewProjectDefaultsValue, ReactNode>>
   text?: Partial<NewProjectDefaultsText>
 }
 
-/** The four choices a new project's rules start from. */
-export function NewProjectDefaults({ value, onChange, text }: NewProjectDefaultsProps) {
+/** The rows a new project's rules start from. */
+export function NewProjectDefaults({ value, onChange, differs = {}, text }: NewProjectDefaultsProps) {
   const t = { ...newProjectDefaultsText, ...text }
-  /** A row with a choice of words at the end; its line says what the choice does, and, away from the start, the way back. */
-  const row = <V extends string>(key: 'permissions' | 'usageLimit' | 'end', title: string, options: Record<V, Worded>) => {
+  const glyph = (key: keyof NewProjectDefaultsValue) => <Icon name={GLYPHS[key]} size={15} />
+  /** A line: what the choice does, and, away from the start, the way back; then what projects have instead. */
+  const note = (key: keyof NewProjectDefaultsValue, line: ReactNode) => {
+    const other = differs[key]
+    return line === '' && other === undefined ? undefined : (
+      <>
+        {line}
+        {line !== '' && other !== undefined && <br />}
+        {other}
+      </>
+    )
+  }
+  /** A row with a choice of words at the end. */
+  const row = <V extends string>(key: 'end' | 'usageLimit', title: string, options: Record<V, Worded>) => {
     const chosen = value[key] as string as V
     const start = newProjectDefault[key] as string as V
     return (
       <SettingRow
         title={title}
-        note={
+        glyph={glyph(key)}
+        note={note(
+          key,
           <>
             {options[chosen].note}
             {chosen !== start && (
@@ -97,8 +137,8 @@ export function NewProjectDefaults({ value, onChange, text }: NewProjectDefaults
                 <LinkButton onClick={() => onChange({ [key]: start })}>{t.reset(options[start].label)}</LinkButton>
               </>
             )}
-          </>
-        }
+          </>,
+        )}
       >
         {() => (
           <Select<V>
@@ -112,17 +152,27 @@ export function NewProjectDefaults({ value, onChange, text }: NewProjectDefaults
       </SettingRow>
     )
   }
+  const toggle = (
+    key: 'pushCommits' | 'postScreenshots' | 'resolveConflicts' | 'moveIssues' | 'rotateAccounts',
+    words: { title: string; note: string },
+  ) => (
+    <SettingSwitch
+      title={words.title}
+      glyph={glyph(key)}
+      {...(note(key, words.note) === undefined ? {} : { note: note(key, words.note) })}
+      checked={value[key]}
+      onChange={(next) => onChange({ [key]: next })}
+    />
+  )
   return (
     <SettingList>
-      {row('permissions', t.permissions.title, t.permissions.options)}
-      {row('usageLimit', t.usageLimit.title, t.usageLimit.options)}
-      <SettingSwitch
-        title={t.rotate.title}
-        note={t.rotate.note}
-        checked={value.rotateAccounts}
-        onChange={(rotateAccounts) => onChange({ rotateAccounts })}
-      />
       {row('end', t.end.title, t.end.options)}
+      {toggle('pushCommits', t.pushCommits)}
+      {toggle('postScreenshots', t.postScreenshots)}
+      {toggle('resolveConflicts', t.resolveConflicts)}
+      {toggle('moveIssues', t.moveIssues)}
+      {row('usageLimit', t.usageLimit.title, t.usageLimit.options)}
+      {toggle('rotateAccounts', t.rotate)}
     </SettingList>
   )
 }

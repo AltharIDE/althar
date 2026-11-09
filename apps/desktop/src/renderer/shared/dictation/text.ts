@@ -1,4 +1,6 @@
-import type { DictationTrayText } from '@althar/ui'
+import type { DictationSettingsText, DictationTrayText } from '@althar/ui'
+
+import { device } from '../device'
 
 /*
  * Dictation's words for each system. The kit's own are the Mac's; Windows
@@ -28,6 +30,22 @@ export const trayText = (platform: string): Partial<DictationTrayText> => {
   if (platform === 'win32') return windows
   if (platform === 'darwin') return {}
   return linux
+}
+
+/** The Settings section's words for each system: the same names the tray uses, and this computer by its own name. */
+export const settingsText = (platform: string): Partial<DictationSettingsText> => {
+  const here = platform === 'win32' ? 'this PC' : platform === 'darwin' ? 'this Mac' : device.this
+  const base: Partial<DictationSettingsText> = {
+    absent: (name, size) => `${name} isn’t on ${here}. Dictating downloads it first (${size}).`,
+    partial: (name, onDisk, size) => `${name} is only partly on ${here}: ${onDisk} of ${size} on disk.`,
+  }
+  if (platform === 'win32')
+    return {
+      ...base,
+      denied: 'Microphone access is off for Althar, so dictation can’t hear you. Turn on microphone access, and access for desktop apps.',
+      openSettings: 'Open Settings',
+    }
+  return base
 }
 
 /** Bytes, as the tray says them: megabytes, or gigabytes from a thousand of them. */

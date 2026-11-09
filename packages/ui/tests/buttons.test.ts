@@ -39,8 +39,9 @@ const PLAIN: Readonly<Record<string, string>> = {
   'outputs/LineComments/LineComments.tsx': 'a sent comment’s file and lines, heading its excerpt, which open the diff at its line',
   'chrome/TaskParts/TaskParts.tsx':
     'the parts’ marks in the bar, the whole of which opens them; a part’s row or chip, which opens it in place; Add and Back, a popover’s own head',
-  'setup/AgentTools/AgentTools.tsx':
-    'a server’s marks, which open its menu; a server’s chip in a file, the whole of which takes it out or puts it back',
+  'setup/ToolTiles/ToolParts.tsx':
+    'a dashed tile, the whole of which adds one; a role’s round switch with its name under it; a project’s mark and name, pressed in or out',
+  'setup/ToolTiles/AddServerDialog.tsx': 'an agent’s mark and name, pressed in or out, as a project’s are',
   /* opens and closes what is below it */
   'thread/Reasoning/Reasoning.tsx': 'the row that folds the reasoning',
   'outputs/Usage/Usage.tsx': 'the card’s head, which folds its lines',

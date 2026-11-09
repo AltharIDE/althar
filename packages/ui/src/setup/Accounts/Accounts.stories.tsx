@@ -142,6 +142,33 @@ export const JustTheList: Story = {
   },
 }
 
+/** None yet: what will be here, how one gets here, and Sign in, which starts the first, in place of the list and its Add an account. */
+export const NoneYet: Story = {
+  args: { accounts: [] },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('heading', { level: 3, name: 'No accounts yet' })).toBeVisible()
+    await expect(c.getByText('Sign in to Codex, and its work runs on that account.')).toBeVisible()
+    await expect(c.queryByRole('list')).toBeNull()
+    await expect(c.queryByRole('button', { name: 'Add an account' })).toBeNull()
+    await userEvent.click(c.getByRole('button', { name: 'Sign in' }))
+    await expect(args.onAdd).toHaveBeenCalled()
+  },
+}
+
+/** The same at night. */
+export const NoneYetDark: Story = { ...NoneYet, globals: { theme: 'dark' } }
+
+/** None yet, where no sign-in starts from here: what and how, and nothing to press. */
+export const NoneYetNoWayIn: Story = {
+  args: { accounts: [], onAdd: undefined },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('heading', { name: 'No accounts yet' })).toBeVisible()
+    await expect(c.queryByRole('button')).toBeNull()
+  },
+}
+
 /** A new account signing in, in the line it will take, after the plans and before the key: the lines under it count on past it, and nothing else starts a sign-in meanwhile. */
 export const AddingInPlace: Story = {
   args: {

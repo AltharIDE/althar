@@ -181,22 +181,6 @@
   font-size: 12px;
   color: var(--t-3);
 }
-.ring {
-  flex: none;
-  transform: rotate(-90deg);
-}
-.ring circle {
-  fill: none;
-  stroke-width: 2;
-}
-.ringBg {
-  stroke: var(--n-4);
-}
-.ringFg {
-  stroke: var(--t-2);
-  stroke-linecap: round;
-  transition: stroke-dashoffset 1s linear;
-}
 .when {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -213,7 +197,6 @@
   transition: width 1s linear;
 }
 @media (prefers-reduced-motion: reduce) {
-  .ringFg,
   .bar {
     transition: none;
   }

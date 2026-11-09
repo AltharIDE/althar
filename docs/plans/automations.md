@@ -465,21 +465,19 @@ and signs what it does. So:
     (`Stalls.ts:71-72`), counted the same way;
   - runs a day, capped for each automation and for all of them together,
     Run now and catch-ups included;
-  - on a usage limit, an automation never moves to another account or agent
-    (the project's rule may `move` a task's work): it stops, and says so.
-- **Per-use models (an API key, OpenRouter):** today work never moves to
-  another agent's paid account unasked (`Limits.ts:97`), but an agent's own
-  accounts take over whatever pays for them
-  ([ADR-012](../decisions/agents.md#accounts)), and the
-  permission judge spends the coordinator's account. An automation on one
-  needs a cap per run and per month, and that needs cost accounting Althar
-  doesn't have: tokens are kept per turn (`turn_deliveries.usage`), money
-  only for the permission judge. **First version: plan accounts only,** as
-  a check of its own: an automation's lead and reviewer start only on an
-  account a plan pays for, and its asks are judged only on one, else they
-  wait for the person. OpenCode always says a key, so it leads no
-  automation at first. Per-use comes with cost accounting (`runs.budget` is
-  already in the schema, unused).
+  - on a usage limit, a run moves on as any task's work does, by the project's
+    rule (`move`, `wait` or `ask`).
+- **Per-use models (an API key, OpenRouter):** an automation's run picks its
+  agent, account and model as any step does, per use included. The caps that
+  hold for any task hold for it; it has none of its own.
+- **When its agent can't take a run** (signed out, out of usage where the
+  project's rule is `move`, or its model's provider refused the sign-in): the run goes to another agent and
+  model a plan pays for, chosen as for any step, and its history line says so.
+  Where no plan anywhere can take it, it is skipped, the line saying why and
+  what would make it run ("OpenCode Go refused its sign-in, and no other plan
+  had room. Sign in to OpenCode Go in Settings."). A second such skip in a row
+  is one question in Needs you, not one a night; "Run it now" on it runs the
+  automation, and the question goes once a run starts.
 - **Each run's worktree is its task's,** as for any task
   ([ADR-006](../decisions/workspaces-and-runs.md#worktree), call 13): a new task
   makes a worktree and runs its setup, installing what the lockfile names
@@ -658,8 +656,7 @@ version waits on either.
    up once; the still-wanted check, since four reviews in one place start
    one after another, and a pull request can merge while its review waits;
    who may trigger, for a query's subjects; one place, for every step; time
-   limits over all of a run's steps; pausing itself; plan accounts only,
-   checked; a new task each time, with at most five pull requests open;
+   limits over all of a run's steps; pausing itself; a new task each time, with at most five pull requests open;
    allow everything for a run's task, with the default branch never; signed
    outward steps; a review that asks once, then posts if told to; open at
    login, offered the first time a schedule is turned on. That covers
@@ -670,8 +667,8 @@ version waits on either.
    schedules (days at a time, or hourly), the three tables, the clock with
    catching up once and missing past the window, one place after the
    person's work for every step, a run's minutes over its turns, the skips
-   (still going, all paused, five pull requests open, 24 a day, per-use
-   agents), pausing itself after three failures, allow everything with the
+   (still going, all paused, five pull requests open, 24 a day, no agent
+   signed in or with room), pausing itself after three failures, allow everything with the
    default branch never, signed reviews and pull requests, the review that
    asks once, the coordinator's six tools with their cards, and the tab, the
    page and the card. **Still to build of it:** Althar's own events (a
@@ -687,8 +684,7 @@ version waits on either.
    labels, from the issue's timeline.
 3. **Carrying on the open one:** the follow-up round Althar opens, for a
    change automation set to carry on its pull request (call 4).
-4. **More trackers, and paying per use:** Linear and GitLab triggers;
-   per-use models with caps, once cost is counted.
+4. **More trackers:** Linear and GitLab triggers.
 5. **The cloud:** the relay, then runs in the cloud with the clock and
    leases, each a product step of its own (call 12).
 
@@ -739,7 +735,7 @@ Taken where the other tools agree:
   apart; 45 minutes of work a run, over all its steps, but one whose lead is done
   and only its review works on goes on without it, not stopped; a cap on runs a day
   for all automations together; on a usage limit, stop rather than move;
-  plan accounts only at first, which leaves OpenCode out; at most five of
+  at most five of
   an automation's pull requests open, Dependabot's limit.
 - **9. The coordinator's reach:** it pauses one in words; resuming and Run
   now go on a small card, since both spend and the coordinator reads text

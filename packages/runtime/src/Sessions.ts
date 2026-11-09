@@ -65,7 +65,7 @@ import {
   type UnknownAgent,
 } from './errors'
 import { Instance } from './Instance'
-import { Limits, type PlanOnly } from './Limits'
+import { Limits } from './Limits'
 import { PlanUsage } from './PlanUsage'
 import { Live } from './Live'
 import type { Models } from './Models'
@@ -117,8 +117,9 @@ import { stopProcesses, treeOfCommand } from './stopping'
 import { outputText } from './reading'
 import { ToolServer } from './ToolServer'
 import { agentSaid, lostWords, startedAfreshWords, summarize } from './words'
-import { serversFor } from './agentTools'
+import { heldSkillsFor, serversFor, syncIo } from './agentTools'
 import { type KeptLineComment, withLineComments } from './lineComments'
+import { noteServerStatus } from './mcpHealth'
 
 /*
  * Agent sessions on a task's thread (docs/architecture/03). The runtime
@@ -682,7 +683,7 @@ export class Sessions extends Context.Service<
       readonly effort?: string
       /** The account it runs on, where the person picked one; else as `Limits.pick` says. */
       readonly accountId?: string
-    }): Effect.Effect<string, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | PlanOnly | Failure>
+    }): Effect.Effect<string, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /**
      * Starts the agent last on the thread again, on the model and effort it
      * had, for what waits in its queue: false, and nothing started, where no
@@ -690,7 +691,7 @@ export class Sessions extends Context.Service<
      */
     startLast(
       threadId: string,
-    ): Effect.Effect<boolean, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | PlanOnly | Failure>
+    ): Effect.Effect<boolean, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /**
      * Tries the thread's last turn again, as the person asked, where it
      * failed (ADR-060): what they said in it goes again, with what waits
@@ -699,7 +700,7 @@ export class Sessions extends Context.Service<
      */
     tryAgain(
       threadId: string,
-    ): Effect.Effect<boolean, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | PlanOnly | Failure>
+    ): Effect.Effect<boolean, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /** Whether Try again can act now: the same rule the window uses for its error's action. */
     retryable(threadId: string): Effect.Effect<boolean, SqlError.SqlError>
     /** Serializes preparation and acceptance in arrival order, holding delivery until the whole burst is ready. */
@@ -788,7 +789,7 @@ export class Sessions extends Context.Service<
       readonly accountId?: string
       /** The person switched, not Althar: the new agent's first turn is theirs, and goes on at once (ADR-037). */
       readonly byPerson?: boolean
-    }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | PlanOnly | Failure>
+    }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /** Stops the turn running, if there is one; the session waits for what comes next. */
     interrupt(threadId: string): Effect.Effect<void, NoSession>
     /** Stops the thread's session, after ending its turn. */
@@ -949,10 +950,20 @@ export class Sessions extends Context.Service<
           ),
         )
       }
+      // What a session says of one of the person's servers, kept for Settings' tiles (mcpHealth.ts); Claude Code is who says it.
+      const heardServer = (event: SessionEvent) => {
+        const server = event._tag === 'Notice' ? event.server : undefined
+        if (event._tag !== 'Notice' || server === undefined) return Effect.void
+        return Effect.gen(function* () {
+          const io = yield* syncIo.pipe(Effect.provideService(RuntimeConfig, runtimeConfig))
+          const why = [event.title, event.description ?? ''].filter((words) => words.trim() !== '').join(' ')
+          if (io !== undefined) noteServerStatus(io, 'claude', server.name, server.status, why)
+        }).pipe(Effect.ignore)
+      }
       const heardPlan = (running: Running, event: SessionEvent) => {
         const windows = event._tag === 'PlanWindows' ? event.windows : event._tag === 'ContextUsage' ? event.planWindows : undefined
         return Effect.andThen(
-          heardCost(running, event),
+          Effect.andThen(heardServer(event), heardCost(running, event)),
           windows === undefined
             ? Effect.void
             : Effect.asVoid(Effect.forkIn(planUsage.heard(running.account.id, running.entry.definition.id, windows), sessionsScope)),
@@ -2345,9 +2356,16 @@ export class Sessions extends Context.Service<
           // Offline outside reviews omit executable plugins. Nothing goes in the repository, the account's home or
           // the person's own folders. A failure here costs the session its skills, not its start: the thread says so once it has
           // started, and what Althar didn't expect is reported, by the agent (ADR-047).
+          // The person's skills turned off for this role or this project (ADR-097): left out of Althar's selection, and held
+          // back in the agent itself where it loads them from its own folders, its plugins or the repository.
+          const turnedOff = yield* heldSkillsFor(toolRoleOf(thread), thread.projectId).pipe(
+            Effect.provideService(RuntimeConfig, runtimeConfig),
+            Effect.provideService(SqlClient.SqlClient, sessionsSql),
+          )
+          const heldSkills = turnedOff.agent.length === 0 ? {} : { heldSkills: turnedOff.agent }
           const setUp: { readonly skills: RunSkills | undefined; readonly failed?: string } =
             !offline && skillsConfig !== undefined && definition.skills !== null
-              ? yield* runSkills(skillsConfig, definition, sessionId, foldersOf(thread)).pipe(
+              ? yield* runSkills(skillsConfig, definition, sessionId, foldersOf(thread), turnedOff.names).pipe(
                   Effect.tap((run) => (run === undefined ? Effect.void : Scope.addFinalizer(scope, run.release.pipe(Effect.ignore)))),
                   Effect.map((run) => ({ skills: run })),
                   Effect.catchCause((cause) =>
@@ -2389,6 +2407,7 @@ export class Sessions extends Context.Service<
             ...(untrusted ? { untrusted } : {}),
             ...(untrusted && offline ? { offline } : {}),
             ...(skills === undefined ? {} : { skills: skills.folder }),
+            ...heldSkills,
           }
           const transport = entry.transport(cwdOf(thread), { ...accounts.env(account), [WORK]: work, ...guarded }, transportOptions)
           const processId = transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
@@ -2473,6 +2492,7 @@ export class Sessions extends Context.Service<
                   ? {}
                   : { sandbox: upFront }),
             ...(skills === undefined ? {} : { skills: skills.folder }),
+            ...heldSkills,
           }
           // Where the session's sandbox holds its shell commands, what it holds runs without being read (ADR-071).
           const hold = definition.holds?.(reads ? 'reader' : 'lead', sessionOptions)
@@ -2504,10 +2524,13 @@ export class Sessions extends Context.Service<
                     }),
               })
               // The person's own servers ticked for this role, whichever of their agents' settings they were found in (ADR-097).
-              const persons = yield* serversFor(toolRoleOf(thread), thread.projectId, connection.info.mcp.http).pipe(
-                Effect.provideService(RuntimeConfig, runtimeConfig),
-                Effect.provideService(SqlClient.SqlClient, sessionsSql),
-              )
+              // A repository's own `.mcp.json` is given only where the repository is the person's: an outside author's never loads its MCP config.
+              const persons = yield* serversFor(
+                toolRoleOf(thread),
+                thread.projectId,
+                connection.info.mcp.http,
+                !(thread.role === 'task' && thread.review?.outside === true),
+              ).pipe(Effect.provideService(RuntimeConfig, runtimeConfig), Effect.provideService(SqlClient.SqlClient, sessionsSql))
               const agent = yield* connection.newSession({
                 cwd: cwdOf(thread),
                 // The coordinator, a reviewer and a review's lead only read: in the agent's read-only mode where that still lets it call
@@ -3415,7 +3438,7 @@ export class Sessions extends Context.Service<
             // Althar runs the project for the person itself (ADR-023): the lead keeps how, when it changes it.
             'Althar runs the project for the person, with no agent, from a command it works out from the repository or keeps for it, and the more things it keeps to run beside it, such as Storybook. If you change how the project runs, such as its dev script, its port or what it needs installed first, keep it with set_run_command; if you add something worth running by hand, keep it with keep_run.',
             // What a lead would otherwise do around its sandbox, Althar does outside it: install, run, and draw a page.
-            "To run the project in your worktree, a dev server or Storybook, use run_project rather than starting it yourself, and stop_project once you're done: Althar runs it outside your sandbox, and the person sees it running. screenshot gives you a picture of any HTTP page, drawn by Althar, so you needn't start a browser. Where an install fails in your sandbox (a lock in .git, the package manager's cache), or what you changed needs installing, install_dependencies runs the project's setup again outside it.",
+            "To run the project in your worktree, a dev server or Storybook, use run_project rather than starting it yourself, and stop_project once you're done: Althar runs it outside your sandbox, and the person sees it running. screenshot gives you a picture of any HTTP page, drawn by Althar, so you needn't start a browser. The page beside your conversation is the person's own, in a session of its own that may be signed in to things: read it with page_snapshot and page_screenshot, drive it with page_click, page_type and the other page_ tools, and open an address in it with page_open (what run_project runs, say); you need not ask, the person sees you at work there, and what they do in the page comes before what you do. Where an install fails in your sandbox (a lock in .git, the package manager's cache), or what you changed needs installing, install_dependencies runs the project's setup again outside it.",
             // Commands inherit code-host identity; Althar's fetch remains available and preferred (ADR-097).
             "Your commands inherit the person's code-host sign-in, git credential helpers and SSH agent. Althar's tools are preferred, and other tools may be used under the same irreversible rules. When you need a branch, a tag or a pull request you don't have, or a fresher one, call fetch_from_remote: Althar fetches it with its own sign-in, so origin/<branch> is current, and says the commit it got. When a fetch fails for credentials, use it rather than retrying outside your sandbox or asking the person to fetch. To work on such a branch, `git switch -c <branch> origin/<branch> --no-track`.",
             // A question shows on the person's cards as its headline; the whole of it is in the thread (Questions.ts).
@@ -3464,6 +3487,7 @@ export class Sessions extends Context.Service<
             towardLine,
             `- works_in, on draft_task, propose_plan and start_task: where the task works. Local is the person's own checkout, with their builds, simulators and services, one task at a time and beside their own edits; a worktree is a folder of its own, side by side with other tasks, built from cold. This project starts tasks ${worksIn === 'checkout' ? 'Local' : 'in a worktree'} unless you say. When another task works Local, plan the next one in a worktree and say why in works_in_why, unless it needs the person's setup and can wait; the tools say who works Local now.`,
             '- screenshot, to see any HTTP page, such as what run_project runs or Storybook: Althar draws it headless and gives it back to you as a picture, at a viewport you choose, the whole page or one element.',
+            "- page_snapshot, page_screenshot and page_logs, to read the page beside your conversation with the person, and page_open, page_click, page_type and the other page_ tools to drive it: it is the project's own page, in a session of its own, and the person sees you at work in it; you need not ask.",
             "- run_project, when the person wants to see the project running: Althar runs it itself, with no agent, in a fresh copy of the default branch, or with task in that task's worktree to see what it built, or with branch or pull_request in a copy of that branch or pull request, which Althar fetches itself, even one nobody has pulled; its default, or with run another of the things it runs. It shows over the composer with where it answers. When the person asks to start, run or try a branch or a pull request, use it with branch or pull_request, never a task: the person wants it running, not a report. When Althar can't tell how the project runs, or tells wrong, read the repository and keep how with set_run_command. When the person wants more to run than its default (Storybook, the app itself, tests in watch mode), read the repository and keep each worth running by hand with keep_run.",
             "- start_task, for something small to do now, with no plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead, a quick model is enough; no review, nothing published, and it starts at once, with no branch. To try what a task has built, ask its lead with message_lead: its branch is in its worktree.",
             "- rename_task, when a task's work became a change (a task started with start_task whose lead began changing the repository, which your news says) and its title no longer says what it does: give it one that does, in a few words. What the person asked stays in its thread.",
