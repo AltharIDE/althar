@@ -1321,8 +1321,6 @@ export class Coordinator extends Context.Service<
                 follow: 'none',
               })
               const under = yield* runs.makeChange(taskId, review, end, instance.systemId)
-              // Made a change is a break in the lead's work: what it builds next may start afresh (ADR-038).
-              yield* sessions.atBreak(task.threadId)
               // Althar's own housekeeping, kept with the lead's work.
               yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
                 source: 'runtime',

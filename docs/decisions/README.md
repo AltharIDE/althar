@@ -101,7 +101,7 @@ one.
 | 035 | A task's kind is read from what it has, and its card has nothing to press | [tasks § Kinds, read from what a task has](tasks.md#kinds-read-from-what-a-task-has), [reviews § Reviewing someone else's pull request](reviews.md#reviewing-someone-elses-pull-request) |
 | 036 | Anonymous usage data goes from the main process, named events only | [packaging § Usage data](packaging.md#usage-data) |
 | 037 | What the person does goes first, a task keeps its place between its steps, and new work waits | [scheduling § What goes first](scheduling.md#what-goes-first) |
-| 038 | A task's lead starts afresh before its context grows large, and at a break in its work | [agents § Keeping context small](agents.md#keeping-context-small) |
+| 038 | A task's lead starts afresh before its context grows large | [agents § Keeping context small](agents.md#keeping-context-small) |
 | 039 | The person can have an agent compact its context, at once, with the agent's own command | [agents § Keeping context small](agents.md#keeping-context-small) |
 | 040 | Until the person has looked, a change's checks are Althar's to see through | [code-hosts § Checks: Althar sees them through](code-hosts.md#checks-althar-sees-them-through) |
 | 041 | What failed is said in full: a check run again once, its whole log on request, and the checks Althar can't see | [code-hosts § Checks: Althar sees them through](code-hosts.md#checks-althar-sees-them-through) |

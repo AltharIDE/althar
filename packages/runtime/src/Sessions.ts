@@ -50,7 +50,7 @@ import { refusalOf, runSkills, type RunSkills } from './Skills'
 import { type CoordinatorFolder, coordinatorFolder } from './coordinatorFolder'
 import { coordinatorNews, type ModelNamer, modelNamer } from './coordinatorNews'
 import { coordinatorRow, forgetItems } from './chatView'
-import { CACHE_LIFE, dueForHandover, dueForLeadHandover, handoverRecord, notesSection, roomFor, shrinks } from './handover'
+import { dueForHandover, dueForLeadHandover, handoverRecord, notesSection, roomFor, shrinks } from './handover'
 import { notesOf } from './notes'
 import {
   AlreadyDelivered,
@@ -393,10 +393,8 @@ interface Running {
   handover: 'none' | 'under_way' | 'left'
   /** When its turn running started, in milliseconds: what the person's wait for its first word is counted from. */
   turnStartedAt: number | null
-  /** When its last turn ended, in milliseconds; null before its first. A lead idle past its cache's life is at a break. */
+  /** When its last turn ended, in milliseconds; null before its first. */
   turnEndedAt: number | null
-  /** Its last turn ended a step of its work, or made its task a change (`atBreak`): a break, where a lead may start afresh. */
-  atBreak: boolean
   /**
    * Who leads it from its next turn, where the person or a tool changed that while it worked or waited (`changeLead`): taken up
    * between turns, as what is said to it next is delivered, never in one.
@@ -886,12 +884,6 @@ export class Sessions extends Context.Service<
         work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
       ) => Effect.Effect<boolean>,
     ): Effect.Effect<void>
-    /**
-     * Says the turn the thread's lead is in ends at a break in its work: it
-     * finished a step, or made its task a change. Its next turn may then
-     * start in a fresh session, briefed from the task (ADR-038).
-     */
-    atBreak(threadId: string): Effect.Effect<void>
     /**
      * Whether the thread's agent is still at work, though its turn has ended:
      * it left a command running, is in a call of its own, or spoke outside a
@@ -1458,8 +1450,7 @@ export class Sessions extends Context.Service<
           // Still at work though its turn ended, or within the moment an agent takes to say what it left running (Codex says so
           // after its turn): not yet.
           if (yield* busyNow(thread.threadId)) return false
-          const idle = running.turnEndedAt !== null && (yield* Clock.currentTimeMillis) - running.turnEndedAt >= CACHE_LIFE
-          return dueForLeadHandover(running.context, running.atBreak || idle)
+          return dueForLeadHandover(running.context)
         })
 
       /** Whether anything waits in the thread's queue. */
@@ -1735,7 +1726,6 @@ export class Sessions extends Context.Service<
           if (!compacting) running.brief = undefined
           running.turnRunning = true
           running.turnStartedAt = yield* Clock.currentTimeMillis
-          running.atBreak = false
           // What it did outside a turn before is over with: this turn is what it is at.
           running.callsOpen.clear()
           running.workedAt = null
@@ -2757,7 +2747,6 @@ export class Sessions extends Context.Service<
             handover: 'none',
             turnStartedAt: null,
             turnEndedAt: null,
-            atBreak: false,
             nextLead: undefined,
           }
           threads.set(thread.threadId, running)
@@ -4017,11 +4006,6 @@ export class Sessions extends Context.Service<
         gateTurns: (next) =>
           Effect.sync(() => {
             gate = next
-          }),
-        atBreak: (threadId) =>
-          Effect.sync(() => {
-            const running = threads.get(threadId)
-            if (running !== undefined) running.atBreak = true
           }),
         onPersonsTurn: (next) =>
           Effect.sync(() => {
