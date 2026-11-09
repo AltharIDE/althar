@@ -21,6 +21,8 @@ export interface ModelFile {
 export interface SpeechModel {
   /** Also the folder it is kept in. */
   readonly id: string
+  /** What the person is told it is called. */
+  readonly name: string
   /** Where its files are, at a pinned revision. */
   readonly base: string
   readonly files: ReadonlyArray<ModelFile>
@@ -32,6 +34,7 @@ export interface SpeechModel {
  */
 export const PARAKEET: SpeechModel = {
   id: 'parakeet-tdt-0.6b-v3-int8',
+  name: 'Parakeet TDT 0.6B v3',
   base: 'https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/2bda32ec70b097a55adaa07d9a7173915b43cc78',
   files: [
     { name: 'tokens.txt', size: 93_939, sha256: 'd58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d' },

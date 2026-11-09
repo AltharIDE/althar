@@ -4,14 +4,14 @@
   padding: 0 10px;
   border-radius: 7px;
   background: var(--paper);
-  box-shadow: inset 0 0 0 1px var(--line-2);
+  box-shadow: inset 0 0 0 1px var(--field-edge);
   font-size: 12.5px;
   color: var(--t-1);
   outline: 0;
   transition: box-shadow var(--fast) var(--ease);
 }
 .field:hover {
-  box-shadow: inset 0 0 0 1px var(--line-3);
+  box-shadow: inset 0 0 0 1px var(--field-edge-hover);
 }
 .field:focus {
   box-shadow: inset 0 0 0 1.5px var(--signal);

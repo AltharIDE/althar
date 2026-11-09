@@ -29,7 +29,13 @@ export interface DictationState {
   /** Whether the system lets Althar use the microphone: yes, it would ask first (macOS, once), or it said no. */
   readonly microphone: 'granted' | 'ask' | 'denied'
   /** The speech model: all here and checked, or how much of it is, in bytes; and whether it is coming down now. */
-  readonly model: { readonly ready: boolean; readonly got: number; readonly size: number; readonly downloading: boolean }
+  readonly model: {
+    readonly name: string
+    readonly ready: boolean
+    readonly got: number
+    readonly size: number
+    readonly downloading: boolean
+  }
   /** Whether the system has settings Althar can open (macOS and Windows). */
   readonly settings: boolean
 }
@@ -46,6 +52,8 @@ export type DictationEvent =
   | { readonly type: 'downloaded' }
   | { readonly type: 'stopped'; readonly stop: DownloadStop; readonly got: number; readonly size: number }
   | { readonly type: 'cancelled' }
+  /** The model was removed from this computer. */
+  | { readonly type: 'removed' }
 
 /** Dictation, through the main process: the microphone's permission, the speech model, and writing down what was said (ADR-017). */
 export interface DictationHost {
@@ -56,6 +64,8 @@ export interface DictationHost {
   readonly download: () => Promise<void>
   /** Stops the download and keeps nothing of it. */
   readonly cancel: () => Promise<void>
+  /** Removes the model from this computer, to free its space; the next dictation brings it down again. */
+  readonly remove: () => Promise<void>
   /** Loads the model, so the first words are written down without the wait. */
   readonly prepare: () => Promise<void>
   /** What was said, as text: 16 kHz mono samples, or whatever rate they were recorded at. */
@@ -278,8 +288,11 @@ export interface PagesHost {
   readonly open: (owner: string, address: string) => Promise<PageState | null>
   /** How each page open stands, for a window that opened after them. */
   readonly states: () => Promise<ReadonlyArray<PageState>>
-  /** Lays the page over the window where it keeps its place, in the window's pixels; null takes it off. Sent each frame of a drag. */
-  readonly show: (owner: string, panel: { x: number; y: number; width: number; height: number } | null) => void
+  /**
+   * Lays the page over the window where it keeps its place, in the window's pixels; null takes it off. Sent each frame of a
+   * drag. `where` says whether the window shows it beside the conversation or in a tab of its own, for an agent asking where it is.
+   */
+  readonly show: (owner: string, panel: { x: number; y: number; width: number; height: number } | null, where?: 'beside' | 'tab') => void
   readonly move: (owner: string, move: PageMove) => Promise<void>
   readonly viewport: (owner: string, viewport: Viewport) => Promise<void>
   /** Points at the page: the element pressed, with its crop and a picture of the page; null where pointing stopped. */
@@ -307,6 +320,8 @@ export interface PagesHost {
   readonly onState: (listener: (state: PageState) => void) => () => void
   /** Calls `listener` as the person presses, in a page, a key the window acts on. */
   readonly onKey: (listener: (owner: string, key: PageKey) => void) => () => void
+  /** Calls `listener` as a lead opens a page that no window shows yet, so the window can place it beside the conversation. */
+  readonly onOpened: (listener: (owner: string) => void) => () => void
   /** Calls `listener` as a page closes of itself, its task done or its project removed. */
   readonly onClosed: (listener: (owner: string) => void) => () => void
 }

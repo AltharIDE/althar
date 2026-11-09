@@ -167,7 +167,7 @@ authority.
 
 Code hosts and trackers are `DomainConnector`s of Althar's own, on each
 service's API, never MCP wrappers
-([ADR-011](../decisions/011-own-connectors-for-hosts-and-trackers.md)). There
+([ADR-011](../decisions/code-hosts.md#connectors)). There
 are two models, a code host and a tracker. Each has one adapter per *product*,
 not per brand: Bitbucket Cloud and Bitbucket Data Center are different APIs,
 and so are Jira Cloud and Jira Data Center. Each adapter declares its
@@ -186,7 +186,7 @@ service's model.
 A feature built for one code host or tracker is built for every one that can
 have it, in the same release. Where a service lacks it, Althar stands in with
 what the service has, and where neither can, it says so and why
-([ADR-082](../decisions/082-a-feature-for-one-host-tracker-or-agent-ships-for-all.md)).
+([ADR-082](../decisions/foundations.md#a-feature-ships-for-every-service-that-can-have-it)).
 The feature is written against the model, adds its clause to the contract
 suite, and is turned off in the adapter's capabilities where it can't be had.
 What isn't alike, as read on 31 October 2026:
@@ -643,7 +643,7 @@ now. Nothing reaches the tracker on its word:
 - **Where it goes** is what the coordinator names, a tracker by its name and
   a container by its id, key or name; or, without them, the tracker and
   container the project is bound to in its settings
-  ([ADR-059](../decisions/059-a-tracker-s-workspaces-side-by-side-and-a-project-bound-to-one.md));
+  ([ADR-059](../decisions/code-hosts.md#trackers));
   or, unbound, where the project's
   issues already come from (the newest issue a task came from, or a draft
   filed), then its repository's issues, then the one tracker or container
@@ -755,7 +755,7 @@ What each tracker changes:
 | Comment | Yes | Yes | Yes | Yes | Yes |
 | Link a pull request | An attachment | A remote link | An attachment | No: a PR that names the issue links it | No: as GitHub |
 
-Where a tracker hasn't a field, its tool says so in its words ([ADR-082](../decisions/082-a-feature-for-one-host-tracker-or-agent-ships-for-all.md)).
+Where a tracker hasn't a field, its tool says so in its words ([ADR-082](../decisions/foundations.md#a-feature-ships-for-every-service-that-can-have-it)).
 Not covered yet: Jira's sprints, story points and transition screens with
 fields, GitHub Projects' own fields, and GitLab's work-item statuses beyond
 open and closed.
@@ -868,7 +868,7 @@ flowchart LR
 ### Reviewing someone else's pull request
 
 What follows is how every review works today. Since
-[ADR-097](../decisions/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md), it is the review of an outside author's pull request
+[ADR-097](../decisions/what-agents-may-do.md#what-asks), it is the review of an outside author's pull request
 (a fork, or an author the host doesn't name a member or collaborator); one
 by the repository's own people gets what a task's lead gets, a worktree at
 its head with the project's setup, its code run in the sandbox, the
@@ -1063,7 +1063,7 @@ stopped working only once the connection needs its person.
 ### Agents and the hosts
 
 Today agents reach code hosts and trackers only through Althar.
-[ADR-097](../decisions/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md) keeps Althar's way as the preferred and recorded one,
+[ADR-097](../decisions/what-agents-may-do.md#what-asks) keeps Althar's way as the preferred and recorded one,
 and lets agents use the person's own: their MCP servers in every role (its
 first phase), and their `gh`, `glab` and git sign-in where they have one
 set up, behind a project switch on by default (its third). What can't be
@@ -1200,15 +1200,15 @@ external observation, not Althar's run authority.
 ## Skills
 
 What is built so far is narrower than this section: one store on the
-computer, a curated default catalog and each lead's set fixed and recorded
-for its session ([ADR-094](../decisions/094-skills-one-store-a-curated-catalog.md)),
+computer, of what the person added, and each lead's set fixed and recorded
+for its session ([ADR-094](../decisions/the-persons-setup.md#skills)),
 and skill and OpenSpec files held off the repository unless the project says
-so ([ADR-095](../decisions/095-skill-and-openspec-files-stay-off-the-repository.md),
+so ([ADR-095](../decisions/the-persons-setup.md#skill-and-openspec-files-in-a-change),
 which ADR-097 supersedes: they go up with the diff). Bindings by scope,
 precedence and conflicts are not built; every lead gets the same active set,
-and the catalog's skills are off until the person turns them on. From
-ADR-097's first phase every role gets them, the catalog is on by default,
-and the person's own skills and plugins load beside it. [The plan](../plans/skills-across-harnesses.md#implementation-status)
+and what the person added is off until they turn it on. From
+ADR-097's first phase every role gets them, and the person's own skills and
+plugins load beside them. Althar ships no skills of its own. [The plan](../plans/skills-across-harnesses.md#implementation-status)
 keeps what is done and what is not.
 
 Althar should adopt the open Agent Skills package shape:
@@ -1243,7 +1243,7 @@ Where each finds them, read from the real agents on 3 November 2026
 | OpenCode 2.2.5, 1.19.5 | `~/.config/opencode/skills`, `~/.claude/skills`, `~/.agents/skills` | `.opencode/skills`, `.claude/skills`, `.agents/skills` | |
 
 Each agent's own folders are its own business, so nothing is copied across to
-what it doesn't read. In a Flatpak ([ADR-027](../decisions/027-what-the-flatpak-reaches.md)):
+what it doesn't read. In a Flatpak ([ADR-027](../decisions/packaging.md#the-flatpak)):
 Codex and a person's own OpenCode run out on the device, with the device's home,
 and read those same folders there. Claude Code and a copy of OpenCode Althar
 downloaded run inside: the four folders are in the sandbox read-only at the same

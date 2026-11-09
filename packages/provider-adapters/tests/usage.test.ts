@@ -221,7 +221,8 @@ describe('asking Codex’s app-server', () => {
       }
       expect(await readAgentUsage(agent, { home: { CODEX_HOME: '/accounts/work' }, now: () => NOW })).toEqual({
         kind: 'failed',
-        message: '||/accounts/work|string',
+        // The SSH agent is inherited (ADR-097); the provider key and the rest of the environment are not.
+        message: '|/tmp/agent.sock|/accounts/work|string',
       })
     } finally {
       delete process.env.ALTHAR_TEST_PROVIDER_KEY

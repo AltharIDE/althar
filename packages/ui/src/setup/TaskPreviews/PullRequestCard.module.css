@@ -1,0 +1,31 @@
+/* a pull request as GitHub shows it: its state and title in a head, then the start of its page */
+.pullRequest {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 14px;
+  background: var(--n-1);
+  box-shadow: inset 0 -1px var(--line);
+  font-size: 13.5px;
+}
+/* a long title wraps, as the host's does */
+.name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.title {
+  font-weight: 600;
+  color: var(--t-1);
+}
+.number {
+  color: var(--t-3);
+}

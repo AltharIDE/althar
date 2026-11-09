@@ -33,7 +33,13 @@ export const text = {
     },
     show: platform === 'darwin' ? 'Show in Finder' : platform === 'win32' ? 'Show in Explorer' : 'Show in Files',
   },
+  on: 'On',
   off: 'Off',
+  everyTask: 'Every task',
+  newProjects: 'New projects start with',
+  newProjectsNote: 'Changing one here leaves the projects you have as they are.',
+  pageBesideConversations: 'Pages beside conversations',
+  dictation: 'Dictation',
   /* The quick settings' cards. */
   awake: 'Keep awake',
   awakeOn: 'While work runs',
@@ -99,17 +105,21 @@ export const text = {
   edgeNote: 'Where what needs you shows',
   examples: 'An example, until work is under way',
   /* The editor. */
-  noEditors: `No editor found on ${device.this}. Files open in ${device.files}.`,
+  /* Dictation. */
+  noDictation: 'Dictation isn’t available on this system.',
+  dictationUnreadable: 'Dictation’s settings couldn’t be read.',
+  tryAgain: 'Try again',
+  removeFailed: 'The speech model couldn’t be removed. Try again.',
   /* What couldn't be kept. */
   failed: 'That couldn’t be kept. Try again.',
+  agentToolsOff: 'This Althar doesn’t read your agents’ settings, so their MCP servers and skills aren’t listed.',
+  serversUnread: 'Your agents’ MCP servers couldn’t be read.',
+  skillsUnread: 'Your skills couldn’t be read.',
   skillsOff: 'Skills aren’t set up in this copy of Althar, so each lead starts without them.',
-  skillsFromAlthar: 'Althar',
   skillsFromFolder: 'A folder you imported',
   skillsCheck: 'Check for updates',
   skillsCurrent: 'Every skill from GitHub is up to date.',
   skillsUpdate: (id: string) => `Review the update to ${id}`,
   skillsUnchecked: (id: string, why: string) => `${id} couldn’t be checked: ${why}`,
-  skillsCatalog: (revision: string) =>
-    `Althar’s skills come from agent-skills (Addy Osmani) and superpowers (Jesse Vincent), both MIT, catalog ${revision}. They’re off until you turn them on, and one you turn on is given to every task’s lead. A change reaches each lead the next time it starts, in a task under way too.`,
   iconFailed: 'That icon couldn’t be kept. Try again.',
 }

@@ -15,6 +15,8 @@ import {
   type AgentTools,
   type SyncedAgent,
   type ToolRole,
+  type ServerDetail,
+  type NewServer,
   type AppSettings,
   type Attachment,
   type AutomationDefinition,
@@ -58,6 +60,7 @@ import {
   type NewProjectDefaultsChange,
   type IssueList,
   type Load,
+  type MissedReports,
   type ModelRoom,
   type PlanUsage,
   type OutputText,
@@ -213,7 +216,24 @@ export interface Client {
   readonly getSettings: () => Promise<AppSettings>
   /** The person's MCP servers and skills, the roles each gets, for every project or one, and how sync stands (ADR-097). */
   readonly getAgentTools: (projectId: string | null) => Promise<AgentTools>
-  readonly setToolRoles: (kind: 'server' | 'skill', name: string, roles: ReadonlyArray<ToolRole>, projectId: string | null) => Promise<void>
+  /** Which roles get a server or skill in every project; `repository` names the project whose repository's own it is. */
+  readonly setToolRoles: (
+    kind: 'server' | 'skill',
+    name: string,
+    roles: ReadonlyArray<ToolRole>,
+    projectId: string | null,
+    repository?: string | null,
+  ) => Promise<void>
+  /** One project's mark pressed out or in on a server or skill. */
+  readonly setToolInProject: (kind: 'server' | 'skill', name: string, projectId: string, on: boolean) => Promise<void>
+  /** A server opened out: each agent's file as it keeps it, and its tools counted. */
+  readonly getServerDetail: (name: string, repository: string | null) => Promise<ServerDetail>
+  /** Asks each of the person's agents how its servers stand: signed in, or why one failed to start. */
+  readonly checkServers: () => Promise<void>
+  /** Adds a server to each agent listed, in its own file. */
+  readonly addServer: (server: NewServer, agents: ReadonlyArray<SyncedAgent>) => Promise<void>
+  /** Takes a server out of every agent's file that has it. */
+  readonly removeServer: (name: string) => Promise<void>
   readonly setToolSync: (kind: 'server' | 'skill', on: boolean, takeBack: boolean) => Promise<void>
   readonly setToolKeptOut: (kind: 'server' | 'skill', agent: SyncedAgent, name: string, out: boolean) => Promise<void>
   readonly pickToolWay: (kind: 'server' | 'skill', name: string, way: SyncedAgent | 'apart') => Promise<void>
@@ -297,7 +317,6 @@ export interface Client {
   readonly approveSkill: (card: SkillReviewCard, replace: boolean) => Promise<InstalledSkill>
   readonly checkSkillUpdates: () => Promise<ReadonlyArray<SkillUpdate>>
   readonly rollBackSkill: (id: string) => Promise<InstalledSkill>
-  readonly setSkillActive: (id: string, active: boolean) => Promise<InstalledSkill>
   readonly uninstallSkill: (id: string) => Promise<void>
   readonly interrupt: (threadId: string) => Promise<void>
   /** Tries the thread's last turn again, where it failed: what the person said in it goes again. */
@@ -533,6 +552,8 @@ export interface Client {
   readonly getPlanUsage: (options?: { readonly refresh?: boolean }) => Promise<PlanUsage>
   /** Each model's room where work on it would start, in a project (its rule for moving work through accounts) or anywhere. */
   readonly getModelRooms: (projectId: string | null) => Promise<ReadonlyArray<ModelRoom>>
+  /** Each model that ended steps without its report in the last week, once reminded, with how often. */
+  readonly getMissedReports: () => Promise<ReadonlyArray<MissedReports>>
   /** Downloads an agent for the person, checks it, and keeps it for Althar to run; done once it is ready. */
   readonly installAgent: (agentId: string) => Promise<void>
   /** Opens a task's folder in an editor, at one of its files and a line; whether it could. */
@@ -749,8 +770,15 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setModelBlocked: (input) => command((commandId) => api.SetModelBlocked({ commandId, ...input })),
     getSettings: () => settle(api.GetSettings({})),
     getAgentTools: (projectId) => settle(api.GetAgentTools({ projectId })),
-    setToolRoles: (kind, name, roles, projectId) =>
-      command((commandId) => api.SetToolRoles({ commandId, kind, name, roles: [...roles], projectId })),
+    setToolRoles: (kind, name, roles, projectId, repository) =>
+      command((commandId) =>
+        api.SetToolRoles({ commandId, kind, name, roles: [...roles], projectId, ...(repository === undefined ? {} : { repository }) }),
+      ),
+    setToolInProject: (kind, name, projectId, on) => command((commandId) => api.SetToolInProject({ commandId, kind, name, projectId, on })),
+    getServerDetail: (name, repository) => settle(api.GetServerDetail({ name, repository })),
+    checkServers: () => command((commandId) => api.CheckServers({ commandId })),
+    addServer: (server, agents) => command((commandId) => api.AddServer({ commandId, server, agents: [...agents] })),
+    removeServer: (name) => command((commandId) => api.RemoveServer({ commandId, name })),
     setToolSync: (kind, on, takeBack) => command((commandId) => api.SetToolSync({ commandId, kind, on, takeBack })),
     setToolKeptOut: (kind, agent, name, out) => command((commandId) => api.SetToolKeptOut({ commandId, kind, agent, name, out })),
     pickToolWay: (kind, name, way) => command((commandId) => api.PickToolWay({ commandId, kind, name, way })),
@@ -793,7 +821,6 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
       }),
     checkSkillUpdates: () => settle(api.CheckSkillUpdates({})),
     rollBackSkill: (id) => command((commandId) => api.RollBackSkill({ commandId, id })),
-    setSkillActive: (id, active) => command((commandId) => api.SetSkillActive({ commandId, id, active })),
     uninstallSkill: (id) => command((commandId) => api.UninstallSkill({ commandId, id })),
     setAgentsAtOnce: (count) => command((commandId) => api.SetAgentsAtOnce({ commandId, count })),
     setFolderWait: (wait) => command((commandId) => api.SetFolderWait({ commandId, wait })),
@@ -914,6 +941,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getLoad: () => settle(api.GetLoad({})),
     getPlanUsage: (options = {}) => settle(api.GetPlanUsage(options.refresh === undefined ? {} : { refresh: options.refresh })),
     getModelRooms: (projectId) => settle(api.GetModelRooms(projectId === null ? {} : { projectId })),
+    getMissedReports: () => settle(api.GetMissedReports({})),
     openInEditor: (input) => command((commandId) => api.OpenInEditor({ commandId, ...input })),
     openCode: (input) => command((commandId) => api.OpenCode({ commandId, ...input })),
     installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),

@@ -10,20 +10,18 @@ import { DEFAULT_PREFERENCES } from '../src/main/appPreferences'
 import { SYSTEM_SOUND } from '../src/main/notify'
 import { soundToPutBack } from '../src/renderer/features/settings/QuickCards'
 import { QuickSettings } from '../src/renderer/features/settings/QuickSettings'
-import { isSection, type Section, SECTIONS } from '../src/renderer/features/settings/sections'
+import { isSection, type Section, SECTIONS, sectionOf } from '../src/renderer/features/settings/sections'
 import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
-import { reviewOf, rowOf } from '../src/renderer/features/settings/useSkills'
+import { reviewOf } from '../src/renderer/features/settings/useSkills'
 import { useStart } from '../src/renderer/features/start/useStart'
 import { edgeSpotOf, edgeWords } from '../src/renderer/shared/edge'
 import {
   agents,
-  changed,
   connectionList,
   fakeClient,
   fakeHost,
   fakePagesHost,
   githubConnection,
-  installedSkill,
   models,
   skillCard,
   withoutOpenCode,
@@ -272,14 +270,12 @@ describe('the Settings tab', () => {
         'MCP servers',
         'Skills',
         'Code hosts and trackers',
+        'Tasks',
+        'Pull requests',
         'Work on this Mac',
-        'Plans and reviews',
-        'New projects',
-        'Reviews and pull requests',
         'Notifications',
         'Appearance',
-        'Editor',
-        'Browser',
+        'Editor and browser',
         'About Althar',
       ]),
     )
@@ -295,9 +291,9 @@ describe('the Settings tab', () => {
     await new Promise((resolve) => setTimeout(resolve, 300))
     expect(vi.mocked(client.status).mock.calls.filter(([input]) => input?.recheck === true)).toHaveLength(1)
 
-    await toSection('Reviews and pull requests')
-    expect(screen.getByRole('heading', { name: 'Reviews and pull requests', level: 1 })).toBeTruthy()
-    expect(sections().getByRole('button', { name: 'Reviews and pull requests' }).getAttribute('aria-current')).toBe('page')
+    await toSection('Pull requests')
+    expect(screen.getByRole('heading', { name: 'Pull requests', level: 1 })).toBeTruthy()
+    expect(sections().getByRole('button', { name: 'Pull requests' }).getAttribute('aria-current')).toBe('page')
     // A card's name goes to the section it is in.
     await userEvent.click(screen.getByRole('button', { name: /^Notifications\s*When you’re away/ }))
     expect(screen.getByRole('heading', { name: 'Notifications', level: 1 })).toBeTruthy()
@@ -311,14 +307,12 @@ describe('the Settings tab', () => {
       'mcp-servers',
       'skills',
       'code-hosts',
+      'tasks',
+      'pull-requests',
       'this-mac',
-      'plans-and-reviews',
-      'new-projects',
-      'reviews',
       'notifications',
       'appearance',
-      'editor',
-      'browser',
+      'editor-and-browser',
       'about',
     ])
     expect(isSection('this-mac')).toBe(true)
@@ -326,115 +320,19 @@ describe('the Settings tab', () => {
     expect(isSection(undefined)).toBe(false)
   })
 
-  it('lists the skills each lead is given, turns one off, and installs one from GitHub only once its card is read', async () => {
-    const { client } = fakeClient()
-    withServices(<Settings at="skills" />, client)
-    expect(await screen.findByRole('switch', { name: 'brainstorming' })).toBeTruthy()
-    expect(screen.getByText(/agent-skills \(Addy Osmani\) and superpowers \(Jesse Vincent\), both MIT/)).toBeTruthy()
-    await userEvent.click(screen.getByRole('switch', { name: 'brainstorming' }))
-    expect(client.setSkillActive).toHaveBeenCalledWith('brainstorming', false)
-
-    await userEvent.type(screen.getByRole('textbox', { name: 'Install a skill from GitHub' }), 'acme/agent-skills')
-    await userEvent.click(screen.getByRole('button', { name: 'Find skills' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Review' }))
-    expect(client.stageSkill).toHaveBeenCalledWith({ repo: 'acme/agent-skills', ref: 'HEAD', subpath: 'skills/release-notes' })
-    // The card: where it is from, its licence and what the agent is told; nothing installed until Install.
-    const card = await screen.findByRole('region', { name: 'release-notes' })
-    expect(within(card).getByText('Write the notes.', { exact: false })).toBeTruthy()
-    expect(client.approveSkill).not.toHaveBeenCalled()
-    await userEvent.click(within(card).getByRole('button', { name: 'Install' }))
-    await waitFor(() => expect(client.approveSkill).toHaveBeenCalledWith(expect.objectContaining({ id: 'release-notes' }), false))
-    await waitFor(() => expect(screen.queryByRole('region', { name: 'release-notes' })).toBeNull())
-  })
-
-  it('offers to replace a skill of the same name from another folder of the same repository, not to update it', async () => {
-    const { client } = fakeClient()
-    const installed = { source: 'github' as const, treeHash: 'b'.repeat(64), review: 'reviewed' as const, active: true }
-    vi.mocked(client.stageSkill).mockResolvedValue({
-      ...skillCard,
-      installed: { ...installed, repo: 'acme/agent-skills', subpath: 'old/release-notes' },
-    })
-    withServices(<Settings at="skills" />, client)
-    await userEvent.type(await screen.findByRole('textbox', { name: 'Install a skill from GitHub' }), 'acme/agent-skills')
-    await userEvent.click(screen.getByRole('button', { name: 'Find skills' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Review' }))
-    const card = await screen.findByRole('region', { name: 'release-notes' })
-    await userEvent.click(within(card).getByRole('button', { name: 'Install in place of the one from acme/agent-skills' }))
-    await waitFor(() => expect(client.approveSkill).toHaveBeenCalledWith(expect.objectContaining({ id: 'release-notes' }), true))
-  })
-
-  it('turns every skill on at once, then every one off, and reads the store again where one isn’t kept', async () => {
-    const { client } = fakeClient({
-      listSkills: vi.fn(async () => ({
-        enabled: true,
-        catalogRevision: 'fixture-1',
-        skills: [installedSkill, { ...installedSkill, id: 'systematic-debugging', active: false }],
-      })),
-    })
-    withServices(<Settings at="skills" />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Turn all on' }))
-    expect(client.setSkillActive).toHaveBeenCalledTimes(1)
-    expect(client.setSkillActive).toHaveBeenCalledWith('systematic-debugging', true)
-    expect(screen.getByText('all 2 on')).toBeTruthy()
-    vi.mocked(client.setSkillActive).mockRejectedValueOnce(new Error('brainstorming couldn’t be turned off'))
-    await userEvent.click(screen.getByRole('button', { name: 'Turn all off' }))
-    expect(client.setSkillActive).toHaveBeenCalledWith('brainstorming', false)
-    expect(client.setSkillActive).toHaveBeenCalledWith('systematic-debugging', false)
-    await waitFor(() => expect(vi.mocked(client.listSkills).mock.calls.length).toBeGreaterThan(1))
-  })
-
-  it('shows a skill switched in another window, as the feed says it changed', async () => {
-    const { client, emit } = fakeClient()
-    withServices(<Settings at="skills" />, client)
-    const brainstorming = await screen.findByRole('switch', { name: 'brainstorming' })
-    expect(brainstorming.getAttribute('aria-checked')).toBe('true')
-    vi.mocked(client.listSkills).mockResolvedValue({
-      enabled: true,
-      catalogRevision: 'fixture-1',
-      skills: [{ ...installedSkill, active: false }],
-    })
-    emit(changed('skill', 'brainstorming', null, null))
-    await waitFor(() => expect(screen.getByRole('switch', { name: 'brainstorming' }).getAttribute('aria-checked')).toBe('false'))
-  })
-
-  it('opens an update the check found, as an update of the one installed', async () => {
-    const { client } = fakeClient()
-    const card = {
-      ...skillCard,
-      installed: {
-        source: 'github' as const,
-        repo: skillCard.source.repo,
-        subpath: skillCard.source.subpath,
-        treeHash: 'b'.repeat(64),
-        review: 'reviewed' as const,
-        active: true,
-      },
-    }
-    vi.mocked(client.checkSkillUpdates).mockResolvedValue([
-      { id: 'release-notes', state: 'available', card },
-      { id: 'changelog', state: 'failed', error: 'GitHub didn’t answer' },
-    ])
-    withServices(<Settings at="skills" />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Check for updates' }))
-    expect(await screen.findByText('changelog couldn’t be checked: GitHub didn’t answer')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Review the update to release-notes' }))
-    const review = await screen.findByRole('region', { name: 'release-notes' })
-    await userEvent.click(within(review).getByRole('button', { name: 'Update' }))
-    await waitFor(() => expect(client.approveSkill).toHaveBeenCalledWith(card, false))
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Review the update to release-notes' })).toBeNull())
-  })
-
-  it('keeps the Skills section named and says when its changes reach each lead', async () => {
-    withServices(<Settings at="skills" />, fakeClient().client)
-    expect(await screen.findByRole('heading', { name: 'Skills', level: 1 })).toBeTruthy()
-    expect(await screen.findByText(/A change reaches each lead the next time it starts, in a task under way too\./)).toBeTruthy()
-    expect(screen.queryByText(/keeps what it started with|runtime/)).toBeNull()
-  })
-
-  it('says when this Althar has no skills to give, without speaking of the runtime', async () => {
-    const { client } = fakeClient({ listSkills: vi.fn(async () => ({ enabled: false, catalogRevision: null, skills: [] })) })
-    withServices(<Settings at="skills" />, client)
-    expect(await screen.findByText('Skills aren’t set up in this copy of Althar, so each lead starts without them.')).toBeTruthy()
+  it('opens an old address where its settings went', () => {
+    for (const [old, now] of [
+      ['plans-and-reviews', 'tasks'],
+      ['new-projects', 'tasks'],
+      ['reviews', 'pull-requests'],
+      ['editor', 'editor-and-browser'],
+      ['browser', 'editor-and-browser'],
+      ['dictation', 'this-mac'],
+      ['agents', 'agents'],
+    ] as const)
+      expect(sectionOf(old)).toBe(now)
+    expect(sectionOf('nowhere')).toBeUndefined()
+    expect(sectionOf(undefined)).toBeUndefined()
   })
 
   it('opens the agents on the one that needs the person, each with its accounts and who makes it', async () => {
@@ -678,7 +576,7 @@ describe('the Settings tab', () => {
 
   it('posts the team’s reviews without asking only once the person turns it on, and says when that can’t be kept', async () => {
     const { client } = fakeClient()
-    withServices(<Settings at="reviews" />, client)
+    withServices(<Settings at="pull-requests" />, client)
     const posts = await screen.findByRole('switch', { name: 'Post reviews of my team’s pull requests without asking' })
     expect(posts.getAttribute('aria-checked')).toBe('false')
     expect(screen.getByText('Pull requests from outside the team still wait for you.')).toBeTruthy()
@@ -695,7 +593,7 @@ describe('the Settings tab', () => {
 
   it('has Althar as co-author of what it sends until the person turns it off, and then asks once, large, why it would stay', async () => {
     const { client } = fakeClient({ listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection] })) })
-    withServices(<Settings at="reviews" />, client)
+    withServices(<Settings at="pull-requests" />, client)
     const credit = await screen.findByRole('switch', { name: 'Althar as co-author' })
     expect(credit.getAttribute('aria-checked')).toBe('true')
     // The line on a commit as GitHub shows it, under the person's own name there.
@@ -724,7 +622,7 @@ describe('the Settings tab', () => {
 
     // Opened again while off, it doesn't ask again.
     await toSection('Notifications')
-    await toSection('Reviews and pull requests')
+    await toSection('Pull requests')
     expect(await screen.findByRole('switch', { name: 'Althar as co-author' })).toBeTruthy()
     expect(screen.queryByText(/no marketing budget/)).toBeNull()
   })
@@ -732,7 +630,7 @@ describe('the Settings tab', () => {
   it('turns co-authoring back when the change can’t be kept, and says so', async () => {
     const { client } = fakeClient()
     vi.mocked(client.setCoAuthor).mockRejectedValue(new Error('disk full'))
-    withServices(<Settings at="reviews" />, client)
+    withServices(<Settings at="pull-requests" />, client)
     const credit = await screen.findByRole('switch', { name: 'Althar as co-author' })
     await userEvent.click(credit)
     expect(await alert()).toBe('That couldn’t be kept. Try again.')
@@ -747,7 +645,7 @@ describe('the Settings tab', () => {
 
   it('puts the review seal on pull requests until the person turns it off, with its look to pick while it is on', async () => {
     const { client } = fakeClient()
-    withServices(<Settings at="reviews" />, client)
+    withServices(<Settings at="pull-requests" />, client)
     const seal = await screen.findByRole('switch', { name: 'Review seal on pull requests' })
     expect(seal.getAttribute('aria-checked')).toBe('true')
     // A pull request as GitHub shows it: the ring in its corner, the review folded under it; never how many findings.
@@ -776,7 +674,7 @@ describe('the Settings tab', () => {
   it('turns the review seal back when the change can’t be kept, and says so', async () => {
     const { client } = fakeClient()
     vi.mocked(client.setReviewSeal).mockRejectedValue(new Error('disk full'))
-    withServices(<Settings at="reviews" />, client)
+    withServices(<Settings at="pull-requests" />, client)
     const seal = await screen.findByRole('switch', { name: 'Review seal on pull requests' })
     await userEvent.click(seal)
     expect(await alert()).toBe('That couldn’t be kept. Try again.')
@@ -812,7 +710,7 @@ describe('the Settings tab', () => {
         { id: 'finder', name: 'Finder' },
       ]),
     })
-    withServices(<Settings at="editor" />, client, host)
+    withServices(<Settings at="editor-and-browser" />, client, host)
     // Each editor by its own icon.
     const editors = await screen.findByRole('radiogroup', { name: 'Open files in' })
     expect(within(editors).getByRole('radio', { name: 'Cursor' }).getAttribute('aria-checked')).toBe('true')
@@ -823,8 +721,10 @@ describe('the Settings tab', () => {
   })
 
   it('says where files open when there is no editor to choose', async () => {
-    withServices(<Settings at="editor" />, fakeClient({ listEditors: vi.fn(async () => []) }).client)
-    expect(await screen.findByText('No editor found on this Mac. Files open in Finder.')).toBeTruthy()
+    withServices(<Settings at="editor-and-browser" />, fakeClient({ listEditors: vi.fn(async () => []) }).client)
+    // A designed empty state: what will be here, where files open meanwhile, and a way to look again.
+    expect(await screen.findByRole('heading', { name: 'No editor found' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Look again' })).toBeTruthy()
   })
 
   it('says which Althar this is, with its release’s notes', async () => {
@@ -1009,7 +909,7 @@ describe('how Althar looks, on the Settings tab', () => {
     withServices(<Settings at="appearance" />, fakeClient().client, fakeHost({ edge }))
     expect(await screen.findByRole('radiogroup', { name: 'In other apps' })).toBeTruthy()
     notch = false
-    await toSection('Editor')
+    await toSection('Editor and browser')
     await toSection('Appearance')
     expect(await screen.findByText('This screen has no notch.')).toBeTruthy()
   })
@@ -1026,7 +926,7 @@ describe('how Althar looks, on the Settings tab', () => {
       within(await screen.findByRole('radiogroup', { name: 'In other apps' })).getByRole('radio', { name: /In the menu bar/ }),
     )
     // Left and opened again before the main process has kept it: what it reads is from before, and the choice stands.
-    await toSection('Editor')
+    await toSection('Editor and browser')
     await toSection('Appearance')
     await waitFor(() => expect(host.edge).toHaveBeenCalledTimes(2))
     await new Promise((resolve) => setTimeout(resolve, 20))
@@ -1150,26 +1050,9 @@ describe('the skills’ view model', () => {
       update: false,
       replaces: 'other/skills',
     })
-    expect(reviewOf({ ...skillCard, installed: { ...installed, source: 'althar-default' as const } })).toMatchObject({
+    expect(reviewOf({ ...skillCard, installed: { ...installed, source: 'local' as const } })).toMatchObject({
       update: false,
-      replaces: 'Althar',
-    })
-  })
-
-  it('shows each skill with where it is from, and lets only the ones the person installed go', () => {
-    expect(rowOf(installedSkill)).toEqual({
-      id: 'brainstorming',
-      description: installedSkill.description,
-      from: 'Althar',
-      on: true,
-      needsSubagents: false,
-      canRollBack: false,
-      removable: false,
-    })
-    expect(rowOf({ ...installedSkill, source: 'github', repo: 'acme/agent-skills', needs: ['subagents'] })).toMatchObject({
-      from: 'acme/agent-skills',
-      needsSubagents: true,
-      removable: true,
+      replaces: 'A folder you imported',
     })
   })
 })
@@ -1178,8 +1061,9 @@ describe('Settings › Browser', () => {
   it('keeps where a thread’s links open and how long pages keep cookies, and clears every page’s at once', async () => {
     const clearAll = vi.fn(async () => {})
     const host = fakeHost({ pages: fakePagesHost({ clearAll }) })
-    withServices(<Settings at="browser" />, fakeClient().client, host)
-    expect(await screen.findByRole('heading', { name: 'Browser', level: 1 })).toBeTruthy()
+    withServices(<Settings at="editor-and-browser" />, fakeClient().client, host)
+    expect(await screen.findByRole('heading', { name: 'Editor and browser', level: 1 })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Pages beside conversations', level: 2 })).toBeTruthy()
     const links = screen.getByRole('radiogroup', { name: 'Links from threads' })
     expect(within(links).getByRole('radio', { name: 'Beside the conversation' }).getAttribute('aria-checked')).toBe('true')
     await userEvent.click(within(links).getByRole('radio', { name: 'In your browser' }))

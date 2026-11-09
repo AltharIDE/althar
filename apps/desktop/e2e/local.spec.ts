@@ -60,9 +60,8 @@ test('works Local: asks before it takes the checkout, waits for it, and gives it
     await openFirstProject(electronApp, page, root)
 
     // The project starts new tasks Local.
-    await projectSettings(page, 'General')
-    const tasks = page.getByRole('region', { name: 'Tasks' })
-    const startIn = tasks.getByRole('radiogroup', { name: 'New tasks start in' })
+    await projectSettings(page, 'Tasks')
+    const startIn = page.getByRole('main').getByRole('radiogroup', { name: 'New tasks start in' })
     await startIn.getByRole('radio', { name: 'Local' }).click()
     await expect(startIn.getByRole('radio', { name: 'Local' })).toHaveAttribute('aria-checked', 'true')
     await shoot(page, blockWith(page, startIn, page.getByText(/^Local works in your own checkout/)), 'settings')

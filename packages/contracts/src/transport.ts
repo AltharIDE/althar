@@ -2,6 +2,8 @@ import { Effect, Layer, Scope } from 'effect'
 import { RpcClient, RpcServer } from 'effect/rpc'
 import { Worker, WorkerRunner } from 'effect/workers'
 
+import { API_VERSION, API_VERSION_HEADER } from './Api'
+
 /*
  * The API runs over a message port (docs/architecture/02): Electron's main
  * process makes a channel and hands one end to the runtime's utility process
@@ -111,10 +113,10 @@ export const serverProtocol = (port: PortLike): Layer.Layer<RpcServer.Protocol> 
     Layer.orDie,
   )
 
-/** The window's end: the RPC client's protocol, over a port. */
-export const clientProtocol = (port: PortLike): Layer.Layer<RpcClient.Protocol> =>
+/** The window's end: the RPC client's protocol, over a port. Every request says which API version the client speaks. */
+export const clientProtocol = (port: PortLike, apiVersion: number = API_VERSION): Layer.Layer<RpcClient.Protocol> => {
   // One port, carrying every call at once: a long-running stream such as `Watch` mustn't hold up the rest.
-  RpcClient.layerProtocolWorker({ size: 1, concurrency: Number.MAX_SAFE_INTEGER }).pipe(
+  const over = RpcClient.layerProtocolWorker({ size: 1, concurrency: Number.MAX_SAFE_INTEGER }).pipe(
     Layer.provide(
       Layer.merge(
         Layer.succeed(
@@ -141,3 +143,20 @@ export const clientProtocol = (port: PortLike): Layer.Layer<RpcClient.Protocol> 
     ),
     Layer.orDie,
   )
+  // The runtime refuses a client of a version it doesn't serve, so each request carries the one this client speaks.
+  return Layer.effect(
+    RpcClient.Protocol,
+    Effect.gen(function* () {
+      const protocol = yield* RpcClient.Protocol
+      return RpcClient.Protocol.of({
+        ...protocol,
+        send: (clientId, request, transferables) =>
+          protocol.send(
+            clientId,
+            request._tag === 'Request' ? { ...request, headers: [...request.headers, [API_VERSION_HEADER, String(apiVersion)]] } : request,
+            transferables,
+          ),
+      })
+    }),
+  ).pipe(Layer.provide(over))
+}
