@@ -1012,10 +1012,10 @@ export const githubCheck: ConnectionCheck = {
   settings: 'https://github.com/settings/personal-access-tokens',
 }
 
-/** A skill the catalog ships, and one from GitHub to review. */
+/** A skill the person has installed, and one from GitHub to review. */
 export const installedSkill: InstalledSkill = {
   id: 'brainstorming',
-  source: 'althar-default',
+  source: 'local',
   description: 'Use before building a new feature or change whose intent or design is not settled yet.',
   license: 'MIT',
   repo: null,
@@ -1023,9 +1023,8 @@ export const installedSkill: InstalledSkill = {
   ref: null,
   sha: null,
   treeHash: 'b'.repeat(64),
-  review: 'default',
+  review: 'reviewed',
   active: true,
-  needs: [],
   canRollBack: false,
 }
 
@@ -1052,6 +1051,12 @@ export const agentTools: AgentTools = {
   skills: [],
   serverSync: { on: false, settle: [], since: [], targets: [], errors: [] },
   skillSync: { on: false, settle: [], since: [], targets: [], errors: [] },
+  places: [
+    { agent: 'claude', file: '~/.claude.json', folder: '~/.claude/skills' },
+    { agent: 'codex', file: '~/.codex/config.toml', folder: '~/.agents/skills' },
+    { agent: 'opencode', file: '~/.config/opencode/opencode.json', folder: '~/.config/opencode/skills' },
+  ],
+  checkedAt: null,
 }
 
 export const fakeClient = (overrides: Partial<Client> = {}) => {
@@ -1133,6 +1138,11 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setModelBlocked: vi.fn(async () => {}),
     getAgentTools: vi.fn(async () => agentTools),
     setToolRoles: vi.fn(async () => {}),
+    setToolInProject: vi.fn(async () => {}),
+    getServerDetail: vi.fn(async (name: string) => ({ name, runs: '', files: [], tools: null, toolsWhy: null })),
+    checkServers: vi.fn(async () => {}),
+    addServer: vi.fn(async () => {}),
+    removeServer: vi.fn(async () => {}),
     setToolSync: vi.fn(async () => {}),
     setToolKeptOut: vi.fn(async () => {}),
     pickToolWay: vi.fn(async () => {}),
@@ -1146,7 +1156,15 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       automationsPaused: false,
       folderWait: 'smart' as const,
       plansAndReviews: { countdown: 25, rounds: 3, roundsOut: 'settled' } as const,
-      newProjects: { permissions: 'rules', usageLimit: 'move', rotateAccounts: false, end: 'draft' } as const,
+      newProjects: {
+        usageLimit: 'move',
+        rotateAccounts: false,
+        end: 'draft',
+        pushCommits: true,
+        postScreenshots: false,
+        resolveConflicts: true,
+        moveIssues: true,
+      } as const,
     })),
     setCoAuthor: vi.fn(async () => {}),
     setPostTeamReviews: vi.fn(async () => {}),
@@ -1170,13 +1188,12 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getSettingChanges: vi.fn(async () => []),
     setAutomationPostsReviews: vi.fn(async () => {}),
     setAutomationsPaused: vi.fn(async () => {}),
-    listSkills: vi.fn(async () => ({ enabled: true, catalogRevision: 'fixture-1', skills: [installedSkill] })),
+    listSkills: vi.fn(async () => ({ enabled: true, skills: [installedSkill] })),
     findSkills: vi.fn(async ({ source }) => ({ repo: source, ref: 'HEAD', sha: 'a'.repeat(40), paths: ['skills/release-notes'] })),
     stageSkill: vi.fn(async () => skillCard),
     approveSkill: vi.fn(async () => ({ ...installedSkill, id: skillCard.id, source: 'github' as const, repo: skillCard.source.repo })),
     checkSkillUpdates: vi.fn(async () => []),
     rollBackSkill: vi.fn(async () => installedSkill),
-    setSkillActive: vi.fn(async (_id: string, active: boolean) => ({ ...installedSkill, active })),
     uninstallSkill: vi.fn(async () => {}),
     setAgentsAtOnce: vi.fn(async () => {}),
     setFolderWait: vi.fn(async () => {}),

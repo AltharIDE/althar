@@ -44,6 +44,7 @@ import { Secrets } from './Secrets'
 import { Sessions } from './Sessions'
 import { LeftBehind } from './LeftBehind'
 import { Setups } from './Setups'
+import { shippedSkillsLayer } from './Skills'
 import { Limits } from './Limits'
 import { AutoModels } from './modelMoves'
 import { FastLane } from './fastLane'
@@ -180,6 +181,8 @@ export const layer = (options: RuntimeLayerOptions) => {
         // A child that ended, and a call that waits while the person is away (Situations.ts).
         Situations.layer,
         startupLayer('search-index', fillIndex),
+        // The skills an older Althar shipped come out of the person's store on the first start after it stopped.
+        startupLayer('skills', shippedSkillsLayer),
       ).pipe(Layer.provideMerge(automating)),
     ),
   )

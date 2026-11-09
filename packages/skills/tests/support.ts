@@ -1,9 +1,9 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { rm } from 'node:fs/promises'
 import { Effect } from 'effect'
 import { unlockTree } from '../src/files'
 import { type GitHubAccess, gitBlobSha } from '../src/github'
-import { type Files, treeHash } from '../src/hash'
+import { type Files } from '../src/hash'
+import { putObject, readInstalls, withInstall, writeInstalls } from '../src/store'
 
 const encoder = new TextEncoder()
 
@@ -27,21 +27,13 @@ export const good = (name = 'my-skill'): Record<string, string> => ({
   'SKILL.md': skillMd(`name: ${name}\ndescription: Use when testing.\nlicense: MIT\nmetadata:\n  author: someone`),
 })
 
-/** Writes a local catalog of the given skills (id -> files) with correct pins, and returns its directory entries' tree hashes. */
-export const writeCatalog = async (
-  directory: string,
-  skills: Record<string, Record<string, string>>,
-  needs: Record<string, string[]> = {},
-) => {
-  const entries = []
-  for (const [id, files] of Object.entries(skills)) {
-    for (const [path, text] of Object.entries(files)) {
-      await mkdir(dirname(join(directory, 'skills', id, path)), { recursive: true })
-      await writeFile(join(directory, 'skills', id, path), text)
-    }
-    entries.push({ id, source: { kind: 'althar' }, treeHash: treeHash(tree(files)), license: 'Apache-2.0', needs: needs[id] ?? [] })
-  }
-  await writeFile(join(directory, 'catalog.json'), JSON.stringify({ version: 1, revision: 'fixture-1', entries }))
+/** Puts a skill in the store and records it as one of the person's own installs, on or off; returns its stored version. */
+export const install = async (root: string, id: string, files: Record<string, string>, active = true): Promise<string> => {
+  const hash = await run(putObject(root, tree(files)))
+  await run(
+    writeInstalls(root, withInstall(await run(readInstalls(root)), { id, source: 'local', treeHash: hash, review: 'reviewed', active })),
+  )
+  return hash
 }
 
 /**

@@ -2,7 +2,7 @@
   "name": "@althar/skills",
   "version": "0.0.0",
   "private": true,
-  "description": "Agent Skills for every harness: validation, the shared store, the default catalog, per-run projection and the repository boundary.",
+  "description": "Agent Skills for every harness: validation, the shared store, adding from GitHub, per-run projection and the repository boundary.",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {

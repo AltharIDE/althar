@@ -4,6 +4,7 @@ import { cx } from '../../lib/cx'
 import { useTheme } from '../../lib/theme'
 import { Choices } from '../../primitives/Choices/Choices'
 import { SEAL_STYLES, type SealFacts, type SealInk, type SealStyle, sealLine, sealSvg } from '../../seal/seal'
+import { PullRequestCard } from '../TaskPreviews/PullRequestCard'
 import s from './ReviewSeal.module.css'
 
 /*
@@ -67,10 +68,7 @@ export function ReviewSeal({ on, style, onStyle, sample, text, className }: Revi
   const said = sealLine(sample.facts)
   return (
     <div className={cx(s.reviewSeal, className)}>
-      <figure className={cx(s.pullRequest, !on && s.off)} aria-label={t.pullRequest}>
-        <div className={s.head}>
-          <span className={s.title}>{sample.title}</span> <span className={s.number}>{sample.number}</span>
-        </div>
+      <PullRequestCard className={cx(!on && s.off)} label={t.pullRequest} title={sample.title} number={sample.number}>
         <div className={s.body}>
           {on ? <img className={s.seal} src={seals[style]} alt={said} /> : <span className={cx(s.seal, s.ghost)} aria-hidden="true" />}
           <p className={s.text}>{sample.text}</p>
@@ -80,7 +78,7 @@ export function ReviewSeal({ on, style, onStyle, sample, text, className }: Revi
             <code>{sample.facts.sha.slice(0, 7)}</code>
           </p>
         </div>
-      </figure>
+      </PullRequestCard>
       {on ? (
         <Choices
           label={t.look}

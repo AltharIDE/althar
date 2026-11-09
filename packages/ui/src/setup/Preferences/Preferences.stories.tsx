@@ -707,3 +707,20 @@ export const BrowserSettings: Story = {
   },
 }
 export const BrowserSettingsDark: Story = { ...BrowserSettings, globals: { theme: 'dark' } }
+
+const onLookAgain = fn()
+
+/** Settings › Editor and browser with no editor found: what will be here, how one gets here, where files open until then, and Look again. */
+export const NoEditorFound: Story = {
+  decorators: [(Story) => <div style={{ width: 760 }}>{Story()}</div>],
+  render: () => <OpenFilesIn editors={[]} value={null} onChange={fn()} onLookAgain={onLookAgain} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('heading', { level: 3, name: 'No editor found' })).toBeVisible()
+    await expect(c.getByText(/files open in Finder/)).toBeVisible()
+    await expect(c.queryByRole('radiogroup')).toBeNull()
+    await userEvent.click(c.getByRole('button', { name: 'Look again' }))
+    await expect(onLookAgain).toHaveBeenCalled()
+  },
+}
+export const NoEditorFoundDark: Story = { ...NoEditorFound, globals: { theme: 'dark' } }

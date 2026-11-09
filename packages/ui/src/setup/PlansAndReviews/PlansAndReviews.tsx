@@ -1,6 +1,10 @@
+import type { ReactNode } from 'react'
+
+import { Icon } from '../../foundations/Icon/Icon'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Select } from '../../primitives/Select/Select'
 import { SettingList, SettingRow } from '../Preferences/Preferences'
+import { ReviewSealGlyph } from '../ReviewSeal/ReviewSeal'
 
 /*
  * How plans start and how long review goes on, as rows of the Settings tab:
@@ -58,6 +62,9 @@ export const plansAndReviewsText: PlansAndReviewsText = {
   reset: (label) => `Default: ${label}`,
 }
 
+/** The seal on the rounds' row: a sample of what a round leaves. */
+const SEAL_SAMPLE = { model: 'GPT-6.1 Sol', sha: '4e1c07a', passes: 2, date: '2026-10-31' }
+
 const COUNTDOWNS: readonly Countdown[] = [0, 10, 25, 60]
 const ROUNDS: readonly ReviewRounds[] = [1, 2, 3, 5]
 const ROUNDS_OUT: readonly RoundsOut[] = ['settled', 'ask']
@@ -79,6 +86,7 @@ export function PlansAndReviews({ value, onChange, text }: PlansAndReviewsProps)
     note: string,
     choices: readonly V[],
     label: (choice: V) => string,
+    picture: { glyph: ReactNode } | { mark: ReactNode },
     width = 150,
   ) => {
     const chosen = value[key] as V
@@ -86,6 +94,7 @@ export function PlansAndReviews({ value, onChange, text }: PlansAndReviewsProps)
     return (
       <SettingRow
         title={title}
+        {...picture}
         note={
           <>
             {note}
@@ -112,9 +121,19 @@ export function PlansAndReviews({ value, onChange, text }: PlansAndReviewsProps)
   }
   return (
     <SettingList>
-      {row('countdown', t.countdown.title, t.countdown.note(value.countdown), COUNTDOWNS, t.countdown.label)}
-      {row('rounds', t.rounds.title, t.rounds.note, ROUNDS, t.rounds.label)}
-      {row('roundsOut', t.roundsOut.title, t.roundsOut.note(value.roundsOut), ROUNDS_OUT, t.roundsOut.label, 280)}
+      {row('countdown', t.countdown.title, t.countdown.note(value.countdown), COUNTDOWNS, t.countdown.label, {
+        glyph: <Icon name="clock" size={15} />,
+      })}
+      {row('rounds', t.rounds.title, t.rounds.note, ROUNDS, t.rounds.label, { mark: <ReviewSealGlyph facts={SEAL_SAMPLE} /> })}
+      {row(
+        'roundsOut',
+        t.roundsOut.title,
+        t.roundsOut.note(value.roundsOut),
+        ROUNDS_OUT,
+        t.roundsOut.label,
+        { glyph: <Icon name="hold" size={15} /> },
+        280,
+      )}
     </SettingList>
   )
 }
