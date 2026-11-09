@@ -252,13 +252,6 @@ describe('a push the lead asks the person for', () => {
       ),
     )
 
-  /** What the person says in a task's thread. */
-  const say = (threadId: string, body: string) =>
-    Effect.gen(function* () {
-      const sessions = yield* Sessions
-      yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { threadId, body }), threadId, body })
-    })
-
   /**
    * What Althar's own course tells the lead (a comment on its pull request, its checks): quiet, so its turn holds nothing for
    * Ship, and what it commits goes up as ADR-072 has it. What the person says is a turn whose commits wait for Ship (ship.test.ts).
@@ -431,7 +424,8 @@ describe('a push the lead asks the person for', () => {
     return Effect.gen(function* () {
       const changes = yield* Changes
       const task = yield* opened(working)
-      yield* say(task.threadId, 'push pls')
+      // Asked in Althar's own course: a turn the person's words began would hold its commit for Ship instead (ship.test.ts).
+      yield* tell(task.threadId, 'push pls')
       yield* until(asked(task.threadId), (all) => all[0]?.state === 'open')
       github.mergeByHand(1)
       yield* changes.refresh(task.taskId)
