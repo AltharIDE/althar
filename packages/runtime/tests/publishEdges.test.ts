@@ -6,7 +6,7 @@ import { ConnectorFailed } from '@althar/connectors'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Deferred, Duration, Effect, Layer } from 'effect'
+import { Deferred, Duration, Effect, Fiber, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
@@ -308,7 +308,8 @@ describe('opening a task’s pull request', () => {
         Effect.map(queries.card(task.taskId), (card) => [card]),
         ([card]) => card?.held !== undefined,
       )
-      yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', {}), taskId: task.taskId })
+      // Pressed as the window does: the press waits on the host with the button busy, while the card says it's under way.
+      const pressed = yield* Effect.forkChild(runs.ship({ envelope: yield* Runtime.envelope('task.ship', {}), taskId: task.taskId }))
       yield* until(
         Effect.sync(() => opens),
         (n) => n === 2,
@@ -318,6 +319,7 @@ describe('opening a task’s pull request', () => {
       yield* Effect.sleep('200 millis')
       assert.strictEqual((yield* queries.card(task.taskId)).phase, 'running')
       yield* Deferred.succeed(gate, undefined)
+      yield* Fiber.join(pressed)
       yield* until(published(task.threadId), (said) => said.length === 2)
       const [done] = yield* until(
         Effect.map(queries.card(task.taskId), (card) => [card]),

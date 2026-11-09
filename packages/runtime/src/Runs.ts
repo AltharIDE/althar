@@ -2735,7 +2735,8 @@ export class Runs extends Context.Service<
        * ending sends the commits up, past the hold (`conclude`). With no
        * reviewer, or one after the merge, it goes up at once. Refused while
        * the task is at work, which ships once that's done, and where nothing
-       * waits. The run, once it's under way.
+       * waits. The run: once its review has started, or, with none, once what
+       * waited is up or couldn't go, as the press waits on the host.
        */
       const ship = (taskId: string, actorId: ActorId) =>
         oneRound(
