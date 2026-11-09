@@ -3607,6 +3607,7 @@ describe('the face a task opens on', () => {
       viewport: 'fit',
       pointing: false,
       line: null,
+      working: false,
     }
     pages.known(page)
     pages.place('t1', 'beside')
