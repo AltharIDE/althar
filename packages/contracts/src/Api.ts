@@ -31,6 +31,12 @@ export const SocketAllowed = Context.Reference<boolean>('@althar/contracts/Socke
 /** Bumped when a change would break a client built against an older API. */
 export const API_VERSION = 1
 
+/** The header every client request carries, naming the API version the client speaks. Compatibility is an exact match. */
+export const API_VERSION_HEADER = 'x-althar-api-version'
+
+/** The reason of the error a runtime answers a client of another API version with. */
+export const API_VERSION_MISMATCH = 'ApiVersionMismatch'
+
 export class ApiError extends Schema.TaggedError<ApiError>()('ApiError', {
   /** What kind of failure: the runtime's error tag, such as `NotARepository` or `SessionFailed`. */
   reason: Schema.String,
@@ -40,7 +46,31 @@ export class ApiError extends Schema.TaggedError<ApiError>()('ApiError', {
   why: Schema.optional(Schema.String),
   /** What it concerns, where the window can act on it: the files a merge conflicts in. */
   detail: Schema.optional(Schema.String),
+  /** For `ApiVersionMismatch`: the API version the client said it speaks; left out where it said none. */
+  clientVersion: Schema.optional(Schema.Int),
+  /** For `ApiVersionMismatch`: the API version the runtime serves. */
+  runtimeVersion: Schema.optional(Schema.Int),
 }) {}
+
+/**
+ * What a runtime answers a request with when its client speaks another API
+ * version than it serves (exact match), or didn't say; nothing when it matches.
+ * `headers` are the request's, as the RPC middleware has them.
+ */
+export const apiVersionRefusal = (headers: Readonly<Record<string, string | undefined>>): ApiError | undefined => {
+  const said = headers[API_VERSION_HEADER]
+  const spoken = said !== undefined && /^\d+$/.test(said) ? Number(said) : undefined
+  if (spoken === API_VERSION) return undefined
+  return new ApiError({
+    reason: API_VERSION_MISMATCH,
+    message:
+      spoken === undefined
+        ? `This client didn’t say which API version it speaks; this runtime serves version ${API_VERSION}.`
+        : `This client speaks API version ${spoken}; this runtime serves version ${API_VERSION}.`,
+    runtimeVersion: API_VERSION,
+    ...(spoken === undefined ? {} : { clientVersion: spoken }),
+  })
+}
 
 /** A command's id, made by the client: `cmd_` and 32 hex digits. The same id twice is a retry. */
 export const CommandId = Schema.String.check(Schema.isPattern(/^cmd_[0-9a-f]{32}$/))
@@ -220,8 +250,23 @@ export const ModelRoom = Schema.Struct({
   resetsAt: Schema.NullOr(Schema.String),
   kind: UsageWindowKind,
   label: Schema.NullOr(Schema.String),
+  /** The account is marked out of usage, as steering sees it (no fresh reading since shows room): until when. The room above is its last read. */
+  outUntil: Schema.optional(Schema.String),
 })
 export type ModelRoom = typeof ModelRoom.Type
+
+/**
+ * How often a model ended a step without its report in the last week, even
+ * once reminded, by agent and model: Althar handed each to another model, or
+ * it needed the person. Pickers say it beside the model.
+ */
+export const MissedReports = Schema.Struct({
+  agentId: Schema.String,
+  /** The model's id at the agent; null for the agent's own default. */
+  model: Schema.NullOr(Schema.String),
+  count: Schema.Number,
+})
+export type MissedReports = typeof MissedReports.Type
 
 /** The percent of a plan left at which a warning is told. */
 export const USAGE_WARN_AT = [50, 25, 10, 5] as const
@@ -381,14 +426,20 @@ export const PLANS_AND_REVIEWS: PlansAndReviews = { countdown: 25, rounds: 3, ro
  * project afterwards on its rules screen.
  */
 export const NewProjectDefaults = Schema.Struct({
-  /** What no rule keeps: allowed, judged by the coordinator, or asked about. */
-  permissions: Schema.Literals(['rules', 'coordinator', 'ask']),
   /** What happens to the work when an agent's account runs out. */
   usageLimit: Schema.Literals(['move', 'wait', 'ask']),
   /** Whether work goes on with an agent's next account before the limit applies. */
   rotateAccounts: Schema.Boolean,
   /** How a task ends when its plan doesn't say. */
   end: Schema.Literals(['draft', 'ready', 'none']),
+  /** Whether a lead's commits go up to its pull request on their own. */
+  pushCommits: Schema.Boolean,
+  /** Whether a task's screenshots are posted to its pull request on their own. */
+  postScreenshots: Schema.Boolean,
+  /** Whether a lead resolves a conflict with the default branch on its own. */
+  resolveConflicts: Schema.Boolean,
+  /** Whether a task's issue moves along with it. */
+  moveIssues: Schema.Boolean,
 })
 export type NewProjectDefaults = typeof NewProjectDefaults.Type
 
@@ -396,7 +447,15 @@ export type NewProjectDefaults = typeof NewProjectDefaults.Type
 export type NewProjectDefaultsChange = { readonly [Key in keyof NewProjectDefaults]?: NewProjectDefaults[Key] | undefined }
 
 /** What a project's rules are made with when the person has chosen nothing. */
-export const NEW_PROJECT_DEFAULTS: NewProjectDefaults = { permissions: 'rules', usageLimit: 'move', rotateAccounts: false, end: 'draft' }
+export const NEW_PROJECT_DEFAULTS: NewProjectDefaults = {
+  usageLimit: 'move',
+  rotateAccounts: false,
+  end: 'draft',
+  pushCommits: true,
+  postScreenshots: false,
+  resolveConflicts: true,
+  moveIssues: true,
+}
 
 /** How the review seal on a pull request looks: a round engraved stamp, a pressed wax seal, or a printer's colophon. */
 export const SealStyle = Schema.Literals(['ring', 'wax', 'colophon'])
@@ -410,7 +469,7 @@ export type ToolRole = typeof ToolRole.Type
 export const SyncedAgent = Schema.Literals(['claude', 'codex', 'opencode'])
 export type SyncedAgent = typeof SyncedAgent.Type
 
-/** Where a server or a skill was found: one of the person's agents, a repository of the project, a plugin, or Althar's catalog. */
+/** Where a server or a skill was found: one of the person's agents, a repository of the project, a plugin, or Althar's store (a skill added from GitHub). */
 export const ToolSource = Schema.Struct({
   from: Schema.Literals(['claude', 'codex', 'opencode', 'repository', 'plugin', 'althar']),
   /** The file or folder, as the person names it: ~/.claude.json, .mcp.json. */
@@ -422,17 +481,98 @@ export type ToolSource = typeof ToolSource.Type
 export const ToolHere = Schema.Literals(['in', 'added', 'missing', 'out', 'differs', 'cant'])
 export type ToolHere = typeof ToolHere.Type
 
-/** One of the person's MCP servers or skills, a row of Settings' table: where it was found, which roles get it, and how it stands in each agent. */
+/**
+ * Whether one of the person's agents is signed in to a server, as the agent's own command says (`claude mcp list`,
+ * `codex mcp list`, `opencode mcp list`): yes; no, which the person fixes with that agent's Sign in; none, for a
+ * server that needs none; unknown, where that agent says nothing of it or hasn't been asked yet.
+ */
+export const ToolSignIn = Schema.Literals(['yes', 'no', 'none', 'unknown'])
+export type ToolSignIn = typeof ToolSignIn.Type
+
+/** Why a server's last start failed, where it did, in the words the agent or the server gave. */
+export const ToolFailure = Schema.Struct({
+  /** The agent that said so; null where Althar's own check of the server did. */
+  agent: Schema.NullOr(SyncedAgent),
+  why: Schema.String,
+  at: Schema.String,
+})
+export type ToolFailure = typeof ToolFailure.Type
+
+/**
+ * One of the person's MCP servers or skills, a tile of Settings: where it was found, which roles get it and where,
+ * and how it stands in each agent. A repository's own (a project's `.mcp.json` or `.claude/skills`) has `repository`.
+ */
 export const ToolRow = Schema.Struct({
   name: Schema.String,
   /** What a server runs or calls; what a skill is for. */
   about: Schema.String,
   sources: Schema.Array(ToolSource),
-  /** The roles that get it, here: for every project, or the project asked about. */
+  /** The roles that get it, in every project. A repository's own is in no role until the person turns it on. */
   roles: Schema.Array(ToolRole),
   here: Schema.Record(SyncedAgent, ToolHere),
+  /** The projects whose marks the person pressed out: it isn't given in them, whatever the roles say. Empty for a repository's own. */
+  offIn: Schema.Array(Schema.String),
+  /** The project whose repository it is in; null for the person's own. */
+  repository: Schema.NullOr(Schema.String),
+  /** A server: whether it runs a command or opens an address. A skill: command. */
+  way: Schema.Literals(['command', 'address']),
+  /** A server: signed in or not, by agent, for the agents that run it. A skill: every agent unknown. */
+  signIn: Schema.Record(SyncedAgent, ToolSignIn),
+  /** A server: why its last start failed, while it has; null otherwise. */
+  failed: Schema.NullOr(ToolFailure),
+  /** A skill: where it lives, as the person names it (a folder, a plugin, Althar's store); a server: null. */
+  home: Schema.NullOr(Schema.String),
+  /** A skill added from GitHub through Althar: where it came from, and the commit it is at. */
+  from: Schema.NullOr(Schema.Struct({ repo: Schema.String, subpath: Schema.String, ref: Schema.String, sha: Schema.String })),
 })
 export type ToolRow = typeof ToolRow.Type
+
+/**
+ * One agent's own file, as it keeps a server: how it stands there, and its lines as that agent writes them. Lines
+ * Althar copied are shown as they are in the file; lines it keeps out, as it would write them, to be struck through.
+ * Values of env and headers that aren't references to a variable are masked.
+ */
+export const ToolFile = Schema.Struct({
+  agent: Schema.Literals(['claude', 'codex', 'opencode', 'repository']),
+  /** As the person names it: ~/.claude.json, ~/.codex/config.toml, .mcp.json. */
+  where: Schema.String,
+  /**
+   * yours: set up there by the person; copied: Althar added it; differs: it runs another way there; out: kept out of it;
+   * missing: not there; cant: Althar can't put it there.
+   */
+  state: Schema.Literals(['yours', 'copied', 'differs', 'out', 'missing', 'cant']),
+  lines: Schema.Array(Schema.String),
+  /** What it runs in this agent, in a line. */
+  runs: Schema.String,
+  /** Where Althar can't put it, why, in words. */
+  why: Schema.NullOr(Schema.String),
+  signIn: ToolSignIn,
+})
+export type ToolFile = typeof ToolFile.Type
+
+/** A server opened out: each agent's file as it keeps it, and what it exposes, where Althar's own check could read that. */
+export const ServerDetail = Schema.Struct({
+  name: Schema.String,
+  /** What it runs, in a line: its address or its command. */
+  runs: Schema.String,
+  files: Schema.Array(ToolFile),
+  /** How many tools it offers, from Althar's own check; null where that couldn't be read. */
+  tools: Schema.NullOr(Schema.Int),
+  /** Why there is no count, where there is none: it needs a sign-in, it didn't start, it isn't one Althar can ask. Null otherwise. */
+  toolsWhy: Schema.NullOr(Schema.String),
+})
+export type ServerDetail = typeof ServerDetail.Type
+
+/** A server the person adds: a name, and an address or a command. Values of `env` and `headers` may be `${VARIABLE}` references. */
+export const NewServer = Schema.Struct({
+  name: Schema.String,
+  url: Schema.optional(Schema.String),
+  command: Schema.optional(Schema.String),
+  args: Schema.optional(Schema.Array(Schema.String)),
+  env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  headers: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+})
+export type NewServer = typeof NewServer.Type
 
 /** Something sync can't do alone, which the person settles: under To settle, problems first. */
 export const SyncSettle = Schema.Union([
@@ -495,6 +635,10 @@ export const AgentTools = Schema.Struct({
   skills: Schema.Array(ToolRow),
   serverSync: SyncView,
   skillSync: SyncView,
+  /** Where each agent keeps its servers (a file) and its skills (a folder), as the person names them. */
+  places: Schema.Array(Schema.Struct({ agent: SyncedAgent, file: Schema.String, folder: Schema.String })),
+  /** When the agents' own checks last ran, for the sign-ins and failures the rows say; null before the first. */
+  checkedAt: Schema.NullOr(Schema.String),
 })
 export type AgentTools = typeof AgentTools.Type
 
@@ -2860,6 +3004,8 @@ export const StuckStep = Schema.Struct({
     'transient',
     // Its agent's account is signed out: signing it in again in Settings, then trying again, is the way on.
     'signed_out',
+    // The lead stopped to wait for the person's answer: its detail is the question, and the answer starts it again.
+    'waiting_on_person',
   ]),
   /** What went wrong, in the agent's or Althar's words; for the last round, the lead's summary. */
   detail: Schema.NullOr(Schema.String),
@@ -2871,8 +3017,8 @@ export const StuckStep = Schema.Struct({
   round: Schema.Number,
   /** Review findings the lead hasn't settled. */
   open: Schema.Number,
-  /** What Althar did before asking: told the agent to carry on, started it afresh, or told it to try another way. */
-  tried: Schema.optional(Schema.Array(Schema.Literals(['carried_on', 'restarted', 'redirected']))),
+  /** What Althar did before asking: told the agent to carry on, started it afresh, told it to try another way, or handed the step to another model. */
+  tried: Schema.optional(Schema.Array(Schema.Literals(['carried_on', 'restarted', 'redirected', 'handed_on']))),
   /** For a usage limit: the account that reached it, and when it resets, where it said, and who could take the step over. */
   limit: Schema.optional(LimitCall),
   /** For a service that kept failing: its name. */
@@ -3697,8 +3843,8 @@ export const Load = Schema.Struct({
 })
 export type Load = typeof Load.Type
 
-/** Where an installed skill came from: the catalog Althar ships, GitHub, or a folder the person imported. */
-export const SkillSource = Schema.Literals(['althar-default', 'github', 'local'])
+/** Where an installed skill came from: GitHub, or a folder the person imported. Althar ships none of its own. */
+export const SkillSource = Schema.Literals(['github', 'local'])
 
 /** One installed skill, as the skills page lists it. */
 export const InstalledSkill = Schema.Struct({
@@ -3712,11 +3858,9 @@ export const InstalledSkill = Schema.Struct({
   ref: Schema.NullOr(Schema.String),
   sha: Schema.NullOr(Schema.String),
   treeHash: Schema.String,
-  review: Schema.Literals(['not-reviewed', 'reviewed', 'default']),
+  review: Schema.Literals(['not-reviewed', 'reviewed']),
   /** Whether later runs are given it. */
   active: Schema.Boolean,
-  /** What a harness must be able to do to be given it: `subagents`. */
-  needs: Schema.Array(Schema.String),
   /** Whether it has an earlier version to go back to. */
   canRollBack: Schema.Boolean,
   /**
@@ -3727,10 +3871,9 @@ export const InstalledSkill = Schema.Struct({
 })
 export type InstalledSkill = typeof InstalledSkill.Type
 
-/** The skills store: off where the runtime has none; the catalog revision it was seeded from. */
+/** The skills store: off where the runtime has none. */
 export const SkillList = Schema.Struct({
   enabled: Schema.Boolean,
-  catalogRevision: Schema.NullOr(Schema.String),
   skills: Schema.Array(InstalledSkill),
 })
 export type SkillList = typeof SkillList.Type
@@ -3764,7 +3907,7 @@ export const SkillReviewCard = Schema.Struct({
     Schema.Struct({
       source: SkillSource,
       treeHash: Schema.String,
-      review: Schema.Literals(['not-reviewed', 'reviewed', 'default']),
+      review: Schema.Literals(['not-reviewed', 'reviewed']),
       active: Schema.Boolean,
       repo: Schema.optional(Schema.String),
       subpath: Schema.optional(Schema.String),
@@ -4193,7 +4336,7 @@ export const Api = RpcGroup.make(
   call('GetSettings', {}, AppSettings),
   /** The person's MCP servers and skills, which roles get each, for every project or one, and how sync stands (ADR-097). */
   call('GetAgentTools', { projectId: Schema.NullOr(Schema.String) }, AgentTools),
-  /** Which roles get one of the person's servers or skills: for every project, or for one. */
+  /** Which roles get one of the person's servers or skills in every project; `repository` names the project whose own it is. A skill added from GitHub is on while any role gets it. */
   command(
     'SetToolRoles',
     {
@@ -4201,9 +4344,24 @@ export const Api = RpcGroup.make(
       name: Schema.String,
       roles: Schema.Array(ToolRole),
       projectId: Schema.NullOr(Schema.String),
+      repository: Schema.optional(Schema.NullOr(Schema.String)),
     },
     Schema.Void,
   ),
+  /** One project's mark pressed out or in on a server or skill: out, it isn't given in that project; in, it goes by the roles again. */
+  command(
+    'SetToolInProject',
+    { kind: Schema.Literals(['server', 'skill']), name: Schema.String, projectId: Schema.String, on: Schema.Boolean },
+    Schema.Void,
+  ),
+  /** A server opened out: each agent's file as it keeps it, and its tools counted by Althar's own check. May take a few seconds. */
+  call('GetServerDetail', { name: Schema.String, repository: Schema.NullOr(Schema.String) }, ServerDetail),
+  /** Asks each of the person's agents, through its own command, how each server stands: signed in, or why it failed to start. */
+  command('CheckServers', {}, Schema.Void),
+  /** Adds a server to each of the agents listed, in its own file, as the person's own there. Refused where the name is taken in one of them. */
+  command('AddServer', { server: NewServer, agents: Schema.Array(SyncedAgent) }, Schema.Void),
+  /** Takes a server out of every one of the agents' files that has it, and out of what sync keeps for it. */
+  command('RemoveServer', { name: Schema.String }, Schema.Void),
   /** Turns a sync switch on, or off with what it added left in or taken back out. */
   command('SetToolSync', { kind: Schema.Literals(['server', 'skill']), on: Schema.Boolean, takeBack: Schema.Boolean }, Schema.Void),
   /** Keeps a server or a skill out of one agent (taken back out where sync added it), or puts it back. */
@@ -4298,10 +4456,13 @@ export const Api = RpcGroup.make(
   command(
     'SetNewProjectDefaults',
     {
-      permissions: Schema.optional(NewProjectDefaults.fields.permissions),
       usageLimit: Schema.optional(NewProjectDefaults.fields.usageLimit),
       rotateAccounts: Schema.optional(NewProjectDefaults.fields.rotateAccounts),
       end: Schema.optional(NewProjectDefaults.fields.end),
+      pushCommits: Schema.optional(NewProjectDefaults.fields.pushCommits),
+      postScreenshots: Schema.optional(NewProjectDefaults.fields.postScreenshots),
+      resolveConflicts: Schema.optional(NewProjectDefaults.fields.resolveConflicts),
+      moveIssues: Schema.optional(NewProjectDefaults.fields.moveIssues),
     },
     Schema.Void,
   ),
@@ -4664,6 +4825,8 @@ export const Api = RpcGroup.make(
   call('GetPlanUsage', { refresh: Schema.optional(Schema.Boolean) }, PlanUsage),
   /** Each model's room where work on it would start, in the project where given (its rule for moving work through accounts): read again as plan usage changes. */
   call('GetModelRooms', { projectId: Schema.optional(Schema.String) }, Schema.Array(ModelRoom)),
+  /** Each model that ended steps without its report in the last week, once reminded, with how often. */
+  call('GetMissedReports', {}, Schema.Array(MissedReports)),
   /** Downloads an agent's latest release for the person, checks it against the digest its release publishes, and keeps it for Althar to run; done once it is ready. */
   command('InstallAgent', { agentId: Schema.String }, Schema.Void),
   /** Opens a task's folder in an editor, at one of its files and a line where given; whether it could. The path is the task's, as its changes list it. */
@@ -4786,7 +4949,7 @@ export const Api = RpcGroup.make(
   command('StopLaunch', { id: Schema.String }, Schema.Void),
   /** Clears a run that ended by itself from the list. */
   command('ClearLaunch', { id: Schema.String }, Schema.Void),
-  /** The skills a task's lead is given, from the catalog Althar ships and what the person installed. */
+  /** The skills a task's lead is given: what the person added from GitHub and turned on. */
   call('ListSkills', {}, SkillList),
   /** The skill folders in a GitHub repository (a URL or `owner/name`), at the ref given or its default branch. */
   call('FindSkills', { source: Schema.String, ref: Schema.optional(Schema.String) }, SkillsFound),
@@ -4810,8 +4973,6 @@ export const Api = RpcGroup.make(
   call('CheckSkillUpdates', {}, Schema.Array(SkillUpdate)),
   /** Puts a skill back to the version before its last update. */
   command('RollBackSkill', { id: Schema.String }, InstalledSkill),
-  /** Turns a skill on or off for later runs. */
-  command('SetSkillActive', { id: Schema.String, active: Schema.Boolean }, InstalledSkill),
   /** Removes a skill the person installed; one Althar ships can only be turned off. */
   command('UninstallSkill', { id: Schema.String }, Schema.Void),
   /** What changes after `since`, or from now without it. */

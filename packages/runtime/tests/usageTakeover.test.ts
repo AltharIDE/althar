@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import type { ProjectId } from '@althar/domain'
+import { Ids, newId, type ProjectId } from '@althar/domain'
 import { holds, type FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Option } from 'effect'
@@ -21,7 +21,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { atReset, fakeAgents, items, later, onTestClock, repository, runtime, turns, until } from './support'
+import { atReset, fakeAgents, items, later, onTestClock, repository, runtime, turns, until, withWork } from './support'
 
 const claude = { id: 'claude-strong', name: 'Claude Strong' }
 const weak = { id: 'gpt-weak', name: 'GPT Weak' }
@@ -48,7 +48,13 @@ writeFileSync(
   }),
 )
 
-const withAgents = (each: Readonly<Record<string, FakeAgentOptions>> = {}, perUse: ReadonlyArray<string> = [], providerPlans = false) => {
+const withAgents = (
+  each: Readonly<Record<string, FakeAgentOptions>> = {},
+  perUse: ReadonlyArray<string> = [],
+  providerPlans = false,
+  /** OpenCode Go refused its sign-in, and the agents named are signed out. */
+  trouble: { readonly goRefused?: boolean; readonly signedOut?: ReadonlyArray<string> } = {},
+) => {
   const options = {
     'claude-code': { models: [claude], ...each['claude-code'] },
     codex: { models: [weak, sol], ...each.codex },
@@ -69,7 +75,12 @@ const withAgents = (each: Readonly<Record<string, FakeAgentOptions>> = {}, perUs
                   ...entry.definition.signIn,
                   providers: {
                     read: () => [
-                      { id: 'opencode-go', name: 'OpenCode Go', connections: 'subscription' },
+                      {
+                        id: 'opencode-go',
+                        name: 'OpenCode Go',
+                        connections: 'subscription',
+                        ...(trouble.goRefused === true ? { needsSignIn: true as const } : {}),
+                      },
                       { id: 'opencode-zen', name: 'OpenCode Zen', connections: 'key' },
                     ],
                     of: (model: string) => model.split('/')[0],
@@ -81,7 +92,7 @@ const withAgents = (each: Readonly<Record<string, FakeAgentOptions>> = {}, perUs
       )
       return Agents.of({ list, get: (id) => Effect.succeed(list.find((entry) => entry.definition.id === id)!) })
     }),
-  ).pipe(Layer.provide(fakeAgents({}, [], options, perUse)))
+  ).pipe(Layer.provide(fakeAgents({}, trouble.signedOut ?? [], options, perUse)))
   return Queries.layer.pipe(
     Layer.provideMerge(
       runtime(
@@ -97,6 +108,7 @@ const withAgents = (each: Readonly<Record<string, FakeAgentOptions>> = {}, perUs
           },
           perUse,
           each: options,
+          ...(trouble.signedOut === undefined ? {} : { signedOut: trouble.signedOut }),
           ...(providerPlans ? { agents } : {}),
         },
       ),
@@ -116,6 +128,7 @@ const startTask = (title = 'Continue the work [lead:finish]', reviewer?: string)
       envelope: yield* Runtime.envelope('task.create', {}),
       projectId: project.projectId,
       title,
+      description: withWork(title, reviewer !== undefined),
       draft: true,
     })
     const id = yield* plans.propose({
@@ -163,7 +176,7 @@ const automationFor = (projectId: string, lead: ModelChoice, review: ModelChoice
       actorId: instance.personId,
       definition: {
         name: 'Subscription run',
-        prompt: 'Finish this run [lead:finish] [review:pass]',
+        prompt: 'Finish this run [lead:finish] [lead:edit] [review:pass]',
         schedule: { every: 'week', days: [1], at: '09:00' },
         zone: 'Europe/London',
         lead,
@@ -224,6 +237,39 @@ describe('automatic usage takeover by model', () => {
       ),
     )
   })
+
+  it.live('moves work planned for an agent out of usage only where the project’s rule is move; under wait it is left to the run', () =>
+    Effect.gen(function* () {
+      // No task runs: only where work planned for the agent stands.
+      const models = yield* Models
+      yield* until(models.catalog, (catalog) => catalog.every((agent) => !agent.probing))
+      const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const projectId = project.projectId as ProjectId
+      const limits = yield* Limits
+      const policies = yield* Policies
+      const instance = yield* Instance
+      // Claude Code said it ran out of usage a moment ago, until an hour on.
+      const [account] = yield* (yield* Accounts).of('claude-code')
+      const sql = yield* SqlClient.SqlClient
+      const principalId = yield* newId(Ids.principal)
+      const at = new Date().toISOString()
+      yield* sql`INSERT INTO principals ${sql.insert({ id: principalId, agentId: 'claude-code', accountId: account!.id, deviceId: instance.deviceId, subjectHint: 'Fake sign-in', authMode: 'vendor_cli', observedAt: at })}`
+      yield* sql`INSERT INTO account_statuses ${sql.insert({
+        id: yield* newId(Ids.accountStatus),
+        principalId,
+        state: 'limited',
+        windows: JSON.stringify([{ kind: 'usage', resetsAt: new Date(Date.now() + 3_600_000).toISOString() }]),
+        source: 'error',
+        observedAt: at,
+      })}`
+      const planned = { agentId: 'claude-code', model: null, projectId }
+      const moving = yield* limits.standing(planned)
+      assert.strictEqual(moving.kind, 'instead')
+      assert.strictEqual(moving.kind === 'instead' ? moving.because.why : undefined, 'out')
+      yield* policies.setUsageLimit(projectId, 'wait', instance.personId)
+      assert.deepStrictEqual(yield* limits.standing(planned), { kind: 'ok' })
+    }).pipe(Effect.provide(withAgents({}))),
+  )
 
   it.live('reviews with a third maker even when its agent also offers a stronger model from the lead’s maker', () => {
     const back = Date.now() + 3_600_000
@@ -449,9 +495,10 @@ describe('automatic usage takeover by model', () => {
         account!.id,
       )
       assert.strictEqual((yield* limits.pick({ agentId: 'opencode', threadId: run!.threadId, model: third.id })).id, account!.id)
+      // A per-use route is picked like any other: nothing refuses it for the run it belongs to.
       assert.strictEqual(
-        (yield* Effect.flip(limits.pick({ agentId: 'opencode', threadId: run!.threadId, model: 'opencode-zen/gpt-strong' })))._tag,
-        'PlanOnly',
+        (yield* limits.pick({ agentId: 'opencode', threadId: run!.threadId, model: 'opencode-zen/gpt-strong' })).id,
+        account!.id,
       )
       yield* noCall
     }).pipe(
@@ -467,35 +514,84 @@ describe('automatic usage takeover by model', () => {
       ),
     )
   })
-  for (const step of ['lead', 'review'] as const) {
-    it.live(`starts an automation with a subscription-backed ${step}, and refuses its per-use route`, () =>
-      Effect.gen(function* () {
-        const { projectId } = yield* startTask()
-        const instance = yield* Instance
-        const automations = yield* Automations
-        const choices = (model: string) =>
-          step === 'lead'
-            ? { lead: { agentId: 'opencode', model }, review: null }
-            : { lead: { agentId: 'claude-code', model: claude.id }, review: { agentId: 'opencode', model } }
-        const paid = choices(third.id)
-        const id = yield* automationFor(projectId, paid.lead, paid.review)
-        yield* automations.runNow(id, instance.personId)
-        const [run] = yield* until(automationRuns(id), (all) => all[0]?.state === 'made')
-        const sql = yield* SqlClient.SqlClient
-        const sessions = yield* sql<{ agentId: string; model: string | null }>`
-          SELECT s.agent_id, s.model FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
-          WHERE t.task_id = ${run!.taskId} AND t.kind = ${step === 'lead' ? 'task' : 'step'}`
-        assert.deepInclude(sessions, { agentId: 'opencode', model: third.id })
-        const perUse = choices('opencode-zen/gpt-strong')
-        const refusedId = yield* automationFor(projectId, perUse.lead, perUse.review)
-        const refused = yield* Effect.flip(automations.runNow(refusedId, instance.personId))
-        assert.deepInclude(refused, {
-          _tag: 'AutomationRefused',
-          message: 'Automations run only on a plan for now, and its agent pays per use.',
-        })
-        yield* noCall
-      }).pipe(Effect.provide(withAgents({}, ['opencode'], true))),
+  const reasonOf = (automationId: string) =>
+    Effect.flatMap(
+      SqlClient.SqlClient,
+      (sql) =>
+        sql<{ state: string; reason: string | null; taskId: string | null }>`
+          SELECT state, reason, task_id FROM automation_occurrences WHERE automation_id = ${automationId} ORDER BY fired_at, rowid`,
     )
+  const agentsOf = (taskId: string) =>
+    Effect.flatMap(SqlClient.SqlClient, (sql) =>
+      Effect.map(
+        sql<{ agentId: string }>`
+          SELECT s.agent_id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id WHERE t.task_id = ${taskId} AND t.kind = 'task'`,
+        (rows) => rows.map((row) => row.agentId),
+      ),
+    )
+
+  it.live('moves an automation whose Go sign-in was refused to another agent a plan pays for, saying so', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* startTask()
+      const instance = yield* Instance
+      const automations = yield* Automations
+      const id = yield* automationFor(projectId, { agentId: 'opencode', model: third.id })
+      yield* automations.runNow(id, instance.personId)
+      const [run] = yield* until(reasonOf(id), (all) => all[0]?.state === 'made')
+      assert.match(run?.reason ?? '', /^OpenCode Go refused its sign-in, so its lead ran on Fake (claude-code|codex)/)
+      const used = yield* agentsOf(run!.taskId!)
+      assert.isAbove(used.length, 0)
+      assert.notInclude(used, 'opencode')
+      yield* noCall
+    }).pipe(Effect.provide(withAgents({}, ['opencode'], true, { goRefused: true }))),
+  )
+
+  it.live('skips an automation whose Go sign-in was refused when no other plan has room, and says what would make it run', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* startTask()
+      const instance = yield* Instance
+      const automations = yield* Automations
+      const id = yield* automationFor(projectId, { agentId: 'opencode', model: third.id })
+      const refused = yield* Effect.flip(automations.runNow(id, instance.personId))
+      assert.strictEqual(
+        (refused as { readonly message?: string }).message,
+        'OpenCode Go refused its sign-in, and no other plan had room. Sign in to OpenCode Go in Settings.',
+      )
+    }).pipe(Effect.provide(withAgents({}, ['opencode'], true, { goRefused: true, signedOut: ['claude-code', 'codex'] }))),
+  )
+
+  for (const step of ['lead', 'review'] as const) {
+    for (const route of ['subscription-backed', 'per-use'] as const) {
+      it.live(`starts an automation with a ${route} ${step}`, () => {
+        const model = route === 'per-use' ? 'opencode-zen/gpt-strong' : third.id
+        return Effect.gen(function* () {
+          const { projectId } = yield* startTask()
+          const instance = yield* Instance
+          const automations = yield* Automations
+          const choice =
+            step === 'lead'
+              ? { lead: { agentId: 'opencode', model }, review: null }
+              : { lead: { agentId: 'claude-code', model: claude.id }, review: { agentId: 'opencode', model } }
+          const id = yield* automationFor(projectId, choice.lead, choice.review)
+          yield* automations.runNow(id, instance.personId)
+          const [run] = yield* until(automationRuns(id), (all) => all[0]?.state === 'made')
+          const sql = yield* SqlClient.SqlClient
+          const sessions = yield* sql<{ agentId: string; model: string | null }>`
+            SELECT s.agent_id, s.model FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
+            WHERE t.task_id = ${run!.taskId} AND t.kind = ${step === 'lead' ? 'task' : 'step'}`
+          assert.deepInclude(sessions, { agentId: 'opencode', model })
+          yield* noCall
+        }).pipe(
+          Effect.provide(
+            withAgents(
+              { opencode: { models: [third, { id: 'opencode-zen/gpt-strong', name: 'OpenCode Zen/GPT Strong' }] } },
+              ['opencode'],
+              true,
+            ),
+          ),
+        )
+      })
+    }
   }
 
   for (const fallback of ['move', 'wait'] as const) {
@@ -525,7 +621,7 @@ describe('automatic usage takeover by model', () => {
             assert.deepStrictEqual(yield* agentsOn(run!.threadId), [{ agentId: 'opencode', model: third.id }])
           }
           assert.strictEqual(failures, 1)
-          const out = yield* (yield* Limits).out('opencode', projectId, run!.threadId, third.id)
+          const out = yield* (yield* Limits).out('opencode', projectId)
           assert.isTrue(Option.isSome(out))
           const notices = (yield* items(run!.threadId)).filter((item) => item.kind === 'notice' && item.content.about === 'limit')
           assert.lengthOf(notices, 1)

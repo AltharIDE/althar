@@ -23,7 +23,7 @@ import { timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, callToolAtOnce, fakeConnectors, HOST, hosted, notices, repository as bare, runtime, until } from './support'
+import { callTool, callToolAtOnce, fakeConnectors, HOST, hosted, notices, repository as bare, runtime, until, withWork } from './support'
 
 /*
  * The coordinator accepting a task as the person's Accept on its card does
@@ -94,6 +94,17 @@ const changed = (projectId: ProjectId, title: string, file: string) =>
     const [task] = yield* sql<{ slug: string; threadId: string }>`
       SELECT k.slug, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${created.taskId}`
     const head = commit(created.worktree, file, `${title}\n`)
+    return { taskId: created.taskId, slug: task?.slug ?? '', threadId: task?.threadId ?? '', worktree: created.worktree, head }
+  })
+
+/** A task in the project with no commit of its own: its slug, thread, worktree and head, where its branch still is. */
+const unchanged = (projectId: ProjectId, title: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const created = yield* (yield* Projects).createTask({ envelope: yield* Runtime.envelope('task.create', {}), projectId, title })
+    const [task] = yield* sql<{ slug: string; threadId: string }>`
+      SELECT k.slug, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${created.taskId}`
+    const head = git(created.worktree, 'rev-parse', 'HEAD')
     return { taskId: created.taskId, slug: task?.slug ?? '', threadId: task?.threadId ?? '', worktree: created.worktree, head }
   })
 
@@ -186,6 +197,22 @@ describe('accept_task, for a task with no pull request', () => {
       )
       // Pushing is its own step: this repository's main follows no remote, so there is nothing to push, and it says so.
       assert.match(yield* callTool(c.access, 'push_accepted_task', { task: retry.slug, message }), /^Nothing changed: .*no remote/)
+    }).pipe(Effect.provide(runtime()))
+  })
+
+  it.live('says there is nothing to merge when the branch has no commits ahead, and leaves it open', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const c = yield* coordinatorOf(root)
+      const task = yield* unchanged(c.projectId, 'Ask first')
+      const message = yield* c.turn('Accept it')
+      assert.match(
+        yield* callTool(c.access, 'accept_task', { task: task.slug, head: task.head, message }),
+        /^Nothing changed: .* has nothing to merge: its work is already in main\./,
+      )
+      assert.strictEqual(yield* stateOf(task.taskId), 'open')
+      assert.notInclude(yield* titles(task.threadId), 'Merged into main here.')
+      assert.notInclude(yield* callTool(c.access, 'read_task', { task: task.slug }), 'merged locally')
     }).pipe(Effect.provide(runtime()))
   })
 
@@ -354,7 +381,7 @@ describe('answer_stuck_step', () => {
         envelope: yield* Runtime.envelope('task.create', {}),
         projectId,
         title,
-        description,
+        description: withWork(description, true),
         draft: true,
       })
       const planId = yield* plans.propose({
@@ -432,7 +459,7 @@ describe('answer_stuck_step', () => {
     const root = repository()
     return Effect.gen(function* () {
       const c = yield* coordinatorOf(root)
-      // Its reviewer never reports, so the review waits on the person.
+      // Its reviewer never reports, and no other agent is free, so the review waits on the person.
       const task = yield* planned(c.projectId, 'Cap retries', '[lead:finish]')
       const call = yield* stuckCall(task.taskId)
       assert.deepStrictEqual([call.step, call.why], ['review', 'no_report'])
@@ -446,7 +473,7 @@ describe('answer_stuck_step', () => {
         started.map((one) => one.agentId),
         ['codex', 'claude-code'],
       )
-    }).pipe(Effect.provide(withQueries()))
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { perUse: ['claude-code', 'opencode'] })))
   })
 
   it.live(

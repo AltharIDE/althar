@@ -37,6 +37,8 @@ export interface PageState {
   /** The person is pointing at it, to comment. */
   readonly pointing: boolean
   readonly line: PageLine | null
+  /** The lead (or the coordinator, beside its conversation) is acting on it now, or did a moment ago. */
+  readonly working: boolean
 }
 
 /** An element pointed at, or found again, with what the window draws the comment over. */

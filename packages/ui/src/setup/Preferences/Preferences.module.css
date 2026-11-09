@@ -546,3 +546,12 @@
   font-weight: 600;
   color: var(--t-2);
 }
+
+/* dictation's permission, as a quiet word at the row's end */
+.state {
+  font-size: 12px;
+  color: var(--t-3);
+}
+.state[data-state='allowed'] {
+  color: var(--t-1);
+}

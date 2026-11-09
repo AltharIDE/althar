@@ -185,7 +185,10 @@ describe('a new step on an agent nearly out', () => {
     return Effect.gen(function* () {
       // The notice names the selected model only once its catalog has been read.
       yield* until((yield* Models).catalog, (catalog) => catalog.every((agent) => !agent.probing))
-      const { task, start } = yield* planned([lead('claude-code'), { key: 'review', agentId: 'codex', model: null, skipped: false }])
+      const { task, start } = yield* planned(
+        [lead('claude-code'), { key: 'review', agentId: 'codex', model: null, skipped: false }],
+        'Retry the checkout [lead:finish] [lead:edit]',
+      )
       yield* reading(yield* first('codex'), 'codex', left(1, resetsAt))
       yield* start
       yield* until(said(task.threadId), (titles) => titles.some((title) => title.includes('takes the review instead')))

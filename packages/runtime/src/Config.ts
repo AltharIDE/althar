@@ -21,6 +21,7 @@ import { Installs, type OnDevice } from './Installs'
 import type { LoadOptions } from './MachineLoad'
 import type { PlanUsageOptions } from './PlanUsage'
 import type { ModelFactsOptions } from './ModelFacts'
+import type { PageAnswer, PageCall } from './pageBridge'
 import type { SkillsConfig } from './Skills'
 
 /** A screenshot an agent asks for: the page, the viewport it is drawn at, and what of it, all of it or one element. */
@@ -84,6 +85,13 @@ export interface RuntimeOptions {
    * for the agent. Without it, the screenshot tool says this Althar can't.
    */
   readonly screenshot?: (shot: Shot) => Effect.Effect<Screenshot, string>
+  /**
+   * Carries what a lead or the coordinator asks of the page beside its conversation to where the page is: the desktop app's main
+   * process, with Chromium (ADR-100). `owner` is the session's own task or project, never the agent's say. It answers in words
+   * for the agent, a picture beside them for a screenshot, or fails with why it can't (no window, no page, a guard refusing).
+   * Without it, the page tools say this Althar can't drive pages.
+   */
+  readonly page?: (owner: string, call: PageCall) => Effect.Effect<PageAnswer, string>
   /** Opens a page in the person's browser, for an agent's sign-in that doesn't itself; whether it could. Without it, the window offers the link. */
   readonly openUrl?: (url: string) => Effect.Effect<boolean>
   /** The editors on this device a task's files open in, and opening one on a folder, at a file and line where it can; without it, none. */

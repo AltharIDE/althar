@@ -230,7 +230,8 @@ export const runWords = (run: AutomationRun): string => {
   switch (run.state) {
     case 'made':
       // A review run's listing has no task of its own: it says what its reviews don't.
-      return what ?? run.reason ?? text.made
+      // A run that went to another plan says so after what it made.
+      return what === null ? (run.reason ?? text.made) : run.reason === null ? what : `${what} · ${run.reason}`
     case 'nothing':
       return run.reason ?? text.nothing
     case 'failed':

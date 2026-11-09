@@ -187,6 +187,27 @@ export const OnlyWhenICleanUp: Story = {
   },
 }
 
+/** None finished yet: the disk as it is, and the legend saying what the bar will show and how a folder gets there; nothing to open or clean up. */
+export const NoneYet: Story = {
+  render: () => <Row goes={[]} held={[]} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText(/No finished tasks’ folders yet/)).toBeVisible()
+    await expect(c.queryByRole('button', { name: /Can go now|Clean up/ })).toBeNull()
+  },
+}
+
+/** The same at night. */
+export const NoneYetDark: Story = { ...NoneYet, globals: { theme: 'dark' } }
+
+/** None, before the disk is read: the legend alone, so the row still says what will be here. */
+export const NoneYetNoDisk: Story = {
+  render: () => <Row goes={[]} held={[]} disk={null} />,
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText(/No finished tasks’ folders yet/)).toBeVisible()
+  },
+}
+
 /** What went wrong, said under the bar. */
 export const Failed: Story = {
   render: () => <Row error="Althar couldn’t remove 1 folder: it is in use." />,

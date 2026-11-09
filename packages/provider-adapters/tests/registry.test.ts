@@ -110,7 +110,7 @@ describe('the agent registry', () => {
     assert.deepStrictEqual(JSON.parse(spec.env?.OPENCODE_CONFIG_CONTENT ?? '{}'), {
       permission: asks,
       agent: { build: { permission: asks }, plan: { permission: asks } },
-      experimental: { continue_loop_on_deny: true },
+      experimental: { continue_loop_on_deny: true, location_idle_timeout: false },
     })
   })
 
@@ -451,7 +451,7 @@ describe('the agent registry', () => {
     const own = {
       OPENCODE_CONFIG_CONTENT: JSON.stringify({
         permission: { edit: 'ask', bash: 'ask', webfetch: 'ask' },
-        experimental: { continue_loop_on_deny: true },
+        experimental: { continue_loop_on_deny: true, location_idle_timeout: false },
         mcp: { github: { enabled: false } },
       }),
     }
@@ -460,7 +460,7 @@ describe('the agent registry', () => {
     assert.deepStrictEqual(JSON.parse(held.OPENCODE_CONFIG_CONTENT ?? '{}'), {
       permission: asks,
       agent: { build: { permission: asks }, plan: { permission: asks } },
-      experimental: { continue_loop_on_deny: true },
+      experimental: { continue_loop_on_deny: true, location_idle_timeout: false },
       mcp: { github: { enabled: false } },
       lsp: false,
     })

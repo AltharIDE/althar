@@ -778,6 +778,49 @@ describe('a task', () => {
     expect(screen.queryByRole('complementary', { name: 'Connect GitHub' })).toBeNull()
   })
 
+  it('says there is no code host where Althar can tell none, rather than leave merging here as all there is', async () => {
+    const file: ChangedFile = { path: 'src/checkout.ts', from: null, status: 'modified', add: 4, del: 1, binary: false, uncommitted: false }
+    const at = (remote: { name: string; newPullRequest: null; pushed: boolean; ahead: number } | null) => {
+      const base = thread({ session: null })
+      return {
+        ...base,
+        host: null,
+        task: {
+          ...base.task,
+          phase: 'ready' as const,
+          files: [file],
+          commits: 2,
+          here: [
+            {
+              repository: 'meridian',
+              name: 'meridian',
+              branch: 'main',
+              head: 'abc111',
+              remote: remote === null ? null : { ...remote, branch: 'althar/add-a-retry' },
+            },
+          ],
+        },
+      }
+    }
+    // No remote at all.
+    const none = withServices(<Task />, fakeClient({ getThread: vi.fn(async () => at(null)) }).client)
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    const alone = within(await screen.findByRole('article', { name: 'Add a retry' }))
+    expect(alone.getByText('No code host: this repository has no remote Althar can open a pull request on.')).toBeTruthy()
+    expect(alone.getByRole('button', { name: 'Merge into main on this Mac' })).toBeTruthy()
+    expect(alone.queryByRole('button', { name: /Connect|pull request/ })).toBeNull()
+    none.unmount()
+
+    // A remote on a host Althar doesn't know.
+    withServices(
+      <Task />,
+      fakeClient({ getThread: vi.fn(async () => at({ name: 'origin', newPullRequest: null, pushed: false, ahead: 2 })) }).client,
+    )
+    const elsewhere = within(await screen.findByRole('article', { name: 'Add a retry' }))
+    expect(elsewhere.getByText('No code host: origin isn’t on a host Althar can open a pull request on.')).toBeTruthy()
+    expect(elsewhere.getByRole('button', { name: 'Push to origin' })).toBeTruthy()
+  })
+
   it('says why a push of its branch didn’t go, in the remote’s words', async () => {
     const base = thread({ session: null })
     const { client } = fakeClient({
@@ -3564,6 +3607,7 @@ describe('the face a task opens on', () => {
       viewport: 'fit',
       pointing: false,
       line: null,
+      working: false,
     }
     pages.known(page)
     pages.place('t1', 'beside')

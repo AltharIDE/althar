@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { delimiter, dirname, join } from 'node:path'
+import { claudeHolding, codexHolding, type HeldSkill, openCodeHolding } from './heldSkills'
 import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt, upToRepository } from './ownTools'
 import { SECRET_PLACES, secretReadRules } from './secrets'
 import { claudeShellFolder } from './shellFolder'
@@ -412,6 +413,11 @@ export interface SessionOptions {
    * written to.
    */
   readonly skills?: string
+  /**
+   * The person's own skills it is not given, from its agent's folders, plugins or the repository: each held back in
+   * the agent itself, the way it documents (`heldSkills.ts`). Althar's own selection leaves them out before `skills`.
+   */
+  readonly heldSkills?: ReadonlyArray<HeldSkill>
 }
 
 /** How a session's sandbox holds its shell commands: see `AgentDefinition.holds`. */
@@ -635,12 +641,19 @@ const loggedInField = (output: string): boolean | undefined => {
  *
  * OpenCode also stops its loop when a request is rejected, unless told to
  * carry on, so a rejection works as it does for the other agents.
+ *
+ * And OpenCode 2.2 unloads a folder's services after an hour with no session
+ * activity, and loads them again at the next prompt with only the MCP servers
+ * its config names: Althar's, given over ACP as the session started, never
+ * comes back, so a lead left idle an hour, or a reviewer between rounds, has
+ * no finish_step or report_review and can't report (#692). It keeps them
+ * loaded (`location_idle_timeout`, which older versions leave out).
  */
 const asks = { edit: 'ask', bash: 'ask', webfetch: 'ask' }
 const openCodeBase = {
   permission: asks,
   agent: { build: { permission: asks }, plan: { permission: asks } },
-  experimental: { continue_loop_on_deny: true },
+  experimental: { continue_loop_on_deny: true, location_idle_timeout: false },
 }
 const openCodeConfig = JSON.stringify(openCodeBase)
 
@@ -945,6 +958,24 @@ const claudeContains = (
   },
 })
 
+/** A Claude Code session's settings with the person's skills it isn't given held back (`heldSkills.ts`). */
+const claudeWithout = <
+  Meta extends { readonly claudeCode: { readonly options: { readonly settings: Settings } } },
+  Settings extends { readonly permissions: { readonly deny?: ReadonlyArray<string> } },
+>(
+  meta: Meta,
+  held: ReadonlyArray<HeldSkill> | undefined,
+): Meta =>
+  held === undefined || held.length === 0
+    ? meta
+    : {
+        ...meta,
+        claudeCode: {
+          ...meta.claudeCode,
+          options: { ...meta.claudeCode.options, settings: claudeHolding(meta.claudeCode.options.settings, held) },
+        },
+      }
+
 // claude-agent-acp 0.88.0 forwards this explicit tools array to the SDK.
 // Removing the tool set also removes Read/Grep/Glob, which never ask in plan mode.
 const claudeJudges = {
@@ -1021,17 +1052,20 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      * a Flatpak, where the sandbox can't start, the rules are what holds it.
      */
     sessionMeta: (role = 'lead', options = {}) =>
-      role !== 'reader'
-        ? claudeAsks(options.sandbox, options.skills, claudeSandboxStarts(), options.web === true && options.offline !== true)
-        : options.contained !== undefined && options.untrusted !== true && options.offline !== true
-          ? claudeContains(options.contained, options.skills, options.sandbox?.deniedHosts)
-          : claudeReads(
-              process.env.FLATPAK_ID !== undefined,
-              options.offline === true,
-              options.untrusted === true,
-              options.web,
-              options.skills,
-            ),
+      claudeWithout(
+        role !== 'reader'
+          ? claudeAsks(options.sandbox, options.skills, claudeSandboxStarts(), options.web === true && options.offline !== true)
+          : options.contained !== undefined && options.untrusted !== true && options.offline !== true
+            ? claudeContains(options.contained, options.skills, options.sandbox?.deniedHosts)
+            : claudeReads(
+                process.env.FLATPAK_ID !== undefined,
+                options.offline === true,
+                options.untrusted === true,
+                options.web,
+                options.skills,
+              ),
+        options.heldSkills,
+      ),
     contains: claudeSandboxStarts,
     upFront: true,
     /* A local plugin its session loads (claudeAsks); it dispatches subagents. */
@@ -1118,13 +1152,18 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       // Every command Codex doesn't read as safe reaches Althar, so the irreversible list holds inside its sandbox too
       // (ADR-097); everything else is answered at once. The adapter's patch puts it on the turn's approval policy.
       ALTHAR_APPROVAL_POLICY: 'untrusted',
-      CODEX_CONFIG: JSON.stringify({
-        ...JSON.parse(own.CODEX_CONFIG ?? '{}'),
-        ...(options.web === undefined && options.offline !== true
-          ? {}
-          : { web_search: options.web === true && options.offline !== true ? 'live' : 'disabled' }),
-        'sandbox_workspace_write.network_access': options.offline !== true,
-      }),
+      CODEX_CONFIG: JSON.stringify(
+        codexHolding(
+          {
+            ...JSON.parse(own.CODEX_CONFIG ?? '{}'),
+            ...(options.web === undefined && options.offline !== true
+              ? {}
+              : { web_search: options.web === true && options.offline !== true ? 'live' : 'disabled' }),
+            'sandbox_workspace_write.network_access': options.offline !== true,
+          },
+          options.heldSkills,
+        ),
+      ),
     }),
     /*
      * codex-acp 2.2.2 sets Codex's extra skill roots to `<dir>/.agents/skills` of each of a session's added directories
@@ -1287,16 +1326,15 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       via: { kind: 'env', env: (folder, own) => openCodeSkills(folder, own) },
     },
     sessionEnv: (own, options) => {
-      if (options.web === undefined && options.offline !== true) return {}
+      const config = JSON.parse(own.OPENCODE_CONFIG_CONTENT ?? openCodeConfig) as Readonly<Record<string, unknown>>
       const web = options.web === true && options.offline !== true ? 'allow' : 'ask'
       const permission = { ...asks, webfetch: web, websearch: web }
-      return {
-        OPENCODE_CONFIG_CONTENT: JSON.stringify({
-          ...JSON.parse(own.OPENCODE_CONFIG_CONTENT ?? openCodeConfig),
-          permission,
-          agent: { build: { permission }, plan: { permission } },
-        }),
-      }
+      const opened =
+        options.web === undefined && options.offline !== true
+          ? config
+          : { ...config, permission, agent: { build: { permission }, plan: { permission } } }
+      const held = openCodeHolding(opened, options.heldSkills)
+      return held === config ? {} : { OPENCODE_CONFIG_CONTENT: JSON.stringify(held) }
     },
     /*
      * MIT licensed; its releases are at anomalyco/opencode (sst/opencode before), each file with GitHub's sha256.

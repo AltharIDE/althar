@@ -384,6 +384,7 @@ export const words = (
         return fieldOf(error, 'keyring') === true && reason !== '' ? reason : "Althar's runtime couldn't do that. Its log has the details."
       }
       case 'SkillRefused':
+      case 'ServerRefused':
         return sentence(text(error, 'message'))
       case 'CliSignedOut':
         return `${text(error, 'tool')} isn't signed in to ${text(error, 'host')} on ${thisDevice()}.`
@@ -485,6 +486,7 @@ const cantMerge = {
     `Your ${into} checkout has ${files.length === 1 ? 'an untracked file' : 'untracked files'} in the way: ${fewOf(files)}.`,
   moved: ({ detail }) => `${detail} moved meanwhile. Merge again.`,
   missing: ({ detail }) => `${thisDevice().replace(/^t/, 'T')} has no ${detail} branch to merge into.`,
+  nothing: ({ into }) => `Its work is already in ${into}: there's nothing to merge.`,
 } as const satisfies Record<CantMerge['why'], (said: MergeSaid) => string>
 
 /** Why a task has no pull request to open, by reason, with the files it concerns where it says them. */
@@ -543,6 +545,7 @@ const reviewIncomplete = {
 /** Errors the person caused or can put right; anything else is worth the log. */
 export const expected = new Set([
   'SkillRefused',
+  'ServerRefused',
   'LaunchRefused',
   'AttachRefused',
   'ScreenshotsRefused',

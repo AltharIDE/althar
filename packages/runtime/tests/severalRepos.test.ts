@@ -72,9 +72,16 @@ const across = (description: string, review: boolean, end: TaskEnd | null) =>
       actorId: actor,
       end,
     })
-    yield* plans.start(planId, actor)
     const rows = yield* sql<{ name: string; path: string }>`
       SELECT b.display_name AS name, w.path FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id WHERE w.task_id = ${created.taskId}`
+    // A task with a review builds something first: nothing built runs no review.
+    if (review)
+      for (const row of rows) {
+        writeFileSync(join(row.path, 'retry.txt'), 'retry\n')
+        git(row.path, 'add', '.')
+        git(row.path, 'commit', '-q', '-m', 'Retry')
+      }
+    yield* plans.start(planId, actor)
     return {
       projectId: opened.projectId,
       ...created,

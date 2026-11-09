@@ -175,30 +175,35 @@ function thesis(origin: string): object[] {
   ]
 }
 
-function wallpaper(origin: string): object[] {
-  const page = PAGE_META['/wallpaper']
-  const url = urlOf(origin, page.path)
-  return [
-    {
-      '@context': CONTEXT,
-      '@type': 'WebPage',
-      '@id': url,
-      url,
-      name: page.name,
-      description: page.description,
-      image: urlOf(origin, page.image),
-      isPartOf: { '@id': ids(origin).site },
-    },
-    breadcrumbs(origin, '/wallpaper'),
-  ]
-}
+/** A plain page: its name, description and preview, and its place in the site. */
+const webPage =
+  (path: '/wallpaper' | '/office-hours' | '/privacy') =>
+  (origin: string): object[] => {
+    const page = PAGE_META[path]
+    const url = urlOf(origin, page.path)
+    return [
+      {
+        '@context': CONTEXT,
+        '@type': 'WebPage',
+        '@id': url,
+        url,
+        name: page.name,
+        description: page.description,
+        image: urlOf(origin, page.image),
+        isPartOf: { '@id': ids(origin).site },
+      },
+      breadcrumbs(origin, path),
+    ]
+  }
 
 const BY_PATH: Partial<Record<PagePath, (origin: string) => object[]>> = {
   '/': home,
   '/shifts': shifts,
   '/changelog': changelog,
   '/thesis': thesis,
-  '/wallpaper': wallpaper,
+  '/wallpaper': webPage('/wallpaper'),
+  '/office-hours': webPage('/office-hours'),
+  '/privacy': webPage('/privacy'),
 }
 
 /** A page's schema.org data, with absolute addresses from `origin`. None for a page kept out of search. */

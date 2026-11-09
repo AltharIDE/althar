@@ -32,6 +32,19 @@ export const useEditorList = (): Editors['editors'] => {
   return useQuery({ queryKey: ['editors'], queryFn: () => client.listEditors(), staleTime: Number.POSITIVE_INFINITY }).data ?? []
 }
 
+/** The editors found on this Mac, with whether they are still being looked for, and looking again. */
+export const useEditorsRead = () => {
+  const { client, cache } = useServices()
+  const query = useQuery({ queryKey: ['editors'], queryFn: () => client.listEditors(), staleTime: Number.POSITIVE_INFINITY })
+  return {
+    editors: query.data ?? [],
+    /** Not read yet: no editors isn't known to be none. */
+    loading: query.isPending,
+    looking: query.isFetching,
+    again: () => void cache.invalidateQueries({ queryKey: ['editors'] }),
+  }
+}
+
 /** Each editor's icon by its id, read from the main process once for the window; an editor without one has none. */
 export const useEditorPictures = (): Readonly<Record<string, string>> => {
   const { host } = useServices()

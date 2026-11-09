@@ -38,6 +38,7 @@ import { DRAFTING_MS } from './needsYou'
 import { Installs } from './Installs'
 import { Models } from './Models'
 import { Plans } from './Plans'
+import { PlanUsage } from './PlanUsage'
 import {
   closePullRequest,
   editPullRequest,
@@ -132,6 +133,7 @@ type Store =
   | Installs
   | ModelFacts
   | Limits
+  | PlanUsage
   | Busy
   | Accounts
   | Reviews
@@ -526,23 +528,25 @@ export class Coordinator extends Context.Service<
         const found = task.state === 'done' && seen !== undefined ? { ...seen, unmerged: 0 } : seen
         // Whose pull requests are all merged (or closed, as far as Althar can tell) is finished, whatever its last run said; not
         // one with commits after them in none yet (ADR-034).
-        const finished =
-          task.state === 'done' && (found?.unshipped ?? 0) === 0
-            ? 'merged'
-            : (task.state === 'open' || task.state === 'done') && found !== undefined
-              ? finishedBy(found)
-              : null
+        const done = task.state === 'done' && (found?.unshipped ?? 0) === 0
+        const merged = done
+          ? found !== undefined && (found.merged.length > 0 || found.changes.some(({ change }) => change.state === 'merged'))
+          : (task.state === 'open' || task.state === 'done') && found !== undefined
+            ? finishedBy(found) !== null
+            : false
         // Only a draft with a plan proposed (or accepted) is planned: a bare one is no plan, whatever its countdown might say.
         const state =
           task.state === 'draft'
             ? task.planned
               ? 'planned'
               : NO_PLAN_YET
-            : finished !== null
+            : merged
               ? 'finished, merged'
-              : task.run === 'succeeded'
-                ? 'ready'
-                : task.state
+              : done
+                ? 'finished'
+                : task.run === 'succeeded'
+                  ? 'ready'
+                  : task.state
         return { found, state }
       }
 

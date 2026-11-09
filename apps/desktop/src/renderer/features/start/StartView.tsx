@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useState } from 'react'
 
 import type { AgentStatus, ProjectSummary } from '@althar/contracts'
-import { Button, CrashReportsLine, keys, modKey, primaryDown, type RuntimeEntry, RuntimeState, SkillsLine } from '@althar/ui'
+import { Button, CrashReportsLine, keys, modKey, primaryDown, type RuntimeEntry, RuntimeState } from '@althar/ui'
 import { Welcome, type WelcomeStep, welcomeText } from '@althar/ui/screens'
 
 import { brandOf, pinnedOf } from '../../shared/agents'
@@ -14,7 +14,6 @@ import type { AccountSignInModel } from '../accounts/useAccountSignIn'
 import { ConnectionsView } from '../connections/ConnectionsView'
 import { useConnections } from '../connections/useConnections'
 import { hostsCode, serviceOf } from '../connections/ways'
-import { useSkills } from '../settings/useSkills'
 import { BareBar } from '../tabs/TabsFrame'
 import s from './Start.module.css'
 import { useFirstProject } from './useFirstProject'
@@ -248,9 +247,6 @@ function First({
 
   const { preferences, set } = usePreferences()
   const { host } = useServices()
-  const skills = useSkills()
-  // Skills with problems cannot be switched in Settings, so leave them out of the all-on calculation too.
-  const sound = skills.rows?.filter((skill) => skill.problem === undefined) ?? []
   const list = connections.list
   const hostConnected =
     list?.connections.some((connection) => {
@@ -290,9 +286,7 @@ function First({
           ? { error: { step: 'project' as const, said: project.error } }
           : model.error !== null
             ? { error: { step: 'agents' as const, said: model.error } }
-            : skills.error !== null
-              ? { error: { step: 'agents' as const, said: skills.error } }
-              : {})}
+            : {})}
         hosts={<ConnectionsView model={connections} only="hosts" />}
         hostConnected={hostConnected}
         // Issues are a step only where a tracker can be connected; until the list is read, as though one can.
@@ -300,7 +294,6 @@ function First({
         onOpen={open}
         foot={
           <>
-            {skills.enabled && sound.length > 0 && <SkillsLine on={sound.every((skill) => skill.on)} onChange={skills.toggleAll} />}
             <CrashReportsLine
               on={preferences.crashReports}
               onChange={(on) => set('crashReports', on)}

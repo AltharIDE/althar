@@ -1,5 +1,5 @@
 import type { ConnectionList } from '@althar/contracts'
-import { BrandMark, Button, ControlLine, LinkButton, SettingGroup, SettingList, SettingRow, TrackerBinding } from '@althar/ui'
+import { BrandMark, Button, ControlLine, EmptyState, LinkButton, SettingGroup, SettingList, SettingRow, TrackerBinding } from '@althar/ui'
 
 import { productBrand, productName } from '../../shared/products'
 import { type Opening, openingFor } from '../connections/ConnectDialog'
@@ -33,6 +33,7 @@ export const text = {
   draftsElsewhere: 'Its drafts go to the tracker above',
   issuesOnly: 'Only its issues are here; the bound workspace is above',
   none: 'No tracker yet',
+  noneLine: 'Connect Linear, Jira, GitHub or Trello in Settings › Code hosts and trackers, and its issues can become tasks here.',
   /** MER issues · Linear; a tracker whose issues share no key by its name alone: Trello cards. */
   issues: (tracker: Tracker) =>
     tracker.key === null ? frontText.issues(tracker) : `${frontText.issues(tracker)} · ${productName(tracker.product)}`,
@@ -166,7 +167,7 @@ export function CodeSection({
             </p>
           )}
           {trackers.length === 0 ? (
-            <SettingRow title={text.none}>{() => null}</SettingRow>
+            <EmptyState icon="plug" variant="flush" title={text.none} line={text.noneLine} headingLevel={4} />
           ) : (
             trackers.map((tracker) => (
               <TrackerRow

@@ -27,6 +27,7 @@ import { servicesFor } from './render'
  */
 
 const OWNER = `task_${'a1'.repeat(16)}`
+const PROJECT = `proj_${'b2'.repeat(16)}`
 const DRAFT = 'task:thr_1'
 const PLACE = { x: 640, y: 120, width: 640, height: 700 }
 
@@ -40,6 +41,7 @@ const stateOf = (overrides: Partial<PageState> = {}): PageState => ({
   viewport: 'fit',
   pointing: false,
   line: null,
+  working: false,
   ...overrides,
 })
 
@@ -68,6 +70,7 @@ const fakePages = () => {
   const states = new Set<(state: PageState) => void>()
   const keys = new Set<(owner: string, key: PageKey) => void>()
   const closings = new Set<(owner: string) => void>()
+  const openings = new Set<(owner: string) => void>()
   const host: PagesHost = {
     open: vi.fn(async (owner: string, address: string) => stateOf({ owner, address })),
     states: vi.fn(async () => []),
@@ -93,6 +96,10 @@ const fakePages = () => {
       keys.add(listener)
       return () => void keys.delete(listener)
     },
+    onOpened: (listener) => {
+      openings.add(listener)
+      return () => void openings.delete(listener)
+    },
     onClosed: (listener) => {
       closings.add(listener)
       return () => void closings.delete(listener)
@@ -109,6 +116,8 @@ const fakePages = () => {
     press: (key: PageKey) => act(() => keys.forEach((listener) => listener(OWNER, key))),
     // A page main closed of itself, as its task was done.
     closed: (owner = OWNER) => act(() => closings.forEach((listener) => listener(owner))),
+    // A page a lead opened that no window shows yet.
+    opened: (owner = OWNER) => act(() => openings.forEach((listener) => listener(owner))),
   }
 }
 
@@ -250,12 +259,54 @@ describe('the line under the bar', () => {
   })
 })
 
+describe('the lead at work on the page', () => {
+  const task = 'The lead is at work on this page. A click or key press from you stops the lead.'
+  const project = 'The coordinator is at work on this page. A click or key press from you stops the coordinator.'
+
+  it('says who is at work under the bar, and that the person’s own press stops them, and goes when they have stopped', async () => {
+    const fake = fakePages()
+    shown(fake.host)
+    fake.say(stateOf({ working: true }))
+    expect((await screen.findByRole('status')).textContent).toBe(task)
+    expect(within(screen.getByRole('status')).queryByRole('button')).toBeNull()
+    fake.say(stateOf({ working: false }))
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+  })
+
+  it('names the coordinator on a project’s page', async () => {
+    const root = createRootRoute({ component: () => <Outlet /> })
+    const page = createRoute({
+      getParentRoute: () => root,
+      path: '/',
+      component: () => <PageView owner={PROJECT} kind="project" draft="coordinator:proj_1" where="beside" onDock={vi.fn()} />,
+    })
+    const router = createRouter({ routeTree: root.addChildren([page]), history: createMemoryHistory({ initialEntries: ['/'] }) })
+    const fake = fakePages()
+    render(
+      <ServicesProvider value={servicesFor(fakeClient().client, fakeHost({ pages: fake.host }))}>
+        <RouterProvider router={router} />
+      </ServicesProvider>,
+    )
+    fake.say(stateOf({ owner: PROJECT, working: true }))
+    expect((await screen.findByRole('status')).textContent).toBe(project)
+  })
+
+  it('leaves the line to what the page refused or sent out while the lead is at work', async () => {
+    const fake = fakePages()
+    shown(fake.host)
+    fake.say(stateOf({ working: true, line: { kind: 'refused', refusal: 'file' } }))
+    const status = await screen.findByRole('status')
+    expect(status.textContent).toContain('Files on this computer don’t open here.')
+    expect(status.textContent).not.toContain('at work')
+  })
+})
+
 describe('where the page is laid', () => {
   it('is the panel’s place, measured, and nowhere once the panel goes', async () => {
     const fake = fakePages()
     const { unmount } = shown(fake.host)
     fake.say(stateOf())
-    await waitFor(() => expect(fake.host.show).toHaveBeenCalledWith(OWNER, PLACE))
+    await waitFor(() => expect(fake.host.show).toHaveBeenCalledWith(OWNER, PLACE, 'beside'))
     unmount()
     expect(fake.host.show).toHaveBeenLastCalledWith(OWNER, null)
   })
@@ -441,6 +492,34 @@ describe('the pages this window shows', () => {
     expect(pages.state(OWNER)).toBeNull()
   })
 
+  it('put a page a lead opened beside its conversation, where the window has no place for it, and leave a place alone', async () => {
+    const fake = fakePages()
+    renderHook(() => usePage(OWNER, fake.host))
+    await waitFor(() => expect(fake.host.states).toHaveBeenCalled())
+    expect(pages.where(OWNER)).toBeNull()
+    fake.opened()
+    expect(pages.where(OWNER)).toBe('beside')
+    // The person's own place for it stays: a page they docked into a tab is not pulled back beside.
+    pages.place(OWNER, 'tab', { kind: 'task', threadId: 'thr_1', draft: DRAFT })
+    fake.opened()
+    expect(pages.where(OWNER)).toBe('tab')
+    // Another page, never placed in this window, goes beside.
+    fake.opened('task_b')
+    expect(pages.where('task_b')).toBe('beside')
+  })
+
+  it('leave a page the window’s storage said where it shows to main’s word, not to a lead opening it', async () => {
+    window.localStorage.setItem('althar.pages', JSON.stringify({ placed: [[OWNER, 'tab']], origins: {} }))
+    const fake = fakePages()
+    let answer: (states: ReadonlyArray<PageState>) => void = () => {}
+    vi.mocked(fake.host.states).mockReturnValue(new Promise((resolve) => (answer = resolve)))
+    renderHook(() => usePage(OWNER, fake.host))
+    fake.opened()
+    expect(pages.where(OWNER)).toBeNull()
+    await act(async () => answer([stateOf()]))
+    expect(pages.where(OWNER)).toBe('tab')
+  })
+
   it('keep what main said of a page since over what the window asked as it opened', async () => {
     const fake = fakePages()
     let answer: (states: ReadonlyArray<PageState>) => void = () => {}
@@ -564,6 +643,28 @@ describe('a page’s tab, the window reloaded on it', () => {
     await answer([stateOf({ title: 'Refunds' })])
     expect(await screen.findByRole('complementary', { name: 'Page' })).toBeTruthy()
     expect(router.state.location.pathname).toBe(`/pages/${OWNER}`)
+  })
+
+  it('tells main the page shows in a tab', async () => {
+    window.localStorage.setItem(
+      'althar.pages',
+      JSON.stringify({ placed: [[OWNER, 'tab']], origins: { [OWNER]: { kind: 'task', threadId: 'thr_1', draft: DRAFT } } }),
+    )
+    const fake = fakePages()
+    vi.mocked(fake.host.states).mockResolvedValue([stateOf()])
+    const { client } = fakeClient()
+    const services = servicesFor(client, fakeHost({ pages: fake.host }))
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([pageRoute]),
+      history: createMemoryHistory({ initialEntries: [`/pages/${OWNER}`] }),
+      context: { client, cache: services.cache },
+    })
+    render(
+      <ServicesProvider value={services}>
+        <RouterProvider router={router} />
+      </ServicesProvider>,
+    )
+    await waitFor(() => expect(fake.host.show).toHaveBeenCalledWith(OWNER, expect.objectContaining({ width: PLACE.width }), 'tab'))
   })
 
   it('goes back to the conversation it came from where main no longer has it', async () => {

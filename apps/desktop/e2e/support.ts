@@ -286,7 +286,7 @@ export const startTask = async (page: Page, title: string, lead = '[lead:finish]
 }
 
 /** A section of the project's settings: Settings, the last of its views in its header, then the section down the side. */
-export const projectSettings = async (page: Page, section: 'General' | 'Code and issues' | 'Rules' | 'Running' | 'Notes') => {
+export const projectSettings = async (page: Page, section: 'General' | 'Code and issues' | 'Tasks' | 'Rules' | 'Running' | 'Notes') => {
   await page
     .getByRole('radiogroup', { name: 'View' })
     .getByRole('radio', { name: /^Settings/ })
@@ -319,7 +319,7 @@ export const askAboutMore = async (page: Page) => {
 
 /** Leaves what the lead commits for the person's Push, as before it went up on its own (ADR-072); then back to the conversation. */
 export const pushByHand = async (page: Page) => {
-  await projectSettings(page, 'General')
+  await projectSettings(page, 'Tasks')
   const pushes = page.getByRole('switch', { name: 'Push the lead’s commits automatically' })
   await pushes.click()
   await expect(pushes).not.toBeChecked()
