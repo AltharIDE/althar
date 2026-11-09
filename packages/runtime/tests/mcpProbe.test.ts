@@ -52,6 +52,27 @@ describe('a server that runs as a command', () => {
     expect(await probe(stdio('refuses'))).toEqual({ tools: null, why: 'It didn’t start: Unsupported protocol version.' })
   })
 
+  it('cuts a long error to a sentence, and says one in general words where it had none', async () => {
+    const long = await probe(stdio('long-error'))
+    if (long.tools !== null) throw new Error('it should not have counted this server')
+    expect(long.why.endsWith('…')).toBe(true)
+    // "It didn’t start: " and the 300 characters its sentence keeps, the last of them the ellipsis.
+    expect(long.why.length).toBeLessThanOrEqual(320)
+    expect(await probe(stdio('blank-error'))).toEqual({ tools: null, why: 'It didn’t start: it answered with an error.' })
+  })
+
+  it('says a command that can’t be started at all', async () => {
+    const bad = await probe({ name: 'bad', transport: 'stdio', command: process.execPath, args: ['a\u0000b'] })
+    if (bad.tools !== null) throw new Error('it should not have counted this server')
+    expect(bad.why).toMatch(/^It didn’t start: /)
+    // A folder can’t be run: neither a command that isn’t there nor one that starts and fails, but one that never ran.
+    const folder = mkdtempSync(join(tmpdir(), 'althar-probe-folder-'))
+    const unrun = await probe({ name: 'folder', transport: 'stdio', command: folder })
+    if (unrun.tools !== null) throw new Error('it should not have counted this server')
+    expect(unrun.why).toMatch(/^It didn’t start: /)
+    expect(unrun.why).not.toContain('isn’t on this computer')
+  })
+
   it('says a command that isn’t there', async () => {
     const found = await probe({ name: 'gone', transport: 'stdio', command: 'althar-no-such-command-anywhere' })
     expect(found).toEqual({ tools: null, why: 'It didn’t start: althar-no-such-command-anywhere isn’t on this computer.' })
@@ -165,6 +186,10 @@ describe('a server at an address', () => {
           response.writeHead(200, { 'Content-Type': 'application/json' })
           return response.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { nothing: true } }))
         }
+        if (path === '/flood') {
+          response.writeHead(200, { 'Content-Type': 'application/json' })
+          return response.end(`${'x'.repeat(10_000)}${JSON.stringify(reply(response, message))}`)
+        }
         if (path === '/json') {
           response.writeHead(200, { 'Content-Type': 'application/json' })
           return response.end(JSON.stringify(reply(response, message)))
@@ -173,6 +198,8 @@ describe('a server at an address', () => {
           // A line that isn't JSON, then an event without its `event:` line, its answer split across two writes.
           response.writeHead(200, { 'Content-Type': 'text/event-stream' })
           response.write('event: message\ndata: {not json}\n\n')
+          response.write('event: ping\ndata: {}\n\n')
+          response.write('event: message\ndata:\n\n')
           response.write(`data: ${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/message' })}\n\n`)
           const answer = JSON.stringify(reply(response, message))
           response.write(`data: ${answer.slice(0, 12)}`)
@@ -247,6 +274,17 @@ describe('a server at an address', () => {
     expect(await probe(http('/error'))).toEqual({ tools: null, why: 'It didn’t start: No tools for you.' })
     expect(await probe(http('/unanswered'))).toEqual({ tools: null, why: 'It answered, but not as an MCP server does.' })
     expect(await probe(http('/no-tools'))).toEqual({ tools: null, why: 'It answered, but not with a list of tools.' })
+  })
+
+  it('reads no more of an address than its limit, and says a wait in seconds', async () => {
+    expect(await probe(http('/flood'), { ...PROBE_LIMITS, bytes: 100 })).toEqual({
+      tools: null,
+      why: 'It said more than Althar reads before answering.',
+    })
+    expect(await probe(http('/slow'), { ...PROBE_LIMITS, millis: 2_000 })).toEqual({
+      tools: null,
+      why: 'It didn’t answer in 2 seconds.',
+    })
   })
 
   it('says an address that answered with no body, and gives a token by its variable', async () => {

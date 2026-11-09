@@ -119,6 +119,10 @@ describe('the lines each agent keeps', () => {
       transport: 'http',
       url: 'https://w.example',
     })
+    // A server read with a part of it missing still draws as the agent would keep it.
+    assert.deepStrictEqual(asCodexWrites({ name: 's', transport: 'stdio' }), { name: 's', transport: 'stdio', command: '' })
+    assert.deepStrictEqual(codexLines({ name: 's', transport: 'stdio' }), ['[mcp_servers.s]', 'command = ""', 'args = []'])
+    assert.deepStrictEqual(codexLines({ name: 'w', transport: 'http' }), ['[mcp_servers.w]', 'url = ""'])
   })
 })
 
@@ -403,6 +407,27 @@ describe('adding a server', () => {
     )
   })
 
+  it('says why an agent it couldn’t write to, or read, wasn’t changed', async () => {
+    const { io } = fakeAgents(homeWith({}))
+    const locked = {
+      ...io,
+      run: async () => {
+        throw new Error('its settings are locked')
+      },
+    }
+    assert.strictEqual(
+      await failure(addServer(locked, { name: 'locked', command: 'locked' }, ['claude'])),
+      'Claude Code wasn’t changed: its settings are locked.',
+    )
+    const home = homeWith({})
+    // Settings that can’t be read: the agent says why, and nothing is written over them.
+    writeFileSync(join(home, '.claude.json'), '{ not json')
+    assert.strictEqual(
+      await failure(addServer(fakeAgents(home).io, { name: 'a', command: 'a' }, ['claude'])),
+      'Claude Code wasn’t changed: its settings can’t be read: it isn’t JSON Althar can read.',
+    )
+  })
+
   it('doesn’t write to Codex what Codex can’t take, and says so', async () => {
     const home = homeWith({})
     const { io } = fakeAgents(home)
@@ -450,6 +475,19 @@ describe('taking a server out', () => {
     assert.deepStrictEqual([names(home, 'claude'), names(home, 'codex'), names(home, 'opencode')], [[], ['a'], []])
     await reconcile(working.io)
     assert.deepStrictEqual([names(home, 'claude'), names(home, 'opencode')], [[], []])
+  })
+
+  it('takes it out of the others where an agent’s command throws, and says which', async () => {
+    const home = homeWith({ claude: { mcpServers: { a: { command: 'a' } } } })
+    const { io } = fakeAgents(home)
+    const throwing = {
+      ...io,
+      run: async () => {
+        throw new Error('it broke')
+      },
+    }
+    assert.strictEqual(await failure(removeServer(throwing, 'a')), 'Claude Code wasn’t changed: it broke.')
+    assert.deepStrictEqual(names(home, 'claude'), ['a'])
   })
 
   it('forgets the sign-ins of what it took out, and keeps the others', async () => {
