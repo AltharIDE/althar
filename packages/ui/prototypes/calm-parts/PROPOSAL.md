@@ -26,9 +26,9 @@ the case back. `node flows.mjs` clicks through 60 of these headless.
   differ only in where a task's several changes show.
 - **The lead's own part changes fold into its work.** A line stands alone
   only where someone else made the change or it offers a way on.
-- **The preset shows only on the plan card.** This round it is a word in the
-  card's kicker ("Change · Task board-still"), in the kicker's own type,
-  underlined on hover and a menu on a press. No pill.
+- **The preset shows only on the plan card,** as a word in the card's kicker
+  ("Change · Task board-still"), in the kicker's own type, underlined on hover
+  and a menu on a press. No pill. Settled (9 November): quiet enough as it is.
 - **Commits not shipped keep a task in Needs you,** as commits to push do
   today. Its card's word is "Not shipped".
 - **Out of usage and a stuck step use the kit's own cards,** with the models
@@ -251,9 +251,39 @@ when several compete (the order under "What the ADR would need to match"),
 making "which change am I talking to" a question nobody has to answer, and
 saying "commits not shipped" so it needs no explaining.
 
+## How to choose between A, B and C
+
+Most cases look the same in all three; these six are where they differ. Open
+each at its address, press 1, 2 and 3 to swap the direction in place, and try
+the button and the message box. Each asks one question.
+
+1. **Can you tell in a second what needs you?** One needs you, two more
+   (`?s=needs-one`). A: "Lane heights: checks failing · Fix it", the marks in
+   the pill. B: "Checks failing · Fix it" for the change in view, a dot on the
+   switch. C: the same sentence with "· 2 more", and a row of tabs over the
+   message box.
+2. **Does a wait on another change reach you?** No place for an agent
+   (`?s=no-slot`). A and C: "Fixing Rename's checks waits for one of the 4
+   agents at work". B, on Lane heights: "Open · checks pass"; only the board
+   card says it. B's weak spot.
+3. **When you type, do you know which change it goes to, or care?** A helper
+   on one, you on another (`?s=helper`). A: "Tell Claude Code something"; the
+   lead picks, and the turn's line says "1 commit to Lane heights". B: "…
+   something about Lane heights". C: the picked tab.
+4. **Does the one button do what you expect?** A hold reaching up a stack
+   (`?s=stack-held`). A: Ship ships both, bottom up. B opens on Card slide, the
+   top; switched to Lane heights, Ship ships only it. C: each tab's own.
+5. **How much moves when a task gets its second change?** A second change
+   starts (`?s=split`). A: a second mark in the pill. B: a switch after the
+   title. C: a row of tabs over the message box.
+6. **What happens to a change that's done while the rest carry on?** One
+   merged (`?s=merged-one`). A: its mark turns green. B: the switch lists only
+   the two still open. C: tabs for the open ones, then "Lane heights merged".
+
+And one to confirm: a task with one change (`?s=one`) is the same in all
+three, as today.
+
 ## Questions for the person
 
 1. Several changes: A · As one (recommended), B · One at a time, or C · Where
    you talk?
-2. The preset: is a word in the plan card's kicker quiet enough, or should it
-   show only when the plan doesn't start from Change?
