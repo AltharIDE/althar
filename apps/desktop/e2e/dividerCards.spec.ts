@@ -18,9 +18,11 @@ import { launch, openFirstProject, sizeWindow, startTask, still } from './suppor
  * behind the lane beside. Here the board draws itself again with each step of
  * the drag, as the pointer going from lane to lane has it do (which lane it is
  * in is the board's state), so every step is such a commit: a slow drag, three
- * pixels a frame, narrowing the board until lanes turn to rails, then widening
- * it until the conversation is at its narrowest. Without the fix, a card stood
- * some 90 px off its lane.
+ * pixels a frame, narrowing the board until a lane turns to a rail, then
+ * widening it past where it began. Slow, as the person's was: where a step
+ * changes a card's width by a pixel or more, the card is taken for laid out
+ * afresh and nothing slides, fixed or not, so it is three pixels shared by four
+ * lanes. Without the fix, a card stood some 90 px off its lane.
  */
 
 test('the board’s cards stay in their lanes while the divider moves', async () => {
@@ -50,11 +52,12 @@ test('the board’s cards stay in their lanes while the divider moves', async ()
 
     /**
      * Moves the divider `by` px a frame for `frames` frames from `from`: how far a card was drawn outside its lane at most,
-     * in px, and where it ended. What moves on the page is held where it is at the last frame, for a shot of it.
+     * in px, and where it ended. Where `hold`, what moves on the page is held where it is at the last frame, for a shot of
+     * it, until `go` lets it on.
      */
-    const drag = (by: number, frames: number, from: number) =>
+    const drag = (by: number, frames: number, from: number, hold = false) =>
       page.evaluate(
-        async ({ by, frames, from }) => {
+        async ({ by, frames, from, hold }) => {
           const handle = document.querySelector<HTMLElement>('[role="separator"][aria-label="Width of the conversation"]')!
           const board = document.querySelector<HTMLElement>('[aria-label="The project’s work"]')!
           const card = (lane: string) => board.querySelector<HTMLElement>(`[data-lane="${lane}"] [data-move]`)!
@@ -79,18 +82,22 @@ test('the board’s cards stay in their lanes while the divider moves', async ()
             await frame()
             worst = Math.max(worst, outside())
           }
-          for (const one of document.getAnimations()) one.pause()
+          if (hold) {
+            const held = document.getAnimations().filter((one) => one.playState === 'running')
+            for (const one of held) one.pause()
+            Object.assign(window, { held })
+          }
           return { worst, at }
         },
-        { by, frames, from },
+        { by, frames, from, hold },
       )
+    const go = () => page.evaluate(() => (window as unknown as { held: Animation[] }).held.forEach((one) => one.play()))
 
-    // Narrowing the board, slowly, until lanes turn to rails; then widening it, past where it was, to the conversation's narrowest.
+    // Narrowing the board, slowly, until a lane turns to a rail; then widening it past where it began.
     const narrowed = await drag(3, 80, x)
-    await page.evaluate(() => document.getAnimations().forEach((one) => one.play()))
-    const widened = await drag(-3, 150, narrowed.at)
+    const widened = await drag(-3, 150, narrowed.at, true)
     await work.screenshot({ path: 'test-results/divider-cards-mid-drag.png', scale: 'css' })
-    await page.evaluate(() => document.getAnimations().forEach((one) => one.play()))
+    await go()
     await page.mouse.up()
     expect(narrowed.worst).toBeLessThanOrEqual(1)
     expect(widened.worst).toBeLessThanOrEqual(1)

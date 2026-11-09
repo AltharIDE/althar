@@ -27,7 +27,11 @@ import { MOTION, reducedMotion, SCALE } from './motion'
  *
  * Where the page sets the list's room (`steady`), as it does a board's beside
  * the conversation, an update in which the list itself moved or changed size
- * moves nothing either: its items went with it. A divider dragged beside the
+ * (a divider dragged beside it, the window resized, something drawn above it)
+ * moves nothing either: its items went with it. What of ours was moving them
+ * stops where they are laid out, as a copy on its way to where the item stood
+ * on the page before would land off it, and what came or went in that update
+ * shows, or goes, at once. A divider dragged beside the
  * board moves the board with each step, and React draws whatever else the
  * board had to draw (its clock, its tasks, a lane turned to a rail) in the
  * same commit as the divider's next width; taken for the items' own moves,
@@ -56,7 +60,7 @@ export interface ListMotionProps {
   readonly still?: boolean
   /**
    * Its room is the page's, not its items' (a board's lanes): an update in which `within` moved or changed size, as a
-   * divider dragged beside it has it do, moves nothing, its items having gone with it.
+   * divider dragged beside it has it do, moves nothing, its items having gone with it, and stops what of ours moved them.
    */
   readonly steady?: boolean
   readonly children?: ReactNode
@@ -143,8 +147,13 @@ export class ListMotion extends Component<ListMotionProps> {
     this.taken = null
     const root = this.props.within.current
     if (before === null || root === null || !moves(root)) return
-    // The list itself moved, or its room changed size: its items went with it, by none of their own.
-    if (before.room !== null && changed(before.room, root.getBoundingClientRect())) return
+    // The list itself moved, or its room changed size: its items went with it, by none of their own, and what of ours
+    // moved them stops where they are laid out.
+    if (before.room !== null && changed(before.room, root.getBoundingClientRect())) {
+      // Those taken before as well as those there now: one drawn again elsewhere is another element, its copy the old one's.
+      for (const el of new Set([...[...before.stood.values()].map((was) => was.el), ...itemsIn(root)])) running.get(el)?.stop()
+      return
+    }
     const items = itemsIn(root, before.held)
     // Read everything, then write: where each is laid out now, whatever of ours moves it.
     const to = items.map((el) => running.get(el)?.place() ?? el.getBoundingClientRect())

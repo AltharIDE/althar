@@ -68,7 +68,7 @@ function stubAnimations() {
  * lists' room stands; the room itself (`data-room`) where `room` has it; a copy where it is laid; anything else, nowhere.
  */
 const placed = (el: Element) => {
-  if (el.hasAttribute('data-room')) return new DOMRect(room.left, 0, room.width, 600)
+  if (el.hasAttribute('data-room')) return new DOMRect(room.left, 0, room.width, room.height)
   if (el.parentElement !== null && el.parentElement === layer()) {
     const { left, top, width, height } = (el as HTMLElement).style
     return new DOMRect(Number.parseFloat(left), Number.parseFloat(top), Number.parseFloat(width), Number.parseFloat(height))
@@ -80,8 +80,8 @@ const placed = (el: Element) => {
   return new DOMRect(room.left + lists.indexOf(list) * 300, place * 50, narrowFirst && place === 0 ? 200 : 280, 40)
 }
 
-/** Where the lists' room stands across the page, and how wide it is. */
-let room = { left: 0, width: 900 }
+/** Where the lists' room stands across the page, and how wide and high it is. */
+let room = { left: 0, width: 900, height: 600 }
 let narrowFirst = false
 let reduced = false
 let visible = true
@@ -89,7 +89,7 @@ let visible = true
 beforeEach(() => {
   played = []
   live.clear()
-  room = { left: 0, width: 900 }
+  room = { left: 0, width: 900, height: 600 }
   narrowFirst = false
   reduced = false
   visible = true
@@ -212,20 +212,36 @@ describe('ListMotion', () => {
   it('where its room is the page’s, moves nothing in an update that moved the list itself or changed its size', () => {
     // A divider dragged beside a board, drawn in the same commit as the board: every card stands elsewhere on the page.
     const { rerender } = render(<Lists lists={[['a', 'b'], ['c']]} steady />)
-    rerender(<Lists lists={[['a', 'b'], ['c']]} steady at={{ left: 120, width: 780 }} />)
+    rerender(<Lists lists={[['a', 'b'], ['c']]} steady at={{ left: 120, width: 780, height: 600 }} />)
     expect(played).toEqual([])
     // Nor where the board changed only its width, nor where its items changed places in that same commit.
-    rerender(<Lists lists={[['b', 'a'], ['c']]} steady at={{ left: 120, width: 700 }} />)
+    rerender(<Lists lists={[['b', 'a'], ['c']]} steady at={{ left: 120, width: 700, height: 600 }} />)
+    expect(played).toEqual([])
+    // Nor where only its height changed, nor where an item came in that same commit: it shows at once.
+    rerender(<Lists lists={[['b', 'a', 'd'], ['c']]} steady at={{ left: 120, width: 700, height: 520 }} />)
     expect(played).toEqual([])
     // Its room as it was, its items' own moves move them.
-    rerender(<Lists lists={[['a', 'b'], ['c']]} steady />)
+    rerender(<Lists lists={[['a', 'b', 'd'], ['c']]} steady />)
     expect(of(item('a'))[0]!.keyframes[0]).toEqual({ translate: '0px 50px' })
   })
 
-  it('elsewhere, slides its items by as far as their room moved', () => {
-    // Where the room is the items' own, as a row of tabs that grows with them; the board's cards slid off their lanes so.
+  it('where its room is the page’s, stops what moves its items once the list itself moves, a copy on its way included', () => {
+    const { rerender } = render(<Lists lists={[['a', 'b'], ['c']]} steady />)
+    // b changes lists: a copy of it travels above the page, to where b is laid out now.
+    rerender(<Lists lists={[['a'], ['b', 'c']]} steady />)
+    const trip = of(layer()!.firstElementChild!)[0]!
+    expect(item('b').style.visibility).toBe('hidden')
+    // The board moves on the way, and b with it: the copy would land where b no longer is. It goes, and b shows in its place.
+    rerender(<Lists lists={[['a'], ['b', 'c']]} steady at={{ left: 120, width: 780, height: 600 }} />)
+    expect(trip.cancel).toHaveBeenCalled()
+    expect(item('b').style.visibility).toBe('')
+    expect(layer()!.childElementCount).toBe(0)
+  })
+
+  it('where its room is its items’, slides them by as far as it moved', () => {
+    // As a row of tabs that grows and shrinks with them: what moves it is theirs. The board's cards slid off their lanes so.
     const { rerender } = render(<Lists lists={[['a', 'b']]} />)
-    rerender(<Lists lists={[['a', 'b']]} at={{ left: 120, width: 780 }} />)
+    rerender(<Lists lists={[['a', 'b']]} at={{ left: 120, width: 780, height: 600 }} />)
     expect(of(item('a'))[0]!.keyframes[0]).toEqual({ translate: '-120px 0px' })
   })
 
