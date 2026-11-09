@@ -31,6 +31,12 @@ export const SocketAllowed = Context.Reference<boolean>('@althar/contracts/Socke
 /** Bumped when a change would break a client built against an older API. */
 export const API_VERSION = 1
 
+/** The header every client request carries, naming the API version the client speaks. Compatibility is an exact match. */
+export const API_VERSION_HEADER = 'x-althar-api-version'
+
+/** The reason of the error a runtime answers a client of another API version with. */
+export const API_VERSION_MISMATCH = 'ApiVersionMismatch'
+
 export class ApiError extends Schema.TaggedError<ApiError>()('ApiError', {
   /** What kind of failure: the runtime's error tag, such as `NotARepository` or `SessionFailed`. */
   reason: Schema.String,
@@ -40,7 +46,31 @@ export class ApiError extends Schema.TaggedError<ApiError>()('ApiError', {
   why: Schema.optional(Schema.String),
   /** What it concerns, where the window can act on it: the files a merge conflicts in. */
   detail: Schema.optional(Schema.String),
+  /** For `ApiVersionMismatch`: the API version the client said it speaks; left out where it said none. */
+  clientVersion: Schema.optional(Schema.Int),
+  /** For `ApiVersionMismatch`: the API version the runtime serves. */
+  runtimeVersion: Schema.optional(Schema.Int),
 }) {}
+
+/**
+ * What a runtime answers a request with when its client speaks another API
+ * version than it serves (exact match), or didn't say; nothing when it matches.
+ * `headers` are the request's, as the RPC middleware has them.
+ */
+export const apiVersionRefusal = (headers: Readonly<Record<string, string | undefined>>): ApiError | undefined => {
+  const said = headers[API_VERSION_HEADER]
+  const spoken = said !== undefined && /^\d+$/.test(said) ? Number(said) : undefined
+  if (spoken === API_VERSION) return undefined
+  return new ApiError({
+    reason: API_VERSION_MISMATCH,
+    message:
+      spoken === undefined
+        ? `This client didn’t say which API version it speaks; this runtime serves version ${API_VERSION}.`
+        : `This client speaks API version ${spoken}; this runtime serves version ${API_VERSION}.`,
+    runtimeVersion: API_VERSION,
+    ...(spoken === undefined ? {} : { clientVersion: spoken }),
+  })
+}
 
 /** A command's id, made by the client: `cmd_` and 32 hex digits. The same id twice is a retry. */
 export const CommandId = Schema.String.check(Schema.isPattern(/^cmd_[0-9a-f]{32}$/))

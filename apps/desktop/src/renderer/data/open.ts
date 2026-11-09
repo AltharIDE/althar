@@ -1,4 +1,4 @@
-import type { DomMessagePort } from '@althar/contracts'
+import { API_VERSION_MISMATCH, ApiError, type DomMessagePort } from '@althar/contracts'
 
 import { tabsStoreOf } from '../features/tabs/store'
 import { makeRouter } from '../router'
@@ -34,7 +34,13 @@ export const openWindow = async (port: DomMessagePort, host: Host) => {
   const cache = makeQueryClient()
   const read = reads(client)
   // Watched from where the projects were read: nothing after is missed. Unread, from now.
-  const listed = await timed('first-projects', () => cache.fetchQuery(read.projects()).catch(() => null))
+  const listed = await timed('first-projects', () =>
+    cache.fetchQuery(read.projects()).catch((failure: unknown) => {
+      // A runtime of another API version answers every call the same; the window never half-opens over it.
+      if (failure instanceof ApiError && failure.reason === API_VERSION_MISMATCH) throw failure
+      return null
+    }),
+  )
   const feed = follow(client, cache, listed?.cursor)
   const services: Services = { client, host, cache, feed }
   const router = makeRouter({ client, cache })

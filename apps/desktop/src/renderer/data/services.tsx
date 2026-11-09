@@ -276,8 +276,11 @@ export interface PagesHost {
   readonly open: (owner: string, address: string) => Promise<PageState | null>
   /** How each page open stands, for a window that opened after them. */
   readonly states: () => Promise<ReadonlyArray<PageState>>
-  /** Lays the page over the window where it keeps its place, in the window's pixels; null takes it off. Sent each frame of a drag. */
-  readonly show: (owner: string, panel: { x: number; y: number; width: number; height: number } | null) => void
+  /**
+   * Lays the page over the window where it keeps its place, in the window's pixels; null takes it off. Sent each frame of a
+   * drag. `where` says whether the window shows it beside the conversation or in a tab of its own, for an agent asking where it is.
+   */
+  readonly show: (owner: string, panel: { x: number; y: number; width: number; height: number } | null, where?: 'beside' | 'tab') => void
   readonly move: (owner: string, move: PageMove) => Promise<void>
   readonly viewport: (owner: string, viewport: Viewport) => Promise<void>
   /** Points at the page: the element pressed, with its crop and a picture of the page; null where pointing stopped. */
@@ -305,6 +308,8 @@ export interface PagesHost {
   readonly onState: (listener: (state: PageState) => void) => () => void
   /** Calls `listener` as the person presses, in a page, a key the window acts on. */
   readonly onKey: (listener: (owner: string, key: PageKey) => void) => () => void
+  /** Calls `listener` as a lead opens a page that no window shows yet, so the window can place it beside the conversation. */
+  readonly onOpened: (listener: (owner: string) => void) => () => void
   /** Calls `listener` as a page closes of itself, its task done or its project removed. */
   readonly onClosed: (listener: (owner: string) => void) => () => void
 }
