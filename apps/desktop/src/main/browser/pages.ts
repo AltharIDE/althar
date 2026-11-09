@@ -939,9 +939,11 @@ export const startPages = (options: PagesOptions) => {
    */
   const relax = async (page: Page) => {
     if (!page.driving || page.contents.isDestroyed()) return
-    await cdp(page, 'Emulation.setFocusEmulationEnabled', { enabled: false }).catch(() => undefined)
+    await answered(cdp(page, 'Emulation.setFocusEmulationEnabled', { enabled: false }), 'for its focus').catch(() => undefined)
     if (page.mobile && page.pointing === null)
-      await cdp(page, 'Emulation.setEmitTouchEventsForMouse', { enabled: true, configuration: 'mobile' }).catch(() => undefined)
+      await answered(cdp(page, 'Emulation.setEmitTouchEventsForMouse', { enabled: true, configuration: 'mobile' }), 'for its touch').catch(
+        () => undefined,
+      )
   }
   /** Where the page takes a point in the viewport's CSS pixels, for input: the page is drawn `scale` times its size in a smaller viewport. (The e2e checks this under a phone's viewport.) */
   const viewPoint = (page: Page, at: { readonly x: number; readonly y: number }) => ({ x: at.x * page.scale, y: at.y * page.scale })
