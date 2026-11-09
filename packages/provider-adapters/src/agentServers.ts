@@ -197,17 +197,19 @@ const readText = (path: string): string | undefined => {
 
 /** Where each agent keeps its servers on this computer, as the person names the file, and its path. */
 export const serverFiles = ({ homeDir, env = {} }: ServerHome): Readonly<Record<SyncedAgent, { file: string; path: string }>> => {
+  // Named with forward slashes whatever the system, as the person is shown it.
+  const named = (path: string) => path.replace(homeDir, '~').replaceAll('\\', '/')
   const codexHome = env['CODEX_HOME'] || join(homeDir, '.codex')
   const openCode = join(env['XDG_CONFIG_HOME'] || join(homeDir, '.config'), 'opencode')
   const openCodeFile = ['opencode.jsonc', 'opencode.json', 'config.json'].map((name) => join(openCode, name)).find(existsSync)
   return {
     // Claude Code keeps its settings in CLAUDE_CONFIG_DIR where that is set, else in the home: read where its command writes.
     claude: env['CLAUDE_CONFIG_DIR']
-      ? { file: join(env['CLAUDE_CONFIG_DIR'], '.claude.json').replace(homeDir, '~'), path: join(env['CLAUDE_CONFIG_DIR'], '.claude.json') }
+      ? { file: named(join(env['CLAUDE_CONFIG_DIR'], '.claude.json')), path: join(env['CLAUDE_CONFIG_DIR'], '.claude.json') }
       : { file: '~/.claude.json', path: join(homeDir, '.claude.json') },
     codex: { file: env['CODEX_HOME'] ? join(codexHome, 'config.toml') : '~/.codex/config.toml', path: join(codexHome, 'config.toml') },
     opencode: {
-      file: openCodeFile === undefined ? '~/.config/opencode/opencode.json' : openCodeFile.replace(homeDir, '~'),
+      file: openCodeFile === undefined ? '~/.config/opencode/opencode.json' : named(openCodeFile),
       path: openCodeFile ?? join(openCode, 'opencode.json'),
     },
   }
