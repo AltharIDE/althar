@@ -35,6 +35,11 @@ the case back. `node flows.mjs` clicks through 60 of these headless.
   free to take the work over.
 - **Outputs is one page for every change** (this round): each change one
   under another, a settled one folded to a line.
+- **Scratch is set aside** (9 November), a topic of its own for later. This
+  round keeps only where a chat meets the rest: a chat is a task with no
+  parts, kept off the board, and once it takes a worktree or makes something
+  it is on the board like any task. The "Scratch 4" chip on the board is a
+  placeholder, not a proposal.
 
 ## The principles it was designed by
 
@@ -144,7 +149,7 @@ Outputs is the same in all three.
 | After the merge, it found something | Back in Needs you: "The review of #715 found 2 · Fix it"; card word "Review found 2" | Ask: Fix it / Leave it |
 | After the merge, nothing found | Stays Settled | The review's line |
 | A change reviewing a related PR | "Review of #698 drafted · Post it"; Reviewing part "2 comments drafted, not posted" | — |
-| Chats on Scratch | "Scratch 4" at the foot of Up next, opening in place | — |
+| Chats on Scratch | Set aside for now; the chip is a placeholder | — |
 | Its preset, and one offered | The preset is the plan card's kicker word, a menu on a press; never in the bar | The coordinator's offer card: save it as a preset |
 | Where each turn's time went | — | The turn's line opens first to "3m 10s waiting for a place · 2m 33s the agent's own work · 1m 1s running tools · 35s starting the session" |
 | A stuck step | "The review for Ship stopped · Try again" | The kit's Stuck card: Try again / Review with another model (its picker) / Ship without the review |
@@ -209,15 +214,42 @@ only its change. If those change again, so do these cases: "A hold reaching
 up a stack", "One merged, the rest carry on", "After the merge, nothing
 found", "A pull request opened elsewhere" and "One it won't guess".
 
-## Scratch, plainly
+## Where it is hard
 
-In the ADR, a chat is the lightest task: a conversation with an agent, with
-no worktree, no branch and no pull request ("What does ADR-087 say about
-helpers?"). It isn't work to track, so it stays out of the board's lanes. Scratch
-is where those chats are kept so you can go back to them: here, a "Scratch 4"
-chip at the foot of Up next that opens in place. When a chat grows into work
-(the lead takes a worktree to write a fix), it leaves Scratch and goes on the
-board as a change.
+Most of what is hard here isn't the window. The window is one rule applied
+over and over (one sentence, one button, count the rest), and this
+prototype shows it holds for every case. What decides whether the window can
+stay calm is underneath it: every state the engine can't settle by itself
+becomes an ask, and too many asks, not the layout, is what would make it
+noisy.
+
+- **The bookkeeping.** Everything that took "one task, one branch, one pull
+  request" for granted changes: where a task works, the hold, the review's
+  mark, the card, settling, every tool that names the task's branch. The
+  products the research read each shipped bugs there.
+- **Git.** A push sends the whole branch, so a held commit low in a stack
+  holds everything above it; a new target with commits waiting means a
+  rebase; a pull request the lead opened itself has to be found by its branch
+  and target. Two of the three points the ADR's lead is still settling are
+  here.
+- **The person's checkout.** Moving into or out of Local waits on their own
+  edits and never touches them. The ADR calls it the part that needs the
+  most care.
+- **The lead's judgment.** What the person says goes to the task, and the
+  lead picks the change. A commit to the wrong one can only be shown at once
+  (each turn's line says where its commits went), not prevented by the
+  window.
+- **When a task is done.** With several changes and a review after each
+  merge, "settled" is worked out, not set; the third point still being
+  settled is here.
+- **Cost and speed.** A worktree and a setup for each change, a warm session
+  that costs more once its cache lapses, and a review that keeps spending
+  after the person has moved on.
+
+The window's own hard parts are three: which change the one sentence names
+when several compete (the order under "What the ADR would need to match"),
+making "which change am I talking to" a question nobody has to answer, and
+saying "commits not shipped" so it needs no explaining.
 
 ## Questions for the person
 
@@ -225,7 +257,3 @@ board as a change.
    you talk?
 2. The preset: is a word in the plan card's kicker quiet enough, or should it
    show only when the plan doesn't start from Change?
-3. Scratch: keep chats on a shelf at the foot of Up next (recommended), or
-   in the lanes like any task?
-4. A chat's reply you haven't seen: a dot on Scratch (recommended, so Needs
-   you holds only decisions), or Needs you, as the ADR says?
