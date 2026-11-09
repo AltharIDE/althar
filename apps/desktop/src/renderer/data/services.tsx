@@ -29,7 +29,13 @@ export interface DictationState {
   /** Whether the system lets Althar use the microphone: yes, it would ask first (macOS, once), or it said no. */
   readonly microphone: 'granted' | 'ask' | 'denied'
   /** The speech model: all here and checked, or how much of it is, in bytes; and whether it is coming down now. */
-  readonly model: { readonly ready: boolean; readonly got: number; readonly size: number; readonly downloading: boolean }
+  readonly model: {
+    readonly name: string
+    readonly ready: boolean
+    readonly got: number
+    readonly size: number
+    readonly downloading: boolean
+  }
   /** Whether the system has settings Althar can open (macOS and Windows). */
   readonly settings: boolean
 }
@@ -46,6 +52,8 @@ export type DictationEvent =
   | { readonly type: 'downloaded' }
   | { readonly type: 'stopped'; readonly stop: DownloadStop; readonly got: number; readonly size: number }
   | { readonly type: 'cancelled' }
+  /** The model was removed from this computer. */
+  | { readonly type: 'removed' }
 
 /** Dictation, through the main process: the microphone's permission, the speech model, and writing down what was said (ADR-017). */
 export interface DictationHost {
@@ -56,6 +64,8 @@ export interface DictationHost {
   readonly download: () => Promise<void>
   /** Stops the download and keeps nothing of it. */
   readonly cancel: () => Promise<void>
+  /** Removes the model from this computer, to free its space; the next dictation brings it down again. */
+  readonly remove: () => Promise<void>
   /** Loads the model, so the first words are written down without the wait. */
   readonly prepare: () => Promise<void>
   /** What was said, as text: 16 kHz mono samples, or whatever rate they were recorded at. */

@@ -19,6 +19,7 @@ const A = bytes(40_000, 1)
 const B = bytes(90_000, 2)
 const MODEL: SpeechModel = {
   id: 'test-model',
+  name: 'Test model',
   base: 'https://models.test/rev',
   files: [
     { name: 'a.txt', size: A.length, sha256: sha(A) },

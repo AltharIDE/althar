@@ -28,7 +28,7 @@ const state = (overrides: Partial<DictationState> = {}, model: Partial<Dictation
   microphone: 'granted',
   settings: true,
   ...overrides,
-  model: { ready: false, got: 0, size: SIZE, downloading: false, ...model },
+  model: { name: 'Parakeet TDT 0.6B v3', ready: false, got: 0, size: SIZE, downloading: false, ...model },
 })
 
 /** A host's dictation, with its events sent by hand. */
@@ -40,6 +40,7 @@ const fakeDictation = (initial: DictationState, overrides: Partial<DictationHost
     allow: vi.fn(async () => true),
     download: vi.fn(async () => {}),
     cancel: vi.fn(async () => {}),
+    remove: vi.fn(async () => {}),
     prepare: vi.fn(async () => {}),
     transcribe: vi.fn(async () => 'check the retry path'),
     openSettings: vi.fn(async () => true),

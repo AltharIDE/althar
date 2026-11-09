@@ -18,6 +18,8 @@ import {
   CrashReports,
   CrashReportsLine,
   EdgeHere,
+  DictationSettings,
+  type DictationSettingsProps,
   EdgePlaces,
   EdgeScene,
   KeepAwake,
@@ -603,6 +605,82 @@ export const Groups: Story = {
     const signIn = c.getByRole('button', { name: 'Sign in again' }).getBoundingClientRect()
     const open = c.getByRole('button', { name: 'Open on Linear' }).getBoundingClientRect()
     await expect(open.left - signIn.right).toBeGreaterThanOrEqual(8)
+  },
+}
+
+const MICS = [
+  { id: 'built-in', label: 'MacBook Pro Microphone' },
+  { id: 'usb', label: 'Shure MV7' },
+]
+
+const PRESENT = { name: 'Parakeet TDT 0.6B v3', state: 'present', onDisk: '670 MB', size: '670 MB' } as const
+
+function Dictation(props: Partial<DictationSettingsProps>) {
+  const [microphone, setMicrophone] = useState<string | null>(null)
+  return (
+    <DictationSettings
+      microphones={MICS}
+      microphone={microphone}
+      onMicrophone={setMicrophone}
+      permission="allowed"
+      model={PRESENT}
+      onRemove={fn()}
+      {...props}
+    />
+  )
+}
+
+/** Allowed, the model here: the microphone chosen from the list, and Remove saying what it frees and what dictating does after. */
+export const DictationAllowed: Story = {
+  render: () => <Dictation />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('combobox', { name: 'Microphone' })).toHaveTextContent('System default')
+    await expect(c.getByText(/Dictation is allowed/)).toBeVisible()
+    await expect(c.getByText(/downloads it again/)).toBeVisible()
+    await expect(c.queryByRole('button', { name: 'Open System Settings' })).toBeNull()
+  },
+}
+
+/** Denied: the way to the system's settings is beside it. */
+export const DictationDenied: Story = {
+  render: () => <Dictation permission="denied" microphones={[]} onOpenSettings={fn()} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Open System Settings' }))
+  },
+}
+
+/** Linux: Althar can't tell, and says so, with nothing to open. */
+export const DictationNotCheckable: Story = {
+  render: () => <Dictation permission="unknown" />,
+}
+
+/** The model is on the computer: its name and size on disk, and Remove. */
+export const DictationModelPresent: Story = {
+  render: () => <Dictation />,
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('button', { name: 'Remove' })).toBeVisible()
+  },
+}
+
+/** The model isn't there: what dictating does, and no Remove. */
+export const DictationModelAbsent: Story = {
+  render: () => <Dictation model={{ ...PRESENT, state: 'absent', onDisk: '0 MB' }} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText(/Dictating downloads it first/)).toBeVisible()
+    await expect(c.queryByRole('button', { name: 'Remove' })).toBeNull()
+  },
+}
+
+/** The model is coming down: how far, and nothing to remove yet. */
+export const DictationDownloading: Story = {
+  render: () => <Dictation model={{ ...PRESENT, state: 'downloading', onDisk: '240 MB', got: '240 MB' }} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText(/Downloading Parakeet TDT 0.6B v3: 240 MB of 670 MB/)).toBeVisible()
+    await expect(c.queryByRole('button', { name: 'Remove' })).toBeNull()
   },
 }
 

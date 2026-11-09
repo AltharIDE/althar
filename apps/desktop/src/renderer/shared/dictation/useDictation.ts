@@ -86,6 +86,7 @@ const NONE: DictationHost = {
   allow: async () => false,
   download: async () => {},
   cancel: async () => {},
+  remove: async () => {},
   prepare: async () => {},
   transcribe: async () => '',
   openSettings: async () => false,
@@ -112,7 +113,7 @@ export interface Voice {
 const isEvent = (event: unknown): event is DictationEvent =>
   typeof event === 'object' &&
   event !== null &&
-  ['progress', 'downloaded', 'stopped', 'cancelled'].includes((event as { type?: unknown }).type as string)
+  ['progress', 'downloaded', 'stopped', 'cancelled', 'removed'].includes((event as { type?: unknown }).type as string)
 
 const problemOf = (stop: DownloadStop, got: number, size: number): Problem =>
   stop.reason === 'space' ? { kind: 'noRoom', need: stop.need, free: stop.free } : { kind: 'stopped', got, size }
@@ -434,6 +435,7 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
         setProblem(problemOf(event.stop, event.got, event.size))
         return setOpen(true)
       case 'cancelled':
+      case 'removed':
         setDownload(null)
         setProblem(null)
         listenWhenHere.current = false
