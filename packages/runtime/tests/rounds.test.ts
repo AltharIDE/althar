@@ -338,8 +338,11 @@ describe('a task that goes back to work', () => {
       const before = yield* taskRow(task.taskId)
       // It commits, and asks for a push to a pull request that merged: told its commit waits for Ship, it ends its turn.
       yield* say(task.threadId, 'Tidy it up, and push pls.')
-      const [card] = yield* until(cards(task.projectId), (all) => all[0]?.held !== undefined)
-      assert.deepStrictEqual([card?.phase, card?.held?.commits], ['ready', 1])
+      // Held as its lead pushes, mid-turn: the card is at work, Ship not yet the person's, until the turn is over.
+      const [first] = yield* until(cards(task.projectId), (all) => all[0]?.held !== undefined)
+      assert.oneOf(first?.phase, ['running', 'ready'])
+      const [card] = yield* until(cards(task.projectId), (all) => all[0]?.held !== undefined && all[0].phase === 'ready')
+      assert.strictEqual(card?.held?.commits, 1)
       assert.deepStrictEqual(card?.unshipped, { commits: 1, add: 1, del: 0 })
       // Neither stuck nor reminded: a turn has no report to give.
       const stuck = yield* sql<{ id: string }>`SELECT id FROM attention_requests WHERE task_id = ${task.taskId} AND kind = 'stuck'`
