@@ -51,6 +51,8 @@ Proposals waiting now:
   a lead's helpers.
 - [ADR-103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md):
   projects on a host, and work placed across pools.
+- [ADR-104](proposed/104-secrets.md): secrets, kept in one store with
+  the project's home, each with a reach, and asked for on a card.
 
 ## The old ADRs
 
@@ -167,3 +169,4 @@ one.
 | 101 | Clearing a coordinator's chat is one question with two kinds: clear only the view (a mark on the thread; the coordinator keeps the conversation; Show earlier and Undo) or forget the conversation too (the session ends and its messages are deleted); both keep what is still open and the project's records | [coordinator § Clearing its chat](coordinator.md#clearing-its-chat) |
 | 102 | A change of a few lines is one step on a light model, starts at once, and is reviewed after it merges, with one card in its thread; Auto moves a lead to a lighter model of its agent as the plan runs out, with Keep for the task | [tasks § The small-change lane](tasks.md#the-small-change-lane), [reviews § A small change is reviewed after it merges](reviews.md#a-small-change-is-reviewed-after-it-merges) |
 | [103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md) | A project's runtime and database live locally, on a personal host or on Althar hosting; automatic task placement uses its assigned worker pools, with SSH or Connect access, forwarded previews and explicit local test copies | Proposed; would fold into [foundations § Where the runtime runs, and who may reach it](foundations.md#where-the-runtime-runs-and-who-may-reach-it) |
+| [104](proposed/104-secrets.md) | Secrets: one store with the project's home, sealed where it runs; a reach for each secret (agents' commands, Althar's runs only, Althar only); `.env` read in place, not copied; masking; agents ask on a card; stand-ins later | Proposed; would become `secrets.md` |
