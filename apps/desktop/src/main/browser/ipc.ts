@@ -9,7 +9,9 @@ import type { Pages } from './pages'
  * (ADR-100): every call checked to come from one of Althar's windows, never
  * a page, and every argument checked for what it should be, as anything
  * crossing a process is. A page itself has no preload, so it has no way to
- * send anything here at all; the check holds even so.
+ * send anything here at all; the check holds even so. Nothing here lets a
+ * window or a page drive a page as the lead does: that is `drive`, which only
+ * the runtime's own process reaches (bridge.ts).
  */
 
 const LONGEST_ADDRESS = 8_192
@@ -63,10 +65,12 @@ export const handlePages = (pages: Pages, mine: (contents: WebContents) => boole
     return pages.states()
   })
   // Sent every frame while the person drags the workbench's edge: no answer is waited for.
-  ipcMain.on('althar:page-show', (event, owner: unknown, panel: unknown) => {
+  ipcMain.on('althar:page-show', (event, owner: unknown, panel: unknown, where: unknown) => {
     if (!mine(event.sender) || typeof owner !== 'string') return
     const window = BrowserWindow.fromWebContents(event.sender)
-    if (window !== null) pages.show(window, owner, panel === null ? null : rectOf(panel))
+    // Where the window shows it, so an agent can say; anything else is left out.
+    if (window !== null)
+      pages.show(window, owner, panel === null ? null : rectOf(panel), where === 'beside' || where === 'tab' ? where : undefined)
   })
   ipcMain.handle('althar:page-move', (event, owner: unknown, move: unknown) => {
     from(event)

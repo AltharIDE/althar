@@ -107,7 +107,7 @@ export const readRecord = (io: SyncIo): SyncRecord => {
   }
 }
 
-const writeRecord = (io: SyncIo, record: SyncRecord) => {
+export const writeRecord = (io: SyncIo, record: SyncRecord) => {
   mkdirSync(io.folder, { recursive: true })
   writeFileSync(recordPath(io), `${JSON.stringify(record, null, 2)}\n`)
 }
@@ -148,8 +148,10 @@ const holdsSecret = (spec: ServerSpec): boolean =>
   )
 
 /** Why a server can't go to an agent as it is, if it can't. */
-const cantGo = (spec: ServerSpec, agent: SyncedAgent): Cant | undefined => {
-  if (holdsSecret(spec)) return 'secret'
+export const cantGo = (spec: ServerSpec, agent: SyncedAgent): Cant | undefined => (holdsSecret(spec) ? 'secret' : codexCant(spec, agent))
+
+/** Why a server can't go to an agent in the way it is set up, whoever writes it: only Codex refuses some ways. */
+export const codexCant = (spec: ServerSpec, agent: SyncedAgent): Exclude<Cant, 'secret'> | undefined => {
   if (agent !== 'codex') return undefined
   // Codex takes streamable HTTP, not SSE; a bearer token by its variable, not other headers; values, not names, for a command.
   if (spec.transport === 'sse') return 'sse'
@@ -311,7 +313,7 @@ export const openCodeEntry = (spec: ServerSpec): Record<string, unknown> =>
       }
 
 /** Writes into OpenCode's file in place, keeping its comments and the rest as the person wrote it. */
-const editOpenCode = (path: string, name: string, value: Record<string, unknown> | undefined) => {
+export const editOpenCode = (path: string, name: string, value: Record<string, unknown> | undefined) => {
   const text = existsSync(path) ? readFileSync(path, 'utf8') : '{\n  "$schema": "https://opencode.ai/config.json"\n}\n'
   const edits = modify(text, ['mcp', name], value, { formattingOptions: { insertSpaces: true, tabSize: 2 } })
   mkdirSync(dirname(path), { recursive: true })
@@ -343,7 +345,7 @@ const unwrite = async (io: SyncIo, agent: SyncedAgent, path: string, name: strin
 }
 
 /** Keeps a copy of an agent's file before Althar first writes to it. */
-const backUp = (io: SyncIo, record: SyncRecord, agent: SyncedAgent, path: string): SyncRecord => {
+export const backUp = (io: SyncIo, record: SyncRecord, agent: SyncedAgent, path: string): SyncRecord => {
   if (record.backups[agent] !== undefined || !existsSync(path)) return record
   const copy = join(io.folder, 'backups', `${agent}-${io.now().replace(/[:.]/g, '-')}${path.slice(path.lastIndexOf('.'))}`)
   mkdirSync(dirname(copy), { recursive: true })
@@ -353,7 +355,7 @@ const backUp = (io: SyncIo, record: SyncRecord, agent: SyncedAgent, path: string
 
 const read = (io: SyncIo) => SYNCED_AGENTS.map((agent) => agentServers(agent, io.home))
 
-const seenNow = (agents: ReadonlyArray<AgentServers>, before: SyncRecord['seen']): SyncRecord['seen'] =>
+export const seenNow = (agents: ReadonlyArray<AgentServers>, before: SyncRecord['seen']): SyncRecord['seen'] =>
   Object.fromEntries(
     SYNCED_AGENTS.map((agent) => {
       const found = agents.find((each) => each.agent === agent)

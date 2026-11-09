@@ -1200,15 +1200,15 @@ external observation, not Althar's run authority.
 ## Skills
 
 What is built so far is narrower than this section: one store on the
-computer, a curated default catalog and each lead's set fixed and recorded
+computer, of what the person added, and each lead's set fixed and recorded
 for its session ([ADR-094](../decisions/the-persons-setup.md#skills)),
 and skill and OpenSpec files held off the repository unless the project says
 so ([ADR-095](../decisions/the-persons-setup.md#skill-and-openspec-files-in-a-change),
 which ADR-097 supersedes: they go up with the diff). Bindings by scope,
 precedence and conflicts are not built; every lead gets the same active set,
-and the catalog's skills are off until the person turns them on. From
-ADR-097's first phase every role gets them, the catalog is on by default,
-and the person's own skills and plugins load beside it. [The plan](../plans/skills-across-harnesses.md#implementation-status)
+and what the person added is off until they turn it on. From
+ADR-097's first phase every role gets them, and the person's own skills and
+plugins load beside them. Althar ships no skills of its own. [The plan](../plans/skills-across-harnesses.md#implementation-status)
 keeps what is done and what is not.
 
 Althar should adopt the open Agent Skills package shape:

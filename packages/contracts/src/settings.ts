@@ -13,20 +13,43 @@ export const SETTINGS_SECTIONS = [
   'mcp-servers',
   'skills',
   'code-hosts',
+  'tasks',
+  'pull-requests',
   'this-mac',
-  'plans-and-reviews',
-  'new-projects',
-  'reviews',
   'notifications',
   'appearance',
-  'editor',
-  'browser',
+  'editor-and-browser',
   'about',
 ] as const
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
 
-export const PROJECT_SETTINGS_SECTIONS = ['general', 'code', 'rules', 'running', 'notes'] as const
+export const PROJECT_SETTINGS_SECTIONS = ['general', 'code', 'tasks', 'rules', 'running', 'notes'] as const
 export type ProjectSettingsSection = (typeof PROJECT_SETTINGS_SECTIONS)[number]
+
+/**
+ * Where an old address of Althar's Settings opens now: the sections that were merged or split. `plans-and-reviews`
+ * and `new-projects` are Tasks, `reviews` is Pull requests, `editor` and `browser` are Editor and browser, and
+ * `dictation`, which sat between them for a day, is part of This Mac. A link, a bookmark or an agent that still
+ * names one lands where its settings went.
+ */
+export const MOVED_SETTINGS_SECTIONS: Readonly<Record<string, SettingsSection>> = {
+  'plans-and-reviews': 'tasks',
+  'new-projects': 'tasks',
+  reviews: 'pull-requests',
+  editor: 'editor-and-browser',
+  browser: 'editor-and-browser',
+  dictation: 'this-mac',
+}
+
+/** The section an address of Althar's Settings names, an old one included; undefined for anything else. */
+export const settingsSectionOf = (id: unknown): SettingsSection | undefined =>
+  typeof id !== 'string'
+    ? undefined
+    : (SETTINGS_SECTIONS as ReadonlyArray<string>).includes(id)
+      ? (id as SettingsSection)
+      : Object.hasOwn(MOVED_SETTINGS_SECTIONS, id)
+        ? MOVED_SETTINGS_SECTIONS[id]
+        : undefined
 
 /** Who changed a setting: the person, the coordinator, or a task's lead, by its task. */
 export const SettingChanger = Schema.Struct({

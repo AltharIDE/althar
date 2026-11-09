@@ -6,20 +6,26 @@ import { describe, expect, it, vi } from 'vitest'
 import { ApiError, type ProjectRulesView } from '@althar/contracts'
 
 import { ServicesProvider } from '../src/renderer/data/services'
-import { RulesSection } from '../src/renderer/features/rules/RulesSection'
+import { RulesSection, TaskRules } from '../src/renderer/features/rules/RulesSection'
 import { useRules } from '../src/renderer/features/rules/useRules'
 import { fakeClient, projectRules } from './fixtures'
 import { servicesFor, withServices } from './render'
 
 /*
  * A project's rules from where the rest of their tests don't start: asking
- * about the rest, a task ending ready for review, work waiting at a limit,
- * the person's own branch pattern followed back to the repository's, a
- * title pattern; and rules that aren't read yet, or can't be.
+ * about the rest; the Tasks' Finished and Limits sentences, a task ending
+ * ready for review, work waiting at a limit, the person's own branch pattern
+ * followed back to the repository's, a title pattern; and rules that aren't
+ * read yet, or can't be.
  */
 
 function Rules() {
   return <RulesSection model={useRules('p1')} />
+}
+
+/** What a task does when it is finished and when an account runs out: the Finished and Limits sentences of a project's Tasks. */
+function Tasks() {
+  return <TaskRules model={useRules('p1')} headingLevel={3} />
 }
 
 const rulesOf = (rules: Partial<ProjectRulesView>) => vi.fn(async () => ({ ...projectRules, ...rules }))
@@ -43,7 +49,7 @@ describe('a project’s rules, changed from where they stand', () => {
 
   it('ends a task ready for review where the rules say so, and changes it to a draft and back', async () => {
     const { client } = fakeClient({ getProjectRules: rulesOf({ end: 'ready' }) })
-    withServices(<Rules />, client)
+    withServices(<Tasks />, client)
     await choose(await screen.findByRole('button', { name: 'a pull request for review' }), 'Open a draft pull request')
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', end: 'draft' }))
     await choose(await screen.findByRole('button', { name: 'a draft pull request' }), 'Open a pull request for review')
@@ -52,14 +58,14 @@ describe('a project’s rules, changed from where they stand', () => {
 
   it('moves work on again where a limit made it wait', async () => {
     const { client } = fakeClient({ getProjectRules: rulesOf({ usageLimit: 'wait' }) })
-    withServices(<Rules />, client)
+    withServices(<Tasks />, client)
     await choose(await screen.findByRole('button', { name: 'waits for the reset' }), 'Move to the strongest model with usage left')
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', usageLimit: 'move' }))
   })
 
   it('follows the repository again in place of the person’s branch pattern, and keeps a title pattern', async () => {
     const { client } = fakeClient({ getProjectRules: rulesOf({ branchPattern: 'team/{key}-{slug}' }) })
-    withServices(<Rules />, client)
+    withServices(<Tasks />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'team/MER-128-fix-login' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Follow the repository' }))
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', branchPattern: null }))

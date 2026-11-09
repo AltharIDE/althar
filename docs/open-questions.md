@@ -21,10 +21,12 @@ was decided. These are what they leave open.
 - [ ] **The Scratch shelf and presets.** The 13 October direction makes a
   temporary chat the lightest form of a task, kept off the board, with
   common uses as presets. Neither is built, and their shape is open
-  ([tasks](decisions/tasks.md#what-a-task-is)).
+  ([tasks](decisions/tasks.md#what-a-task-is)). Proposed in
+  [a task is a conversation plus parts](decisions/proposed/a-task-is-a-conversation-plus-parts.md#chats-and-scratch).
 - [ ] **Moving a running task.** A task's place (Local or a worktree) and the
   branch it works toward change only until its first step. The container
-  direction implies they change at any time, as its team now does.
+  direction implies they change at any time, as its team now does. Proposed
+  in [a task is a conversation plus parts](decisions/proposed/a-task-is-a-conversation-plus-parts.md#the-workspace-moves-up).
 - [ ] **Keeping what agents hand back.** Nothing in the artifact store is
   swept yet. How long each kind is kept, and a mark-and-sweep, are open
   ([tasks](decisions/tasks.md#what-agents-hand-back)).
@@ -40,7 +42,10 @@ was decided. These are what they leave open.
   pull request runs none of their code and stays offline. A "Run it" step,
   not built, would run it in the sandbox, and its installs would need the
   package registries. The leaning is a short list of the download hosts the
-  recorded setup already uses, for that step only.
+  recorded setup already uses, for that step only. Proposed instead: "Run it"
+  asks Run safely (a lockfile install from the registries, scripts off,
+  commands offline) or Trust fully
+  ([a task is a conversation plus parts](decisions/proposed/a-task-is-a-conversation-plus-parts.md#running-someone-elses-pull-request)).
 - [ ] **Claude Code's own memory.** ADR-097 turned it on; main still turns it
   off, because it writes into the person's `~/.claude`
   ([the person's setup](decisions/the-persons-setup.md#claude-codes-own-memory)).
@@ -51,7 +56,7 @@ was decided. These are what they leave open.
 - [ ] **An MCP broker.** Build one only if MCP calls are seen slipping past
   the agents' own hooks.
 - [ ] **Skills per project.** There is no per-project choice of skills, and
-  Codex may drop catalog skills over its budget without saying so.
+  Codex may drop skills over its budget without saying so.
 
 **Code hosts and trackers**
 
@@ -148,8 +153,8 @@ page.
   and then the run only reads.
 - [x] **The limits by default.** One place; an hour apart at least; 45
   minutes of work a run, over all its steps; runs a day capped for all
-  automations together; stop on a usage limit; plan accounts only at
-  first, which leaves OpenCode out; at most five pull requests open.
+  automations together; stop on a usage limit; at most five pull requests
+  open.
 - [x] **The coordinator's reach.** Pause in words; resume and Run now on a
   small card; any other change on a card.
 - [x] **Where they live.** In Althar, the person's own, on the computer they were

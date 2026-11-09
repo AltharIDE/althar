@@ -359,7 +359,7 @@ export const runtime = (
     readonly idle?: IdleOptions
     /** The device outside a sandbox, as for a Flatpak. */
     readonly onDevice?: RuntimeOptions['onDevice']
-    /** The skills store and local catalog; no run has Althar-selected skills without it. */
+    /** The skills store; no run has Althar-selected skills without it. */
     readonly skills?: RuntimeOptions['skills']
     /** The person's agents' settings, in a home of the test's own: none is read without it. */
     readonly agentConfigs?: RuntimeOptions['agentConfigs']
@@ -369,6 +369,8 @@ export const runtime = (
     readonly keychain?: Map<string, string>
     /** How a screenshot is taken, where a test takes one; without, none can be. */
     readonly screenshot?: RuntimeOptions['screenshot']
+    /** How the page beside a conversation is reached, where a test drives one; without, none can be. */
+    readonly page?: RuntimeOptions['page']
     /** The clock and zone automations are read by, and how often they are looked at. */
     readonly automations?: AutomationOptions
     /** The disk finished tasks' folders are on; a roomy one unless a test says, so no test removes them for the Mac it runs on being full. */
@@ -417,6 +419,7 @@ export const runtime = (
     idle: { reports: Duration.millis(300), ...more.idle },
     ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
     ...(more.screenshot === undefined ? {} : { screenshot: more.screenshot }),
+    ...(more.page === undefined ? {} : { page: more.page }),
     ...(more.skills === undefined ? {} : { skills: more.skills }),
     busy: { machine: ROOMY, ...more.busy },
     ...(more.automations === undefined ? {} : { automations: more.automations }),

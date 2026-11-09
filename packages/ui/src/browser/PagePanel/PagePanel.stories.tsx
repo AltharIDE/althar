@@ -120,6 +120,15 @@ export const PermissionRefused: Story = {
 }
 export const PermissionRefusedDark: Story = { ...PermissionRefused, globals: { theme: 'dark' } }
 
+/** The lead acting on the page: who, and that the person's own press in the page stops it. No way to dismiss it: it goes when the lead is done. */
+export const LeadAtWork: Story = {
+  args: {
+    line: <PageLine icon="agents">The lead is at work on this page. A click or key press from you stops the lead.</PageLine>,
+  },
+  decorators: [beside],
+}
+export const LeadAtWorkDark: Story = { ...LeadAtWork, globals: { theme: 'dark' } }
+
 /** In a tab of its own, with the way back beside the conversation. */
 export const InATab: Story = { args: { docked: 'tab' }, decorators: [(Story) => <div style={{ height: '100vh' }}>{Story()}</div>] }
 
