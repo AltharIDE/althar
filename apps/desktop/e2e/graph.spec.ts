@@ -15,13 +15,13 @@ import { askAboutMore, connectGitHub, launch, openFirstProject, say, shown, toCo
  * lane for each agent and the steps in the order they ran. The review that
  * found something opens in the code, its finding under its line, from its
  * card and from the conversation; one that passed opens its report. A round's marker goes to what started it in the conversation, and
- * a follow-up shows as a second round. A report goes to its place in the
- * conversation, and a permission asked mid-step is answered from its card
- * with the keyboard. The screenshots it takes are
- * this change's own evidence (test-results/graph-*.png).
+ * a Ship shows as a second round (a task is a conversation plus parts): the
+ * person talked with its lead, a turn and not a round, then shipped what it
+ * committed. A report goes to its place in the conversation. The screenshots
+ * it takes are this change's own evidence (test-results/graph-*.png).
  */
 
-test('a task’s steps as a graph: a lane for each agent, a card’s report, and a follow-up as a second round', async () => {
+test('a task’s steps as a graph: a lane for each agent, a card’s report, and a Ship as a second round', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const repo = repository(home)
   const remote = join(home, 'api.git')
@@ -96,34 +96,24 @@ test('a task’s steps as a graph: a lane for each agent, a card’s report, and
     await graph.getByRole('button', { name: /You asked/ }).click()
     await expect(page.getByRole('radiogroup', { name: 'Face' }).getByRole('radio', { name: /Conversation/ })).toBeChecked()
 
-    // The person asks for more: a second round, its follow-up in the lead's lane, its marker saying they followed up.
+    // The person asks for more: a turn, not a round, so the graph has none for it; what its lead commits waits for Ship.
     await toConversation(page)
-    await say(page, 'Also log each retry. [lead:finish]')
-    // From the switch: the composer has focus, and a face's letter there is only a letter.
+    await say(page, 'Also log each retry. tidy pls [lead:commit]')
+    const header = page.locator('header[aria-label="Add a retry to the checkout call"]')
+    await expect(header.getByRole('button', { name: 'Ship', exact: true })).toBeVisible()
+    // Its lead asks to run a command in that turn: answered where the person talks with it, as no step is at work.
+    await say(page, 'run make deploy')
+    await expect(page.getByText('Needs your permission')).toBeVisible()
+    await page.getByRole('button', { name: /^Allow(?! everything)/ }).click()
+    await expect(page.getByText('chosen=allow_once')).toBeVisible()
+
+    // Shipped from the header: a second round, the person's Ship its marker, its review in the reviewer's lane and the push after.
+    await header.getByRole('button', { name: 'Ship', exact: true }).click()
     await page.getByRole('radiogroup', { name: 'Face' }).getByRole('radio', { name: /Graph/ }).click()
-    await expect(graph.getByRole('button', { name: /You followed up/ })).toBeVisible()
-    await expect(graph.getByRole('button', { name: /^Follow-up/ })).toBeVisible()
-    // Its review passes and the round ends, the task ready again. The marker and the card show as the round opens: what the person
-    // says before it ends is more of this round, which no new round's card holds.
+    await expect(graph.getByRole('button', { name: /You shipped/ })).toBeVisible()
     await expect(shown(page, 'Ready to accept', { exact: true })).toBeVisible()
     await page.mouse.move(1400, 880)
-    await graph.screenshot({ path: 'test-results/graph-follow-up.png', animations: 'disabled', scale: 'css' })
-
-    // Mid-step, its lead asks to run a command: its card waits on the person, and opened, Enter allows it.
-    await toConversation(page)
-    await say(page, 'run make deploy')
-    await page.getByRole('radiogroup', { name: 'Face' }).getByRole('radio', { name: /Graph/ }).click()
-    const asking = graph.getByRole('button', { name: /waits on you/ })
-    await expect(asking).toBeVisible()
-    await asking.click()
-    const permission = page.getByRole('dialog')
-    await expect(permission.getByText('make deploy').first()).toBeVisible()
-    await expect(permission.locator('input[type="radio"]:checked')).toBeFocused()
-    await page.screenshot({ path: 'test-results/graph-permission.png', animations: 'disabled', scale: 'css' })
-    await page.keyboard.press('Enter')
-    await expect(graph.getByRole('button', { name: /waits on you/ })).toHaveCount(0)
-    await toConversation(page)
-    await expect(page.getByText('chosen=allow_once')).toBeVisible()
+    await graph.screenshot({ path: 'test-results/graph-shipped.png', animations: 'disabled', scale: 'css' })
   } finally {
     await electronApp.close()
   }

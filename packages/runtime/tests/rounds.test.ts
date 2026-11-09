@@ -248,6 +248,9 @@ describe('a task that goes back to work', () => {
       yield* say(task.threadId, 'What did you change? [lead:slowly]')
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'running')
       slow.open('[lead:slowly]')
+      // Its answer waits in Needs you until the person reads it; read, it is settled as it was.
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].replied !== undefined)
+      yield* (yield* Tasks).see({ taskId: task.taskId })
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'settled')
       assert.deepStrictEqual(yield* taskRow(task.taskId), before)
       // A turn, not a round: the plan's run is its only one, and nothing asked its lead to report.
@@ -312,7 +315,9 @@ describe('a task that goes back to work', () => {
         attentionId: question?.id ?? '',
         answers: { [field]: { values: ['Postgres'] } },
       })
-      // Answered, it changed nothing, so the task is back where it was.
+      // Answered, it changed nothing: its answer waits for the person, and read, the task is back where it was.
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].replied !== undefined)
+      yield* (yield* Tasks).see({ taskId: task.taskId })
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'settled')
       assert.strictEqual((yield* taskRow(task.taskId))?.state, 'done')
     }).pipe(Effect.provide(runtimeWith(github)))
@@ -820,54 +825,43 @@ describe('a task’s first pull request in a repository, and a reported round wi
 describe('a round of work and a restart', () => {
   it.live('holds for Ship what a turn cut short by a restart committed, before anything goes up', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'althar-rounds-')), 'althar.db')
+    const { working, bare, github } = onGitHub()
     return Effect.gen(function* () {
-      // A plan that ends on its branch, done; then the person asks its lead for more, which commits and is still at it when
-      // Althar stops.
+      // Its draft pull request open; then the person asks its lead for more, which commits and is still at it when Althar stops.
       const started = yield* Effect.gen(function* () {
-        const plans = yield* Plans
+        yield* connect()
         const projects = yield* Projects
+        const coordinator = yield* Coordinator
         const sql = yield* SqlClient.SqlClient
-        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
-        const [person] = yield* sql<{ id: string }>`SELECT id FROM actors WHERE kind = 'person'`
-        const actor = (person?.id ?? '') as Parameters<typeof plans.hold>[1]
-        const created = yield* projects.createTask({
-          envelope: yield* Runtime.envelope('task.create', {}),
-          projectId: project.projectId,
-          title: 'Hold after a restart',
-          description: 'Do it. [lead:finish] [lead:edit]',
-          draft: true,
-        })
-        const planId = yield* plans.propose({
-          projectId: project.projectId as Parameters<typeof plans.propose>[0]['projectId'],
-          taskId: created.taskId,
-          steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
-          reason: null,
-          actorId: actor,
-        })
-        yield* plans.start(planId, actor)
-        yield* until(runsOf(created.taskId), (rows) => rows[0]?.state === 'succeeded')
-        yield* say(created.threadId, 'One more thing. [lead:wait]')
-        const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${created.taskId}`
+        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+        const threadId = yield* coordinator.thread(project.projectId)
+        const body = 'Add a retry. [coordinator:plan] [coordinator:plan-no-review] [lead:finish] [lead:edit]'
+        yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
+        const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready' && all[0].change !== null)
+        const card = ready ?? assert.fail('no card')
+        yield* say(card.threadId, 'One more thing. [lead:wait]')
         // Where its turn began is kept with it, then the lead commits as it works.
         yield* until(
-          sql<{ heads: string | null }>`SELECT heads FROM turn_deliveries WHERE thread_id = ${created.threadId} AND heads IS NOT NULL`,
+          sql<{ heads: string | null }>`SELECT heads FROM turn_deliveries WHERE thread_id = ${card.threadId} AND heads IS NOT NULL`,
           (rows) => rows.length === 1,
         )
+        const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${card.taskId}`
         commitIn(workspace?.path ?? '', 'more.txt', 'One more thing')
-        return { ...created, projectId: project.projectId }
-      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(file)))))
+        return { projectId: project.projectId, taskId: card.taskId, pushed: git(bare, 'rev-parse', 'althar/add-a-retry') }
+      }).pipe(Effect.provide(runtimeWith(github, file)))
 
       yield* Effect.gen(function* () {
-        // Started again, it holds that commit for Ship, as the turn's end would have, and no round carries the turn on.
+        // Started again, it holds that commit for Ship, as the turn's end would have, before what leads left waiting goes up.
         const sql = yield* SqlClient.SqlClient
         yield* until(
           sql<{ heldAt: string | null }>`SELECT held_at FROM workspaces WHERE task_id = ${started.taskId}`,
           (rows) => rows[0]?.heldAt != null,
         )
         const [card] = yield* until(cards(started.projectId), (all) => all[0]?.held !== undefined)
-        assert.deepStrictEqual([card?.phase, card?.held?.commits], ['ready', 2])
+        assert.deepStrictEqual([card?.phase, card?.held?.commits], ['ready', 1])
+        assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), started.pushed)
         assert.lengthOf(yield* runsOf(started.taskId), 1)
-      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(file)))))
+      }).pipe(Effect.provide(runtimeWith(github, file)))
     })
   })
 })

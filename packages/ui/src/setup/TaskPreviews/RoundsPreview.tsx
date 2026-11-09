@@ -7,10 +7,10 @@ import { ReviewSealGlyph } from '../ReviewSeal/ReviewSeal'
 import s from './TaskPreviews.module.css'
 
 /*
- * What "Rounds of review" and "When rounds run out" make: a seal for each
- * round a task's review may take, the first as it would be left and the
- * rest fainter, as rounds it may not need; then what happens once they run
- * out, in violet where that waits on the person. A picture: nothing in it
+ * What a task's review may take, and "When a check finds more" makes: a
+ * seal for its review and one for the check of its fixes, the check
+ * fainter, as one it may not need; then what happens once the check found
+ * more, in violet where that waits on the person. A picture: nothing in it
  * can be pressed, and a screen reader reads its words.
  */
 
@@ -25,7 +25,8 @@ export interface RoundsPreviewText {
 export const roundsPreviewText: RoundsPreviewText = {
   label: 'Rounds of review',
   title: 'Review',
-  upTo: (n) => (n === 1 ? 'up to 1 round' : `up to ${n} rounds`),
+  // A review, and the one check of its fixes that may follow it: a fix is never reviewed again in whole.
+  upTo: (n) => (n === 1 ? 'one review' : n === 2 ? 'a review, and one check of its fixes' : `up to ${n} rounds`),
   out: { settled: 'Goes on, once every finding is settled', ask: 'Asks you' },
 }
 

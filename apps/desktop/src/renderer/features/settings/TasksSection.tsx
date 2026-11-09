@@ -43,7 +43,8 @@ export function TasksSection() {
       {plans !== null && (
         <SettingPreviews>
           <PlanPreview countdown={plans.value.countdown} sample={PLAN_PREVIEW_SAMPLE} />
-          <RoundsPreview rounds={plans.value.rounds} out={plans.value.roundsOut} facts={TASK_PREVIEW_SEAL} />
+          {/* A review and the one check of its fixes, whatever the old rounds setting kept: no fix is reviewed again in whole. */}
+          <RoundsPreview rounds={2} out={plans.value.roundsOut} facts={TASK_PREVIEW_SEAL} />
         </SettingPreviews>
       )}
       {plans !== null && (

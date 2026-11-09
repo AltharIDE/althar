@@ -11,10 +11,12 @@ import { connectGitHub, launch, openFirstProject, say, toConversation } from './
 /*
  * A task goes back to work, and ships again (ADR-034), in a real window
  * with the fake agent and the fake GitHub: its pull request merged, the
- * person asks its lead for more, its card says Running on the board while
- * the lead works on its follow-up, and what it committed opens as a second
- * pull request from the task, on a new branch from main. The screenshots it
- * takes are this change's own evidence (test-results/rounds-*.png).
+ * person asks its lead for more, a turn and not a round (a task is a
+ * conversation plus parts), its card Running on the board while the lead
+ * works; what it committed waits for Ship, said on the card and in the
+ * task's header, and Ship opens it as a second pull request from the task,
+ * on a new branch from main. The screenshots it takes are this change's own
+ * evidence (test-results/rounds-*.png).
  */
 
 const git = (cwd: string, ...args: Array<string>) =>
@@ -29,7 +31,7 @@ const squashMerge = (remote: string, branch: string) => {
   git(clone, 'push', '-q', 'origin', 'main')
 }
 
-test('a merged task goes back to work when the person writes to its lead, and ships it as a second pull request by itself', async () => {
+test('a merged task’s lead works on what the person asks, and Ship opens what it committed as a second pull request', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const repo = repository(home)
   const remote = join(home, 'api.git')
@@ -57,22 +59,31 @@ test('a merged task goes back to work when the person writes to its lead, and sh
     const work = page.getByRole('region', { name: 'The project’s work' })
     await expect(work.getByText('PR #1 merged')).toBeVisible()
 
-    // The person goes back to it and asks its lead for more: it runs again, a follow-up, on the board and in the task.
+    // The person goes back to it and asks its lead for more: a turn, its lead at work on the board and in the task.
     await work.getByRole('button', { name: 'Add a retry to the checkout call' }).click()
     await toConversation(page)
     await say(page, 'Add the slider we agreed on. [lead:slowly] [lead:finish]')
-    await expect(page.getByText('Following up', { exact: true })).toBeVisible()
+    await expect(page.getByText('Working', { exact: true })).toBeVisible()
     await page.mouse.move(1400, 300)
     await page.screenshot({ path: 'test-results/rounds-running-task.png', animations: 'disabled' })
-    await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await expect(work.getByText('Follow-up', { exact: true })).toBeVisible()
-    await expect(work.getByText('PR #1 merged')).toHaveCount(0)
-    await page.screenshot({ path: 'test-results/rounds-running-board.png', animations: 'disabled' })
 
-    // Done, its commit is in no pull request: a new draft opens by itself, as its plan's did, and the card is under way until it
-    // has (ADR-034, DEV-173). It is ready to accept, never ready for a pull request the person would only have to open.
+    // Done, what it committed waits for Ship, in the header's chip with Ship beside it; nothing opened by itself.
+    const header = page.locator('header[aria-label="Add a retry to the checkout call"]')
+    await expect(header.getByText('1 commit not shipped')).toBeVisible()
+    await expect(header.getByRole('button', { name: 'Ship', exact: true })).toBeVisible()
+    await page.mouse.move(1400, 300)
+    await page.screenshot({ path: 'test-results/rounds-held-task.png', animations: 'disabled' })
+    await page.getByRole('button', { name: 'Back to meridian' }).click()
+    // On the board, the person's to ship: its word, what waits, and Ship, done right there.
+    await expect(work.getByText('Not shipped', { exact: true })).toBeVisible()
+    await expect(work.getByText('1 commit not shipped')).toBeVisible()
+    await page.screenshot({ path: 'test-results/rounds-held-board.png', animations: 'disabled' })
+    expect(execFileSync('git', ['--git-dir', remote, 'branch', '--list', `${branch}-2`], { encoding: 'utf8' }).trim()).toBe('')
+
+    // Shipped from the card, with no review to run: a new draft opens, from main as GitHub merged it, and it is ready to accept.
+    await work.getByRole('button', { name: 'Ship 1 commit' }).click()
     await expect(work.getByText('Ready to accept')).toBeVisible()
-    await expect(work.getByText('Ready for a new pull request')).toHaveCount(0)
+    await expect(work.getByText('Not shipped', { exact: true })).toHaveCount(0)
     await work.getByRole('button', { name: 'Add a retry to the checkout call' }).click()
     await page
       .getByRole('radiogroup', { name: 'Face' })

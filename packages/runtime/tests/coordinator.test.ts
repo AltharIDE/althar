@@ -73,7 +73,7 @@ const results = (threadId: string) =>
   })
 
 describe('the coordinator loop', () => {
-  it.live('plans a task that runs Implement, then Review, settling and reviewing again until it passes', () =>
+  it.live('plans a task that runs Implement, then Review, settling and checking the fixes until they pass', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const { projectId, threadId } = yield* opened
@@ -116,11 +116,11 @@ describe('the coordinator loop', () => {
         Effect.map(touches, (revision) => (revision >= before + 2 ? [revision] : [])),
         (rows) => rows.length === 1,
       )
-      // What the person said opened a round of work after the plan, which made nothing new: the task is ready as it was (ADR-034).
-      yield* until(sql<{ state: string }>`SELECT state FROM runs WHERE plan_id IS NULL`, (rows) => rows[0]?.state === 'succeeded')
+      // What the person said is a turn, not a round (a task is a conversation plus parts): no run opens, and the task is ready as it was.
+      assert.lengthOf(yield* sql<{ state: string }>`SELECT state FROM runs WHERE plan_id IS NULL`, 0)
       assert.strictEqual((yield* cardsOf(projectId))[0]?.phase, 'ready')
 
-      // Implement, a review with a finding, the lead settling it, and a second review that passes.
+      // Implement, a review with a finding, the lead settling it, and a check of the fix that passes.
       const steps = yield* results(ready?.threadId ?? '')
       assert.deepStrictEqual(
         steps.map((step) => [step.step, step.verdict ?? null, step.summary]),
@@ -148,8 +148,6 @@ describe('the coordinator loop', () => {
           ['review', 0, 'succeeded'],
           ['settle', 0, 'succeeded'],
           ['review', 1, 'succeeded'],
-          // The round "hello" opened.
-          ['implement', 0, 'succeeded'],
         ],
       )
       // The lead said what became of the finding, and the record keeps it with the settling that did it.
@@ -298,44 +296,40 @@ describe('the coordinator loop', () => {
     }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.millis(50) }))),
   )
 
-  it.live('goes on to its end after its last round when the lead settled every finding, saying the fixes were not reviewed again', () =>
+  it.live('goes on to its end after its check when the lead settled every finding, saying the last fixes were not reviewed', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      // One round, and the default for when rounds run out.
-      yield* setPlansAndReviews({ rounds: 1 })
+      // The default for when a check reopens what the lead then settles: it goes on.
       const { projectId, threadId } = yield* opened
       yield* say(threadId, 'Tighten the types. [coordinator:plan] [lead:finish] [lead:edit] [review:always]')
       const [card] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.lengthOf(yield* sql`SELECT id FROM attention_requests WHERE kind = 'stuck'`, 0)
+      // The fix checked once, the check reopening it, and the second fix not read again.
       assert.deepStrictEqual(
         (yield* results(card?.threadId ?? '')).map((step) => step.step),
-        ['implement', 'review', 'settle'],
+        ['implement', 'review', 'settle', 'review', 'settle'],
       )
       const notices = yield* sql<{ title: string; description: string | null }>`
         SELECT json_extract(content, '$.title') AS title, json_extract(content, '$.description') AS description
         FROM thread_items WHERE thread_id = ${card?.threadId ?? ''} AND kind = 'notice'`
       assert.deepStrictEqual(
         notices.map((notice) => [notice.title, notice.description]).filter(([title]) => /weren’t reviewed/.test(title ?? '')),
-        [['Reviewed once; the last fixes weren’t reviewed.', null]],
+        [['Reviewed twice; the last fixes weren’t reviewed.', null]],
       )
     }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.millis(50) }))),
   )
 
-  it.live('stops at its last round with a finding the lead left open', () =>
+  it.live('stops after its check with a finding the lead left open', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      yield* setPlansAndReviews({ rounds: 1 })
       const { projectId, threadId } = yield* opened
       yield* say(threadId, 'Tighten the types. [coordinator:plan] [lead:finish] [lead:edit] [lead:leave-open] [review:always]')
-      // Settled: stuck as it was.
+      // Checked once and settled again, a finding still open: the person's.
       const [waiting] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'waiting')
       const [call] = yield* sql<{ payload: string }>`SELECT payload FROM attention_requests WHERE kind = 'stuck'`
-      assert.deepStrictEqual(pick(JSON.parse(call?.payload ?? '{}') as Record<string, unknown>, ['step', 'why', 'round', 'open']), {
-        step: 'review',
-        why: 'round_limit',
-        round: 1,
-        open: 1,
-      })
+      const asked = JSON.parse(call?.payload ?? '{}') as Record<string, unknown>
+      assert.deepStrictEqual(pick(asked, ['step', 'why', 'round']), { step: 'review', why: 'round_limit', round: 2 })
+      assert.isAbove(Number(asked.open), 0)
       assert.isDefined(waiting)
     }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.millis(50) }))),
   )
@@ -355,20 +349,20 @@ describe('the coordinator loop', () => {
     }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.millis(50) }))),
   )
 
-  it.live('stops after three rounds for the person, and takes a settling that changes nothing as the last word', () =>
+  it.live('stops after its check for the person, and takes a settling that changes nothing as the last word', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const runs = yield* Runs
       yield* setPlansAndReviews({ roundsOut: 'ask' })
       const { projectId, threadId } = yield* opened
       yield* say(threadId, 'Tighten the types. [coordinator:plan] [lead:finish] [lead:edit] [review:always]')
-      // Out of rounds, with settled changes no review has seen: it needs the person, with the findings still open.
+      // Checked once, and settled again with changes no check reads: it needs the person.
       const [waiting] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'waiting')
       const [call] = yield* sql<{ id: string; payload: string }>`SELECT id, payload FROM attention_requests WHERE kind = 'stuck'`
       assert.deepStrictEqual(pick(JSON.parse(call?.payload ?? '{}') as Record<string, unknown>, ['step', 'why', 'round', 'open']), {
         step: 'review',
         why: 'round_limit',
-        round: 3,
+        round: 2,
         open: 0,
       })
       // Accepted as it is, it's ready.
@@ -383,8 +377,6 @@ describe('the coordinator loop', () => {
         (yield* results(first?.threadId ?? '')).map((step) => [step.step, step.verdict ?? null]),
         [
           ['implement', null],
-          ['review', 'changes_requested'],
-          ['settle', null],
           ['review', 'changes_requested'],
           ['settle', null],
           ['review', 'changes_requested'],
@@ -1118,7 +1110,7 @@ describe('a step that needs the person', () => {
     }).pipe(Effect.provide(withQueries(undefined, undefined, { perUse: ['claude-code', 'opencode'] }))),
   )
 
-  it.live('starts afresh, each round, a reviewer that says yes to its step’s model but stays on another', () =>
+  it.live('starts afresh, review and check, a reviewer that says yes to its step’s model but stays on another', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       yield* setPlansAndReviews({ roundsOut: 'ask' })
@@ -1128,14 +1120,14 @@ describe('a step that needs the person', () => {
       ])
       const call = yield* stuckCall(task.taskId)
       assert.deepStrictEqual([call.step, call.why], ['review', 'round_limit'])
-      // Not kept on a model it wasn't asked for: each round's reviewer is a new one, told the step's model again.
+      // Not kept on a model it wasn't asked for: the review's reviewer and the check's are each a new one, told the step's model again.
       const reviewers = yield* sql<{ model: string | null; state: string }>`
         SELECT s.model, s.state FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
         WHERE t.task_id = ${task.taskId} AND t.kind = 'step' AND t.node_key = 'review' ORDER BY s.started_at`
-      assert.strictEqual(reviewers.length, 3)
+      assert.strictEqual(reviewers.length, 2)
       assert.deepStrictEqual(
         reviewers.map((reviewer) => reviewer.model),
-        ['small', 'small', 'small'],
+        ['small', 'small'],
       )
     }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.millis(50), each: { codex: { staysOn: ['large'] } } }))),
   )

@@ -1913,9 +1913,9 @@ export class Queries extends Context.Service<
        */
       /** A task's card, as its item in the coordinator's thread shows it. */
       /**
-       * When the task's lead last answered, since a turn the person's words began after its plan and since the person last had
-       * the task open: undefined where they have, or there is none. Its answer may come in a turn after theirs, as when it was
-       * told to carry on.
+       * When the task's lead last answered, since a turn the person's words began after its plan, since the person last had
+       * the task open, and since it last settled, which the person's Done, post or merge did with the answer before them:
+       * undefined where there is none. Its answer may come in a turn after theirs, as when it was told to carry on.
        */
       const repliedOf = (taskId: string) =>
         Effect.gen(function* () {
@@ -1923,6 +1923,7 @@ export class Queries extends Context.Service<
           const [row] = yield* sql<{ at: string | null }>`
             SELECT max(d.ended_at) AS at FROM turn_deliveries d JOIN threads t ON t.id = d.thread_id JOIN tasks k ON k.id = t.task_id
             WHERE t.task_id = ${taskId} AND t.kind = 'task' AND d.state = 'completed' AND d.ended_at > coalesce(k.seen_at, '')
+              AND d.ended_at > coalesce(k.settled_at, '')
               AND d.requested_at >= (SELECT max(p.delivered_at) FROM turn_deliveries p WHERE p.thread_id = t.id AND p.heads IS NOT NULL)
               AND EXISTS (SELECT 1 FROM thread_items i WHERE i.delivery_id = d.id AND i.kind = 'agent_message')`
           return row?.at ?? undefined
@@ -3129,13 +3130,15 @@ export class Queries extends Context.Service<
               const publishes =
                 run.endedAt === null &&
                 parameters !== null &&
-                (run.planId !== null || parameters.publishes === true) &&
+                (run.planId !== null || parameters.publishes === true || parameters.ships !== undefined) &&
                 (parameters.end ??
                   (here ? null : yield* (yield* Changes).endFor(projectId, taskId).pipe(Effect.orElseSucceed(() => null)))) !== null
               // What started a follow-up: the person's message, or what the coordinator passed on, after the round before began.
               const before = runs[index - 1]?.createdAt ?? ''
+              const ships = parameters?.ships !== undefined
+              // A Ship is started by the person's press, not by what they said last.
               const [said] =
-                run.planId === null
+                run.planId === null && !ships
                   ? yield* sql<{ id: string; kind: string; content: string }>`
                       SELECT id, kind, content FROM thread_items
                       WHERE thread_id = ${threadId} AND created_at <= ${run.createdAt} AND created_at > ${before}
@@ -3169,6 +3172,7 @@ export class Queries extends Context.Service<
                 endedAt: run.endedAt,
                 planned: parameters?.steps ?? [],
                 publishes,
+                ...(ships ? { ships: true } : {}),
                 began,
                 changedAt: mine.find((one) => one.cause === 'patch')?.createdAt ?? null,
                 said: said === undefined ? null : saidOf(said),

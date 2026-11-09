@@ -703,6 +703,8 @@ export class Tasks extends Context.Service<
             }),
           )
           if (!settled) return false
+          // Settled by the person, it is read: an answer of its lead's they hadn't opened doesn't bring it back to Needs you.
+          yield* see({ taskId: input.taskId })
           // What waited for Ship stays on its branch, settled with it: nothing holds it any more.
           yield* changes.releaseHolds(input.taskId, 'left')
           // What it runs stops too: nothing is left to stop it from. What its agents left running stops in the background, then

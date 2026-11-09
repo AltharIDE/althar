@@ -58,6 +58,14 @@ describe('a ready task’s line', () => {
     expect(briefOf(task({ change: merged, unshipped: { commits: 3, add: 9, del: 2 } }))).toBe('3 commits in no pull request · +9 −2')
   })
 
+  it('says what waits for Ship, by the pull request it goes to, and offers Ship', () => {
+    const held = task({ change: change({ draft: false }), held: { since: '2026-10-01T10:00:00.000Z', commits: 2 } })
+    expect(briefOf(held)).toBe('api #12 · 2 commits not shipped')
+    expect(briefOf(task({ change: change({ state: 'merged' }), held: { since: '2026-10-01T10:00:00.000Z', commits: 1 } }))).toBe(
+      '1 commit not shipped',
+    )
+  })
+
   it('says nothing changed on a branch with no files, and only which pull request one merged or closed was', () => {
     expect(briefOf(task({ changed: { files: 0, add: 0, del: 0 } }))).toBe('Nothing changed on its branch')
     expect(briefOf(task({ change: change({ state: 'closed' }) }))).toBe('api #12')
@@ -136,6 +144,21 @@ describe('the home', () => {
     withServices(<Home />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Accept and merge #12' }))
     await waitFor(() => expect(client.merge).toHaveBeenCalledWith('t5', '', 'https://github.com/meridian/api/pull/12'))
+  })
+
+  it('ships what waits on a task’s branch from its line', async () => {
+    const held = task({
+      taskId: 't6',
+      threadId: 'th6',
+      title: 'Retry twice',
+      change: change({ draft: false, localHead: 'def456', unpushed: 2 }),
+      held: { since: '2026-10-01T10:00:00.000Z', commits: 2 },
+    })
+    const { client } = fakeClient({ getHome: vi.fn(async () => home({ tasks: [held] })) })
+    withServices(<Home />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Ship 2 commits' }))
+    await waitFor(() => expect(client.ship).toHaveBeenCalledWith('t6'))
+    expect(client.push).not.toHaveBeenCalled()
   })
 
   it('takes a change out of what waits on the person while it merges, and puts it back with why where it didn’t', async () => {

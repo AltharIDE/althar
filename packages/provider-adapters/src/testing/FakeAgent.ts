@@ -923,8 +923,11 @@ const playRole = async (
 ): Promise<string | undefined> => {
   for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
   // A later round of review: told to check the fixes, or to read a Ship, as a round once was by its number.
+  // Told in its brief too, as a reviewer started afresh for it is: the words say it wherever they stand.
   const laterRound =
-    text.startsWith('Round ') || text.startsWith('A check of the fixes') || text.startsWith('More to review. The person ships')
+    text.startsWith('Round ') ||
+    text.includes('A check of the fixes, not another review.') ||
+    text.includes('More to review. The person ships')
   const asked = session.markers.size > 0 || text.includes('Settle each') || laterRound || text.startsWith('More to review')
   if (session.tools === undefined || !asked) return undefined
   const client = new Client({ name: 'fake-agent', version: '1.0.0' })

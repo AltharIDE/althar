@@ -3306,6 +3306,8 @@ export const GraphRound = Schema.Struct({
   /** Its run's id. */
   id: Schema.String,
   followUp: Schema.Boolean,
+  /** A Ship's run (a task is a conversation plus parts): the person shipped what waited, with no work step. Absent otherwise. */
+  ships: Schema.optional(Schema.Boolean),
   createdAt: Schema.String,
   endedAt: Schema.NullOr(Schema.String),
   /** What the person said that started it, for a follow-up: their message, or what the coordinator passed on. */
