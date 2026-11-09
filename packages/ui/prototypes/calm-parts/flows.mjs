@@ -17,7 +17,8 @@ const check = (ok, what) => {
   process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} ${what}\n`)
   if (!ok) failed += 1
 }
-const text = () => page.locator('body').innerText()
+// Its words as one run, so a row's parts read as the sentence they make
+const text = async () => (await page.locator('body').innerText()).replace(/\s+/g, ' ')
 const titled = () => page.title()
 const open = async (d, s) => {
   await page.goto(`http://localhost:5374/?d=${d}&s=${s}#/threads/th1`)
@@ -127,7 +128,7 @@ const startOne = async () => {
 await open('A', 'one')
 await startOne()
 t = await text()
-check(t.includes('New change You started althar/board-still-tests'), 'A one: Start one says so in the thread')
+check(t.includes('New change althar/board-still-tests, started by you.'), 'A one: Start one says so in the thread')
 check(
   ((await page.getByRole('button', { name: /^2 changes:/ }).count()) ?? 0) === 1,
   'A one: the chip now holds a mark for each of the 2 changes',
@@ -516,7 +517,7 @@ check(
 check((await bar()).includes('4 commits not shipped') && !(await bar()).includes('in 2 changes'), 'A tickets-split: one change again')
 await press('Ship')
 await settle(4200)
-check((await text()).includes('Shipped althar/privacy-page as #719, into main, with 4 commits.'), 'A tickets-split: one pull request')
+check((await text()).includes('Shipped althar/privacy-page as #719, with 4 commits.'), 'A tickets-split: one pull request')
 await open('A', 'tickets-one')
 check((await parts()) >= 1, 'A tickets-one: the parts row is there')
 await page.locator('button[aria-label^="Parts,"]').first().click()

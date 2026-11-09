@@ -279,7 +279,7 @@ const releaseOpening: ReadonlyArray<Beat> = [
     tools: ['Ran gh run view --log-failed', 'Edit apps/desktop/e2e/board.spec.ts'],
     took: { work: 74, tools: 31 },
     commits: { n: 1, change: 'fixmain' },
-    part: { text: 'Fix main, on althar/fix-main toward main. It goes in before Release 0.9.0.', change: 'fixmain', stamp: 'change' },
+    part: { text: 'Fix main, on althar/fix-main, to go in before Release 0.9.0.', change: 'fixmain', stamp: 'change' },
   },
 ]
 
@@ -363,7 +363,7 @@ export const CASES: ReadonlyArray<Case> = [
       {
         kind: 'part',
         who: 'lead',
-        text: 'Rename, on althar/rename-later toward main, to keep it apart.',
+        text: 'Rename, on althar/rename-later.',
         change: 'later',
         stamp: 'change',
         act: 'Keep them together',
@@ -538,7 +538,7 @@ export const CASES: ReadonlyArray<Case> = [
       {
         kind: 'part',
         who: 'lead',
-        text: 'Rename, on althar/rename-later toward main, to keep it apart.',
+        text: 'Rename, on althar/rename-later.',
         change: 'later',
         stamp: 'change',
         act: 'Keep them together',
@@ -582,7 +582,7 @@ export const CASES: ReadonlyArray<Case> = [
     thread: [
       ...releaseOpening,
       { kind: 'review', findings: 0, change: 'fixmain' },
-      { kind: 'line', text: 'Fix main as #719, into main, with 1 commit.', change: 'fixmain', stamp: 'shipped' },
+      { kind: 'line', text: 'Fix main as #719, with 1 commit.', change: 'fixmain', stamp: 'shipped' },
     ],
     adr: 'Proposed: what the change going first fixes doesn’t ask for the person on the one waiting for it.',
   },
@@ -606,7 +606,7 @@ export const CASES: ReadonlyArray<Case> = [
     thread: [
       ...releaseOpening,
       { kind: 'review', findings: 0, change: 'fixmain' },
-      { kind: 'line', text: 'Fix main as #719, into main, with 1 commit.', change: 'fixmain', stamp: 'shipped' },
+      { kind: 'line', text: 'Fix main as #719, with 1 commit.', change: 'fixmain', stamp: 'shipped' },
       { kind: 'line', text: 'Fix main (#719). Release 0.9.0 took main in.', change: 'release', stamp: 'merged' },
     ],
     adr: 'A merge ends only its own change, never the task, its session or what runs.',
@@ -636,7 +636,7 @@ export const CASES: ReadonlyArray<Case> = [
       {
         kind: 'part',
         who: 'lead',
-        text: 'Terms page, on althar/terms-page toward main, as DEV-141 is a page of its own.',
+        text: 'Terms page, on althar/terms-page, for DEV-141.',
         change: 'terms',
         stamp: 'change',
         act: 'Keep them together',
@@ -706,8 +706,9 @@ export const CASES: ReadonlyArray<Case> = [
       {
         kind: 'part',
         who: 'althar',
-        text: 'Virtual lanes, the lead’s althar/try-virtual-lanes, is a change of this task now, toward main. Lane heights keeps #714, with no folder until it’s worked on again.',
+        text: 'Virtual lanes, on althar/try-virtual-lanes, the branch the lead moved to.',
         change: 'virtual',
+        stamp: 'change',
         act: 'Drop it',
       },
     ],

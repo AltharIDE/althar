@@ -168,7 +168,7 @@ const shipping = (c: Case, id: string, options: ShipOptions): ReadonlyArray<Edit
     const pr = now.pr ?? NEW_PR
     const again = now.checks === 'failed'
     const words = fresh
-      ? `${nameOf(now)} as #${pr}, into ${now.toward ?? 'main'}, with ${commits(n)}.`
+      ? `${nameOf(now)} as #${pr}${(now.toward ?? 'main') === 'main' ? '' : `, into ${now.toward}`}, with ${commits(n)}.`
       : n === 0
         ? `${recordOf(now)}, on top of what shipped under it.`
         : `${commits(n)} to ${recordOf(now)}${(now.replies ?? 0) > 0 ? ', and the answer to the reply on it' : ''}${again ? '. Its checks run again' : ''}.`
@@ -464,7 +464,7 @@ export const addChange = () => {
   proto.edit(
     compose(
       added({ id, branch, title: 'A change of its own', place: 'worktree' }),
-      part('you', `You started ${branch}, toward main.`, id, 'change'),
+      part('you', `${branch}, started by you.`, id, 'change'),
       (cc) => (cc.lane === 'scratch' ? { ...cc, lane: 'running' as const, status: 'running' as const } : cc),
     ),
   )
@@ -498,7 +498,7 @@ export const attachPr = (pr = 718, base = 'release/0.8.0') => {
         came: 'outside',
         place: 'none',
       }),
-      part('you', `You attached #${pr}, into ${base}.`, `pr${pr}`, 'change'),
+      part('you', `#${pr}, into ${base}, attached by you.`, `pr${pr}`, 'change'),
     ),
   )
 }

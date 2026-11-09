@@ -26,7 +26,7 @@ export const SHOTS = [
   { id: '07-A-after-merge-card', d: 'A', s: 'after-merge', at: 'board', ...card('Rename “Keep for later” to “Later”') },
   // The thread: a step in the work stamped, Shipped and Merged in green, a new change in cobalt
   { id: '08-A-release-on-thread', d: 'A', s: 'release-on', at: 'task', ...around('took main in', 200, 60) },
-  { id: '09-A-split-thread', d: 'A', s: 'split', at: 'task', ...around('to keep it apart', 60, 60) },
+  { id: '09-A-split-thread', d: 'A', s: 'split', at: 'task', ...around('Keep them together', 60, 60) },
   { id: '10-A-merged-one-thread', d: 'A', s: 'merged-one', at: 'task', ...around('Rename and Card slide carry on', 40, 200) },
   // Outputs: each change a line that opens and folds; the one the task's fact is about starts open, a settled one folded
   { id: '11-outputs-needs-one', d: 'A', s: 'needs-one', at: 'task', face: 'out', clip: { x: 0, y: 44, width: 1440, height: 760 } },
@@ -47,7 +47,7 @@ export const SHOTS = [
   { id: '16-A-release-red-bar', d: 'A', s: 'release-red', at: 'task', ...top(56) },
   { id: '17-A-release-red-marks', d: 'A', s: 'release-red', at: 'task', press: 'button[aria-label^="2 changes"]', pop: true },
   { id: '18-A-release-red-card', d: 'A', s: 'release-red', at: 'board', ...card('Cut 0.9.0') },
-  { id: '19-A-tickets-split-thread', d: 'A', s: 'tickets-split', at: 'task', ...around('as DEV-141 is a page of its own', 200, 60) },
+  { id: '19-A-tickets-split-thread', d: 'A', s: 'tickets-split', at: 'task', ...around('for DEV-141.', 200, 60) },
   { id: '20-A-tickets-one-parts', d: 'A', s: 'tickets-one', at: 'task', press: 'button[aria-label^="Parts,"]', pop: true },
   // The other two directions, kept on the page for comparison
   { id: '21-B-needs-one-switch', d: 'B', s: 'needs-one', at: 'task', press: 'button[aria-label^="Showing"]', pop: true },

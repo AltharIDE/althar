@@ -286,7 +286,8 @@
 
 /* A line's way on, after its words */
 .lineAct {
-  margin-left: 8px;
+  font-size: 12px;
+  color: var(--t-2);
   white-space: nowrap;
 }
 
@@ -816,16 +817,43 @@
   text-decoration-color: var(--t-3);
 }
 
-/* A step in the work, stamped: Shipped and Merged in green, a new change in cobalt, as work under way; the rest of its line a step louder */
-.stamped {
+/*
+ * After a lead's answer, Althar's lines and a review sit in the room its hidden Copy row already keeps: they read with that round,
+ * not a round away. Elsewhere they keep the thread's own line rhythm.
+ */
+:global(article[class*='Round-module__round']) + [data-rhythm='line'] {
+  margin-top: 0;
+}
+
+/*
+ * A step in the work, a row of its own as a review is: its stamp where Althar's name stands (Shipped and Merged in green, a new
+ * change in cobalt, as work under way), its few words a step louder than Althar's, its way on at their end. It never wraps.
+ */
+.step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
   color: var(--t-2);
+}
+.stepWords {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.step > .lineAct {
+  flex: none;
 }
 .stamp {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 4px;
   height: 20px;
-  margin-right: 4px;
   padding: 0 8px 0 6px;
   border-radius: 99px;
   font-size: 12px;

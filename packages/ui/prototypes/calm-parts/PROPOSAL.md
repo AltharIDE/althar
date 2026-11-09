@@ -23,10 +23,18 @@ the case back. `node flows.mjs` clicks through 79 of these headless.
 - **A · As one** (9 November). A task is one sentence and one button, the
   same on its card, in its bar's pill and in Needs you; a mark for each change
   sits inside the pill and opens to a row for each.
-- **A step in the work is stamped in the thread** (9 November): "Shipped" and
-  "Merged" in green, "New change" in cobalt, a small tinted label before the
-  line, the changes it names in ink and branches as code. Everything else
-  Althar says stays a plain grey line.
+- **A step in the work is a row of its own** (9 November), as a review is:
+  its stamp stands where "Althar" would ("Shipped" and "Merged" in green, "New
+  change" in cobalt), then a few words, the change named in ink and its branch
+  as code, and its button at their end: "New change · Terms page, on
+  althar/terms-page, for DEV-141. Keep them together". It never wraps; what
+  doesn't fit ends in an ellipsis, the whole on hover. The default target
+  goes unsaid ("toward main"); another is named ("into release/0.8.0").
+  Everything else Althar says stays a plain grey line, its button inline in
+  the sentence, as the app's own lines have it.
+- **Althar's lines sit with the answer before them.** A line or a review after
+  a lead's answer takes the room the answer's hidden Copy row already keeps,
+  30px under it rather than 60px.
 - **The pill is one colour.** Its marks sit in it with no white well; on hover
   the pill's own colour deepens behind them, and its button is the same colour
   a shade deeper.
@@ -134,8 +142,8 @@ Outputs is the same in all three.
 | (its ask, in all three) | "Ship Card slide, and the 2 commits on Lane heights below it" | | |
 | One merged, the rest carry on | Line "Merged · Lane heights (#714). Rename and Card slide carry on."; its mark turns green | The switch lists the two open ones, "Lane heights merged." under them | Tabs Rename and Card slide, "Lane heights merged" after them |
 | A helper on one, you on another | "Lane heights: 1 commit not shipped · Ship"; Card slide's row says "A helper on it" | On Lane heights: "1 commit not shipped · Ship" | "1 commit not shipped · 1 more"; Card slide's tab says the helper |
-| A second change starts | Line "New change · Rename, on althar/rename-later toward main, to keep it apart. Keep them together"; a second mark | The switch appears, "1 of 2" | A second tab appears |
-| A branch the lead made with git | Line "Virtual lanes, the lead's althar/try-virtual-lanes, is a change of this task now… · Drop it"; a mark appears | The window opens on Virtual lanes | Tab "Virtual lanes · Made with git, no pull request" |
+| A second change starts | Row "New change · Rename, on althar/rename-later. Keep them together"; a second mark | The switch appears, "1 of 2" | A second tab appears |
+| A branch the lead made with git | Row "New change · Virtual lanes, on althar/try-virtual-lanes, the branch the lead moved to. Drop it"; a mark appears | The window opens on Virtual lanes | Tab "Virtual lanes · Made with git, no pull request" |
 | A pull request opened elsewhere | Line "Found #717, from althar/rename-later into main, opened on GitHub. It's Rename's now."; chip "Waiting for checks on Rename" | "/ Rename"; chip "Checks running" | Rename's tab |
 | One it won't guess | A quiet card: "#718 is from althar/board-still, but into release/0.8.0… · Attach it as its own change"; the chip doesn't change. Attached, it becomes a mark | Attached, a second entry in the switch | Attached, a second tab |
 | Out of usage | "Claude is out of usage until 14:00 · Use another model" (it is the task's, not a change's) | The same | The same |
@@ -208,8 +216,9 @@ task has two changes, and each tab's state competes with the bar's sentence.
   line; one whose after-merge review found something stays open.
 - **A line for every part change** becomes: the lead's own fold into its
   work; a line stands alone where someone else made it, or it offers a way on.
-  The steps of the work (a new change, Shipped, Merged) are stamped, so they
-  stand out of the thread.
+  The steps of the work (a new change, Shipped, Merged) are a stamped row
+  each, so they stand out of the thread. A line after an answer sits in its
+  Copy row's room.
 - **No preset chip** in the bar or on the board card. The preset is named
   only on the plan card, as its kicker's first word.
 - **Commits not shipped keep a task in Needs you,** with "Not shipped" as its
@@ -318,8 +327,8 @@ privacy page", then "pull in DEV-141 too, the terms page". Claude Code put
 them on two branches, and the person wanted one. In A:
 
 - Split, as Claude Code did: "4 commits not shipped, in 2 changes · Ship",
-  and the lead's line "New change · Terms page, on althar/terms-page toward
-  main, as DEV-141 is a page of its own. Keep them together". One press joins
+  and the lead's line "New change · Terms page, on althar/terms-page, for
+  DEV-141. Keep them together". One press joins
   them: "You kept Terms page with Privacy page, on althar/privacy-page. Its
   pull request closes DEV-140 and DEV-141." Ship opens one pull request.
 - Kept together from the start, as proposed: one change, "4 commits not

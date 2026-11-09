@@ -97,25 +97,35 @@ const nextOf = (need: Need) =>
     </NextStep>
   )
 
-/** The line a part change, or Althar, writes: who and what, its way on after it. A step in the work leads with its stamp. */
-const line = (c: Case, beat: Extract<Beat, { kind: 'part' | 'line' }>, { links = false }: { links?: boolean } = {}) => (
-  <AltharLine
-    tone={beat.kind === 'line' && beat.tone === 'warning' ? 'warning' : 'info'}
-    {...(beat.stamp === undefined ? {} : { className: css.stamped })}
-  >
-    {beat.stamp !== undefined && (
-      <>
-        <StampOf stamp={beat.stamp} />{' '}
-      </>
-    )}
-    {links ? <Linked c={c} text={beat.text} /> : <Marked c={c} text={beat.text} names={beat.stamp !== undefined} />}
-    {beat.act !== undefined && (
-      <span className={css.lineAct}>
-        <LinkButton onClick={() => lineAct(beat.act!, beat.change)}>{beat.act}</LinkButton>
-      </span>
-    )}
-  </AltharLine>
-)
+/**
+ * The line a part change, or Althar, writes: who and what, its way on in its sentence, as the app's own lines have it. A step in
+ * the work is a row of its own, as a review is: its stamp where Althar's name stands, its few words, its way on at their end, never
+ * wrapping; what doesn't fit ends in an ellipsis, the whole on hover.
+ */
+const line = (c: Case, beat: Extract<Beat, { kind: 'part' | 'line' }>, { links = false }: { links?: boolean } = {}) => {
+  const words = links ? <Linked c={c} text={beat.text} /> : <Marked c={c} text={beat.text} names={beat.stamp !== undefined} />
+  const act = beat.act !== undefined && (
+    <LinkButton className={css.lineAct} onClick={() => lineAct(beat.act!, beat.change)}>
+      {beat.act}
+    </LinkButton>
+  )
+  if (beat.stamp !== undefined)
+    return (
+      <p className={css.step} data-rhythm="line">
+        <StampOf stamp={beat.stamp} />
+        <span className={css.stepWords} title={beat.text}>
+          {words}
+        </span>
+        {act}
+      </p>
+    )
+  return (
+    <AltharLine tone={beat.kind === 'line' && beat.tone === 'warning' ? 'warning' : 'info'} data-rhythm="line">
+      {words}
+      {act !== false && <> {act}</>}
+    </AltharLine>
+  )
+}
 
 const review = (c: Case, beat: Extract<Beat, { kind: 'review' }>) => {
   const change = changeIn(c, beat.change)
