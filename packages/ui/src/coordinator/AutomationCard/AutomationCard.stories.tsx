@@ -246,7 +246,7 @@ export const Changed: Story = {
   },
 }
 
-/** A change it didn't make needs turning on again: Undo, or Turn on. */
+/** A change it didn't make needs turning on again: Undo, or Update. */
 export const ChangedNeedsTurningOn: Story = {
   args: { onUndo: fn(), onTurnOn: fn() },
   render: (args) => (
@@ -261,9 +261,9 @@ export const ChangedNeedsTurningOn: Story = {
   ),
   play: async ({ canvasElement, args }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('Off until you turn it on')).toBeInTheDocument()
+    await expect(c.getByText('Off until you update it')).toBeInTheDocument()
     await expect(c.getByText('Every night at 2:00', { selector: 'span' })).toBeInTheDocument()
-    await userEvent.click(c.getByRole('button', { name: 'Turn on' }))
+    await userEvent.click(c.getByRole('button', { name: 'Update' }))
     await expect(args.onTurnOn).toHaveBeenCalled()
     await expect(c.queryByRole('button', { name: 'Its limits' })).toBeNull()
   },

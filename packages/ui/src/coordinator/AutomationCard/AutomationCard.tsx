@@ -98,6 +98,8 @@ export interface AutomationCardText {
   hideLimits: string
   tryOnce: string
   turnOn: string
+  /** The button on a changed card: the automation exists, so it is updated. */
+  update: string
   undo: string
   open: string
 }
@@ -133,11 +135,12 @@ export const automationCardText: AutomationCardText = {
   reviewOwner: 'Reviewer for each run',
   proposed: 'Off',
   holds: (next) => (next === null ? 'Holds from its next run.' : `Holds from its next run, ${next}.`),
-  again: 'Off until you turn it on',
+  again: 'Off until you update it',
   limits: 'Its limits',
   hideLimits: 'Hide its limits',
   tryOnce: 'Try it once now',
   turnOn: 'Turn on',
+  update: 'Update',
   undo: 'Undo',
   open: 'Open in Automations',
 }
@@ -651,7 +654,7 @@ export function AutomationCard({
               )
             : onTurnOn !== undefined && (
                 <Button onClick={onTurnOn} busy={busy}>
-                  {t.turnOn}
+                  {stage === 'changed' ? t.update : t.turnOn}
                 </Button>
               )}
         </div>
