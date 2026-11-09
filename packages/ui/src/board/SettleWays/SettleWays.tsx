@@ -20,16 +20,23 @@ import s from './SettleWays.module.css'
  * discarding it) is said to its lead. A review with a draft has only Keep
  * for later: it settles as its draft is posted. A task kept already has only
  * Done.
+ *
+ * A task whose branch holds commits for Ship (a task is a conversation plus
+ * parts, "A tweak waits for Ship") has Ship there too, in its header, first:
+ * the one way on that sends them up, its review first where its plan has
+ * one before the work ships.
  */
 
 export interface SettleWaysText {
   done: string
   keep: string
+  ship: string
 }
 
 export const settleWaysText: SettleWaysText = {
   done: 'Done',
   keep: 'Keep for later',
+  ship: 'Ship',
 }
 
 export type SettleWaysProps = RootProps<
@@ -42,8 +49,12 @@ export type SettleWaysProps = RootProps<
     /** Takes it out of Needs you, as it is; absent once it is kept. */
     onKeep?: () => void
     keepHint?: string
-    /** Which of them is under way: it says so, and the other waits. */
-    busy?: 'done' | 'keep'
+    /** Sends up what waits on its branch for Ship; in its header only, before the others. */
+    onShip?: () => void
+    /** What Ship does, on hover: how many commits go, and that its review runs first. */
+    shipHint?: string
+    /** Which of them is under way: it says so, and the others wait. */
+    busy?: 'done' | 'keep' | 'ship'
     /** On a card, two glyphs for its corner; in the task's header, segments of the chip that says where it stands. */
     place?: 'card' | 'header'
     text?: Partial<SettleWaysText>
@@ -59,12 +70,25 @@ const named = (name: string, hint: string | undefined, control: ReactElement) =>
   <Tooltip label={hint === undefined ? name : `${name}: ${hint}`}>{control}</Tooltip>
 )
 
-export function SettleWays({ onDone, doneHint, onKeep, keepHint, busy, place = 'card', text, className, ...rest }: SettleWaysProps) {
+export function SettleWays({
+  onDone,
+  doneHint,
+  onKeep,
+  keepHint,
+  onShip,
+  shipHint,
+  busy,
+  place = 'card',
+  text,
+  className,
+  ...rest
+}: SettleWaysProps) {
   const t = { ...settleWaysText, ...text }
-  if (onDone === undefined && onKeep === undefined) return null
+  const ships = place === 'header' && onShip !== undefined
+  if (onDone === undefined && onKeep === undefined && !ships) return null
   if (place === 'header') {
-    // A segment of the chip: under way, it says so and stays where focus is; the other waits.
-    const part = (which: 'done' | 'keep', run: () => void) => ({
+    // A segment of the chip: under way, it says so and stays where focus is; the others wait.
+    const part = (which: 'done' | 'keep' | 'ship', run: () => void) => ({
       type: 'button' as const,
       className: s.part,
       disabled: busy !== undefined && busy !== which,
@@ -76,6 +100,14 @@ export function SettleWays({ onDone, doneHint, onKeep, keepHint, busy, place = '
     })
     return (
       <span className={cx(s.parts, className)} {...rest}>
+        {ships &&
+          hinted(
+            shipHint,
+            <button {...part('ship', onShip)}>
+              {busy === 'ship' ? <Spinner size="small" /> : <Icon name="up" size={12} />}
+              {t.ship}
+            </button>,
+          )}
         {onDone &&
           hinted(
             doneHint,

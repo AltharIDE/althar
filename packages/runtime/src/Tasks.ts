@@ -448,6 +448,8 @@ export class Tasks extends Context.Service<
             }),
           )
           if (!abandoned) return
+          // What waited for Ship stays on its branch: nothing holds it any more.
+          yield* changes.releaseHolds(input.taskId, 'left')
           // Its run is suspended, so no step answers an agent going: each one on it stops, and what it runs with them.
           yield* stopAgents(input.taskId)
           yield* launches.stopAll(standing.projectId, input.taskId)
@@ -670,6 +672,13 @@ export class Tasks extends Context.Service<
       const markingDone = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // Settled already, in Needs you for a reply the person hadn't read: Done says they have, and it is settled again.
+          const [standing] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${input.taskId}`
+          if (standing?.state === 'done') {
+            yield* see({ taskId: input.taskId })
+            yield* touchCard(input.taskId)
+            return true
+          }
           const ready = yield* doneable(input.taskId)
           if (ready === undefined) return false
           const at = yield* timestamp
@@ -694,6 +703,8 @@ export class Tasks extends Context.Service<
             }),
           )
           if (!settled) return false
+          // What waited for Ship stays on its branch, settled with it: nothing holds it any more.
+          yield* changes.releaseHolds(input.taskId, 'left')
           // What it runs stops too: nothing is left to stop it from. What its agents left running stops in the background, then
           // they do once their turns end, and what wouldn't is said in its thread (LeftBehind.ts).
           yield* launches.stopAll(ready.projectId, input.taskId)

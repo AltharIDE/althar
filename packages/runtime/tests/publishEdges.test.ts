@@ -19,7 +19,7 @@ import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
-import { fakeConnectors, HOST, hosted, items, notices, runtime, until } from './support'
+import { fakeConnectors, HOST, hosted, items, runtime, until } from './support'
 
 /*
  * A task's own step that opens its pull request, where changes.test.ts and
@@ -238,11 +238,12 @@ describe('opening a task’s pull request', () => {
     }).pipe(Effect.provide(runtimeWith(refusing, { stopGrace: Duration.millis(300) })))
   })
 
-  it.live('opens a round of work after its pull request was closed in a new one by itself, a draft (ADR-034)', () => {
+  it.live('ships what its lead did after its pull request was closed in a new one, a draft named for the one it follows', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {
       const sessions = yield* Sessions
       const changes = yield* Changes
+      const runs = yield* Runs
       const task = yield* publishing(working)
       yield* until(published(task.threadId), (said) => said.length === 1)
       github.close(1)
@@ -251,27 +252,29 @@ describe('opening a task’s pull request', () => {
         Effect.map(items(task.threadId), (all) => all.filter((item) => item.kind === 'arrival' && item.content.kind === 'closed')),
         (closed) => closed.length === 1,
       )
-      // The person asks its lead for more, which it commits: a round of work of its own, whose commits open the next pull request.
+      // The person asks its lead for more, which it commits: a turn, its commit held for Ship, and nothing opens by itself.
       yield* sessions.send({
         envelope: yield* Runtime.envelope('thread.send', {}),
         threadId: task.threadId,
         body: 'Retry twice. [lead:finish] [lead:edit]',
       })
-      yield* until(runsOf(task.taskId), (runs) => runs.length === 2 && runs[1]?.state === 'succeeded')
+      yield* until(
+        Effect.map(Queries.pipe(Effect.flatMap((queries) => queries.card(task.taskId))), (card) => [card]),
+        ([card]) => card?.held !== undefined,
+      )
+      assert.lengthOf(github.changes, 1)
+      assert.lengthOf(yield* runsOf(task.taskId), 1)
+      // Shipped, its commits open the next pull request, a draft.
+      yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', {}), taskId: task.taskId })
       yield* until(published(task.threadId), (said) => said.length === 2)
       assert.lengthOf(github.changes, 2)
       assert.isTrue(github.changes[1]?.draft)
       // Named by the one it follows, ahead of the task's own title.
       assert.strictEqual(github.changes[1]?.title, `After #1: ${github.changes[0]?.title}`)
-      // Opened, nothing says it isn't in one.
-      assert.notInclude(
-        (yield* notices(task.threadId)).map((notice) => notice.title),
-        "What the follow-up committed isn't in a pull request yet.",
-      )
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
-  it.live('keeps a round of work under way while its next pull request opens by itself, never Ready (DEV-173)', () => {
+  it.live('keeps a Ship under way while its next pull request opens, never Ready (DEV-173)', () => {
     const { working, bare } = hosted()
     // The host takes its time over the second pull request, until the test has seen the card meanwhile.
     const gate = Deferred.makeUnsafe<void>()
@@ -287,6 +290,7 @@ describe('opening a task’s pull request', () => {
       const sessions = yield* Sessions
       const changes = yield* Changes
       const queries = yield* Queries
+      const runs = yield* Runs
       const task = yield* publishing(working)
       yield* until(published(task.threadId), (said) => said.length === 1)
       github.close(1)
@@ -300,30 +304,36 @@ describe('opening a task’s pull request', () => {
         threadId: task.threadId,
         body: 'Retry twice. [lead:finish] [lead:edit]',
       })
-      yield* until(runsOf(task.taskId), (runs) => runs.length === 2 && runs[1]?.state === 'succeeded')
+      yield* until(
+        Effect.map(queries.card(task.taskId), (card) => [card]),
+        ([card]) => card?.held !== undefined,
+      )
+      yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', {}), taskId: task.taskId })
       yield* until(
         Effect.sync(() => opens),
         (n) => n === 2,
       )
-      // The round over and the pull request held at the host: under way, nothing for the person to press.
+      // Shipping, the pull request held at the host: under way, nothing for the person to press, Ship included.
       assert.strictEqual((yield* queries.card(task.taskId)).phase, 'running')
       yield* Effect.sleep('200 millis')
       assert.strictEqual((yield* queries.card(task.taskId)).phase, 'running')
       yield* Deferred.succeed(gate, undefined)
       yield* until(published(task.threadId), (said) => said.length === 2)
-      yield* until(
-        Effect.map(queries.card(task.taskId), (card) => card.phase),
-        (phase) => phase !== 'running',
+      const [done] = yield* until(
+        Effect.map(queries.card(task.taskId), (card) => [card]),
+        ([card]) => card?.phase !== 'running',
       )
+      assert.isUndefined(done?.held)
       assert.lengthOf(github.changes, 2)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
-  it.live('opens none for a round whose lead only answered the person, and says what waits (ADR-034)', () => {
+  it.live('opens none for what its lead committed in passing as it answered: it waits for Ship (ADR-034)', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {
       const sessions = yield* Sessions
       const changes = yield* Changes
+      const queries = yield* Queries
       const task = yield* publishing(working)
       yield* until(published(task.threadId), (said) => said.length === 1)
       github.close(1)
@@ -338,12 +348,14 @@ describe('opening a task’s pull request', () => {
         threadId: task.threadId,
         body: 'Why twice? [lead:finish] [lead:edit] [lead:answered]',
       })
-      yield* until(runsOf(task.taskId), (runs) => runs.length === 2 && runs[1]?.state === 'succeeded')
-      yield* until(notices(task.threadId), (all) =>
-        all.some((notice) => notice.title === "What the follow-up committed isn't in a pull request yet."),
+      const [card] = yield* until(
+        Effect.map(queries.card(task.taskId), (one) => [one]),
+        ([one]) => one?.held !== undefined,
       )
+      assert.deepStrictEqual([card?.phase, card?.held?.commits], ['ready', 1])
       yield* Effect.sleep('300 millis')
       assert.lengthOf(github.changes, 1)
+      assert.lengthOf(yield* runsOf(task.taskId), 1)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 

@@ -178,6 +178,8 @@ export interface TaskModel {
   readonly markAllReady: (urls: ReadonlyArray<string>) => Promise<void>
   /** Opens the pull request of a task whose work ended on its branch. */
   readonly openChange: () => Promise<void>
+  /** Ships what waits on its branch for Ship: its review first, where its plan has one before the work ships, then the commits go up. */
+  readonly ship: () => Promise<void>
   /** Merges the task into its repositories' default branches here, up to the heads it showed; it has no pull request. */
   readonly mergeHere: () => Promise<void>
   /** Pushes what it merged here to the remotes its default branches follow. */
@@ -694,6 +696,7 @@ export const useTask = (threadId: string): TaskModel => {
         for (const url of urls) await client.markReady(snapshot.task.id, url)
       }, doing.markAllReady),
     openChange: () => act(async () => (snapshot === null ? undefined : client.openChange(snapshot.task.id)), doing.openChange),
+    ship: () => act(async () => (snapshot === null ? undefined : client.ship(snapshot.task.id)), doing.ship),
     markDone: () => act(async () => (snapshot === null ? undefined : client.markTaskDone(snapshot.task.id)), doing.markDone),
     keep: () => act(async () => (snapshot === null ? undefined : client.keepTaskForLater(snapshot.task.id)), doing.keep),
     mergeHere: () =>

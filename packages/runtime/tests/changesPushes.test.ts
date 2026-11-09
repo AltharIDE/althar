@@ -259,6 +259,16 @@ describe('a push the lead asks the person for', () => {
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { threadId, body }), threadId, body })
     })
 
+  /**
+   * What Althar's own course tells the lead (a comment on its pull request, its checks): quiet, so its turn holds nothing for
+   * Ship, and what it commits goes up as ADR-072 has it. What the person says is a turn whose commits wait for Ship (ship.test.ts).
+   */
+  const tell = (threadId: string, body: string) =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { threadId, body }), threadId, body, quiet: true })
+    })
+
   /** What Althar told the lead quietly, in the person's place. */
   const toldLead = (like: string) =>
     Effect.gen(function* () {
@@ -320,7 +330,7 @@ describe('a push the lead asks the person for', () => {
     }).pipe(Effect.provide(runtimeWith({})))
   })
 
-  it.live('shows the person what would go up when they ask the lead to push, pushes exactly that, and tells the lead', () => {
+  it.live('shows the person what would go up when the lead is asked to push, pushes exactly that, and tells the lead', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
@@ -340,8 +350,8 @@ describe('a push the lead asks the person for', () => {
       // Named as it isn't, it says how it is named.
       assert.include(yield* callTool(task.lead, 'push_to_pull_request', { pull_request: 'web#1' }), "This task's pull request is PR #1.")
 
-      // The person asks the lead to push: it commits, and asks them to, with what would go up.
-      yield* say(task.threadId, 'push pls')
+      // The lead is asked to push, by Althar's own course: it commits, and asks the person to, with what would go up.
+      yield* tell(task.threadId, 'push pls')
       const [card] = yield* until(asked(task.threadId), (all) => all.length === 1)
       assert.deepInclude(card, { where: 'PR #1', count: 1, moved: false, state: 'open' })
       assert.deepStrictEqual(
@@ -641,6 +651,16 @@ describe('what a lead commits after the person has looked', () => {
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { threadId, body }), threadId, body })
     })
 
+  /**
+   * What Althar's own course tells the lead (a comment on its pull request, its checks): quiet, so its turn holds nothing for
+   * Ship, and what it commits goes up as ADR-072 has it. What the person says is a turn whose commits wait for Ship (ship.test.ts).
+   */
+  const tell = (threadId: string, body: string) =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { threadId, body }), threadId, body, quiet: true })
+    })
+
   const pushRequests = (threadId: string) => Effect.map(items(threadId), (all) => all.filter((item) => item.kind === 'push_request'))
   const notices = (threadId: string) =>
     Effect.map(items(threadId), (all) => all.flatMap((item) => (item.kind === 'notice' ? [String(item.content.title)] : [])))
@@ -651,7 +671,7 @@ describe('what a lead commits after the person has looked', () => {
     github.addRepository(['meridian', 'api'])
     return Effect.gen(function* () {
       const task = yield* opened(working)
-      yield* say(task.threadId, 'tidy pls')
+      yield* tell(task.threadId, 'tidy pls')
       yield* until(
         Effect.sync(() => git(bare, 'log', '--format=%s', task.branch).split('\n')),
         (log) => log.includes('Tidy up'),
@@ -664,7 +684,7 @@ describe('what a lead commits after the person has looked', () => {
       assert.include(yield* notices(task.threadId), "Pushed 1 commit to PR #1 as the lead's turn ended.")
 
       // Asked to push before its turn ends, the lead's tool pushes at once rather than asking the person.
-      yield* say(task.threadId, 'push pls')
+      yield* tell(task.threadId, 'push pls')
       yield* until(
         Effect.sync(() => git(bare, 'log', '--format=%s', task.branch).split('\n')),
         (log) => log.includes('Tidy up before pushing'),
@@ -718,7 +738,7 @@ describe('what a lead commits after the person has looked', () => {
       git(task.path, '-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-q', '--allow-empty', '-m', 'My own')
       git(task.path, 'push', '-q', bare, `HEAD:refs/heads/${task.branch}`)
       const theirs = git(task.path, 'rev-parse', 'HEAD')
-      yield* say(task.threadId, 'tidy pls')
+      yield* tell(task.threadId, 'tidy pls')
       const [card] = yield* until(cards(task.projectId), (all) => all[0]?.change?.pushing?.held != null && all[0]?.change?.unpushed === 1)
       // What they pushed stays the pull request's head; the lead's commit waits for their Push, and the card says why.
       assert.strictEqual(git(bare, 'rev-parse', task.branch), theirs)
@@ -779,7 +799,7 @@ describe('what a lead commits after the person has looked', () => {
           step: () => undefined,
         }),
       )
-      yield* say(task.threadId, 'tidy pls')
+      yield* tell(task.threadId, 'tidy pls')
       const [card] = yield* until(cards(task.projectId), (all) => all[0]?.change?.pushing?.held != null)
       offline = false
       yield* Fiber.join(failing)

@@ -278,6 +278,13 @@ const Shown = Schema.Struct({ pictures: Schema.Array(PictureGiven) })
 /** The longest a finding's title is kept: past it, a reviewer wrote its claim there, cut at a word with an ellipsis. */
 const TITLE_LONGEST = 120
 
+/**
+ * A fix after a review this small isn't read again (a task is a conversation
+ * plus parts, "Fixes are checked by the same reviewer, only where they need
+ * it"): this many lines changed or fewer, every one in a file a finding named.
+ */
+const TINY_LINES = 10
+
 /** How many commits a Ship's reviewer is told by subject; more, and it reads them in its copy. */
 const SHIPPED_LISTED = 12
 
@@ -1684,6 +1691,64 @@ export class Runs extends Context.Service<
         })
 
       /**
+       * A task's lead whose turn after its plan ended having done nothing at
+       * all never reached its model: a moment later, unless something was
+       * said to it since, it is told to carry on with what it was last asked,
+       * as a step's agent is; BLANKS times in a row to no effect, the thread
+       * says so once, for the person to write again. There is no step to
+       * stop: the conversation is theirs.
+       */
+      const blankTalk = (threadId: string, turnId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ projectId: ProjectId; taskId: string }>`
+            SELECT project_id, task_id FROM threads WHERE id = ${threadId} AND kind = 'task'`
+          if (thread === undefined) return
+          const inARow = yield* blanks(threadId, turnId)
+          if (inARow === 0) return
+          if (inARow > BLANKS) {
+            if (inARow === BLANKS + 1)
+              yield* addItem({ projectId: thread.projectId, threadId }, 'notice', {
+                source: 'runtime',
+                severity: 'warning',
+                title: 'Its turns ended without doing anything. Write to it again to carry on.',
+                about: 'stall',
+              })
+            return
+          }
+          yield* addItem({ projectId: thread.projectId, threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'warning',
+            title: 'Its turn ended without doing anything.',
+            about: 'stall',
+            role: 'aside',
+          })
+          const again = Effect.gen(function* () {
+            yield* Effect.sleep(blankPause)
+            // Moved on meanwhile: a step began, or it was told something, which started another turn or waits for one.
+            if ((yield* currentRun(thread.taskId)) !== undefined) return
+            const [latest] = yield* sql<{ id: string }>`
+              SELECT id FROM turn_deliveries WHERE thread_id = ${threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`
+            if (latest?.id !== turnId) return
+            const [queued] = yield* sql<{
+              id: string
+            }>`SELECT id FROM user_inputs WHERE thread_id = ${threadId} AND state = 'queued' LIMIT 1`
+            if (queued !== undefined) return
+            yield* sessions.send({
+              envelope: yield* envelope('thread.send', { threadId, blank: turnId }),
+              threadId,
+              body: blankAgain('implement', true),
+              quiet: true,
+            })
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause) ? Effect.interrupt : Effect.logWarning('Could not tell a lead to carry on', cause),
+            ),
+          )
+          yield* Effect.forkIn(provide(again), scope)
+        })
+
+      /**
        * A step's agent whose turn ended having done nothing at all never
        * reached its model: it hasn't stopped without reporting. A minute
        * later, unless the person or Althar has said something to it since,
@@ -2002,7 +2067,12 @@ export class Runs extends Context.Service<
               ? outOfUsageElsewhere(event.threadId, turn.agentId, turn.accountId)
               : outOfUsage(on, turn.agentId, turn.accountId)
           }
-          if (on === undefined) return
+          if (on === undefined) {
+            // After its plan, a turn that did nothing at all is told to carry on too, as a step's is (a task is a conversation plus parts).
+            if (event._tag === 'TurnEnded' && event.state === 'completed' && event.errorClass === undefined)
+              yield* blankTalk(event.threadId, event.turnId)
+            return
+          }
           // Its connection or its service failed (ADR-060): not a missing report, so it isn't reminded. It waits, and is tried again.
           if (event._tag === 'TurnEnded' && event.errorClass === 'transient') {
             const [turn] = yield* sql<{ sessionId: string | null; agentId: string; accountId: string | null }>`
@@ -2252,6 +2322,48 @@ export class Runs extends Context.Service<
               : from.map((one) => `\n- ${one.name}: \`git diff ${one.head}\``).join('')
           return `More to review. The task's earlier work was reviewed before; since then the person asked the lead for more, and it did it:\n\n${lead?.summary ?? ''}\n\nReview what changed since, ${how}. Look at the earlier work only where the new work touches it.`
         })
+
+      /**
+       * The files a fix after the run's last review changed, by repository,
+       * where it is tiny (`TINY_LINES` or fewer, each in a file a finding of
+       * that review named); null where it isn't, or can't be read: then it is
+       * checked. What the fix changed is read against the copy that review
+       * read, its uncommitted work and all.
+       */
+      const tinyFixOf = (run: RunRow) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [last] = yield* sql<{ id: string }>`
+            SELECT a.id FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+            WHERE n.execution_id = ${run.executionId} AND n.node_key = 'review' AND a.state = 'succeeded'
+            ORDER BY a.ended_at DESC, a.rowid DESC LIMIT 1`
+          if (last === undefined) return null
+          const named = (yield* sql<{ location: string }>`SELECT location FROM findings WHERE review_attempt_id = ${last.id}`).flatMap(
+            (finding) => {
+              const file = (JSON.parse(finding.location) as { file?: string | null }).file
+              return typeof file === 'string' && file !== '' ? [file.replace(/^\.?\//, '')] : []
+            },
+          )
+          const namedBy = (path: string) => named.some((file) => file === path || file.endsWith(`/${path}`) || path.endsWith(`/${file}`))
+          let lines = 0
+          const files: Array<string> = []
+          for (const worktree of yield* worktreesOf(run.taskId)) {
+            const [read] = yield* sql<{ commitSha: string | null }>`
+              SELECT commit_sha FROM workspace_snapshots WHERE workspace_id = ${worktree.id} AND node_attempt_id = ${last.id}
+              ORDER BY taken_at DESC, rowid DESC LIMIT 1`
+            if (read?.commitSha == null) return null
+            const listed = yield* git(worktree.path, '-c', 'core.quotePath=false', 'diff', '--numstat', read.commitSha)
+            for (const line of listed.split('\n').filter((one) => one !== '')) {
+              const [added, removed, path] = line.split('\t')
+              // A binary file changed says no lines: it isn't tiny.
+              if (added === undefined || removed === undefined || path === undefined || added === '-' || removed === '-') return null
+              if (!namedBy(path)) return null
+              lines += Number(added) + Number(removed)
+              files.push(path)
+            }
+          }
+          return files.length > 0 && lines <= TINY_LINES ? { files, lines } : null
+        }).pipe(Effect.orElseSucceed(() => null))
 
       /**
        * What a reviewer is told of a Ship: the person shipped what they and
@@ -2930,6 +3042,17 @@ export class Runs extends Context.Service<
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // A check after the first round reads only the fixes: from what the round before read, in the first repository.
+          const [first] = yield* worktreesOf(run.taskId)
+          const [before] =
+            round === 0 || first === undefined
+              ? []
+              : yield* sql<{ commitSha: string | null }>`
+                  SELECT s.commit_sha FROM workspace_snapshots s JOIN node_attempts a ON a.id = s.node_attempt_id
+                  JOIN nodes n ON n.id = a.node_id
+                  WHERE n.execution_id = ${run.executionId} AND n.node_key = 'review' AND s.workspace_id = ${first.id}
+                  ORDER BY s.taken_at DESC, s.rowid DESC LIMIT 1`
+          const reread = before?.commitSha ?? null
           // The round reads a copy of the work as it stands now, in each repository, and the record keeps which code that was (ADR-008).
           for (const workspace of yield* worktreesOf(run.taskId)) {
             const snapshot = yield* snapshotForReview(workspace.path, round)
@@ -2988,7 +3111,6 @@ export class Runs extends Context.Service<
                 ...(on === undefined ? {} : { accountId: on }),
               })
           // A reviewer carrying on has the brief it started with: the lead's evidence as it stands now, written out again, goes with the round.
-          const [first] = yield* worktreesOf(run.taskId)
           const shown =
             Option.isSome(live) && first !== undefined
               ? yield* evidenceForReview(run.threadId, evidenceFolderOf(reviewCopyOf(first.path))).pipe(Effect.orElseSucceed(() => ''))
@@ -3016,7 +3138,7 @@ export class Runs extends Context.Service<
             yield* sessions.send({
               envelope: yield* envelope('thread.send', { threadId, round }),
               threadId,
-              body: `Round ${round + 1}. The lead settled your findings:\n\n${settled ?? ''}\n\nYour copy now holds the settled work. Review the change again. Check that the fixes hold, and don't raise again what the lead set aside unless you have new evidence; then say which finding you repeat, and why.${shown === '' ? '' : `\n\nAs it stands now, in place of what you were told before:\n\n${shown}`}`,
+              body: `A check of the fixes, not another review. The lead settled your findings:\n\n${settled ?? ''}\n\nYour copy now holds the settled work${reread === null ? '' : `; what the fixes changed is \`git diff ${reread.slice(0, 12)}\` in it`}. Read only the fixes, against your findings, and say whether each is settled: pass where they all are. Reopen only a finding a fix didn't settle, saying which and why, and don't raise again what the lead set aside unless you have new evidence. Don't review the rest of the change again.${shown === '' ? '' : `\n\nAs it stands now, in place of what you were told before:\n\n${shown}`}`,
               quiet: true,
             })
           yield* begin(run, attemptId, sessionId, threadId)
@@ -4296,8 +4418,12 @@ export class Runs extends Context.Service<
               message: 'Only a task’s lead waits on the person: the coordinator talks with them in its thread.',
             })
           const current = yield* currentRun(access.taskId)
-          const attempt = current === undefined ? undefined : yield* running(current, ['implement', 'settle'])
-          if (current === undefined || attempt === undefined)
+          // After its plan, a turn is a conversation (a task is a conversation plus parts): its question is its answer, and the
+          // person's reply is the next turn.
+          if (current === undefined)
+            return 'No step is open, so there is nothing to hold: ask your question in your answer and end your turn. The person’s reply comes to you as your next turn.'
+          const attempt = yield* running(current, ['implement', 'settle'])
+          if (attempt === undefined)
             return yield* new ToolRefused({ message: 'No step is waiting on you, so there is nothing to wait on the person for.' })
           const step = attempt.nodeKey === 'settle' ? 'settle' : 'implement'
           const [agent] = yield* sql<{ agentId: string }>`
@@ -4524,13 +4650,21 @@ export class Runs extends Context.Service<
                 : 'Althar has your summary. A review starts now; wait for its findings.',
             )
           }
-          // Another round only if settling changed the code, and rounds are left: as many as the person's setting says (plansAndReviews.ts).
-          if (workAfter !== workBefore && attempt.iteration + 1 < (yield* roundsNow)) {
+          // A fix is checked only where it needs it, never by another whole review (a task is a conversation plus parts): a tiny one
+          // isn't read again, and the pull request names it; a bigger one gets one short check by the same reviewer, of the fixes
+          // alone. A finding that check reopened is the lead's once more, and that second fix isn't read again.
+          if (workAfter !== workBefore && attempt.iteration === 0) {
+            const tiny = yield* tinyFixOf(current)
+            if (tiny !== null) {
+              yield* change('node_attempts', attempt.id, { output: JSON.stringify({ summary, tiny }) })
+              yield* conclude(current)
+              return 'Althar has your summary. Your fixes are small enough to need no check, so the task goes on to its end.'
+            }
             yield* review(current, attempt.iteration + 1, summary)
-            return 'Althar has your summary. The review looks again.'
+            return 'Althar has your summary. The reviewer checks your fixes, and only them.'
           }
-          // Out of rounds, with changes no review has seen: that isn't ready. It goes on to its ending where the person's setting says
-          // it may, once every finding is settled; else it's their call (05: Stuck, findings open).
+          // After the check, a second fix no one reads: it goes on to its ending where the person's setting says it may, once every
+          // finding is settled; else it's their call (05: Stuck, findings open).
           if (workAfter !== workBefore) {
             // Unsettled: still open, or set aside by this settle with no word why (a decline is deliberate only when explained).
             const left = [...(yield* openFindings(current)), ...(yield* unexplained(current, attempt.id))]
@@ -4538,7 +4672,7 @@ export class Runs extends Context.Service<
             if (carry === 'settled' && left.length === 0) {
               yield* carriedOn(current, attempt.id, attempt.iteration + 1, summary)
               yield* conclude(current)
-              return 'Althar has your summary. That was the last round of review; the task goes on to its end with the last fixes not reviewed again, and the person decides on any merge.'
+              return 'Althar has your summary. The check is done; the task goes on to its end with this fix not read again, and the person decides on any merge.'
             }
             const { review: reviewer } = yield* stepsOf(current)
             yield* stuck(current, null, {
@@ -4549,7 +4683,7 @@ export class Runs extends Context.Service<
               round: attempt.iteration + 1,
               open: left.length,
             })
-            return 'Althar has your summary. That was the last round of review, so the person decides what comes next.'
+            return 'Althar has your summary. The check is done and a finding is still open, so the person decides what comes next.'
           }
           yield* conclude(current)
           return 'Althar has your summary. The task is ready for the person.'

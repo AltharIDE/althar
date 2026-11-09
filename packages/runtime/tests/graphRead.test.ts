@@ -1,7 +1,6 @@
 import { execFileSync } from 'node:child_process'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
-import { migrations } from '@althar/persistence-sqlite'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -11,6 +10,7 @@ import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
+import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { fakeConnectors, HOST, hosted, runtime, until } from './support'
@@ -18,9 +18,9 @@ import { fakeConnectors, HOST, hosted, runtime, until } from './support'
 /*
  * A task's graph, read with its thread: its plan's run with each step in the
  * order it ran (its work, a review that found something, the settling, the
- * review again, its pull request), who worked on each, and a follow-up after
- * it with the person's words that started it. A step changing reaches its
- * task's thread, so a window showing the graph reads it again.
+ * check of the fixes, its pull request), who worked on each, and a Ship
+ * after it, a round of its own with its review and its push. A step changing
+ * reaches its task's thread, so a window showing the graph reads it again.
  */
 
 const runtimeWith = (github: FakeService) =>
@@ -47,7 +47,7 @@ const shape = (
 ) => rounds.map((round) => round.steps.map((step) => `${step.key}${step.iteration}:${step.state}`))
 
 describe('a task’s graph', () => {
-  it.live('reads each round of work with its steps as they ran, who ran them, and what started a follow-up', () => {
+  it.live('reads each round of work with its steps as they ran and who ran them, a Ship’s among them', () => {
     // Its pull request opens on the fake GitHub, where what is pushed goes to the bare repository, as the lead commits as the person.
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
@@ -111,76 +111,37 @@ describe('a task’s graph', () => {
       const [switched] = yield* graphOf(card.threadId)
       assert.deepStrictEqual(new Map(switched?.steps.map((step) => [`${step.key}${step.iteration}`, step.model])), ran)
 
-      // The person writes to its lead: a follow-up, started by what they said, reviewed as its plan was.
-      const followUp = 'Also log each retry. [lead:finish] [lead:edit] [review:pass]'
+      // The person writes to its lead: a turn, not a round, on the new model; the graph has no round for it.
+      const followUp = 'Also log each retry. tidy pls [lead:commit]'
       yield* (yield* Sessions).send({
         envelope: yield* Runtime.envelope('thread.send', { threadId: card.threadId, body: followUp }),
         threadId: card.threadId,
         body: followUp,
       })
-      const rounds = yield* until(graphOf(card.threadId), (all) => all.length === 2 && all[1]?.endedAt !== null)
-      const after = rounds[1] ?? assert.fail('no follow-up')
-      assert.isTrue(after.followUp)
-      assert.deepStrictEqual([after.said?.text, after.said?.relayed], [followUp, false])
-      assert.strictEqual(after.steps[0]?.key, 'implement')
-      assert.strictEqual(after.steps[0]?.model, other)
-      assert.strictEqual(rounds[0]?.steps[0]?.model, was)
-      assert.isTrue(after.steps.every((step) => step.state === 'done'))
-
-      // Every item keeps the model its own turn ran on, so the thread can name the round it belongs to after a switch.
+      yield* until(cards(project.projectId), (all) => all[0]?.held !== undefined)
+      assert.lengthOf(yield* graphOf(card.threadId), 1)
+      // Every item keeps the model its own turn ran on, so the thread can name what it belongs to after a switch.
       const snapshot = yield* Effect.orDie((yield* Queries).thread(card.threadId))
-      const roundOpener = snapshot.items.find((item) => item.id === after.said?.itemId) ?? assert.fail('no opening turn')
-      // What an agent's turns wrote: a report is its step's, and says its model on its own.
+      const opener = snapshot.items.find((item) => item.kind === 'user_message' && String(item.content.text ?? '').includes('Also log'))
+      const said = opener ?? assert.fail('no message')
       const leading = snapshot.items.filter((item) => ['agent_message', 'agent_thought', 'tool_call', 'plan'].includes(item.kind))
       const modelsOf = (items: typeof leading) => [...new Set(items.map((item) => item.model ?? null))]
-      assert.deepStrictEqual(modelsOf(leading.filter((item) => item.sequence < roundOpener.sequence)), [was])
-      assert.deepStrictEqual(modelsOf(leading.filter((item) => item.sequence > roundOpener.sequence)), [other])
-      // Its reports say the model too, for a step that reported without a turn the thread groups.
-      const reportModels = (items: typeof snapshot.items, step: string) =>
-        items.flatMap((item) => (item.kind === 'step_result' && item.content.step === step ? [item.content.model ?? null] : []))
-      assert.deepStrictEqual(
-        reportModels(
-          snapshot.items.filter((item) => item.sequence < roundOpener.sequence),
-          'implement',
-        ),
-        [was],
-      )
-      assert.deepStrictEqual(
-        reportModels(
-          snapshot.items.filter((item) => item.sequence > roundOpener.sequence),
-          'implement',
-        ),
-        [other],
-      )
+      assert.deepStrictEqual(modelsOf(leading.filter((item) => item.sequence < said.sequence)), [was])
+      assert.deepStrictEqual(modelsOf(leading.filter((item) => item.sequence > said.sequence)), [other])
 
-      // The turn that opened the follow-up, given before its step was there, is that step's.
-      const [opener] = yield* (yield* SqlClient.SqlClient)<{ model: string | null; marked: number }>`
-          SELECT model, node_attempt_id IS NOT NULL AS marked FROM turn_deliveries
-          WHERE thread_id = ${card.threadId} AND prompt LIKE ${'%Also log each retry.%'} ORDER BY requested_at LIMIT 1`
-      assert.deepStrictEqual([opener?.model, opener?.marked], [other, 1])
-
+      // Shipped: a round of its own, with no work step, its review and then its pull request's push, the review on its reviewer.
+      yield* (yield* Runs).ship({ envelope: yield* Runtime.envelope('task.ship', {}), taskId: card.taskId })
+      const rounds = yield* until(graphOf(card.threadId), (all) => all.length === 2 && all[1]?.endedAt !== null)
+      const shipped = rounds[1] ?? assert.fail('no Ship')
+      assert.deepStrictEqual(shape([shipped]), [['review0:done', 'publish0:done']])
+      assert.strictEqual(shipped.steps[0]?.agentId, who.get('review0'))
       // Switched back, each round stays on the model it ran on.
-      const followed = new Map(after.steps.map((step) => [`${step.key}${step.iteration}`, step.model]))
-      yield* (yield* Sessions).setModel({ threadId: card.threadId, model: was })
-      const back = yield* graphOf(card.threadId)
-      const models = (graph: typeof back) =>
+      const models = (graph: typeof rounds) =>
         graph.map((each) => new Map(each.steps.map((step) => [`${step.key}${step.iteration}`, step.model])))
-      assert.deepStrictEqual(models(back), [ran, followed])
-
-      // A follow-up from before its opening turn was marked: its step took the session's model again, until the store
-      // is migrated, which marks the turn as the runtime now does.
-      yield* sql`UPDATE turn_deliveries SET node_attempt_id = NULL WHERE thread_id = ${card.threadId}`
-      assert.strictEqual((yield* graphOf(card.threadId))[1]?.steps[0]?.model, was, 'unmarked, it reads as the session')
-      const openers = migrations.find((migration) => migration.key === '0038_round_openers') ?? assert.fail('no migration')
-      for (const statement of openers.statements) yield* sql.unsafe(statement)
-      assert.deepStrictEqual(models(yield* graphOf(card.threadId)), [ran, followed])
-      const marked = yield* sql<{ prompt: string | null }>`
-          SELECT prompt FROM turn_deliveries WHERE thread_id = ${card.threadId} AND node_attempt_id IS NOT NULL`
-      assert.deepStrictEqual(
-        marked.map((row) => row.prompt?.includes('Also log each retry.')),
-        [true],
-        'only the opener, not the plan’s first turn',
-      )
+      const before = models(rounds)
+      yield* (yield* Sessions).setModel({ threadId: card.threadId, model: was })
+      assert.deepStrictEqual(models(yield* graphOf(card.threadId)), before)
+      assert.deepStrictEqual(models(yield* graphOf(card.threadId))[0], ran)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })

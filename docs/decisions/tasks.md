@@ -143,19 +143,44 @@ in a turn, starting, or waiting for a place among the agents at work
 waits on the person still comes first, as Needs you. Once nothing is at
 work, the card says what fits what is there now.
 
-**What the person says to a lead after its plan opens a round.** When the
-person's own words reach a lead whose latest run is over, Althar opens a
-round. A round is a run of its own, with no plan, and with the plan's steps
-and ending, so a reviewed task's round has a review. A merged task opens
-again for it. A stopped run is resumed, as before. Althar's own messages to
-the lead open no round, because they have their own course: what people said
-on the pull request, its checks, a conflict to resolve. A lead that calls
-`finish_step` after its plan, with no step open, opens a round and finishes
-it in the same call.
+**What the person says to a lead after its plan is a turn, not a round**
+([a task is a conversation plus parts](proposed/a-task-is-a-conversation-plus-parts.md#a-message-is-a-turn-not-a-round)).
+It goes to the same session and opens no step: there is no report to give,
+no reminder to give one, and no review. The turn's last message is its
+answer. What the coordinator passes on from the person counts as theirs. A
+lead that calls `finish_step` in such a turn has its summary, evidence and
+descriptions kept, and nothing opens. A lead still at its plan's steps takes
+the message into the step under way, as before.
 
-**Where a round ends depends on what it made.** New work means new commits
-in any of the task's repositories, or uncommitted changes that aren't
-evidence.
+**What the turn commits waits for Ship.** As each such turn ends, a worktree
+whose head the turn moved is held for Ship (`workspaces.held_at`). The head
+each worktree had as the turn began is kept with the turn
+(`turn_deliveries.heads`), so this holds after a restart too. From then
+until Ship, nothing pushes the branch:
+
+- the person's Push, a lead's `push_to_pull_request` and pushing as the
+  lead's turn ends (ADR-072) all refuse it, with ShipRefused;
+- failing checks of the pushed head aren't put to the lead, as Ship replaces
+  that head, and a conflict waits for Ship's push;
+- what people say on the pull request still reaches the lead at once.
+
+The card, the header and Needs you say how much waits, "2 commits not
+shipped", with **Ship**, and the task is in Needs you whatever its pushed
+head's checks say. Ship (the button, or `ship_task` on the person's word) is
+a run of its own with no Implement step. Where the plan has a reviewer before
+the work ships, that review runs first and reads only what came after the
+commit the last review read, found by its tree, as pushing may have credited
+it since. The lead settles what it finds as in any review. Then Ship's ending
+sends the commits up: to the open pull request; after the last merged or
+closed, in the next ("After #N", on a new branch); where there was none, in
+the first, as the plan ends. The hold goes once they're up. A plan with no
+reviewer, or whose review runs after the merge, ships at once. A lead that
+calls `ship_task` in its own turn ships once that turn ends.
+
+**The rounds that are left** are those Althar's own course and
+`make_it_a_change` open, and Ship's run. Where a round ends depends on what
+it made. New work means new commits in any of the task's repositories, or
+uncommitted changes that aren't evidence.
 
 - **Nothing new.** The round closes and the task goes back to where it was.
   A merged task is done again and keeps its settled time.
@@ -174,8 +199,8 @@ evidence.
     only where the lead said it only answered a question (`answered`), or
     where the pull request couldn't open.
 
-The person can skip a round's review from the task's menu. Only that round
-loses its review; the next has it again.
+The person can skip a round's review from the task's menu, Ship's included.
+Only that round loses its review; the next has it again.
 
 **A task has as many pull requests as it needs**, one per repository at a
 time.
@@ -350,3 +375,4 @@ pushes), and its counts are cost caps. Built so far: leads have
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 9 Nov 2026: what the person says to a lead after its plan is a turn, not a round, and what it commits waits for Ship, which reviews only what came since the last review ([a task is a conversation plus parts](proposed/a-task-is-a-conversation-plus-parts.md)).

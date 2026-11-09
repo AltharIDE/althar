@@ -568,6 +568,8 @@ export interface Client {
   }) => Promise<boolean>
   /** Pushes the task's branch to its pull request, up to the commit the person saw; in a task of several repositories, the one at `url`. */
   readonly push: (taskId: string, head: string, url?: string) => Promise<void>
+  /** Ships what waits on the task's branch for Ship: its review first, where its plan has one before the work ships, then the commits go up. */
+  readonly ship: (taskId: string) => Promise<void>
   /** Replaces the commits on the task's pull request with its branch, up to the commit the person saw, only while it is still at `replaces`: a force push they confirmed. */
   readonly replacePullRequest: (taskId: string, head: string, replaces: string, url?: string) => Promise<void>
   /** What to tell the lead so its branch takes the pull request's commits in by merging; they are fetched to its worktree first. */
@@ -941,6 +943,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     openCode: (input) => command((commandId) => api.OpenCode({ commandId, ...input })),
     installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
+    ship: (taskId) => command((commandId) => api.Ship({ commandId, taskId })),
     replacePullRequest: (taskId, head, replaces, url) =>
       command((commandId) => api.ReplacePullRequest({ commandId, taskId, head, replaces, ...(url === undefined ? {} : { url }) })),
     mergeNote: (taskId, url) =>

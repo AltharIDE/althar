@@ -36,6 +36,8 @@ export type Blocker =
 export type Next =
   | { readonly kind: 'merge' }
   | { readonly kind: 'push'; readonly commits: number }
+  /** What waits on its branch for Ship goes up, its review first where its plan has one (a task is a conversation plus parts). */
+  | { readonly kind: 'ship'; readonly commits: number }
   | { readonly kind: 'resolve' }
   | { readonly kind: 'fix'; readonly failing: ReadonlyArray<string> }
 
@@ -77,6 +79,7 @@ export const standingText = {
   nextFailed: {
     merge: (why: string) => `Merge failed: ${why}`,
     push: (why: string) => `Push failed: ${why}`,
+    ship: (why: string) => `Ship failed: ${why}`,
     again: 'Try again',
   },
   /** What a screen reader hears of the button for a next thing, naming the pull request it acts on. */
@@ -213,18 +216,19 @@ export const factsOf = (change: ChangeSummary, standing: Standing = standingOf(c
   return facts.length === 0 ? [clearOf(change)] : facts
 }
 
-/** Whether the next thing is the person's own, done from where it is shown: pushing and merging. The others are the lead's, and open the task. */
-export type DoneHere = Extract<Next, { kind: 'merge' | 'push' }>
+/** Whether the next thing is the person's own, done from where it is shown: pushing, merging and shipping. The others are the lead's, and open the task. */
+export type DoneHere = Extract<Next, { kind: 'merge' | 'push' | 'ship' }>
 
-export const doneHere = (next: Next): next is DoneHere => next.kind === 'merge' || next.kind === 'push'
+export const doneHere = (next: Next): next is DoneHere => next.kind === 'merge' || next.kind === 'push' || next.kind === 'ship'
 
 /** The next thing while it is under way. */
-export const doingWords = (next: Extract<Next, { kind: 'merge' | 'push' }>): string =>
-  next.kind === 'merge' ? standingText.doing.merge : standingText.doing.push(next.commits)
+export const doingWords = (next: DoneHere): string =>
+  next.kind === 'merge' ? standingText.doing.merge : next.kind === 'ship' ? shipText.shipping : standingText.doing.push(next.commits)
 
 /** The next thing's button, for a screen reader: what it does and to which pull request; or, after it failed, that it tries again. */
-export const labelWords = (next: Extract<Next, { kind: 'merge' | 'push' }>, where: string, failed = false): string => {
+export const labelWords = (next: DoneHere, where: string, failed = false): string => {
   const t = standingText.label
+  if (next.kind === 'ship') return failed ? shipText.again(next.commits) : shipText.label(next.commits)
   return next.kind === 'merge'
     ? failed
       ? t.mergeAgain(where)
@@ -242,11 +246,32 @@ export const nextWords = (next: Next): string => {
       return t.merge
     case 'push':
       return t.push(next.commits)
+    case 'ship':
+      return shipText.ship
     case 'resolve':
       return t.resolve
     case 'fix':
       return t.fix
   }
+}
+
+/**
+ * What waits on a task's branch for Ship (a task is a conversation plus
+ * parts, "A tweak waits for Ship"), as its card, its header and Needs you
+ * say it: how many commits, and Ship, which reviews them where the plan has a
+ * reviewer before the work ships, and then sends them up.
+ */
+export const shipText = {
+  word: 'Not shipped',
+  commits: (n: number) => `${standingText.commits(n)} not shipped`,
+  ship: 'Ship',
+  shipping: 'Shipping',
+  failed: (why: string) => `Ship failed: ${why}`,
+  label: (n: number) => `Ship ${standingText.commits(n)}`,
+  /** What Ship does, on hover: its review reads them first, where the plan has a reviewer, and then they go up. */
+  hint: (n: number, reviewed: boolean) =>
+    reviewed ? `Its review reads ${standingText.commits(n)} first, then they go up` : `${standingText.commits(n)} go up`,
+  again: (n: number) => `Try shipping ${standingText.commits(n)} again`,
 }
 
 /** A ready change's word, where it isn't plainly ready to accept. */
@@ -272,10 +297,16 @@ export const readyWordOf = (
     readonly conflictUnsent?: string | null | undefined
     readonly unshipped?: unknown
     readonly nothingBuilt?: boolean | undefined
+    readonly held?: unknown
+    readonly replied?: string | undefined
   },
   latest: ChangeSummary | null,
 ): string => {
   const change = task.unshipped == null || latest?.state === 'open' ? latest : null
+  // Held for Ship, the person's word is what it waits on, whatever its pull request says: Ship's push replaces its head.
+  if (task.held !== undefined) return shipText.word
+  // Its lead answered them, unread, where no open pull request says more of where it stands.
+  if (task.replied !== undefined && latest?.state !== 'open' && task.unshipped == null) return kindWords.replied
   if (task.handedBack != null || task.conflictUnsent != null) return readyText.mergeConflict
   if (task.nothingBuilt === true) return kindWords.nothingBuilt
   if (change === null && task.unshipped != null) return kindWords.unshipped

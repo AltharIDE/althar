@@ -12,6 +12,7 @@ import { SqlClient } from 'effect/sql'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
+import { Runs } from '../src/Runs'
 import { type TaskEnd } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
@@ -120,26 +121,39 @@ describe('a task of several repositories', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('reviews a round of work after its plan by what changed in each repository since', () => {
+  it.live('reviews a Ship after its plan by what changed in each repository since its last review', () => {
     const lead = holds()
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const sessions = yield* Sessions
+      const runs = yield* Runs
       const task = yield* across('Do it. [lead:finish] [review:pass]', true, null)
       yield* until(runsOf(task.taskId), (rows) => rows[0]?.state === 'succeeded')
       const heads = Object.fromEntries(
         Object.entries(task.worktree).map(([name, path]) => [name, git(path, 'rev-parse', 'HEAD').toString().trim().slice(0, 12)]),
       )
-      // The person asks for more; while its lead works on it, it changes the web app only.
-      const body = 'Add the docs. [lead:slowly] [lead:finish]'
+      // The person asks for more; while its lead works on it, it changes the web app only, and commits that.
+      const body = 'Add the docs. [lead:slowly]'
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId: task.threadId, body })
-      yield* until(runsOf(task.taskId), (rows) => rows[1]?.state === 'running')
-      writeFileSync(join(task.worktree.web ?? '', 'docs.md'), '# Retry\n')
+      yield* until(
+        sql<{ heads: string | null }>`SELECT heads FROM turn_deliveries WHERE thread_id = ${task.threadId} AND heads IS NOT NULL`,
+        (rows) => rows.length === 1,
+      )
+      const web = task.worktree.web ?? ''
+      writeFileSync(join(web, 'docs.md'), '# Retry\n')
+      git(web, 'add', '-A')
+      git(web, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '-m', 'Add the docs')
       lead.open('[lead:slowly]')
+      yield* until(
+        sql<{ heldAt: string | null }>`SELECT held_at FROM workspaces WHERE task_id = ${task.taskId} AND held_at IS NOT NULL`,
+        (rows) => rows.length === 1,
+      )
+      // Shipped, its review reads each repository from where the last review left it.
+      yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', {}), taskId: task.taskId })
       const [told] = yield* until(
         sql<{ body: string }>`
           SELECT i.body FROM user_inputs i JOIN threads t ON t.id = i.thread_id
-          WHERE t.task_id = ${task.taskId} AND t.kind = 'step' AND i.body LIKE 'More to review%'`,
+          WHERE t.task_id = ${task.taskId} AND t.kind = 'step' AND i.body LIKE 'More to review. The person ships%'`,
         (rows) => rows.length === 1,
       )
       assert.include(told?.body, `Review what changed since, \n- api: \`git diff ${heads.api}\`\n- web: \`git diff ${heads.web}\`.`)

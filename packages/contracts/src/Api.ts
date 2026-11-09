@@ -2242,6 +2242,11 @@ export const TaskCard = Schema.Struct({
    * many commits. Absent while nothing is held, and from a runtime before it.
    */
   held: Schema.optional(HeldForShip),
+  /**
+   * When its lead answered a turn the person's words began after its plan, where they haven't had the task open since: it
+   * waits in Needs you until they do (a task is a conversation plus parts). Absent otherwise, and from a runtime before it.
+   */
+  replied: Schema.optional(Schema.String),
   /** A change ready that built nothing: no commits on its branch and no pull request open or merged. Absent otherwise. */
   nothingBuilt: Schema.optional(Schema.Boolean),
   /**
@@ -3403,6 +3408,8 @@ export const ThreadSnapshot = Schema.Struct({
     unshipped: Schema.optional(Schema.NullOr(Unshipped)),
     /** What waits on its branch for Ship, as its card has it (`TaskCard.held`). Absent while nothing is held. */
     held: Schema.optional(HeldForShip),
+    /** When its lead last answered the person unseen, as its card has it (`TaskCard.replied`). */
+    replied: Schema.optional(Schema.String),
     /** A change ready that built nothing: no commits on its branch, no pull request open or merged. Absent otherwise. */
     nothingBuilt: Schema.optional(Schema.Boolean),
     /** The review of its run under way can still be skipped, as the person may (ADR-034). */

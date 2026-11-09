@@ -83,7 +83,10 @@ const gitIn = (cwd: string, ...args: ReadonlyArray<string>) => {
 }
 
 /** The task's card once `check` holds of it. */
-const cardOnce = (taskId: string, check: (card: { readonly phase: string; readonly kind: string }) => boolean) =>
+const cardOnce = (
+  taskId: string,
+  check: (card: { readonly phase: string; readonly kind: string; readonly replied?: string | undefined }) => boolean,
+) =>
   Effect.gen(function* () {
     const queries = yield* Queries
     const [card] = yield* until(
@@ -203,7 +206,7 @@ describe('a plain task', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('tells a lead whose turn on a follow-up did nothing to carry on with what it was asked, and asks no report of it', () =>
+  it.live('tells a lead whose turn after it was done did nothing to carry on, and keeps its answer in Needs you until it is read', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const tasks = yield* Tasks
@@ -217,19 +220,22 @@ describe('a plain task', () => {
       const state = Effect.map(sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.id}`, (rows) => rows)
       yield* until(markDone, ([done]) => done === true)
       yield* until(state, (rows) => rows[0]?.state === 'done')
-      // A question, whose first turn does nothing: told to carry on, the lead answers it, and the task waits in Needs you again, to be settled.
+      // A question, whose first turn does nothing: told to carry on, the lead answers it, a turn and not a round. Its answer waits
+      // in Needs you, unread, though the task stays settled; Done says it was read, and it is settled again.
       yield* sayAfterDone(task.threadId, 'And the v2 ones?')
       const [told] = yield* until(
         sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${task.threadId} AND body LIKE 'Your last turn%'`,
         (rows) => rows.length === 1,
       )
       assert.strictEqual(told?.body, 'Your last turn ended before you could do anything. Carry on with what you were last asked.')
-      yield* until(
-        sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL AND state <> 'running'`,
-        (rows) => (rows[0]?.n ?? 0) === 1,
-      )
+      const answered = yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.replied !== undefined)
+      assert.strictEqual(answered.kind, 'plain')
+      assert.strictEqual((yield* state)[0]?.state, 'done')
+      const [rounds] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL`
+      assert.strictEqual(rounds?.n, 0)
       yield* until(markDone, ([done]) => done === true)
-      yield* until(state, (rows) => rows[0]?.state === 'done')
+      yield* cardOnce(task.id, (one) => one.phase === 'settled')
+      assert.strictEqual((yield* state)[0]?.state, 'done')
     }).pipe(
       Effect.provide(
         Queries.layer.pipe(
@@ -333,7 +339,7 @@ describe('a plain task', () => {
   )
 
   it.live(
-    'done, goes back to work as a follow-up in the same folder, and waits in Needs you after: one that writes nothing has no branch, one that writes has one, and both stay plain',
+    'done, talks with its lead in the same folder, and its answers wait in Needs you after: one that writes nothing has no branch, one that writes has one, and both stay plain',
     () =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
@@ -345,22 +351,19 @@ describe('a plain task', () => {
         assert.isTrue(yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId: task.id }), taskId: task.id }))
         const state = Effect.map(sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.id}`, (rows) => rows)
         yield* until(state, (rows) => rows[0]?.state === 'done')
-        // A question: the follow-up changes nothing, and it waits in Needs you, not settled again, still with no branch.
+        // A question: its answer changes nothing, and waits in Needs you, unread, the task settled still, with no branch.
         yield* sayAfterDone(task.threadId, 'And the v2 ones?')
-        yield* until(
-          sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL AND state <> 'running'`,
-          (rows) => (rows[0]?.n ?? 0) === 1,
-        )
-        assert.strictEqual((yield* state)[0]?.state, 'open')
-        assert.strictEqual((yield* cardOnce(task.id, (one) => one.phase === 'ready')).kind, 'plain')
+        assert.strictEqual((yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.replied !== undefined)).kind, 'plain')
+        assert.strictEqual((yield* state)[0]?.state, 'done')
         assert.isNull((yield* worktreeOf(task.id)).branchedAt)
-        // Asked to write: as its turn ends, its branch is made with what it wrote, and it is open again.
+        // Asked to write: as its turn ends, its branch is made with what it wrote, and its answer waits for the person too.
         yield* say(task.threadId, 'Write it down. [lead:write]')
         const worktree = yield* branchedOnce(task.id)
         assert.strictEqual(gitIn(worktree.path, 'symbolic-ref', '--short', 'HEAD'), worktree.branch)
         assert.strictEqual(gitIn(worktree.path, 'status', '--porcelain'), '?? draft.md')
-        yield* until(state, (rows) => rows[0]?.state === 'open')
-        assert.strictEqual((yield* cardOnce(task.id, () => true)).kind, 'plain')
+        assert.strictEqual((yield* cardOnce(task.id, (one) => one.phase === 'ready')).kind, 'plain')
+        const [rounds] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL`
+        assert.strictEqual(rounds?.n, 0)
         yield* sessions.stop(task.threadId)
       }).pipe(Effect.provide(withQueries())),
   )
@@ -397,13 +400,14 @@ describe('a plain task', () => {
         const tasks = yield* Tasks
         assert.isTrue(yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId: task.id }), taskId: task.id }))
         assert.deepInclude(yield* cardOnce(task.id, (one) => one.phase === 'settled'), { kind: 'plain', branch: worktree.branch })
-        // Asked for more, it commits again in a round of its own, Finished again: nothing offers a pull request for it.
+        // Asked for more, it commits again in a turn, its answer waiting for the person: nothing holds it for Ship, and nothing
+        // offers a pull request for it.
         yield* sayAfterDone(task.threadId, 'One more thing. [lead:commit] [lead:finish]')
-        yield* until(
-          sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL AND state = 'succeeded'`,
-          (rows) => rows[0]?.n === 1,
-        )
-        assert.deepInclude(yield* cardOnce(task.id, (one) => one.phase === 'ready'), { kind: 'plain', unshipped: null })
+        const again = yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.replied !== undefined)
+        assert.deepInclude(again, { kind: 'plain', unshipped: null })
+        assert.isUndefined(again.held)
+        const [rounds] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL`
+        assert.strictEqual(rounds?.n, 0)
         assert.notInclude((yield* notices(task.threadId)).map((notice) => notice.title).join('\n'), 'pull request')
         assert.lengthOf(github.changes, 0)
       }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(undefined, {}, { connectors: fakeConnectors({ github }) })))))

@@ -87,6 +87,7 @@ import {
 import { conventionsAt, ruleOf, titleFor } from './conventions'
 import { baseBranch, forkOf, workRemotes } from './forks'
 import { makeKeyedLock } from './keyedLock'
+import { quickIn } from './kinds'
 import {
   branchExists,
   branchOn,
@@ -4809,6 +4810,8 @@ export class Changes extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const after = yield* unshippedOf(input.taskId)
           if (after.length === 0) return
+          // What waited for Ship is left out with the rest: it stays on the branch, and nothing holds it.
+          yield* releaseHolds(input.taskId, 'left')
           const [task] = yield* sql<{ projectId: ProjectId; threadId: string; state: string; revision: number }>`
             SELECT k.project_id, t.id AS thread_id, k.state, k.revision FROM tasks k
             JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${input.taskId}`
@@ -6203,10 +6206,14 @@ export class Changes extends Context.Service<
           if (seen.state !== 'open') return
           const workspace = yield* worktreeOf(taskId, seen.url)
           if (workspace === undefined || !existsSync(workspace.path)) return
-          // Held for Ship, what the person's turns committed goes up with Ship alone, after its review: its card offers Ship.
-          if (workspace.heldAt !== null) return
           const sent = yield* sentTo(link.projectId, seen.url)
           const here = yield* aheadOf(workspace.path, null, [sent, seen.headSha])
+          // Held for Ship, what the person's turns committed goes up with Ship alone, after its review: its card offers Ship. Held
+          // with nothing left to send, as where the person pushed it themselves, nothing waits: the hold goes.
+          if (workspace.heldAt !== null) {
+            if (here.kind === 'ahead' && here.count === 0 && (yield* unshippedOf(taskId)).length === 0) yield* releaseHolds(taskId, 'left')
+            return
+          }
           if (here.kind === 'ahead' && here.count === 0) return
           // Its host gone from the project, nothing can ask it; where asking it fails, as when offline, the person's Push waits
           // with why, not a card that says they're on their way, until the next turn ends, the person pushes, or Althar starts.
@@ -6300,6 +6307,28 @@ export class Changes extends Context.Service<
           )
         })
 
+      /**
+       * Holds for Ship what turns the person's words began committed, for
+       * each task whose turn ended before this launch but wasn't held yet:
+       * one cut short by a stop, or whose end Althar didn't hear. Each on its
+       * own, so one that can't be read leaves the rest.
+       */
+      const holdAfterRestart = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const talked = yield* sql<{ taskId: string; threadId: string }>`
+          SELECT DISTINCT t.task_id, t.id AS thread_id FROM threads t JOIN tasks k ON k.id = t.task_id
+          JOIN turn_deliveries d ON d.thread_id = t.id
+          WHERE t.kind = 'task' AND k.state IN ('open', 'done') AND d.heads IS NOT NULL
+            AND k.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)`
+        for (const one of talked)
+          yield* locked(one.taskId)(
+            Effect.gen(function* () {
+              const heads = yield* turnHeadsOf(one.taskId, one.threadId)
+              if (heads !== undefined) yield* holdAfterTurn(one.taskId, heads)
+            }),
+          ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not hold what a turn committed before Althar restarted', cause)))
+      })
+
       /** The task's worktrees here held for Ship, the first held first. */
       const holdsOf = (taskId: string) =>
         Effect.gen(function* () {
@@ -6320,12 +6349,16 @@ export class Changes extends Context.Service<
       const holdAfterTurn = (taskId: string, heads: Readonly<Record<string, string>>) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // A quick task's work stays on this Mac until the person makes it a change: nothing of it ships, so nothing is held.
           const rows = yield* sql<{ id: string; projectId: ProjectId; path: string }>`
-            SELECT id, project_id, path FROM workspaces
-            WHERE task_id = ${taskId} AND device_id = ${instance.deviceId} AND access = 'write' AND state <> 'cleaned'
-              AND branched_at IS NOT NULL AND held_at IS NULL`
+            SELECT w.id, w.project_id, w.path FROM workspaces w JOIN tasks k ON k.id = w.task_id
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.state <> 'cleaned'
+              AND w.branched_at IS NOT NULL AND w.held_at IS NULL AND NOT ${sql.unsafe(quickIn('k'))}`
+          // Only where something waits to go up: a turn that pushed what it made already holds nothing.
+          const waiting = rows.length > 0 && ((yield* shipToOpen(taskId, false)).length > 0 || (yield* unshippedOf(taskId)).length > 0)
           let held = 0
           for (const row of rows) {
+            if (!waiting) break
             const before = heads[row.id]
             if (before === undefined || !existsSync(row.path)) continue
             const now = yield* commitOf(row.path, 'HEAD').pipe(Effect.orElseSucceed(() => null))
@@ -6561,7 +6594,9 @@ export class Changes extends Context.Service<
       yield* busy.queue(provide(roundsWaiting))
 
       // What a lead committed as an earlier launch ended goes up now, where its project's rules push it on its own (ADR-072).
-      yield* Effect.forkScoped(afterOpen(provide(pushNow({}))))
+      // What a turn the person began committed before Althar stopped is held for Ship first, as its end would have: a turn cut
+      // short by the stop ends with no event to hold it by, and nothing it committed may go up before Ship.
+      yield* Effect.forkScoped(afterOpen(provide(Effect.andThen(holdAfterRestart, pushNow({})))))
 
       /*
        * A settled task's pull request that Althar stopped listening to while
@@ -7436,7 +7471,9 @@ export class Changes extends Context.Service<
                     message:
                       refusals.length > 0
                         ? refusals.join(' ')
-                        : "None of this task's pull requests is open, so there's nothing to push to. What you committed goes in a new pull request, which Althar opens as a draft once you call finish_step: if you haven't, call it with your summary.",
+                        : (yield* holdsOf(taskId)).length > 0
+                          ? "None of this task's pull requests is open, so there's nothing to push to. What you committed waits for the person's Ship, which opens a new pull request for it, its review first. Where the person asked you to ship it, call ship_task."
+                          : "None of this task's pull requests is open, so there's nothing to push to. What you committed goes in a new pull request, which Althar opens as a draft once you call finish_step: if you haven't, call it with your summary.",
                   })
                 }
                 const { link, snapshot, where, ahead, left, path, branch } = chosen

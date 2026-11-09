@@ -19,4 +19,5 @@ export const doing = {
   pushBranch: 'push-branch',
   markDone: 'mark-done',
   keep: 'keep',
+  ship: 'ship',
 } as const

@@ -147,13 +147,14 @@ export function HomeView({
 
   // A ready change's next thing, done from its line when it is the person's own (merge, push), at once, at the heads they saw; the lead's it leaves to the task.
   const doNext = (task: HomeTask, next: DoneHere) => {
+    if (next.kind === 'ship') return void model.ship(task.taskId)
     const change = task.change
     if (change === null) return
     return void (next.kind === 'merge'
       ? model.merge(task.taskId, change.head ?? '', change.url)
       : model.push(task.taskId, change.localHead ?? '', change.url))
   }
-  const doing = (taskId: string) => model.merging.has(taskId) || model.pushing.has(taskId)
+  const doing = (taskId: string) => model.merging.has(taskId) || model.pushing.has(taskId) || model.shipping.has(taskId)
 
   // What waits, each gathered under its project; a call answered here stays its line, quiet, until the person leaves.
   const waits: ReadonlyArray<HomeNeed> = needs.map((need) => ({

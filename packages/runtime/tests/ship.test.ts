@@ -268,6 +268,38 @@ describe('talking to a lead once its plan is done', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
+  it.live('lets the person skip a Ship’s review: what waits goes up without it', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const runs = yield* Runs
+      const sql = yield* SqlClient.SqlClient
+      // Its reviewer passes the plan's review, and reads a later one until it is stopped.
+      const task = yield* opened(working, '[review:pass] [review:wait-later]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      yield* say(task.threadId, 'Make it retry twice. tidy pls [lead:commit]')
+      yield* answered(task.threadId, task.turns + 1)
+      yield* until(heldAt(task.taskId), (at) => at !== null)
+      yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
+      yield* until(
+        sql<{ state: string }>`
+          SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+          JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.taskId} AND r.plan_id IS NULL AND n.node_key = 'review'`,
+        (rows) => rows[0]?.state === 'running',
+      )
+      yield* runs.skipReview({ envelope: yield* Runtime.envelope('task.skip_review', {}), taskId: task.taskId })
+      yield* until(
+        Effect.sync(() => [git(bare, 'rev-parse', BRANCH), git(task.path, 'rev-parse', 'HEAD')] as const),
+        ([there, here]) => there === here && there !== pushed,
+      )
+      yield* until(heldAt(task.taskId), (at) => at === null)
+      // No review result for it: the plan's own, then what Ship sent up.
+      assert.deepStrictEqual(
+        (yield* results(task.threadId)).map((result) => result.step),
+        ['implement', 'review', 'publish', 'publish'],
+      )
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
   it.live('holds nothing where the turn only answered', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {
