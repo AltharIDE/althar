@@ -309,7 +309,11 @@ test('a task’s run opens beside its thread, isolated; a comment pointed on it 
     await say(page, 'Two things on the refunds page.')
     await expect(shown(page, /saw images: image\/png \d+ B/).last()).toBeVisible()
     // What the lead says back is what it was sent, its paragraphs as the message's.
-    const echo = shown(page, 'echo: Two things on the refunds page.', { exact: true }).last().locator('xpath=..')
+    // Streaming can wrap the words in a fading span. Find the paragraph first so its parent is always the whole message.
+    const echo = shown(page, 'echo: Two things on the refunds page.', { exact: true })
+      .last()
+      .locator('xpath=ancestor-or-self::p')
+      .locator('xpath=..')
     await expect(echo).toContainText('Say what happened: too many refunds at once.')
     await expect(echo).toContainText('div[data-testid="error"]')
     await expect(echo).toContainText(`Page: http://${address}/`)
