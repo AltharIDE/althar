@@ -7,8 +7,8 @@ import { Effect } from 'effect'
 
 import { addServer, removeServer, serverDetail } from '../src/mcpAdd'
 import { setToolRoles } from '../src/agentTools'
-import { claudeLines, codexLines, mask, openCodeLines } from '../src/mcpLines'
-import { keepOut, readRecord, reconcile, syncState, turnOn } from '../src/mcpSync'
+import { asCodexWrites, claudeLines, codexLines, mask, openCodeLines } from '../src/mcpLines'
+import { keepOut, readRecord, reconcile, syncState, turnOn, writeRecord } from '../src/mcpSync'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { fakeAgents, homeWith } from './agentHome'
@@ -97,6 +97,28 @@ describe('the lines each agent keeps', () => {
       'X-Team = "••••"',
       'Authorization = "Bearer ••••"',
     ])
+    // A token given as a variable stays, and a server turned off says so where Codex keeps it.
+    const reference = mask({ name: 'w', transport: 'http', url: 'https://w.example', headers: { Authorization: 'Bearer ${W_TOKEN}' } })
+    assert.deepStrictEqual(reference.headers, { Authorization: 'Bearer ${W_TOKEN}' })
+    assert.deepStrictEqual(codexLines({ name: 's', transport: 'stdio', command: 'x', off: true }), [
+      '[mcp_servers.s]',
+      'command = "x"',
+      'args = []',
+      'enabled = false',
+    ])
+    // What Codex's own command would keep of a command with nothing beside it.
+    assert.deepStrictEqual(asCodexWrites({ name: 's', transport: 'stdio', command: 'x', args: ['a'], env: { A: 'b' } }), {
+      name: 's',
+      transport: 'stdio',
+      command: 'x',
+      args: ['a'],
+      env: { A: 'b' },
+    })
+    assert.deepStrictEqual(asCodexWrites({ name: 'w', transport: 'http', url: 'https://w.example' }), {
+      name: 'w',
+      transport: 'http',
+      url: 'https://w.example',
+    })
   })
 })
 
@@ -177,6 +199,33 @@ describe('a server opened out', () => {
     }).pipe(Effect.provide(runtime(':memory:', {}, { agentConfigs: { homeDir: home, folder: io.folder, run: io.run, env: {} } })))
   })
 
+  it.live('says why a server with a written-out token isn’t copied, and that it reads no agents here', () => {
+    const home = homeWith({ claude: { mcpServers: { paid: { command: 'x', env: { API_TOKEN: 'written-out' } } } } })
+    const { io } = fakeAgents(home)
+    return Effect.gen(function* () {
+      const paid = yield* serverDetail('paid', null)
+      assert.deepStrictEqual(
+        paid.files.map((one) => [one.agent, one.state, one.why]),
+        [
+          ['claude', 'yours', null],
+          ['codex', 'cant', 'It has a token written out in its settings, so it isn’t copied to Codex. Give it as a variable to copy it.'],
+          [
+            'opencode',
+            'cant',
+            'It has a token written out in its settings, so it isn’t copied to OpenCode. Give it as a variable to copy it.',
+          ],
+        ],
+      )
+    }).pipe(Effect.provide(runtime(':memory:', {}, { agentConfigs: { homeDir: home, folder: io.folder, run: io.run, env: {} } })))
+  })
+
+  it.live('says it reads none of the agents’ settings where this Althar has no way to', () =>
+    Effect.gen(function* () {
+      const refused = yield* Effect.flip(serverDetail('paid', null))
+      assert.strictEqual(refused.message, 'This Althar doesn’t read your agents’ settings.')
+    }).pipe(Effect.provide(runtime(':memory:', {}, {}))),
+  )
+
   it.live('shows a repository’s own as its .mcp.json keeps it', () => {
     const home = homeWith({})
     const { io } = fakeAgents(home)
@@ -191,6 +240,18 @@ describe('a server opened out', () => {
       )
       assert.include(docs.files[0]?.lines.join('\n'), '"KEY": "••••"')
       assert.notInclude(JSON.stringify(docs), 'written-out')
+    }).pipe(Effect.provide(runtime(':memory:', {}, { agentConfigs: { homeDir: home, folder: io.folder, run: io.run, env: {} } })))
+  })
+
+  it.live('says where a repository has no server of that name', () => {
+    const home = homeWith({})
+    const { io } = fakeAgents(home)
+    const root = repository()
+    writeFileSync(join(root, '.mcp.json'), JSON.stringify({ mcpServers: { docs: { command: GH } } }))
+    return Effect.gen(function* () {
+      const { projectId } = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: root })
+      const refused = yield* Effect.flip(serverDetail('nowhere', projectId))
+      assert.strictEqual(refused.message, 'This project’s repository has no server named nowhere.')
     }).pipe(Effect.provide(runtime(':memory:', {}, { agentConfigs: { homeDir: home, folder: io.folder, run: io.run, env: {} } })))
   })
 
@@ -279,6 +340,18 @@ describe('adding a server', () => {
     assert.deepStrictEqual(names(home, 'codex'), [])
   })
 
+  it('says which agents already have one of its name, in the plural where two do', async () => {
+    const home = homeWith({
+      claude: { mcpServers: { linear: { type: 'http', url: 'https://mcp.linear.app/mcp' } } },
+      codex: { mcp_servers: { linear: { url: 'https://mcp.linear.app/mcp' } } },
+    })
+    const { io } = fakeAgents(home)
+    assert.strictEqual(
+      await failure(addServer(io, { name: 'linear', command: 'x' }, ['claude', 'codex', 'opencode'])),
+      'Claude Code and Codex already have a server named linear.',
+    )
+  })
+
   it('says in words what is wrong with what was given', async () => {
     const home = homeWith({})
     const { io, calls } = fakeAgents(home)
@@ -291,6 +364,12 @@ describe('adding a server', () => {
     assert.strictEqual(await said({ name: 'a', url: 'ftp://a.example' }), 'Its address starts with https:// or http://.')
     assert.strictEqual(await said({ name: 'a', url: 'not an address' }), 'Its address starts with https:// or http://.')
     assert.strictEqual(await said({ name: 'a', command: 'x', headers: { 'X-A': 'b' } }), 'Only an address takes headers.')
+    assert.strictEqual(await said({ name: 'a', url: 'https://a.example', args: ['x'] }), 'Only a command takes arguments.')
+    assert.strictEqual(
+      await said({ name: 'a', url: 'https://a.example', env: { A: 'b' } }),
+      'Only a command takes variables; an address takes headers.',
+    )
+    assert.strictEqual(await said({ name: 'a', url: 'https://a.example', headers: { 'X A': 'b' } }), 'X A isn’t a header’s name.')
     assert.strictEqual(
       await said({ name: 'a', command: 'x', env: { '1A': 'b' } }),
       '1A isn’t a variable’s name: letters, digits and underscores, not starting with a digit.',
@@ -313,6 +392,15 @@ describe('adding a server', () => {
       'Claude Code wasn’t changed: its `claude` command isn’t on this computer. Codex wasn’t changed: its `codex` command isn’t on this computer.',
     )
     assert.deepStrictEqual(names(absent.io.home.homeDir, 'opencode'), ['b'])
+  })
+
+  it('says its command failed where it failed without a word', async () => {
+    const { io } = fakeAgents(homeWith({}))
+    const quiet = { ...io, run: async () => ({ code: 1, output: '' }) }
+    assert.strictEqual(
+      await failure(addServer(quiet, { name: 'quiet', command: 'quiet' }, ['claude'])),
+      'Claude Code wasn’t changed: its command failed.',
+    )
   })
 
   it('doesn’t write to Codex what Codex can’t take, and says so', async () => {
@@ -362,6 +450,15 @@ describe('taking a server out', () => {
     assert.deepStrictEqual([names(home, 'claude'), names(home, 'codex'), names(home, 'opencode')], [[], ['a'], []])
     await reconcile(working.io)
     assert.deepStrictEqual([names(home, 'claude'), names(home, 'opencode')], [[], []])
+  })
+
+  it('forgets the sign-ins of what it took out, and keeps the others', async () => {
+    const home = homeWith({ claude: { mcpServers: { a: { command: 'a' }, b: { command: 'b' } } } })
+    const { io } = fakeAgents(home)
+    await turnOn(io)
+    writeRecord(io, { ...readRecord(io), signedIn: ['a:claude', 'b:claude'] })
+    await removeServer(io, 'a')
+    assert.deepStrictEqual(readRecord(io).signedIn, ['b:claude'])
   })
 
   it('says so where no agent has it', async () => {

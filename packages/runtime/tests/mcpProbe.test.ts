@@ -57,6 +57,18 @@ describe('a server that runs as a command', () => {
     expect(found).toEqual({ tools: null, why: 'It didn’t start: althar-no-such-command-anywhere isn’t on this computer.' })
   })
 
+  it('says the code or the signal where a command ended without a word', async () => {
+    const exited = { name: 'exits', transport: 'stdio' as const, command: process.execPath, args: ['-e', 'process.exit(7)'] }
+    expect(await probe(exited)).toEqual({ tools: null, why: 'It didn’t start: it exited with code 7.' })
+    const stopped = {
+      name: 'stopped',
+      transport: 'stdio' as const,
+      command: process.execPath,
+      args: ['-e', "process.kill(process.pid, 'SIGTERM')"],
+    }
+    expect(await probe(stopped)).toEqual({ tools: null, why: 'It didn’t start: it was stopped by SIGTERM.' })
+  })
+
   it('stops one that never answers, and what it started', async () => {
     const pidFile = join(mkdtempSync(join(tmpdir(), 'althar-probe-')), 'pid')
     expect(await probe(stdio('hangs', { FAKE_PID_FILE: pidFile }), SHORT)).toEqual({ tools: null, why: 'It didn’t answer in 1 second.' })
@@ -126,11 +138,43 @@ describe('a server at an address', () => {
         if (path === '/slow') return
         if (path === '/auth') return response.writeHead(401, { 'WWW-Authenticate': 'Bearer' }).end()
         if (path === '/broken') return response.writeHead(500).end('no')
+        // A body of no kind at all, as a server answering 204 does.
+        if (path === '/empty') return response.writeHead(204).end()
         const message = await json(request)
         if (message.id === undefined) return response.writeHead(202).end()
+        // A JSON reply with no content type, and one that is a batch of messages.
+        if (path === '/bare') return response.writeHead(200).end(JSON.stringify(reply(response, message)))
+        if (path === '/array') {
+          response.writeHead(200, { 'Content-Type': 'application/json' })
+          return response.end(JSON.stringify([{ jsonrpc: '2.0', method: 'notifications/message' }, reply(response, message)]))
+        }
+        if (path === '/error') {
+          response.writeHead(200, { 'Content-Type': 'application/json' })
+          return response.end(
+            JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32602, message: 'No tools for you\nmore' } }),
+          )
+        }
+        if (path === '/unanswered') {
+          response.writeHead(200, { 'Content-Type': 'application/json' })
+          return response.end(JSON.stringify({ jsonrpc: '2.0', id: 9_999, result: { tools: [] } }))
+        }
+        if (path === '/no-tools') {
+          response.writeHead(200, { 'Content-Type': 'application/json' })
+          return response.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { nothing: true } }))
+        }
         if (path === '/json') {
           response.writeHead(200, { 'Content-Type': 'application/json' })
           return response.end(JSON.stringify(reply(response, message)))
+        }
+        if (path === '/odd-sse') {
+          // A line that isn't JSON, then an event without its `event:` line, its answer split across two writes.
+          response.writeHead(200, { 'Content-Type': 'text/event-stream' })
+          response.write('event: message\ndata: {not json}\n\n')
+          response.write(`data: ${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/message' })}\n\n`)
+          const answer = JSON.stringify(reply(response, message))
+          response.write(`data: ${answer.slice(0, 12)}`)
+          response.end(`${answer.slice(12)}\n\n`)
+          return
         }
         // Server-sent events, with a session the next requests must carry, and a notification before the answer.
         if (message.method !== 'initialize' && session !== 'session-1') return response.writeHead(400).end()
@@ -185,5 +229,31 @@ describe('a server at an address', () => {
       tools: null,
       why: 'The address didn’t answer.',
     })
+  })
+
+  it('reads a JSON reply with no content type, or a batch with its notification first', async () => {
+    expect(await probe(http('/bare'))).toEqual({ tools: 3 })
+    expect(await probe(http('/array'))).toEqual({ tools: 3 })
+  })
+
+  it('reads server-sent events past what isn’t an answer, and an event without its name', async () => {
+    expect(await probe(http('/odd-sse'))).toEqual({ tools: 3 })
+  })
+
+  it('says what it got where the answer was an error, for another request, or no tools', async () => {
+    expect(await probe(http('/error'))).toEqual({ tools: null, why: 'It didn’t start: No tools for you.' })
+    expect(await probe(http('/unanswered'))).toEqual({ tools: null, why: 'It answered, but not as an MCP server does.' })
+    expect(await probe(http('/no-tools'))).toEqual({ tools: null, why: 'It answered, but not with a list of tools.' })
+  })
+
+  it('says an address that answered with no body, and gives a token by its variable', async () => {
+    expect(await probe(http('/empty'))).toEqual({ tools: null, why: 'It answered with nothing.' })
+    process.env.ALTHAR_PROBE_TOKEN = 'from-the-environment'
+    try {
+      expect(await probe(http('/json', { tokenVariable: 'ALTHAR_PROBE_TOKEN' }))).toEqual({ tools: 3 })
+    } finally {
+      delete process.env.ALTHAR_PROBE_TOKEN
+    }
+    expect(seen.filter((one) => one.path === '/json').some((one) => one.auth === 'Bearer from-the-environment')).toBe(true)
   })
 })

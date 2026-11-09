@@ -66,6 +66,14 @@ describe('Claude Code’s list', () => {
     expect(parseClaudeList(`${plugin}\n${own}`)?.get('github')).toEqual({ status: 'connected' })
   })
 
+  it('adds a reason’s next line to a failure, and not to one that started', () => {
+    const found = parseClaudeList('a: b - ✗ Failed to connect — first\n  second\nc: d - ✓ Connected\n  not a reason')!
+    expect(found.get('a')).toEqual({ status: 'failed', why: 'first second' })
+    expect(found.get('c')).toEqual({ status: 'connected' })
+    // A plugin named with nothing after its last colon keeps that as its name.
+    expect(parseClaudeList('plugin:: c - ✓ Connected')?.get('plugin:')).toEqual({ status: 'connected' })
+  })
+
   it('cuts a long reason to 300 characters', () => {
     const why = parseClaudeList(`a: b - ✗ Failed to connect — ${'x'.repeat(400)}`)?.get('a')?.why ?? ''
     expect(why).toHaveLength(300)
@@ -118,6 +126,7 @@ describe('Codex’s list', () => {
       'Name    Url                           Bearer Token Env Var  Status   Auth         ',
       'linear  https://mcp.linear.app/mcp    -                     enabled  Not logged in',
       'tok     https://example.invalid/mcp2  X_TOKEN               enabled  Bearer token ',
+      '        https://orphan.invalid         -                     enabled  Unsupported  ',
       '',
       'Name  Command  Args',
       'old   x        -',
@@ -276,6 +285,13 @@ describe('asking the agents how their servers stand', () => {
     const broken = agents({ 'codex mcp list --json': { code: 1, output: 'Error: config.toml has a mistake' } })
     await checkHealth(broken.io)
     expect(broken.calls).not.toContain('codex mcp list')
+    // An older Codex whose table fails too says nothing.
+    const failed = agents({
+      'codex mcp list --json': { code: 2, output: "error: unexpected argument '--json' found" },
+      'codex mcp list': { code: 1, output: 'error: config.toml has a mistake' },
+    })
+    expect((await checkHealth(failed.io)).servers).toEqual({})
+    expect(failed.calls).toContain('codex mcp list')
   })
 
   it('reads a damaged record as empty, and checks over it', async () => {
