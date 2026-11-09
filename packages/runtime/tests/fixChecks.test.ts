@@ -97,6 +97,45 @@ describe('checking a fix after a review', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
+  it.live('checks a tiny fix that left a finding open, and leaves what is still open to the person', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const instance = yield* Instance
+      yield* (yield* Connections).connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
+      const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      const coordinator = yield* Coordinator
+      const threadId = yield* coordinator.thread(project.projectId)
+      // Two findings, one in README.md; its lead fixes a line of README.md and settles only the first.
+      const body = 'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [review:always] [lead:fix-tiny] [lead:leave-open]'
+      yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
+      const [card] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'waiting')
+      const [round] = yield* graphOf(card?.threadId ?? '')
+      assert.deepStrictEqual(shape(round === undefined ? [] : [round]), [
+        ['implement0:done', 'review0:done', 'settle0:done', 'review1:done', 'settle1:done', 'publish0:next'],
+      ])
+      assert.isTrue((yield* toldReviewer(card?.taskId ?? '')).some((body) => body.startsWith('A check of the fixes')))
+      // Nothing published: a finding still open is the person's.
+      assert.lengthOf(github.changes, 0)
+      const sql = yield* SqlClient.SqlClient
+      const [stuck] = yield* sql<{ payload: string }>`SELECT payload FROM attention_requests WHERE kind = 'stuck'`
+      assert.isAbove(Number((JSON.parse(stuck?.payload ?? '{}') as { open?: number }).open), 0)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('checks a tiny fix that set its finding aside with no reason, and names no fix as too small to read', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const card = yield* reviewed(working, '[review:findings] [lead:fix-tiny] [lead:decline-quietly]')
+      const [round] = yield* graphOf(card.threadId)
+      assert.deepStrictEqual(shape(round === undefined ? [] : [round]), [
+        ['implement0:done', 'review0:done', 'settle0:done', 'review1:done', 'publish0:done'],
+      ])
+      // The check read it, so its pull request says nothing went unread.
+      assert.isTrue((yield* toldReviewer(card.taskId)).some((body) => body.startsWith('A check of the fixes')))
+      assert.notInclude(github.changes[0]?.body ?? '', 'too small to read again')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
   it.live('checks a bigger fix once, by the same reviewer, reading the fixes alone', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {

@@ -4684,7 +4684,10 @@ export class Runs extends Context.Service<
           // isn't read again, and the pull request names it; a bigger one gets one short check by the same reviewer, of the fixes
           // alone. A finding that check reopened is the lead's once more, and that second fix isn't read again.
           if (workAfter !== workBefore && attempt.iteration === 0) {
-            const tiny = yield* tinyFixOf(current)
+            // Not read again only once every finding is settled: one left open, or set aside with no word why, gets the check as a
+            // bigger fix does, and what's still unsettled after it goes back to the lead, then to the person.
+            const unsettled = (yield* openFindings(current)).length + (yield* unexplained(current, attempt.id)).length
+            const tiny = unsettled === 0 ? yield* tinyFixOf(current) : null
             if (tiny !== null) {
               yield* change('node_attempts', attempt.id, { output: JSON.stringify({ summary, tiny }) })
               yield* conclude(current)
