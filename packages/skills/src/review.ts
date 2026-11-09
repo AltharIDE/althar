@@ -171,8 +171,17 @@ const cardOf = (
 const installedFiles = (root: string, install: Install | undefined): Effect.Effect<Files, SkillStoreFailed> =>
   install === undefined ? Effect.succeed(new Map()) : readObject(root, install.treeHash)
 
+/** A repository path with no slash at either end, read a character at a time so no path can make the read slow. */
+const withoutEdgeSlashes = (path: string): string => {
+  let start = 0
+  let end = path.length
+  while (start < end && path[start] === '/') start += 1
+  while (end > start && path[end - 1] === '/') end -= 1
+  return path.slice(start, end)
+}
+
 /** The name a skill installs under: its directory's, as Agent Skills requires `name` to match. */
-const idOf = (subpath: string): string => basename(subpath.replace(/\/+$/, '')) || ''
+const idOf = (subpath: string): string => basename(withoutEdgeSlashes(subpath)) || ''
 
 const refused = (message: string) => new SkillRefused({ message })
 
@@ -191,7 +200,7 @@ const installOf = (
 export const stageFromGitHub = (root: string, access: GitHubAccess, source: GitHubSkillSource): Effect.Effect<ReviewCard, SkillError> =>
   Effect.gen(function* () {
     const sha = yield* resolveRef(access, source.repo, source.ref)
-    const subpath = source.subpath.replace(/^\/+|\/+$/g, '')
+    const subpath = withoutEdgeSlashes(source.subpath)
     const id = idOf(subpath) || (source.repo.split('/')[1] ?? source.repo)
     const files = yield* fetchSkill(access, source.repo, sha, subpath)
     const treeHash = yield* putObject(root, files)

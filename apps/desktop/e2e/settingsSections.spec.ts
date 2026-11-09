@@ -44,6 +44,9 @@ const SERVERS: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
   ].map((name): readonly [string, Record<string, unknown>] => [name, { type: 'stdio', command: 'node', args: [FAKE_SERVER, 'pages'] }]),
 ]
 
+/** The app names this section for the system it runs on: this Mac, this PC, this computer. */
+const THIS_COMPUTER = process.platform === 'darwin' ? 'this Mac' : process.platform === 'win32' ? 'this PC' : 'this computer'
+
 const GROUPS = [
   ['Agents', 'agents'],
   ['MCP servers', 'mcp-servers'],
@@ -51,7 +54,7 @@ const GROUPS = [
   ['Code hosts and trackers', 'code-hosts'],
   ['Tasks', 'tasks'],
   ['Pull requests', 'pull-requests'],
-  ['Work on this Mac', 'this-mac'],
+  [`Work on ${THIS_COMPUTER}`, 'this-mac'],
   ['Notifications', 'notifications'],
   ['Appearance', 'appearance'],
   ['Editor and browser', 'editor-and-browser'],
