@@ -664,7 +664,7 @@ Under the default project rule, the paused work moves on, in this order:
 
 Free routes must be signed in, allowed, unblocked and have usage left. A
 subscription on the model's provider counts even when the account otherwise
-pays per use; session startup uses the same rule for automation runs. First
+pays per use; session startup uses the same rule. First
 prefer models from a different maker than the other step, keeping review
 cross-maker whenever possible. Then prefer models not nearly out. Within
 five score points of the strongest model in that class, prefer a known

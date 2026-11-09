@@ -1540,13 +1540,25 @@ export const handlers = Api.toLayer(
           api(
             Effect.gen(function* () {
               const said = yield* envelope('attention.answer_question', { attentionId, answers }, commandId)
-              const [on] = yield* sql<{ kind: string | null }>`
-                SELECT t.kind FROM attention_requests q LEFT JOIN threads t ON t.id = json_extract(q.payload, '$.threadId')
+              const [on] = yield* sql<{ kind: string | null; automationId: string | null; state: string }>`
+                SELECT t.kind, q.state, json_extract(q.payload, '$.automationId') AS automation_id FROM attention_requests q
+                LEFT JOIN threads t ON t.id = json_extract(q.payload, '$.threadId')
                 WHERE q.id = ${attentionId}`
               // A task's lead or reviewer carries on with the answer once it has a place among the agents at work here (Runs).
               const answer =
                 on?.kind === 'coordinator'
                   ? Effect.gen(function* () {
+                      // Althar asked, not the coordinator: "run it" runs the automation, which takes the question back, and says
+                      // why where it still can't; any other answer closes it.
+                      if (on.automationId !== null) {
+                        // A call already closed, here or by a run that started since, starts nothing. The run that "Run it now"
+                        // starts is the record of that answer, and takes the call back; "Leave it" answers it.
+                        if (on.state !== 'open') return
+                        if (answers.next?.values.includes('run') === true)
+                          return yield* automations.runNow(on.automationId, instance.personId)
+                        yield* questions.answer({ envelope: said, attentionId, answers })
+                        return
+                      }
                       const answered = yield* questions.answer({ envelope: said, attentionId, answers })
                       if (answered.told) return
                       // The coordinator that asked has gone: the answer is told to the one on its thread next.

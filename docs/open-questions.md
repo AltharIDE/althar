@@ -153,8 +153,8 @@ page.
   and then the run only reads.
 - [x] **The limits by default.** One place; an hour apart at least; 45
   minutes of work a run, over all its steps; runs a day capped for all
-  automations together; stop on a usage limit; plan accounts only at
-  first, which leaves OpenCode out; at most five pull requests open.
+  automations together; stop on a usage limit; at most five pull requests
+  open.
 - [x] **The coordinator's reach.** Pause in words; resume and Run now on a
   small card; any other change on a card.
 - [x] **Where they live.** In Althar, the person's own, on the computer they were

@@ -65,7 +65,7 @@ import {
   type UnknownAgent,
 } from './errors'
 import { Instance } from './Instance'
-import { Limits, type PlanOnly } from './Limits'
+import { Limits } from './Limits'
 import { PlanUsage } from './PlanUsage'
 import { Live } from './Live'
 import type { Models } from './Models'
@@ -681,7 +681,7 @@ export class Sessions extends Context.Service<
       readonly effort?: string
       /** The account it runs on, where the person picked one; else as `Limits.pick` says. */
       readonly accountId?: string
-    }): Effect.Effect<string, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | PlanOnly | Failure>
+    }): Effect.Effect<string, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /**
      * Starts the agent last on the thread again, on the model and effort it
      * had, for what waits in its queue: false, and nothing started, where no
@@ -689,7 +689,7 @@ export class Sessions extends Context.Service<
      */
     startLast(
       threadId: string,
-    ): Effect.Effect<boolean, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | PlanOnly | Failure>
+    ): Effect.Effect<boolean, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /**
      * Tries the thread's last turn again, as the person asked, where it
      * failed (ADR-060): what they said in it goes again, with what waits
@@ -698,7 +698,7 @@ export class Sessions extends Context.Service<
      */
     tryAgain(
       threadId: string,
-    ): Effect.Effect<boolean, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | PlanOnly | Failure>
+    ): Effect.Effect<boolean, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /** Whether Try again can act now: the same rule the window uses for its error's action. */
     retryable(threadId: string): Effect.Effect<boolean, SqlError.SqlError>
     /** Serializes preparation and acceptance in arrival order, holding delivery until the whole burst is ready. */
@@ -784,7 +784,7 @@ export class Sessions extends Context.Service<
       readonly accountId?: string
       /** The person switched, not Althar: the new agent's first turn is theirs, and goes on at once (ADR-037). */
       readonly byPerson?: boolean
-    }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | PlanOnly | Failure>
+    }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /** Stops the turn running, if there is one; the session waits for what comes next. */
     interrupt(threadId: string): Effect.Effect<void, NoSession>
     /** Stops the thread's session, after ending its turn. */
