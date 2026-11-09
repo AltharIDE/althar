@@ -23,6 +23,11 @@ export const recordOf = (change: Change) => (change.short === undefined ? prOf(c
 /** A change and where it stands, as one fact: “Lane heights: checks failing”, or “#714 checks failing” where it has no words. */
 export const about = (change: Change, rest: string) => (change.short === undefined ? `${prOf(change)} ${rest}` : `${change.short}: ${rest}`)
 export const open = (change: Change) => change.state !== 'merged' && change.state !== 'closed'
+/** The change it waits for, while that one is still open: what it fixes doesn't ask for the person here. */
+export const waitsFor = (c: Case, change: Change): Change | undefined => {
+  const first = changeIn(c, change.after)
+  return first !== undefined && open(first) ? first : undefined
+}
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 export const commits = (n: number) => plural(n, 'commit')
 export const list = (names: ReadonlyArray<string>) =>
@@ -104,7 +109,7 @@ export const needOf = (c: Case, answered: Readonly<Record<string, string>>): Nee
       says: c.still.why,
       ...(c.still.act === undefined ? {} : { act: c.still.act }),
     })
-  const failing = live.find((one) => one.checks === 'failed' && (one.waiting ?? 0) === 0)
+  const failing = live.find((one) => one.checks === 'failed' && (one.waiting ?? 0) === 0 && waitsFor(c, one) === undefined)
   if (failing !== undefined) return with_({ tone: 'bad', says: about(failing, 'checks failing'), act: 'Fix it', change: failing })
   const conflict = live.find((one) => one.conflict === true)
   if (conflict !== undefined)

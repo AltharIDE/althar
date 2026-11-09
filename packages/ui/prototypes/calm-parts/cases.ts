@@ -20,6 +20,13 @@ export interface Change {
   readonly heldBy?: string
   /** Stacked on another of the task's changes: it branches from that one and targets it. */
   readonly on?: string
+  /**
+   * Goes up after another of the task's changes merges, as the person asked ("fix main first"): it doesn't build on that one's code,
+   * so it isn't stacked. What that one fixes doesn't ask for the person here, and once it merges, main comes in.
+   */
+  readonly after?: string
+  /** The issues its pull request closes. */
+  readonly closes?: ReadonlyArray<string>
   /** The branch it works toward, where it isn't main. */
   readonly toward?: string
   /** Where it is checked out now. */
@@ -106,6 +113,7 @@ export type Preset = 'Change' | 'Small change' | 'Chat' | 'Review a PR' | 'Proto
 
 export type Group =
   | 'Several changes'
+  | 'Your two flows'
   | 'Found, not made here'
   | 'Where it works'
   | 'Waiting for Ship'
@@ -146,6 +154,10 @@ export interface Case {
   /** Gone from its parts, and what it left. */
   readonly left?: ReadonlyArray<{ readonly what: string; readonly stays: string }>
   readonly issue?: string
+  /** The issues it was started from or took in; today's one where it isn't said. */
+  readonly issues?: ReadonlyArray<{ readonly key: string; readonly title: string }>
+  /** Checks pass a beat after a push, so a flow can be clicked through to its end. */
+  readonly passes?: true
   readonly shots?: number
   /** It has gone quiet for a reason the person should know: out of usage, no place. */
   readonly still?: { readonly why: string; readonly act?: string }
@@ -205,6 +217,92 @@ const opening: ReadonlyArray<Beat> = [
     took: { work: 214, tools: 61 },
     commits: { n: 3, change: 'still' },
   },
+]
+
+/* ——— Your two flows' changes ——— */
+
+const RELEASE_TITLE = 'Cut 0.9.0'
+const RELEASE: Change = {
+  id: 'release',
+  branch: 'release-0.9.0',
+  pr: 710,
+  state: 'open',
+  title: 'Release 0.9.0: raise the version and write its notes',
+  short: 'Release 0.9.0',
+  checks: 'failed',
+  failing: ['e2e (board.spec.ts)'],
+  after: 'fixmain',
+  place: 'worktree',
+  add: 96,
+  del: 4,
+}
+const FIX_MAIN: Change = {
+  id: 'fixmain',
+  branch: 'althar/fix-main',
+  title: 'Fix the board’s e2e on main',
+  short: 'Fix main',
+  waiting: 1,
+  place: 'worktree',
+  add: 3,
+  del: 3,
+}
+const releaseOpening: ReadonlyArray<Beat> = [
+  { kind: 'you', text: 'Cut 0.9.0: a release branch, the version raised, and the notes from what merged since 0.8.0.' },
+  {
+    kind: 'lead',
+    text: 'release-0.9.0 is up as #710: version 0.9.0, and notes for the 14 pull requests since 0.8.0, in four groups.',
+    tools: ['Ran git log v0.8.0..main', 'Edit package.json', 'Write docs/releases/0.9.0.md'],
+    took: { work: 188, tools: 42 },
+    commits: { n: 2, change: 'release' },
+  },
+  { kind: 'you', text: 'Main is red, the board’s e2e. Fix main first, then carry on with the release.' },
+  {
+    kind: 'lead',
+    text: 'board.spec.ts fails on main since #709: it waits for a lane still called “Keep for later”. The fix goes into main on its own, so it lands before the release. #710 waits for it, then takes main in.',
+    tools: ['Ran gh run view --log-failed', 'Edit apps/desktop/e2e/board.spec.ts'],
+    took: { work: 74, tools: 31 },
+    commits: { n: 1, change: 'fixmain' },
+    part: { text: 'Started a second change, Fix main, on althar/fix-main toward main, to land before Release 0.9.0.', change: 'fixmain' },
+  },
+]
+
+const PAGES_TITLE = 'Privacy page'
+const PAGES_ISSUES = [
+  { key: 'DEV-140', title: 'A privacy page on the landing site' },
+  { key: 'DEV-141', title: 'A terms page on the landing site' },
+]
+const PRIVACY: Change = {
+  id: 'privacy',
+  branch: 'althar/privacy-page',
+  title: 'A privacy page on the landing site',
+  short: 'Privacy page',
+  waiting: 2,
+  place: 'worktree',
+  closes: ['DEV-140'],
+  add: 132,
+  del: 2,
+}
+const TERMS: Change = {
+  id: 'terms',
+  branch: 'althar/terms-page',
+  title: 'A terms page on the landing site',
+  short: 'Terms page',
+  waiting: 2,
+  place: 'worktree',
+  closes: ['DEV-141'],
+  add: 118,
+  del: 1,
+}
+const pagesOpening: ReadonlyArray<Beat> = [
+  { kind: 'you', text: 'Do DEV-140: a privacy page on the landing site.' },
+  {
+    kind: 'lead',
+    text: 'The privacy page is at /privacy, linked from the footer, in the site’s own type.',
+    tools: ['Write site/src/pages/privacy.astro', 'Edit site/src/components/Footer.astro'],
+    took: { work: 142, tools: 28 },
+    commits: { n: 2, change: 'privacy' },
+  },
+  { kind: 'you', text: 'Pull in DEV-141 too, the terms page. It’s on the landing site as well.' },
 ]
 
 export const CASES: ReadonlyArray<Case> = [
@@ -427,6 +525,128 @@ export const CASES: ReadonlyArray<Case> = [
       },
     ],
     adr: 'The thread’s line lets the person say “keep them together”, which joins two changes again before either ships.',
+  },
+
+  /* ——— Your two flows: one conversation, two things to do, as the person works ——— */
+  {
+    key: 'release-red',
+    group: 'Your two flows',
+    label: 'A release, and main is red: fix main first',
+    lane: 'you',
+    word: 'Not shipped',
+    status: 'yours',
+    title: RELEASE_TITLE,
+    kind: 'change',
+    preset: 'Change',
+    changes: [RELEASE, FIX_MAIN],
+    reviewer: SOL,
+    issues: [],
+    passes: true,
+    thread: releaseOpening,
+    adr: 'Proposed: a change can go first. The one waiting for it isn’t stacked on it; once it merges, main comes in.',
+  },
+  {
+    key: 'release-fix-ready',
+    group: 'Your two flows',
+    label: 'Fix main ready, the release waiting for it',
+    lane: 'you',
+    word: 'Ready',
+    status: 'yours',
+    title: RELEASE_TITLE,
+    kind: 'change',
+    preset: 'Change',
+    changes: [RELEASE, ch(FIX_MAIN, { waiting: undefined, pr: 719, state: 'open', checks: 'passed', ready: true })],
+    reviewer: SOL,
+    issues: [],
+    passes: true,
+    thread: [
+      ...releaseOpening,
+      { kind: 'review', findings: 0, change: 'fixmain' },
+      { kind: 'line', text: 'Shipped: althar/fix-main is up as #719, into main, with the 1 commit.', change: 'fixmain' },
+    ],
+    adr: 'Proposed: what the change going first fixes doesn’t ask for the person on the one waiting for it.',
+  },
+  {
+    key: 'release-on',
+    group: 'Your two flows',
+    label: 'Main fixed, the release carries on',
+    lane: 'running',
+    word: 'Checks',
+    status: 'running',
+    title: RELEASE_TITLE,
+    kind: 'change',
+    preset: 'Change',
+    changes: [
+      ch(RELEASE, { after: undefined, checks: 'running', failing: undefined }),
+      ch(FIX_MAIN, { waiting: undefined, pr: 719, state: 'merged', place: 'none', checks: undefined }),
+    ],
+    reviewer: SOL,
+    issues: [],
+    passes: true,
+    thread: [
+      ...releaseOpening,
+      { kind: 'review', findings: 0, change: 'fixmain' },
+      { kind: 'line', text: 'Shipped: althar/fix-main is up as #719, into main, with the 1 commit.', change: 'fixmain' },
+      { kind: 'line', text: 'Fix main (#719) merged, and main came into Release 0.9.0.', change: 'release' },
+    ],
+    adr: 'A merge ends only its own change, never the task, its session or what runs.',
+  },
+  {
+    key: 'tickets-split',
+    group: 'Your two flows',
+    label: 'Two tickets, put on two branches',
+    lane: 'you',
+    word: 'Not shipped',
+    status: 'yours',
+    title: PAGES_TITLE,
+    kind: 'change',
+    preset: 'Change',
+    changes: [PRIVACY, TERMS],
+    reviewer: SOL,
+    issues: PAGES_ISSUES,
+    thread: [
+      ...pagesOpening,
+      {
+        kind: 'lead',
+        text: 'The terms page is at /terms, beside the privacy page in the footer.',
+        tools: ['Write site/src/pages/terms.astro', 'Edit site/src/components/Footer.astro'],
+        took: { work: 96, tools: 20 },
+        commits: { n: 2, change: 'terms' },
+      },
+      {
+        kind: 'part',
+        who: 'lead',
+        text: 'Started a second change, Terms page, on althar/terms-page toward main, as DEV-141 is a page of its own.',
+        change: 'terms',
+        act: 'Keep them together',
+      },
+    ],
+    adr: 'The lead splits where the parts should be reviewed or merged apart. Proposed: only where something forces it, or you ask.',
+  },
+  {
+    key: 'tickets-one',
+    group: 'Your two flows',
+    label: 'Two tickets, kept on one branch',
+    lane: 'you',
+    word: 'Not shipped',
+    status: 'yours',
+    title: PAGES_TITLE,
+    kind: 'change',
+    preset: 'Change',
+    changes: [ch(PRIVACY, { waiting: 4, closes: ['DEV-140', 'DEV-141'], short: undefined })],
+    reviewer: SOL,
+    issues: PAGES_ISSUES,
+    thread: [
+      ...pagesOpening,
+      {
+        kind: 'lead',
+        text: 'The terms page is at /terms, beside the privacy page in the footer. It’s on the same branch: one pull request closes DEV-140 and DEV-141.',
+        tools: ['Write site/src/pages/terms.astro', 'Edit site/src/components/Footer.astro'],
+        took: { work: 96, tools: 20 },
+        commits: { n: 2, change: 'privacy' },
+      },
+    ],
+    adr: 'Proposed: a task stays one change until something forces a second: another target or repository, one that goes first, or you ask.',
   },
 
   /* ——— Found, not made here ——— */

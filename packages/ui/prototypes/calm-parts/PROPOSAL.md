@@ -17,7 +17,7 @@ Task, Outputs, Plan). The URL keeps them: `?d=B&s=stack-held#/threads/th1`.
 Every press changes the case it is pressed in: Ship, Merge, Fix it, Add,
 Remove, Run safely, Trust fully, Move, Call it off and every ask's buttons do
 what they say, and Undo takes an answer back. Start over, in the strip, puts
-the case back. `node flows.mjs` clicks through 60 of these headless.
+the case back. `node flows.mjs` clicks through 74 of these headless.
 
 ## Decided so far
 
@@ -202,6 +202,22 @@ task has two changes, and each tab's state competes with the bar's sentence.
   message to the same lead.
 - **After merge, back in Needs you:** the card says "Review found 2", naming
   the merged pull request.
+- **A change can go first** (your release flow). The ADR has siblings, which
+  merge in any order, and stacks. It needs a third: a change that waits for
+  another to merge, toward the same target, without building on its code.
+  Its checks that the first one fixes don't ask for the person, and when the
+  first merges, Althar brings main into it (held with it, where it has
+  commits waiting). Today's text, "so does a fix the change under way needs"
+  (stays one change), would put main's fix inside the release.
+- **Split less** (your two tickets). "The lead splits where the parts should
+  be reviewed or merged apart" becomes: a task stays one change until
+  something forces a second (another target or repository, one that has to
+  go first) or the person asks. Two tickets in one place are one change, its
+  pull request closing both.
+- **A change records the issues it closes,** and Keep them together carries
+  them across.
+- **Keep them together is offered only where the lead split by its own
+  choice,** never where the person asked for the work apart.
 - **Run it's prompt** offers Not now beside the two levels.
 - **Out of usage and a stuck step** offer the models free to take the work
   over, with how each is reached, not only Wait and Try again.
@@ -251,6 +267,60 @@ when several compete (the order under "What the ADR would need to match"),
 making "which change am I talking to" a question nobody has to answer, and
 saying "commits not shipped" so it needs no explaining.
 
+## Your two flows
+
+Two flows the person has all the time (9 November), as cases in the group
+"Your two flows". Both are one conversation with two things to do, one
+leaning on the other. The person thinks in what they want done and in what
+order ("fix main first", "do this one too"), never in changes, stacks or
+siblings, so the window never asks them to.
+
+**A release, and main is red** (`?s=release-red`, then
+`release-fix-ready`, `release-on`). "Cut 0.9.0" puts up `release-0.9.0` as
+#710. Its checks fail with the e2e that fails on main. "Fix main first, then
+carry on with the release": the lead makes Fix main, toward main, and says
+in its own turn that the release waits for it. In A:
+
+1. "Fix main: 1 commit not shipped · Ship". The release's red checks don't
+   take the sentence, as Fix main is what fixes them. Its mark is grey, and
+   its row says "Waits for Fix main to merge".
+2. Ship: reviewed, up as #719, checks pass. "Fix main: ready to merge · Merge".
+3. Merge: "Fix main (#719) merged, and main came into Release 0.9.0." The
+   release's checks run again, and pass. "Release 0.9.0: ready to merge".
+
+Fix main isn't stacked under the release: that would point #710 at the
+fix's branch and show the fix in the release's diff, and main should be
+green for everyone as soon as it can be. Both go toward main; one goes
+first.
+
+**Two tickets** (`?s=tickets-split`, then `tickets-one`). "Do DEV-140, a
+privacy page", then "pull in DEV-141 too, the terms page". Claude Code put
+them on two branches, and the person wanted one. In A:
+
+- Split, as Claude Code did: "4 commits not shipped, in 2 changes · Ship",
+  and the lead's line "Started a second change, Terms page… as DEV-141 is a
+  page of its own · Keep them together". One press joins them: "You kept
+  Terms page with Privacy page… and its pull request closes DEV-140 and
+  DEV-141." Ship opens one pull request.
+- Kept together from the start, as proposed: one change, "4 commits not
+  shipped · Ship", the parts naming DEV-140 and DEV-141. The lead's own
+  words say it's one branch; nothing else changes on screen.
+
+What the flows changed in this design:
+
+- **A change can go first.** A change that waits for another isn't stacked
+  on it. What the first one fixes doesn't ask for the person on the second,
+  and once the first merges, main comes into the second. Its row says
+  "Waits for Fix main to merge".
+- **One change until something forces a second:** another target or
+  repository, one that has to go first, or the person asks. Two tickets in
+  one place stay one change, its pull request closing both.
+- **Keep them together only where the lead chose to split.** Where the
+  person asked for it ("fix main first"), the lead's line offers nothing to
+  undo it.
+
+These are in A only; B and C read the same rules their own way.
+
 ## How to choose between A, B and C
 
 Most cases look the same in all three; these six are where they differ. Open
@@ -285,5 +355,7 @@ three, as today.
 
 ## Questions for the person
 
-1. Several changes: A · As one (recommended), B · One at a time, or C · Where
-   you talk?
+1. Several changes: A · As one (recommended, and where you lean), B · One at
+   a time, or C · Where you talk?
+2. Two tickets in one task: one pull request closing both, unless something
+   forces two (recommended), or one pull request per ticket?

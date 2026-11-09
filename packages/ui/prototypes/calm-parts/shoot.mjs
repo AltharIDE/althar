@@ -43,6 +43,13 @@ export const SHOTS = [
   // The plan card: its preset, a quiet word in its kicker
   { id: '15-plan-preset-word', d: 'A', s: 'needs-one', at: 'talk', selector: '[class*="TaskLaunch-module__launch"]' },
   { id: '16-plan-preset-open', d: 'A', s: 'needs-one', at: 'talk', press: 'button[aria-label^="Preset"]', pop: true },
+  // Your two flows, in A: a release with main red, fixed first; two tickets on two branches, kept together.
+  { id: '17-A-release-red-bar', d: 'A', s: 'release-red', at: 'task', ...top(56) },
+  { id: '18-A-release-red-marks', d: 'A', s: 'release-red', at: 'task', press: 'button[aria-label^="2 changes"]', pop: true },
+  { id: '19-A-release-red-card', d: 'A', s: 'release-red', at: 'board', ...card('Cut 0.9.0') },
+  { id: '20-A-release-on-thread', d: 'A', s: 'release-on', at: 'task', ...around('Fix main (#719) merged', 260, 60) },
+  { id: '21-A-tickets-split-thread', d: 'A', s: 'tickets-split', at: 'task', ...around('Started a second change, Terms page', 200, 60) },
+  { id: '22-A-tickets-one-parts', d: 'A', s: 'tickets-one', at: 'task', press: 'button[aria-label^="Parts,"]', pop: true },
 ]
 
 const only = process.argv.slice(2)

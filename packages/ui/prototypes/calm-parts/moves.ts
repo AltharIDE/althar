@@ -1,7 +1,7 @@
 // Scrappy: what a press does. Each is an edit to the case on screen (its changes, parts, access, thread), so the bar, the card, the
 // parts and the thread all read the same case after it; and what takes time (a Ship) goes step by step, in place. Nothing real happens.
 import { type Ask, type Beat, type Case, type Change, changeIn, type Preset, type Who } from './cases'
-import { askNeed, askOf, commits, nameOf, open, recordOf } from './need'
+import { askNeed, askOf, commits, list as joined, nameOf, open, recordOf } from './need'
 import { type Edit, proto } from './state'
 
 const STEP = 1100
@@ -193,6 +193,18 @@ const shipping = (c: Case, id: string, options: ShipOptions): ReadonlyArray<Edit
   return list
 }
 
+/** Where the case lets a flow run on: the change's checks pass, and it is ready to merge. */
+const passing =
+  (id: string): Edit =>
+  (c) => {
+    const one = changeIn(c, id)
+    if (c.passes !== true || one === undefined || !open(one) || one.checks !== 'running') return c
+    return compose(
+      change(id, (x) => ({ ...x, checks: 'passed', ready: true })),
+      standing('you', 'yours', 'Ready'),
+    )(c)
+  }
+
 /** Ship: one change, or every one waiting. A change holding up another is shipped first, and the ask that offered it is answered. */
 export const ship = (id?: string, options: ShipOptions = {}) => {
   const c = proto.current()
@@ -206,6 +218,7 @@ export const ship = (id?: string, options: ShipOptions = {}) => {
   if (c.thread.some((b) => b.kind === 'ask' && b.ask.kind === 'ship-stack') && proto.get().answered[key] === undefined)
     proto.answer(key, `Shipping ${order.map((one) => nameOf(changeIn(c, one)!)).join(', then ')}`)
   const list = order.flatMap((one) => shipping(c, one, options))
+  if (c.passes === true) list.push(...order.map(passing))
   if (options.last !== undefined) list.push(options.last)
   steps(list)
   if (options.after !== undefined) proto.afterwards(STEP * list.length + 300, options.after)
@@ -226,6 +239,7 @@ export const merge = (id?: string, then?: Edit, all = false) => {
       : [target]
   const list = order.map((one): Edit => (cc) => {
     const above = cc.changes.find((other) => other.on === one.id)
+    const waited = cc.changes.filter((other) => other.after === one.id && open(other))
     const next = {
       ...cc,
       changes: cc.changes.map((other) =>
@@ -233,12 +247,17 @@ export const merge = (id?: string, then?: Edit, all = false) => {
           ? { ...other, state: 'merged' as const, ready: undefined, place: 'none' as const, checks: undefined, shipping: undefined }
           : other.on === one.id
             ? { ...other, on: undefined, toward: undefined }
-            : other,
+            : other.after === one.id
+              ? { ...other, after: undefined, checks: 'running' as const, failing: undefined }
+              : other,
       ),
     }
     return compose(
       calm,
-      line(`${recordOf(one)} merged.${above === undefined ? '' : ` ${nameOf(above)} goes into main now.`}`, one.id),
+      line(
+        `${recordOf(one)} merged${waited.length === 0 ? '.' : `, and main came into ${joined(waited.map(nameOf))}.`}${above === undefined ? '' : ` ${nameOf(above)} goes into main now.`}`,
+        waited[0]?.id ?? one.id,
+      ),
     )(next)
   })
   list.push((cc) => {
@@ -251,6 +270,9 @@ export const merge = (id?: string, then?: Edit, all = false) => {
     )(cc)
   })
   steps(list)
+  // What waited for it: its checks run with main in, and pass a beat later where the case runs on.
+  const waited = c.changes.filter((other) => open(other) && order.some((one) => other.after === one.id))
+  if (c.passes === true && waited.length > 0) proto.later(STEP * (list.length + 1), compose(...waited.map((one) => passing(one.id))), c.key)
 }
 
 /* ——— Fix it, post it, resolve it ——— */
@@ -529,19 +551,36 @@ export const lineAct = (act: string, id?: string) => {
       return callOff()
     case 'Trust fully':
       return trust()
-    case 'Keep them together':
+    case 'Keep them together': {
+      const into = c.changes.find((other) => other.id !== id && open(other))
+      if (one === undefined || into === undefined) return undefined
+      const closes = [...(into.closes ?? []), ...(one.closes ?? [])]
       return proto.edit(
         compose(
           (cc) => ({
             ...cc,
             changes: cc.changes
               .filter((other) => other.id !== id)
-              .map((other, at) => (at === 0 ? { ...other, waiting: (other.waiting ?? 0) + (one?.waiting ?? 0) } : other)),
+              .map((other) =>
+                other.id === into.id
+                  ? {
+                      ...other,
+                      waiting: (other.waiting ?? 0) + (one.waiting ?? 0),
+                      ...(closes.length === 0 ? {} : { closes }),
+                      // Alone again, it goes by its pull request or branch, as a task that never split does.
+                      ...(cc.changes.filter(open).length <= 2 ? { short: undefined } : {}),
+                    }
+                  : other,
+              ),
           }),
           dropAct(act),
-          part('you', 'You kept the rename with the fix. The lead carries its commits onto althar/board-still.'),
+          part(
+            'you',
+            `You kept ${nameOf(one)} with ${nameOf(into)}. The lead carries its commits onto ${into.branch}${closes.length > 1 ? `, and its pull request closes ${joined(closes)}` : ''}.`,
+          ),
         ),
       )
+    }
     case 'Drop it':
       return proto.edit(compose(without(id ?? ''), dropAct(act), part('you', `You dropped ${one?.branch ?? 'it'}. The branch stays.`)))
     case 'Fix it':

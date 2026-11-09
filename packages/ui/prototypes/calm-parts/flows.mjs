@@ -452,5 +452,63 @@ check(
   'A stuck: picking GPT-6.1 Terra reviews with it, then ships',
 )
 
+// Your two flows. A release, and main is red: the fix goes first; the release's own red checks don't ask meanwhile.
+const bar = () => page.locator('header[aria-label]').first().innerText()
+await open('A', 'release-red')
+check((await bar()).includes('Fix main: 1 commit not shipped'), 'A release-red: the bar names Fix main, not the release’s red checks')
+await press('Ship')
+await settle(5200)
+t = await bar()
+check(t.includes('Fix main: ready to merge'), 'A release-red: Ship puts Fix main up, its checks pass, and it is ready to merge')
+check((await titled()).includes('fix main first'), 'A release-red: the flow stays in its case')
+await press('Merge')
+await settle(4800)
+t = await text()
+check(t.includes('Fix main (#719) merged, and main came into Release 0.9.0.'), 'A release-red: the merge brings main into the release')
+check((await bar()).includes('Release 0.9.0: ready to merge'), 'A release-red: the release carries on, and its checks pass with main in')
+await page.getByRole('button', { name: /^2 changes:/ }).click()
+await settle(250)
+t = await page.locator('[role=dialog]').innerText()
+check(t.includes('Merged') && t.includes('Ready to merge'), 'A release-red: the marks open to Fix main merged and the release ready')
+await page.keyboard.press('Escape')
+
+// The release waits for Fix main: its row says so, in every direction.
+await open('C', 'release-red')
+check((await dock().innerText()).includes('Release 0.9.0'), 'C release-red: a tab for each')
+await open('A', 'release-red')
+await page.getByRole('button', { name: /^2 changes:/ }).click()
+await settle(250)
+check(
+  (await page.locator('[role=dialog]').innerText()).includes('Waits for Fix main to merge'),
+  'A release-red: the release’s row says it waits for Fix main',
+)
+await page.keyboard.press('Escape')
+
+// Two tickets on two branches: Keep them together puts them on one, its pull request closing both.
+await open('A', 'tickets-split')
+check((await bar()).includes('4 commits not shipped, in 2 changes'), 'A tickets-split: one sentence for both')
+await press('Keep them together')
+await settle(400)
+t = await text()
+check(
+  t.includes(
+    'You kept Terms page with Privacy page. The lead carries its commits onto althar/privacy-page, and its pull request closes DEV-140 and DEV-141.',
+  ),
+  'A tickets-split: Keep them together joins them, closing both issues',
+)
+check((await bar()).includes('4 commits not shipped') && !(await bar()).includes('in 2 changes'), 'A tickets-split: one change again')
+await press('Ship')
+await settle(4200)
+check(
+  (await text()).includes('Shipped: althar/privacy-page is up as #719, into main, with the 4 commits.'),
+  'A tickets-split: one pull request',
+)
+await open('A', 'tickets-one')
+check((await parts()) >= 1, 'A tickets-one: the parts row is there')
+await page.locator('button[aria-label^="Parts,"]').first().click()
+await settle(250)
+check((await page.locator('[role=dialog]').innerText()).includes('DEV-140, DEV-141'), 'A tickets-one: the parts name both issues')
+await page.keyboard.press('Escape')
+
 process.stdout.write(`${failed} failed; page errors: ${errors.length === 0 ? 'none' : [...new Set(errors)].join(' | ')}\n`)
 await browser.close()

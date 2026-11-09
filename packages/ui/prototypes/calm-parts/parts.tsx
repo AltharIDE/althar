@@ -13,7 +13,7 @@ import { Popover } from '../../src/primitives/Popover/Popover'
 import type { PartAction, PartKind, PartTone, TaskPartModel } from '../../src/chrome/TaskParts/TaskParts'
 import { BranchChip, PullChip } from '../../src/board/BoardCard/Chips'
 import { type Case, caseOf, type Change, changeIn, type Timing } from './cases'
-import { commits, nameOf, needOf, open, partsOfTime, prOf, said } from './need'
+import { commits, nameOf, needOf, open, partsOfTime, prOf, said, waitsFor } from './need'
 import {
   act as doAct,
   addChange,
@@ -58,6 +58,8 @@ export const standingOf = (c: Case, change: Change): { detail: string; tone?: Pa
     }
   }
   if (change.shipping !== undefined) return { detail: change.shipping === 'review' ? 'Shipping: the review' : 'Shipping', tone: 'live' }
+  const first = waitsFor(c, change)
+  if (first !== undefined && (change.waiting ?? 0) === 0) return { detail: `Waits for ${nameOf(first)} to merge` }
   if (c.moving?.change === change.id && c.moving.to === 'local' && c.moving.waitsOn === undefined)
     return { detail: 'Moving to your checkout: it asks first', tone: 'you' }
   if (c.moving?.change === change.id && c.moving.waitsOn !== undefined)
@@ -101,6 +103,7 @@ export const factsOf = (
   ['Toward', towardOf(c, change)],
   ['Where', placeWords(c, change)],
   ...(change.helper === undefined ? [] : [['Helper', change.helper] as const]),
+  ...(change.closes === undefined ? [] : [['Closes', change.closes.join(', ')] as const]),
   ...(mark && change.state !== 'merged'
     ? [['Reviewed', (change.waiting ?? 0) > 0 ? `up to ${commits(change.waiting ?? 0)} ago` : 'up to its head'] as const]
     : []),
@@ -291,17 +294,7 @@ export const taskWide = (c: Case, { workspace = true }: { workspace?: boolean } 
         },
       ]),
   ...(c.shots === undefined ? [] : [{ id: 'shots', icon: 'image' as const, name: `${c.shots} screenshots`, detail: 'In Outputs' }]),
-  ...(c.kind === 'change' && c.preset === 'Change'
-    ? [
-        {
-          id: 'issue',
-          icon: Brand.Linear,
-          name: 'DEV-214',
-          detail: 'The board jumps as cards move',
-          facts: [['Status', 'In Progress'] as const],
-        },
-      ]
-    : []),
+  ...(c.kind === 'change' && c.preset === 'Change' ? issuesOf(c) : []),
 ]
 
 /** What a task can take on from Add, at any time: each says what it does, and does it, here. */
@@ -364,6 +357,21 @@ export const kindsOf = (c: Case): ReadonlyArray<PartKind> => {
             form: form('It becomes a change of this task’s, followed on its own.', 'Attach #718', () => attachPr()),
           },
         ]),
+  ]
+}
+
+/** The issues it came from or took in: one by its key and title; two by their keys; more counted. */
+const issuesOf = (c: Case): ReadonlyArray<TaskPartModel> => {
+  const issues = c.issues ?? [{ key: 'DEV-214', title: 'The board jumps as cards move' }]
+  if (issues.length === 0) return []
+  return [
+    {
+      id: 'issue',
+      icon: Brand.Linear,
+      name: issues.length <= 2 ? issues.map((one) => one.key).join(', ') : `${issues.length} issues`,
+      detail: issues.length === 1 ? issues[0]!.title : 'In Progress',
+      facts: issues.length === 1 ? [['Status', 'In Progress'] as const] : issues.map((one) => [one.key, one.title] as const),
+    },
   ]
 }
 
