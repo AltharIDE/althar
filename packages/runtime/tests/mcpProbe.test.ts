@@ -60,13 +60,16 @@ describe('a server that runs as a command', () => {
   it('says the code or the signal where a command ended without a word', async () => {
     const exited = { name: 'exits', transport: 'stdio' as const, command: process.execPath, args: ['-e', 'process.exit(7)'] }
     expect(await probe(exited)).toEqual({ tools: null, why: 'It didn’t start: it exited with code 7.' })
-    const stopped = {
-      name: 'stopped',
-      transport: 'stdio' as const,
-      command: process.execPath,
-      args: ['-e', "process.kill(process.pid, 'SIGTERM')"],
+    // Windows ends a command by a signal as an exit, so there is nothing of a signal to say there.
+    if (process.platform !== 'win32') {
+      const stopped = {
+        name: 'stopped',
+        transport: 'stdio' as const,
+        command: process.execPath,
+        args: ['-e', "process.kill(process.pid, 'SIGTERM')"],
+      }
+      expect(await probe(stopped)).toEqual({ tools: null, why: 'It didn’t start: it was stopped by SIGTERM.' })
     }
-    expect(await probe(stopped)).toEqual({ tools: null, why: 'It didn’t start: it was stopped by SIGTERM.' })
   })
 
   it('stops one that never answers, and what it started', async () => {
