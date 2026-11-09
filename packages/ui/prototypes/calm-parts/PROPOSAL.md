@@ -59,6 +59,11 @@ the case back. `node flows.mjs` clicks through 79 of these headless.
   Hovered, the line goes a step louder, as the thread's folds do; no band.
 - **Out of usage offers GPT-6.1 Sol first,** then Terra; DeepSeek last, as
   your notes say.
+- **One change or two is the lead's call** (9 November). Two tickets in one
+  conversation can be one pull request closing both, or one each; Keep them
+  together undoes a split the lead chose.
+- **The ADR takes these in its own text** (9 November): the proposal is
+  rewritten in place, not amended.
 - **Scratch is set aside** (9 November), a topic of its own for later. This
   round keeps only where a chat meets the rest: a chat is a task with no
   parts, kept off the board, and once it takes a worktree or makes something
@@ -237,11 +242,9 @@ task has two changes, and each tab's state competes with the bar's sentence.
   first merges, Althar brings main into it (held with it, where it has
   commits waiting). Today's text, "so does a fix the change under way needs"
   (stays one change), would put main's fix inside the release.
-- **Split less** (your two tickets). "The lead splits where the parts should
-  be reviewed or merged apart" becomes: a task stays one change until
-  something forces a second (another target or repository, one that has to
-  go first) or the person asks. Two tickets in one place are one change, its
-  pull request closing both.
+- **One change or two is the lead's call** (your two tickets, and your
+  answer of 9 November). Two tickets in one place can be one change, its
+  pull request closing both, or a change each.
 - **A change records the issues it closes,** and Keep them together carries
   them across.
 - **Keep them together is offered only where the lead split by its own
@@ -331,7 +334,7 @@ them on two branches, and the person wanted one. In A:
   DEV-141. Keep them together". One press joins
   them: "You kept Terms page with Privacy page, on althar/privacy-page. Its
   pull request closes DEV-140 and DEV-141." Ship opens one pull request.
-- Kept together from the start, as proposed: one change, "4 commits not
+- Kept together from the start, the lead's other call: one change, "4 commits not
   shipped · Ship", the parts naming DEV-140 and DEV-141. The lead's own
   words say it's one branch; nothing else changes on screen.
 
@@ -341,9 +344,8 @@ What the flows changed in this design:
   on it. What the first one fixes doesn't ask for the person on the second,
   and once the first merges, main comes into the second. Its row says
   "Waits for Fix main to merge".
-- **One change until something forces a second:** another target or
-  repository, one that has to go first, or the person asks. Two tickets in
-  one place stay one change, its pull request closing both.
+- **One change or two is the lead's call:** two tickets in one place can
+  be one change, its pull request closing both, or a change each.
 - **Keep them together only where the lead chose to split.** Where the
   person asked for it ("fix main first"), the lead's line offers nothing to
   undo it.
@@ -360,7 +362,6 @@ changes (`?s=needs-one`).
 
 ## Questions for the person
 
-1. Two tickets in one task: one pull request closing both, unless something
-   forces two (recommended), or one pull request per ticket?
-2. The ADR changes above: shall I pass them to a task that amends the
-   proposed ADR (recommended), or will you read them first?
+Both answered on 9 November: one change or two is the lead's call, and the
+ADR's changes are folded into its own text, in
+`docs/decisions/proposed/a-task-is-a-conversation-plus-parts.md`.
