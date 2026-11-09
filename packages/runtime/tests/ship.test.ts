@@ -185,6 +185,42 @@ describe('talking to a lead once its plan is done', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
+  it.live('holds what the first turn commits though its lead pushes before the turn ends, until Ship sends it', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const runs = yield* Runs
+      // A project that pushes what a lead commits by itself, as by default.
+      const task = yield* opened(working)
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      // Within the turn, before it ends, it commits and calls push_to_pull_request.
+      yield* say(task.threadId, 'Push it now. push pls [lead:push]')
+      yield* answered(task.threadId, task.turns + 1)
+      const tweak = git(task.path, 'rev-parse', 'HEAD')
+      assert.strictEqual(git(task.path, 'log', '-1', '--format=%s', tweak), 'Tidy up before pushing')
+      // Its tool held it then and there, and said so: nothing went up, and no one is asked to push it.
+      const [answer] = yield* sql<{ text: string }>`
+        SELECT json_extract(content, '$.text') AS text FROM thread_items
+        WHERE thread_id = ${task.threadId} AND kind = 'agent_message' AND json_extract(content, '$.text') LIKE '%waits for the person''s Ship%'`
+      assert.match(answer?.text ?? '', /^What's committed on the branch waits for the person's Ship \(1 commit for PR #1\)/)
+      assert.isNotNull(yield* heldAt(task.taskId))
+      yield* Effect.sleep(Duration.seconds(1))
+      assert.strictEqual(git(bare, 'rev-parse', BRANCH), pushed)
+      const asked = yield* sql<{ id: string }>`SELECT id FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'push_request'`
+      assert.lengthOf(asked, 0)
+
+      // Ship sends it, after its review: up to the branch's head here, as pushing credits it.
+      yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
+      yield* until(
+        Effect.sync(() => [git(bare, 'rev-parse', BRANCH), git(task.path, 'rev-parse', 'HEAD')] as const),
+        ([there, here]) => there === here && there !== pushed,
+      )
+      assert.strictEqual(git(bare, 'log', '-1', '--format=%s', BRANCH), 'Tidy up before pushing')
+      yield* until(heldAt(task.taskId), (at) => at === null)
+      assert.lengthOf(github.changes, 1)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
   it.live('ships with one review of only what came since the last, then sends the commits up and lets go of the hold', () => {
     const { working, bare, github } = onGitHub()
     return Effect.gen(function* () {

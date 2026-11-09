@@ -2460,6 +2460,7 @@ export class Changes extends Context.Service<
        */
       const push = (taskId: string, seen: string, url?: string, by: 'person' | 'althar' | 'ship' = 'person') =>
         Effect.gen(function* () {
+          if (by !== 'ship') yield* holdBeforePush(taskId)
           const { link, snapshot, workspace, pushTarget, sent } = yield* pushingTo(taskId, url)
           if (workspace.heldAt !== null && by !== 'ship') return yield* new ShipRefused({ taskId, why: 'held' })
           // Onto the pull request's own branch, which for one attached to the task may be called otherwise (ADR-052).
@@ -6285,15 +6286,17 @@ export class Changes extends Context.Service<
        * Each of the task's worktrees' head, by workspace, as the first turn
        * the person's words began after its last run ended found it, or since
        * its last hold was let go, whichever is later: what such turns
-       * committed since is theirs, held for Ship. Undefined while a run is
-       * under way, whose steps push as they did, or where no such turn is.
+       * committed since is theirs, held for Ship. One under way still counts
+       * only with `underWay`, as a push does. Undefined while a run is under
+       * way, whose steps push as they did, or where no such turn is.
        */
-      const turnHeadsOf = (taskId: string, threadId: string) =>
+      const turnHeadsOf = (taskId: string, threadId: string, underWay = false) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [first] = yield* sql<{ heads: string }>`
             SELECT d.heads FROM turn_deliveries d
-            WHERE d.thread_id = ${threadId} AND d.heads IS NOT NULL AND d.state NOT IN ('pending', 'delivered')
+            WHERE d.thread_id = ${threadId} AND d.heads IS NOT NULL AND d.state <> 'pending'
+              AND (${underWay ? 1 : 0} = 1 OR d.state <> 'delivered')
               AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = ${taskId} AND r.state = 'running')
               AND d.delivered_at >= max(
                 coalesce((SELECT max(r.ended_at) FROM runs r WHERE r.task_id = ${taskId}), ''),
@@ -6328,6 +6331,20 @@ export class Changes extends Context.Service<
             }),
           ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not hold what a turn committed before Althar restarted', cause)))
       })
+
+      /**
+       * Holds for Ship what the person's turns committed so far, the one under
+       * way included: what a turn commits is held from the start, not only once
+       * it ends, so nothing pushes it first, the lead's own push included.
+       */
+      const holdBeforePush = (taskId: string): Effect.Effect<void, unknown, Store> =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task'`
+          if (thread === undefined) return
+          const heads = yield* turnHeadsOf(taskId, thread.id, true)
+          if (heads !== undefined) yield* holdAfterTurn(taskId, heads)
+        })
 
       /** The task's worktrees here held for Ship, the first held first. */
       const holdsOf = (taskId: string) =>
@@ -7427,7 +7444,7 @@ export class Changes extends Context.Service<
         ),
         leadTool(
           'push_to_pull_request',
-          "Pushes what you've committed on the task's branch to its pull request, once it's open, where the project has Althar push a lead's commits by itself; otherwise, or where something holds them (someone else pushed to it, the person stopped you), asks the person: Althar shows them the commits that would go up, from the pull request's head to your branch's, with a Push button, and tells you once they've pushed. Use it when the person asks you to push, or when what you've committed should go up to the pull request. Commit first: only commits go up. What it says is what happened: don't say it's up unless it says it pushed. In a task of several repositories, pull_request names the one, as read_pull_request names it: web#3.",
+          "Pushes what you've committed on the task's branch to its pull request, once it's open, where the project has Althar push a lead's commits by itself; otherwise, or where something holds them (someone else pushed to it, the person stopped you), asks the person: Althar shows them the commits that would go up, from the pull request's head to your branch's, with a Push button, and tells you once they've pushed. Use it when the person asks you to push, or when what you've committed should go up to the pull request. Once your plan is done, what you commit in a turn the person's words began waits for their Ship instead, which reviews it first: it says so, and pushes nothing. Commit first: only commits go up. What it says is what happened: don't say it's up unless it says it pushed. In a task of several repositories, pull_request names the one, as read_pull_request names it: web#3.",
           { type: 'object', properties: { pull_request: { type: 'string' } } },
           (taskId, input) =>
             locked(taskId)(
@@ -7438,6 +7455,8 @@ export class Changes extends Context.Service<
                 )
                 const seen = yield* urlsOf(taskId)
                 if (seen.length === 0) return yield* new NotFound({ kind: 'pull request', id: taskId })
+                // In a turn the person's words began, what it committed so far is held now, before its end would hold it.
+                yield* holdBeforePush(taskId)
                 const several = seen.length > 1
                 const named = asked.pull_request == null ? null : String(asked.pull_request).trim().toLowerCase()
                 const candidates = named === null ? seen : seen.filter((candidate) => isNamed(candidate, named))
