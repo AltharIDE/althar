@@ -240,15 +240,20 @@ test('a lead opens the page beside its task, reads it, types and clicks, and its
         window.on('sheet-end', () => sheets.push('end'))
       }
     })
+    // CI's Linux has no window manager: Electron's own message box for the page's dialog closes itself
+    // after a moment there, answering the page before the lead can. Take that box away, so the page
+    // waits for the lead, as it does wherever the box stays open.
+    if (process.platform === 'linux')
+      await electronApp.evaluate(({ webContents }) => {
+        const contents = webContents.getAllWebContents().find((one) => one.session.storagePath?.includes('task-') === true)!
+        contents.removeAllListeners('-run-dialog')
+      })
     const confirming = await drive(electronApp, owner, { op: 'click', target: { selector: '#remove' }, button: 'left', double: false })
     expect(confirming.value?.text).toContain('As you acted, the page opened a confirm dialog saying “Remove the note?”')
     expect((await drive(electronApp, owner, { op: 'snapshot', target: null })).error).toContain(
       'The page shows a confirm dialog saying “Remove the note?”',
     )
     const accepted = await drive(electronApp, owner, { op: 'dialog', accept: true, text: null })
-    console.warn(`DIALOG ANSWER ${JSON.stringify(accepted)}`)
-    console.warn(`DIALOG STATE ${JSON.stringify(await drive(electronApp, owner, { op: 'state' }))}`)
-    console.warn(`DIALOG STATUS ${JSON.stringify(await inPage<string>(electronApp, 'document.getElementById("status").textContent'))}`)
     expect(accepted.error ?? accepted.value?.text).toContain('Answered OK to the confirm dialog “Remove the note?”.')
     await expect.poll(() => inPage<string>(electronApp, 'document.getElementById("status").textContent')).toBe('Removed')
     // Electron's own sheet of the dialog on the window goes with the lead's answer, which it doesn't undo.
