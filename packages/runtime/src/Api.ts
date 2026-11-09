@@ -6,6 +6,7 @@ import { basename, dirname, isAbsolute, join, type posix, relative, resolve, sep
 import {
   type AccountStatus,
   API_VERSION,
+  apiVersionRefusal,
   ClientAuthority,
   SocketAllowed,
   type MessageSender,
@@ -2034,13 +2035,15 @@ export const connection = (port: PortLike, sender: MessageSender) =>
   RpcServer.layer(Api).pipe(
     Layer.provide(handlers.pipe(Layer.provide(Layer.succeed(ConnectionSender, sender)))),
     Layer.provide(
-      Layer.succeed(ClientAuthority, (effect, { rpc }) =>
-        sender.kind === 'socket' && !Context.get(rpc.annotations, SocketAllowed)
+      Layer.succeed(ClientAuthority, (effect, { rpc, headers }) => {
+        const refusal = apiVersionRefusal(headers)
+        if (refusal !== undefined) return Effect.fail(refusal)
+        return sender.kind === 'socket' && !Context.get(rpc.annotations, SocketAllowed)
           ? Effect.fail(
               new ApiError({ reason: 'PersonRequired', message: 'This call needs the person in the window or on a paired device.' }),
             )
-          : effect,
-      ),
+          : effect
+      }),
     ),
     Layer.provide(serverProtocol(port)),
   )
