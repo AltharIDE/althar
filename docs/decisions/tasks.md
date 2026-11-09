@@ -255,9 +255,10 @@ The person can also tell the lead, which has `settle_task` (done, keep or
 discard). The composer suggests "Mark this as done". The coordinator settles
 with the same tool ([coordinator.md](coordinator.md#moving-a-task)).
 
-**Another round ends in Needs you.** Writing to a kept task brings it back.
-A round on a settled task that makes nothing new no longer drops silently
-back into Settled. Only a merged change goes back to done by itself.
+**Another turn ends in Needs you.** Writing to a kept task brings it back.
+A turn on a settled task stays a turn: the task stays settled, and its
+lead's answer waits in Needs you, as below. Only a merged change goes back
+to done by itself.
 
 **A reply the person hasn't seen waits in Needs you** (a task is a
 conversation plus parts). Where a settled task's lead answers a turn the
@@ -265,7 +266,8 @@ person's words began, after they last had it open, its card says "Replied"
 (a quick task's, Finished) until they open it, or press Done, which says
 they read it. One they watched arrive doesn't: the window marks a task seen
 as it becomes ready in front of them. Settling it, by Done, posting its
-review or merging, reads what came before.
+review or merging, reads what came before; and a lead that settles it as
+they told it to answers with that, so nothing waits to be read.
 
 ## The small-change lane
 
