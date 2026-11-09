@@ -30,6 +30,7 @@ import { Plans } from './Plans'
 import { copyReviewed, reviewOf } from './reviewing'
 import { touchQuestion } from './Questions'
 import { change, fact, timestamp } from './records'
+import { repliedAt } from './replied'
 import { retitleTask } from './taskTitle'
 import { type Lead, PlanParameters, Runs } from './Runs'
 import { Sessions } from './Sessions'
@@ -672,9 +673,11 @@ export class Tasks extends Context.Service<
       const markingDone = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          // Settled already, in Needs you for a reply the person hadn't read: Done says they have, and it is settled again.
+          // Settled already, in Needs you for a reply the person hadn't read: Done says they have, and it is settled again. Pressed
+          // again, nothing more happens.
           const [standing] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${input.taskId}`
           if (standing?.state === 'done') {
+            if ((yield* repliedAt(input.taskId)) === undefined) return false
             yield* see({ taskId: input.taskId })
             yield* touchCard(input.taskId)
             return true

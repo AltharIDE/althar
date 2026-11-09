@@ -72,12 +72,13 @@ test('a merged task’s lead works on what the person asks, and Ship opens what 
     await expect(header.getByText('1 commit not shipped')).toBeVisible()
     await expect(header.getByRole('button', { name: 'Ship', exact: true })).toBeVisible()
     await page.mouse.move(1400, 300)
-    await page.screenshot({ path: 'test-results/rounds-held-task.png', animations: 'disabled' })
+    await header.screenshot({ path: 'test-results/rounds-held-task.png', animations: 'disabled', scale: 'css' })
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     // On the board, the person's to ship: its word, what waits, and Ship, done right there.
     await expect(work.getByText('Not shipped', { exact: true })).toBeVisible()
     await expect(work.getByText('1 commit not shipped')).toBeVisible()
-    await page.screenshot({ path: 'test-results/rounds-held-board.png', animations: 'disabled' })
+    const card = work.locator('article', { has: page.getByRole('button', { name: 'Add a retry to the checkout call' }) })
+    await card.screenshot({ path: 'test-results/rounds-held-board.png', animations: 'disabled', scale: 'css' })
     expect(execFileSync('git', ['--git-dir', remote, 'branch', '--list', `${branch}-2`], { encoding: 'utf8' }).trim()).toBe('')
 
     // Shipped from the card, with no review to run: a new draft opens, from main as GitHub merged it, and it is ready to accept.

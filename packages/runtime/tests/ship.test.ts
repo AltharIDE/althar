@@ -325,7 +325,7 @@ describe('talking to a lead once its plan is done', () => {
       const said = yield* callTool(
         { role: 'lead', projectId: task.projectId, threadId: task.threadId, sessionId: lead?.id ?? '', taskId: task.taskId },
         'finish_step',
-        { summary: 'Retries twice now.' },
+        { summary: 'Retries twice now.', built: 'Checkout retries twice when the payment call fails.' },
       )
       assert.strictEqual(
         said,

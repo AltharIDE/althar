@@ -399,6 +399,7 @@ describe('the client', () => {
           SignInAccount: () => Effect.die('unused'),
           OpenChange: () => Effect.die('unused'),
           SkipReview: () => Effect.die('unused'),
+          Ship: () => Effect.die('unused'),
           RefreshTask: () => Effect.die('unused'),
           StopListening: () => Effect.die('unused'),
           AttachPullRequest: () => Effect.die('unused'),

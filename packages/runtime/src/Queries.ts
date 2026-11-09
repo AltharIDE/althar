@@ -72,6 +72,7 @@ import { graphOf, type RunRows, type StepRow } from './graph'
 import { taskFindingsOf } from './taskFindings'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { answeredIn, handedOf, issueCardsWaiting, kindOf } from './kinds'
+import { repliedAt } from './replied'
 import { BETWEEN_AGENTS_MS, betweenAgents, byItself, DRAFTING_MS, isMergeable, stillDrafting } from './needsYou'
 import { documentKept, documentText, outputText } from './reading'
 import { type CodeRoot, type CodeRoots, findCode, readCode } from './code'
@@ -1913,23 +1914,6 @@ export class Queries extends Context.Service<
        */
       /** A task's card, as its item in the coordinator's thread shows it. */
       /**
-       * When the task's lead last answered, since a turn the person's words began after its plan, since the person last had
-       * the task open, and since it last settled, which the person's Done, post or merge did with the answer before them:
-       * undefined where there is none. Its answer may come in a turn after theirs, as when it was told to carry on.
-       */
-      const repliedOf = (taskId: string) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const [row] = yield* sql<{ at: string | null }>`
-            SELECT max(d.ended_at) AS at FROM turn_deliveries d JOIN threads t ON t.id = d.thread_id JOIN tasks k ON k.id = t.task_id
-            WHERE t.task_id = ${taskId} AND t.kind = 'task' AND d.state = 'completed' AND d.ended_at > coalesce(k.seen_at, '')
-              AND d.ended_at > coalesce(k.settled_at, '')
-              AND d.requested_at >= (SELECT max(p.delivered_at) FROM turn_deliveries p WHERE p.thread_id = t.id AND p.heads IS NOT NULL)
-              AND EXISTS (SELECT 1 FROM thread_items i WHERE i.delivery_id = d.id AND i.kind = 'agent_message')`
-          return row?.at ?? undefined
-        })
-
-      /**
        * What waits on a task's branch for Ship (a task is a conversation plus parts, "A tweak waits for Ship"): since its first
        * hold, and how many commits, those ahead of its open pull requests and `after`, those after its last merged or closed or
        * in none yet. Undefined while nothing is held: read only then, so a board of tasks holding nothing asks git nothing more.
@@ -2271,7 +2255,7 @@ export class Queries extends Context.Service<
           const held = yield* heldOf(taskId, unshipped?.commits ?? 0)
           // A reply the person hasn't seen (a task is a conversation plus parts): its lead answered a turn their words began after
           // its plan, since they last had the task open. It waits in Needs you until they open it, settled or not.
-          const replied = yield* repliedOf(taskId)
+          const replied = yield* repliedAt(taskId)
           // Someone else's pull request it reviews (DEV-96); and whether a draft of its review waits for the person.
           const reviewing = yield* reviewBriefOf(taskId)
           const [draftWaits] =

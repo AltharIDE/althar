@@ -422,7 +422,7 @@ describe('a task’s course', () => {
       const plans = yield* Plans
       const tasks = yield* Tasks
       yield* setPlansAndReviews({ roundsOut: 'ask' })
-      // Out of rounds with settled changes no review has seen: the run waits on the person with no step under way.
+      // Checked once, then settled again with changes no check reads: the run waits on the person with no step under way.
       const { task, planId, actor } = yield* planned('Tighten the types [lead:finish] [review:always]', [implement(), reviewBy()])
       yield* plans.start(planId, actor)
       yield* standsAt(task.threadId, (now) => now.phase === 'waiting')
@@ -431,13 +431,13 @@ describe('a task’s course', () => {
         ['round_limit'],
       )
       yield* tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId })
-      assert.deepStrictEqual((yield* attempts(task.taskId)).at(-1), ['settle', 2, 'succeeded', false])
-      // Resumed, the lead settles what is open again; with still more to see and no rounds left, the person decides again.
+      assert.deepStrictEqual((yield* attempts(task.taskId)).at(-1), ['settle', 1, 'succeeded', false])
+      // Resumed, the lead settles what is open again; with still more to see and no check left, the person decides again.
       yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
       yield* until(callsOf(task.taskId), (calls) => calls.filter((call) => call.state === 'open').length === 1)
       assert.deepStrictEqual((yield* attempts(task.taskId)).slice(-2), [
-        ['settle', 2, 'succeeded', false],
-        ['settle', 2, 'succeeded', false],
+        ['settle', 1, 'succeeded', false],
+        ['settle', 1, 'succeeded', false],
       ])
     }).pipe(Effect.provide(withQueries())),
   )

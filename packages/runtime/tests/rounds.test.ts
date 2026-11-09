@@ -26,7 +26,7 @@ import { Sessions } from '../src/Sessions'
 import type { ToolAccess } from '../src/ToolServer'
 import { Tasks } from '../src/Tasks'
 import { withoutReview } from './changesSupport'
-import { callTool, fakeConnectors, HOST, hosted, items, notices, repository, runtime, turns, until, withWork } from './support'
+import { callTool, fakeConnectors, HOST, hosted, items, notices, runtime, turns, until, withWork } from './support'
 
 /*
  * A task goes back to work whenever its lead does, and ships again
@@ -166,7 +166,11 @@ describe('a task that goes back to work', () => {
         yield* callTool(
           { role: 'lead', projectId: task.projectId, threadId: task.threadId, sessionId: lead?.id ?? '', taskId: task.taskId },
           'finish_step',
-          { summary: 'Added the slider.', descriptions: [{ text: 'Adds the slider we agreed on, beside the retry.' }] },
+          {
+            summary: 'Added the slider.',
+            built: 'The slider we agreed on, beside the retry.',
+            descriptions: [{ text: 'Adds the slider we agreed on, beside the retry.' }],
+          },
         ),
         'Althar has your summary.',
       )
@@ -248,10 +252,9 @@ describe('a task that goes back to work', () => {
       yield* say(task.threadId, 'What did you change? [lead:slowly]')
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'running')
       slow.open('[lead:slowly]')
-      // Its answer waits in Needs you until the person reads it; read, it is settled as it was.
-      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].replied !== undefined)
-      yield* (yield* Tasks).see({ taskId: task.taskId })
+      // It said nothing back and made nothing: settled as it was, with no reply waiting.
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'settled')
+      assert.isUndefined((yield* cards(task.projectId))[0]?.replied)
       assert.deepStrictEqual(yield* taskRow(task.taskId), before)
       // A turn, not a round: the plan's run is its only one, and nothing asked its lead to report.
       assert.lengthOf(yield* runsOf(task.taskId), 1)

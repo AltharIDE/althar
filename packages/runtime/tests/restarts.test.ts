@@ -339,7 +339,7 @@ describe('A step a restart stopped', () => {
     }),
   )
 
-  it.live('carries a later round of review on with what the lead settled before it', () =>
+  it.live('carries a check of the fixes on with what the lead settled before it', () =>
     Effect.gen(function* () {
       const file = store()
       const task = yield* reviewing(file, undefined, true)
@@ -350,7 +350,8 @@ describe('A step a restart stopped', () => {
         const sql = yield* SqlClient.SqlClient
         const told = yield* until(
           sql<{ body: string }>`
-            SELECT body FROM user_inputs WHERE thread_id = ${yield* reviewThread(task.taskId)} AND body LIKE 'Round 2.%' ORDER BY sequence`,
+            SELECT body FROM user_inputs WHERE thread_id = ${yield* reviewThread(task.taskId)} AND body LIKE 'A check of the fixes%'
+            ORDER BY sequence`,
           (found) => found.length === 2,
         )
         assert.include(told[1]?.body ?? '', 'Fixed the heading.')

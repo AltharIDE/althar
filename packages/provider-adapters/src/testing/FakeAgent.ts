@@ -1221,7 +1221,8 @@ const playRole = async (
       }
       // Asked to tidy up, it commits and ends its turn: what goes up, and when, isn't its to say.
       if (session.markers.has('[lead:commit]') && /\btidy pls\b/i.test(text)) {
-        commitIn(session.cwd, 'tidied.txt', 'Tidy up')
+        // Within its turn, as a lead commits before it answers: what the turn's end looks at has it.
+        await commitIn(session.cwd, 'tidied.txt', 'Tidy up')
         return 'Tidied up, and committed it.'
       }
       // What people said on the task's pull request, and its checks.

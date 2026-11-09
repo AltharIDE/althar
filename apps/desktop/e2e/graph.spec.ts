@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { askAboutMore, connectGitHub, launch, openFirstProject, say, shown, toConversation } from './support'
+import { connectGitHub, launch, openFirstProject, say, shown, toConversation } from './support'
 
 /*
  * A task's Graph face (ADR-054), in a real window with the fake agents and
@@ -33,8 +33,6 @@ test('a task’s steps as a graph: a lane for each agent, a card’s report, and
     await (await electronApp.browserWindow(page)).evaluate((window) => window.setSize(1440, 900))
     await openFirstProject(electronApp, page, repo)
     await connectGitHub(page)
-    // A deploy asks the person where the project asks about more than what can't be undone (ADR-097).
-    await askAboutMore(page)
 
     // Planned with a review that finds something: implemented, reviewed, settled, reviewed again, its draft opened.
     await say(page, 'Add a retry to the checkout call. [coordinator:plan] [lead:finish] [lead:edit] [review:findings]')
@@ -101,11 +99,6 @@ test('a task’s steps as a graph: a lane for each agent, a card’s report, and
     await say(page, 'Also log each retry. tidy pls [lead:commit]')
     const header = page.locator('header[aria-label="Add a retry to the checkout call"]')
     await expect(header.getByRole('button', { name: 'Ship', exact: true })).toBeVisible()
-    // Its lead asks to run a command in that turn: answered where the person talks with it, as no step is at work.
-    await say(page, 'run make deploy')
-    await expect(page.getByText('Needs your permission')).toBeVisible()
-    await page.getByRole('button', { name: /^Allow(?! everything)/ }).click()
-    await expect(page.getByText('chosen=allow_once')).toBeVisible()
 
     // Shipped from the header: a second round, the person's Ship its marker, its review in the reviewer's lane and the push after.
     await header.getByRole('button', { name: 'Ship', exact: true }).click()

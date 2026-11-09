@@ -4,8 +4,11 @@ A prototype for
 [a task is a conversation plus parts](https://github.com/AltharIDE/althar/pull/713)
 (proposed, merged into `docs/decisions/proposed/` on 9 November). It shows how the window handles every situation the
 proposal adds, on the real board, task bar, thread, composer, Outputs and the
-coordinator's plan card. It builds nothing of the feature. A · As one is
-chosen (9 November); B and C stay on the page to compare.
+coordinator's plan card. The prototype itself builds nothing of the
+feature; the same pull request builds the proposal's core in the app
+(talking to a lead as turns, Ship, checking fixes), as the ADR's "Building
+it" says. A · As one is chosen (9 November); B and C stay on the page to
+compare.
 
 Run it from `packages/ui`:
 `./node_modules/.bin/vp dev --config prototypes/calm-parts/vite.config.mjs`,

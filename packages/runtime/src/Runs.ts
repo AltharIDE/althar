@@ -1690,6 +1690,16 @@ export class Runs extends Context.Service<
           return worked === -1 ? turns.length : worked
         })
 
+      /** A settled task's lead stops once its turn ends (LeftBehind.ts), unless a run of the task is under way. */
+      const settledAgain = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ taskId: string; state: string }>`
+            SELECT k.id AS task_id, k.state FROM threads t JOIN tasks k ON k.id = t.task_id WHERE t.id = ${threadId} AND t.kind = 'task'`
+          if (task === undefined || task.state !== 'done' || (yield* currentRun(task.taskId)) !== undefined) return
+          yield* leftBehind.settled(task.taskId)
+        })
+
       /**
        * A task's lead whose turn after its plan ended having done nothing at
        * all never reached its model: a moment later, unless something was
@@ -2071,6 +2081,9 @@ export class Runs extends Context.Service<
             // After its plan, a turn that did nothing at all is told to carry on too, as a step's is (a task is a conversation plus parts).
             if (event._tag === 'TurnEnded' && event.state === 'completed' && event.errorClass === undefined)
               yield* blankTalk(event.threadId, event.turnId)
+            // A settled task's lead, written to, stops once its turn ends, as it did when it settled: what it said stays, and the
+            // person's next words start it again.
+            if (event._tag === 'TurnEnded') yield* settledAgain(event.threadId)
             return
           }
           // Its connection or its service failed (ADR-060): not a missing report, so it isn't reminded. It waits, and is tried again.
@@ -4513,7 +4526,11 @@ export class Runs extends Context.Service<
             // After its plan, a lead's turn is a turn, not a round (a task is a conversation plus parts): a summary it gives is kept, its
             // evidence and descriptions with it, and opens nothing. What it committed waits for the person's Ship, which reviews it.
             // A task started without a plan has no steps: the summary is still what the person reads, and what it built, its end.
-            if (planned === undefined && built === null && !plain) return yield* new ToolRefused({ message: builtAsk(false) })
+            // Where it changed the work since the last run left it, what the task built is said again, so the pull request and Outputs
+            // are never older than its work.
+            const made =
+              planned !== undefined && access.taskId !== null && (yield* madeSince(access.taskId, yield* restedOf(access.taskId)))
+            if ((planned === undefined || made) && built === null && !plain) return yield* new ToolRefused({ message: builtAsk(false) })
             yield* addItem(
               { projectId: access.projectId as ProjectId, threadId: access.threadId },
               'step_result',
