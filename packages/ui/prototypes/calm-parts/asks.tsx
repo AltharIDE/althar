@@ -152,12 +152,12 @@ export function AskView({ c, ask }: { c: Case; ask: Ask }) {
           resets={ask.until}
           affects={[{ id: 'lead', label: 'the lead', model: OPUS }]}
           options={[
-            { model: FLASH, note: 'OpenCode Go · your plan' },
             { model: SOL, note: 'Codex · 38% of this week used' },
             { model: TERRA, note: 'Codex · 38% of this week used' },
+            { model: FLASH, note: 'OpenCode Go · your plan' },
             { model: SONNET, note: 'same limit, resets 14:00', busy: true },
           ]}
-          onSwap={(id) => answer(`swap:${[FLASH, SOL, TERRA, SONNET].find((one) => one.id === id)?.name ?? id}`)}
+          onSwap={(id) => answer(`swap:${[SOL, TERRA, FLASH, SONNET].find((one) => one.id === id)?.name ?? id}`)}
           onWait={() => answer('Wait')}
         />
       )

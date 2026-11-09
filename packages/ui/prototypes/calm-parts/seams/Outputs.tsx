@@ -16,7 +16,7 @@ import type { ChangeCheck } from '../../../src/primitives/Checks/Checks'
 import { type Case, type Change, changeIn } from '../cases'
 import { act } from '../moves'
 import { commits, nameOf, needOf, open, prOf } from '../need'
-import { ChangeMark, css, markOf, standingOf } from '../parts'
+import { asideOf, ChangeMark, css, markOf, standingOf } from '../parts'
 import { proto, useProto } from '../state'
 import { SOL } from '../team'
 
@@ -40,9 +40,26 @@ const FILES: Record<string, ReadonlyArray<{ path: string; add: number; del: numb
     { path: 'packages/ui/src/board/BoardCard/BoardCard.tsx', add: 31, del: 5 },
     { path: 'packages/ui/src/board/BoardCard/BoardCard.module.css', add: 15, del: 3 },
   ],
+  release: [
+    { path: 'docs/releases/0.9.0.md', add: 88, del: 0 },
+    { path: 'package.json', add: 4, del: 2 },
+    { path: 'apps/desktop/package.json', add: 4, del: 2 },
+  ],
+  fixmain: [{ path: 'apps/desktop/e2e/board.spec.ts', add: 3, del: 3 }],
+  privacy: [
+    { path: 'site/src/pages/privacy.astro', add: 124, del: 0 },
+    { path: 'site/src/components/Footer.astro', add: 8, del: 2 },
+  ],
+  terms: [
+    { path: 'site/src/pages/terms.astro', add: 112, del: 0 },
+    { path: 'site/src/components/Footer.astro', add: 6, del: 1 },
+  ],
 }
-const filesOf = (change: Change) =>
-  FILES[change.id] ?? [{ path: 'packages/ui/src/board/Board/Board.tsx', add: change.add ?? 12, del: change.del ?? 4 }]
+const filesOf = (change: Change) => [
+  ...(FILES[change.id] ?? [{ path: 'packages/ui/src/board/Board/Board.tsx', add: change.add ?? 12, del: change.del ?? 4 }]),
+  // Two tickets kept on one branch: the terms page came with them.
+  ...(change.id === 'privacy' && change.closes?.includes('DEV-141') === true ? (FILES['terms'] ?? []).slice(0, 1) : []),
+]
 
 /** What each change is, in the words its pull request says it. */
 const STORIES: Record<string, { lede: string; rest: string }> = {
@@ -59,7 +76,25 @@ const STORIES: Record<string, { lede: string; rest: string }> = {
     rest: 'Built on the held heights of #714, so the lanes stay still while it moves.',
   },
 }
-const storyOf = (change: Change) => STORIES[change.id] ?? { lede: change.title, rest: '' }
+const MORE_STORIES: Record<string, { lede: string; rest: string }> = {
+  release: {
+    lede: '0.9.0: the version raised, and notes for the 14 pull requests since 0.8.0.',
+    rest: 'The notes are in four groups: the board, tasks, reviews and fixes, each line in the words its pull request used.',
+  },
+  fixmain: {
+    lede: 'The board’s end-to-end test waits for “Later”, the lane’s name since #709.',
+    rest: 'It waited for “Keep for later”, so it failed on main and on every branch from it.',
+  },
+  privacy: {
+    lede: 'A privacy page at /privacy, linked from the footer, in the site’s own type.',
+    rest: 'What Althar keeps on your machine, what it sends and to whom, and how to ask for it to be deleted.',
+  },
+  terms: {
+    lede: 'A terms page at /terms, beside the privacy page in the footer.',
+    rest: '',
+  },
+}
+const storyOf = (change: Change) => STORIES[change.id] ?? MORE_STORIES[change.id] ?? { lede: change.title, rest: '' }
 
 /** A picture of the board, drawn, so the page needs no file. */
 const board = (title: string, note: string) =>
@@ -190,16 +225,10 @@ function ChangeCard({ c, change, ship = true, signal }: { c: Case; change: Chang
 }
 
 /** One change's outputs: what it changes, its pictures, and its card beside them. */
-function OneChange({ c, change, named, signal }: { c: Case; change: Change; named: boolean; signal: boolean }) {
+function OneChange({ c, change, signal, className }: { c: Case; change: Change; signal: boolean; className?: string }) {
   return (
-    <div className={s.outputsWide}>
-      <WhatItMade
-        story={storyOf(change)}
-        shots={shotsOf(change)}
-        checked={[]}
-        unverified={[]}
-        text={{ story: named ? `What ${nameOf(change)} changes` : 'What changed' }}
-      />
+    <div className={[s.outputsWide, className].filter(Boolean).join(' ')}>
+      <WhatItMade story={storyOf(change)} shots={shotsOf(change)} checked={[]} unverified={[]} text={{ story: 'What changed' }} />
       <aside className={s.side}>
         <ChangeCard c={c} change={change} signal={signal} />
       </aside>
@@ -215,24 +244,29 @@ const sizeOf = (change: Change) => {
   return `${files.length === 1 ? '1 file' : `${files.length} files`} · +${add} −${del}`
 }
 
-/** Settled: merged or closed, with nothing its review after the merge found. It folds to a line once the task has others. */
+/** Settled: merged or closed, with nothing its review after the merge found. */
 const settled = (change: Change) => !open(change) && change.found === undefined
 
-/** A settled change, a line that opens to all it made. */
-function Settled({ c, change }: { c: Case; change: Change }) {
+/** One of several changes: a line naming it and where it stands, that opens to all it made and folds again. */
+function Section({ c, change, opened, signal }: { c: Case; change: Change; opened: boolean; signal: boolean }) {
+  const stands = standingOf(c, change)
   return (
-    <Disclosure className={css.outSettled}>
+    <Disclosure className={css.outFold} defaultOpen={opened}>
       <DisclosureTrigger>
-        <button type="button" className={css.outSettledLine}>
-          <ChangeMark mark={markOf(c, change)} />
+        <button type="button" className={css.outHead}>
+          <ChangeMark mark={markOf(c, change)} aside={asideOf(c, change)} />
           <span className={css.outName}>{nameOf(change)}</span>
-          <span className={css.outSettledWhat}>{`${prOf(change)} ${change.state === 'merged' ? 'merged' : 'closed'}`}</span>
-          <span className={css.outSettledSize}>{sizeOf(change)}</span>
-          <Caret />
+          <code className={css.outHeadRef}>{prOf(change)}</code>
+          {/* One thing asks at a time: violet only where the task's one fact is about this one; a failure stays red. */}
+          <span className={css.outDetail} data-tone={signal || stands.tone === 'bad' ? stands.tone : 'quiet'}>
+            {stands.detail}
+          </span>
+          <span className={css.outHeadSize}>{sizeOf(change)}</span>
+          <Caret className={css.outHeadCaret} />
         </button>
       </DisclosureTrigger>
       <Fold bleed={false}>
-        <OneChange c={c} change={change} named signal={false} />
+        <OneChange c={c} change={change} signal={signal} className={css.outBody} />
       </Fold>
     </Disclosure>
   )
@@ -240,25 +274,32 @@ function Settled({ c, change }: { c: Case; change: Change }) {
 
 /**
  * Every direction: the task's changes one under another, as one piece of work, in the task's order so nothing moves while agents
- * work. A settled one folds to a line in its place; one its after-merge review found something in stays open. One change: today's page.
+ * work. Each is a line that opens and folds: it opens on the one the task's one fact is about (every open one where the fact is
+ * about them all); a settled one starts folded, one its after-merge review found something in starts open. One change: today's page.
  */
 export function Outputs(props: ComponentProps<typeof real.Outputs>) {
   const p = useProto()
   const c = proto.current()
   if (c.changes.length === 0) return <real.Outputs {...props} />
-  const several = c.changes.length > 1
   const need = needOf(c, p.answered)
+  if (c.changes.length === 1)
+    return (
+      <div className={s.outputs}>
+        <OneChange c={c} change={c.changes[0]!} signal />
+      </div>
+    )
+  const about = need.change !== undefined && open(need.change) ? need.change : undefined
   // One thing asks at a time: violet only on the change the task's one fact is about.
-  const signal = (change: Change) => !several || change.id === need.change?.id
   return (
     <div className={s.outputs}>
       {c.changes.map((change) => (
-        <section key={change.id} className={css.outSection} aria-label={nameOf(change)}>
-          {several && settled(change) ? (
-            <Settled c={c} change={change} />
-          ) : (
-            <OneChange c={c} change={change} named={several} signal={signal(change)} />
-          )}
+        <section key={`${c.key}/${change.id}`} className={css.outSection} aria-label={nameOf(change)}>
+          <Section
+            c={c}
+            change={change}
+            opened={!settled(change) && (about === undefined || about.id === change.id)}
+            signal={change.id === need.change?.id}
+          />
         </section>
       ))}
     </div>

@@ -1,6 +1,6 @@
 // Scrappy: what a press does. Each is an edit to the case on screen (its changes, parts, access, thread), so the bar, the card, the
 // parts and the thread all read the same case after it; and what takes time (a Ship) goes step by step, in place. Nothing real happens.
-import { type Ask, type Beat, type Case, type Change, changeIn, type Preset, type Who } from './cases'
+import { type Ask, type Beat, type Case, type Change, changeIn, type Preset, type Stamp, type Who } from './cases'
 import { askNeed, askOf, commits, list as joined, nameOf, open, recordOf } from './need'
 import { type Edit, proto } from './state'
 
@@ -23,9 +23,13 @@ const beat =
   (one: Beat): Edit =>
   (c) => ({ ...c, thread: [...c.thread, one] })
 
-const part = (who: Who, text: string, id?: string): Edit => beat({ kind: 'part', who, text, ...(id === undefined ? {} : { change: id }) })
+const part = (who: Who, text: string, id?: string, stamp?: Stamp): Edit =>
+  beat({ kind: 'part', who, text, ...(id === undefined ? {} : { change: id }), ...(stamp === undefined ? {} : { stamp }) })
 const line = (text: string, id?: string, tone?: 'warning'): Edit =>
   beat({ kind: 'line', text, ...(id === undefined ? {} : { change: id }), ...(tone === undefined ? {} : { tone }) })
+/** A step in the work, stamped: up for review, merged, a new change. */
+const stamped = (stamp: Stamp, text: string, id?: string): Edit =>
+  beat({ kind: 'line', text, stamp, ...(id === undefined ? {} : { change: id }) })
 
 /** What is under way is a line at the thread's end; it goes when the next step or the end comes. */
 const underWay = (b: Beat) => b.kind === 'live' && (b.made === true || b.act === 'Call it off')
@@ -164,10 +168,10 @@ const shipping = (c: Case, id: string, options: ShipOptions): ReadonlyArray<Edit
     const pr = now.pr ?? NEW_PR
     const again = now.checks === 'failed'
     const words = fresh
-      ? `Shipped: ${now.branch} is up as #${pr}, into ${now.toward ?? 'main'}, with the ${commits(n)}.`
+      ? `${nameOf(now)} as #${pr}, into ${now.toward ?? 'main'}, with ${commits(n)}.`
       : n === 0
-        ? `Shipped: ${recordOf(now)} went up on top of what was just shipped below it.`
-        : `Shipped: ${recordOf(now)} has the ${commits(n)}${(now.replies ?? 0) > 0 ? ' and the answer to the reply on it' : ''}. Its checks are running${again ? ' again' : ''}.`
+        ? `${recordOf(now)}, on top of what shipped under it.`
+        : `${commits(n)} to ${recordOf(now)}${(now.replies ?? 0) > 0 ? ', and the answer to the reply on it' : ''}${again ? '. Its checks run again' : ''}.`
     return compose(
       change(id, (x) => ({
         ...x,
@@ -185,7 +189,7 @@ const shipping = (c: Case, id: string, options: ShipOptions): ReadonlyArray<Edit
       })),
       (x) => ({ ...x, changes: x.changes.map((other) => (other.heldBy === id ? { ...other, heldBy: undefined } : other)) }),
       calm,
-      line(words, id),
+      stamped('shipped', words, id),
       standing('running', 'running', 'Checks'),
       ...(now.replaces === undefined ? [] : [asking({ kind: 'close-old', old: now.replaces, now: pr })]),
     )(cc)
@@ -254,8 +258,9 @@ export const merge = (id?: string, then?: Edit, all = false) => {
     }
     return compose(
       calm,
-      line(
-        `${recordOf(one)} merged${waited.length === 0 ? '.' : `, and main came into ${joined(waited.map(nameOf))}.`}${above === undefined ? '' : ` ${nameOf(above)} goes into main now.`}`,
+      stamped(
+        'merged',
+        `${recordOf(one)}.${waited.length === 0 ? '' : ` ${joined(waited.map(nameOf))} took main in.`}${above === undefined ? '' : ` ${nameOf(above)} goes into main now.`}`,
         waited[0]?.id ?? one.id,
       ),
     )(next)
@@ -308,7 +313,7 @@ const fixAfterMerge = (c: Case, ask?: Extract<Ask, { kind: 'after-merge' }>) => 
         title: `Settle what the review found on ${name}`,
         place: 'worktree',
       }),
-      part('lead', `Started ${merged?.branch ?? 'althar/fix'}-fix, after ${name}, for the ${found} findings.`, 'fix'),
+      part('lead', `${merged?.branch ?? 'althar/fix'}-fix, after ${name}, for its ${found} findings.`, 'fix', 'change'),
       working,
     ),
   )
@@ -459,7 +464,7 @@ export const addChange = () => {
   proto.edit(
     compose(
       added({ id, branch, title: 'A change of its own', place: 'worktree' }),
-      part('you', `You started a change, ${branch}, toward main.`, id),
+      part('you', `You started ${branch}, toward main.`, id, 'change'),
       (cc) => (cc.lane === 'scratch' ? { ...cc, lane: 'running' as const, status: 'running' as const } : cc),
     ),
   )
@@ -493,7 +498,7 @@ export const attachPr = (pr = 718, base = 'release/0.8.0') => {
         came: 'outside',
         place: 'none',
       }),
-      part('you', `You attached #${pr}, into ${base}, as a change of its own.`, `pr${pr}`),
+      part('you', `You attached #${pr}, into ${base}.`, `pr${pr}`, 'change'),
     ),
   )
 }
@@ -576,7 +581,7 @@ export const lineAct = (act: string, id?: string) => {
           dropAct(act),
           part(
             'you',
-            `You kept ${nameOf(one)} with ${nameOf(into)}. The lead carries its commits onto ${into.branch}${closes.length > 1 ? `, and its pull request closes ${joined(closes)}` : ''}.`,
+            `You kept ${nameOf(one)} with ${nameOf(into)}, on ${into.branch}${closes.length > 1 ? `. Its pull request closes ${joined(closes)}` : ''}.`,
           ),
         ),
       )
@@ -690,8 +695,8 @@ export const answerAsk = (c: Case, ask: Ask, choice: string) => {
         : say(`Kept #${ask.old} open`, working)
     case 'usage': {
       if (choice === 'Wait') return say(`Waits until ${ask.until}`)
-      // The chip's press takes the card's first: the project's backup.
-      const to = choice.startsWith('swap:') ? choice.slice(5) : 'DeepSeek V4.1 Flash'
+      // The chip's press takes the card's first free model: GPT-6.1 Sol, as the person's notes order them.
+      const to = choice.startsWith('swap:') ? choice.slice(5) : 'GPT-6.1 Sol'
       return say(`Moved to ${to}`, compose(working, part('you', `You moved the lead to ${to} until Claude is back.`)))
     }
     case 'stuck': {

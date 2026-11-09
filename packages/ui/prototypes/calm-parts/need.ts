@@ -64,7 +64,7 @@ export const askNeed = (c: Case, ask: Ask): Omit<Need, 'more'> => {
     case 'remove-draft':
       return { tone: 'you', says: `Your review of #${ask.pr} isn’t posted`, act: 'Post it' }
     case 'after-merge':
-      return { tone: 'you', says: `The review of #${ask.pr} found ${ask.findings.length}`, act: 'Fix it' }
+      return { tone: 'you', says: `Review found ${ask.findings.length} after #${ask.pr} merged`, act: 'Fix it' }
     case 'close-old':
       return { tone: 'you', says: `#${ask.now} is up. #${ask.old} is still open`, act: `Close #${ask.old}` }
     case 'usage':

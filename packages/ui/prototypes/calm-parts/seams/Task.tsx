@@ -5,6 +5,7 @@ import { TaskHeader as RealTaskHeader, type TaskHeaderProps } from '../../../src
 import { Composer as RealComposer, type ComposerProps } from '../../../src/composer/Composer/Composer'
 import { VIEWS } from '../directions'
 import { needOf } from '../need'
+import { css } from '../parts'
 import { proto, useProto } from '../state'
 
 const overOf = () => {
@@ -19,7 +20,14 @@ export function TaskHeader<F extends string>(props: TaskHeaderProps<F>) {
   const over = overOf()
   const beside = over.beside ?? props.beside
   return (
-    <RealTaskHeader {...props} status={over.status} state={over.state} parts={over.parts} {...(beside === undefined ? {} : { beside })} />
+    <RealTaskHeader
+      {...props}
+      className={[props.className, css.taskHead].filter(Boolean).join(' ')}
+      status={over.status}
+      state={over.state}
+      parts={over.parts}
+      {...(beside === undefined ? {} : { beside })}
+    />
   )
 }
 

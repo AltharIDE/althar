@@ -47,7 +47,7 @@ check(t.includes('Shipping Lane heights, then Card slide'), 'A stack-held: the c
 await settle(5200)
 t = await text()
 check(
-  t.includes('Shipped: Lane heights (#714) has the 2 commits') && t.includes('Card slide (#716) went up on top of'),
+  t.includes('Shipped 2 commits to Lane heights (#714)') && t.includes('Card slide (#716), on top of what shipped under it'),
   'A stack-held: both went up, in order, each naming its pull request',
 )
 
@@ -66,7 +66,7 @@ check(
 )
 await press('Ship')
 await settle(4600)
-check((await text()).includes('Shipped: Lane heights (#714) has the 2 commits'), 'B stack-held: its Ship ships Lane heights')
+check((await text()).includes('Shipped 2 commits to Lane heights (#714)'), 'B stack-held: its Ship ships Lane heights')
 
 // C · Where you talk: a tab picks the change; pressed again, its card, whose Ship ships it.
 await open('C', 'stack-held')
@@ -86,14 +86,14 @@ await dock().getByRole('button', { pressed: true }).click()
 await settle(300)
 await page.locator('[role=dialog]').getByRole('button', { name: 'Ship', exact: true }).first().click()
 await settle(4600)
-check((await text()).includes('Shipped: Lane heights (#714) has the 2 commits'), 'C stack-held: the tab’s card ships Lane heights')
+check((await text()).includes('Shipped 2 commits to Lane heights (#714)'), 'C stack-held: the tab’s card ships Lane heights')
 
 // One change, waiting beside a reply and a failing check: the chip's Ship takes them all.
 await open('A', 'held-beside')
 await press('Ship')
 await settle(4600)
 check(
-  (await text()).includes('Shipped: #714 has the 3 commits and the answer to the reply on it'),
+  (await text()).includes('Shipped 3 commits to #714, and the answer to the reply on it'),
   'A held-beside: shipped with the reply, checks running again',
 )
 
@@ -104,7 +104,7 @@ await settle(5200)
 t = await text()
 check((await titled()).includes('A new target while held'), 'A retarget: Ship stays in the case')
 check(
-  t.includes('althar/board-still-2 is up as #719, into release/0.8.0'),
+  t.includes('Shipped althar/board-still-2 as #719, into release/0.8.0'),
   'A retarget: the new pull request goes into release/0.8.0, not main',
 )
 check(t.includes('#714') && t.includes('is still open'), 'A retarget: only then asks about the old #714')
@@ -127,7 +127,7 @@ const startOne = async () => {
 await open('A', 'one')
 await startOne()
 t = await text()
-check(t.includes('You started a change, althar/board-still-tests'), 'A one: Start one says so in the thread')
+check(t.includes('New change You started althar/board-still-tests'), 'A one: Start one says so in the thread')
 check(
   ((await page.getByRole('button', { name: /^2 changes:/ }).count()) ?? 0) === 1,
   'A one: the chip now holds a mark for each of the 2 changes',
@@ -198,7 +198,7 @@ await press('Merge both')
 await settle(3600)
 t = await text()
 check(
-  t.includes('Lane heights (#714) merged. Card slide goes into main now.') && t.includes('Card slide (#716) merged.'),
+  t.includes('Merged Lane heights (#714). Card slide goes into main now.') && t.includes('Merged Card slide (#716).'),
   'A stack: Merge both merges Lane heights, then Card slide',
 )
 await inCase('A stack, ready to merge', 'A stack')
@@ -259,7 +259,7 @@ await open('A', 'merge-unshipped')
 await press('Review and merge')
 await settle(5600)
 t = await text()
-check(t.includes('Shipped: #714 has the 2 commits') && t.includes('#714 merged.'), 'A merge-unshipped: Review and merge ships, then merges')
+check(t.includes('Shipped 2 commits to #714') && t.includes('Merged #714.'), 'A merge-unshipped: Review and merge ships, then merges')
 
 // Settle with commits not shipped: ship, then settle.
 await open('A', 'settle-unshipped')
@@ -267,7 +267,7 @@ await press('Ship, then settle')
 await settle(5600)
 t = await text()
 check(
-  t.includes('Shipped: althar/calmer-empty-board is up as #719') && (await text()).includes('Settled'),
+  t.includes('Shipped althar/calmer-empty-board as #719') && (await text()).includes('Settled'),
   'A settle-unshipped: Ship, then settle ends settled',
 )
 
@@ -276,7 +276,7 @@ await open('A', 'after-merge')
 await press('Fix it')
 await settle(600)
 t = await text()
-check(t.includes('Started althar/rename-later-fix, after #715, for the 2 findings.'), 'A after-merge: Fix it starts a change after #715')
+check(t.includes('New change althar/rename-later-fix, after #715, for its 2 findings.'), 'A after-merge: Fix it starts a change after #715')
 
 // A removed review with a draft asks first; answering removes it.
 await open('C', 'reviewing-related')
@@ -305,15 +305,15 @@ await page
   .first()
   .click()
 await settle(600)
-check((await text()).includes('Moved to DeepSeek V4.1 Flash'), 'A usage: the kit’s card moves the lead to the first free model')
+check((await text()).includes('Moved to GPT-6.1 Sol'), 'A usage: the kit’s card moves the lead to the first free model')
 await open('A', 'stuck')
 await press('Try again')
 await settle(4200)
-check((await text()).includes('Shipped: #714 has the 2 commits'), 'A stuck: Try again runs the step again and ships')
+check((await text()).includes('Shipped 2 commits to #714'), 'A stuck: Try again runs the step again and ships')
 await open('A', 'refused')
 await press('Set up signing')
-await settle(4200)
-check((await text()).includes('Shipped: #714 has the 3 commits'), 'A refused: Set up signing ships')
+await settle(5200)
+check((await text()).includes('Shipped 3 commits to #714'), 'A refused: Set up signing ships')
 await open('A', 'unmatched')
 await page.getByRole('button', { name: 'Attach it as its own change' }).first().click()
 await settle(500)
@@ -346,7 +346,7 @@ await page.getByRole('button', { name: /Undo/ }).first().click()
 await settle(2500)
 t = await text()
 check(
-  t.includes('Ship Card slide, and the 2 commits on Lane heights') && !t.includes('Shipped: Lane heights'),
+  t.includes('Ship Card slide, and the 2 commits on Lane heights') && !t.includes('Shipped 2 commits to Lane heights'),
   'A stack-held: Undo gives the ask back and stops the Ship',
 )
 
@@ -364,20 +364,39 @@ const outputs = async (d, k = 'needs-one') => {
   await settle(1200)
   return (await text()).toLowerCase()
 }
+const heads = () => page.locator('section[aria-label] > [data-state] > button[aria-expanded]')
+const opened = () => page.locator('section[aria-label] > [data-state="open"]').count()
 for (const d of ['A', 'B', 'C']) {
   t = await outputs(d)
   check(
-    t.includes('what lane heights changes') && t.includes('what rename changes') && t.includes('what card slide changes'),
-    `${d} needs-one Outputs: every change, one under another`,
+    (await heads().count()) === 3 && t.includes('lane heights') && t.includes('rename') && t.includes('card slide'),
+    `${d} needs-one Outputs: every change, one under another, each a line`,
   )
+  check((await opened()) === 1, `${d} needs-one Outputs: only Lane heights, which the one fact is about, starts open`)
 }
-// A merged change folds to a line while another is open, and opens on a press; the open one stays as it was.
-t = await outputs('A', 'merged-one')
-check(t.includes('#714 merged') && !t.includes('what lane heights changes'), 'A merged-one Outputs: the merged change is a line')
-check(t.includes('what card slide changes'), 'A merged-one Outputs: the open change is in full')
-await page.getByRole('button', { name: /#714 merged/ }).click()
+// Every change folds and opens on its line, open or settled; a settled one starts folded.
+await outputs('A', 'needs-one')
+await heads().nth(0).click()
 await settle(500)
-check((await text()).toLowerCase().includes('what lane heights changes'), 'A merged-one Outputs: its line opens to all it made')
+check((await opened()) === 0, 'A needs-one Outputs: the open change folds on its line')
+await heads().nth(1).click()
+await heads().nth(2).click()
+await settle(500)
+check((await opened()) === 2, 'A needs-one Outputs: two folded changes open together')
+await heads().nth(1).click()
+await settle(500)
+check((await opened()) === 1, 'A needs-one Outputs: and fold again, one by one')
+t = await outputs('A', 'merged-one')
+check(
+  (await page.locator('section[aria-label="Lane heights"] > [data-state="closed"]').count()) === 1,
+  'A merged-one Outputs: the merged change starts as a line',
+)
+await page.locator('section[aria-label="Lane heights"] button[aria-expanded]').first().click()
+await settle(500)
+check(
+  (await page.locator('section[aria-label="Lane heights"] > [data-state="open"]').count()) === 1,
+  'A merged-one Outputs: its line opens to all it made',
+)
 
 // One at a time: the composer says which change what you say goes to; a name in a line is a way to it.
 await open('B', 'needs-one')
@@ -448,7 +467,7 @@ await page
 await settle(4200)
 t = await text()
 check(
-  t.includes('Reviewing with GPT-6.1 Terra') && t.includes('Shipped: #714 has the 2 commits'),
+  t.includes('Reviewing with GPT-6.1 Terra') && t.includes('Shipped 2 commits to #714'),
   'A stuck: picking GPT-6.1 Terra reviews with it, then ships',
 )
 
@@ -464,7 +483,7 @@ check((await titled()).includes('fix main first'), 'A release-red: the flow stay
 await press('Merge')
 await settle(4800)
 t = await text()
-check(t.includes('Fix main (#719) merged, and main came into Release 0.9.0.'), 'A release-red: the merge brings main into the release')
+check(t.includes('Merged Fix main (#719). Release 0.9.0 took main in.'), 'A release-red: the merge brings main into the release')
 check((await bar()).includes('Release 0.9.0: ready to merge'), 'A release-red: the release carries on, and its checks pass with main in')
 await page.getByRole('button', { name: /^2 changes:/ }).click()
 await settle(250)
@@ -491,18 +510,13 @@ await press('Keep them together')
 await settle(400)
 t = await text()
 check(
-  t.includes(
-    'You kept Terms page with Privacy page. The lead carries its commits onto althar/privacy-page, and its pull request closes DEV-140 and DEV-141.',
-  ),
+  t.includes('You kept Terms page with Privacy page, on althar/privacy-page. Its pull request closes DEV-140 and DEV-141.'),
   'A tickets-split: Keep them together joins them, closing both issues',
 )
 check((await bar()).includes('4 commits not shipped') && !(await bar()).includes('in 2 changes'), 'A tickets-split: one change again')
 await press('Ship')
 await settle(4200)
-check(
-  (await text()).includes('Shipped: althar/privacy-page is up as #719, into main, with the 4 commits.'),
-  'A tickets-split: one pull request',
-)
+check((await text()).includes('Shipped althar/privacy-page as #719, into main, with 4 commits.'), 'A tickets-split: one pull request')
 await open('A', 'tickets-one')
 check((await parts()) >= 1, 'A tickets-one: the parts row is there')
 await page.locator('button[aria-label^="Parts,"]').first().click()

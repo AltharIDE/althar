@@ -37,7 +37,7 @@ export const SHOTS = [
     s: 'merged-one',
     at: 'task',
     face: 'out',
-    press: 'button:has-text("#714 merged")',
+    press: 'section[aria-label="Lane heights"] button[aria-expanded]',
     clip: { x: 0, y: 44, width: 1440, height: 560 },
   },
   // The plan card: its preset, a quiet word in its kicker
@@ -48,7 +48,7 @@ export const SHOTS = [
   { id: '18-A-release-red-marks', d: 'A', s: 'release-red', at: 'task', press: 'button[aria-label^="2 changes"]', pop: true },
   { id: '19-A-release-red-card', d: 'A', s: 'release-red', at: 'board', ...card('Cut 0.9.0') },
   { id: '20-A-release-on-thread', d: 'A', s: 'release-on', at: 'task', ...around('Fix main (#719) merged', 260, 60) },
-  { id: '21-A-tickets-split-thread', d: 'A', s: 'tickets-split', at: 'task', ...around('Started a second change, Terms page', 200, 60) },
+  { id: '21-A-tickets-split-thread', d: 'A', s: 'tickets-split', at: 'task', ...around('as DEV-141 is a page of its own', 200, 60) },
   { id: '22-A-tickets-one-parts', d: 'A', s: 'tickets-one', at: 'task', press: 'button[aria-label^="Parts,"]', pop: true },
 ]
 

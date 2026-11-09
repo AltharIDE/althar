@@ -26,7 +26,7 @@ const SHOTS = [
       await page.locator('[role=dialog]').getByRole('button', { name: 'Ship', exact: true }).first().click()
       await page.waitForTimeout(5600)
     },
-    around: ['went up on top of', 300, 120],
+    around: ['on top of what shipped under it', 300, 120],
   },
   {
     id: '31-B-retarget-shipped',

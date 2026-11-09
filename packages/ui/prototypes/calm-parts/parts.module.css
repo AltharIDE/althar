@@ -61,6 +61,10 @@
 .mark[data-mark='ready'] {
   color: var(--signal);
 }
+.mark[data-aside][data-mark='you'],
+.mark[data-aside][data-mark='ready'] {
+  color: var(--t-2);
+}
 .mark[data-mark='ok'],
 .mark[data-mark='merged'] {
   color: var(--ok);
@@ -283,6 +287,7 @@
 /* A line's way on, after its words */
 .lineAct {
   margin-left: 8px;
+  white-space: nowrap;
 }
 
 /* A: the one press, inside where it stands */
@@ -300,12 +305,29 @@
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  transition: background-color var(--fast) var(--ease);
 }
-.chipAct[data-tone='bad'],
-.chipAct[data-tone='quiet'] {
-  background: var(--paper);
-  color: var(--t-1);
-  box-shadow: inset 0 0 0 1px var(--line-2);
+.chipAct:hover {
+  background: var(--signal-fill-hover);
+}
+.chipAct:active {
+  background: var(--signal-fill-pressed);
+}
+.chipAct:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 1.5px var(--n-2),
+    0 0 0 3px var(--signal);
+}
+/* Where nothing asks, the press is the chip's own colour a shade deeper: never a white key on a tint */
+.chipAct[data-tone='quiet'],
+.chipAct[data-tone='live'] {
+  background: color-mix(in srgb, currentColor 13%, transparent);
+  color: inherit;
+}
+.chipAct[data-tone='quiet']:hover,
+.chipAct[data-tone='live']:hover {
+  background: color-mix(in srgb, currentColor 20%, transparent);
 }
 
 /* A: the chip's sentence, cut with … where the bar is narrow */
@@ -579,14 +601,26 @@
 .setMarks {
   display: inline-flex;
   align-items: center;
-  gap: 1px;
-  padding: 1px 3px;
+  gap: 2px;
+  margin: 0 -2px 0 -5px;
+  padding: 2px 4px;
   border-radius: 99px;
-  background: var(--paper);
-  box-shadow: inset 0 0 0 1px var(--line);
+  transition: background-color var(--fast) var(--ease);
 }
-.setChip:hover .setMarks {
-  box-shadow: inset 0 0 0 1px var(--line-2);
+/* They open the list: on hover, the chip's own colour a shade deeper behind them, never a white well */
+.setChip:hover .setMarks,
+.setChip[aria-expanded='true'] .setMarks {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.setChip:focus-visible {
+  outline: none;
+}
+.setChip:focus-visible .setMarks {
+  box-shadow: 0 0 0 1.5px currentColor;
+}
+/* The marks stand where the chip's own glyph would: one column of glyphs, never two */
+.taskHead [data-status] > :first-child:has(.setChip) > :first-child {
+  display: none;
 }
 
 /* One at a time: the change in view, after the task's title */
@@ -691,16 +725,18 @@
   border-top: 1px solid var(--line);
 }
 
-.outSettled {
+.outFold {
   max-width: 1480px;
   margin: 0 auto;
 }
-.outSettledLine {
+/* Its line: what it is and where it stands, a step louder on hover; no band, as the thread's folds */
+.outHead {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 14px 40px;
+  min-height: 52px;
+  padding: 0 40px;
   border: 0;
   background: none;
   font: inherit;
@@ -709,20 +745,54 @@
   text-align: left;
   cursor: pointer;
 }
-.outSettledLine:hover {
-  background: var(--hover-faint);
+.outHead:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--t-3);
+  border-radius: 8px;
 }
-.outSettledLine .outName {
+.outHead .outName {
+  font-size: 13.5px;
+  font-weight: 550;
   color: var(--t-1);
 }
-.outSettledWhat {
-  color: var(--t-2);
+.outHeadRef {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t-3);
+  transition: color var(--fast) var(--ease);
 }
-.outSettledSize {
+.outHead .outDetail {
+  margin-left: 4px;
+}
+.outHeadSize {
   margin-left: auto;
   font-size: 12px;
   color: var(--t-3);
   font-variant-numeric: tabular-nums;
+  transition: color var(--fast) var(--ease);
+}
+.outHeadCaret {
+  transition:
+    transform var(--fold) var(--ease-fold),
+    color var(--fast) var(--ease);
+}
+/* Hovered, the whole line a step louder, as the kit's thread rows: its words to ink, its quiet parts to the words' grey */
+.outHead .outDetail:not([data-tone='you']):not([data-tone='bad']) {
+  color: var(--t-2);
+  transition: color var(--fast) var(--ease);
+}
+.outHead:hover .outDetail:not([data-tone='you']):not([data-tone='bad']) {
+  color: var(--t-1);
+}
+.outHead:hover .outHeadRef,
+.outHead:hover .outHeadSize,
+.outHead:hover .outHeadCaret {
+  color: var(--t-2);
+}
+/* Opened under its line: its story and its card, without the page's top margin again */
+.outFold .outBody {
+  padding-top: 4px;
+  padding-bottom: 36px;
 }
 
 /* The plan card's preset: the kicker's first word, a menu on a press; underlined only on hover */
@@ -744,4 +814,40 @@
 .presetWord[aria-expanded='true'] {
   color: var(--t-1);
   text-decoration-color: var(--t-3);
+}
+
+/* A step in the work, stamped: Shipped and Merged in green, a new change in ink; the rest of its line a step louder */
+.stamped {
+  color: var(--t-2);
+}
+.stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  margin-right: 4px;
+  padding: 0 8px 0 6px;
+  border-radius: 99px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+.stamp[data-stamp='shipped'],
+.stamp[data-stamp='merged'] {
+  background: color-mix(in srgb, var(--ok) 13%, transparent);
+  color: var(--ok-ink);
+}
+.stamp[data-stamp='change'] {
+  background: color-mix(in srgb, var(--t-1) 7%, transparent);
+  color: var(--t-1);
+}
+.lineName {
+  font-weight: 550;
+  color: var(--t-1);
+}
+.lineCode {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t-2);
 }

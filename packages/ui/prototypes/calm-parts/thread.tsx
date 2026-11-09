@@ -27,7 +27,16 @@ export const itemsOf = (c: Case, direction: Direction): ThreadItem[] => {
   // The lead's part changes on its way, as a beat of their own after its turn.
   const beats: Beat[] = c.thread.flatMap((beat): Beat[] =>
     beat.kind === 'lead' && beat.part !== undefined
-      ? [beat, { kind: 'part', who: 'lead', text: beat.part.text, ...(beat.part.change === undefined ? {} : { change: beat.part.change }) }]
+      ? [
+          beat,
+          {
+            kind: 'part',
+            who: 'lead',
+            text: beat.part.text,
+            ...(beat.part.change === undefined ? {} : { change: beat.part.change }),
+            ...(beat.part.stamp === undefined ? {} : { stamp: beat.part.stamp }),
+          },
+        ]
       : [beat],
   )
   // The blocks are made again each read, so they draw on what the page holds now; the items keep their ids.

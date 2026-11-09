@@ -12,7 +12,7 @@ import { Menu, MenuItem } from '../../src/primitives/Menu/Menu'
 import { Popover } from '../../src/primitives/Popover/Popover'
 import type { PartAction, PartKind, PartTone, TaskPartModel } from '../../src/chrome/TaskParts/TaskParts'
 import { BranchChip, PullChip } from '../../src/board/BoardCard/Chips'
-import { type Case, caseOf, type Change, changeIn, type Timing } from './cases'
+import { type Case, caseOf, type Change, changeIn, type Stamp, type Timing } from './cases'
 import { commits, nameOf, needOf, open, partsOfTime, prOf, said, waitsFor } from './need'
 import {
   act as doAct,
@@ -37,6 +37,7 @@ import {
   workOn,
 } from './moves'
 import css from './parts.module.css'
+import { proto } from './state'
 
 export { css }
 
@@ -391,7 +392,7 @@ export const chipOf = (change: Change | undefined) =>
 
 /* ——— B: a change's mark, its track on the card, its strip under the bar ——— */
 
-type Mark = 'bad' | 'you' | 'ready' | 'live' | 'ok' | 'quiet' | 'merged'
+type Mark = 'bad' | 'you' | 'ready' | 'live' | 'ok' | 'quiet' | 'merged' | 'waits'
 export const markOf = (c: Case, change: Change): Mark => {
   if (change.state === 'merged') return change.found === undefined ? 'merged' : 'you'
   const stands = standingOf(c, change)
@@ -401,10 +402,21 @@ export const markOf = (c: Case, change: Change): Mark => {
   if (tone === 'you' && stands.act === 'Merge') return 'ready'
   if (tone === 'you') return 'you'
   if (tone === 'live') return 'live'
+  // It goes after another: a clock, until that one merges.
+  if (waitsFor(c, change) !== undefined) return 'waits'
   return change.checks === 'passed' ? 'ok' : 'quiet'
 }
 
-export function ChangeMark({ mark }: { mark: Mark }) {
+/**
+ * One thing asks at a time: a change that waits on you (ready, or commits held), but isn't the one the task's fact is about, is
+ * marked in ink, not violet. Inside the task's chip they all stay its colour: the chip is the one ask.
+ */
+export const asideOf = (c: Case, change: Change) => {
+  const about = needOf(c, proto.get().answered).change
+  return about !== undefined && about.id !== change.id
+}
+
+export function ChangeMark({ mark, aside = false }: { mark: Mark; aside?: boolean }) {
   if (mark === 'live')
     return (
       <span className={css.mark} data-mark="live">
@@ -412,9 +424,19 @@ export function ChangeMark({ mark }: { mark: Mark }) {
       </span>
     )
   const icon: IconName =
-    mark === 'bad' ? 'close' : mark === 'ok' || mark === 'ready' ? 'check' : mark === 'you' ? 'after' : mark === 'merged' ? 'pr' : 'branch'
+    mark === 'bad'
+      ? 'close'
+      : mark === 'ok' || mark === 'ready'
+        ? 'check'
+        : mark === 'you'
+          ? 'after'
+          : mark === 'merged'
+            ? 'pr'
+            : mark === 'waits'
+              ? 'clock'
+              : 'branch'
   return (
-    <span className={css.mark} data-mark={mark}>
+    <span className={css.mark} data-mark={mark} {...(aside ? { 'data-aside': '' } : {})}>
       <Icon name={icon} size={11} />
     </span>
   )
@@ -430,7 +452,7 @@ export function ChangeTrack({ c }: { c: Case }) {
       aria-label={`${c.changes.length} changes: ${c.changes.map((change) => `${nameOf(change)}, ${standingOf(c, change).detail}`).join('; ')}`}
     >
       {c.changes.slice(0, 8).map((change) => (
-        <ChangeMark key={change.id} mark={markOf(c, change)} />
+        <ChangeMark key={change.id} mark={markOf(c, change)} aside={asideOf(c, change)} />
       ))}
       <span className={css.count}>{c.changes.length} changes</span>
     </span>
@@ -561,16 +583,19 @@ const othersNeed = (c: Case, now: Change | undefined) =>
 
 /** Each of the task's changes, a row: its mark, its name, its pull request and branch, where it stands, and its quiet press. */
 export function ChangesList({ c, onPick }: { c: Case; onPick?: (id: string) => void }) {
+  const about = needOf(c, proto.get().answered).change
   return (
     <ul className={css.outRows}>
       {c.changes.map((change) => {
         const stands = standingOf(c, change)
+        // One thing asks at a time: violet only on the change the task's one fact is about; a failure stays red.
+        const tone = stands.tone === 'you' && about !== undefined && about.id !== change.id ? 'quiet' : stands.tone
         const row = (
           <>
-            <ChangeMark mark={markOf(c, change)} />
+            <ChangeMark mark={markOf(c, change)} aside={asideOf(c, change)} />
             <span className={css.outName}>{nameOf(change)}</span>
             <code className={css.outRowBranch}>{change.pr === undefined ? change.branch : `#${change.pr} · ${change.branch}`}</code>
-            <span className={css.outDetail} data-tone={stands.tone}>
+            <span className={css.outDetail} data-tone={tone}>
               {stands.detail}
               {change.place === 'local' ? ' · in your checkout' : ''}
             </span>
@@ -745,6 +770,51 @@ export function Linked({ c, text }: { c: Case; text: string }) {
           </LinkButton>
         )
       })}
+    </>
+  )
+}
+
+/* ——— A step in the work, stamped ——— */
+
+const STAMPS: Record<Stamp, { readonly word: string; readonly icon: IconName }> = {
+  shipped: { word: 'Shipped', icon: 'up' },
+  merged: { word: 'Merged', icon: 'pr' },
+  change: { word: 'New change', icon: 'branch' },
+}
+
+/** What a step in the work is, before its line: Shipped and Merged in green, a new change in ink. */
+export function StampOf({ stamp }: { stamp: Stamp }) {
+  const { word, icon } = STAMPS[stamp]
+  return (
+    <span className={css.stamp} data-stamp={stamp}>
+      <Icon name={icon} size={11} />
+      {word}
+    </span>
+  )
+}
+
+/** A stamped line's words: the changes it names in ink, branches as code, pull requests by number in ink. */
+export function Marked({ c, text }: { c: Case; text: string }) {
+  const names = c.changes.map((one) => one.short).filter((one): one is string => one !== undefined)
+  const escape = (one: string) => one.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const pattern = new RegExp(
+    `(${[...names.map(escape), '#\\d+', '\\b[a-z0-9][a-z0-9.-]*/[a-z0-9./-]*[a-z0-9]', '\\brelease-\\d[\\d.]*\\d'].join('|')})`,
+  )
+  return (
+    <>
+      {text.split(pattern).map((bit, at) =>
+        at % 2 === 0 ? (
+          bit
+        ) : names.includes(bit) || bit.startsWith('#') ? (
+          <span key={`${bit}${at}`} className={css.lineName}>
+            {bit}
+          </span>
+        ) : (
+          <code key={`${bit}${at}`} className={css.lineCode}>
+            {bit}
+          </code>
+        ),
+      )}
     </>
   )
 }

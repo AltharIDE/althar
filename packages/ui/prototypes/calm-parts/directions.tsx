@@ -4,7 +4,6 @@
 // the same in all three, as today.
 import type { ReactNode } from 'react'
 
-import { Icon } from '../../src/foundations/Icon/Icon'
 import { TaskStatus, Verdict } from '../../src/foundations/vocabulary'
 import { NextStep } from '../../src/primitives/NextStep/NextStep'
 import { LinkButton } from '../../src/primitives/LinkButton/LinkButton'
@@ -27,7 +26,9 @@ import {
   focusOf,
   kindsOf,
   Linked,
+  Marked,
   SetMarks,
+  StampOf,
   taskWide,
   TimeParts,
 } from './parts'
@@ -96,10 +97,18 @@ const nextOf = (need: Need) =>
     </NextStep>
   )
 
-/** The line a part change, or Althar, writes: who and what, its way on after it. */
+/** The line a part change, or Althar, writes: who and what, its way on after it. A step in the work leads with its stamp. */
 const line = (c: Case, beat: Extract<Beat, { kind: 'part' | 'line' }>, { links = false }: { links?: boolean } = {}) => (
-  <AltharLine tone={beat.kind === 'line' && beat.tone === 'warning' ? 'warning' : 'info'}>
-    {links ? <Linked c={c} text={beat.text} /> : beat.text}
+  <AltharLine
+    tone={beat.kind === 'line' && beat.tone === 'warning' ? 'warning' : 'info'}
+    {...(beat.stamp === undefined ? {} : { className: css.stamped })}
+  >
+    {beat.stamp !== undefined && (
+      <>
+        <StampOf stamp={beat.stamp} />{' '}
+      </>
+    )}
+    {links ? <Linked c={c} text={beat.text} /> : beat.stamp === undefined ? beat.text : <Marked c={c} text={beat.text} />}
     {beat.act !== undefined && (
       <span className={css.lineAct}>
         <LinkButton onClick={() => lineAct(beat.act!, beat.change)}>{beat.act}</LinkButton>
@@ -144,10 +153,21 @@ const chip = (c: Case, need: Need, words: ReactNode) => ({
 })
 const sentence = (need: Need) => <span className={css.chipWords} title={`${need.says}${more(need)}`}>{`${need.says}${more(need)}`}</span>
 
+/**
+ * The card's line under its title: the task's one fact, less what its status already says. “Working” under “Working” goes;
+ * “Review found 2 after #715 merged” under “Review found 2” is “After #715 merged”. The header, with no status word, keeps it whole.
+ */
+const whyOf = (c: Case, says: string): { why?: string } => {
+  if (says === c.word) return {}
+  if (!says.startsWith(`${c.word} `)) return { why: says }
+  const rest = says.slice(c.word.length + 1)
+  return { why: `${rest.charAt(0).toUpperCase()}${rest.slice(1)}` }
+}
+
 /** A's card: the sentence, the pull request it names, its button. */
 const card = (c: Case, need: Need): CardOver => ({
   status: statusOf(c, need),
-  ...(need.tone === 'quiet' && need.says === c.word ? {} : { why: `${need.says}${more(need)}` }),
+  ...whyOf(c, `${need.says}${more(need)}`),
   object: chipOf(named(c, need)),
   foot: null,
   next: nextOf(need),
@@ -170,8 +190,8 @@ const beatOf =
   }
 
 const shared = {
-  // A part the lead changed on its way is its housekeeping, inside its work; one with a way on stands as a line.
-  folds: (beat: Extract<Beat, { kind: 'part' }>) => beat.who === 'lead' && beat.act === undefined,
+  // A part the lead changed on its way is its housekeeping, inside its work; one with a way on, or a new change, stands as a line.
+  folds: (beat: Extract<Beat, { kind: 'part' }>) => beat.who === 'lead' && beat.act === undefined && beat.stamp === undefined,
   // Once a task has two changes, each turn's line says where its commits went.
   took: (c: Case, took: string, _t: Timing, beat: Extract<Beat, { kind: 'lead' }>) => {
     const change = changeIn(c, beat.commits?.change)
@@ -235,7 +255,7 @@ const ONE: View = {
     several(c)
       ? {
           status: statusOf(c, need),
-          ...(need.tone === 'quiet' && need.says === c.word ? {} : { why: need.says }),
+          ...whyOf(c, need.says),
           object: null,
           foot: <ChangeTrack c={c} />,
           next: nextOf(need),

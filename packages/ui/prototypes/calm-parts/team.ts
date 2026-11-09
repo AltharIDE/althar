@@ -48,5 +48,5 @@ export const FLASH: ModelInfo = {
   via: 'via OpenCode Go',
 }
 
-/** Who can take a review or a lead's turn over, the project's backup first (the person's notes). */
-export const TAKERS: ReadonlyArray<ModelInfo> = [FLASH, TERRA, OPUS, SONNET]
+/** Who can take a review or a lead's turn over, in the person's order: GPT-6.1 first, then Claude, DeepSeek only last. */
+export const TAKERS: ReadonlyArray<ModelInfo> = [TERRA, OPUS, SONNET, FLASH]

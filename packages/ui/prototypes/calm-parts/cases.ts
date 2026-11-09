@@ -79,6 +79,9 @@ export type Ask =
   | { readonly kind: 'ship-stack'; readonly change: string }
 
 /** A beat of the thread, as plain facts; each direction draws them its way. */
+/** A line that marks a step in the work, stamped so it stands out of the thread: up for review, merged, a new change. */
+export type Stamp = 'shipped' | 'merged' | 'change'
+
 export type Beat =
   | { readonly kind: 'you'; readonly text: string }
   | {
@@ -89,13 +92,27 @@ export type Beat =
       /** Its commits, and the change they went to. */
       readonly commits?: { readonly n: number; readonly change: string }
       /** A part it changed on the way, in its own words: the thread's line for it. */
-      readonly part?: { readonly text: string; readonly change?: string }
+      readonly part?: { readonly text: string; readonly change?: string; readonly stamp?: Stamp }
       readonly who?: string
     }
   /** A part changed, by someone other than the lead mid-turn: one line. */
-  | { readonly kind: 'part'; readonly who: Who; readonly text: string; readonly change?: string; readonly act?: string }
+  | {
+      readonly kind: 'part'
+      readonly who: Who
+      readonly text: string
+      readonly change?: string
+      readonly act?: string
+      readonly stamp?: Stamp
+    }
   /** Althar, saying what the person should know. */
-  | { readonly kind: 'line'; readonly text: string; readonly change?: string; readonly tone?: 'warning'; readonly act?: string }
+  | {
+      readonly kind: 'line'
+      readonly text: string
+      readonly change?: string
+      readonly tone?: 'warning'
+      readonly act?: string
+      readonly stamp?: Stamp
+    }
   /** A review, as the thread's one line for it. */
   | {
       readonly kind: 'review'
@@ -184,7 +201,7 @@ const LATER: Change = {
   branch: 'althar/rename-later',
   pr: 715,
   state: 'open',
-  title: 'Call “Keep for later” “Later”',
+  title: 'Rename “Keep for later” to “Later”',
   checks: 'passed',
   place: 'worktree',
   add: 12,
@@ -262,7 +279,7 @@ const releaseOpening: ReadonlyArray<Beat> = [
     tools: ['Ran gh run view --log-failed', 'Edit apps/desktop/e2e/board.spec.ts'],
     took: { work: 74, tools: 31 },
     commits: { n: 1, change: 'fixmain' },
-    part: { text: 'Started a second change, Fix main, on althar/fix-main toward main, to land before Release 0.9.0.', change: 'fixmain' },
+    part: { text: 'Fix main, on althar/fix-main toward main. It goes in before Release 0.9.0.', change: 'fixmain', stamp: 'change' },
   },
 ]
 
@@ -346,13 +363,14 @@ export const CASES: ReadonlyArray<Case> = [
       {
         kind: 'part',
         who: 'lead',
-        text: 'Started a second change, Rename, on althar/rename-later toward main, to keep it apart.',
+        text: 'Rename, on althar/rename-later toward main, to keep it apart.',
         change: 'later',
+        stamp: 'change',
         act: 'Keep them together',
       },
       { kind: 'review', findings: 0, change: 'still' },
       { kind: 'review', findings: 0, change: 'later' },
-      { kind: 'line', text: 'Opened #714 for Lane heights and #715 for Rename, as drafts.' },
+      { kind: 'line', text: 'Lane heights as #714 and Rename as #715, both drafts.', stamp: 'shipped' },
     ],
     adr: 'Where none needs them, it says what the changes wait on: “Waiting for checks on #714, #715”.',
   },
@@ -454,8 +472,9 @@ export const CASES: ReadonlyArray<Case> = [
       ...opening,
       {
         kind: 'line',
-        text: 'Lane heights (#714) merged. The task carries on with Rename and Card slide.',
+        text: 'Lane heights (#714). Rename and Card slide carry on.',
         change: 'still',
+        stamp: 'merged',
       },
       { kind: 'you', text: 'Good. Start the slide now, on main.' },
       {
@@ -519,8 +538,9 @@ export const CASES: ReadonlyArray<Case> = [
       {
         kind: 'part',
         who: 'lead',
-        text: 'Started a second change, Rename, on althar/rename-later toward main, to keep it apart.',
+        text: 'Rename, on althar/rename-later toward main, to keep it apart.',
         change: 'later',
+        stamp: 'change',
         act: 'Keep them together',
       },
     ],
@@ -562,7 +582,7 @@ export const CASES: ReadonlyArray<Case> = [
     thread: [
       ...releaseOpening,
       { kind: 'review', findings: 0, change: 'fixmain' },
-      { kind: 'line', text: 'Shipped: althar/fix-main is up as #719, into main, with the 1 commit.', change: 'fixmain' },
+      { kind: 'line', text: 'Fix main as #719, into main, with 1 commit.', change: 'fixmain', stamp: 'shipped' },
     ],
     adr: 'Proposed: what the change going first fixes doesn’t ask for the person on the one waiting for it.',
   },
@@ -586,8 +606,8 @@ export const CASES: ReadonlyArray<Case> = [
     thread: [
       ...releaseOpening,
       { kind: 'review', findings: 0, change: 'fixmain' },
-      { kind: 'line', text: 'Shipped: althar/fix-main is up as #719, into main, with the 1 commit.', change: 'fixmain' },
-      { kind: 'line', text: 'Fix main (#719) merged, and main came into Release 0.9.0.', change: 'release' },
+      { kind: 'line', text: 'Fix main as #719, into main, with 1 commit.', change: 'fixmain', stamp: 'shipped' },
+      { kind: 'line', text: 'Fix main (#719). Release 0.9.0 took main in.', change: 'release', stamp: 'merged' },
     ],
     adr: 'A merge ends only its own change, never the task, its session or what runs.',
   },
@@ -616,8 +636,9 @@ export const CASES: ReadonlyArray<Case> = [
       {
         kind: 'part',
         who: 'lead',
-        text: 'Started a second change, Terms page, on althar/terms-page toward main, as DEV-141 is a page of its own.',
+        text: 'Terms page, on althar/terms-page toward main, as DEV-141 is a page of its own.',
         change: 'terms',
+        stamp: 'change',
         act: 'Keep them together',
       },
     ],
@@ -1144,7 +1165,7 @@ export const CASES: ReadonlyArray<Case> = [
     lane: 'you',
     word: 'Review found 2',
     status: 'yours',
-    title: 'Call “Keep for later” “Later”',
+    title: 'Rename “Keep for later” to “Later”',
     kind: 'change',
     preset: 'Small change',
     changes: [ch(LATER, { state: 'merged', place: 'none', checks: undefined, found: 2 })],
@@ -1176,7 +1197,7 @@ export const CASES: ReadonlyArray<Case> = [
     lane: 'settled',
     word: 'Settled',
     status: 'done',
-    title: 'Call “Keep for later” “Later”',
+    title: 'Rename “Keep for later” to “Later”',
     kind: 'change',
     preset: 'Small change',
     changes: [ch(LATER, { state: 'merged', place: 'none', checks: undefined })],
@@ -1334,7 +1355,7 @@ export const CASES: ReadonlyArray<Case> = [
     preset: 'Change',
     changes: [ch(STILL), ch(LATER, { checks: 'failed', failing: ['lint'] })],
     reviewer: SOL,
-    still: { why: 'Fixing Rename’s checks waits for one of the 4 agents at work' },
+    still: { why: 'Rename’s fix waits for a free agent' },
     thread: [
       ...opening,
       { kind: 'line', text: 'lint fails on Rename.', change: 'later', tone: 'warning' },
