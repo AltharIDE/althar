@@ -22,6 +22,7 @@ import { Launches } from './Launches'
 import { Live } from './Live'
 import { MachineLoad } from './MachineLoad'
 import { Overlaps } from './Overlaps'
+import { PageTools } from './PageTools'
 import { Situations } from './Situations'
 import { PlanUsage } from './PlanUsage'
 import { Permissions } from './Permissions'
@@ -43,6 +44,7 @@ import { Secrets } from './Secrets'
 import { Sessions } from './Sessions'
 import { LeftBehind } from './LeftBehind'
 import { Setups } from './Setups'
+import { shippedSkillsLayer } from './Skills'
 import { Limits } from './Limits'
 import { AutoModels } from './modelMoves'
 import { FastLane } from './fastLane'
@@ -172,11 +174,15 @@ export const layer = (options: RuntimeLayerOptions) => {
         TaskActions.layer,
         // The settings, read and changed by the coordinator and leads as the person can (ADR-097).
         SettingsTools.layer,
+        // The page beside a conversation, read and driven by its lead and the coordinator (ADR-100).
+        PageTools.layer,
         MachineLoad.layer,
         Overlaps.layer,
         // A child that ended, and a call that waits while the person is away (Situations.ts).
         Situations.layer,
         startupLayer('search-index', fillIndex),
+        // The skills an older Althar shipped come out of the person's store on the first start after it stopped.
+        startupLayer('skills', shippedSkillsLayer),
       ).pipe(Layer.provideMerge(automating)),
     ),
   )

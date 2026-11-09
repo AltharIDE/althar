@@ -1,0 +1,88 @@
+/* What a part will hold, while it holds nothing: the mark in its round glyph, then the words and what to press under them. */
+.empty {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+  outline: none;
+}
+
+/* Alone, where a section's content would be: a card on the sheet, as the quick cards are. */
+.card {
+  gap: 14px;
+  padding: 16px 18px 18px;
+  border-radius: 15px;
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift-card);
+}
+
+/* Inside a sheet or a list already drawn: a row's padding and its glyph's size, no card of its own. */
+.flush {
+  gap: 12px;
+  padding: 10px 0;
+}
+
+/* The mark, drawn quiet in an open circle: a glyph waiting for what it stands for. */
+.glyph {
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: 50%;
+  color: var(--t-2);
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.card .glyph {
+  width: 40px;
+  height: 40px;
+}
+.flush .glyph {
+  width: 30px;
+  height: 30px;
+}
+
+.words {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.card .words {
+  padding-top: 2px;
+}
+.flush .words {
+  padding-top: 1px;
+}
+
+.title {
+  margin: 0;
+  font-weight: 600;
+  color: var(--t-1);
+  overflow-wrap: anywhere;
+}
+.card .title {
+  font-size: 15px;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+.flush .title {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.line {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--t-2);
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 9px;
+}

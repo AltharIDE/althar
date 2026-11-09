@@ -9,6 +9,10 @@ import {
   Api,
   ApiError,
   ClientAuthority,
+  API_VERSION,
+  API_VERSION_HEADER,
+  API_VERSION_MISMATCH,
+  apiVersionRefusal,
   AtOnceCount,
   CommandId,
   FOUND_MOST,
@@ -523,6 +527,11 @@ describe('the API', () => {
               GetSettings: () => Effect.die('unused'),
               GetAgentTools: () => Effect.die('unused'),
               SetToolRoles: () => Effect.die('unused'),
+              SetToolInProject: () => Effect.die('unused'),
+              GetServerDetail: () => Effect.die('unused'),
+              CheckServers: () => Effect.die('unused'),
+              AddServer: () => Effect.die('unused'),
+              RemoveServer: () => Effect.die('unused'),
               SetToolSync: () => Effect.die('unused'),
               SetToolKeptOut: () => Effect.die('unused'),
               PickToolWay: () => Effect.die('unused'),
@@ -625,7 +634,6 @@ describe('the API', () => {
               ApproveSkill: () => Effect.die('unused'),
               CheckSkillUpdates: () => Effect.die('unused'),
               RollBackSkill: () => Effect.die('unused'),
-              SetSkillActive: () => Effect.die('unused'),
               UninstallSkill: () => Effect.die('unused'),
               ListConnections: () => Effect.succeed({ cursor: 0, connections: [], products: [], places: [] }),
               StartSignIn: ({ commandId: id }) =>
@@ -754,6 +762,63 @@ describe('the API', () => {
         // A command without its id doesn't leave the client.
         const bad = yield* Effect.exit(client.Send({ commandId: 'cmd_nope', threadId: 'th1', body: 'Hi', disposition: 'after_current' }))
         assert.strictEqual(bad._tag, 'Failure')
+      }),
+    ),
+  )
+
+  it.live('refuses a client of another API version, or one that says none, naming both versions', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const serveStatus = (version: number) =>
+          Effect.gen(function* () {
+            const channel = new MessageChannel()
+            yield* Effect.addFinalizer(() => Effect.sync(() => channel.port1.close()))
+            const handlers = Api.toLayer({
+              Status: () => Effect.succeed({ apiVersion: API_VERSION, appVersion: 'x', agents: [] }),
+            } as never)
+            yield* Effect.forkScoped(
+              Layer.launch(
+                RpcServer.layer(Api).pipe(
+                  Layer.provide(
+                    Layer.succeed(ClientAuthority, (effect, { headers }) => {
+                      const refusal = apiVersionRefusal(headers)
+                      return refusal === undefined ? effect : Effect.fail(refusal)
+                    }),
+                  ),
+                  Layer.provide(handlers),
+                  Layer.provide(serverProtocol(emitterPort(channel.port1, (data) => data))),
+                ),
+              ),
+            )
+            const protocol = yield* Layer.build(
+              clientProtocol(
+                emitterPort(channel.port2, (data) => data),
+                version,
+              ),
+            )
+            return yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
+          })
+
+        // The version it serves is let in.
+        const same = yield* serveStatus(API_VERSION)
+        assert.strictEqual((yield* same.Status({})).apiVersion, API_VERSION)
+
+        // Another is refused, with an error naming both.
+        const other = yield* serveStatus(API_VERSION + 1)
+        const refused = yield* Effect.flip(other.Status({}))
+        assert.instanceOf(refused, ApiError)
+        assert.strictEqual(refused.reason, API_VERSION_MISMATCH)
+        assert.strictEqual(refused.clientVersion, API_VERSION + 1)
+        assert.strictEqual(refused.runtimeVersion, API_VERSION)
+        assert.include(refused.message, `version ${API_VERSION + 1}`)
+
+        // Not saying is refused too, and the same for every call.
+        assert.strictEqual(apiVersionRefusal({})?.reason, API_VERSION_MISMATCH)
+        assert.isUndefined(apiVersionRefusal({})?.clientVersion)
+        assert.strictEqual(apiVersionRefusal({ [API_VERSION_HEADER]: 'abc' })?.reason, API_VERSION_MISMATCH)
+        assert.isUndefined(apiVersionRefusal({ [API_VERSION_HEADER]: String(API_VERSION) }))
+        const watching = yield* Effect.exit(Stream.runCollect(other.Watch({})))
+        assert.strictEqual(watching._tag, 'Failure')
       }),
     ),
   )

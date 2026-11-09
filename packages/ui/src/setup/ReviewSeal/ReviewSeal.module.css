@@ -4,27 +4,7 @@
   gap: 14px;
 }
 
-/* a pull request as GitHub shows it: its title, then the start of its description */
-.pullRequest {
-  margin: 0;
-  overflow: hidden;
-  border-radius: 10px;
-  background: var(--paper);
-  box-shadow: 0 0 0 1px var(--line-2);
-}
-.head {
-  padding: 10px 14px;
-  background: var(--n-1);
-  box-shadow: inset 0 -1px var(--line);
-  font-size: 13.5px;
-}
-.title {
-  font-weight: 600;
-  color: var(--t-1);
-}
-.number {
-  color: var(--t-3);
-}
+/* the pull request (PullRequestCard): under its title, the start of its description */
 .body {
   display: flow-root;
   padding: 12px 14px 14px;

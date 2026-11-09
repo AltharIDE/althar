@@ -461,10 +461,11 @@ describe('Althar’s settings, in the window', () => {
   })
 
   it('open again on the section they were on, after a launch, and close to the home where there is no project tab', async () => {
+    // The section the tab was on before the sections moved (Reviews, now Pull requests) is kept as where its settings went.
     window.localStorage.setItem('althar.tabs', JSON.stringify({ open: [], places: {}, settings: 'reviews' }))
     windowAt('/', [halyard])
     await userEvent.click(await waitFor(() => tab('Settings')))
-    expect(where()).toBe('/settings/reviews')
+    expect(where()).toBe('/settings/pull-requests')
     await userEvent.click(nav().getByRole('button', { name: 'Close Settings' }))
     await waitFor(() => expect(where()).toBe('/'))
   })

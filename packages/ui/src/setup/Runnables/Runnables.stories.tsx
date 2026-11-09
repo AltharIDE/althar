@@ -58,8 +58,31 @@ export const List: Story = {
   },
 }
 
-/** Everything taken out. */
-export const Empty: Story = { args: { runnables: [] } }
+/** Everything taken out: what will be here and how it gets here, over the way to add one in the dialog's foot. */
+export const Empty: Story = {
+  args: { runnables: [] },
+  play: async () => {
+    const page = within(document.body)
+    await expect(await page.findByRole('heading', { level: 3, name: 'Nothing to run yet' })).toBeVisible()
+    await expect(page.getByText(/Run starts it without an agent/)).toBeVisible()
+    await expect(page.queryByRole('list')).toBeNull()
+    await expect(page.getByRole('button', { name: 'Add something to run' })).toBeVisible()
+  },
+}
+
+/** Nothing yet, on a page of the project's settings, at night. */
+export const EmptyOnAPageDark: StoryObj<typeof RunnableList> = {
+  render: (args) => (
+    <div style={{ width: 760, padding: 24, background: 'var(--n-1)' }}>
+      <RunnableList {...args} />
+    </div>
+  ),
+  args: { runnables: [], onOrder: fn(), onDefault: fn(), onEdit: fn(), onRemove: fn() },
+  globals: { theme: 'dark' },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('region', { name: 'Nothing to run yet' })).toBeVisible()
+  },
+}
 
 /** The runtime said no to removing or ordering one. */
 export const ListFailed: Story = { args: { error: 'Storybook is running; stop it first.' } }

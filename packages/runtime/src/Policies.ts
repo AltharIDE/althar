@@ -285,10 +285,13 @@ export const insertRevision = (projectId: ProjectId, revision: number, rules: Pr
  */
 export const startingRules = (defaults: NewProjectDefaults): ProjectRules => {
   const chosen: Partial<ProjectRules> = {
-    ...(defaults.permissions === NEW_PROJECT_DEFAULTS.permissions ? {} : { permissions: defaults.permissions }),
     ...(defaults.usageLimit === NEW_PROJECT_DEFAULTS.usageLimit ? {} : { usageLimit: defaults.usageLimit }),
     ...(defaults.rotateAccounts ? { accounts: { rotate: true } } : {}),
     ...(defaults.end === NEW_PROJECT_DEFAULTS.end ? {} : { end: defaults.end }),
+    ...(defaults.pushCommits === NEW_PROJECT_DEFAULTS.pushCommits ? {} : { pushCommits: defaults.pushCommits }),
+    ...(defaults.postScreenshots === NEW_PROJECT_DEFAULTS.postScreenshots ? {} : { postScreenshots: defaults.postScreenshots }),
+    ...(defaults.resolveConflicts === NEW_PROJECT_DEFAULTS.resolveConflicts ? {} : { resolveConflicts: defaults.resolveConflicts }),
+    ...(defaults.moveIssues === NEW_PROJECT_DEFAULTS.moveIssues ? {} : { moveIssues: defaults.moveIssues }),
   }
   return Object.keys(chosen).length === 0 ? FIRST : { ...FIRST, ...chosen, source: 'defaults' }
 }

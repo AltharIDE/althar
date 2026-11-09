@@ -4,10 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { fetchSkill, findSkills, parseGitHubSource, resolveRef, resolveTree } from '../src/github'
-import { installLocalCatalog } from '../src/local'
 import { approve, checkUpdates, diffLines, rollBack, setActive, stageFromGitHub, uninstall } from '../src/review'
 import { readInstalls } from '../src/store'
-import { failure, fakeGitHub, skillMd, writeCatalog, run } from './support'
+import { failure, fakeGitHub, skillMd, run } from './support'
 
 const A = 'a'.repeat(40)
 const B = 'b'.repeat(40)
@@ -149,30 +148,6 @@ describe('installing a skill from GitHub as a person reviews it', () => {
     expect(await run(readInstalls(root))).toMatchObject({ installs: [] })
   })
 
-  it('needs the person’s say-so to put a skill in place of a default of the same name, which the catalog then leaves alone', async () => {
-    const catalog = await mkdtemp(join(tmpdir(), 'althar-skills-cat-'))
-    await writeCatalog(catalog, { alpha: { 'SKILL.md': skill('alpha', 'Default.\n') } })
-    await run(installLocalCatalog(root, catalog))
-    const { access } = fakeGitHub({ 'o/r': repoAt('Mine.\n') })
-    const card = await run(stageFromGitHub(root, access, { repo: 'o/r', subpath: 'skills/alpha', ref: 'main' }))
-    expect(card.installed).toMatchObject({ source: 'althar-default' })
-    expect(card.changes[0]?.lines).toEqual(
-      expect.arrayContaining([
-        { kind: 'removed', text: 'Default.' },
-        { kind: 'added', text: 'Mine.' },
-      ]),
-    )
-    await expect(run(approve(root, { id: 'alpha', ...card.source, treeHash: card.treeHash }))).rejects.toThrow('say-so')
-    await run(approve(root, { id: 'alpha', ...card.source, treeHash: card.treeHash, replace: true }))
-    await run(installLocalCatalog(root, catalog))
-    const read = await run(readInstalls(root))
-    expect(read.installs).toMatchObject([{ id: 'alpha', source: 'github', treeHash: card.treeHash }])
-    // Rolled back, it is the default again, not the default's files under the GitHub source.
-    const back = await run(rollBack(root, 'alpha'))
-    expect(back).toMatchObject({ source: 'althar-default', review: 'default' })
-    expect([back.repo, back.subpath, back.ref, back.sha, back.history]).toEqual([undefined, undefined, undefined, undefined, undefined])
-  })
-
   it('rolls a skill put in place of one from another repository back to that repository', async () => {
     const { access } = fakeGitHub({
       'o/r': repoAt('Theirs.\n'),
@@ -244,18 +219,15 @@ describe('installing a skill from GitHub as a person reviews it', () => {
     expect(await run(checkUpdates(root, gone))).toMatchObject([{ id: 'alpha', state: 'failed' }])
   })
 
-  it('turns an install off and on, removes a person’s own, and only turns a default off', async () => {
-    const catalog = await mkdtemp(join(tmpdir(), 'althar-skills-cat-'))
-    await writeCatalog(catalog, { beta: { 'SKILL.md': skill('beta') } })
-    await run(installLocalCatalog(root, catalog))
+  it('turns an install off and on, and removes it, leaving what is not installed alone', async () => {
     const { access } = fakeGitHub({ 'o/r': repoAt('Do it.\n') })
     const card = await run(stageFromGitHub(root, access, { repo: 'o/r', subpath: 'skills/alpha', ref: 'main' }))
     await run(approve(root, { id: 'alpha', ...card.source, treeHash: card.treeHash }))
-    expect(await run(setActive(root, 'beta', false))).toMatchObject({ active: false })
-    await expect(run(uninstall(root, 'beta'))).rejects.toThrow('turn it off')
-    await run(uninstall(root, 'alpha'))
-    const read = await run(readInstalls(root))
-    expect(read.installs.map(({ id, active }) => [id, active])).toEqual([['beta', false]])
+    expect(await run(setActive(root, 'alpha', false))).toMatchObject({ active: false })
+    expect(await run(setActive(root, 'alpha', true))).toMatchObject({ active: true })
+    expect(await run(uninstall(root, 'none'))).toBeUndefined()
+    expect(await run(uninstall(root, 'alpha'))).toMatchObject({ id: 'alpha' })
+    expect((await run(readInstalls(root))).installs).toEqual([])
   })
 })
 

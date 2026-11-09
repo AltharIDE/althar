@@ -57,7 +57,7 @@ const READY: DictationState = {
   platform: 'darwin',
   microphone: 'granted',
   settings: true,
-  model: { ready: true, got: 1, size: 1, downloading: false },
+  model: { name: 'Parakeet', ready: true, got: 1, size: 1, downloading: false },
 }
 
 /** A dictation host whose writing down waits until the test says what was heard, or that it failed. */
@@ -68,6 +68,7 @@ const slowDictation = () => {
     allow: vi.fn(async () => true),
     download: vi.fn(async () => {}),
     cancel: vi.fn(async () => {}),
+    remove: vi.fn(async () => {}),
     prepare: vi.fn(async () => {}),
     transcribe: vi.fn(() => new Promise<string>((resolve, reject) => void waiting.push({ resolve, reject }))),
     openSettings: vi.fn(async () => true),
