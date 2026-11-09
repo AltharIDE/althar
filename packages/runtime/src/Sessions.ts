@@ -3345,7 +3345,7 @@ export class Sessions extends Context.Service<
             `Task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
             ...(why.kind === 'start' && standing?.state === 'done'
               ? [
-                  "This task is settled: it is done, in the person's Settled, and the session that worked on it stopped as it settled. Don't do it again: what they ask now is a round of work of its own, on the work as it stands.",
+                  "This task is settled: it is done, in the person's Settled, and the session that worked on it stopped as it settled. Don't do it again: what they ask now is new work on the work as it stands, and what you commit for it waits for their Ship.",
                 ]
               : []),
             ...askedFor(thread),
@@ -3379,8 +3379,8 @@ export class Sessions extends Context.Service<
                 ]),
             // How the step ends: the lead says so, with what the person reads instead of the whole turn.
             "When you have done the task, call Althar's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did. If you can't go further without the person's answer, call wait_for_person with your question and end your turn: the task waits in their Needs you, and their answer starts you again. Don't use finish_step for work that waits on them.",
-            // After its plan, what the person asks for is a round of work of its own (ADR-034).
-            "Once the plan's steps are done, what the person asks you for is a round of work of its own: when you have done it, call finish_step the same way, with your summary and evidence. Where they only asked something and you changed nothing, answer them; there is nothing to finish. What you commit after the task's pull request merged or closed goes in a new pull request, which Althar opens as a draft once you finish; where they only asked something and you committed in passing as you answered, call finish_step with `answered`, and the person opens it from the task if they want it.",
+            // After its plan, what the person says is a turn, not a round (a task is a conversation plus parts): its commits wait for Ship.
+            'Once the plan\'s steps are done, what the person says to you is a turn of the conversation, not a step: do what they ask and answer; your last message is your answer, and there is no report to give and no finish_step to call. What you commit stays on the task\'s branch, where they can try it, and nothing pushes it: it waits for their Ship, which runs the review over everything since the last one and then sends it up (to the open pull request, or a new one after the last merged or closed). Where they ask you to ship it ("ship it", "push it"), call ship_task once your work for it is committed.',
             // The thread reads in rounds: what was asked, the lead's word on it, its work folded into one line, and what it did.
             'When you pick up something to do, whether the task, a message from the person, what the coordinator passes on or the findings of a review, first say in a sentence or two what you understood and what you will do, then do it. Say little while you work: your words along the way are folded in with your work. When you are done, end with a message that says what you did, what to look at, and what is left.',
             // What stands open of a round is its last message, or its report where nothing follows it: it carries everything (ADR-099).

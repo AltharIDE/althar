@@ -2004,6 +2004,13 @@ export type Queued = typeof Queued.Type
  * Commits on a task's branch after its last pull request merged or closed,
  * in none yet: what Open a new pull request opens one with (ADR-034).
  */
+/** What waits on a task's branch for Ship: since when it's held, and how many commits wait, across its repositories. */
+export const HeldForShip = Schema.Struct({
+  since: Schema.String,
+  commits: Schema.Number,
+})
+export type HeldForShip = typeof HeldForShip.Type
+
 export const Unshipped = Schema.Struct({
   commits: Schema.Int,
   /** Lines they add and remove, all together. */
@@ -2228,6 +2235,13 @@ export const TaskCard = Schema.Struct({
   earlier: Schema.optional(Schema.Array(ChangeSummary)),
   /** Commits after its last pull request merged or closed, in none yet; null or absent where there are none. */
   unshipped: Schema.optional(Schema.NullOr(Unshipped)),
+  /**
+   * What the person's turns with its lead committed after its plan waits on
+   * its branch for Ship, which reviews it and then sends it up (a task is a
+   * conversation plus parts, "A tweak waits for Ship"): since when, and how
+   * many commits. Absent while nothing is held, and from a runtime before it.
+   */
+  held: Schema.optional(HeldForShip),
   /** A change ready that built nothing: no commits on its branch and no pull request open or merged. Absent otherwise. */
   nothingBuilt: Schema.optional(Schema.Boolean),
   /**
@@ -3387,6 +3401,8 @@ export const ThreadSnapshot = Schema.Struct({
     changes: Schema.Array(ChangeSummary),
     /** Commits after its last pull request merged or closed, in none yet: what Open a new pull request opens one with. */
     unshipped: Schema.optional(Schema.NullOr(Unshipped)),
+    /** What waits on its branch for Ship, as its card has it (`TaskCard.held`). Absent while nothing is held. */
+    held: Schema.optional(HeldForShip),
     /** A change ready that built nothing: no commits on its branch, no pull request open or merged. Absent otherwise. */
     nothingBuilt: Schema.optional(Schema.Boolean),
     /** The review of its run under way can still be skipped, as the person may (ADR-034). */
@@ -4789,6 +4805,14 @@ export const Api = RpcGroup.make(
   command('OpenChange', { taskId: Schema.String }, Schema.Void),
   /** Skips the review of the task's run under way: a review under way stops, and work whose lead is done is ready (ADR-034). */
   command('SkipReview', { taskId: Schema.String }, Schema.Void),
+  /**
+   * Ships what waits on the task's branch, as the person said (a task is a
+   * conversation plus parts, "A tweak waits for Ship"): its review first,
+   * where its plan has one before the work ships, over everything since the
+   * last; then its commits go up. Refused while the task is at work, or
+   * where nothing waits (`ShipRefused`).
+   */
+  command('Ship', { taskId: Schema.String }, Schema.Void),
   /**
    * Merges the task's pull request at the head the person saw, because they
    * said to; a draft is marked ready first. A pull request that moved on

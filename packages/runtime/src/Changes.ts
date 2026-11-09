@@ -73,7 +73,17 @@ import {
 import { coAuthorOn, creditBranch, type Memory, recallMade, rememberMade, withoutAgentCredit } from './credit'
 import { envelope } from './envelope'
 import { evidencePaths, taskShown } from './evidence'
-import { AttachRefused, CantMerge, ChangedSinceSeen, GitFailed, NoChangeToOpen, NotFound, OutwardUncertain, PushRefused } from './errors'
+import {
+  AttachRefused,
+  CantMerge,
+  ChangedSinceSeen,
+  GitFailed,
+  NoChangeToOpen,
+  NotFound,
+  OutwardUncertain,
+  PushRefused,
+  ShipRefused,
+} from './errors'
 import { conventionsAt, ruleOf, titleFor } from './conventions'
 import { baseBranch, forkOf, workRemotes } from './forks'
 import { makeKeyedLock } from './keyedLock'
@@ -302,6 +312,12 @@ interface PublishInput {
   readonly runId: string
   readonly end: 'draft' | 'ready' | 'none'
   readonly again?: boolean | undefined
+  /**
+   * Ship publishes it, on the person's word, after its review: a worktree
+   * held for Ship goes up only so (a task is a conversation plus parts, "A
+   * tweak waits for Ship"); without it, publishing refuses one.
+   */
+  readonly ships?: boolean | undefined
 }
 
 /** One of the task's repositories, as publishing reads it. */
@@ -324,6 +340,21 @@ interface PublishRow {
   readonly toward: string | null
   /** For a fork: where its pull requests open, the repository it was forked from or the fork itself. */
   readonly changeTarget: ChangeTarget | null
+  /** When it was held for Ship; null while nothing waits for it. */
+  readonly heldAt: string | null
+}
+
+/**
+ * A task's worktree held for Ship (a task is a conversation plus parts, "A
+ * tweak waits for Ship"): what the person's turns with its lead committed
+ * after its plan waits on its branch, and nothing pushes it but Ship.
+ */
+export interface Held {
+  readonly workspaceId: string
+  readonly path: string
+  readonly branch: string
+  /** When the hold began: the end of the first turn that left commits on the branch. */
+  readonly heldAt: string
 }
 
 /**
@@ -691,6 +722,21 @@ export class Changes extends Context.Service<
      * that isn't on the branch any more isn't pushed.
      */
     push(taskId: string, head: string, url?: string): Effect.Effect<{ readonly change: ChangeSummary }, unknown>
+    /**
+     * The task's worktrees here held for Ship (a task is a conversation plus
+     * parts, "A tweak waits for Ship"): what the person's turns with its lead
+     * committed after its plan waits on the branch, and only Ship pushes it.
+     */
+    holds(taskId: string): Effect.Effect<ReadonlyArray<Held>, unknown>
+    /**
+     * Ship's push, after its review: each of the task's open pull requests
+     * takes its branch up to its head here, past the hold. What went where.
+     */
+    shipToOpen(taskId: string): Effect.Effect<ReadonlyArray<{ readonly where: string; readonly count: number }>, unknown>
+    /** What Ship would send to the task's open pull requests now, by pull request, sending nothing. */
+    aheadOfOpen(taskId: string): Effect.Effect<ReadonlyArray<{ readonly where: string; readonly count: number }>, unknown>
+    /** Lets go of the task's holds for Ship: what waited went up (`shipped`), or the person left it on the branch (`left`). */
+    releaseHolds(taskId: string, why: 'shipped' | 'left'): Effect.Effect<void, unknown>
     /**
      * Replaces the commits on the task's pull request with its branch here, up
      * to the commit the person saw, after its published commits were rewritten:
@@ -1215,12 +1261,15 @@ export class Changes extends Context.Service<
           const tasks = yield* sql<PublishRow>`
             SELECT k.title, b.display_name AS name, b.slug, t.id AS thread_id, w.id AS workspace_id, w.path, w.branch, w.base_commit, w.base_ref, b.id AS binding_id,
               w.branched_at IS NOT NULL AS branched, b.remote_fingerprints AS remotes, coalesce(w.toward, b.default_base_ref) AS default_base, b.change_target,
-              w.toward
+              w.toward, w.held_at
             FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
             JOIN workspaces w ON w.task_id = k.id AND w.device_id = ${instance.deviceId} AND w.access = 'write'
             JOIN repository_bindings b ON b.id = w.binding_id
             WHERE k.id = ${input.taskId} ORDER BY b.created_at, b.rowid`
           if (tasks.length === 0) return yield* new NotFound({ kind: 'task', id: input.taskId })
+          // Held for Ship, a worktree goes up only with Ship, after its review: nothing else publishes past the person's commits.
+          if (input.ships !== true && tasks.some((task) => task.heldAt !== null))
+            return yield* new ShipRefused({ taskId: input.taskId, why: 'held' })
           const [bound] = yield* sql<{ n: number }>`
             SELECT count(*) AS n FROM repository_bindings WHERE project_id = ${input.projectId} AND detached_at IS NULL`
           // Its next pull request goes only where the last one merged or closed with commits after it; the rest stand as they are.
@@ -2112,9 +2161,17 @@ export class Changes extends Context.Service<
       const worktreeOf = (taskId: string, url: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [workspace] = yield* sql<{ path: string; branch: string; base: string; baseCommit: string | null; threadId: string }>`
-            SELECT w.path, w.branch, coalesce(w.toward, b.default_base_ref, w.base_ref) AS base, w.base_commit,
-              (SELECT t.id FROM threads t WHERE t.task_id = w.task_id AND t.kind = 'task') AS thread_id
+          const [workspace] = yield* sql<{
+            id: string
+            path: string
+            branch: string
+            base: string
+            baseCommit: string | null
+            threadId: string
+            heldAt: string | null
+          }>`
+            SELECT w.id, w.path, w.branch, coalesce(w.toward, b.default_base_ref, w.base_ref) AS base, w.base_commit,
+              (SELECT t.id FROM threads t WHERE t.task_id = w.task_id AND t.kind = 'task') AS thread_id, w.held_at
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
             ORDER BY w.id = (SELECT c.workspace_id FROM repository_changes c WHERE c.pull_request_url = ${url} LIMIT 1) DESC,
@@ -2393,9 +2450,17 @@ export class Changes extends Context.Service<
           return { change: yield* summaryOf({ ...link, snapshot: JSON.stringify({ ...snapshot, headSha: head }) }) }
         })
 
-      const push = (taskId: string, seen: string, url?: string, by: 'person' | 'althar' = 'person') =>
+      /**
+       * Pushes the task's branch to its open pull request, up to `seen`: the
+       * person's Push, Althar's own course, or Ship (`ship`). A worktree held
+       * for Ship goes up only with Ship, which reviewed it first: nothing else
+       * pushes past the person's commits (a task is a conversation plus
+       * parts, "A tweak waits for Ship").
+       */
+      const push = (taskId: string, seen: string, url?: string, by: 'person' | 'althar' | 'ship' = 'person') =>
         Effect.gen(function* () {
           const { link, snapshot, workspace, pushTarget, sent } = yield* pushingTo(taskId, url)
+          if (workspace.heldAt !== null && by !== 'ship') return yield* new ShipRefused({ taskId, why: 'held' })
           // Onto the pull request's own branch, which for one attached to the task may be called otherwise (ADR-052).
           const onto = sourceOf(snapshot, workspace.branch)
           const tip = yield* remoteTip(workspace.path, pushTarget, onto)
@@ -2416,7 +2481,7 @@ export class Changes extends Context.Service<
             Effect.catchTag('GitFailed', (failed) => refusal(taskId, nameOf(snapshot), failed)),
           )
           yield* settle
-          return yield* pushedTo(taskId, link, snapshot, workspace.path, seen, head, by)
+          return yield* pushedTo(taskId, link, snapshot, workspace.path, seen, head, by === 'althar' ? 'althar' : 'person')
         })
 
       /**
@@ -4327,10 +4392,12 @@ export class Changes extends Context.Service<
           // While a round is under way on this pull request, the checks that count are those on the merge it pushes: the round sees
           // them through. Another pull request's round leaves this one's checks to the lead.
           const rounds = theRounds || began || (yield* roundUnderWay(link.taskId, before.url))
+          // Held for Ship, the checks that failed are the pushed head's, which Ship replaces: they start no fix, and show beside Ship.
+          const forShip = (yield* worktreeOf(link.taskId, before.url))?.heldAt != null
           yield* tellLead(
             link,
-            rounds ? forLead.filter((part) => !part.startsWith('Checks failed')) : forLead,
-            addressed || (after.state === 'open' && alone && !rounds),
+            rounds || forShip ? forLead.filter((part) => !part.startsWith('Checks failed')) : forLead,
+            addressed || (after.state === 'open' && alone && !rounds && !forShip),
           )
           if (now.state === 'open' && !held)
             yield* bringTogether(link, now.headSha, now.url).pipe(
@@ -5483,6 +5550,8 @@ export class Changes extends Context.Service<
       ): Effect.Effect<boolean, unknown, Store> =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // Held for Ship, a conflict waits for it: what the person tried goes up first, and the look after brings the target in.
+          if ((yield* worktreeOf(link.taskId, seen.url))?.heldAt != null) return false
           const first = yield* askable(link.taskId, seen.url, { force: how.force })
           if (first === 'off') return pressed.has(link.taskId) ? false : yield* Effect.as(forgetUnsent(link.taskId), false)
           if (first === 'resolving') return false
@@ -6134,6 +6203,8 @@ export class Changes extends Context.Service<
           if (seen.state !== 'open') return
           const workspace = yield* worktreeOf(taskId, seen.url)
           if (workspace === undefined || !existsSync(workspace.path)) return
+          // Held for Ship, what the person's turns committed goes up with Ship alone, after its review: its card offers Ship.
+          if (workspace.heldAt !== null) return
           const sent = yield* sentTo(link.projectId, seen.url)
           const here = yield* aheadOf(workspace.path, null, [sent, seen.headSha])
           if (here.kind === 'ahead' && here.count === 0) return
@@ -6204,6 +6275,133 @@ export class Changes extends Context.Service<
       }
 
       /**
+       * Each of the task's worktrees' head, by workspace, as the first turn
+       * the person's words began after its last run ended found it, or since
+       * its last hold was let go, whichever is later: what such turns
+       * committed since is theirs, held for Ship. Undefined while a run is
+       * under way, whose steps push as they did, or where no such turn is.
+       */
+      const turnHeadsOf = (taskId: string, threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [first] = yield* sql<{ heads: string }>`
+            SELECT d.heads FROM turn_deliveries d
+            WHERE d.thread_id = ${threadId} AND d.heads IS NOT NULL AND d.state NOT IN ('pending', 'delivered')
+              AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = ${taskId} AND r.state = 'running')
+              AND d.delivered_at >= max(
+                coalesce((SELECT max(r.ended_at) FROM runs r WHERE r.task_id = ${taskId}), ''),
+                coalesce((SELECT max(e.occurred_at) FROM record_events e JOIN workspaces w ON w.id = e.aggregate_id
+                  WHERE e.aggregate_type = 'workspace' AND w.task_id = ${taskId}
+                    AND e.type IN ('workspace.shipped', 'workspace.hold_left')), ''))
+            ORDER BY d.delivered_at, d.rowid LIMIT 1`
+          if (first === undefined) return undefined
+          return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Record(Schema.String, Schema.String)))(first.heads).pipe(
+            Effect.orElseSucceed(() => undefined),
+          )
+        })
+
+      /** The task's worktrees here held for Ship, the first held first. */
+      const holdsOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          return yield* sql<Held>`
+            SELECT id AS workspace_id, path, branch, held_at FROM workspaces
+            WHERE task_id = ${taskId} AND device_id = ${instance.deviceId} AND held_at IS NOT NULL ORDER BY held_at, rowid`
+        })
+
+      /**
+       * Holds for Ship each of the task's worktrees whose branch a turn the
+       * person's words began moved: `heads`, each worktree's head as that
+       * turn began, by workspace. What the turn committed stays on the
+       * branch, and nothing pushes it but Ship (a task is a conversation plus
+       * parts, "A tweak waits for Ship"). A worktree held already, gone, or
+       * with no branch yet is left as it is. How many it held.
+       */
+      const holdAfterTurn = (taskId: string, heads: Readonly<Record<string, string>>) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{ id: string; projectId: ProjectId; path: string }>`
+            SELECT id, project_id, path FROM workspaces
+            WHERE task_id = ${taskId} AND device_id = ${instance.deviceId} AND access = 'write' AND state <> 'cleaned'
+              AND branched_at IS NOT NULL AND held_at IS NULL`
+          let held = 0
+          for (const row of rows) {
+            const before = heads[row.id]
+            if (before === undefined || !existsSync(row.path)) continue
+            const now = yield* commitOf(row.path, 'HEAD').pipe(Effect.orElseSucceed(() => null))
+            if (now === null || now === before) continue
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                const revision = yield* change('workspaces', row.id, { heldAt: yield* timestamp })
+                yield* fact({
+                  projectId: row.projectId,
+                  aggregateType: 'workspace',
+                  aggregateId: row.id,
+                  revision,
+                  type: 'workspace.held_for_ship',
+                  payload: { from: before, head: now },
+                  actorId: instance.systemId,
+                })
+              }),
+            )
+            held += 1
+          }
+          if (held > 0) yield* touchCard(taskId)
+          return held
+        })
+
+      /**
+       * Lets go of the task's holds for Ship: what waited went up with Ship,
+       * or the person left it on the branch. Its commits go up as Althar's
+       * course has them from here.
+       */
+      const releaseHolds = (taskId: string, why: 'shipped' | 'left') =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const held = yield* sql<{ id: string; projectId: ProjectId }>`
+            SELECT id, project_id FROM workspaces WHERE task_id = ${taskId} AND held_at IS NOT NULL`
+          for (const row of held)
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                const revision = yield* change('workspaces', row.id, { heldAt: null })
+                yield* fact({
+                  projectId: row.projectId,
+                  aggregateType: 'workspace',
+                  aggregateId: row.id,
+                  revision,
+                  type: why === 'shipped' ? 'workspace.shipped' : 'workspace.hold_left',
+                  actorId: instance.systemId,
+                })
+              }),
+            )
+          if (held.length > 0) yield* touchCard(taskId)
+        })
+
+      /**
+       * What Ship sends to the task's open pull requests, after its review:
+       * each one's branch up to its head here, past the hold, as a person's
+       * push. What went where, by pull request; with `send` false, what would,
+       * and nothing goes up.
+       */
+      const shipToOpen = (taskId: string, send = true) =>
+        Effect.gen(function* () {
+          const went: Array<{ readonly where: string; readonly count: number }> = []
+          for (const link of yield* linksOf(taskId)) {
+            if (link.listening !== 1) continue
+            const seen = yield* decodeSnapshot(link.snapshot)
+            if (seen.state !== 'open') continue
+            const workspace = yield* worktreeOf(taskId, seen.url)
+            if (workspace === undefined || !existsSync(workspace.path)) continue
+            const sent = yield* sentTo(link.projectId, seen.url)
+            const here = yield* aheadOf(workspace.path, null, [sent, seen.headSha])
+            if (here.kind !== 'ahead' || here.count === 0) continue
+            if (send) yield* push(taskId, here.head, seen.url, 'ship')
+            went.push({ where: nameOf(seen), count: here.count })
+          }
+          return went
+        })
+
+      /**
        * Pushes what a task's lead committed to each of its open pull
        * requests, where the project's rules push it on its own (ADR-072),
        * once its turn has ended: not while it is in one, nor while its plan
@@ -6240,16 +6438,31 @@ export class Changes extends Context.Service<
           if (event._tag !== 'TurnEnded' && event._tag !== 'SessionEnded') return
           if (holdingCommits.has(event.threadId)) return
           const sql = yield* SqlClient.SqlClient
-          const [thread] = yield* sql<{ taskId: string }>`
-            SELECT t.task_id FROM threads t JOIN tasks k ON k.id = t.task_id WHERE t.id = ${event.threadId} AND t.kind = 'task'
-              AND k.state = 'open' AND EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change' AND l.listening = 1)`
-          if (thread === undefined || !(yield* pushesFor(thread.taskId))) return
+          const [thread] = yield* sql<{ taskId: string; state: string; listening: number }>`
+            SELECT t.task_id, k.state,
+              EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change' AND l.listening = 1) AS listening
+            FROM threads t JOIN tasks k ON k.id = t.task_id WHERE t.id = ${event.threadId} AND t.kind = 'task'
+              AND k.state IN ('open', 'done')`
+          if (thread === undefined) return
+          const pushes = thread.state === 'open' && thread.listening === 1 && (yield* pushesFor(thread.taskId))
+          // A turn the person's words began after the plan, which may have committed: what it did is held for Ship first.
+          const talked = (yield* turnHeadsOf(thread.taskId, event.threadId)) !== undefined
+          if (!pushes && !talked) return
           holdingCommits.add(event.threadId)
           yield* Effect.forkIn(
             Effect.sleep(reportsWithin).pipe(
               Effect.andThen(sessions.untilIdle(event.threadId, busyUpTo)),
               Effect.ensuring(Effect.sync(() => holdingCommits.delete(event.threadId))),
-              Effect.flatMap((done) => locked(thread.taskId)(pushLeft(thread.taskId, done === 'late'))),
+              Effect.flatMap((done) =>
+                locked(thread.taskId)(
+                  Effect.gen(function* () {
+                    // Read again once the lead is done: what it committed just after its turn counts, and a hold comes before any push.
+                    const heads = yield* turnHeadsOf(thread.taskId, event.threadId)
+                    if (heads !== undefined) yield* holdAfterTurn(thread.taskId, heads)
+                    if (pushes) yield* pushLeft(thread.taskId, done === 'late')
+                  }),
+                ),
+              ),
               Effect.catchCause((cause) => Effect.logWarning('Could not push what the lead committed after its turn', cause)),
               provide,
             ),
@@ -7227,6 +7440,9 @@ export class Changes extends Context.Service<
                   })
                 }
                 const { link, snapshot, where, ahead, left, path, branch } = chosen
+                // Held for Ship, what the person's turns committed goes up only with Ship, which reviews it first.
+                if ((yield* worktreeOf(taskId, snapshot.url))?.heldAt != null)
+                  return `What's committed on the branch waits for the person's Ship (${commitsWord(ahead.count)} for ${where}): Ship reviews it, then pushes it. Nothing goes up before. Where the person asked you to ship it, call ship_task.`
                 const unpushed = left.length === 0 ? [] : [`Not included, since they aren't committed: ${filesWord(left)}.`]
                 // Where the project's rules push the lead's commits on their own, they go up now, as at the end of its turn (ADR-072),
                 // unless something holds them for the person: then they are asked, with why.
@@ -7333,7 +7549,21 @@ export class Changes extends Context.Service<
         merged: (taskId) => provide(Effect.map(mergeOf(taskId), (one) => one.merged)),
         leaveOut: (input) => provide(locked(input.taskId)(leaveOut(input))),
         // The person pushing takes the change into their hands: from here, its lead's fixes wait for them (ADR-040).
-        push: (taskId, head, url) => provide(locked(taskId)(Effect.andThen(taken(taskId, 'pushed'), push(taskId, head, url)))),
+        // Held for Ship, the person's Push isn't theirs to take: Ship sends what waits, after its review.
+        push: (taskId, head, url) =>
+          provide(
+            locked(taskId)(
+              Effect.gen(function* () {
+                if ((yield* holdsOf(taskId)).length > 0) return yield* new ShipRefused({ taskId, why: 'held' })
+                yield* taken(taskId, 'pushed')
+                return yield* push(taskId, head, url)
+              }),
+            ),
+          ),
+        holds: (taskId) => provide(holdsOf(taskId)),
+        shipToOpen: (taskId) => provide(locked(taskId)(shipToOpen(taskId))),
+        aheadOfOpen: (taskId) => provide(shipToOpen(taskId, false)),
+        releaseHolds: (taskId, why) => provide(releaseHolds(taskId, why)),
         replace: (taskId, head, replaces, url) =>
           provide(locked(taskId)(Effect.andThen(taken(taskId, 'pushed'), replace(taskId, head, replaces, url)))),
         mergeNote: (taskId, url) => provide(locked(taskId)(mergeNote(taskId, url))),
