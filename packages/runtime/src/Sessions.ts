@@ -1688,6 +1688,12 @@ export class Sessions extends Context.Service<
             )
             .pipe(Effect.catchTag('TakenBack', () => Effect.succeed(false)))
           if (!claimed) return true
+          // What the person says to a task's lead after its plan is a turn: where its worktrees stand is kept before the turn is
+          // delivered (Runs.ts), so what it commits can wait for Ship, and its card says it works as soon as it is.
+          if (thread.role === 'task' && inputs.some((input) => input.shown === 1))
+            yield* personsTurn({ taskId: thread.taskId, threadId: thread.threadId, sessionId: running.sessionId, deliveryId: turnId }).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not keep where the person’s turn began', cause)),
+            )
           // Recorded as delivered before the prompt goes out: after a crash, a delivered turn may have acted.
           yield* sql.withTransaction(
             Effect.gen(function* () {
@@ -1720,12 +1726,6 @@ export class Sessions extends Context.Service<
           if (!compacting) running.brief = undefined
           running.turnRunning = true
           running.turnStartedAt = yield* Clock.currentTimeMillis
-          // What the person says to a task's lead after its plan is a turn: where its worktrees stand is kept before the lead reads
-          // it (Runs.ts), so what the turn commits can wait for Ship. Its card says it works meanwhile, as it does.
-          if (thread.role === 'task' && inputs.some((input) => input.shown === 1))
-            yield* personsTurn({ taskId: thread.taskId, threadId: thread.threadId, sessionId: running.sessionId, deliveryId: turnId }).pipe(
-              Effect.catchCause((cause) => Effect.logWarning('Could not keep where the person’s turn began', cause)),
-            )
           // What it did outside a turn before is over with: this turn is what it is at.
           running.callsOpen.clear()
           running.workedAt = null
