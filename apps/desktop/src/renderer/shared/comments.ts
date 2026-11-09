@@ -5,6 +5,7 @@ import type { CommentFact, ComposerComment } from '@althar/ui'
 import { DEVICES, type Viewport } from '../../main/browser/devices'
 import type { Picked } from '../../main/browser/picked'
 import { shownAddress } from '../../main/browser/addresses'
+import { elementLine, onLine, selectorLine, sized, sizeLine } from '../../main/browser/elementWords'
 import type { Picture, SentImage } from '@althar/contracts'
 import { pictureOf, type ReadImage, readImage, remember, type Shrink, sentOf, shrinkInWindow } from './images'
 
@@ -121,18 +122,18 @@ export const text = {
   background: 'Background',
   page: 'Page',
   selector: 'Selector',
-  sized: (width: number, height: number) => `${width} × ${height}`,
+  sized,
   at: (address: string, size: string) => `${address} at ${size}`,
   /** What the lead reads before them. */
   heading: (count: number) => (count === 1 ? 'A comment on a page:' : `${count} comments on pages:`),
-  on: (label: string, words: string, size: string) => `On \`${label}\`${words === '' ? '' : ` (“${words}”)`}, ${size}`,
-  selectorLine: (selector: string) => `Selector: \`${selector}\``,
+  on: onLine,
+  selectorLine,
   pageLine: (address: string, size: string, device: string | null) => `Page: ${address} at ${size}${device === null ? '' : ` (${device})`}`,
   pictureLine: (n: number) => `Picture ${n} of those attached.`,
   devices: { desktop: 'desktop', laptop: 'laptop', tablet: 'tablet', phone: 'phone' } as Readonly<Record<Exclude<Viewport, 'fit'>, string>>,
 } as const
 
-const sizeOf = (spot: PageSpot) => text.sized(spot.picked.rect.width, spot.picked.rect.height)
+const sizeOf = (spot: PageSpot) => sizeLine(spot.picked)
 const pageSize = (spot: PageSpot) => {
   const device = spot.viewport === 'fit' ? null : DEVICES[spot.viewport]
   return device === null ? text.sized(spot.picked.page.width, spot.picked.page.height) : text.sized(device.width, device.height)
@@ -176,8 +177,8 @@ export const commentsText = (comments: ReadonlyArray<GatheredComment>, before: n
     const device = spot.viewport === 'fit' ? null : text.devices[spot.viewport]
     const lines = [
       `${index + 1}. ${comment.note.replace(/\n/g, '\n   ')}`,
-      `   - ${text.on(spot.picked.label, spot.picked.text, sizeOf(spot))}`,
-      `   - ${text.selectorLine(spot.picked.selector)}`,
+      `   - ${elementLine(spot.picked)}`,
+      `   - ${selectorLine(spot.picked.selector)}`,
       `   - ${text.pageLine(spot.address, pageSize(spot), device)}`,
     ]
     if (pictures && comment.crop !== null) {

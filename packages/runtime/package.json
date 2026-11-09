@@ -12,6 +12,7 @@
     "./device": "./src/device.ts",
     "./attachments": "./src/attachments.ts",
     "./screenshots": "./src/screenshots.ts",
+    "./pageBridge": "./src/pageBridge.ts",
     "./pullRequestReview": "./src/pullRequestReview.ts",
     "./windowActions": "./src/windowActions.ts"
   },
