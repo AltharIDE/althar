@@ -15,8 +15,24 @@ import { MARK, markIn, unmarkIn } from '../src/overlay/marks'
 
 const marks: Array<unknown> = []
 let driver: Driver
-/* jsdom has no elementFromPoint; a test that needs what is at a point gives it one, and each gets it taken away again. */
-const noElementFromPoint = (document as unknown as { elementFromPoint: unknown }).elementFromPoint
+/* jsdom draws nothing, so a test that needs a box, a point's element or a scroll position gives one, and each puts
+ * back what it borrowed: a shuffle runs the tests in any order, and one's mocks must never reach the next. */
+const borrowed = [
+  [document, 'elementFromPoint'],
+  [document, 'execCommand'],
+  [window, 'scrollTo'],
+  [window, 'scrollX'],
+  [window, 'scrollY'],
+  [document.documentElement, 'scrollWidth'],
+  [document.documentElement, 'scrollHeight'],
+] as const
+const kept = borrowed.map(([owner, name]) => [owner, name, Object.getOwnPropertyDescriptor(owner, name)] as const)
+const giveBack = () => {
+  for (const [owner, name, descriptor] of kept) {
+    if (descriptor === undefined) delete (owner as unknown as Record<string, unknown>)[name]
+    else Object.defineProperty(owner, name, descriptor)
+  }
+}
 
 beforeEach(() => {
   marks.length = 0
@@ -27,7 +43,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks()
   vi.useRealTimers()
-  ;(document as unknown as { elementFromPoint: unknown }).elementFromPoint = noElementFromPoint
+  giveBack()
   document.body.innerHTML = ''
 })
 

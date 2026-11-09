@@ -1481,10 +1481,18 @@ describe('dialogs the page opens', () => {
 
     const sheet = vi.fn()
     contents.on('-cancel-dialogs', sheet)
+    // A page a dialog holds is sent nothing: a call sent to it waits, and can close the dialog instead of its answer.
+    expect(
+      contents.commands.filter((command) => command.method === 'Emulation.setFocusEmulationEnabled').map((command) => command.params),
+    ).toEqual([{ enabled: true }])
     const answered = await pages.drive(id, { op: 'dialog', accept: false, text: null })
     expect(text(answered)).toContain('Answered Cancel to the confirm dialog “Delete it?”.')
     // Electron's own sheet of it on the window goes too.
     expect(sheet).toHaveBeenCalledTimes(1)
+    // And the page gets its focus back, which the action that opened the dialog left for this to do.
+    expect(
+      contents.commands.filter((command) => command.method === 'Emulation.setFocusEmulationEnabled').map((command) => command.params),
+    ).toEqual([{ enabled: true }, { enabled: false }])
     expect(
       contents.commands.filter((command) => command.method === 'Page.handleJavaScriptDialog').map((command) => command.params),
     ).toEqual([{ accept: false }])

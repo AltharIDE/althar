@@ -594,7 +594,10 @@ export const startPages = (options: PagesOptions) => {
     })
     // A dialog holds the page until it is answered: what waits on the page hears it at once, rather than when it gives up.
     contents.debugger.on('message', (_event, method, params) => {
-      if (method === 'Page.javascriptDialogClosed') page.dialog = null
+      if (method === 'Page.javascriptDialogClosed') {
+        page.dialog = null
+        void relax(page)
+      }
       if (method !== 'Page.javascriptDialogOpening') return
       const dialog = dialogOf(params)
       if (dialog === null) return
@@ -929,6 +932,17 @@ export const startPages = (options: PagesOptions) => {
       () => undefined,
     )
   }
+  /**
+   * Gives the page back its focus, and a touch screen its mouse, once the dialog it was held on is answered. The
+   * action that opened the dialog leaves these be (a call sent to a page a dialog holds can close it), so the close
+   * does it.
+   */
+  const relax = async (page: Page) => {
+    if (!page.driving || page.contents.isDestroyed()) return
+    await cdp(page, 'Emulation.setFocusEmulationEnabled', { enabled: false }).catch(() => undefined)
+    if (page.mobile && page.pointing === null)
+      await cdp(page, 'Emulation.setEmitTouchEventsForMouse', { enabled: true, configuration: 'mobile' }).catch(() => undefined)
+  }
   /** Where the page takes a point in the viewport's CSS pixels, for input: the page is drawn `scale` times its size in a smaller viewport. (The e2e checks this under a phone's viewport.) */
   const viewPoint = (page: Page, at: { readonly x: number; readonly y: number }) => ({ x: at.x * page.scale, y: at.y * page.scale })
   const BUTTONS = { left: 1, right: 2, middle: 4 } as const
@@ -970,11 +984,10 @@ export const startPages = (options: PagesOptions) => {
     busy(page)
     debugging(page)
     page.leftUnsaved = false
-    // While a dialog holds the page, what is sent to it isn't answered: it is sent, and not waited for.
+    // A dialog holds the page: a call sent to it now waits, and can close the dialog rather than its own answer.
     const emulation = async (method: string, params: Record<string, unknown>, what: string) => {
-      const sent = cdp(page, method, params)
-      if (page.dialog !== null) return void sent.catch(() => undefined)
-      await answered(heldBy(page, sent), what).catch(() => undefined)
+      if (page.dialog !== null) return
+      await answered(heldBy(page, cdp(page, method, params)), what).catch(() => undefined)
     }
     await emulation('Emulation.setFocusEmulationEnabled', { enabled: true }, 'for its focus')
     // On a touch screen's viewport the person's mouse is made a finger; the lead's presses go in as they are, as pointing's do.
@@ -1603,6 +1616,8 @@ export const startPages = (options: PagesOptions) => {
           'the answer to its dialog',
         )
         page.dialog = null
+        // The action that opened the dialog left its focus emulation on, which a page a dialog holds can't be told.
+        await relax(page)
         // Electron draws the dialog on the window as well (a sheet on a Mac), which the debugger's answer leaves there:
         // its own handler of the page's dialogs takes it away at this word, the answer already given. (The e2e sees it go.)
         ;(page.contents as unknown as { emit: (name: string) => boolean }).emit('-cancel-dialogs')
