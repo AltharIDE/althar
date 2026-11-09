@@ -15,6 +15,8 @@ import { MARK, markIn, unmarkIn } from '../src/overlay/marks'
 
 const marks: Array<unknown> = []
 let driver: Driver
+/* jsdom has no elementFromPoint; a test that needs what is at a point gives it one, and each gets it taken away again. */
+const noElementFromPoint = (document as unknown as { elementFromPoint: unknown }).elementFromPoint
 
 beforeEach(() => {
   marks.length = 0
@@ -25,6 +27,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks()
   vi.useRealTimers()
+  ;(document as unknown as { elementFromPoint: unknown }).elementFromPoint = noElementFromPoint
   document.body.innerHTML = ''
 })
 
