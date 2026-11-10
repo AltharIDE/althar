@@ -154,6 +154,13 @@ agent's words, and one live line (`WorkedFor`).
   on the message. Claude Code and OpenCode don't, so a message after the work
   that is longer than 280 characters, or holds a list, heading, table or
   code, is taken for the answer; a short one folds as the turn ends.
+- **The line says where its time went** (a task is a conversation plus
+  parts, "Where a turn's time goes"): the total, from what the runtime kept
+  of each turn (waiting for a place, starting or handing over its session,
+  the agent's own work and its tools), and the part that took most where it
+  wasn't the agent's own work and took a quarter of it or more: "Worked for
+  4m · 3m 10s waiting for a place". Opened, every part comes first in the
+  trail. A task adds its turns up under its Usage in Outputs.
 - **What needs the person never folds:** a stuck step, a question, a
   permission, an error and its way out.
 - **What stands open carries the whole turn.** A lead's last message (or its

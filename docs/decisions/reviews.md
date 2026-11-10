@@ -83,12 +83,28 @@ started with, and the next round takes the new one.
 
 A change of a few lines takes the fast lane ([tasks](tasks.md)): one step on
 a light model, no countdown, and a review step that names its reviewer but is
-skipped. Its pull request merges on the person's word, and the merge starts a
-**review task of its own** on the merged pull request (`Reviews.start` with
-`afterMerge`), which reads and posts as any review of a pull request does.
-Nothing blocks the merge until then.
+skipped. Its pull request merges on the person's word, and the merge ends
+that change: the task settles where it was its last. Then **the task's own
+reviewer reads what merged, in the same task** (`MergeReviews.ts`, a
+proposal of [a task is a conversation plus parts](proposed/a-task-is-a-conversation-plus-parts.md#after-merge-in-the-same-task)):
 
-The review after a merge is refused where the plan named no reviewer, or
+- It is owed as the merge is heard, kept before it is tried
+  (`merge_reviews`), and started in a thread of the task's own
+  (`merge_review`), on a copy at the merged head, from what the last review
+  read. Settling spares it, and a restart starts it again.
+- It reports in the task's thread, naming the pull request it read. Nothing
+  is posted on the merged pull request.
+- **Nothing found** is a line in the thread, and nothing more.
+- **Findings** bring the task back to Needs you, "Review found 2 after #715
+  merged", with **Fix it**, which hands them to the lead as the person's word
+  and ships its fix as a new pull request after the merged one once its turn
+  ends, and **Leave it**, which closes them. Agents answer it on the person's
+  word with `answer_review_after_merge`.
+
+What Merge now merges with commits not shipped is reviewed after the merge
+the same way, where the task has a reviewer.
+
+The review after a merge isn't owed where the plan named no reviewer, or
 where the pull request closed without merging. "Make it a full task", on the
 small change's card, moves its review back before the merge.
 

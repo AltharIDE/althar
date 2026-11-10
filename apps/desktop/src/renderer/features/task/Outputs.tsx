@@ -89,6 +89,11 @@ export const text = {
   openNewChange: 'Open a new draft pull request',
   /** What waits on its branch for Ship goes up, its review first where its plan has one (a task is a conversation plus parts). */
   ship: (n: number) => (n === 1 ? 'Ship 1 commit' : `Ship ${n} commits`),
+  /** Merge, with commits not shipped: one review of what waits, then it goes up and merges. */
+  reviewAndMerge: 'Review and merge',
+  /** Or up and merged at once, reviewed after the merge. */
+  mergeNow: 'Merge now',
+  mergeWays: 'Other ways to merge',
   /** One of the task's earlier pull requests, before its latest: merged or closed. In a task of several repositories, by its own. */
   earlier: (change: ChangeSummary, host: string, repository: string | undefined) =>
     `Before this: ${repository === undefined ? '' : `${repository} `}${change.short} ${change.prefix}${change.number}, ${change.state === 'open' ? 'open' : change.state} on ${host}.`,
@@ -199,6 +204,7 @@ export function Outputs({
   onOpenChange,
   onPush,
   onShip,
+  onMergeWaiting,
   onMarkReady,
   onMarkAllReady,
   merging = null,
@@ -245,6 +251,8 @@ export function Outputs({
   onPush: (head: string, url: string) => void
   /** Ships what waits on its branch for Ship; without it, nothing is offered for it here. */
   onShip?: () => void
+  /** Merge, with commits not shipped: Review and merge, or Merge now (a task is a conversation plus parts). */
+  onMergeWaiting?: (how: 'review' | 'now') => void
   /** The pull request a push was refused by for commits on it that aren't here, by its address. */
   refused?: string | null
   /** Replaces a pull request's commits with the branch, up to the head shown, while it is still at `replaces`: confirmed on the card. */
@@ -352,8 +360,33 @@ export function Outputs({
           // What the lead committed since goes up first: accepting merges what the pull request has.
           const accepting = (ready || task.mergeable === true) && state === ChangeState.Ready && pushes.length === 0
           if (open.length > 1) return track(accepting)
+          // Merge, with commits not shipped: Review and merge, or Merge now, beside Ship.
+          const mergingWaiting =
+            held !== undefined &&
+            onMergeWaiting !== undefined &&
+            ready &&
+            state === ChangeState.Ready &&
+            first.state === 'open' &&
+            !first.draft
+              ? [
+                  <SplitButton
+                    key="merge-waiting"
+                    moreLabel={text.mergeWays}
+                    {...pressed(doing.mergeWaiting)}
+                    onClick={() => onMergeWaiting('review')}
+                    menu={(trigger) => (
+                      <Menu trigger={trigger} label={text.mergeWays} align="end">
+                        <MenuItem onSelect={() => onMergeWaiting('now')}>{text.mergeNow}</MenuItem>
+                      </Menu>
+                    )}
+                  >
+                    {text.reviewAndMerge}
+                  </SplitButton>,
+                ]
+              : []
           const actions: ReactNode[] = [
             ...(shipNow === null ? [] : [shipNow]),
+            ...mergingWaiting,
             // Only those Althar held, where the project's rules push the lead's commits on their own (ADR-072); held for Ship, none.
             ...pushes
               .filter((one) => held === undefined && personPushes(one))

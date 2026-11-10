@@ -80,7 +80,7 @@ import { change, fact, timestamp } from './records'
 import type { Reach } from './sandboxReach'
 import { withRole } from './roles'
 import { git, PUSHED } from './git'
-import { evidenceFolderOf, reviewCopyOf } from './reviewCopy'
+import { evidenceFolderOf, MERGE_REVIEW, mergeCopyOf, reviewCopyOf } from './reviewCopy'
 import { LAST_MESSAGE_COORDINATOR, LAST_MESSAGE_LEAD, LAST_MESSAGE_REVIEWER } from './lastMessage'
 import { reviewBrief as reviewingBrief, type Reviewed, reviewOf } from './reviewing'
 import { Setups } from './Setups'
@@ -234,6 +234,8 @@ interface CoordinatorThread {
  */
 interface ReviewThread {
   readonly role: 'reviewer'
+  /** A review after a merge (MergeReviews.ts): the pull request that merged, as its host names it. */
+  readonly merged?: { readonly words: string } | undefined
   readonly threadId: string
   readonly projectId: ProjectId
   readonly taskId: string
@@ -874,6 +876,14 @@ export class Sessions extends Context.Service<
      * task is a conversation plus parts), so what the turn commits waits for
      * Ship. It is done once, and never fails the turn.
      */
+    /**
+     * What happens as any turn of a task's lead begins, before the agent
+     * reads its prompt: what the person committed by hand since the lead's
+     * last turn is held for Ship then (Changes.ts; a task is a conversation
+     * plus parts), before the lead can commit on top of it. Never fails the
+     * turn.
+     */
+    onLeadTurn(next: (lead: { readonly taskId: string; readonly threadId: string }) => Effect.Effect<void>): Effect.Effect<void>
     onPersonsTurn(
       next: (lead: {
         readonly taskId: string
@@ -988,6 +998,8 @@ export class Sessions extends Context.Service<
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const threads = new Map<string, Running>()
+      /* What any turn of a task's lead starts, once Changes says (onLeadTurn): until then, nothing. */
+      let leadTurn = (_lead: { readonly taskId: string; readonly threadId: string }): Effect.Effect<void> => Effect.void
       /* What a lead's turn that delivers the person's words starts, once Runs says (onPersonsTurn): until then, nothing. */
       let personsTurn = (_lead: {
         readonly taskId: string
@@ -1261,6 +1273,9 @@ export class Sessions extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [kind] = yield* sql<{ kind: string; projectId: ProjectId; projectName: string }>`
             SELECT t.kind, t.project_id, p.name AS project_name FROM threads t JOIN projects p ON p.id = t.project_id WHERE t.id = ${threadId}`
+          // A review after a merge reads a copy at the merged head, beside the task's folder: whether that folder is here or not.
+          const merged = kind?.kind === 'step' ? yield* mergedReviewOf(threadId) : undefined
+          if (merged !== undefined) return merged
           // A finished task's folder that was removed comes back before an agent starts in it, and is set up again (ADR-056).
           if (kind !== undefined && kind.kind !== 'coordinator') {
             const back = yield* bringBackFor(threadId, instance.systemId)
@@ -1278,7 +1293,7 @@ export class Sessions extends Context.Service<
           const repositories = yield* sql<TaskRepository>`
             SELECT b.display_name AS name, b.role, w.path AS worktree, w.branch, w.branched_at IS NOT NULL AS branched, w.base_ref,
               w.base_commit, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.toward, b.folder AS within,
-              w.kind IS NOT NULL AS local
+              w.kind IS 'checkout' AS local
             FROM threads t
             JOIN workspaces w ON w.task_id = t.task_id AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
             JOIN repository_bindings b ON b.id = w.binding_id
@@ -1312,6 +1327,43 @@ export class Sessions extends Context.Service<
             repositories,
             cwd: startIn(repositories),
             review: yield* reviewOf(task.taskId),
+          } satisfies ThreadContext as ThreadContext
+        })
+
+      /**
+       * The thread of a review after a merge, where it is one (MergeReviews.ts): its copy is at the merged head, and the change is
+       * what merged since what the last review read. Undefined for any other thread.
+       */
+      const mergedReviewOf = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [review] = yield* sql<{ number: number | null; base: string | null; url: string }>`
+            SELECT r.number, r.base, r.url FROM threads t JOIN merge_reviews r ON r.task_id = t.task_id
+            WHERE t.id = ${threadId} AND t.kind = 'step' AND t.node_key = ${MERGE_REVIEW} AND r.state IN ('running', 'owed')
+            ORDER BY r.state = 'running' DESC, r.updated_at DESC LIMIT 1`
+          if (review === undefined) return undefined
+          const repositories = yield* sql<TaskRepository>`
+            SELECT b.display_name AS name, b.role, w.path AS worktree, w.branch, w.branched_at IS NOT NULL AS branched, w.base_ref,
+              w.base_commit, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.toward, b.folder AS within,
+              w.kind IS 'checkout' AS local
+            FROM threads t
+            JOIN workspaces w ON w.task_id = t.task_id AND w.device_id = ${instance.deviceId}
+            JOIN repository_bindings b ON b.id = w.binding_id
+            LEFT JOIN repository_changes c ON c.workspace_id = w.id AND c.pull_request_url = ${review.url}
+            WHERE t.id = ${threadId}
+            ORDER BY c.id IS NULL, b.created_at, b.rowid LIMIT 1`
+          const [task] = yield* sql<{ projectId: ProjectId; taskId: string; title: string; description: string; request: string | null }>`
+            SELECT t.project_id, t.task_id, k.title, k.description, k.request FROM threads t JOIN tasks k ON k.id = t.task_id WHERE t.id = ${threadId}`
+          const [first] = repositories
+          if (task === undefined || first === undefined) return yield* new NotFound({ kind: 'review after a merge', id: threadId })
+          const copies = [{ ...first, worktree: mergeCopyOf(first.worktree, review.number), baseCommit: review.base ?? first.baseCommit }]
+          return {
+            role: 'reviewer',
+            merged: { words: review.number === null ? 'the pull request' : `#${review.number}` },
+            threadId,
+            ...task,
+            repositories: copies,
+            cwd: startIn(copies),
           } satisfies ThreadContext as ThreadContext
         })
 
@@ -1699,6 +1751,12 @@ export class Sessions extends Context.Service<
             )
             .pipe(Effect.catchTag('TakenBack', () => Effect.succeed(false)))
           if (!claimed) return true
+          // What the person committed by hand since the lead's last turn is held before the lead reads anything, so it can't commit
+          // on top of it first.
+          if (thread.role === 'task')
+            yield* leadTurn({ taskId: thread.taskId, threadId: thread.threadId }).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not look at commits made by hand', cause)),
+            )
           // What the person says to a task's lead after its plan is a turn: where its worktrees stand is kept before the turn is
           // delivered (Runs.ts), so what it commits can wait for Ship, and its card says it works as soon as it is.
           if (thread.role === 'task' && inputs.some((input) => input.shown === 1))
@@ -3259,6 +3317,20 @@ export class Sessions extends Context.Service<
             taskThread === undefined || first === undefined
               ? ''
               : yield* evidenceForReview(taskThread.id, evidenceFolderOf(first.worktree)).pipe(Effect.orElseSucceed(() => ''))
+          // A review after a merge reads what merged, for the person, who decides what becomes of it.
+          if (thread.merged !== undefined) {
+            const [copy] = thread.repositories
+            return [
+              `You are reviewing a change that merged already, as ${thread.merged.words}, in Althar. You only read: you may read files, search, and run commands that only look, such as git diff. You change nothing; the person reads what you find and decides whether the task's lead fixes it, in a change after this one.`,
+              `The task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
+              ...askedFor(thread),
+              `What merged is in ${copy?.worktree ?? thread.cwd}: a copy at the merged head, which Althar throws away after. See what merged that no review read before with \`git diff ${copy?.baseCommit ?? 'HEAD~1'}\` there.`,
+              ...(summary === '' ? [] : [`The lead says:\n${summary}`]),
+              "Look for what would make the change wrong or unsafe: bugs, missed cases, broken behaviour, security, tests that don't test it. Not style the project doesn't ask for. Then call Althar's report_review tool once: a verdict (pass, or changes_requested), a summary of a few lines, and your findings, each with its severity (blocking, major, minor or nit), a title saying what is wrong in one short line, where it is (the file and line), and what is wrong in full. With no findings worth fixing, the verdict is pass.",
+              LAST_MESSAGE_REVIEWER,
+              ...(yield* threadSoFar(thread.threadId)),
+            ].join('\n\n')
+          }
           return [
             "You are reviewing another agent's change, in Althar. You only read: you may read files, search, and run commands that only look, such as git diff. You change nothing; the task's lead settles what you find.",
             `The task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
@@ -4054,6 +4126,10 @@ export class Sessions extends Context.Service<
         gateTurns: (next) =>
           Effect.sync(() => {
             gate = next
+          }),
+        onLeadTurn: (next) =>
+          Effect.sync(() => {
+            leadTurn = next
           }),
         onPersonsTurn: (next) =>
           Effect.sync(() => {

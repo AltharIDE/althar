@@ -1881,6 +1881,8 @@ export const StepResultItem = Schema.Struct({
     unverified: Schema.NullOr(Schema.Array(Schema.String)),
     /** For the lead's steps: its pull request's description, by the slug of the repository each is for, where it gave one. */
     descriptions: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+    /** For a review after a merge: the pull request that merged, which it read, as its host names it. Absent for any other. */
+    afterMerge: Schema.optional(Schema.Struct({ url: Schema.String, words: Schema.String })),
     /** Who reported it, for a review. */
     agentId: Schema.NullOr(Schema.String),
     /**
@@ -2151,6 +2153,18 @@ export type HeldForConnection = typeof HeldForConnection.Type
  * where it stands, its plan, the issue it came from, its pull request, the
  * step it is on, what its lead last reported, who leads it.
  */
+/** A task's review after a merge, as its card and header say it: which pull request, and where the review stands. */
+export const AfterMergeReview = Schema.Struct({
+  url: Schema.String,
+  /** The pull request, as its host names it: `#715`. */
+  words: Schema.String,
+  /** Under way, or what it found waits on the person. */
+  state: Schema.Literals(['running', 'found']),
+  /** How many it found, once it has. */
+  findings: Schema.Number,
+})
+export type AfterMergeReview = typeof AfterMergeReview.Type
+
 export const TaskCard = Schema.Struct({
   /** Open errands concerning this task, from durable records. */
   errands: Schema.optional(Schema.Array(Schema.String)),
@@ -2249,6 +2263,12 @@ export const TaskCard = Schema.Struct({
    * waits in Needs you until they do (a task is a conversation plus parts). Absent otherwise, and from a runtime before it.
    */
   replied: Schema.optional(Schema.String),
+  /**
+   * Its review after a merge (a task is a conversation plus parts, "After merge, in the same task"): the task's own reviewer
+   * reading a pull request of its that merged with something no review read, under way, or what it found, waiting on the
+   * person for Fix it or Leave it. Absent otherwise, and from a runtime before it.
+   */
+  afterMerge: Schema.optional(AfterMergeReview),
   /** A change ready that built nothing: no commits on its branch and no pull request open or merged. Absent otherwise. */
   nothingBuilt: Schema.optional(Schema.Boolean),
   /**
@@ -3445,6 +3465,8 @@ export const ThreadSnapshot = Schema.Struct({
     held: Schema.optional(HeldForShip),
     /** When its lead last answered the person unseen, as its card has it (`TaskCard.replied`). */
     replied: Schema.optional(Schema.String),
+    /** Its review after a merge, under way or waiting on the person, as its card has it (`TaskCard.afterMerge`). */
+    afterMerge: Schema.optional(AfterMergeReview),
     /** A change ready that built nothing: no commits on its branch, no pull request open or merged. Absent otherwise. */
     nothingBuilt: Schema.optional(Schema.Boolean),
     /** The review of its run under way can still be skipped, as the person may (ADR-034). */
@@ -4860,11 +4882,34 @@ export const Api = RpcGroup.make(
    */
   command('Ship', { taskId: Schema.String }, Schema.Void),
   /**
+   * Fix it, on what a review after a merge found (a task is a conversation
+   * plus parts, "After merge, in the same task"): the findings go to the
+   * task's lead as the person's word, and once its turn is over its fix
+   * ships as a new pull request after the merged one. `url` names the merged
+   * pull request where the task has several waiting; the latest otherwise.
+   */
+  command('FixAfterMerge', { taskId: Schema.String, url: Schema.optional(Schema.String) }, Schema.Void),
+  /** Leave it, on what a review after a merge found: the findings close, and stay in the thread. */
+  command('LeaveAfterMerge', { taskId: Schema.String, url: Schema.optional(Schema.String) }, Schema.Void),
+  /**
    * Merges the task's pull request at the head the person saw, because they
    * said to; a draft is marked ready first. A pull request that moved on
-   * since isn't merged. Agents never merge.
+   * since isn't merged. Agents never merge. With commits not shipped (a task
+   * is a conversation plus parts), `how` says which of the two the person
+   * pressed: `review`, Review and merge, one review of what waits, then it
+   * goes up and merges; `now`, Merge now, up and merged at once, reviewed
+   * after the merge where the task has a reviewer.
    */
-  command('Merge', { taskId: Schema.String, head: Schema.String, url: Schema.optional(Schema.String) }, Schema.Void),
+  command(
+    'Merge',
+    {
+      taskId: Schema.String,
+      head: Schema.String,
+      url: Schema.optional(Schema.String),
+      how: Schema.optional(Schema.Literals(['review', 'now'])),
+    },
+    Schema.Void,
+  ),
   /**
    * Merges a task without a pull request into each of its repositories'
    * default branches on this Mac, up to the commit the person saw in each:

@@ -654,7 +654,8 @@ const playStall = async (
 /**
  * Calls Althar's tools over the MCP server a session was given. The fake
  * plays a role when its prompt carries a marker, as a task's description or
- * the person's message can: `[coordinator:plan]` drafts and plans a task,
+ * the person's message can: `[coordinator:plan]` drafts and plans a task (`[coordinator:plan-small]` as a small change, reviewed
+ * only once it merged),
  * passing on the `[lead:…]` and `[review:…]` markers it was given
  * (`[coordinator:plan-effort]` puts its lead on the large model at high
  * effort), and `[coordinator:start]` starts one at once, without a plan;
@@ -1398,6 +1399,8 @@ const playRole = async (
           reason: 'It knows the code.',
         },
         review: ask.includes('[coordinator:plan-no-review]') ? null : { agent: 'codex' },
+        // `[coordinator:plan-small]`: a small change, reviewed only once it merged.
+        ...(ask.includes('[coordinator:plan-small]') ? { small_change: true } : {}),
       })
     }
     return undefined

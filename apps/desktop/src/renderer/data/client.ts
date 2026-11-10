@@ -533,7 +533,7 @@ export interface Client {
   /** Skips the review of the task's work under way. */
   readonly skipReview: (taskId: string) => Promise<void>
   /** Merges the task's pull request at the head the person saw, as they said to; a draft is marked ready first. */
-  readonly merge: (taskId: string, head: string, url?: string) => Promise<void>
+  readonly merge: (taskId: string, head: string, url?: string, how?: 'review' | 'now') => Promise<void>
   /** Merges a task without a pull request into its repositories' default branches on this Mac, up to the commit the person saw in each. */
   readonly mergeHere: (taskId: string, heads: ReadonlyArray<{ readonly repository: string; readonly head: string }>) => Promise<void>
   /** Pushes the default branches the task merged into here to their remotes, with the person's own git sign-in. */
@@ -570,6 +570,10 @@ export interface Client {
   readonly push: (taskId: string, head: string, url?: string) => Promise<void>
   /** Ships what waits on the task's branch for Ship: its review first, where its plan has one before the work ships, then the commits go up. */
   readonly ship: (taskId: string) => Promise<void>
+  /** Fix it, on what the task's review after a merge found: the lead takes the findings, and its fix ships after the merged pull request. */
+  readonly fixAfterMerge: (taskId: string, url?: string) => Promise<void>
+  /** Leave it, on what the task's review after a merge found: the findings close, and stay in the thread. */
+  readonly leaveAfterMerge: (taskId: string, url?: string) => Promise<void>
   /** Replaces the commits on the task's pull request with its branch, up to the commit the person saw, only while it is still at `replaces`: a force push they confirmed. */
   readonly replacePullRequest: (taskId: string, head: string, replaces: string, url?: string) => Promise<void>
   /** What to tell the lead so its branch takes the pull request's commits in by merging; they are fetched to its worktree first. */
@@ -930,7 +934,10 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     postScreenshots: (input) => command((commandId) => api.PostScreenshots({ commandId, ...input })),
     openChange: (taskId) => command((commandId) => api.OpenChange({ commandId, taskId })),
     skipReview: (taskId) => command((commandId) => api.SkipReview({ commandId, taskId })),
-    merge: (taskId, head, url) => command((commandId) => api.Merge({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
+    merge: (taskId, head, url, how) =>
+      command((commandId) =>
+        api.Merge({ commandId, taskId, head, ...(url === undefined ? {} : { url }), ...(how === undefined ? {} : { how }) }),
+      ),
     mergeHere: (taskId, heads) => command((commandId) => api.MergeHere({ commandId, taskId, heads })),
     pushHere: (taskId) => command((commandId) => api.PushHere({ commandId, taskId })),
     pushBranch: (taskId, heads) => command((commandId) => api.PushBranch({ commandId, taskId, heads })),
@@ -944,6 +951,9 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
     ship: (taskId) => command((commandId) => api.Ship({ commandId, taskId })),
+    fixAfterMerge: (taskId, url) => command((commandId) => api.FixAfterMerge({ commandId, taskId, ...(url === undefined ? {} : { url }) })),
+    leaveAfterMerge: (taskId, url) =>
+      command((commandId) => api.LeaveAfterMerge({ commandId, taskId, ...(url === undefined ? {} : { url }) })),
     replacePullRequest: (taskId, head, replaces, url) =>
       command((commandId) => api.ReplacePullRequest({ commandId, taskId, head, replaces, ...(url === undefined ? {} : { url }) })),
     mergeNote: (taskId, url) =>

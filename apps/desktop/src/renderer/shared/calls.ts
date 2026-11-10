@@ -50,22 +50,25 @@ export const readyKindOf = (task: {
   readonly reviewing?: Reviewing
   readonly held?: unknown
   readonly replied?: string | undefined
+  readonly afterMerge?: { readonly state: string; readonly findings: number } | undefined
 }): string =>
-  task.kind === 'review' && !isAnswered(task.reviewing)
-    ? kindWords.drafted
-    : task.held !== undefined
-      ? kindWords.notShipped
-      : task.replied !== undefined && task.kind === 'change' && task.change?.state !== 'open'
-        ? kindWords.replied
-        : task.kind === 'plain' || task.kind === 'review'
-          ? kindWords.finished
-          : task.handedBack != null || task.checksBack != null
-            ? kindWords.stuck
-            : task.nothingBuilt === true
-              ? kindWords.nothingBuilt
-              : isUnshipped(task)
-                ? kindWords.unshipped
-                : kindWords.ready
+  task.afterMerge?.state === 'found'
+    ? `Review found ${task.afterMerge.findings}`
+    : task.kind === 'review' && !isAnswered(task.reviewing)
+      ? kindWords.drafted
+      : task.held !== undefined
+        ? kindWords.notShipped
+        : task.replied !== undefined && task.kind === 'change' && task.change?.state !== 'open'
+          ? kindWords.replied
+          : task.kind === 'plain' || task.kind === 'review'
+            ? kindWords.finished
+            : task.handedBack != null || task.checksBack != null
+              ? kindWords.stuck
+              : task.nothingBuilt === true
+                ? kindWords.nothingBuilt
+                : isUnshipped(task)
+                  ? kindWords.unshipped
+                  : kindWords.ready
 
 /** Whether a task has commits after its last pull request merged or closed (or with none), and no pull request open to accept. */
 export const isUnshipped = (task: {

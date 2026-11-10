@@ -693,6 +693,10 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           unverified: unverifiedIn(field(content, 'unverified')),
           ...descriptionsIn(field(content, 'descriptions')),
           ...keptViewsIn(field(content, 'keptViews')),
+          // A review after a merge says which pull request it read.
+          ...(text(field(content, 'afterMerge'), 'url') === ''
+            ? {}
+            : { afterMerge: { url: text(field(content, 'afterMerge'), 'url'), words: text(field(content, 'afterMerge'), 'words') } }),
           agentId: agentId === '' ? null : agentId,
           ...(model === '' ? {} : { model }),
         },
@@ -2172,7 +2176,7 @@ export class Queries extends Context.Service<
               (SELECT pk.title FROM tasks pk WHERE pk.id = k.parent_task_id) AS parent_title,
               (SELECT pt.id FROM threads pt WHERE pt.task_id = k.parent_task_id AND pt.kind = 'task') AS parent_thread,
               (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') + ${sql.unsafe(issueCardsWaiting('k'))} AS waiting,
-              (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' LIMIT 1) AS review,
+              (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' AND s.node_key = 'review' LIMIT 1) AS review,
               (SELECT agent_id FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead,
               (SELECT model FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead_model,
               (SELECT effort FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead_effort,
@@ -2262,6 +2266,9 @@ export class Queries extends Context.Service<
           // A reply the person hasn't seen (a task is a conversation plus parts): its lead answered a turn their words began after
           // its plan, since they last had the task open. It waits in Needs you until they open it, settled or not.
           const replied = yield* repliedAt(taskId)
+          // Its review after a merge (a task is a conversation plus parts): under way beside its other work, or what it found,
+          // which brings it back to Needs you, settled or not, until the person says Fix it or Leave it.
+          const afterMerge = yield* afterMergeOf(taskId)
           // Someone else's pull request it reviews (DEV-96); and whether a draft of its review waits for the person.
           const reviewing = yield* reviewBriefOf(taskId)
           const [draftWaits] =
@@ -2327,6 +2334,8 @@ export class Queries extends Context.Service<
             // A review has no run: drafted, it is the person's to post, as a change is to accept. Posted, and written to again, it
             // is open once more: its lead answered, it is finished as a quick task is, the person's to settle (ADR-051).
             if (task.state === 'open' && (draftWaits !== undefined || reviewing?.posted != null)) return 'ready'
+            // A review after one of its merges found something: the person's, Fix it or Leave it, whatever else of it stands.
+            if (afterMerge?.state === 'found') return 'ready'
             // Held for Ship, it waits on the person's word, whatever its pushed head's checks say: Ship replaces that head. Not while
             // a run is under way, as Ship's own is as it reviews and sends what waited.
             if (held !== undefined && task.runState !== 'running') return 'ready'
@@ -2482,6 +2491,7 @@ export class Queries extends Context.Service<
             unshipped,
             ...(held === undefined ? {} : { held }),
             ...(replied === undefined ? {} : { replied }),
+            ...(afterMerge === undefined ? {} : { afterMerge }),
             // Resolving a conflict, or fixing the checks on the merge, is a step of its own while it lasts.
             step:
               task.step ??
@@ -2936,6 +2946,9 @@ export class Queries extends Context.Service<
             FROM external_links x JOIN tasks k ON k.id = x.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
             WHERE x.kind = 'review' AND x.url = ${change?.url ?? ''}
             ORDER BY k.created_at DESC, k.rowid DESC LIMIT 1`
+          const [review] = yield* sql<{ state: string; findings: number; updatedAt: string }>`
+            SELECT state, json_array_length(findings) AS findings, updated_at AS updatedAt FROM merge_reviews
+            WHERE url = ${change?.url ?? ''}`
           const [reported] = yield* sql<{ at: string }>`
             SELECT created_at AS at FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
               AND json_extract(content, '$.step') = 'implement' ORDER BY sequence LIMIT 1`
@@ -2998,6 +3011,24 @@ export class Queries extends Context.Service<
                   done: passed,
                 },
                 { key: 'merged', what: 'Merged', at: merged?.at ?? null, done: afterMerge },
+                // Its review after the merge, in the task itself (MergeReviews.ts).
+                ...(review === undefined
+                  ? []
+                  : [
+                      {
+                        key: 'review' as const,
+                        what:
+                          review.state === 'found'
+                            ? `Review found ${review.findings}`
+                            : review.state === 'owed' || review.state === 'running'
+                              ? 'Reviewing'
+                              : review.state === 'stopped'
+                                ? 'Review stopped'
+                                : 'Reviewed',
+                        at: review.state === 'owed' || review.state === 'running' ? null : review.updatedAt,
+                        done: review.state !== 'owed' && review.state !== 'running',
+                      },
+                    ]),
               ],
               change,
               ...(reviewed === undefined || !afterMerge
@@ -3040,6 +3071,27 @@ export class Queries extends Context.Service<
           const card = page.before === undefined ? yield* smallChangeOfThread(threadId) : undefined
           const all = [...(card === undefined ? [] : [card]), ...shown.flatMap((item) => (item === undefined ? [] : [item]))]
           return { items: all, earlier, turns: yield* turnsOf(all) }
+        })
+
+      /**
+       * A task's review after a merge that the card says: one whose findings wait on the person first, else one under way or
+       * owed; undefined where none is.
+       */
+      const afterMergeOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ url: string; number: number | null; state: string; findings: number; prefix: string | null }>`
+            SELECT r.url, r.number, r.state, json_array_length(r.findings) AS findings,
+              (SELECT json_extract(l.snapshot, '$.words.prefix') FROM external_links l WHERE l.url = r.url AND l.task_id = r.task_id LIMIT 1) AS prefix
+            FROM merge_reviews r WHERE r.task_id = ${taskId} AND r.state IN ('owed', 'running', 'found')
+            ORDER BY r.state = 'found' DESC, r.updated_at DESC LIMIT 1`
+          if (row === undefined) return undefined
+          return {
+            url: row.url,
+            words: row.number === null ? 'the pull request' : `${row.prefix ?? '#'}${row.number}`,
+            state: row.state === 'found' ? ('found' as const) : ('running' as const),
+            findings: row.state === 'found' ? row.findings : 0,
+          }
         })
 
       /** Where the time went of each turn the items came in, that kept it (turnTimes.ts). */
@@ -3368,6 +3420,7 @@ export class Queries extends Context.Service<
               unshipped: card?.unshipped ?? null,
               ...(card?.held === undefined ? {} : { held: card.held }),
               ...(card?.replied === undefined ? {} : { replied: card.replied }),
+              ...(card?.afterMerge === undefined ? {} : { afterMerge: card.afterMerge }),
               // As the board reads it: a ready change whose branch holds nothing and whose pull request, if any, closed.
               ...(card?.phase === 'ready' &&
               card.kind === 'change' &&

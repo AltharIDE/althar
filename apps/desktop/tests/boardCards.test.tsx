@@ -315,6 +315,29 @@ describe('a ready card’s own ways', () => {
     expect(screen.getAllByRole('button', { name: 'Try shipping 1 commit again' }).length).toBeGreaterThan(0)
   })
 
+  it('says what a review after a merge found, for that merge, with Fix it and Leave it', async () => {
+    const fixAfterMerge = vi.fn(async () => true)
+    const leaveAfterMerge = vi.fn(async () => true)
+    const merged = change({ state: 'merged', draft: false, checks: checks(2, 0) })
+    const found = task({
+      taskId: 'm1',
+      threadId: 'thm1',
+      title: 'Rename the setting',
+      phase: 'ready',
+      state: 'done',
+      change: merged,
+      afterMerge: { url: merged.url, words: '#715', state: 'found', findings: 2 },
+    })
+    show(lanesOf(board([found])), { actions: ways({ fixAfterMerge, leaveAfterMerge, answeringAfterMerge: new Set() }) })
+    const shown = cardOf('Rename the setting')
+    expect(shown.getByText('Review found 2')).toBeTruthy()
+    expect(shown.getByText('After #715 merged')).toBeTruthy()
+    await userEvent.click(shown.getByRole('button', { name: /new pull request after #715/ }))
+    expect(fixAfterMerge).toHaveBeenCalledWith('m1')
+    await userEvent.click(shown.getByRole('button', { name: /Close the findings/ }))
+    expect(leaveAfterMerge).toHaveBeenCalledWith('m1')
+  })
+
   it('says a settled change’s lead replied, until the person reads it', () => {
     const merged = change({ state: 'merged', draft: false, checks: checks(2, 0) })
     const replied = task({

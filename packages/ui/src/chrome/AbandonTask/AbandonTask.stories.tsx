@@ -138,3 +138,14 @@ export const Abandoning: Story = {
     await expect(args.onAbandon).toHaveBeenCalledOnce()
   },
 }
+
+/** Commits that wait for Ship: shipping them is offered first, and settling leaves them on the branch (a task is a conversation plus parts). */
+export const WithCommitsNotShipped: Story = {
+  args: { changes: [PR], held: { commits: 3, onShip: fn() } },
+  play: async ({ args }) => {
+    const dialog = within(document.body)
+    await expect(dialog.getByText('Its 3 commits not shipped stay on its branch.')).toBeInTheDocument()
+    await userEvent.click(dialog.getByRole('button', { name: 'Ship 3 commits' }))
+    await expect(args.held?.onShip).toHaveBeenCalled()
+  },
+}

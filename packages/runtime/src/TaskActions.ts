@@ -19,6 +19,7 @@ import { CantMerge, PushRefused } from './errors'
 import { commitsOf } from './git'
 import { Instance } from './Instance'
 import { answeredIn, quickIn } from './kinds'
+import { MergeReviews } from './MergeReviews'
 import { Plans } from './Plans'
 import { PlanUsage } from './PlanUsage'
 import { fact } from './records'
@@ -141,6 +142,7 @@ type Store =
   | Changes
   | Sessions
   | Runs
+  | MergeReviews
   | Errands
   | Busy
   | Agents
@@ -263,6 +265,7 @@ export class TaskActions extends Context.Service<
       const changes = yield* Changes
       const sessions = yield* Sessions
       const runs = yield* Runs
+      const mergeReviews = yield* MergeReviews
       const errands = yield* Errands
       const busy = yield* Busy
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
@@ -863,6 +866,7 @@ export class TaskActions extends Context.Service<
         pull_request: Schema.optional(Schema.String),
       })
       const Named = Schema.Struct({ task: Schema.optional(Schema.String) })
+      const AfterMerge = Schema.Struct({ task: Schema.optional(Schema.String), answer: Schema.Literals(['fix', 'leave']) })
       const Branches = Schema.Struct({
         task: Schema.optional(Schema.String),
         heads: Schema.optional(Schema.Array(Schema.Struct({ repository: Schema.String, head: Schema.String }))),
@@ -931,6 +935,39 @@ export class TaskActions extends Context.Service<
           yield* plainly(runs.ship({ envelope: said, taskId: task.id, ...(own ? { afterTurn: true } : {}) }), task.slug)
           yield* did(access, input, task, `Shipped “${task.title}”`, 'shipped this task')
           return `${own ? 'Althar ships this task once your turn ends' : `Shipping ${task.slug}`}: where its plan has a reviewer before the work ships, the review runs first, over everything since the last one, and the lead settles what it finds; then its commits go up, to the open pull request, or a new one after the last merged or closed. read_task shows where it stands. Both threads have a line saying so.`
+        })
+
+      /** What a review after a merge found, answered on the person's word, as the task's Fix it and Leave it do. */
+      const answerAfterMerge = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(AfterMerge, input)
+          const task = yield* named(access, asked.task)
+          if (asked.answer === 'leave') {
+            yield* plainly(mergeReviews.leave(task.id), task.slug)
+            yield* did(
+              access,
+              input,
+              task,
+              `Left what the review after the merge found on “${task.title}”`,
+              'left what the review after the merge found',
+            )
+            return `Left what the review after the merge found on ${task.slug}: its findings close, and stay in its thread. Both threads have a line saying so.`
+          }
+          const sent = yield* plainly(mergeReviews.fix(task.id), task.slug)
+          const said = yield* envelope('task.ship', { taskId: task.id, afterMerge: true }, undefined, actorOf(access))
+          yield* Effect.forkDetach(
+            Effect.andThen(mergeReviews.afterTurnOf(sent.threadId, sent.inputId), runs.ship({ envelope: said, taskId: task.id })).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not ship a fix after a merge', cause)),
+            ),
+          )
+          yield* did(
+            access,
+            input,
+            task,
+            `Fix it on what the review after the merge found on “${task.title}”`,
+            'asked its lead to fix what the review after the merge found',
+          )
+          return `${task.slug}'s lead has what the review after the merge found, as the person's word: once its turn is over, its fix ships as a new pull request after the merged one. Both threads have a line saying so.`
         })
 
       const publishTask = (access: ToolAccess, input: unknown) =>
@@ -1091,6 +1128,16 @@ export class TaskActions extends Context.Service<
           'Ships what waits on a task’s branch, as its Ship button does, on the person’s word ("ship it", "push it"): what the person’s turns with its lead committed after its plan stays on the branch until then. Where its plan has a reviewer before the work ships, one review runs first, over everything since the last review, and its lead settles what it finds; then the commits go up, to its open pull request, or a new one after the last merged or closed. A lead shipping its own task ships it once its turn ends. It acts at once, with a line in your thread and the task’s.',
           { type: 'object', properties: { task: optionalTask, why } },
           shipTask,
+        ),
+        tool(
+          'answer_review_after_merge',
+          'Answers what a task’s review after a merge found, as its Fix it and Leave it do, on the person’s word: fix hands the findings to its lead, whose fix ships as a new pull request after the merged one once its turn ends; leave closes them, and they stay in its thread. read_task says what the review found. It acts at once, with a line in your thread and the task’s.',
+          {
+            type: 'object',
+            properties: { task: optionalTask, why, answer: { type: 'string', enum: ['fix', 'leave'] } },
+            required: ['answer'],
+          },
+          answerAfterMerge,
         ),
         tool(
           'open_task_pull_request',

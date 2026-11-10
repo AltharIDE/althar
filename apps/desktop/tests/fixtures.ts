@@ -1098,6 +1098,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     merge: vi.fn(async () => {}),
     push: vi.fn(async () => {}),
     ship: vi.fn(async () => {}),
+    fixAfterMerge: vi.fn(async () => {}),
+    leaveAfterMerge: vi.fn(async () => {}),
     replacePullRequest: vi.fn(async () => {}),
     mergeNote: vi.fn(async () => 'Merge them.'),
     mergeHere: vi.fn(async () => {}),

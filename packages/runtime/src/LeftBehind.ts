@@ -10,6 +10,7 @@ import { ALTHAR, type Listed, listProcesses, marksOf, ownersOf, workIn } from '.
 import { Sessions } from './Sessions'
 import { stopProcesses } from './stopping'
 import { addItem } from './threads'
+import { MERGE_REVIEW } from './reviewCopy'
 
 /*
  * What a task leaves running once it settles, however it settles: merged
@@ -198,7 +199,12 @@ export class LeftBehind extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const task = yield* settledNow(taskId)
           if (task === undefined) return
-          const threads = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} ORDER BY created_at, rowid`
+          // Settling spares a review after a merge under way, or owed: its reviewer runs until it ends (MergeReviews.ts).
+          const threads = yield* sql<{ id: string }>`
+            SELECT id FROM threads WHERE task_id = ${taskId}
+              AND NOT (kind = 'step' AND node_key = ${MERGE_REVIEW} AND EXISTS (
+                SELECT 1 FROM merge_reviews r WHERE r.task_id = threads.task_id AND r.state IN ('owed', 'running')))
+            ORDER BY created_at, rowid`
           const stuck = (yield* Effect.forEach(threads, (thread) => stopAgent(taskId, thread.id), { concurrency: 'unbounded' })).flat()
           // Its runs from before it settled, not if it opened again while its agents' turns ended.
           if ((yield* settledNow(taskId)) !== undefined) yield* launches.stopAll(task.projectId, taskId, at)
@@ -270,12 +276,24 @@ export class LeftBehind extends Context.Service<
           return project?.over === 1
         })
 
+      /** Whether the thread is a review after a merge's that is under way or owed, which settling spares. */
+      const sparedReview = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ one: number }>`
+            SELECT 1 AS one FROM threads t JOIN merge_reviews r ON r.task_id = t.task_id
+            WHERE t.id = ${threadId} AND t.kind = 'step' AND t.node_key = ${MERGE_REVIEW} AND r.state IN ('owed', 'running') LIMIT 1`
+          return row !== undefined
+        })
+
       const sweep = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         // An agent left idle on a settled task, by a settling it outlived or an Althar from before this one.
         const idleBefore = (yield* Clock.currentTimeMillis) - Duration.toMillis(IDLE_FOR)
         for (const session of yield* sessions.onTasks) {
           if (session.turnRunning) continue
+          // A review after a merge waits between turns on its own: settling spares it.
+          if (yield* sparedReview(session.threadId)) continue
           const [task] = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE id = ${session.taskId} AND state IN ('done', 'abandoned')`
           const running = yield* sessions.running(session.threadId)
           const ended = Option.isSome(running) ? running.value.turnEndedAt : null

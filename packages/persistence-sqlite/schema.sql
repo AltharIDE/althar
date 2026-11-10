@@ -1467,3 +1467,23 @@ CREATE TABLE reviews_after_merge (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   ) STRICT;
+
+CREATE TABLE merge_reviews (
+    url TEXT PRIMARY KEY NOT NULL,
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    number INTEGER,
+    base TEXT CHECK (base IS NULL OR (length(base) IN (40, 64) AND base NOT GLOB '*[^0-9a-f]*')),
+    head TEXT,
+    state TEXT NOT NULL CHECK (state IN ('owed', 'running', 'clear', 'found', 'fixing', 'left', 'stopped')),
+    reviewer TEXT CHECK (json_valid(reviewer)),
+    verdict TEXT CHECK (verdict IN ('pass', 'changes_requested')),
+    summary TEXT,
+    findings TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(findings)),
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+    message TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  ) STRICT;
+
+CREATE INDEX merge_reviews_by_task ON merge_reviews (task_id);

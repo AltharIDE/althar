@@ -211,9 +211,20 @@ is a unit of work, so commits aren't pushed one by one as they're made.
   Ship's push. Ship reviews first, where the plan has a reviewer before the
   work ships, then pushes past the hold.
 
-Commits the person made in the task's own folder and never pushed go up
-with the lead's: Althar can't tell them apart there. Not built yet: those
-holding the branch for Ship too, read against each turn's last head.
+**Commits the person makes by hand in the task's folder hold the branch for
+Ship too.** Of what isn't sent yet, a commit written outside every turn of
+the task's agents (from a moment before each began to two minutes after it
+ended, as a lead may commit just after) is the person's. Althar looks as
+each turn of its lead begins, before the lead reads anything, and before it
+pushes on its own; crediting keeps when a commit was written, so a commit
+made again for its credit is still the lead's.
+
+**Merge, with commits not shipped, offers two.** Review and merge is a Ship
+that merges once what waited is up, unless the lead set a finding of its
+review aside, which a line says, leaving the merge to the person. Merge now
+sends them up past the hold and merges at once, and they are reviewed after
+the merge, in the same task, where it has a reviewer
+([reviews](reviews.md#a-small-change-is-reviewed-after-it-merges)).
 
 `push_to_pull_request` pushes at once wherever the rule or a checks fix
 would, and says what it did; otherwise it shows the person the commits with
@@ -633,3 +644,4 @@ The decisions above are current. These parts of them aren't built on main:
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: the limits sweep (#696) built: agents carry the person's own sign-in, and `gh` and `glab` are read as git is.
 - 9 Nov 2026: what a turn the person's words began after the plan commits holds the branch for Ship ([a task is a conversation plus parts](proposed/a-task-is-a-conversation-plus-parts.md#a-tweak-waits-for-ship)).
+- 10 Nov 2026: commits made by hand hold the branch too; Merge with commits not shipped offers Review and merge or Merge now ([a task is a conversation plus parts](proposed/a-task-is-a-conversation-plus-parts.md#merge-with-commits-not-shipped)).

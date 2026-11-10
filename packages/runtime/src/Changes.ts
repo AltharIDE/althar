@@ -773,6 +773,13 @@ export class Changes extends Context.Service<
      */
     merge(taskId: string, head: string, url?: string): Effect.Effect<void, unknown>
     /**
+     * Merges the task's pull request at the head its host has now, where the
+     * person's word covered what waited and has just gone up: Review and merge
+     * once its review passed, or Merge now (a task is a conversation plus
+     * parts, "Merge, with commits not shipped").
+     */
+    mergeAsItStands(taskId: string, url: string): Effect.Effect<void, unknown>
+    /**
      * Merges the task's branch into each of its repositories' default
      * branches on this Mac, up to the commit the person saw in each, where it
      * has no pull request: all of them or none, and nothing pushed. Its task
@@ -2708,12 +2715,10 @@ export class Changes extends Context.Service<
             yield* arrive(link, { kind: after.state, from: null, where: nameOf(before), url: before.url })
           if (settled) for (const asked of yield* askedOf(link.taskId, before.url)) yield* settleAsked(asked, 'closed')
           if (after.state === 'merged' && before.state !== 'merged') {
-            // Owed before it is tried, so a stop before it starts loses no review (README section 6).
-            yield* fastLane.markReviewPending(link.taskId, link.projectId)
             yield* Effect.andThen(
               Effect.andThen(follow(link.taskId, 'merged', before), baseMoved),
-              // The fast lane's review reads the change now that it merged.
-              Effect.forkIn(fastLane.reviewMerged(link.taskId), scope).pipe(Effect.asVoid),
+              // Its review after the merge, where it is owed, reads the change now that it merged, in the task itself.
+              Effect.forkIn(fastLane.reviewMerged(link.taskId, before.url), scope).pipe(Effect.asVoid),
             )
           }
           if (after.state === 'merged') yield* settleIfDone(link.taskId)
@@ -4367,12 +4372,10 @@ export class Changes extends Context.Service<
           // Merged or closed, it takes no more pushes: what the lead asked to push to it is closed.
           if (settled) for (const asked of yield* askedOf(link.taskId, before.url)) yield* settleAsked(asked, 'closed')
           if (after.state === 'merged' && before.state !== 'merged') {
-            // Owed before it is tried, so a stop before it starts loses no review (README section 6).
-            yield* fastLane.markReviewPending(link.taskId, link.projectId)
             yield* Effect.andThen(
               Effect.andThen(follow(link.taskId, 'merged', before), baseMoved),
-              // The fast lane's review reads the change now that it merged.
-              Effect.forkIn(fastLane.reviewMerged(link.taskId), scope).pipe(Effect.asVoid),
+              // Its review after the merge, where it is owed, reads the change now that it merged, in the task itself.
+              Effect.forkIn(fastLane.reviewMerged(link.taskId, before.url), scope).pipe(Effect.asVoid),
             )
           }
           if (after.state === 'merged') yield* settleIfDone(link.taskId)
@@ -6466,6 +6469,8 @@ export class Changes extends Context.Service<
           if (thread === undefined) return
           const lead = yield* sessions.running(thread.id)
           if (Option.isSome(lead) && lead.value.turnRunning) return
+          // What the person committed by hand meanwhile is held first: Althar's own push would carry it up.
+          yield* holdHands(taskId)
           for (const link of yield* linksOf(taskId)) {
             if (link.listening !== 1) continue
             yield* pushLeftOn(taskId, link, late).pipe(
@@ -6518,6 +6523,56 @@ export class Changes extends Context.Service<
             ),
             scope,
           )
+        })
+
+      /*
+       * Commits the person makes by hand in a task's folder hold it for Ship, as their turns' do (a task is a conversation plus
+       * parts, "A tweak waits for Ship"): of what isn't sent yet, a commit written outside every turn of the task's agents (from
+       * a moment before each began to a while after it ended, as a lead may commit just after) is the person's. Told by when it
+       * was written, which crediting what Althar sends keeps. Looked at as each turn of its lead begins, before it reads
+       * anything, and before Althar pushes on its own.
+       */
+      const HAND_GRACE_MS = 2 * 60_000
+      const holdHands = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{ id: string; path: string; projectId: string }>`
+            SELECT w.id, w.path, w.project_id FROM workspaces w JOIN tasks k ON k.id = w.task_id
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.state = 'ready'
+              AND w.branched_at IS NOT NULL AND w.held_at IS NULL AND NOT ${sql.unsafe(quickIn('k'))}`
+          if (rows.length === 0) return
+          const turns = yield* sql<{ from: string | null; to: string | null }>`
+            SELECT d.delivered_at AS "from", d.ended_at AS "to" FROM turn_deliveries d JOIN threads t ON t.id = d.thread_id
+            WHERE t.task_id = ${taskId} AND d.delivered_at IS NOT NULL`
+          const now = yield* Clock.currentTimeMillis
+          const windows = turns.flatMap((turn) =>
+            turn.from === null
+              ? []
+              : [{ from: Date.parse(turn.from) - 5_000, to: (turn.to === null ? now : Date.parse(turn.to)) + HAND_GRACE_MS }],
+          )
+          const inATurn = (at: number) => windows.some((window) => at >= window.from && at <= window.to)
+          const moved: Record<string, string> = {}
+          for (const row of rows) {
+            if (!existsSync(row.path)) continue
+            // What isn't sent yet: past what its open pull request has, or what Althar last pushed of it.
+            const [link] = yield* sql<{ url: string; snapshot: string }>`
+              SELECT l.url, l.snapshot FROM external_links l JOIN repository_changes c ON c.pull_request_url = l.url
+              WHERE c.workspace_id = ${row.id} AND l.kind = 'change' AND json_extract(l.snapshot, '$.state') = 'open'
+              ORDER BY l.created_at DESC LIMIT 1`
+            if (link === undefined) continue
+            const seen = yield* decodeSnapshot(link.snapshot)
+            const here = yield* aheadOf(row.path, null, [yield* sentTo(row.projectId, seen.url), seen.headSha])
+            if (here.kind !== 'ahead' || here.count === 0) continue
+            const written = yield* git(row.path, 'log', '--format=%H %at', `${here.from}..${here.head}`).pipe(
+              Effect.orElseSucceed(() => ''),
+            )
+            const byHand = written
+              .split('\n')
+              .filter((line) => line !== '')
+              .some((line) => !inATurn(Number(line.split(' ')[1] ?? '0') * 1000))
+            if (byHand) moved[row.id] = here.from
+          }
+          if (Object.keys(moved).length > 0) yield* holdAfterTurn(taskId, moved)
         })
 
       /** What each open task's lead left waiting, of a project or of all, goes up where their rules push it on its own (ADR-072). */
@@ -6586,6 +6641,8 @@ export class Changes extends Context.Service<
         )
 
       yield* Effect.forkScoped(provide(Stream.runForEach(yield* live.subscribe, onLive)))
+      // As a lead's turn begins, before it reads anything, what the person committed by hand since its last is held first.
+      yield* sessions.onLeadTurn((lead) => provide(holdHands(lead.taskId)).pipe(Effect.ignore))
 
       // A round an earlier launch left under way has no lead on it now: what the branch holds says how it ended. One that waited
       // for a place to ask its lead still waits, and is asked once it has one.
@@ -7628,6 +7685,17 @@ export class Changes extends Context.Service<
         close: (taskId, url, options) => provide(locked(taskId)(close(taskId, url, options.deleteBranch))),
         exclusive: (taskId, effect) => locked(taskId)(effect),
         merge: (taskId, head, url) => provide(locked(taskId)(merge(taskId, head, url))),
+        mergeAsItStands: (taskId, url) =>
+          provide(
+            locked(taskId)(
+              Effect.gen(function* () {
+                const { snapshot, host, repository } = yield* current(taskId, url)
+                if (snapshot.state !== 'open') return
+                const read = yield* host.change(repository, snapshot.number)
+                yield* merge(taskId, read.headSha ?? snapshot.headSha ?? '', url)
+              }),
+            ),
+          ),
         mergeHere: (taskId, heads, stands = Effect.void) =>
           provide(locked(taskId)(branches.withPermits(1)(Effect.andThen(stands, mergeHere(taskId, heads))))),
         pushHere: (taskId, stands = Effect.void) =>

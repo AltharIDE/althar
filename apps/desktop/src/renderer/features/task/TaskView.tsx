@@ -58,7 +58,7 @@ import { pendingText } from '../../shared/Pending'
 import { useModelNames } from '../../shared/modelNames'
 import { type Choice, runningOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
-import { readyWordOf, shipText } from '../../shared/standing'
+import { afterMergeText, readyWordOf, shipText } from '../../shared/standing'
 import { stepText, trackFor } from '../../shared/steps'
 import { inMergeQueue, MERGE_QUEUE_STEP } from '../../data/merges'
 import { ago, clock, running, useNow } from '../../shared/time'
@@ -228,6 +228,12 @@ export const statusOf = (
   // A review drafted is the person's to post (DEV-96).
   if (phase === 'ready' && snapshot.task.review != null && !isAnswered(snapshot.task.review))
     return { status: TaskStatus.Yours, state: text.drafted }
+  // What its review after a merge found: the person's Fix it or Leave it, beside it.
+  if (phase === 'ready' && snapshot.task.afterMerge?.state === 'found')
+    return {
+      status: TaskStatus.Yours,
+      state: afterMergeText.sentence(snapshot.task.afterMerge.findings, snapshot.task.afterMerge.words),
+    }
   // Held for Ship: what waits on its branch, and Ship beside it, whatever kind of task it is.
   if (phase === 'ready' && snapshot.task.held !== undefined)
     return { status: TaskStatus.Yours, state: shipText.commits(snapshot.task.held.commits) }
@@ -801,10 +807,20 @@ export function TaskView({
   })
   // Held for Ship, Ship is its one way on, first in the chip; a finished task that isn't a change keeps Done and Keep beside it.
   const held = !busy && snapshot.task.phase === 'ready' ? snapshot.task.held : undefined
+  // What its review after a merge found: Fix it and Leave it, first in the chip.
+  const found = !busy && snapshot.task.afterMerge?.state === 'found' ? snapshot.task.afterMerge : undefined
   const settle =
-    settleable || held !== undefined ? (
+    settleable || held !== undefined || found !== undefined ? (
       <SettleWays
         place="header"
+        {...(found === undefined
+          ? {}
+          : {
+              onFix: () => void model.fixAfterMerge(),
+              fixHint: afterMergeText.fixHint(found.words),
+              onLeave: () => void model.leaveAfterMerge(),
+              leaveHint: afterMergeText.leaveHint,
+            })}
         {...(held === undefined
           ? {}
           : {
@@ -820,11 +836,15 @@ export function TaskView({
           : {})}
         {...(model.doing === doing.ship
           ? { busy: 'ship' as const }
-          : model.doing === doing.markDone
-            ? { busy: 'done' as const }
-            : model.doing === doing.keep
-              ? { busy: 'keep' as const }
-              : {})}
+          : model.doing === doing.fixAfterMerge
+            ? { busy: 'fix' as const }
+            : model.doing === doing.leaveAfterMerge
+              ? { busy: 'leave' as const }
+              : model.doing === doing.markDone
+                ? { busy: 'done' as const }
+                : model.doing === doing.keep
+                  ? { busy: 'keep' as const }
+                  : {})}
       />
     ) : null
   // Its parts, just before the faces: what it changed is in its worktree's, which opens the changes over the window (ADR-097).
@@ -1173,6 +1193,7 @@ export function TaskView({
                   error={model.error}
                   errorMore={model.errorMore}
                   onAccept={(changes) => void model.accept(changes)}
+                  onMergeWaiting={(how) => void model.mergeWaiting(how)}
                   onMergeHere={() => void model.mergeHere()}
                   onOpenChange={() => void model.openChange()}
                   onShip={() => void model.ship()}
@@ -1409,6 +1430,18 @@ export function TaskView({
                 host: productName(one.product),
               }))}
               abandoned={leftOpen !== null}
+              // Commits that wait for Ship: settling asks first, Ship them or leave them on the branch.
+              {...(snapshot.task.held === undefined
+                ? {}
+                : {
+                    held: {
+                      commits: snapshot.task.held.commits,
+                      onShip: () => {
+                        endAbandoning()
+                        void model.ship()
+                      },
+                    },
+                  })}
               {...(mergedChange === undefined || !can('leaveOut')
                 ? {}
                 : {

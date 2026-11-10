@@ -278,12 +278,13 @@ few lines is the exception to the usual course of a change:
   light, quick model (Sonnet at low effort, where the agent lists it). It
   names a reviewer, but the review step is skipped before merge. It starts
   at once, with no countdown to read.
-- **Reviewed after it merges.** Its pull request merges on the person's word,
-  as every merge does. The merge starts a review task of its own, on the
-  merged pull request, which posts what it finds as any review does
-  ([reviews.md](reviews.md)). Nothing blocks the merge. A plan that named no
-  reviewer gets no review after merge, and neither does a pull request that
-  was closed unmerged.
+- **Reviewed after it merges, in the same task.** Its pull request merges on
+  the person's word, as every merge does, and the task settles. Its own
+  reviewer then reads what merged, in a thread of the task's, and reports in
+  the task's thread ([reviews.md](reviews.md#a-small-change-is-reviewed-after-it-merges)).
+  Nothing is posted on the merged pull request, and no second task is made.
+  Nothing blocks the merge. A plan that named no reviewer gets no review
+  after merge, and neither does a pull request that was closed unmerged.
 - **One card in its thread says what it skipped.** It lists each step with
   its time (Started, Changed a line in …, Checks pass, Merged). It offers
   Merge, which still asks, and **Make it a full task**, which starts the

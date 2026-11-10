@@ -89,6 +89,7 @@ import {
 } from './evidence'
 import { Sessions } from './Sessions'
 import { LeftBehind } from './LeftBehind'
+import { MergeReviews } from './MergeReviews'
 import { type GiveUp, watchStalls } from './Stalls'
 import type { Tried } from './stallWatch'
 import { addItem } from './threads'
@@ -205,7 +206,17 @@ export const PlanParameters = Schema.Struct({
    * hold. Absent from every other run, so a store written before reads the
    * same.
    */
-  ships: Schema.optional(Schema.Struct({ from: Schema.Record(Schema.String, Schema.String) })),
+  ships: Schema.optional(
+    Schema.Struct({
+      from: Schema.Record(Schema.String, Schema.String),
+      /**
+       * Review and merge (a task is a conversation plus parts, "Merge, with commits not shipped"): once what waited is up, its
+       * pull requests merge, unless the lead set a finding of its review aside, which brings the task back to the person
+       * first. Absent from a plain Ship.
+       */
+      merges: Schema.optional(Schema.Boolean),
+    }),
+  ),
   /**
    * The fast lane (README section 6): reviewed after it merges, not before.
    * Its one step implements, its review step names who reads it once it
@@ -420,6 +431,7 @@ type Store =
   | Artifacts
   | Connectivity
   | LeftBehind
+  | MergeReviews
 
 /**
  * Whether a publish step's failure may pass if tried again (DEV-173): the
@@ -718,6 +730,20 @@ export class Runs extends Context.Service<
       /** Its own lead asked in its turn: it ships once that turn ends, refused then only where nothing waits. */
       readonly afterTurn?: boolean
     }): Effect.Effect<void, unknown>
+    /**
+     * Merge, with commits not shipped (a task is a conversation plus parts):
+     * `review`, Review and merge, ships them with one review of what waited
+     * and merges once they are up, unless the lead set a finding aside; `now`,
+     * Merge now, sends them up and merges at once, and they are reviewed after
+     * the merge where the task has a reviewer. With nothing waiting, it merges
+     * as it stands.
+     */
+    mergeWaiting(input: {
+      readonly envelope: CommandEnvelope
+      readonly taskId: string
+      readonly how: 'review' | 'now'
+      readonly url?: string
+    }): Effect.Effect<void, unknown>
     /** Whether the task's plan waits for a place before its first step, nothing of it started yet: the person can still change it. */
     planWaits(taskId: string): Effect.Effect<boolean, SqlError.SqlError, SqlClient.SqlClient>
     /**
@@ -786,6 +812,7 @@ export class Runs extends Context.Service<
       const instance = yield* Instance
       const sessions = yield* Sessions
       const leftBehind = yield* LeftBehind
+      const mergeReviews = yield* MergeReviews
       /**
        * Tasks with something still at work here: an agent, in a turn or idle,
        * or a settling not done stopping what they ran. A settled Local task's
@@ -1645,7 +1672,7 @@ export class Runs extends Context.Service<
             JOIN nodes n ON n.execution_id = e.id
             JOIN node_attempts a ON a.node_id = n.id AND a.state = 'running'
             WHERE t.id = ${threadId}
-              AND ((t.kind = 'task' AND n.node_key IN ('implement', 'settle')) OR (t.kind = 'step' AND n.node_key = 'review'))
+              AND ((t.kind = 'task' AND n.node_key IN ('implement', 'settle')) OR (t.kind = 'step' AND t.node_key = 'review' AND n.node_key = 'review'))
             ORDER BY a.admitted_at DESC LIMIT 1`
           if (row === undefined) return undefined
           const run = yield* currentRun(row.taskId)
@@ -2736,7 +2763,7 @@ export class Runs extends Context.Service<
        * waits. The run: once its review has started, or, with none, once what
        * waited is up or couldn't go, as the press waits on the host.
        */
-      const ship = (taskId: string, actorId: ActorId) =>
+      const ship = (taskId: string, actorId: ActorId, merges = false) =>
         oneRound(
           taskId,
           Effect.gen(function* () {
@@ -2770,7 +2797,7 @@ export class Runs extends Context.Service<
               steps: plan.steps.map((step) =>
                 step.key === 'implement' || (step.key === 'review' && plan.reviewAfterMerge === true) ? { ...step, skipped: true } : step,
               ),
-              ships: { from },
+              ships: { from, ...(merges ? { merges: true } : {}) },
             }
             const encoded = JSON.stringify(parameters)
             const policyId = yield* policyOf(task.projectId)
@@ -2909,6 +2936,9 @@ export class Runs extends Context.Service<
           }
           const { went, published } = shipped.value
           yield* changes.releaseHolds(run.taskId, 'shipped')
+          // Review and merge: what went up merges now, unless the lead set a finding aside, which is the person's to read first.
+          const merging = (yield* stepsOf(run)).ships?.merges === true
+          if (merging) yield* mergeShipped(run)
           const sent = went.map((one) => `${one.count === 1 ? '1 commit' : `${one.count} commits`} to ${one.where}`)
           const opened = published === undefined ? undefined : publishedSummary(published, end === 'none' || end === null ? 'draft' : end)
           const summary = [sent.length === 0 ? undefined : `Shipped ${sent.join(', ')}.`, opened]
@@ -2936,6 +2966,63 @@ export class Runs extends Context.Service<
           yield* rest(run.taskId)
           yield* Effect.ignore(changes.settleIfMerged(run.taskId))
           yield* touchCard(run.taskId)
+        })
+
+      /**
+       * Review and merge's last step: each of the task's open pull requests merges at what it has now, its waiting commits
+       * up; unless the lead set a finding of this Ship's review aside, which a line says, leaving Merge to the person.
+       */
+      const mergeShipped = (run: RunRow) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [aside] = yield* sql<{ n: number }>`
+            SELECT count(*) AS n FROM findings f JOIN node_attempts a ON a.id = f.review_attempt_id JOIN nodes n ON n.id = a.node_id
+            WHERE n.execution_id = ${run.executionId} AND f.state = 'set_aside'`
+          if ((aside?.n ?? 0) > 0)
+            return yield* addItem({ projectId: run.projectId, threadId: run.threadId }, 'notice', {
+              source: 'runtime',
+              severity: 'warning',
+              title: `Not merged: the lead set ${aside?.n === 1 ? 'a finding' : `${aside?.n} findings`} of the review aside. Read why, then merge it yourself.`,
+              description: null,
+            })
+          for (const one of yield* changes.ofTask(run.taskId))
+            if (one.state === 'open')
+              yield* changes.mergeAsItStands(run.taskId, one.url).pipe(
+                Effect.catchCause((cause) =>
+                  addItem({ projectId: run.projectId, threadId: run.threadId }, 'notice', {
+                    source: 'runtime',
+                    severity: 'warning',
+                    title: `Shipped, but not merged: ${summarize(cause) || 'its host refused the merge.'}`,
+                    description: null,
+                  }),
+                ),
+              )
+        })
+
+      /**
+       * Merge, with commits not shipped. Review and merge is a Ship that merges once what waited is up (`mergeShipped`). Merge
+       * now owes a review after the merge of what no review read, where the task has a reviewer, then sends the commits up,
+       * past the hold, and merges each open pull request at what it has then.
+       */
+      const mergeWaiting = (input: {
+        readonly envelope: CommandEnvelope
+        readonly taskId: string
+        readonly how: 'review' | 'now'
+        readonly url?: string
+      }) =>
+        Effect.gen(function* () {
+          const waits = (yield* changes.aheadOfOpen(input.taskId)).length > 0 || (yield* changes.holds(input.taskId)).length > 0
+          if (input.how === 'review' && waits) return yield* Effect.asVoid(ship(input.taskId, input.envelope.actorId, true))
+          const marks = yield* reviewMarksOf(input.taskId)
+          const open = (yield* changes.ofTask(input.taskId)).filter(
+            (one) => one.state === 'open' && (input.url === undefined || one.url === input.url),
+          )
+          if (waits) for (const one of open) yield* mergeReviews.owe(input.taskId, one.url, marks)
+          if (waits) {
+            yield* changes.shipToOpen(input.taskId)
+            yield* changes.releaseHolds(input.taskId, 'shipped')
+          }
+          for (const one of open) yield* changes.mergeAsItStands(input.taskId, one.url)
         })
 
       /** A merged task whose new work goes out is open again, until that merges too; inside its own transaction. */
@@ -4826,6 +4913,14 @@ export class Runs extends Context.Service<
             const line = titleOf(title)
             return line === null ? finding : { ...finding, title: line }
           })
+          // A review after a merge reports in its own thread, to the person rather than the lead (MergeReviews.ts).
+          if (yield* mergeReviews.owns(access.threadId))
+            return yield* mergeReviews.reported(access, {
+              verdict: reviewed.verdict,
+              summary: reviewed.summary,
+              findings: findings.map((finding) => ({ ...finding, file: finding.file ?? null, line: finding.line ?? null })),
+              model,
+            })
           const current = access.taskId === null ? undefined : yield* currentRun(access.taskId)
           const attempt = current === undefined ? undefined : yield* running(current, ['review'])
           if (current === undefined || attempt === undefined) return yield* new ToolRefused({ message: 'No review is waiting on you.' })
@@ -6893,6 +6988,7 @@ export class Runs extends Context.Service<
       return Runs.of({
         run: (planId) => provide(run(planId)),
         skipReview: (input) => provide(skipReview(input)),
+        mergeWaiting: (input) => provide(mergeWaiting(input)),
         ship: (input) =>
           provide(
             input.afterTurn === true

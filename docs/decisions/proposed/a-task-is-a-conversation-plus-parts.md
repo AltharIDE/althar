@@ -9,7 +9,8 @@
 > each section.
 
 - **Status:** Proposed; talking to a lead, Ship and checking fixes built
-  (#722)
+  (#722); each turn's time, the review after a merge in the same task and
+  Merge with commits not shipped built (#739)
 - **Date:** 2026-11-08; how it reads, 2026-11-09
 - **Owner:** Runtime and desktop maintainers
 - **Amends:** the sections in
@@ -1193,6 +1194,31 @@ stores had working on upgrade. Built there, each in its area document:
 - **A lead starts afresh only when its context is full**
   ([agents](../agents.md#keeping-context-small)).
 
+Built since, in #739:
+
+- **Each turn records where its time went** (`turn_deliveries.timings`):
+  waiting for a place, starting or handing over its session, and the
+  agent's work and tools. Its line names the part that took most, and the
+  task adds its turns up in Outputs' Usage.
+- **The review after a merge runs in the same task** (`merge_reviews`, its
+  reviewer in a thread of the task's own): a small change's, and what Merge
+  now merged. The task settles as the change merges, the review is spared
+  by settling, and what it finds brings the task back to Needs you with
+  Fix it and Leave it, on its card, in its header and in Needs you, and for
+  agents with `answer_review_after_merge`. Nothing is posted on the merged
+  pull request, and no second task is made.
+- **Merge, with commits not shipped,** offers Review and merge (a Ship
+  that merges once its commits are up, unless the lead set a finding aside)
+  or Merge now (up and merged at once, reviewed after the merge).
+- **Settling with commits not shipped asks first:** the Abandon dialog
+  offers Ship beside it.
+- **Commits the person makes by hand hold the branch:** of what isn't sent
+  yet, a commit written outside every turn of the task's agents is the
+  person's, looked at as each turn of its lead begins and before Althar
+  pushes on its own. Told by when it was written, which crediting keeps,
+  rather than by a head kept as each turn ends, which the person could
+  outrun.
+
 Compatibility: every change to the store is additive, with nullable
 columns an older build reads past; a run with no `ships` and a workspace
 with no `held_at` behave as before, so a round under way from before the
@@ -1201,13 +1227,8 @@ old "Review rounds" setting is kept and read by nothing; the lead's tools
 keep their names, `make_it_a_change` included.
 
 Still to build, as the rest of this proposal says: several changes in a
-task, the review after a merge in the same task, each turn's time, the
-workspace moving up and between a worktree and Local, "Run it", the parts
-tools, Scratch and presets. Merge with commits not shipped merges the pull
-request as it is meanwhile, and what waited stays held, for Ship's next pull
-request; settling with commits not shipped leaves them on the branch,
-letting go of the hold. Commits the person makes by hand in the task's
-folder don't hold it yet.
+task, the workspace moving up and between a worktree and Local, "Run it",
+the parts tools, Scratch and presets.
 
 Where it was all to be built together, recording each turn's time went in
 first, so the rest could be measured against today's turns. It is the next

@@ -49,6 +49,7 @@ import {
   labelWords,
   nextWords,
   readyWordOf,
+  afterMergeText,
   shipText,
   standingOf,
   standingText,
@@ -495,6 +496,9 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
  */
 export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
   const base = { status: TaskStatus.Yours, kind: kindOf(work), ...localOf(work), ...towardOf(work), title: work.title, ...fromOf(work) }
+  // What its review after a merge found comes first: the person's Fix it or Leave it, for the change that merged.
+  if (work.afterMerge?.state === 'found')
+    return { ...base, word: afterMergeText.word(work.afterMerge.findings), ...afterMergeOf(work, actions) }
   // Held for Ship, whatever kind it is: what waits, and Ship, which is all the person has to do for it.
   if (work.held !== undefined && work.kind !== 'review') {
     const change = work.change?.state === 'open' ? work.change : null
@@ -645,7 +649,70 @@ const shipOf = (
 
 /** What a ready card does without opening its task: push, and merge, ship, mark done or keep for later, and how they stand. */
 export type CardActions = Pick<WorkActions, 'push' | 'merge' | 'pushing' | 'merging' | 'failed'> &
-  Partial<Pick<WorkActions, 'markDone' | 'keep' | 'settling' | 'resolveNow' | 'resolving' | 'sendBack' | 'sending' | 'ship' | 'shipping'>>
+  Partial<
+    Pick<
+      WorkActions,
+      | 'markDone'
+      | 'keep'
+      | 'settling'
+      | 'resolveNow'
+      | 'resolving'
+      | 'sendBack'
+      | 'sending'
+      | 'ship'
+      | 'shipping'
+      | 'fixAfterMerge'
+      | 'leaveAfterMerge'
+      | 'answeringAfterMerge'
+    >
+  >
+
+/**
+ * What a task's review after a merge found (a task is a conversation plus parts): which merge, at its foot, and Fix it, which
+ * hands the findings to the lead, with Leave it, quiet, before it.
+ */
+const afterMergeOf = (work: BoardTask, actions: CardActions | undefined): Pick<Card, 'foot' | 'next'> => {
+  const found = work.afterMerge
+  if (found === undefined) return {}
+  const answering = actions?.answeringAfterMerge?.has(work.taskId) === true
+  const fix = actions?.fixAfterMerge
+  const leave = actions?.leaveAfterMerge
+  return {
+    foot: (
+      <FactLine>
+        <Fact key="after" icon="pr" tone="warm">
+          {afterMergeText.after(found.words)}
+        </Fact>
+      </FactLine>
+    ),
+    next:
+      fix === undefined ? (
+        <NextStep>{afterMergeText.fix}</NextStep>
+      ) : (
+        <>
+          {leave !== undefined && (
+            <NextStep
+              busy={answering}
+              doing={afterMergeText.leaving}
+              label={afterMergeText.leaveHint}
+              onPress={() => void leave(work.taskId)}
+            >
+              {afterMergeText.leave}
+            </NextStep>
+          )}
+          <NextStep
+            signal
+            busy={answering}
+            doing={afterMergeText.fixing}
+            label={afterMergeText.fixHint(found.words)}
+            onPress={() => void fix(work.taskId)}
+          >
+            {afterMergeText.fix}
+          </NextStep>
+        </>
+      ),
+  }
+}
 
 /**
  * A conflict that is the person's, handed back or not asked of its lead: why, in one line, at its foot, and Resolve now, which

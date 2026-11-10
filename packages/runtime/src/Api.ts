@@ -116,6 +116,7 @@ import { IssueChanges } from './IssueChanges'
 import { IssueDrafts } from './IssueDrafts'
 import { postTeamReviews, Reviews, setPostTeamReviews } from './Reviews'
 import { FastLane } from './fastLane'
+import { MergeReviews } from './MergeReviews'
 import { Plans } from './Plans'
 import { Runs } from './Runs'
 import { findTasks } from './Search'
@@ -248,6 +249,7 @@ export const handlers = Api.toLayer(
     const issueChanges = yield* IssueChanges
     const reviews = yield* Reviews
     const fastLane = yield* FastLane
+    const mergeReviews = yield* MergeReviews
     const runs = yield* Runs
     const tasks = yield* Tasks
     const coordinator = yield* Coordinator
@@ -1827,7 +1829,34 @@ export const handlers = Api.toLayer(
         ),
       Ship: ({ commandId, taskId }) =>
         once(commandId, api(Effect.flatMap(envelope('task.ship', { taskId }, commandId), (said) => runs.ship({ envelope: said, taskId })))),
-      Merge: ({ commandId, taskId, head, url }) => once(commandId, api(pullRequests.merge(taskId, head, url))),
+      // Fix it: the findings go to the lead, and once its turn is over its fix ships as the next pull request.
+      FixAfterMerge: ({ commandId, taskId, url }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const sent = yield* mergeReviews.fix(taskId, url)
+              const said = yield* envelope('task.ship', { taskId, afterMerge: url ?? null }, commandId)
+              yield* Effect.forkDetach(
+                Effect.andThen(mergeReviews.afterTurnOf(sent.threadId, sent.inputId), runs.ship({ envelope: said, taskId })).pipe(
+                  Effect.catchCause((cause) => Effect.logWarning('Could not ship a fix after a merge', cause)),
+                ),
+              )
+            }),
+          ),
+        ),
+      LeaveAfterMerge: ({ commandId, taskId, url }) => once(commandId, api(mergeReviews.leave(taskId, url))),
+      Merge: ({ commandId, taskId, head, url, how }) =>
+        once(
+          commandId,
+          api(
+            how === undefined
+              ? pullRequests.merge(taskId, head, url)
+              : Effect.flatMap(envelope('task.merge', { taskId, how }, commandId), (said) =>
+                  runs.mergeWaiting({ envelope: said, taskId, how, ...(url === undefined ? {} : { url }) }),
+                ),
+          ),
+        ),
       ClosePullRequest: ({ commandId, taskId, url, deleteBranch }) =>
         once(commandId, api(Effect.map(pullRequests.close(taskId, url, { deleteBranch }), ({ branch }) => ({ branch })))),
       MergeHere: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.mergeHere(taskId, heads)))),
