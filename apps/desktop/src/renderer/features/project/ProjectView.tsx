@@ -74,6 +74,7 @@ import { partsOf, tasksOf, trackersOf, trackersWithBinding } from './front'
 import { nextRoom } from './rooms'
 import s from './Project.module.css'
 import type { ProjectModel } from './useProject'
+import { turnsById } from '../../shared/turnTime'
 
 /*
  * A project: its header across the top, the bar a task has, then the
@@ -738,6 +739,7 @@ export function ProjectView({
                               worktree: null,
                               queue,
                               outputs: model.outputs,
+                              turns: turnsById(coordinator.turns),
                             },
                             model.streaming,
                             (iso) => ago(iso),

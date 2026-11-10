@@ -71,6 +71,7 @@ import { statements as clearedView } from './0066_cleared_view'
 import { statements as fastLane } from './0067_fast_lane'
 import { statements as reviewsAfterMerge } from './0068_reviews_after_merge'
 import { statements as heldForShip } from './0069_held_for_ship'
+import { statements as turnTimings } from './0070_turn_timings'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -159,6 +160,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0067_fast_lane', statements: fastLane },
   { key: '0068_reviews_after_merge', statements: reviewsAfterMerge },
   { key: '0069_held_for_ship', statements: heldForShip },
+  { key: '0070_turn_timings', statements: turnTimings },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

@@ -37,6 +37,7 @@ import { McpActs, PartView, ThreadBlocks } from '../../shared/ThreadBlocks'
 import { WayOut } from '../../shared/WayOut'
 import { PublishedReport, ReviewReport } from './Reports'
 import s from './TaskThread.module.css'
+import { duration, mostOf, spentWords } from '../../shared/turnTime'
 
 /*
  * A task's thread in rounds (shared/rounds.ts, ADR-042), as the kit draws
@@ -193,7 +194,11 @@ const RoundView = memo(function RoundView({
   )
     return (
       <>
-        <WorkLine who={model} took={work.took} summary={work.counts}>
+        <WorkLine
+          who={model}
+          took={work.spent === null ? work.took : duration(work.spent.total)}
+          summary={[work.counts, ...(work.spent === null ? [] : [mostOf(work.spent) ?? ''])].filter((words) => words !== '').join(' · ')}
+        >
           {work.steps.map((step) => (
             <StepView key={step.id} step={step} threadId={threadId} worktree={worktree} />
           ))}
@@ -241,7 +246,9 @@ const RoundView = memo(function RoundView({
     <Round model={model} at={block.at} {...(copy === undefined ? {} : { copy })} {...(report === null ? {} : { 'data-item': report.id })}>
       {work !== null && (
         <WorkedFor
-          took={work.took}
+          took={work.spent === null ? work.took : duration(work.spent.total)}
+          {...(work.spent === null ? {} : { spent: spentWords(work.spent) })}
+          {...(work.spent === null || mostOf(work.spent) === undefined ? {} : { most: mostOf(work.spent) })}
           live={work.live && !block.answered}
           {...(onTheWay.length === 0
             ? {}

@@ -106,6 +106,7 @@ import { composerComment, cropsOf, drop, giveBack as giveCommentsBack, takeAll, 
 import { REQUEST, taskGraphOf } from './graph'
 import { GraphFace } from './GraphFace'
 import { reveal } from './reveal'
+import { turnsById } from '../../shared/turnTime'
 
 /*
  * A task, with its faces under its header, as in the prototype: the
@@ -656,6 +657,7 @@ export function TaskView({
         worktree: snapshot.task.worktree,
         queue,
         outputs: model.outputs,
+        turns: turnsById(snapshot.turns),
       },
       model.streaming,
       (iso) => ago(iso),

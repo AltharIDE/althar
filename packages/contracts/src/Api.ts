@@ -1514,6 +1514,8 @@ const itemFields = {
    */
   model: Schema.optional(Schema.NullOr(Schema.String)),
   createdAt: Schema.String,
+  /** The turn it came in, by its delivery's id, where an agent's turn wrote it: what its line's time is read from (`TurnTime`). */
+  turn: Schema.optional(Schema.String),
 }
 
 /**
@@ -2839,6 +2841,35 @@ export type ContextUse = typeof ContextUse.Type
  * agent that reaches several providers, each paid its own way (OpenCode), has
  * one for each provider its turns ran on.
  */
+/**
+ * Where a turn's time went, in milliseconds (a task is a conversation plus
+ * parts, "Where a turn's time goes"): waiting for a place among the agents at
+ * work here, starting its session or handing it over to a fresh one, and the
+ * agent's own work, of which the tools it ran are a part. Kept as the turn
+ * ends; a turn before Althar kept it has none.
+ */
+export const TurnTime = Schema.Struct({
+  /** The turn, by its delivery's id, as its items name it (`turn`). */
+  id: Schema.String,
+  place: Schema.Number,
+  session: Schema.Number,
+  /** How its session began, where it was its first turn: started for the work, or handed over to a fresh one; null otherwise. */
+  starting: Schema.NullOr(Schema.Literals(['start', 'handover'])),
+  work: Schema.Number,
+  tools: Schema.Number,
+})
+export type TurnTime = typeof TurnTime.Type
+
+/** All a task's turns added up, its reviewers' too, as `TurnTime` counts them: what Outputs' Usage says it took. */
+export const TaskTime = Schema.Struct({
+  turns: Schema.Number,
+  place: Schema.Number,
+  session: Schema.Number,
+  work: Schema.Number,
+  tools: Schema.Number,
+})
+export type TaskTime = typeof TaskTime.Type
+
 export const AccountUse = Schema.Struct({
   accountId: Schema.String,
   agentId: Schema.String,
@@ -3324,6 +3355,8 @@ export const ThreadSnapshot = Schema.Struct({
   cursor: Cursor,
   /** What the task used of each account its agents ran on, in every thread of it, its reviews' too (ADR-084). */
   usage: Schema.optional(Schema.Array(AccountUse)),
+  /** Where all its turns' time went, added up; absent where none kept it. */
+  time: Schema.optional(TaskTime),
   project: Schema.Struct({ id: Schema.String, name: Schema.String }),
   /** Where the project's repository is hosted, and whether Althar is connected there: what a pull request needs. */
   host: Schema.NullOr(Schema.Struct({ product: Product, name: Schema.String, webUrl: Schema.String, connected: Schema.Boolean })),
@@ -3458,6 +3491,8 @@ export const ThreadSnapshot = Schema.Struct({
   earlier: Schema.Boolean,
   /** Its steps' reports, on this page or not, newest two hundred: its finished view is read from the lead's, its graph from all. */
   reports: Schema.Array(ThreadItem),
+  /** Where the time went of each turn its page's items came in, that kept it; absent from a runtime before it. */
+  turns: Schema.optional(Schema.Array(TurnTime)),
 })
 export type ThreadSnapshot = typeof ThreadSnapshot.Type
 
@@ -3613,6 +3648,8 @@ export const CoordinatorSnapshot = Schema.Struct({
   ),
   items: Schema.Array(ThreadItem),
   earlier: Schema.Boolean,
+  /** Where the time went of each turn its page's items came in, that kept it; absent from a runtime before it. */
+  turns: Schema.optional(Schema.Array(TurnTime)),
   view: ConversationView,
   /** Where the project's repository is hosted, when its remote says, and whether Althar is connected to it there. */
   host: Schema.NullOr(Schema.Struct({ product: Product, name: Schema.String, webUrl: Schema.String, connected: Schema.Boolean })),

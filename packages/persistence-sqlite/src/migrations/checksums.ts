@@ -73,4 +73,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0067_fast_lane': '40aea3565549b777401c1bd8a8b34d2fc806ecffb6253fea5fa7320469eb5111',
   '0068_reviews_after_merge': 'a57cffdcbf9d31a4263dde84ed6243fd16db5d42c45ac447d0cde27397431f2a',
   '0069_held_for_ship': 'ca526db1f6b50c7b0880bfd1e1b6f4bb5f8da861cd2d794ba4574c6e9cffc67a',
+  '0070_turn_timings': 'caac9eb5e1b549158261e8131bc84ad99ceb5c1b94e1399b0f4fcaf3ecbd027e',
 }

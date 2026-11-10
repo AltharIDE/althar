@@ -1,10 +1,11 @@
-import type { ThreadItem } from '@althar/contracts'
+import type { ThreadItem, TurnTime } from '@althar/contracts'
 import { ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar } from './handed'
 import { type Block, blocksOf, carriedOn, type Doing, doingOf, type Part, relayed, type StepResult, type Streamed } from './thread'
 import { text as threadText } from './ThreadBlocks'
 import { took } from './time'
+import { type Spent, spentOf, turnOfItems } from './turnTime'
 
 /*
  * A task's thread in rounds (ADR-042). A round starts with an ask: what the
@@ -55,6 +56,8 @@ export interface Work {
   readonly counts: string
   /** While it works: what it is doing now, in one line; none while it writes. */
   readonly doing: Doing | null
+  /** Once it is over, where its time went, as the runtime kept it for its turns; null where none of them did. */
+  readonly spent: Spent | null
 }
 
 /** Pictures the lead showed the person (show_pictures), as one set. */
@@ -207,6 +210,8 @@ export interface RoundSource {
   readonly openedAt?: string | null
   readonly reading?: boolean
   readonly turnEnded?: string | null
+  /** Where each turn's time went, by its id (`turnsById`). */
+  readonly turns?: ReadonlyMap<string, TurnTime>
 }
 
 /** A task's thread in rounds, oldest first, with what is still being written but not yet read at the end. */
@@ -219,6 +224,16 @@ export const roundsOf = (
   const { items, turnRunning, worktree } = source
   const at = new Map(items.map((item) => [item.id, item.createdAt]))
   for (const [id, streamed] of streaming) if (!at.has(id)) at.set(id, streamed.at)
+  // Where a round's time went: its items' turns, as the runtime kept them.
+  const turnOf = turnOfItems(items)
+  const kept = source.turns
+  const spending = (ids: ReadonlyArray<string>) =>
+    kept === undefined
+      ? null
+      : spentOf(
+          ids.flatMap((id) => turnOf.get(id) ?? []),
+          kept,
+        )
   // In stretches that end at a report, so blocksOf never folds what was said after one into the turn before it.
   const stretches: Array<Array<ThreadItem>> = [[]]
   for (const item of items) {
@@ -246,6 +261,7 @@ export const roundsOf = (
         ...(last && source.reading !== undefined ? { reading: source.reading } : {}),
         ...(last && source.turnEnded !== undefined ? { turnEnded: source.turnEnded } : {}),
         ...(last && index > 0 ? { earlierAt } : {}),
+        ...(source.turns === undefined ? {} : { turns: source.turns }),
       },
       last ? streaming : new Map(),
       ago,
@@ -271,7 +287,7 @@ export const roundsOf = (
   // What Althar did between rounds goes in the next one's work.
   let pending: Array<WorkStep> = []
   const close = () => {
-    if (open !== null) out.push(roundOf(open, open.id === liveId, at, worktree, now))
+    if (open !== null) out.push(roundOf(open, open.id === liveId, at, worktree, now, spending))
     open = null
   }
   blocks.forEach((block, index) => {
@@ -308,7 +324,7 @@ export const roundsOf = (
           if (open.report !== null) {
             const later = open.steps.slice(open.reportedAfter)
             const first = later[0]
-            out.push(roundOf({ ...open, steps: open.steps.slice(0, open.reportedAfter) }, false, at, worktree, now))
+            out.push(roundOf({ ...open, steps: open.steps.slice(0, open.reportedAfter) }, false, at, worktree, now, spending))
             const id = first?.id ?? block.id
             if (open.id === liveId) liveId = id
             open = {
@@ -433,7 +449,14 @@ const withSettled = (blocks: ReadonlyArray<RoundBlock>): ReadonlyArray<RoundBloc
 }
 
 /** A round, from everything its lead did: its acknowledgement, its work in one line, and its result. */
-const roundOf = (open: Gathering, live: boolean, at: ReadonlyMap<string, string>, worktree: string | null, now: string): Round => {
+const roundOf = (
+  open: Gathering,
+  live: boolean,
+  at: ReadonlyMap<string, string>,
+  worktree: string | null,
+  now: string,
+  spending: (ids: ReadonlyArray<string>) => Spent | null,
+): Round => {
   // An error its agent's turn ended with is said in the open; any other notice of its own stays in the work, as Althar's do.
   const ending = open.steps.at(-1)
   const failed = !live && ending?.kind === 'notice' && ending.tone === 'error' ? ending : undefined
@@ -514,6 +537,7 @@ const roundOf = (open: Gathering, live: boolean, at: ReadonlyMap<string, string>
                   writing !== undefined,
                 )
               : null,
+            spent: live ? null : spending(open.steps.map((step) => step.id)),
           },
     result: result === undefined ? null : said(result, true),
     writing: writing === undefined ? null : said(writing, false),

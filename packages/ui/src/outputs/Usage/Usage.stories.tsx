@@ -151,3 +151,21 @@ export const CardByProvider: StoryObj<typeof UsageCard> = {
   ),
   args: { lines: BY_PROVIDER.slice(0, 2), open: true, onOpenChange: fn() },
 }
+/** Open, with how long the task's turns took, added up, and where that time went (a task is a conversation plus parts). */
+export const CardWithTime: StoryObj<typeof UsageCard> = {
+  render: (args) => (
+    <div style={{ width: 340 }}>
+      <UsageCard {...args} />
+    </div>
+  ),
+  args: {
+    lines: TWO_PLANS,
+    open: true,
+    onOpenChange: fn(),
+    time: {
+      took: '1h 4m',
+      turns: 12,
+      spent: ['20m 4s waiting for a place', '1m 2s starting', '31m thinking and writing', '12m running tools'],
+    },
+  },
+}

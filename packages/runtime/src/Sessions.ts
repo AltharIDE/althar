@@ -94,6 +94,7 @@ import { quickIn } from './kinds'
 import { defaultEffortOf } from './preferences'
 import { makeKeyedLock } from './keyedLock'
 import { makeInputBatches } from './inputBatches'
+import { type Starting, toolClock } from './turnTimes'
 import { addItem, betweenTurns, keepAltharCall, moveToEnd, type OutputSoFar, recorder, toolItem, transcript } from './threads'
 import {
   addressOf,
@@ -400,6 +401,14 @@ interface Running {
    * between turns, as what is said to it next is delivered, never in one.
    */
   nextLead: { readonly agentId: string; readonly model?: string; readonly effort?: string } | undefined
+  /**
+   * Where the next turn's time went before it was delivered (turnTimes.ts):
+   * how long its session took to start or be handed over, and its folder's
+   * setup it waited for, which only a session's first turn counts; and how
+   * long it waited for a place among the agents at work here. Taken by the
+   * turn it was for.
+   */
+  before: { session: number; starting: Starting | null; place: number }
 }
 
 /** How often, at most, a thread's agent is looked at while a round waits for it to be done. */
@@ -446,6 +455,8 @@ interface Brief {
   readonly closing: string
   /** The person started or switched to the agent: its first turn is theirs, and goes on at once (ADR-037). */
   readonly byPerson?: boolean
+  /** A fresh session taking over from one whose context was full, rather than one started for the work: its first turn's line says which. */
+  readonly starting?: Starting
 }
 
 type Store =
@@ -1793,6 +1804,10 @@ export class Sessions extends Context.Service<
           running.recording = items
           let ended: Extract<SessionEvent, { _tag: 'TurnEnded' }> | undefined
           let compactFailed = false
+          // What the turn spent before it was delivered is its own, and the next one's starts from nothing.
+          const spent = running.before
+          running.before = { session: 0, starting: null, place: 0 }
+          const tools = toolClock()
           // A failure to record one event doesn't stop the runtime reading the rest of the turn.
           const record = (event: SessionEvent) =>
             items.record(event).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause)))
@@ -1857,6 +1872,7 @@ export class Sessions extends Context.Service<
           const streamed = yield* Stream.runForEach(running.agent.prompt(prompt, parts, started), (event) =>
             Effect.gen(function* () {
               if (event._tag === 'TurnEnded') ended = event
+              tools.heard(event, yield* Clock.currentTimeMillis)
               // An agent may say its compaction failed in a call of its own, and end its turn as usual (Claude Code).
               if (compacting && event._tag === 'ToolCallUpdate' && event.status === 'failed') compactFailed = true
               heardContext(running, event)
@@ -1872,6 +1888,23 @@ export class Sessions extends Context.Service<
           running.turnRunning = false
           running.promptSent = null
           running.turnEndedAt = yield* Clock.currentTimeMillis
+          // A session started for a step that waited for a place counts that wait in its first turn (Runs' `startPlaced`).
+          const [placed] =
+            spent.starting === null
+              ? []
+              : yield* sql<{ waited: number | null }>`
+                  SELECT json_extract(f.payload, '$.waited') AS waited FROM record_events f
+                  JOIN node_attempts a ON a.id = f.aggregate_id AND f.aggregate_type = 'node_attempt'
+                  WHERE a.provider_session_id = ${running.sessionId} AND f.type = 'node_attempt.admitted'
+                    AND json_extract(f.payload, '$.waited') IS NOT NULL
+                  ORDER BY f.sequence DESC LIMIT 1`.pipe(Effect.orElseSucceed(() => []))
+          const timings = {
+            place: spent.place + Math.max(0, placed?.waited ?? 0),
+            session: spent.starting === null ? 0 : spent.session,
+            starting: spent.starting,
+            work: Math.max(0, running.turnEndedAt - (running.turnStartedAt ?? running.turnEndedAt)),
+            tools: tools.total(running.turnEndedAt),
+          }
 
           const failure = Exit.isFailure(streamed) ? Cause.findErrorOption(streamed.cause) : Option.none()
           const errorClass = errorClassOf(failure, Exit.isFailure(streamed)) ?? ended?.failure?.failure
@@ -1892,6 +1925,7 @@ export class Sessions extends Context.Service<
                 usage: ended?.usage === undefined ? null : JSON.stringify(ended.usage),
                 errorClass: errorClass ?? null,
                 endedAt: yield* timestamp,
+                timings: JSON.stringify(timings),
               })
               yield* fact({
                 projectId: thread.projectId,
@@ -1927,6 +1961,8 @@ export class Sessions extends Context.Service<
           // A brief the agent never read goes with the next turn: refused, or out of usage before it began.
           // A compaction left the brief where it was.
           if ((refused || held) && !compacting) running.brief = brief
+          // Refused, its prompt never went: what it spent before is the turn's that tries again.
+          if (refused) running.before = spent
           running.retryBrief = state === 'failed' && !compacting ? brief : undefined
           if (refused) {
             // Tried again shortly, rather than straight away.
@@ -2077,8 +2113,12 @@ export class Sessions extends Context.Service<
           Effect.gen(function* () {
             yield* Queue.take(running.wake)
             // A lead's first turn waits for its worktrees to be set up (Setups.ts), and so has what was said meanwhile. It
-            // waits before it holds the turn, so the lead can be stopped meanwhile.
-            if (running.thread.role === 'task' && running.brief !== undefined) yield* setups.ready(running.thread.taskId)
+            // waits before it holds the turn, so the lead can be stopped meanwhile. Its first turn counts the wait as its start.
+            if (running.thread.role === 'task' && running.brief !== undefined) {
+              const from = yield* Clock.currentTimeMillis
+              yield* setups.ready(running.thread.taskId)
+              running.before.session += Math.max(0, (yield* Clock.currentTimeMillis) - from)
+            }
             const { thread } = running
             // A turn that couldn't be delivered is kept to that turn: the next message wakes the loop again.
             if (thread.role === 'coordinator')
@@ -2129,6 +2169,8 @@ export class Sessions extends Context.Service<
               if (!running.stopping) yield* Queue.offer(running.wake, undefined)
               return
             }
+            // From asking for a place to being given one: what its turn counts as waiting for one.
+            const asked = yield* Clock.currentTimeMillis
             yield* gate(
               {
                 taskId: thread.taskId,
@@ -2138,9 +2180,10 @@ export class Sessions extends Context.Service<
                 byPerson: running.brief?.byPerson === true,
               },
               (begun) =>
-                Effect.suspend(() => {
+                Effect.flatMap(Clock.currentTimeMillis, (given) => {
                   if (running.stopping) return Effect.succeed(false)
                   running.begun = begun
+                  running.before.place += Math.max(0, given - asked)
                   return run(running.delivering.withPermits(1)(deliver(running)))
                 }).pipe(
                   Effect.flatMap((delivered) => (delivered ? Queue.offer(running.wake, undefined) : Effect.succeed(false))),
@@ -2689,6 +2732,9 @@ export class Sessions extends Context.Service<
         return Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { sessionId, entry, account, thread, connection, agent, scope, revokeTools, requestContext, skills, upFront } = connected
+          // How long it took to start, from its row to now: what its first turn counts as starting or handing over.
+          const [made] = yield* sql<{ startedAt: string }>`SELECT started_at FROM provider_sessions WHERE id = ${sessionId}`
+          const opened = made === undefined ? 0 : Math.max(0, (yield* Clock.currentTimeMillis) - Date.parse(made.startedAt))
           const { definition } = entry
           const options = yield* agent.options
           yield* sql.withTransaction(
@@ -2748,6 +2794,7 @@ export class Sessions extends Context.Service<
             turnStartedAt: null,
             turnEndedAt: null,
             nextLead: undefined,
+            before: { session: opened, starting: brief.starting ?? 'start', place: 0 },
           }
           threads.set(thread.threadId, running)
           // Closed, it stops what it left running with all that started, before its agent ends their shells only (stopping.ts).
@@ -3723,6 +3770,7 @@ export class Sessions extends Context.Service<
                 thread.role === 'coordinator'
                   ? 'Carry the conversation on from where it stands.'
                   : 'Carry on with the task from where it stands.',
+              starting: 'handover',
             })
           }),
         ).pipe(

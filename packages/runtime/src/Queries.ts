@@ -45,7 +45,9 @@ import {
   QuestionField,
   type ThreadItem,
   ModelMoveItem,
+  type TaskTime,
   type ThreadSnapshot,
+  type TurnTime,
   type ScreenshotsOnChange,
   type TaskFindings,
 } from '@althar/contracts'
@@ -88,6 +90,7 @@ import { commandIn, shortCommand } from './rules'
 import { reviewBriefOf } from './Reviews'
 import { Sessions } from './Sessions'
 import { spendingOf } from './Spending'
+import { timingsFrom } from './turnTimes'
 import { actionsOf, standingOf } from './Tasks'
 
 /*
@@ -278,6 +281,8 @@ interface ItemRow {
   /** For a tool call: the agent asking the person something, which its question stands for. */
   readonly asks?: number | null
   readonly createdAt: string
+  /** The turn it came in, where an agent's turn wrote it. */
+  readonly deliveryId?: string | null
 }
 
 const decodeFields = Schema.decodeUnknownOption(Schema.Array(QuestionField))
@@ -543,6 +548,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
     agentId: row.agentId,
     ...(row.model == null ? {} : { model: row.model }),
     createdAt: row.createdAt,
+    ...(row.deliveryId == null ? {} : { turn: row.deliveryId }),
   }
   switch (row.kind) {
     case 'user_message':
@@ -1075,7 +1081,7 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const rows = yield* sql<ItemRow>`
-            SELECT i.id, i.sequence, i.kind, i.content, s.agent_id,
+            SELECT i.id, i.sequence, i.kind, i.content, s.agent_id, i.delivery_id,
               -- The model the item's turn ran on, as its delivery recorded it; a session's own is what it is on now,
               -- so an earlier round would take the name of the model it moved to. Else the session's, as before.
               COALESCE(d.model, s.model) AS model,
@@ -3032,10 +3038,46 @@ export class Queries extends Context.Service<
           })
           // A small change's card opens its thread, where the person meets it first: read from the task, so it is current.
           const card = page.before === undefined ? yield* smallChangeOfThread(threadId) : undefined
-          return {
-            items: [...(card === undefined ? [] : [card]), ...shown.flatMap((item) => (item === undefined ? [] : [item]))],
-            earlier,
-          }
+          const all = [...(card === undefined ? [] : [card]), ...shown.flatMap((item) => (item === undefined ? [] : [item]))]
+          return { items: all, earlier, turns: yield* turnsOf(all) }
+        })
+
+      /** Where the time went of each turn the items came in, that kept it (turnTimes.ts). */
+      const turnsOf = (items: ReadonlyArray<ThreadItem>) =>
+        Effect.gen(function* () {
+          const ids = [...new Set(items.flatMap((item) => (item.turn === undefined ? [] : [item.turn])))]
+          if (ids.length === 0) return []
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{ id: string; timings: string | null }>`
+            SELECT id, timings FROM turn_deliveries WHERE id IN ${sql.in(ids)} AND timings IS NOT NULL`
+          return rows.flatMap((row): Array<TurnTime> => {
+            const timings = timingsFrom(row.timings)
+            return timings === null ? [] : [{ id: row.id, ...timings }]
+          })
+        })
+
+      /** All a task's turns added up, its reviewers' too, where they kept where their time went; undefined where none did. */
+      const taskTimeOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{ timings: string | null }>`
+            SELECT d.timings FROM turn_deliveries d JOIN threads t ON t.id = d.thread_id
+            WHERE t.task_id = ${taskId} AND d.timings IS NOT NULL`
+          const kept = rows.flatMap((row) => {
+            const timings = timingsFrom(row.timings)
+            return timings === null ? [] : [timings]
+          })
+          if (kept.length === 0) return undefined
+          return kept.reduce<TaskTime>(
+            (sum, one) => ({
+              turns: sum.turns + 1,
+              place: sum.place + one.place,
+              session: sum.session + one.session,
+              work: sum.work + one.work,
+              tools: sum.tools + one.tools,
+            }),
+            { turns: 0, place: 0, session: 0, work: 0, tools: 0 },
+          )
         })
 
       /**
@@ -3212,7 +3254,7 @@ export class Queries extends Context.Service<
             Option.getOrElse(decodeAttached(field(parse(row.content), 'files') ?? []), () => []),
           )
           // What the store says comes first, together, so it is as of the cursor; git after.
-          const { items, earlier } = yield* pageOf(threadId, page, true)
+          const { items, earlier, turns } = yield* pageOf(threadId, page, true)
           // Its steps' reports, whatever page they're on: the task's finished view is read from the lead's, its graph from all.
           const reports = (yield* itemRows(threadId, { reports: true, limit: REPORTS })).items.map(itemOf)
           const attention = yield* sql<{
@@ -3268,10 +3310,12 @@ export class Queries extends Context.Service<
           )
           // What it used of each account its agents ran on: a reading that fails leaves it out, never the thread (ADR-084).
           const usage = yield* spendingOf({ taskId: head.taskId }).pipe(Effect.orElseSucceed(() => []))
+          const time = yield* taskTimeOf(head.taskId)
           return {
             threadId,
             cursor: at,
             usage,
+            ...(time === undefined ? {} : { time }),
             project: { id: head.projectId, name: head.projectName },
             host,
             task: {
@@ -3369,6 +3413,7 @@ export class Queries extends Context.Service<
             items,
             earlier,
             reports: reports.flatMap((item) => (item === undefined ? [] : [item])),
+            turns,
           } satisfies ThreadSnapshot
         })
 
@@ -3413,6 +3458,7 @@ export class Queries extends Context.Service<
               : yield* pageOf(threadId, { until: mark.from, limit: CARRIED, open: true }).pipe(Effect.map((one) => one.items))
           const { earlier } = read
           const items = [...carried, ...read.items]
+          const turns = yield* turnsOf(items)
           // What it used today, since this computer's midnight, of each account it ran on (ADR-084).
           const midnight = new Date(yield* Clock.currentTimeMillis)
           midnight.setHours(0, 0, 0, 0)
@@ -3427,6 +3473,7 @@ export class Queries extends Context.Service<
             suggested,
             items,
             earlier,
+            turns,
             view,
             host,
             runnables: yield* launches.runnables(projectId, null).pipe(Effect.orElseSucceed(() => [])),

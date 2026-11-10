@@ -1,9 +1,10 @@
-import type { AllowedBy, AttachedFile, FileMention, Picture, ShownPicture, ThreadItem, Unfurl } from '@althar/contracts'
+import type { AllowedBy, AttachedFile, FileMention, Picture, ShownPicture, ThreadItem, TurnTime, Unfurl } from '@althar/contracts'
 import { Delivery, headingOf, oneLine, PlanState, ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar, type PartHanded, type Ran, ranOf } from './handed'
 import { isSending } from './items'
 import { took } from './time'
+import { type Spent, spentOf, turnOfItems } from './turnTime'
 
 /*
  * A thread's items as the blocks the kit draws, in order: what the person
@@ -154,6 +155,8 @@ export type Block =
       readonly doing: Doing | null
       /** What it handed back beside its words: pictures, documents, files. */
       readonly handed: Handed
+      /** Once it is over, where its time went, as the runtime kept it for its turns; null where none of them did. */
+      readonly spent: Spent | null
     }
   | { readonly kind: 'divider'; readonly id: string; readonly text: string }
   | {
@@ -505,6 +508,8 @@ export interface ThreadSource {
   readonly turnEnded?: string | null
   /** When the newest of what comes before these items was written, where they are the last stretch of a longer thread. */
   readonly earlierAt?: string
+  /** Where each turn's time went, by its id, as the snapshot carries them (`turnsById`). */
+  readonly turns?: ReadonlyMap<string, TurnTime>
 }
 
 /** What a part handed back, for the turn to gather. */
@@ -649,6 +654,7 @@ export const blocksOf = (
       took: '',
       doing: null,
       handed: handedBy([], null),
+      spent: null,
     })
     spans.set(part.id, { from: at, to: at })
   }
@@ -805,6 +811,8 @@ export const blocksOf = (
     const since = merged.slice(index + 1).every((block) => block.kind === 'step')
     return since && (askedWhen == null || Date.parse(askedWhen) <= Date.parse(span.to)) ? ended : span.to
   }
+  // Each item's turn, by which a block over is told where its time went.
+  const turnOf = turnOfItems(source.items)
   const drawn = merged.map((block, index): Block => {
     if (block.kind !== 'turn') return block
     const known = spans.get(block.id)
@@ -826,6 +834,13 @@ export const blocksOf = (
       took: span === undefined || until === undefined ? '' : took(span.from, until),
       doing: running ? doingOf(work, writing?.kind === 'message') : null,
       handed: handedBy(block.parts.map(partHanded), worktree),
+      spent:
+        running || source.turns === undefined
+          ? null
+          : spentOf(
+              block.parts.flatMap((part) => turnOf.get(part.id) ?? []),
+              source.turns,
+            ),
     }
   })
   if (!waiting || askedWhen == null) return drawn

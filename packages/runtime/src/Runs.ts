@@ -6382,13 +6382,15 @@ export class Runs extends Context.Service<
                 SELECT state, hold_reason FROM node_attempts WHERE id = ${row.attemptId}`
               if (still?.state !== 'held' || still.holdReason !== 'machine_busy') return false
               const revision = yield* change('node_attempts', row.attemptId, { state: 'admitted', holdReason: null, output: null })
+              // How long it waited, in milliseconds: what the first turn of the session it starts counts as waiting for a place.
+              const placedAfter = Math.max(0, (yield* Clock.currentTimeMillis) - Date.parse(waited.since))
               yield* fact({
                 projectId: current.projectId,
                 aggregateType: 'node_attempt',
                 aggregateId: row.attemptId,
                 revision,
                 type: 'node_attempt.admitted',
-                payload: { node: row.nodeKey, iteration: row.iteration, placed: waited.place.how },
+                payload: { node: row.nodeKey, iteration: row.iteration, placed: waited.place.how, waited: placedAfter },
                 actorId: instance.systemId,
               })
               return true
