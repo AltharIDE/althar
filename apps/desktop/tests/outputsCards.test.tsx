@@ -207,6 +207,29 @@ describe('what a task changed, card by card', () => {
     expect(screen.queryByRole('button', { name: /^Accept and merge/ })).toBeNull()
   })
 
+  it('lists what its host needs before it merges in place of its checks’ line, the missing first, with what to do (DEV-204)', () => {
+    show(
+      task({
+        changes: [
+          pr('api', 1, {
+            target: 'main',
+            needs: [
+              { kind: 'checks', state: 'met', have: 1, need: 1, required: ['test'] },
+              { kind: 'approvals', state: 'unmet', have: 0, need: 1 },
+              { kind: 'up_to_date', state: 'unmet', have: 2 },
+              { kind: 'conflicts', state: 'met' },
+            ],
+          }),
+        ],
+      }),
+    )
+    const list = screen.getByRole('list', { name: 'What merging needs' })
+    expect(within(list).getByText('Needs an approval')).toBeTruthy()
+    expect(within(list).getByText('Ask for a review')).toBeTruthy()
+    expect(within(list).getByText('2 commits behind main')).toBeTruthy()
+    expect(within(list).getByRole('button', { name: /The required check passed/ })).toBeTruthy()
+  })
+
   it('offers Accept and merge on a stopped task whose pull request is ready as it is, and not on one stopped without', async () => {
     const stopped = { phase: 'stopped' as const, stopped: { by: 'althar' as const, at: null } }
     const { onAccept } = show(task({ ...stopped, mergeable: true, changes: [pr('api', 1)] }))

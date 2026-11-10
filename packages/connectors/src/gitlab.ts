@@ -6,6 +6,7 @@ import { type Access, type AccessLine, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { updateInCopy } from './branchUpdate'
 import { ConnectorFailed } from './errors'
+import { ApprovalsAnswer, ApprovalStateAnswer, gitlabRulesOf, ProjectRules, RequestRules, ReviewersAnswer } from './gitlabRules'
 import { makeHttp, paged } from './http'
 import { makeGitLabReleases } from './gitlabReleases'
 import { pageOfCursor, tail } from './github'
@@ -1088,6 +1089,23 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
               }),
           ),
         ),
+    mergeRules: (repository, change) =>
+      Effect.gen(function* () {
+        const at = `${project(repository)}/merge_requests/${change.number}`
+        // Each by ETag where GitLab gives one; approval rules are Premium's, and a reviewer's state may not be said: without
+        // them, what they'd say isn't.
+        const [settings, request, approvals, state, reviewers] = yield* Effect.all(
+          [
+            http.cached(ProjectRules, project(repository)),
+            http.cached(RequestRules, `${at}?include_diverged_commits_count=true`),
+            http.cached(ApprovalsAnswer, `${at}/approvals`).pipe(Effect.orElseSucceed(() => null)),
+            http.cached(ApprovalStateAnswer, `${at}/approval_state`).pipe(Effect.orElseSucceed(() => null)),
+            http.cached(ReviewersAnswer, `${at}/reviewers`).pipe(Effect.orElseSucceed(() => null)),
+          ],
+          { concurrency: 'unbounded' },
+        )
+        return gitlabRulesOf({ project: settings, request, approvals, state, reviewers })
+      }),
     // Read each time, as the project's settings and the server's version can change: a merge is rare, and two reads are cheap.
     mergeWays: (repository) =>
       Effect.gen(function* () {

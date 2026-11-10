@@ -15,6 +15,8 @@ const PLAIN: Readonly<Record<string, string>> = {
   'dock/ListPeek/ListPeek.tsx': 'an entry of the list',
   'outputs/ArtifactCard/ArtifactCard.tsx': 'the card’s title, which opens it',
   'outputs/ChangeSet/ChangeSet.tsx': 'the line of its checks, which folds their list; a folder’s row, which folds its files',
+  'outputs/ChangeSet/MergeNeeds.tsx':
+    'the line of its checks among its needs, which folds their list; its met needs’ line, which folds them',
   'outputs/WhatItMade/WhatItMade.tsx': 'a picture, which opens full size',
   'thread/External/External.tsx': 'the row of an external call',
   'thread/FileArtifact/FileArtifact.tsx': 'the preview, which opens the file',

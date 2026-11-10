@@ -1423,6 +1423,58 @@ export const ScreenshotsOnChange = Schema.Struct({
 })
 export type ScreenshotsOnChange = typeof ScreenshotsOnChange.Type
 
+/**
+ * One thing merging a change needs on its host, as it stands (DEV-204):
+ * met, unmet (someone has something to do), waiting (on someone asked, or
+ * something under way), or unknown, where the host doesn't say, never taken
+ * as met. Each kind says what it is about, in numbers and names:
+ *
+ * - `checks`: its required checks, `have` of `need` passed; `who` those that
+ *   failed, else those still to finish; `required` their names, where the host
+ *   says which are (absent, every check counts); `apart`, the others, which
+ *   don't hold it back;
+ * - `approvals`: `have` of `need` (absent where the host doesn't say how
+ *   many); `who` approved, or, waiting, who is asked;
+ * - `code_owners`: a code owner's review, `who` it waits on;
+ * - `changes_requested`: none outstanding, else `who` asked for them;
+ * - `conversations`: all resolved, `have` of `need` where the host counts;
+ * - `up_to_date`: has what its target has, `have` commits behind where not;
+ * - `conflicts`, `draft`: no conflict with its target; not a draft;
+ * - `pushed`: nothing of its lead's left to push, `have` commits where there
+ *   is, waiting where they go up on their own; unmet too where its branch and
+ *   it have parted;
+ * - `signatures`: every commit signed, `have` not;
+ * - `linear_history`: merged as a squash or rebase;
+ * - `merge_queue`: merges through its branch's queue, waiting once in it;
+ * - `other`: something else holds it back, in the host's words (`said`), or
+ *   a rule Althar can't read.
+ */
+export const MergeNeed = Schema.Struct({
+  kind: Schema.Literals([
+    'checks',
+    'approvals',
+    'code_owners',
+    'changes_requested',
+    'conversations',
+    'up_to_date',
+    'conflicts',
+    'draft',
+    'pushed',
+    'signatures',
+    'linear_history',
+    'merge_queue',
+    'other',
+  ]),
+  state: Schema.Literals(['met', 'unmet', 'waiting', 'unknown']),
+  have: Schema.optional(Schema.Number),
+  need: Schema.optional(Schema.Number),
+  who: Schema.optional(Schema.Array(Schema.String)),
+  said: Schema.optional(Schema.String),
+  required: Schema.optional(Schema.Array(Schema.String)),
+  apart: Schema.optional(Schema.Struct({ passed: Schema.Number, failed: Schema.Array(Schema.String), running: Schema.Number })),
+})
+export type MergeNeed = typeof MergeNeed.Type
+
 export const ChangeSummary = Schema.Struct({
   product: Product,
   number: Schema.Number,
@@ -1502,6 +1554,13 @@ export const ChangeSummary = Schema.Struct({
    * it isn't open.
    */
   screenshots: Schema.optional(ScreenshotsOnChange),
+  /**
+   * What merging it needs, each as it stands, in order, for an open one
+   * (DEV-204): its host's requirements as last read, with its checks, its
+   * conflict, whether it is a draft and what is left to push. Absent where its
+   * host doesn't read them, or hasn't yet.
+   */
+  needs: Schema.optional(Schema.Array(MergeNeed)),
 })
 export type ChangeSummary = typeof ChangeSummary.Type
 
