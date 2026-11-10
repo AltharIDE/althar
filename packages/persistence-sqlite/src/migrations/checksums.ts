@@ -80,4 +80,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0074_scratch_and_presets': 'a87cee43a3b348aa6d41f86f89d12b8e2439aa0294b552914dc8aef0d81cfc39',
   '0075_helpers': '81eb220a40c0ba5d76b91e64dd380c5ba0cd823047769bfb80b94d231340cac1',
   '0076_change_waits': '377b00faa1422cf19a0c48579ca67ca8a85c3604fc9afd88dd29a1fa9f7d61a9',
+  '0077_helper_copies': '227f03fdb43df2006d705f9fe7026ede76c43a39390f0f5ac8e5c364b6a7430a',
 }

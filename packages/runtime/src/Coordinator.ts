@@ -2713,9 +2713,12 @@ export class Coordinator extends Context.Service<
       const HelperAsked = Schema.Struct({
         brief: Schema.String,
         name: Schema.String,
+        agent: Schema.optional(Schema.String),
         model: Schema.optional(Schema.String),
         effort: Schema.optional(Schema.NullOr(Schema.String)),
         change: Schema.optional(Schema.String),
+        in_copy: Schema.optional(Schema.Boolean),
+        writes: Schema.optional(Schema.Boolean),
       })
       const startHelper = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
@@ -2724,8 +2727,12 @@ export class Coordinator extends Context.Service<
           // The lead's own model and effort, where it names none.
           const own = yield* sessions.running(access.threadId)
           const pick =
-            asked.model !== undefined
-              ? yield* stepOf(access.projectId, { model: asked.model, ...(asked.effort == null ? {} : { effort: asked.effort }) })
+            asked.model !== undefined || asked.agent !== undefined
+              ? yield* stepOf(access.projectId, {
+                  ...(asked.model === undefined ? {} : { model: asked.model }),
+                  ...(asked.agent === undefined ? {} : { agent: asked.agent }),
+                  ...(asked.effort == null ? {} : { effort: asked.effort }),
+                })
               : Option.isSome(own)
                 ? { agentId: own.value.agentId, model: null, effort: undefined }
                 : yield* new ToolRefused({ message: 'Name the model it runs on, as list_models writes it.' })
@@ -2739,6 +2746,8 @@ export class Coordinator extends Context.Service<
             modelName: named({ key: 'implement', agentId: pick.agentId, model: pick.model ?? null, skipped: false }),
             ...(pick.effort == null ? {} : { effort: pick.effort }),
             ...(asked.change === undefined ? {} : { change: asked.change }),
+            ...(asked.in_copy === true || asked.writes === true ? { inCopy: true } : {}),
+            ...(asked.writes === true ? { writes: true } : {}),
           })
         })
       const StopAsked = Schema.Struct({ helper: Schema.String })
@@ -2752,15 +2761,21 @@ export class Coordinator extends Context.Service<
       yield* toolServer.serve('lead', [
         tool(
           'start_helper',
-          'Starts a helper (a task is a conversation plus parts, ADR-087): another agent, on any model, that works in the background on one of this task’s changes while you and the person carry on; its result comes to you as a new turn when it ends. Hand it a change (change: its name; the task’s first without one): it works in that change’s worktree, the only one writing there until it reports, and its commits stay on the change’s branch for Ship. brief is what to do, whole: it reads nothing of your conversation. name is a few words shown in the thread ("Split the migration"). model as list_models writes it, and effort: a quicker, cheaper model for searching and reading, a different maker’s for a second opinion, the strongest for hard reasoning, a plan over a key; your own without one. Four at once, fifty in a task’s life. Don’t wait or poll for it.',
+          'Starts a helper (a task is a conversation plus parts, ADR-087): another agent, on any model, that works in the background on one of this task’s changes while you and the person carry on; its result comes to you as a new turn when it ends. Hand it a change (change: its name; the task’s first without one): it works in that change’s worktree, the only one writing there until it reports, and its commits stay on the change’s branch for Ship. brief is what to do, whole: it reads nothing of your conversation. name is a few words shown in the thread ("Split the migration"). model as list_models writes it, and effort: a quicker, cheaper model for searching and reading, a different maker’s for a second opinion, the strongest for hard reasoning, a plan over a key; your own without one. Or, with in_copy, it works in a copy of its own of that change’s worktree as it stands now, untracked files too, beside your work rather than on it: for reading, trying or checking something without a change of its own. What it changes there is thrown away, unless writes: then it is kept as a commit, never pushed, which its result names for you to bring in with git cherry-pick, settling any conflict as you do with main. Four at work at once, ten at work or waiting, fifty in a task’s life, an hour each. Don’t wait or poll for it.',
           {
             type: 'object',
             properties: {
               brief: { type: 'string' },
               name: { type: 'string', maxLength: 60 },
               model: { type: 'string' },
+              agent: { type: 'string', description: 'The agent it runs on, where a model goes more than one way: claude-code, codex.' },
               effort,
               change: { type: 'string', description: 'One of the task’s changes, by name; its first without one.' },
+              in_copy: { type: 'boolean', description: 'In a copy of its own of that change’s worktree, not in it.' },
+              writes: {
+                type: 'boolean',
+                description: 'In a copy, what it changes is kept as a commit for you to bring in; thrown away without it.',
+              },
             },
             required: ['brief', 'name'],
           },

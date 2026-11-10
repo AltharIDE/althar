@@ -193,6 +193,7 @@ export const definition = (
   // Each may lead a review of a pull request from outside but `codex`, as the registry's Codex may not.
   reviewing: { outside: id !== 'codex' },
   knownGaps: [],
+  ownHelpers: { off: true, how: 'nothing of its own', kept: 'none' },
 })
 
 /**

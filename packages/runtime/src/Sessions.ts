@@ -226,7 +226,14 @@ interface TaskThread {
    * A helper its lead started (ADR-087, as "a task is a conversation plus parts" amends it): a session of its own, in a step
    * thread of the task's, working in the worktree of the change it was handed; absent for the task's lead.
    */
-  readonly helper?: { readonly name: string; readonly brief: string; readonly change: string | null }
+  readonly helper?: {
+    readonly name: string
+    readonly brief: string
+    readonly change: string | null
+    /** In a copy of its own, not the change's worktree; `writes`, what it changes there kept as a commit for its lead. */
+    readonly copy?: boolean
+    readonly writes?: boolean
+  }
 }
 
 /**
@@ -1444,8 +1451,13 @@ export class Sessions extends Context.Service<
       const helperThreadOf = (threadId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [helper] = yield* sql<{ name: string; brief: string; workspaceId: string | null }>`
-            SELECT name, brief, workspace_id FROM helpers WHERE thread_id = ${threadId}`
+          const [helper] = yield* sql<{
+            name: string
+            brief: string
+            workspaceId: string | null
+            copyPath: string | null
+            writes: number
+          }>`SELECT name, brief, workspace_id, copy_path, writes FROM helpers WHERE thread_id = ${threadId}`
           if (helper === undefined) return undefined
           const repositories = yield* sql<TaskRepository>`
             SELECT b.display_name AS name, b.role, w.path AS worktree, w.branch, w.branched_at IS NOT NULL AS branched, w.base_ref,
@@ -1458,8 +1470,10 @@ export class Sessions extends Context.Service<
             ORDER BY b.created_at, b.rowid LIMIT 1`
           const [task] = yield* sql<{ projectId: ProjectId; taskId: string; title: string; description: string; request: string | null }>`
             SELECT t.project_id, t.task_id, k.title, k.description, k.request FROM threads t JOIN tasks k ON k.id = t.task_id WHERE t.id = ${threadId}`
-          const [first] = repositories
-          if (task === undefined || first === undefined) return yield* new NotFound({ kind: 'helper with a ready worktree', id: threadId })
+          const [found] = repositories
+          if (task === undefined || found === undefined) return yield* new NotFound({ kind: 'helper with a ready worktree', id: threadId })
+          // One given no change works in a copy of its own, its only folder (ADR-087, task 6).
+          const first = helper.copyPath === null ? found : { ...found, worktree: helper.copyPath }
           return {
             role: 'task',
             threadId,
@@ -1469,11 +1483,16 @@ export class Sessions extends Context.Service<
             baseRef: first.baseRef,
             baseCommit: first.baseCommit,
             defaultBranch: first.defaultBranch,
-            repositories,
+            repositories: helper.copyPath === null ? repositories : [first],
             cwd: first.worktree,
             review: null,
             trust: null,
-            helper: { name: helper.name, brief: helper.brief, change: first.change ?? null },
+            helper: {
+              name: helper.name,
+              brief: helper.brief,
+              change: first.change ?? null,
+              ...(helper.copyPath === null ? {} : { copy: true, writes: helper.writes === 1 }),
+            },
           } satisfies ThreadContext as ThreadContext
         })
 
@@ -3447,10 +3466,12 @@ export class Sessions extends Context.Service<
                 : taskBrief(thread, why)
 
       /** A helper's brief (ADR-087): what it was asked, whole, where it works, and how it ends: its last message is its result. */
-      const helperBrief = (thread: TaskThread, helper: { readonly name: string; readonly brief: string; readonly change: string | null }) =>
+      const helperBrief = (thread: TaskThread, helper: NonNullable<TaskThread['helper']>) =>
         [
           `You are a helper in Althar, "${helper.name}", started by the lead of the task "${thread.title}" to do one thing in the background while the person keeps talking with the lead. You read nothing of their conversation: what you were asked is below, whole.`,
-          `You work in ${thread.cwd}, the worktree of ${helper.change === null ? 'the task’s change' : `its change “${helper.change}”`}, on ${thread.branch}. You're the only one writing there until you end: commit what you change there, in commits of their own with clear messages. Push nothing and open no pull request: the change ships with the person's Ship, after its review.`,
+          helper.copy === true
+            ? `You work in ${thread.cwd}, a copy of your own of ${helper.change === null ? 'the task’s change' : `its change “${helper.change}”`} as it stood when you started, untracked files too, apart from the lead's work. ${helper.writes === true ? 'What you change there is kept as a commit for the lead to bring in once you end: change only what you were asked to, and leave it, committed or not.' : 'What you change there is thrown away when you end: read, run and try what you were asked, and say what you found.'} Push nothing and open no pull request.`
+            : `You work in ${thread.cwd}, the worktree of ${helper.change === null ? 'the task’s change' : `its change “${helper.change}”`}, on ${thread.branch}. You're the only one writing there until you end: commit what you change there, in commits of their own with clear messages. Push nothing and open no pull request: the change ships with the person's Ship, after its review.`,
           "You can't ask the person anything, and you start no helpers of your own. Where something stops you, say so in your result rather than guess.",
           'When you are done, end your turn with your result, short: what you did or found, with paths and lines, and what you couldn’t do. That last message is what the lead reads, as a new turn.',
           `What you were asked:\n\n${helper.brief}`,
@@ -3719,6 +3740,8 @@ export class Sessions extends Context.Service<
             STANDING_DICTATED,
             // Althar runs the project for the person itself (ADR-023): the lead keeps how, when it changes it.
             'Althar runs the project for the person, with no agent, from a command it works out from the repository or keeps for it, and the more things it keeps to run beside it, such as Storybook. If you change how the project runs, such as its dev script, its port or what it needs installed first, keep it with set_run_command; if you add something worth running by hand, keep it with keep_run.',
+            // Its agent's own helpers in the background are off (ADR-087): within its turn they stay where the agent has them.
+            "Your agent's own helpers that would work in the background are switched off. Use its helpers within your turn where it has them, for quick work on your own model; start_helper for another model or agent, for work the person should see and can stop, or for work that should outlive your turn. A dev server goes through run_project, never a command left running.",
             // What a lead would otherwise do around its sandbox, Althar does outside it: install, run, and draw a page.
             "To run the project in your worktree, a dev server or Storybook, use run_project rather than starting it yourself, and stop_project once you're done: Althar runs it outside your sandbox, and the person sees it running. screenshot gives you a picture of any HTTP page, drawn by Althar, so you needn't start a browser. The page beside your conversation is the person's own, in a session of its own that may be signed in to things: read it with page_snapshot and page_screenshot, drive it with page_click, page_type and the other page_ tools, and open an address in it with page_open (what run_project runs, say); you need not ask, the person sees you at work there, and what they do in the page comes before what you do. Where an install fails in your sandbox (a lock in .git, the package manager's cache), or what you changed needs installing, install_dependencies runs the project's setup again outside it.",
             // Commands inherit code-host identity; Althar's fetch remains available and preferred (ADR-097).

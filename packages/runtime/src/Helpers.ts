@@ -1,8 +1,9 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 
 import { Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
+import { removeFully } from '@althar/provider-adapters'
 import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schedule, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -18,6 +19,7 @@ import { PlanUsage } from './PlanUsage'
 import { SignIns } from './SignIns'
 import { usableModels } from './usableModels'
 import { envelope } from './envelope'
+import { commitTree, git, treeOf } from './git'
 import { scratchOf } from './firstWrite'
 import { Instance } from './Instance'
 import { Live, type LiveEvent } from './Live'
@@ -92,6 +94,10 @@ export class Helpers extends Context.Service<
       readonly modelName: string
       readonly effort?: string
       readonly change?: string | null
+      /** In a copy of its own of the change's worktree, not in it (ADR-087, task 6). */
+      readonly inCopy?: boolean
+      /** In a copy, what it changes is kept as a commit for its lead to bring in. */
+      readonly writes?: boolean
     }): Effect.Effect<string, unknown>
     /** Stops one of the task's helpers, by its name or id: by its lead, which knows why; by the person, said in the thread. */
     stop(input: { readonly taskId: string; readonly helper: string; readonly by: 'lead' | 'person' }): Effect.Effect<string, unknown>
@@ -145,9 +151,12 @@ export class Helpers extends Context.Service<
                 ? 'This task has no worktree to hand a helper: take one with add_part first.'
                 : `This task has no change "${input.change}" here: start_change starts one.`
             const changeWords = workspace.name === null ? 'the task’s change' : `“${workspace.name}”`
-            // The only one writing there until it reports.
-            const [busy] = yield* sql<{ name: string }>`
-              SELECT name FROM helpers WHERE workspace_id = ${workspace.id} AND state = 'working' LIMIT 1`
+            const copied = input.inCopy === true || input.writes === true
+            // The only one writing there until it reports; one in a copy of its own writes beside it.
+            const [busy] = copied
+              ? []
+              : yield* sql<{ name: string }>`
+                  SELECT name FROM helpers WHERE workspace_id = ${workspace.id} AND state = 'working' AND copy_path IS NULL LIMIT 1`
             if (busy !== undefined)
               return `Helper "${busy.name}" works on ${changeWords} already: hand this one another change, or wait for it.`
             const [run] = yield* sql<{ executionId: string }>`
@@ -156,6 +165,11 @@ export class Helpers extends Context.Service<
             if (run === undefined) return 'This task has never run, so it has nothing to hand a helper yet.'
             const id = `hlp_${(yield* newId(Ids.thread)).slice(4)}`
             const threadId = yield* newId(Ids.thread)
+            // Its copy: the change's worktree as it stands, untracked files too, checked out apart.
+            const made = copied ? yield* Effect.exit(copyFor(workspace.path, id)) : undefined
+            if (made !== undefined && made._tag === 'Failure')
+              return `Althar couldn't make a copy of ${changeWords} for the helper. Try again, or hand it the change itself.`
+            const copy = made?._tag === 'Success' ? made.value : undefined
             const at = yield* timestamp
             yield* sql.withTransaction(
               Effect.gen(function* () {
@@ -180,6 +194,7 @@ export class Helpers extends Context.Service<
                   model: input.model,
                   state: 'working',
                   startedAt: at,
+                  ...(copy === undefined ? {} : { copyPath: copy.path, snapshot: copy.commit, writes: input.writes === true ? 1 : 0 }),
                 })}`
               }),
             )
@@ -188,7 +203,7 @@ export class Helpers extends Context.Service<
               yield* addItem({ projectId: workspace.projectId, threadId: lead }, 'notice', {
                 source: 'runtime',
                 severity: 'info',
-                title: `Helper · ${name}, on ${changeWords} (${input.modelName}).`,
+                title: `Helper · ${name}, ${copy === undefined ? 'on' : 'in a copy of'} ${changeWords} (${input.modelName}).`,
                 description: null,
               })
             const started = yield* Effect.exit(
@@ -213,6 +228,8 @@ export class Helpers extends Context.Service<
               yield* ended(id, 'failed', 'Its agent couldn’t start.')
               return `Helper "${name}" couldn't start on ${input.modelName}: its agent didn't start. Start it again on another model, as you judge.`
             }
+            if (copy !== undefined)
+              return `Started "${name}" on ${input.modelName}, in a copy of its own of ${changeWords} as it stands now: ${input.writes === true ? 'what it changes there is kept as a commit, which its result names for you to bring in' : 'what it changes there is thrown away'}. Its result comes to you as a new turn when it ends. Don't wait or poll for it, and don't say what it will find: carry on, or end your turn.`
             return `Started "${name}" on ${input.modelName}, in the worktree of ${changeWords}. Its result comes to you as a new turn when it ends. Don't wait or poll for it, don't write in that worktree meanwhile, and don't say what it will find: carry on with work it doesn't touch, or end your turn.`
           }),
         )
@@ -224,13 +241,65 @@ export class Helpers extends Context.Service<
           return lead?.id
         })
 
-      /** A helper's end, kept: done with its result, stopped, or failed, and why. */
+      /** A helper's end, kept: done with its result, stopped, or failed, and why. Its copy, where it had one, goes. */
       const ended = (id: string, state: 'done' | 'stopped' | 'failed', result: string | null) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // Its copy goes first: what reads it as ended finds nothing of it left.
+          yield* dropCopy(id)
           yield* sql`UPDATE helpers SET state = ${state}, result = ${result}, ended_at = ${yield* timestamp}
             WHERE id = ${id} AND state = 'working'`
         })
+
+      /**
+       * A helper's copy (ADR-087, task 6): its change's worktree as it stands, untracked files included, committed as a
+       * snapshot and checked out apart, under `<project>/.helpers/<task>/<helper>/<repository>`.
+       */
+      const copyFor = (worktree: string, id: string) =>
+        Effect.gen(function* () {
+          const tree = yield* treeOf(worktree)
+          const head = yield* git(worktree, 'rev-parse', 'HEAD')
+          const commit = yield* commitTree(worktree, tree, head, 'What a helper starts from')
+          const task = dirname(worktree)
+          const path = join(dirname(task), '.helpers', basename(task), id, basename(worktree))
+          yield* git(worktree, 'worktree', 'add', '--detach', path, commit)
+          return { path, commit }
+        })
+
+      /** Removes a helper's copy, where it had one: what it changed there that wasn't kept goes with it. */
+      const dropCopy = (id: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ copyPath: string | null; worktree: string | null }>`
+            SELECT h.copy_path, w.path AS worktree FROM helpers h LEFT JOIN workspaces w ON w.id = h.workspace_id WHERE h.id = ${id}`
+          if (row?.copyPath == null) return
+          const path = row.copyPath
+          yield* git(row.worktree ?? path, 'worktree', 'remove', '--force', path).pipe(Effect.ignore)
+          yield* removeFully(dirname(path)).pipe(Effect.ignore)
+        })
+
+      /**
+       * A writing helper's work, kept (ADR-087, task 6): what it changed in its copy committed on its snapshot, and kept on
+       * `refs/althar/helpers/<task>/<helper>`, never pushed, for its lead to bring in. Undefined where it changed nothing.
+       */
+      const keepWork = (helper: { readonly id: string; readonly name: string; readonly taskId: string }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ copyPath: string | null; snapshot: string | null; writes: number }>`
+            SELECT copy_path, snapshot, writes FROM helpers WHERE id = ${helper.id}`
+          if (row?.copyPath == null || row.snapshot === null || row.writes !== 1) return undefined
+          const copy = row.copyPath
+          yield* git(copy, 'add', '-A')
+          const staged = yield* git(copy, 'status', '--porcelain')
+          if (staged.trim() !== '')
+            yield* git(copy, '-c', 'user.name=Althar', '-c', 'user.email=althar@localhost', 'commit', '-q', '-m', `Helper “${helper.name}”`)
+          const head = yield* git(copy, 'rev-parse', 'HEAD')
+          if (head === row.snapshot) return undefined
+          const ref = `refs/althar/helpers/${helper.taskId}/${helper.id}`
+          yield* git(copy, 'update-ref', ref, head)
+          yield* sql`UPDATE helpers SET kept_ref = ${ref} WHERE id = ${helper.id}`
+          return { ref, head, from: row.snapshot }
+        }).pipe(Effect.orElseSucceed(() => undefined))
 
       /**
        * A helper's turn ended, and it is done: its last message is its result, kept on its thread and as a file in the lead's
@@ -244,7 +313,13 @@ export class Helpers extends Context.Service<
             ORDER BY sequence DESC LIMIT 1`
           const spoken = said === undefined ? undefined : (JSON.parse(said.content) as { text?: unknown }).text
           const text = typeof spoken === 'string' ? spoken : ''
-          const result = text.trim() === '' ? '(It said nothing.)' : text.trim()
+          const said_ = text.trim() === '' ? '(It said nothing.)' : text.trim()
+          // A writing helper's work, kept for its lead: named, with how to bring it in.
+          const kept = yield* keepWork(helper)
+          const result =
+            kept === undefined
+              ? said_
+              : `${said_}\n\nIts work is kept as commit ${kept.head.slice(0, 12)} (${kept.ref}), never pushed. Bring it into your worktree with \`git cherry-pick --no-commit ${kept.from.slice(0, 12)}..${kept.head.slice(0, 12)}\`, settling any conflict as you do with main, then commit it as yours.`
           const [lead] = yield* sql<{ id: string; path: string | null }>`
             SELECT t.id, (SELECT w.path FROM workspaces w WHERE w.task_id = t.task_id AND w.access = 'write' AND w.state = 'ready'
               ORDER BY w.created_at LIMIT 1) AS path

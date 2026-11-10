@@ -18,7 +18,7 @@ import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
+import { callTool, fakeConnectors, HOST, hosted, items, launches, runtime, until } from './support'
 
 /*
  * A lead's helpers (ADR-087, as "a task is a conversation plus parts" amends
@@ -254,5 +254,76 @@ describe('a lead’s helpers', () => {
         assert.notStrictEqual(still?.state, 'failed')
       }).pipe(Effect.provide(launch()))
     })
+  })
+
+  it.live('given no change, work in a copy of their own: thrown away, or kept as a commit the lead brings in', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* opened(working)
+      const before = git(task.path, 'rev-parse', 'HEAD')
+      const done = (name: string) =>
+        until(
+          sql<{ id: string; state: string; result: string | null; copyPath: string | null; keptRef: string | null }>`
+            SELECT id, state, result, copy_path, kept_ref FROM helpers WHERE task_id = ${task.taskId} AND name = ${name}`,
+          (rows) => rows[0]?.state === 'done',
+        ).pipe(Effect.map((rows) => rows[0] ?? assert.fail('no helper')))
+
+      // In a copy, what it changes is thrown away with the copy.
+      assert.match(
+        yield* callTool(task.access, 'start_helper', { name: 'Try it', brief: 'Try a note. [lead:commit]', in_copy: true }),
+        /in a copy of its own of the task’s change as it stands now: what it changes there is thrown away/,
+      )
+      const tried = yield* done('Try it')
+      assert.isNotNull(tried.copyPath)
+      assert.isFalse(existsSync(tried.copyPath ?? ''))
+      assert.isNull(tried.keptRef)
+      assert.strictEqual(git(task.path, 'rev-parse', 'HEAD'), before)
+
+      // Writing, its work is kept as a commit on a ref of its own, never pushed, which the lead brings in.
+      yield* callTool(task.access, 'start_helper', { name: 'Write it', brief: 'Write a note. [lead:commit]', writes: true })
+      const wrote = yield* done('Write it')
+      assert.strictEqual(wrote.keptRef, `refs/althar/helpers/${task.taskId}/${wrote.id}`)
+      assert.include(wrote.result ?? '', 'Its work is kept as commit')
+      assert.strictEqual(git(task.path, 'rev-parse', 'HEAD'), before)
+      const range = /git cherry-pick --no-commit ([0-9a-f]+\.\.[0-9a-f]+)/.exec(wrote.result ?? '')?.[1] ?? assert.fail('no range')
+      git(task.path, 'cherry-pick', '--no-commit', range)
+      assert.isTrue(existsSync(join(task.path, 'change.txt')))
+      assert.isFalse(existsSync(wrote.copyPath ?? ''))
+      assert.throws(() => git(bare, 'rev-parse', '--verify', wrote.keptRef ?? ''))
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('work on every agent the tests run, each one’s result coming to the lead, and one in a copy never in the lead’s folder', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* opened(working)
+      for (const agent of ['claude-code', 'codex', 'opencode']) {
+        const name = `On ${agent}`
+        yield* callTool(task.access, 'start_helper', { name, agent, brief: 'Look at the retry, and say what you found.', in_copy: true })
+        const [done] = yield* until(
+          sql<{ state: string; threadId: string; copyPath: string | null }>`
+            SELECT state, thread_id, copy_path FROM helpers WHERE task_id = ${task.taskId} AND name = ${name}`,
+          (rows) => rows[0]?.state === 'done',
+        )
+        // On that agent, launched in its copy, never in its lead's folder.
+        const [session] = yield* sql<{ agentId: string }>`
+          SELECT agent_id FROM provider_sessions WHERE thread_id = ${done?.threadId ?? ''} ORDER BY started_at LIMIT 1`
+        assert.strictEqual(session?.agentId, agent)
+        const launched = launches.filter((one) => one.agentId === agent && one.cwd.includes('/.helpers/'))
+        assert.isNotEmpty(launched)
+        assert.isTrue(launched.every((one) => !one.cwd.startsWith(`${task.path}/`) && one.cwd !== task.path))
+        // Its result comes to the lead as news.
+        yield* until(
+          sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${task.threadId} AND body LIKE ${`Helper "${name}"%`}`,
+          (rows) => rows.length === 1,
+        )
+      }
+    }).pipe(Effect.provide(runtimeWith(github)))
   })
 })

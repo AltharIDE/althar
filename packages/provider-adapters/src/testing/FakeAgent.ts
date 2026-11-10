@@ -942,6 +942,14 @@ const playRole = async (
       const content = Array.isArray(result.content) ? result.content : []
       return content.map((part) => (typeof part === 'object' && part !== null && 'text' in part ? String(part.text) : '')).join('')
     }
+    // A lead's helper (ADR-087) has no step to finish: it does what its brief's markers say in its folder, slowly
+    // (`[lead:slowly]`), writing a file (`[lead:write]`) or committing one (`[lead:commit]`), and its last words are its result.
+    if (text.includes('You are a helper in Althar')) {
+      if (text.includes('[lead:slowly]')) await takesAWhile(session, '[lead:slowly]', 6_000)
+      if (text.includes('[lead:write]')) appendFileSync(join(session.cwd, 'draft.md'), 'A first draft.\n')
+      if (text.includes('[lead:commit]')) await commitIn(session.cwd, 'change.txt', 'Change it')
+      return `Done in ${session.cwd}: what I was asked is there.`
+    }
     if (available.has('report_review')) {
       // Reviews until it is stopped: for a review cut short in the middle; or, `[review:wait-later]`, a later round.
       const later = session.markers.has('[review:wait-later]') && laterRound

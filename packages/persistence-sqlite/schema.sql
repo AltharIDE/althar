@@ -1531,7 +1531,7 @@ CREATE TABLE helpers (
     result TEXT,
     started_at TEXT NOT NULL CHECK (started_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
     ended_at TEXT CHECK (ended_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
-  ) STRICT;
+  , copy_path TEXT, snapshot TEXT, writes INTEGER NOT NULL DEFAULT 0 CHECK (writes IN (0, 1)), kept_ref TEXT) STRICT;
 
 CREATE INDEX helpers_by_task ON helpers (task_id);
 
