@@ -8,7 +8,7 @@ import { TaskStatus } from '@althar/ui'
 
 import type { Client } from '../src/renderer/data/client'
 import { ServicesProvider } from '../src/renderer/data/services'
-import { BoardView, runningCardOf } from '../src/renderer/features/board/BoardView'
+import { BoardView, runningCardOf, severalSaid } from '../src/renderer/features/board/BoardView'
 import { DockView } from '../src/renderer/features/board/DockView'
 import { lanesOf } from '../src/renderer/features/board/lanes'
 import { needsOf } from '../src/renderer/features/board/needs'
@@ -297,6 +297,41 @@ describe('a ready card’s own ways', () => {
     expect(shown.queryByRole('button', { name: /^Push/ })).toBeNull()
     await userEvent.click(shown.getByRole('button', { name: 'Ship 2 commits' }))
     expect(ship).toHaveBeenCalledWith('h1')
+  })
+
+  it('says one sentence across several changes, naming only the exception, with a mark for each at its foot', () => {
+    const several = task({
+      taskId: 's1',
+      threadId: 'ths1',
+      title: 'Lanes and cards',
+      phase: 'ready',
+      change: change({ draft: false, checks: checks(2, 0) }),
+      changeCount: 3,
+      changeMarks: [
+        { name: 'Add a retry', stands: 'ready' },
+        { name: 'Lane heights', stands: 'failing' },
+        { name: 'Card sizes', stands: 'ready' },
+      ],
+    })
+    show(lanesOf(board([several])))
+    const shown = cardOf('Lanes and cards')
+    // Said once as the card's fact, and again by its mark, to a screen reader.
+    expect(shown.getAllByText('Lane heights: checks failing')).toHaveLength(2)
+    expect(shown.getByText('3 changes')).toBeTruthy()
+    expect(shown.getAllByRole('listitem').map((mark) => mark.textContent)).toEqual([
+      'Add a retry: ready to merge',
+      'Lane heights: checks failing',
+      'Card sizes: ready to merge',
+    ])
+    // What's alike is counted; merged ones drop out while any is open.
+    const said = (...stands: ReadonlyArray<'ready' | 'checking' | 'failing' | 'merged' | 'unshipped'>) =>
+      severalSaid(stands.map((one, at) => ({ name: `C${at + 1}`, stands: one })))?.words
+    expect(said('ready', 'ready')).toBe('Both ready to merge')
+    expect(said('checking', 'checking', 'checking')).toBe('Waiting for checks on all 3')
+    expect(said('merged', 'ready')).toBe('C2: ready to merge')
+    expect(said('failing', 'failing', 'ready')).toBe('Checks failing on 2 of 3')
+    expect(said('unshipped', 'unshipped')).toBe('Neither shipped yet')
+    expect(said('merged', 'merged')).toBe('Both merged')
   })
 
   it('says Ship is under way, and why it failed, offering it again', () => {

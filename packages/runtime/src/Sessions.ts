@@ -413,6 +413,8 @@ interface Running {
   handover: 'none' | 'under_way' | 'left'
   /** When its turn running started, in milliseconds: what the person's wait for its first word is counted from. */
   turnStartedAt: number | null
+  /** In a task of several changes, where each change's branch stood as its turn started: what it committed to each is counted from. */
+  turnHeads?: ReadonlyArray<{ readonly name: string; readonly path: string; readonly head: string }> | undefined
   /** When its last turn ended, in milliseconds; null before its first. */
   turnEndedAt: number | null
   /**
@@ -996,6 +998,29 @@ export class Sessions extends Context.Service<
           if (io !== undefined) noteServerStatus(io, 'claude', server.name, server.status, why)
         }).pipe(Effect.ignore)
       }
+      /**
+       * Where each of a task's several changes stands as its lead's turn starts (a task is a conversation plus parts, "Where
+       * a turn's time goes": with several changes, its line says where its commits went). None for one change, or another
+       * thread.
+       */
+      const changeHeads = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{ name: string; path: string }>`
+            SELECT coalesce(w.name, w.branch) AS name, w.path FROM threads t JOIN workspaces w ON w.task_id = t.task_id
+            WHERE t.id = ${threadId} AND t.kind = 'task' AND w.access = 'write' AND w.reviewing IS NULL AND w.state = 'ready'
+              AND w.branched_at IS NOT NULL
+            ORDER BY w.created_at, w.rowid`
+          if (rows.length < 2) return undefined
+          const heads = yield* Effect.forEach(rows, (row) =>
+            git(row.path, 'rev-parse', 'HEAD').pipe(
+              Effect.map((head) => ({ ...row, head })),
+              Effect.orElseSucceed(() => undefined),
+            ),
+          )
+          return heads.filter((one) => one !== undefined)
+        }).pipe(Effect.orElseSucceed(() => undefined))
+
       const heardPlan = (running: Running, event: SessionEvent) => {
         const windows = event._tag === 'PlanWindows' ? event.windows : event._tag === 'ContextUsage' ? event.planWindows : undefined
         return Effect.andThen(
@@ -1869,6 +1894,7 @@ export class Sessions extends Context.Service<
           if (!compacting) running.brief = undefined
           running.turnRunning = true
           running.turnStartedAt = yield* Clock.currentTimeMillis
+          running.turnHeads = yield* changeHeads(thread.threadId)
           // What it did outside a turn before is over with: this turn is what it is at.
           running.callsOpen.clear()
           running.workedAt = null
@@ -2030,12 +2056,22 @@ export class Sessions extends Context.Service<
                   WHERE a.provider_session_id = ${running.sessionId} AND f.type = 'node_attempt.admitted'
                     AND json_extract(f.payload, '$.waited') IS NOT NULL
                   ORDER BY f.sequence DESC LIMIT 1`.pipe(Effect.orElseSucceed(() => []))
+          // In a task of several changes, how many commits it made in each, from where each stood as it began.
+          const went = yield* Effect.forEach(running.turnHeads ?? [], (one) =>
+            git(one.path, 'rev-list', '--count', `${one.head}..HEAD`).pipe(
+              Effect.map((count) => ({ name: one.name, commits: Number(count) || 0 })),
+              Effect.orElseSucceed(() => ({ name: one.name, commits: 0 })),
+            ),
+          )
+          running.turnHeads = undefined
+          const committed = went.filter((one) => one.commits > 0)
           const timings = {
             place: spent.place + Math.max(0, placed?.waited ?? 0),
             session: spent.starting === null ? 0 : spent.session,
             starting: spent.starting,
             work: Math.max(0, running.turnEndedAt - (running.turnStartedAt ?? running.turnEndedAt)),
             tools: tools.total(running.turnEndedAt),
+            ...(committed.length === 0 ? {} : { changes: committed }),
           }
 
           const failure = Exit.isFailure(streamed) ? Cause.findErrorOption(streamed.cause) : Option.none()

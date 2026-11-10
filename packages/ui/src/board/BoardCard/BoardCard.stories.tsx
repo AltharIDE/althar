@@ -105,6 +105,24 @@ export const ChangeTowardARelease: Story = {
 
 /** Several changes in one task (a task is a conversation plus parts): how many, quietly at its foot, apart from where it stands. */
 export const SeveralChanges: Story = { args: { ...CHANGE_RUNNING_PR, changes: 3 } }
+
+/** Several changes, each with its mark: one sentence for them all, naming only the exception, and a mark for each at the foot. */
+export const SeveralChangesMarked: Story = {
+  args: {
+    ...CHANGE_READY,
+    foot: (
+      <FactLine>
+        <Fact tone="danger">Lane heights: checks failing</Fact>
+      </FactLine>
+    ),
+    changes: 3,
+    marks: [
+      { name: 'Add a retry', says: 'Add a retry: ready to merge', tone: 'signal' },
+      { name: 'Lane heights', says: 'Lane heights: checks failing', tone: 'danger' },
+      { name: 'Card sizes', says: 'Card sizes: ready to merge', tone: 'signal' },
+    ],
+  },
+}
 export const ChangeTowardAReleaseDark: Story = { ...ChangeTowardARelease, globals: { theme: 'dark' } }
 export const ReadyToAccept: Story = {
   args: CHANGE_READY,

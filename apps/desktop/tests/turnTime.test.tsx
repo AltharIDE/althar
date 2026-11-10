@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 
 import { blocksOf } from '../src/renderer/shared/thread'
-import { duration, mostOf, spentOf, spentOfTask, spentWords, turnsById } from '../src/renderer/shared/turnTime'
+import { duration, lineOf, mostOf, spentOf, spentOfTask, spentWords, turnsById, wentWords } from '../src/renderer/shared/turnTime'
 import { items } from './fixtures'
 
 /*
@@ -40,8 +40,31 @@ describe('where a turn’s time went', () => {
       handover: false,
       work: 47_000,
       tools: 12_000,
+      went: [],
     })
     expect(spentOf(['unknown'], kept)).toBeNull()
+  })
+
+  it('says where a turn’s commits went in a task of several changes, after the part that took most', () => {
+    const kept = turnsById([
+      turn('t1', { place: 190_000, work: 40_000, changes: [{ name: 'Lane heights', commits: 2 }] }),
+      turn('t2', {
+        work: 5_000,
+        changes: [
+          { name: 'Card sizes', commits: 1 },
+          { name: 'Lane heights', commits: 1 },
+        ],
+      }),
+    ])
+    const one = spentOf(['t1'], kept)
+    const both = spentOf(['t1', 't2'], kept)
+    if (one === null || both === null) throw new Error('no time kept')
+    expect(wentWords(one)).toBe('2 commits to Lane heights')
+    expect(lineOf(one)).toBe('3m 10s waiting for a place · 2 commits to Lane heights')
+    expect(wentWords(both)).toBe('3 commits to Lane heights, 1 to Card sizes')
+    // One change, or none committed to: the line as it was.
+    const plain = spentOf(['t3'], turnsById([turn('t3', { work: 5_000 })]))
+    expect(plain === null ? 'none' : lineOf(plain)).toBeUndefined()
   })
 
   it('says each part of a second or more, and names the one that took most where it wasn’t the agent’s own work', () => {

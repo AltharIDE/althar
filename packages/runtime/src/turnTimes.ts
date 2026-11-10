@@ -22,6 +22,8 @@ export interface TurnTimings {
   readonly work: number
   /** The tools it ran, counted once where several ran at once. */
   readonly tools: number
+  /** In a task of several changes, how many commits the turn made in each that it committed to, by name; absent otherwise. */
+  readonly changes?: ReadonlyArray<{ readonly name: string; readonly commits: number }>
 }
 
 const ended = (status: string | undefined) => status === 'completed' || status === 'failed'
@@ -79,5 +81,14 @@ export const timingsFrom = (json: string | null): TurnTimings | null => {
     starting,
     work,
     tools: Math.min(work, whole(record.tools)),
+    ...(Array.isArray(record.changes) ? { changes: changesFrom(record.changes) } : {}),
   }
 }
+
+/** Where a turn's commits went, as kept: each change by name, with a count above none. */
+const changesFrom = (list: ReadonlyArray<unknown>) =>
+  list.flatMap((one) => {
+    if (typeof one !== 'object' || one === null) return []
+    const { name, commits } = one as Record<string, unknown>
+    return typeof name === 'string' && whole(commits) > 0 ? [{ name, commits: whole(commits) }] : []
+  })

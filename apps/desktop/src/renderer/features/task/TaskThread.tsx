@@ -38,7 +38,7 @@ import { McpActs, PartView, ThreadBlocks } from '../../shared/ThreadBlocks'
 import { WayOut } from '../../shared/WayOut'
 import { PublishedReport, ReviewReport } from './Reports'
 import s from './TaskThread.module.css'
-import { duration, mostOf, spentWords } from '../../shared/turnTime'
+import { duration, lineOf, spentWords } from '../../shared/turnTime'
 
 /** A step of the work's row (a task is a conversation plus parts): its stamp, and the whole of it on hover. */
 export const workStepText = {
@@ -215,7 +215,7 @@ const RoundView = memo(function RoundView({
         <WorkLine
           who={model}
           took={work.spent === null ? work.took : duration(work.spent.total)}
-          summary={[work.counts, ...(work.spent === null ? [] : [mostOf(work.spent) ?? ''])].filter((words) => words !== '').join(' · ')}
+          summary={[work.counts, ...(work.spent === null ? [] : [lineOf(work.spent) ?? ''])].filter((words) => words !== '').join(' · ')}
         >
           {work.steps.map((step) => (
             <StepView key={step.id} step={step} threadId={threadId} worktree={worktree} />
@@ -266,7 +266,7 @@ const RoundView = memo(function RoundView({
         <WorkedFor
           took={work.spent === null ? work.took : duration(work.spent.total)}
           {...(work.spent === null ? {} : { spent: spentWords(work.spent) })}
-          {...(work.spent === null || mostOf(work.spent) === undefined ? {} : { most: mostOf(work.spent) })}
+          {...(work.spent === null || lineOf(work.spent) === undefined ? {} : { most: lineOf(work.spent) })}
           live={work.live && !block.answered}
           {...(onTheWay.length === 0
             ? {}

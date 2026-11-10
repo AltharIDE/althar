@@ -18,6 +18,8 @@ export interface Spent {
   readonly handover: boolean
   readonly work: number
   readonly tools: number
+  /** In a task of several changes, where its commits went: each change by name, its commits added up, in the order first made. */
+  readonly went: ReadonlyArray<{ readonly name: string; readonly commits: number }>
 }
 
 /** A part names itself on the line only where it took at least this long, and at least a quarter of the whole. */
@@ -44,6 +46,7 @@ export const turnOfItems = (items: ReadonlyArray<ThreadItem>): ReadonlyMap<strin
 export const spentOf = (turns: Iterable<string>, kept: ReadonlyMap<string, TurnTime>): Spent | null => {
   let found = false
   const sum = { total: 0, place: 0, session: 0, handover: false, work: 0, tools: 0 }
+  const went = new Map<string, number>()
   for (const id of new Set(turns)) {
     const turn = kept.get(id)
     if (turn === undefined) continue
@@ -53,9 +56,14 @@ export const spentOf = (turns: Iterable<string>, kept: ReadonlyMap<string, TurnT
     sum.handover ||= turn.starting === 'handover'
     sum.work += turn.work
     sum.tools += turn.tools
+    for (const one of turn.changes ?? []) went.set(one.name, (went.get(one.name) ?? 0) + one.commits)
   }
   if (!found) return null
-  return { ...sum, total: sum.place + sum.session + sum.work }
+  return {
+    ...sum,
+    total: sum.place + sum.session + sum.work,
+    went: [...went].map(([name, commits]) => ({ name, commits })),
+  }
 }
 
 /** A task's turns added up, as `Spent`: what its Usage says it took. */
@@ -69,6 +77,7 @@ export const spentOfTask = (time: TaskTime | undefined): Spent | null =>
         handover: false,
         work: time.work,
         tools: time.tools,
+        went: [],
       }
 
 /** Where the time went, a few words each part that took a second or more, in the order the turn spent it. */
@@ -80,6 +89,20 @@ export const spentWords = (spent: Spent): ReadonlyArray<string> => {
     [spent.tools, 'running tools'],
   ]
   return parts.filter(([ms]) => ms >= 1000).map(([ms, words]) => `${duration(ms)} ${words}`)
+}
+
+/** Where its commits went, in a task of several changes: "2 commits to Lane heights", "2 commits to Lane heights, 1 to Card sizes". */
+export const wentWords = (spent: Spent): string | undefined => {
+  const [first, ...rest] = spent.went
+  if (first === undefined) return undefined
+  const commits = (n: number) => (n === 1 ? '1 commit' : `${n} commits`)
+  return [`${commits(first.commits)} to ${first.name}`, ...rest.map((one) => `${one.commits} to ${one.name}`)].join(', ')
+}
+
+/** What a turn's line says after its total: the part that took most, where one did, and where its commits went. */
+export const lineOf = (spent: Spent): string | undefined => {
+  const words = [mostOf(spent), wentWords(spent)].filter((one) => one !== undefined)
+  return words.length === 0 ? undefined : words.join(' · ')
 }
 
 /** The part that took most, where one did and it wasn't the agent's thinking and writing: what its line names after the total. */

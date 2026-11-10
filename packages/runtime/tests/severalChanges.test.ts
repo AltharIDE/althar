@@ -196,6 +196,21 @@ describe('a task with several changes', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
+  it.live('keeps where each turn’s commits went, by change, once the task holds several', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* opened(working)
+      yield* callTool(task.lead, 'start_change', { name: 'Lane heights' })
+      yield* say(task.threadId, 'Make it retry twice. [lead:commit]')
+      const [last] = yield* sql<{ timings: string | null }>`
+        SELECT timings FROM turn_deliveries WHERE thread_id = ${task.threadId} ORDER BY rowid DESC LIMIT 1`
+      assert.deepStrictEqual((JSON.parse(last?.timings ?? '{}') as { changes?: unknown }).changes, [
+        { name: 'althar/add-a-retry', commits: 1 },
+      ])
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
   it.live('stacks a change on another, its pull request going into that one’s branch', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {
@@ -486,6 +501,13 @@ describe('a task with several changes', () => {
           ['Card sizes', true, false],
         ],
       )
+      // The card says where each stands, for its one sentence and a mark for each.
+      const [card] = yield* until(cards(task.projectId), (all) => all[0]?.changeMarks?.length === 3)
+      assert.deepStrictEqual(
+        card?.changeMarks?.map((mark) => mark.name),
+        ['althar/add-a-retry', 'Lane heights', 'Card sizes'],
+      )
+      assert.isTrue(card?.changeMarks?.every((mark) => mark.stands === 'draft' || mark.stands === 'ready'))
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })

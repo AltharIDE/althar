@@ -65,7 +65,7 @@ import type {
   TaskCardContent,
 } from './thread'
 import s from './ThreadBlocks.module.css'
-import { duration, mostOf, spentWords } from './turnTime'
+import { duration, lineOf, spentWords } from './turnTime'
 
 /*
  * A thread's blocks as the kit draws them, the same in a task and in the
@@ -700,7 +700,7 @@ export function ThreadBlocks({
               <WorkedFor
                 took={block.spent === null ? block.took : duration(block.spent.total)}
                 {...(block.spent === null ? {} : { spent: spentWords(block.spent) })}
-                {...(block.spent === null || mostOf(block.spent) === undefined ? {} : { most: mostOf(block.spent) })}
+                {...(block.spent === null || lineOf(block.spent) === undefined ? {} : { most: lineOf(block.spent) })}
                 live={working}
                 {...(onTheWay.length === 0
                   ? {}

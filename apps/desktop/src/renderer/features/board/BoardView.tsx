@@ -32,6 +32,7 @@ import {
   TaskStatus,
   Thumbs,
   trackOf as trackItems,
+  type ChangeMarkTone,
   unreachable,
   Wait,
 } from '@althar/ui'
@@ -236,11 +237,90 @@ export const kindWordOf = (task: Pick<BoardTask, 'kind' | 'local'>): string | un
 
 /** In the person's own checkout, as its kind's word says (ADR-091). */
 const localOf = (task: Pick<BoardTask, 'local'>): Pick<Card, 'local'> => (task.local === true ? { local: true } : {})
+type ChangeMark = NonNullable<BoardTask['changeMarks']>[number]
+type Stands = ChangeMark['stands']
+
+/** Where one of several changes stands, in the card's words. */
+const standsWords: Record<Stands, string> = {
+  unshipped: 'not shipped',
+  draft: 'a draft',
+  checking: 'waiting for checks',
+  failing: 'checks failing',
+  ready: 'ready to merge',
+  merged: 'merged',
+  closed: 'closed',
+}
+const markTones: Record<Stands, ChangeMarkTone> = {
+  unshipped: 'still',
+  draft: 'still',
+  checking: 'live',
+  failing: 'danger',
+  ready: 'signal',
+  merged: 'ok',
+  closed: 'still',
+}
+const factTones: Record<Stands, 'quiet' | 'ok' | 'danger' | 'live'> = {
+  unshipped: 'quiet',
+  draft: 'quiet',
+  checking: 'live',
+  failing: 'danger',
+  ready: 'quiet',
+  merged: 'ok',
+  closed: 'quiet',
+}
+/** The most pressing first: what the sentence names, where its changes stand apart. */
+const PRESSING: ReadonlyArray<Stands> = ['failing', 'unshipped', 'checking', 'draft', 'ready', 'closed', 'merged']
+
+/**
+ * The card's one sentence across several changes (a task is a conversation plus parts, "The card keeps one fact"): what's
+ * alike counted, "Both ready to merge", "Waiting for checks on all 3"; else the most pressing named, "Lane heights: checks
+ * failing", or counted where several share it. Merged and closed ones are left out while any is still open.
+ */
+export const severalSaid = (marks: ReadonlyArray<ChangeMark>): { readonly words: string; readonly stands: Stands } | null => {
+  const open = marks.filter((mark) => mark.stands !== 'merged' && mark.stands !== 'closed')
+  const counted = open.length === 0 ? marks : open
+  const [pressing] = PRESSING.flatMap((stands) => {
+    const alike = counted.filter((mark) => mark.stands === stands)
+    return alike.length === 0 ? [] : [{ stands, alike }]
+  })
+  if (pressing === undefined) return null
+  const { stands, alike } = pressing
+  const [one] = alike
+  if (alike.length === 1 && one !== undefined) return { words: `${one.name}: ${standsWords[stands]}`, stands }
+  const every = alike.length === counted.length
+  const all = every ? (alike.length === 2 ? 'both' : `all ${alike.length}`) : `${alike.length} of ${counted.length}`
+  const All = `${all.charAt(0).toUpperCase()}${all.slice(1)}`
+  const words =
+    stands === 'checking'
+      ? `Waiting for checks on ${all}`
+      : stands === 'failing'
+        ? `Checks failing on ${all}`
+        : stands === 'draft'
+          ? `${All} drafts`
+          : stands === 'unshipped'
+            ? every
+              ? alike.length === 2
+                ? 'Neither shipped yet'
+                : 'None shipped yet'
+              : `${All} not shipped`
+            : `${All} ${standsWords[stands]}`
+  return { words, stands }
+}
+
 /** Toward a branch other than the default, quietly at its foot (ADR-093). */
-const towardOf = (task: Pick<BoardTask, 'toward' | 'changeCount'>): Pick<Card, 'toward' | 'changes'> => ({
+const towardOf = (task: Pick<BoardTask, 'toward' | 'changeCount' | 'changeMarks'>): Pick<Card, 'toward' | 'changes' | 'marks'> => ({
   ...(task.toward === undefined ? {} : { toward: task.toward }),
-  // How many changes it holds, where several (a task is a conversation plus parts).
+  // How many changes it holds, where several (a task is a conversation plus parts), behind a mark for each.
   ...(task.changeCount === undefined || task.changeCount < 2 ? {} : { changes: task.changeCount }),
+  ...(task.changeMarks === undefined || task.changeMarks.length < 2
+    ? {}
+    : {
+        marks: task.changeMarks.map((mark) => ({
+          name: mark.name,
+          says: `${mark.name}: ${standsWords[mark.stands]}`,
+          tone: markTones[mark.stands],
+        })),
+      }),
 })
 
 /** A pull request as its chip shows it: its host's mark, its repository's own name, its number in the host's words, and its size. */
@@ -791,11 +871,20 @@ const readyOf = (work: BoardTask, change: ChangeSummary, actions: CardActions | 
   const failed = failure !== undefined && failure.action === here?.kind ? failure.message : null
   // Not looked at for a conflict here, whatever its host says: why, first, as the host's word may be out of date.
   const unchecked = work.conflictUnchecked ?? null
-  const facts = factsOf(change, standing).map((one, i) => (
-    <Fact key={one.words} {...(!(i === 0 && unchecked !== null) && one.icon !== undefined ? { icon: one.icon } : {})} tone={one.tone}>
-      {one.words}
-    </Fact>
-  ))
+  // Several changes: one sentence for them all, in place of the one pull request's facts.
+  const several = work.changeMarks === undefined || work.changeMarks.length < 2 ? null : severalSaid(work.changeMarks)
+  const facts =
+    several === null
+      ? factsOf(change, standing).map((one, i) => (
+          <Fact key={one.words} {...(!(i === 0 && unchecked !== null) && one.icon !== undefined ? { icon: one.icon } : {})} tone={one.tone}>
+            {one.words}
+          </Fact>
+        ))
+      : [
+          <Fact key="several" tone={factTones[several.stands]}>
+            {several.words}
+          </Fact>,
+        ]
   // Failing checks its lead brought to the person (ADR-070): not asking it again. Why is in its task, not on the card.
   const step =
     next === null || (next.kind === 'fix' && work.checksBack != null) ? null : here === null || actions === undefined ? (

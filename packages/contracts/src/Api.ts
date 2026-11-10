@@ -2357,6 +2357,18 @@ export const TaskCard = Schema.Struct({
   /** How many changes it holds, where it holds more than one (a task is a conversation plus parts); absent for one. */
   changeCount: Schema.optional(Schema.Int),
   /**
+   * Where each of its several changes stands, in the task's order (a task is a conversation plus parts, "The card keeps one
+   * fact"): what its one sentence counts and names the exception of, and the marks at its foot. Absent with one change.
+   */
+  changeMarks: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        name: Schema.String,
+        stands: Schema.Literals(['unshipped', 'draft', 'checking', 'failing', 'ready', 'merged', 'closed']),
+      }),
+    ),
+  ),
+  /**
    * A chat on Scratch (a task is a conversation plus parts, "Chats and Scratch"): off the board's lanes, listed by its latest
    * exchange, unless something of it waits on the person. Absent for a task on the board.
    */
@@ -2969,6 +2981,8 @@ export const TurnTime = Schema.Struct({
   starting: Schema.NullOr(Schema.Literals(['start', 'handover'])),
   work: Schema.Number,
   tools: Schema.Number,
+  /** In a task of several changes, where its commits went: each change it committed to, by name, and how many. */
+  changes: Schema.optional(Schema.Array(Schema.Struct({ name: Schema.String, commits: Schema.Number }))),
 })
 export type TurnTime = typeof TurnTime.Type
 

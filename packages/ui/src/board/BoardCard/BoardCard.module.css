@@ -109,11 +109,38 @@
   }
 }
 
-/* how many changes it holds, quietly, apart from where it stands */
+/* how many changes it holds, quietly, apart from where it stands, behind a mark for each */
 .changes {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin: 0;
   font-size: 11.5px;
   line-height: 16px;
   color: var(--t-3);
   font-variant-numeric: tabular-nums;
+}
+
+/* a change's mark: a small dot in the colour of what it means */
+.marks {
+  display: inline-flex;
+  gap: 3px;
+}
+.mark {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--t-4);
+}
+.mark-signal {
+  background: var(--signal);
+}
+.mark-live {
+  background: var(--live);
+}
+.mark-danger {
+  background: var(--danger);
+}
+.mark-ok {
+  background: var(--ok);
 }

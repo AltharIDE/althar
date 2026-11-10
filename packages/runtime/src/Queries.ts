@@ -2328,6 +2328,30 @@ export class Queries extends Context.Service<
           const { issue, issueConnection, changes } = links ?? (yield* linksOf(taskId))
           // The first still open, for the person to act on: one merged while another isn't leaves the other. Else its latest.
           const shown = changes.find((candidate) => candidate.state === 'open') ?? changes.at(-1) ?? null
+          // Where each stands, by its latest pull request, for the card's one sentence and its marks: none yet, not shipped.
+          const marks =
+            changeCount < 2
+              ? []
+              : (yield* sql<{ id: string; name: string | null; branch: string }>`
+                  SELECT id, name, branch FROM workspaces WHERE task_id = ${taskId} AND access = 'write' AND reviewing IS NULL
+                    AND state NOT IN ('failed', 'preparing') ORDER BY created_at, rowid`).map((one) => {
+                  const pull = changes.findLast((candidate) => candidate.change?.id === one.id)
+                  const stands =
+                    pull === undefined
+                      ? ('unshipped' as const)
+                      : pull.state === 'merged'
+                        ? ('merged' as const)
+                        : pull.state === 'closed'
+                          ? ('closed' as const)
+                          : pull.checks?.outcome === 'failed'
+                            ? ('failing' as const)
+                            : pull.draft
+                              ? ('draft' as const)
+                              : pull.checks?.outcome === 'running'
+                                ? ('checking' as const)
+                                : ('ready' as const)
+                  return { name: one.name ?? one.branch, stands }
+                })
           // Its commits going up on their own, or its checks running with nothing of the person's before them: under way (DEV-173).
           // Some failed while the rest still run, they go to its lead once they end, unless its tries are spent, the lead brought
           // them to the person, or the person stopped it since (ADR-070).
@@ -2545,7 +2569,7 @@ export class Queries extends Context.Service<
             ...(held === undefined ? {} : { held }),
             ...(replied === undefined ? {} : { replied }),
             ...(afterMerge === undefined ? {} : { afterMerge }),
-            ...(changeCount > 1 ? { changeCount } : {}),
+            ...(changeCount > 1 ? { changeCount, changeMarks: marks } : {}),
             ...(task.shelf === 'scratch' ? { scratch: true } : {}),
             // Resolving a conflict, or fixing the checks on the merge, is a step of its own while it lasts.
             step:
