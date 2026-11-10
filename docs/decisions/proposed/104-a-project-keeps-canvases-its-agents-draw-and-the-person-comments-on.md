@@ -585,15 +585,18 @@ is kept as a page's is.
 **The project's canvases are in its Artifacts view,** beside Automations
 in its header, so the board needs no sidebar. Artifacts is what the
 project's agents made to keep; canvases are its first kind, and other kinds
-join it later, each a section of its own. Each canvas is a row, as a list of
-files reads, not a card:
+join it later, in the same table. Each artifact is a row:
 
-- its kind's glyph, its title, and its name, kind and version under it
-- its open comments, where it has any
-- who published its latest version, and when, in columns that line up down
-  the list
+- its kind's glyph, its title and its name
+- its kind, how many versions it has, and its open comments
+- who published its latest version, and when
 
-One opened takes the view, and its Close comes back to the list. Not built
+A filter by kind (where there is more than one), a search, and its
+columns, which sort it, narrow it; it is sorted by when each was last
+updated unless the person says. Narrow, what it is, its comments and when
+stay.
+
+One opened takes the view, and its Close comes back to the table. Not built
 yet: a picture of each version, a group's directions together with its
 latest pick, and archived canvases a press away.
 
@@ -952,7 +955,7 @@ need to draw, see, comment and draw again, across the project.
 | Drawing | Markdown with its diagrams, Mermaid, SVG and pictures in the window; HTML in a view of its own, at `althar-canvas://<id>/v<n>/`, served only in the project's canvas partition, for versions a window opened |
 | Guards | No preload; every web permission refused but writing what the person copies; downloads refused; navigation kept to the version, web links to the person's browser; Althar's own listeners refused, as the runtime tells main its port |
 | The person's word | Comments on the whole canvas or the words selected, waiting in the composer as drafts, kept with the message that sends them; answered ones with the lead's reply |
-| On screen | The canvas's line in the turn that drew it; the panel on the workbench, with its versions, "v2 is out" and Show; a canvas published or opened opening as it arrives; the project's Artifacts view, its canvases as rows |
+| On screen | The canvas's line in the turn that drew it; the panel on the workbench, with its versions, "v2 is out" and Show; a canvas published or opened opening as it arrives; the project's Artifacts view, one table with a kind filter, search and sortable columns |
 | Briefs | The lead's and the coordinator's say when to draw one |
 | Proof | Runtime, main, window and kit tests, and `apps/desktop/e2e/canvases.spec.ts`, which draws, comments and draws again in the built app |
 

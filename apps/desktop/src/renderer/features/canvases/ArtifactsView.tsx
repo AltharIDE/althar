@@ -12,7 +12,7 @@ import { CanvasHost } from './CanvasHost'
 
 /*
  * A project's Artifacts view (ADR-104): what its agents made to keep, every
- * lead's and the coordinator's, newest first, read again as one is
+ * lead's and the coordinator's, as one table, read again as one is
  * published, commented on or archived. Today that is its canvases. One
  * opened takes the view; what is said on it goes to the coordinator's
  * conversation, the project's own, as a comment made beside it would.
@@ -27,6 +27,7 @@ export const rowOf = (canvas: CanvasSummary, now = new Date()): ArtifactRow => (
   version: canvas.latest.number,
   by: canvas.latest.by.role === 'coordinator' ? 'Coordinator' : `Lead of ${canvas.latest.by.taskTitle ?? 'a task'}`,
   when: ago(canvas.latest.at, now),
+  at: canvas.latest.at,
   openComments: canvas.openComments,
 })
 

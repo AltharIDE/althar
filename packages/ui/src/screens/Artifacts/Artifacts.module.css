@@ -1,4 +1,4 @@
-/* A project's Artifacts view: one column down the middle of the project's ground; its artifacts as rows, a section for each kind. */
+/* A project's Artifacts view: one column down the middle of the project's ground; its artifacts as one table, filtered, searched and sorted. */
 
 .view {
   container-type: inline-size;
@@ -7,13 +7,21 @@
 }
 
 .column {
-  max-width: 880px;
+  max-width: 920px;
   margin: 0 auto;
   padding: 36px 40px 96px;
 }
 
 .head {
-  margin-bottom: 28px;
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.headWords {
+  flex: 1;
+  min-width: 0;
 }
 
 .title {
@@ -26,7 +34,6 @@
 }
 
 .line {
-  max-width: 560px;
   margin: 6px 0 0;
   font-size: 12.5px;
   line-height: 1.5;
@@ -34,78 +41,151 @@
 }
 
 .error {
-  margin: -12px 0 20px;
+  margin: -8px 0 16px;
   font-size: 12.5px;
   color: var(--danger);
 }
 
-/* ——— A section: a kind of artifact ——— */
+/* ——— Search, and how many show ——— */
 
-.section + .section {
-  margin-top: 28px;
-}
-
-.sectionHead {
+.tools {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 0 10px 8px;
-  border-bottom: 1px solid var(--line);
-  margin-bottom: 4px;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
 }
 
-.sectionTitle {
-  margin: 0;
+.search {
+  flex: 1;
+  max-width: 300px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--t-3);
+  transition: box-shadow var(--fast) var(--ease);
+}
+
+.search:focus-within {
+  box-shadow: inset 0 0 0 1.5px var(--signal);
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
   font-size: 12.5px;
-  font-weight: 600;
-  letter-spacing: -0.005em;
   color: var(--t-1);
 }
 
+.search input::placeholder {
+  color: var(--t-3);
+}
+
+.search input::-webkit-search-cancel-button {
+  display: none;
+}
+
 .count {
-  font: 500 11px/1 var(--mono);
+  min-width: 48px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--t-3);
 }
 
-.rows {
-  margin: 0;
-  padding: 0;
-  list-style: none;
+/* ——— The table ——— */
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
 }
 
-/* ——— A row: what it is, then who and when, lined up down the list ——— */
+.table th {
+  padding: 0;
+  border-bottom: 1px solid var(--line-2);
+  text-align: left;
+  font-weight: inherit;
+  white-space: nowrap;
+}
 
-.row {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) minmax(0, 220px) 72px;
+.sort {
+  display: inline-flex;
   align-items: center;
-  column-gap: 12px;
-  width: 100%;
-  min-height: 52px;
+  gap: 3px;
   margin: 0;
-  padding: 8px 10px;
+  padding: 0 10px 8px;
   border: 0;
-  border-radius: 10px;
   background: none;
   font: inherit;
-  color: inherit;
-  text-align: left;
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--t-3);
   cursor: pointer;
+}
+
+.sort:hover,
+.sorted {
+  color: var(--t-1);
+}
+
+/* the arrow keeps its room, so a header doesn't shift as the sort moves to it */
+.arrow {
+  display: inline-block;
+  width: 9px;
+}
+
+.num,
+.table th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.num .sort {
+  flex-direction: row-reverse;
+}
+
+.table td {
+  height: 52px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--t-2);
+  white-space: nowrap;
+}
+
+.row {
+  cursor: pointer;
+}
+
+.row td {
   transition: background var(--fast) var(--ease);
 }
 
-.row:hover {
+.row:hover td {
   background: var(--n-1);
+}
+
+.name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
 .glyph {
   display: grid;
   place-items: center;
+  flex: none;
   width: 28px;
   height: 28px;
   border-radius: 8px;
-  /* raised off the page, as what sits on it is */
   background: var(--n-1);
   box-shadow: inset 0 0 0 1px var(--line);
   color: var(--t-2);
@@ -120,66 +200,65 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  align-items: flex-start;
+  gap: 1px;
 }
 
-.name {
-  min-width: 0;
+.open {
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: none;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font: inherit;
   font-size: 13px;
   font-weight: 550;
   color: var(--t-1);
-}
-
-.facts {
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  overflow: hidden;
-  white-space: nowrap;
-  font-size: 11.5px;
-  color: var(--t-3);
+  text-align: left;
+  cursor: pointer;
 }
 
 .slug {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   font: 11px var(--mono);
-}
-
-.comments {
-  color: var(--t-2);
-  font-weight: 550;
+  color: var(--t-3);
 }
 
 .by {
-  min-width: 0;
+  max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  color: var(--t-2);
 }
 
 .when {
-  justify-self: end;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
   color: var(--t-3);
-  white-space: nowrap;
 }
 
-/* narrow: who made it goes, its time stays */
-@container (max-width: 560px) {
-  .row {
-    grid-template-columns: 28px minmax(0, 1fr) 64px;
-  }
-  .by {
+.zero {
+  color: var(--t-4);
+}
+
+.comments {
+  font-weight: 600;
+  color: var(--t-1);
+}
+
+.noMatch {
+  color: var(--t-3);
+  text-align: center;
+}
+
+/* narrow: what it is, its comments and when stay; the rest goes */
+@container (max-width: 640px) {
+  .wide {
     display: none;
+  }
+  .head {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 
@@ -221,14 +300,14 @@
   color: var(--t-1);
 }
 
-/* ——— One open: the panel in the view's place, as wide as the view, its Close back to the list ——— */
+/* ——— One open: the panel in the view's place, its Close back to the table ——— */
 
-.open {
+.opened {
   display: flex;
   flex-direction: column;
 }
 
-.open > * {
+.opened > * {
   flex: 1;
   min-height: 0;
 }
