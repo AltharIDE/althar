@@ -1230,6 +1230,16 @@ Built since, in #739:
   outside Althar from a change's own branch, into what it works toward, is
   that change's. The thread says when a change starts, Outputs groups the
   pull requests by change, and the card says how many there are.
+- **Stacks:** a change stacked on another branches from its branch and its
+  pull request goes into it. A change whose branch carries commits that
+  wait for Ship on the one below is held with them, worked out from git
+  before each push. Ship sends the bottom of a stack first, and its review
+  is asked to read each change on its own. Merge on a stacked change merges
+  the one below first, as it stands, and its button says so ("Merge PR
+  #714, then PR #715"). Once the one below merges, the one above goes into
+  what it went into, on the host (`editChange` sets a base on every host)
+  and in its workspace, said in the thread. "Not done yet" is said only
+  once something of the task has merged.
 
 Compatibility: every change to the store is additive, with nullable
 columns an older build reads past; a run with no `ships` and a workspace
@@ -1238,8 +1248,7 @@ update finishes as a round; the API only gains fields and a command; the
 old "Review rounds" setting is kept and read by nothing; the lead's tools
 keep their names, `make_it_a_change` included.
 
-Still to build, as the rest of this proposal says: a stack shipping and
-merging as one, the workspace moving between a worktree and Local and the
+Still to build, as the rest of this proposal says: the workspace moving between a worktree and Local and the
 branch a task works toward changing, "Run it", the parts tools, Scratch and
 presets.
 

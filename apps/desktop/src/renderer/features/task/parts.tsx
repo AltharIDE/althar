@@ -48,6 +48,8 @@ export const partsText = {
         ? 'Closed'
         : `${change.draft ? 'Draft' : 'Open'}${change.checks === null || change.checks.outcome === 'none' ? '' : change.checks.outcome === 'failed' ? ` · ${change.checks.failed} ${change.checks.failed === 1 ? 'check fails' : 'checks fail'}` : change.checks.outcome === 'running' ? ' · checks running' : ' · checks pass'}`,
   merge: 'Merge',
+  /** Merge on a change stacked on another's open pull request: the one below first. */
+  mergeThrough: (below: string, short: string) => `Merge ${below}, then ${short}`,
   onHost: (host: string) => `On ${host}`,
   seeCheck: 'See the check',
   fixIt: 'Ask the lead to fix it',
@@ -108,6 +110,10 @@ export interface PartsActions {
 }
 
 /** The review drafts in the thread still waiting to be posted: the latest of each. */
+/** Merge, or, on a change stacked on another whose pull request is open, the stack through it: the one below first. */
+const mergeLabel = (change: { readonly short: string; readonly change?: { readonly below?: string } | undefined }) =>
+  change.change?.below === undefined ? partsText.merge : partsText.mergeThrough(change.change.below, change.short)
+
 const draftsIn = (items: ReadonlyArray<ThreadItem>) =>
   items.flatMap((item) => (item.kind === 'review_draft' && item.content.state === 'pending' ? [item.content] : []))
 
@@ -181,7 +187,7 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
       ...(failing
         ? { tone: 'bad' as const, act: { label: t.seeCheck } }
         : ready
-          ? { tone: 'you' as const, act: { label: t.merge, onClick: () => act.merge(change) } }
+          ? { tone: 'you' as const, act: { label: mergeLabel(change), onClick: () => act.merge(change) } }
           : {}),
       facts: [
         [t.title, change.title],
@@ -201,7 +207,7 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
           }
         : {}),
       actions: [
-        ...(ready ? [{ label: t.merge, onClick: () => act.merge(change), variant: 'signal' as const }] : []),
+        ...(ready ? [{ label: mergeLabel(change), onClick: () => act.merge(change), variant: 'signal' as const }] : []),
         ...(failing && change.checks !== null
           ? [{ label: t.fixIt, onClick: () => act.askLead(t.fixAsk(change.checks?.failing ?? [], change.short)) }]
           : []),

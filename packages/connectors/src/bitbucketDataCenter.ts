@@ -734,6 +734,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
           description: edit.body ?? now.description ?? '',
           reviewers: (now.reviewers ?? []).map((reviewer) => ({ user: { name: reviewer.user.name } })),
           ...(now.draft === undefined ? {} : { draft: now.draft }),
+          ...(edit.base === undefined ? {} : { toRef: { id: `refs/heads/${edit.base}`, repository: now.toRef.repository } }),
         })
         return changeOf(repository, edited)
       }),

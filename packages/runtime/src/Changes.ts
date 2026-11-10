@@ -1276,8 +1276,11 @@ export class Changes extends Context.Service<
             WHERE k.id = ${input.taskId} ORDER BY b.created_at, b.rowid`
           if (tasks.length === 0) return yield* new NotFound({ kind: 'task', id: input.taskId })
           // Held for Ship, a worktree goes up only with Ship, after its review: nothing else publishes past the person's commits.
-          if (input.ships !== true && tasks.some((task) => task.heldAt !== null))
-            return yield* new ShipRefused({ taskId: input.taskId, why: 'held' })
+          // A change stacked on one held is held too, where it carries what waits there.
+          if (input.ships !== true)
+            for (const task of tasks)
+              if (task.heldAt !== null || (yield* heldBelow(input.taskId, { id: task.workspaceId, path: task.path })) !== null)
+                return yield* new ShipRefused({ taskId: input.taskId, why: 'held' })
           const [bound] = yield* sql<{ n: number }>`
             SELECT count(*) AS n FROM repository_bindings WHERE project_id = ${input.projectId} AND detached_at IS NULL`
           // Its next pull request goes only where the last one merged or closed with commits after it; the rest stand as they are.
@@ -2174,6 +2177,76 @@ export class Changes extends Context.Service<
           yield* touchCard(link.taskId)
         })
 
+      /**
+       * Whether a change is held by the one it is stacked on (a task is a
+       * conversation plus parts, "A hold reaches up a stack"): a push sends a
+       * branch's whole history, so one whose branch carries commits that wait
+       * for Ship on a change below it is held as if they were its own. Worked
+       * out from git each time, rather than kept: what the change below has
+       * that its pull request doesn't, as far as this branch has taken it in.
+       * When the one below was held, or null.
+       */
+      const heldBelow = (
+        taskId: string,
+        above: { readonly id: string; readonly path: string },
+        depth = 0,
+      ): Effect.Effect<string | null, unknown, Store> =>
+        Effect.gen(function* () {
+          if (depth > 8) return null
+          const sql = yield* SqlClient.SqlClient
+          const [below] = yield* sql<{ id: string; path: string; branch: string; heldAt: string | null; projectId: string }>`
+            SELECT w.id, w.path, w.branch, w.held_at, w.project_id FROM workspaces w JOIN workspaces a ON a.id = ${above.id}
+            WHERE w.task_id = ${taskId} AND w.binding_id = a.binding_id AND w.branch = a.toward AND w.id <> a.id
+              AND w.reviewing IS NULL AND w.state <> 'cleaned'
+            LIMIT 1`
+          if (below === undefined) return null
+          const held = below.heldAt ?? (yield* heldBelow(taskId, below, depth + 1))
+          if (held === null || !existsSync(above.path)) return null
+          const [open] = yield* sql<{ url: string; head: string | null }>`
+            SELECT l.url, json_extract(l.snapshot, '$.headSha') AS head FROM repository_changes c
+            JOIN external_links l ON l.url = c.pull_request_url AND l.kind = 'change'
+            WHERE c.workspace_id = ${below.id} ORDER BY l.created_at DESC LIMIT 1`
+          // Never sent, all the branch below has waits with it.
+          if (open === undefined) return held
+          const sent = (yield* sentTo(below.projectId, open.url)) ?? open.head
+          if (sent === null) return held
+          const met = yield* git(above.path, 'merge-base', 'HEAD', `refs/heads/${below.branch}`).pipe(Effect.orElseSucceed(() => ''))
+          if (met === '') return null
+          return (yield* commitsAhead(above.path, sent, met).pipe(Effect.orElseSucceed(() => 0))) > 0 ? held : null
+        })
+
+      /**
+       * A task's pull requests, the bottom of each stack before what is
+       * stacked on it, as Ship and Merge go through them; otherwise in the
+       * order they came.
+       */
+      const bottomUp = (taskId: string, links: ReadonlyArray<LinkRow>) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{ url: string; id: string; bindingId: string; branch: string; toward: string | null }>`
+            SELECT c.pull_request_url AS url, w.id, w.binding_id, w.branch, w.toward FROM repository_changes c
+            JOIN workspaces w ON w.id = c.workspace_id WHERE w.task_id = ${taskId} AND c.pull_request_url IS NOT NULL`
+          const depthOf = (url: string) => {
+            let depth = 0
+            let at = rows.find((row) => row.url === url)
+            const seen = new Set<string>()
+            while (at !== undefined && at.toward !== null && !seen.has(at.id)) {
+              seen.add(at.id)
+              const { bindingId, toward } = at
+              at = rows.find((row) => row.bindingId === bindingId && row.branch === toward)
+              if (at !== undefined) depth += 1
+            }
+            return depth
+          }
+          const urls = yield* Effect.forEach(links, (link) =>
+            Effect.map(Effect.option(decodeSnapshot(link.snapshot)), (seen) => (Option.isSome(seen) ? seen.value.url : '')),
+          )
+          return links
+            .map((link, index) => ({ link, depth: depthOf(urls[index] ?? ''), index }))
+            .toSorted((a, b) => a.depth - b.depth || a.index - b.index)
+            .map((one) => one.link)
+        })
+
       /** The worktree of the repository a pull request is from, with its default branch and the task's thread; the task's first, where the record doesn't say. */
       const worktreeOf = (taskId: string, url: string) =>
         Effect.gen(function* () {
@@ -2186,15 +2259,22 @@ export class Changes extends Context.Service<
             baseCommit: string | null
             threadId: string
             heldAt: string | null
+            stacked: number
           }>`
             SELECT w.id, w.path, w.branch, coalesce(w.toward, b.default_base_ref, w.base_ref) AS base, w.base_commit,
-              (SELECT t.id FROM threads t WHERE t.task_id = w.task_id AND t.kind = 'task') AS thread_id, w.held_at
+              (SELECT t.id FROM threads t WHERE t.task_id = w.task_id AND t.kind = 'task') AS thread_id, w.held_at,
+              EXISTS (SELECT 1 FROM workspaces s WHERE s.task_id = w.task_id AND s.binding_id = w.binding_id AND s.branch = w.toward
+                AND s.id <> w.id AND s.reviewing IS NULL) AS stacked
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
             ORDER BY w.id = (SELECT c.workspace_id FROM repository_changes c WHERE c.pull_request_url = ${url} LIMIT 1) DESC,
               b.created_at, b.rowid
             LIMIT 1`
-          return workspace
+          if (workspace === undefined) return undefined
+          const { stacked, ...rest } = workspace
+          // Held by what waits beneath it, it goes up only with the Ship that ships that too.
+          if (rest.heldAt !== null || stacked !== 1) return rest
+          return { ...rest, heldAt: yield* heldBelow(taskId, rest) }
         })
 
       /** The commit Althar last pushed to a pull request, as the record of its push keeps it. */
@@ -2628,10 +2708,29 @@ export class Changes extends Context.Service<
        * settles then: reading it back can still say open for a moment, and
        * what was said on it last is listened to after, not before.
        */
-      const merge = (taskId: string, head: string, url?: string) =>
+      const merge = (taskId: string, head: string, url?: string): Effect.Effect<void, unknown, Store> =>
         Effect.gen(function* () {
           const { link, snapshot, host, repository } = yield* current(taskId, url)
           if (snapshot.state !== 'open') return
+          const sql = yield* SqlClient.SqlClient
+          // Stacked on another of the task's changes, the one below merges first, as it stands, and this goes into what it went
+          // into once it has (a task is a conversation plus parts, "Merge on a stacked change offers the whole stack").
+          const [below] = yield* sql<{ url: string }>`
+            SELECT l.url FROM repository_changes c JOIN workspaces w ON w.id = c.workspace_id
+            JOIN workspaces a ON a.task_id = w.task_id AND a.binding_id = w.binding_id AND a.toward = w.branch AND a.id <> w.id
+            JOIN repository_changes ac ON ac.workspace_id = a.id AND ac.pull_request_url = ${snapshot.url}
+            JOIN external_links l ON l.url = c.pull_request_url AND l.kind = 'change' AND l.task_id = ${taskId}
+            WHERE w.task_id = ${taskId} AND json_extract(l.snapshot, '$.state') = 'open'
+            ORDER BY l.created_at DESC LIMIT 1`
+          if (below !== undefined) {
+            const under = yield* current(taskId, below.url)
+            const now = yield* under.host.change(under.repository, under.snapshot.number)
+            yield* merge(taskId, now.headSha ?? under.snapshot.headSha ?? '', below.url)
+            const after = yield* current(taskId, below.url)
+            if (after.snapshot.state !== 'merged')
+              return yield* sayOn(link, `${nameOf(snapshot)} merges once ${nameOf(under.snapshot)} below it has: press Merge again then.`)
+            return yield* merge(taskId, head, snapshot.url)
+          }
           const read = yield* host.change(repository, snapshot.number, { queue: true })
           // In its merge queue already, put there from outside Althar before a turn heard it, it isn't merged again: it is kept
           // in it, and its thread says so where it hasn't.
@@ -2704,6 +2803,81 @@ export class Changes extends Context.Service<
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not hear whether a merge landed', cause)))
 
       /**
+       * Once a change's pull request merges, each change of the task stacked
+       * on it goes into what the merged one went into (a task is a
+       * conversation plus parts, "Starting and splitting"): its workspace
+       * works toward that from here, and its open pull request, which went
+       * into the merged one's branch, is pointed there on its host, said in
+       * the thread. One its host won't point elsewhere is said too, and the
+       * person points it.
+       */
+      const retargetAbove = (link: LinkRow, merged: Snapshot) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [below] = yield* sql<{ id: string; bindingId: string; branch: string; toward: string | null }>`
+            SELECT w.id, w.binding_id, w.branch, w.toward FROM repository_changes c JOIN workspaces w ON w.id = c.workspace_id
+            WHERE c.pull_request_url = ${merged.url} AND w.task_id = ${link.taskId} ORDER BY c.created_at DESC LIMIT 1`
+          if (below === undefined) return
+          const into = merged.target ?? below.toward
+          const above = yield* sql<{ id: string; projectId: ProjectId }>`
+            SELECT id, project_id FROM workspaces
+            WHERE task_id = ${link.taskId} AND binding_id = ${below.bindingId} AND toward = ${below.branch} AND reviewing IS NULL
+              AND state <> 'cleaned' AND id <> ${below.id}`
+          for (const one of above) {
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                const revision = yield* change('workspaces', one.id, { toward: below.toward })
+                yield* fact({
+                  projectId: one.projectId,
+                  aggregateType: 'workspace',
+                  aggregateId: one.id,
+                  revision,
+                  type: 'workspace.toward_set',
+                  payload: { toward: below.toward, below: merged.url },
+                  actorId: instance.systemId,
+                })
+              }),
+            )
+            if (into == null) continue
+            const [open] = yield* sql<{ url: string }>`
+              SELECT l.url FROM repository_changes c JOIN external_links l ON l.url = c.pull_request_url AND l.kind = 'change'
+              WHERE c.workspace_id = ${one.id} AND json_extract(l.snapshot, '$.state') = 'open'
+                AND json_extract(l.snapshot, '$.target') = ${below.branch}
+              ORDER BY l.created_at DESC LIMIT 1`
+            if (open === undefined) continue
+            const pointed = yield* Effect.exit(
+              Effect.gen(function* () {
+                const on = yield* current(link.taskId, open.url)
+                const now = yield* on.host.change(on.repository, on.snapshot.number)
+                const edited = yield* outward({
+                  projectId: on.link.projectId,
+                  subject: { type: 'external_link', id: on.link.id },
+                  target: `${on.host.product}:${on.snapshot.repository.join('/')}`,
+                  operation: 'edit_change',
+                  key: `retarget:${on.link.id}:${merged.url}`,
+                  request: { number: on.snapshot.number, base: into },
+                  retryable: true,
+                  perform: on.host.editChange(on.repository, now, { base: into }),
+                  encode: (answer) => answer,
+                  decode: (kept) => Option.getOrUndefined(Schema.decodeUnknownOption(ChangeRequest)(kept)),
+                })
+                yield* saveSnapshot(on.link, { ...on.snapshot, target: edited.target })
+                return nameOf(on.snapshot)
+              }),
+            )
+            if (pointed._tag === 'Success') yield* sayOn(link, `${pointed.value} goes into ${into} now, as ${nameOf(merged)} merged.`)
+            else {
+              yield* Effect.logWarning('Could not point a stacked pull request elsewhere', pointed.cause)
+              yield* sayOn(
+                link,
+                `${nameOf(merged)} merged, but the pull request stacked on it still goes into ${below.branch}: point it at ${into} on its host.`,
+              )
+            }
+          }
+          if (above.length > 0) yield* touchCard(link.taskId)
+        })
+
+      /**
        * A change as its host has it now, kept: said in the task's thread where
        * it merged or closed since it was seen, and listened to no more; what
        * the lead asked to push to it is closed, and a merge may settle its task.
@@ -2725,7 +2899,12 @@ export class Changes extends Context.Service<
           if (settled) for (const asked of yield* askedOf(link.taskId, before.url)) yield* settleAsked(asked, 'closed')
           if (after.state === 'merged' && before.state !== 'merged') {
             yield* Effect.andThen(
-              Effect.andThen(follow(link.taskId, 'merged', before), baseMoved),
+              Effect.andThen(
+                Effect.andThen(follow(link.taskId, 'merged', before), baseMoved),
+                retargetAbove(link, before).pipe(
+                  Effect.catchCause((cause) => Effect.logWarning('Could not point what was stacked on a merged change elsewhere', cause)),
+                ),
+              ),
               // Its review after the merge, where it is owed, reads the change now that it merged, in the task itself.
               Effect.forkIn(fastLane.reviewMerged(link.taskId, before.url), scope).pipe(Effect.asVoid),
             )
@@ -4382,7 +4561,12 @@ export class Changes extends Context.Service<
           if (settled) for (const asked of yield* askedOf(link.taskId, before.url)) yield* settleAsked(asked, 'closed')
           if (after.state === 'merged' && before.state !== 'merged') {
             yield* Effect.andThen(
-              Effect.andThen(follow(link.taskId, 'merged', before), baseMoved),
+              Effect.andThen(
+                Effect.andThen(follow(link.taskId, 'merged', before), baseMoved),
+                retargetAbove(link, before).pipe(
+                  Effect.catchCause((cause) => Effect.logWarning('Could not point what was stacked on a merged change elsewhere', cause)),
+                ),
+              ),
               // Its review after the merge, where it is owed, reads the change now that it merged, in the task itself.
               Effect.forkIn(fastLane.reviewMerged(link.taskId, before.url), scope).pipe(Effect.asVoid),
             )
@@ -4738,7 +4922,13 @@ export class Changes extends Context.Service<
             const merged = yield* gitOutcome(repository.root, 'merge-base', '--is-ancestor', head, `refs/heads/${repository.base}`)
             if (head === '' || merged.code !== 0) unmerged.push(repository.name)
           }
-          return { repositories, open, unmerged, merged: latest.length > 0 && open.length === 0 && unmerged.length === 0 }
+          return {
+            repositories,
+            open,
+            unmerged,
+            merged: latest.length > 0 && open.length === 0 && unmerged.length === 0,
+            someMerged: seen.some((one) => one.state === 'merged'),
+          }
         })
 
       const settleIfDone = (
@@ -4758,15 +4948,17 @@ export class Changes extends Context.Service<
           // A round of work under way settles it when it ends, by what it left (ADR-034).
           const [working] = yield* sql<{ id: string }>`SELECT id FROM runs WHERE task_id = ${taskId} AND state = 'running' LIMIT 1`
           if (working !== undefined) return yield* touchCard(taskId)
-          const { open, unmerged } = yield* mergeOf(taskId)
+          const { open, unmerged, someMerged } = yield* mergeOf(taskId)
           // Commits after a merged pull request are in none yet: a new one takes them.
           const after =
             open.length > 0
               ? []
               : (yield* unshippedOf(taskId)).flatMap((one) => (one.change === null ? [] : [{ ...one, change: one.change }]))
           if (open.length > 0 || unmerged.length > 0 || after.length > 0) {
-            // Abandoned, it is nobody's to finish: nothing is said.
+            // Abandoned, it is nobody's to finish: nothing is said. Nor where nothing of it merged yet, as when Ship opened another
+            // of its changes' pull requests: what is open is said where one merged and the rest are still to go.
             if (task.state === 'abandoned') return
+            if (!someMerged && by.here === undefined) return yield* touchCard(taskId)
             yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
               source: 'runtime',
               severity: 'info',
@@ -6448,7 +6640,8 @@ export class Changes extends Context.Service<
       const shipToOpen = (taskId: string, send = true) =>
         Effect.gen(function* () {
           const went: Array<{ readonly where: string; readonly count: number }> = []
-          for (const link of yield* linksOf(taskId)) {
+          // The bottom of a stack first: each change goes up before what is stacked on it.
+          for (const link of yield* bottomUp(taskId, yield* linksOf(taskId))) {
             if (link.listening !== 1) continue
             const seen = yield* decodeSnapshot(link.snapshot)
             if (seen.state !== 'open') continue

@@ -37,6 +37,21 @@ describe('a task’s parts', () => {
     await waitFor(() => expect(client.merge).toHaveBeenCalledWith(base.task.id, 'abc123', ready.url))
   })
 
+  it('offers to merge a stacked change through the one below it, which merges first', async () => {
+    const above = change({
+      draft: false,
+      head: 'def456',
+      short: 'PR #715',
+      change: { id: 'ws_2', name: 'Lane colours', below: 'PR #714' },
+      checks: { outcome: 'passed', passed: 3, failed: 0, running: 0, total: 3, failing: [], list: [] },
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ task: { ...base.task, changes: [above] } })) })
+    withServices(<Task />, client)
+    const popover = await parts()
+    await userEvent.click(popover.getByRole('button', { name: 'Merge PR #714, then PR #715' }))
+    await waitFor(() => expect(client.merge).toHaveBeenCalledWith(base.task.id, 'def456', above.url))
+  })
+
   it('posts a review draft from its row', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [items.review({ state: 'pending' })] })) })
     withServices(<Task />, client)

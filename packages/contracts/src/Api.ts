@@ -1396,9 +1396,10 @@ export const ChangeSummary = Schema.Struct({
   /**
    * The change of the task it is the pull request of (a task is a conversation plus parts, "A task holds as many changes as
    * it needs"): by its worktree's id, and its name where the task has several (null for its first, which the task's title
-   * names). Absent where Althar can't tell, as for one it was only told of.
+   * names). Absent where Althar can't tell, as for one it was only told of. `below`, for one stacked on another of the
+   * task's changes whose pull request is still open, names that one (PR #714): Merge merges it first.
    */
-  change: Schema.optional(Schema.Struct({ id: Schema.String, name: Schema.NullOr(Schema.String) })),
+  change: Schema.optional(Schema.Struct({ id: Schema.String, name: Schema.NullOr(Schema.String), below: Schema.optional(Schema.String) })),
   additions: Schema.NullOr(Schema.Number),
   deletions: Schema.NullOr(Schema.Number),
   changedFiles: Schema.NullOr(Schema.Number),

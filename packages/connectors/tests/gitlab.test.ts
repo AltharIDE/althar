@@ -489,6 +489,13 @@ describe('GitLab as a code host', () => {
         described.sent.map((one) => [one.method, one.body]),
         [['PUT', { description: 'Only this' }]],
       )
+      // A stacked change goes into another branch once the one below merges.
+      const based = gitlab([['PUT', `${PROJECT}/merge_requests/12`, { json: request() }]])
+      yield* based.host.editChange(repository, change, { base: 'main' })
+      assert.deepStrictEqual(
+        based.sent.map((one) => [one.method, one.body]),
+        [['PUT', { target_branch: 'main' }]],
+      )
       // An account that may not edit it is refused, as forbidden, while its token works.
       const refusing = gitlab([
         ['PUT', `${PROJECT}/merge_requests/12`, { status: 401, json: { message: '401 Unauthorized' } }],

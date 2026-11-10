@@ -103,6 +103,37 @@ const workspacesOf = (taskId: string) =>
       SELECT id, name, branch, path, toward, state FROM workspaces WHERE task_id = ${taskId} ORDER BY created_at, rowid`
   })
 
+/** What the person says to the task's lead, and its turn ended. */
+const say = (threadId: string, body: string) =>
+  Effect.gen(function* () {
+    const sessions = yield* Sessions
+    const sql = yield* SqlClient.SqlClient
+    const before = (yield* sql<{ n: number }>`SELECT count(*) AS n FROM turn_deliveries WHERE thread_id = ${threadId}`)[0]?.n ?? 0
+    yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { threadId, body }), threadId, body })
+    yield* until(
+      sql<{ state: string }>`SELECT state FROM turn_deliveries WHERE thread_id = ${threadId}`,
+      (rows) => rows.length > before && rows.every((row) => row.state !== 'pending' && row.state !== 'delivered'),
+    )
+  })
+
+/** A task whose first change has its pull request, with a change stacked on it whose own pull request Ship opened, into its branch. */
+const stacked = (working: string, github: FakeService) =>
+  Effect.gen(function* () {
+    const task = yield* opened(working)
+    yield* callTool(task.lead, 'start_change', { name: 'Lane heights', on: 'althar/add-a-retry' })
+    const [, above] = yield* workspacesOf(task.taskId)
+    const path = above?.path ?? ''
+    writeFileSync(join(path, 'lanes.txt'), 'taller\n')
+    git(path, 'add', 'lanes.txt')
+    git(path, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '-m', 'Taller lanes')
+    yield* (yield* Runs).ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
+    yield* until(
+      Effect.sync(() => github.changes.length),
+      (count) => count === 2,
+    )
+    return { ...task, above: path, url: github.changes[1]?.url ?? '' }
+  })
+
 describe('a task with several changes', () => {
   it.live('starts another change on its own branch and worktree, ships it as its own pull request, and settles once both merge', () => {
     const { working, bare, github } = onGitHub()
@@ -246,6 +277,69 @@ describe('a task with several changes', () => {
       const following = yield* sql<{ n: number }>`
         SELECT count(*) AS n FROM external_links WHERE task_id = ${task.taskId} AND kind = 'change' AND listening = 1`
       assert.strictEqual(following[0]?.n, 2)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('merges a stack with one Merge, from the bottom up, the one above going into main once the one below has', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* stacked(working, github)
+      assert.strictEqual(github.changes[1]?.target, 'althar/add-a-retry')
+      // Its pull request says which it is stacked on, for Merge to name both.
+      const shown = (yield* (yield* Queries).thread(task.threadId)).task.changes.find((one) => one.url === task.url)
+      assert.strictEqual(shown?.change?.below, 'PR #1')
+      // Merge on the one above merges the one below first, as it stands; then the one above goes into main, and merges.
+      const head = github.changes[1]?.headSha ?? ''
+      yield* (yield* Changes).merge(task.taskId, head, task.url)
+      assert.deepStrictEqual(
+        github.merged.map((one) => one.number),
+        [1, 2],
+      )
+      assert.strictEqual(github.changes[1]?.target, 'main')
+      const said = (yield* items(task.threadId)).flatMap((item) => (item.kind === 'notice' ? [String(item.content.title)] : []))
+      assert.include(said, 'PR #2 goes into main now, as PR #1 merged.')
+      const [above] = (yield* workspacesOf(task.taskId)).filter((one) => one.path === task.above)
+      assert.strictEqual(above?.toward, null)
+      // Both merged, the task settles.
+      const sql = yield* SqlClient.SqlClient
+      yield* until(sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.taskId}`, (rows) => rows[0]?.state === 'done')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('holds a change stacked on one with a tweak waiting, once it carries it, until Ship sends both up from the bottom', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* stacked(working, github)
+      const sentAbove = git(bare, 'rev-parse', 'althar/lane-heights')
+      // The person's word to the lead commits on the change below: held for Ship.
+      yield* say(task.threadId, 'Make it retry twice. [lead:commit]')
+      yield* until(
+        sql<{ heldAt: string | null }>`SELECT held_at FROM workspaces WHERE path = ${task.path}`,
+        (rows) => rows[0]?.heldAt != null,
+      )
+      const changes = yield* Changes
+      // Carried above, it is: no push but Ship's takes it up, the lead's included.
+      git(task.above, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'merge', '-q', '--no-edit', 'althar/add-a-retry')
+      const carried = git(task.above, 'rev-parse', 'HEAD')
+      const refused = yield* Effect.exit(changes.push(task.taskId, carried, task.url))
+      assert.isTrue(refused._tag === 'Failure' && String(refused.cause).includes('ShipRefused'))
+      const told = yield* callTool(task.lead, 'push_to_pull_request', { pull_request: 2 })
+      assert.include(told, 'waits for the person')
+      assert.strictEqual(git(bare, 'rev-parse', 'althar/lane-heights'), sentAbove)
+      // Ship sends both: the one below first.
+      yield* (yield* Runs).ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
+      // Up to each folder's head, as pushing credits it.
+      yield* until(
+        Effect.sync(() => git(bare, 'rev-parse', 'althar/lane-heights')),
+        (now) => now !== sentAbove && now === git(task.above, 'rev-parse', 'HEAD'),
+      )
+      assert.strictEqual(git(bare, 'log', '-1', '--format=%s', 'althar/lane-heights'), git(task.above, 'log', '-1', '--format=%s', carried))
+      assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), git(task.path, 'rev-parse', 'HEAD'))
+      const pushes = yield* sql<{ url: string }>`
+        SELECT json_extract(payload, '$.url') AS url FROM record_events WHERE type = 'change.pushed' ORDER BY occurred_at, rowid`
+      const order = pushes.map((one) => one.url).filter((url) => url !== null)
+      if (order.length >= 2) assert.isBelow(order.lastIndexOf(github.changes[0]?.url ?? ''), order.lastIndexOf(task.url))
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })

@@ -2426,7 +2426,12 @@ export class Runs extends Context.Service<
                 Effect.orElseSucceed(() => ''),
               )
               const lines = listed.split('\n').filter((line) => line !== '')
-              return { name: worktree.name, head: head.slice(0, 12), lines }
+              // Among several changes, each is named, and read on its own: a stacked one from the one below's head.
+              return {
+                name: worktree.change === null ? worktree.name : `${worktree.change} (${worktree.branch})`,
+                head: head.slice(0, 12),
+                lines,
+              }
             }),
           )
           const shown = parts.filter((part) => part !== undefined)
@@ -2435,7 +2440,8 @@ export class Runs extends Context.Service<
               ? `with \`git diff ${shown[0]?.head ?? ''}\` in your copy`
               : shown.map((one) => `\n- ${one.name}: \`git diff ${one.head}\``).join('')
           const listed = shown.flatMap((one) => (one.lines.length === 0 || one.lines.length > SHIPPED_LISTED ? [] : one.lines))
-          return `More to review. The person ships what they and the lead did since the last review${listed.length === 0 ? '' : `:\n\n${listed.join('\n')}`}\n\nReview what changed since, ${how}. Look at the earlier work only where the new work touches it.`
+          const several = worktrees.some((one) => one.change !== null)
+          return `More to review. The person ships what they and the lead did since the last review${listed.length === 0 ? '' : `:\n\n${listed.join('\n')}`}\n\nReview what changed since, ${how}. Look at the earlier work only where the new work touches it.${several ? ' Each change ships as its own pull request: review each on its own, and say which change each finding is in.' : ''}`
         })
 
       /**
@@ -2484,10 +2490,20 @@ export class Runs extends Context.Service<
       const worktreesOf = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          return yield* sql<{ id: string; path: string; branch: string; name: string; slug: string; base: string | null }>`
-            SELECT w.id, w.path, w.branch, b.display_name AS name, b.slug, coalesce(w.base_commit, w.base_ref) AS base
+          // Each change's own: a change whose folder another took (away) has none, and a pull request the task reviews isn't its work.
+          return yield* sql<{
+            id: string
+            path: string
+            branch: string
+            name: string
+            slug: string
+            base: string | null
+            change: string | null
+          }>`
+            SELECT w.id, w.path, w.branch, b.display_name AS name, b.slug, coalesce(w.base_commit, w.base_ref) AS base, w.name AS change
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
-            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state <> 'away' AND w.reviewing IS NULL
+            ORDER BY b.created_at, b.rowid, w.created_at, w.rowid`
         })
 
       /** What the task's worktrees hold, together: it changes when any of them does. */

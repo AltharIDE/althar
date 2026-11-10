@@ -1824,15 +1824,31 @@ export class Queries extends Context.Service<
             // of it: commits the person hasn't pushed yet.
             (found) =>
               Effect.gen(function* () {
-                const [binding] = yield* sql<{ slug: string; workspaceId: string | null; name: string | null }>`
-                  SELECT b.slug, c.workspace_id, w.name FROM repository_changes c JOIN repository_bindings b ON b.id = c.binding_id
+                const [binding] = yield* sql<{ slug: string; workspaceId: string | null; name: string | null; below: string | null }>`
+                  SELECT b.slug, c.workspace_id, w.name,
+                    (SELECT json_extract(l.snapshot, '$.words.short') || ' ' || json_extract(l.snapshot, '$.words.prefix') ||
+                        json_extract(l.snapshot, '$.number')
+                      FROM workspaces s JOIN repository_changes sc ON sc.workspace_id = s.id
+                      JOIN external_links l ON l.url = sc.pull_request_url AND l.kind = 'change'
+                      WHERE s.task_id = w.task_id AND s.binding_id = w.binding_id AND s.branch = w.toward AND s.id <> w.id
+                        AND json_extract(l.snapshot, '$.state') = 'open'
+                      ORDER BY l.created_at DESC LIMIT 1) AS below
+                  FROM repository_changes c JOIN repository_bindings b ON b.id = c.binding_id
                   LEFT JOIN workspaces w ON w.id = c.workspace_id
                   WHERE c.pull_request_url = ${found.url} ORDER BY c.updated_at DESC LIMIT 1`
                 return {
                   ...found,
                   slug: binding?.slug ?? null,
                   // The change it belongs to: everything hangs on the change, never on a folder.
-                  ...(binding?.workspaceId == null ? {} : { change: { id: binding.workspaceId, name: binding.name } }),
+                  ...(binding?.workspaceId == null
+                    ? {}
+                    : {
+                        change: {
+                          id: binding.workspaceId,
+                          name: binding.name,
+                          ...(binding.below === null || found.state !== 'open' ? {} : { below: binding.below }),
+                        },
+                      }),
                 }
               }).pipe(
                 Effect.flatMap((change) =>
