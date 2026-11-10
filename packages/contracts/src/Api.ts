@@ -134,6 +134,31 @@ export const CheckoutAnswer = Schema.Literals(['wait', 'worktree', 'switch', 'fr
 export type CheckoutAnswer = typeof CheckoutAnswer.Type
 
 /** What moving a running task did: moved; waiting, and why; or asking first, about the checkout as it was seen. */
+/** A preset's parts (a task is a conversation plus parts, "Presets"): only a start; the parts are what a task has. */
+export const PresetParts = Schema.Struct({
+  workspace: Schema.Literals(['copy', 'worktree', 'local']),
+  checked: Schema.Literals(['before', 'after', 'none']),
+  end: Schema.Literals(['draft', 'ready', 'none']),
+  shelf: Schema.Literals(['scratch', 'board']),
+  lead: Schema.NullOr(Schema.String),
+  reviewer: Schema.NullOr(Schema.String),
+  brief: Schema.String,
+  reviews: Schema.optional(Schema.Boolean),
+})
+export type PresetParts = typeof PresetParts.Type
+
+/** A named set of starting parts: built in, or the person's own, kept to a project where `projectId` says. */
+export const Preset = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  parts: PresetParts,
+  builtin: Schema.Boolean,
+  projectId: Schema.NullOr(Schema.String),
+  /** What it holds, in words. */
+  about: Schema.String,
+})
+export type Preset = typeof Preset.Type
+
 export const MoveOutcome = Schema.Union([
   Schema.Struct({ kind: Schema.Literal('moved') }),
   Schema.Struct({ kind: Schema.Literal('waits'), why: Schema.String }),
@@ -1839,6 +1864,11 @@ export const NoticeItem = Schema.Struct({
         toward: Schema.NullOr(Schema.String),
       }),
     ),
+    /**
+     * What the line offers to keep, in the coordinator's thread (a task is a conversation plus parts, "Presets"): parts the
+     * person set up twice, as a preset by that name, which its button saves.
+     */
+    offer: Schema.optional(Schema.Struct({ kind: Schema.Literal('preset'), name: Schema.String, parts: PresetParts })),
     /** For what a lead's agent could see: each skill, and whether it is the person's or the repository's. */
     skills: Schema.optional(
       Schema.Array(Schema.Struct({ name: Schema.String, path: Schema.String, from: Schema.Literals(['person', 'repository']) })),
@@ -2260,6 +2290,8 @@ export const TaskCard = Schema.Struct({
       agents: Schema.optional(Schema.Array(Schema.String)),
       /** Where it works (ADR-091); absent for a worktree, as a review's. */
       worksIn: Schema.optional(WorksIn),
+      /** The preset its parts are, as the card's kicker names it first (a task is a conversation plus parts): Change, Chat. */
+      preset: Schema.optional(Schema.String),
       /** Why it works where it does, in the coordinator's words, where that isn't the project's default; null otherwise. */
       worksInWhy: Schema.optional(Schema.NullOr(Schema.String)),
       /** The task working Local now, which it would wait for there; null where Local is free. */
@@ -2310,6 +2342,11 @@ export const TaskCard = Schema.Struct({
   afterMerge: Schema.optional(AfterMergeReview),
   /** How many changes it holds, where it holds more than one (a task is a conversation plus parts); absent for one. */
   changeCount: Schema.optional(Schema.Int),
+  /**
+   * A chat on Scratch (a task is a conversation plus parts, "Chats and Scratch"): off the board's lanes, listed by its latest
+   * exchange, unless something of it waits on the person. Absent for a task on the board.
+   */
+  scratch: Schema.optional(Schema.Boolean),
   /** A change ready that built nothing: no commits on its branch and no pull request open or merged. Absent otherwise. */
   nothingBuilt: Schema.optional(Schema.Boolean),
   /**
@@ -3437,6 +3474,8 @@ export const ThreadSnapshot = Schema.Struct({
     worktree: Schema.NullOr(Schema.String),
     /** It works Local, its folder the repository's own checkout here (ADR-091); absent for a worktree. */
     local: Schema.optional(Schema.Boolean),
+    /** A chat on Scratch, off the board's lanes (a task is a conversation plus parts); absent for a task on the board. */
+    scratch: Schema.optional(Schema.Boolean),
     /**
      * A move between a worktree and Local the person asked for that waits (a task is a conversation plus parts): where to,
      * and why, in words. `seen`, where it asks first, about a checkout on a branch of the person's own: what it was on and at,
@@ -4471,6 +4510,8 @@ export const Api = RpcGroup.make(
   /** Switches one of an agent's models off, or on again: one switched off is never planned, and no picker offers it. */
   command('SetModelBlocked', { agentId: Schema.String, model: Schema.String, blocked: Schema.Boolean }, Schema.Void),
   call('GetSettings', {}, AppSettings),
+  /** The presets the person has, in a project where one is named: built in, then their own. */
+  call('ListPresets', { projectId: Schema.optional(Schema.String) }, Schema.Array(Preset)),
   /** The person's MCP servers and skills, which roles get each, for every project or one, and how sync stands (ADR-097). */
   call('GetAgentTools', { projectId: Schema.NullOr(Schema.String) }, AgentTools),
   /** Which roles get one of the person's servers or skills in every project; `repository` names the project whose own it is. A skill added from GitHub is on while any role gets it. */
@@ -4523,6 +4564,22 @@ export const Api = RpcGroup.make(
   command('SetPostTeamReviews', { on: Schema.Boolean }, Schema.Void),
   /** What "Run it" on code from outside the team does without asking: ask each time, run safely, or trust it fully. */
   command('SetRunOutside', { to: Schema.Literals(['ask', 'safe', 'full']) }, Schema.Void),
+  /**
+   * Saves a preset: a task's parts, team and first lines of its brief (Save as preset), or the parts the coordinator offered;
+   * kept to the task's project with `projectOnly`. Its name, as kept.
+   */
+  command(
+    'SavePreset',
+    {
+      name: Schema.String,
+      taskId: Schema.optional(Schema.String),
+      parts: Schema.optional(PresetParts),
+      projectOnly: Schema.optional(Schema.Boolean),
+    },
+    Schema.Struct({ name: Schema.String }),
+  ),
+  /** Removes one of the person's presets; a built-in one stays. */
+  command('RemovePreset', { id: Schema.String }, Schema.Void),
   /**
    * "Run it" on the pull request a review task reviews, as the person said (a task is a conversation plus parts): the team's
    * code is trusted fully; an outside author's runs as `how` says, else as their setting answers, else they are asked
@@ -4799,6 +4856,8 @@ export const Api = RpcGroup.make(
   ),
   /** Calls off a move that waits: the task stays where it works. */
   command('DropMove', { taskId: Schema.String }, Schema.Void),
+  /** Puts a task on Scratch, or on the board with null (a task is a conversation plus parts, "Chats and Scratch"). */
+  command('ShelveTask', { taskId: Schema.String, shelf: Schema.NullOr(Schema.Literal('scratch')) }, Schema.Void),
   /**
    * Points a running task at another branch to work toward, or its default with null (a task is a conversation plus parts):
    * rebased where nothing is pushed, else onto a fresh branch whose pull request opens into it. What it did, in words.

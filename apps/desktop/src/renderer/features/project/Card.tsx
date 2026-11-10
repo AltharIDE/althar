@@ -152,6 +152,7 @@ function PlanCard({
   return (
     <TaskLaunch
       task={card.slug}
+      {...(plan.preset === undefined ? {} : { preset: plan.preset })}
       title={card.title}
       {...(from === undefined ? {} : { from })}
       project={actions.project}

@@ -54,6 +54,11 @@ export type Group = 'continuing' | 'line' | 'paused' | 'running'
 export type Held = ReadonlyMap<string, { readonly group: Group; readonly at: number }>
 
 export interface Lanes {
+  /**
+   * Chats on Scratch (a task is a conversation plus parts, "Chats and Scratch"): off the lanes, the latest first, unless a
+   * call of theirs waits on the person, which Needs you shows.
+   */
+  readonly scratch: ReadonlyArray<BoardTask>
   /** Up next in order: what continues, then the line, then what is paused, then plans on their countdown, then those held. */
   readonly next: ReadonlyArray<BoardTask>
   /** How many of `next`, from its start, continue when an agent is free. */
@@ -164,7 +169,10 @@ const plansOf = (lanes: Lanes) => lanes.next.slice(lanes.continuing + lanes.free
 
 /** The lanes, with each ready task in `merging` at work, merging, until it settles. */
 export const lanesOf = (board: BoardSnapshot, merging: ReadonlySet<string> = new Set()): Lanes => {
-  const tasks = asMerging(board.tasks, merging)
+  const every = asMerging(board.tasks, merging)
+  // A chat stays off the lanes, but for a call of its that waits on the person, and once it is settled.
+  const scratch = every.filter((task) => task.scratch === true && task.phase !== 'waiting' && task.phase !== 'settled')
+  const tasks = every.filter((task) => !scratch.includes(task))
   const of = (...phases: ReadonlyArray<BoardTask['phase']>) => tasks.filter((task) => phases.includes(task.phase))
   // A waiting task's calls are one, its oldest (`standingCalls`, as the home counts them too).
   const standing = standingCalls(tasks, board.calls)
@@ -174,6 +182,7 @@ export const lanesOf = (board: BoardSnapshot, merging: ReadonlySet<string> = new
   const unread = all.flatMap(({ task, call }) => (call === null ? [{ ...task, phase: 'running' as const }] : []))
   const folded = new Set(all.map(({ task }) => task.taskId))
   return {
+    scratch: scratch.toSorted((a, b) => b.createdAt.localeCompare(a.createdAt)),
     ...laid(
       [...of('running'), ...unread],
       of('planned', 'held').toSorted((a, b) => (a.plan?.startsAt ?? '￿').localeCompare(b.plan?.startsAt ?? '￿')),

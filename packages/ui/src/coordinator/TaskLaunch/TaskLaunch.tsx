@@ -153,6 +153,8 @@ const whereLine = (worksIn: WorksIn, why: string | undefined, taken: string | nu
 
 export interface TaskLaunchProps {
   task: string
+  /** The preset its parts are (a task is a conversation plus parts), the kicker's first word: Change, Chat. */
+  preset?: string
   title: string
   from?: IssueRefProps
   steps?: readonly LaunchStep[]
@@ -218,6 +220,7 @@ export interface TaskLaunchProps {
 
 export function TaskLaunch({
   task,
+  preset,
   title,
   from,
   steps: stepsProp,
@@ -322,6 +325,7 @@ export function TaskLaunch({
     <div className={cx(s.launch, held && s.held)} ref={ref} data-rhythm={Rhythm.Card}>
       <div className={s.head}>
         <span className={s.kicker}>
+          {preset !== undefined && `${preset} · `}
           {t.task(task)}
           {from && (
             <>

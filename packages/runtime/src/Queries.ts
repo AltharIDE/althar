@@ -88,6 +88,7 @@ import { commitOf, commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRe
 import { reachedRemote } from './sshHosts'
 import { commandIn, shortCommand } from './rules'
 import { reviewBriefOf } from './Reviews'
+import { partsOfPlan, presetOf, presetsIn } from './presets'
 import { Sessions } from './Sessions'
 import { spendingOf } from './Spending'
 import { timingsFrom } from './turnTimes'
@@ -1828,9 +1829,8 @@ export class Queries extends Context.Service<
                   SELECT b.slug, c.workspace_id, w.name,
                     (SELECT json_extract(l.snapshot, '$.words.short') || ' ' || json_extract(l.snapshot, '$.words.prefix') ||
                         json_extract(l.snapshot, '$.number')
-                      FROM workspaces s JOIN repository_changes sc ON sc.workspace_id = s.id
-                      JOIN external_links l ON l.url = sc.pull_request_url AND l.kind = 'change'
-                      WHERE s.task_id = w.task_id AND s.binding_id = w.binding_id AND s.branch = w.toward AND s.id <> w.id
+                      FROM external_links l
+                      WHERE l.task_id = w.task_id AND l.kind = 'change' AND json_extract(l.snapshot, '$.source') = w.toward
                         AND json_extract(l.snapshot, '$.state') = 'open'
                       ORDER BY l.created_at DESC LIMIT 1) AS below
                   FROM repository_changes c JOIN repository_bindings b ON b.id = c.binding_id
@@ -2158,6 +2158,7 @@ export class Queries extends Context.Service<
             turnWaits: number
             runPlan: string | null
             local: number
+            shelf: string | null
             toward: string | null
             parentId: string | null
             parentSlug: string | null
@@ -2188,6 +2189,7 @@ export class Queries extends Context.Service<
               -- Whether it works Local, in its repositories' own checkouts here (ADR-091).
               (SELECT count(*) FROM workspaces lw WHERE lw.task_id = k.id AND lw.device_id = ${instance.deviceId} AND lw.kind = 'checkout')
                 AS local,
+              k.shelf,
               -- The branch its work goes into, where it isn't the default (ADR-093): its first repository's that says one.
               (SELECT tw.toward FROM workspaces tw JOIN repository_bindings tb ON tb.id = tw.binding_id
                 WHERE tw.task_id = k.id AND tw.device_id = ${instance.deviceId} AND tw.toward IS NOT NULL
@@ -2486,6 +2488,22 @@ export class Queries extends Context.Service<
                       : {}),
                     reason: text(parameters, 'reason') || null,
                     end: end === 'draft' || end === 'ready' || end === 'none' ? end : null,
+                    // The preset its parts are, which the card's kicker names first (a task is a conversation plus parts).
+                    preset: presetOf(
+                      yield* presetsIn(task.projectId),
+                      partsOfPlan(
+                        {
+                          steps: planned,
+                          end: end ?? null,
+                          here: field(parameters, 'here') === true,
+                          reads: field(parameters, 'reads') === true,
+                          reviewAfterMerge: field(parameters, 'reviewAfterMerge') === true,
+                          worksIn: text(parameters, 'worksIn'),
+                        },
+                        task.shelf,
+                        '',
+                      ),
+                    ),
                     // A review's lead only reads: only an agent its session holds to that may take it (Reviews.canLead).
                     ...(field(parameters, 'reads') === true
                       ? {
@@ -2520,6 +2538,7 @@ export class Queries extends Context.Service<
             ...(replied === undefined ? {} : { replied }),
             ...(afterMerge === undefined ? {} : { afterMerge }),
             ...(changeCount > 1 ? { changeCount } : {}),
+            ...(task.shelf === 'scratch' ? { scratch: true } : {}),
             // Resolving a conflict, or fixing the checks on the merge, is a step of its own while it lasts.
             step:
               task.step ??
@@ -3418,6 +3437,7 @@ export class Queries extends Context.Service<
               branch: head.branch,
               worktree: head.worktree,
               ...(card?.local === true ? { local: true } : {}),
+              ...(card?.scratch === true ? { scratch: true } : {}),
               ...(moving === undefined
                 ? {}
                 : {

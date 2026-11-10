@@ -20,6 +20,7 @@ import {
   Findings,
   KeptRow,
   LinkButton,
+  Popover,
   NextLine,
   NextRow,
   NextStep,
@@ -80,6 +81,9 @@ import type { WorkActions } from './useWorkActions'
 
 export const text = {
   label: 'The project’s work',
+  /** Chats on Scratch, off the lanes (a task is a conversation plus parts): the chip that lists them. */
+  scratch: (count: number) => `Scratch · ${count}`,
+  scratchLabel: 'Chats on Scratch',
   startsIn: (seconds: number) => (seconds <= 0 ? 'Starting' : `Starts in ${seconds}s`),
   held: 'Held. Starts when you say',
   /** The quiet divider over the tasks that wait for a free agent before any has worked on them, and, under them, the plans. */
@@ -997,6 +1001,25 @@ export function BoardView({
             }
           : {})}
       >
+        {/* Chats on Scratch, off the lanes: one chip, opened in place. */}
+        {lanes.scratch.length > 0 && (
+          <div className={s.scratch}>
+            <Popover
+              label={text.scratchLabel}
+              placement="below"
+              align="start"
+              trigger={<LinkButton>{text.scratch(lanes.scratch.length)}</LinkButton>}
+            >
+              <ul className={s.scratchList}>
+                {lanes.scratch.map((chat) => (
+                  <li key={chat.taskId}>
+                    <LinkButton onClick={() => onOpen(chat.threadId)}>{chat.title}</LinkButton>
+                  </li>
+                ))}
+              </ul>
+            </Popover>
+          </div>
+        )}
         {continuing > 0 && <BoardList>{shown.next.slice(0, continuing).map(nextRow)}</BoardList>}
         {free > 0 && (
           <BoardDivider

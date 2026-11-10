@@ -62,7 +62,9 @@ export const WINDOW_ACTIONS = {
   move: { person: 'moves a running task into or out of their own checkout: only they say when it switches' },
   dropMove: { person: 'calls off a move into or out of their own checkout' },
   workToward: { tool: 'work_toward' },
-  runIt: { tool: 'run_it' },
+  runIt: { person: 'says how far to trust a pull request’s code: a lead’s run_it only relays their word' },
+  shelve: { tool: 'change_part' },
+  savePreset: { person: 'keeps a task’s parts as a preset of their own, in their settings' },
   handOverHeld: { tool: 'change_lead' },
   answerQuestion: { person: 'answers what an agent asked them' },
   // The Change card.

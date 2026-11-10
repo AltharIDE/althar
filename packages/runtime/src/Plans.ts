@@ -10,6 +10,7 @@ import { RuntimeConfig } from './Config'
 import { countdownNow } from './plansAndReviews'
 import { Reviews } from './Reviews'
 import { Instance } from './Instance'
+import { offerPreset } from './presets'
 import { change, fact, timestamp } from './records'
 import { setToward } from './towards'
 import { type PlanStep, Runs, type TaskEnd } from './Runs'
@@ -230,6 +231,11 @@ export class Plans extends Context.Service<
           )
           const plan = yield* load(planId)
           const parameters = parametersOf(plan)
+          // The same parts set up twice running: the coordinator offers them as a preset, once (a task is a conversation plus parts).
+          if (accepted)
+            yield* offerPreset(plan.projectId, instance.coordinatorId).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not offer a preset', cause)),
+            )
           if (parameters.reads === true) {
             // A review's lead starts in its thread; accepted before, it started then, or its thread says why it couldn't.
             const [lead] = parameters.steps

@@ -39,3 +39,11 @@
   font-size: 13px;
   line-height: 1.55;
 }
+
+/* What Althar offers to keep, such as a preset: its line, what it holds, and its button. */
+.offer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}

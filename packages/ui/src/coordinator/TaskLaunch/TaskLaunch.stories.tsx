@@ -87,6 +87,9 @@ type Story = StoryObj<typeof meta>
 /** The plan, counting down once you can see it. Change an agent, skip an optional step, or pick what happens when it is done. */
 export const AboutToStart: Story = { render: () => <Launch /> }
 
+/** Its kicker names the preset its parts are first (a task is a conversation plus parts), in the kicker's own type. */
+export const NamesItsPreset: Story = { render: () => <Launch preset="Change" /> }
+
 /** A review proposed with two agents can go down to one: the second's picker has Remove from this step. */
 export const OneReviewerInsteadOfTwo: Story = {
   render: () => <Launch />,

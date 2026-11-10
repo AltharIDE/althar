@@ -21,10 +21,12 @@ import { Instance } from './Instance'
 import { answeredIn, quickIn } from './kinds'
 import { MergeReviews } from './MergeReviews'
 import { Reviews } from './Reviews'
+import { shelve } from './scratch'
+import { branchOnFirstWrite } from './firstWrite'
 import { Projects } from './Projects'
 import { Plans } from './Plans'
 import { PlanUsage } from './PlanUsage'
-import { fact } from './records'
+import { fact, timestamp } from './records'
 import { Runs, type StuckAnswer, type StuckInfo } from './Runs'
 import { Sessions } from './Sessions'
 import { actionsOf, standingOf, Tasks } from './Tasks'
@@ -888,6 +890,16 @@ export class TaskActions extends Context.Service<
         pull_request: Schema.Union([Schema.String, Schema.Number]),
         why: Schema.optional(Schema.String),
       })
+      const PartAsked = Schema.Struct({
+        task: Schema.optional(Schema.String),
+        part: Schema.Literals(['workspace', 'checked_by', 'reviewing', 'output', 'access', 'shelf']),
+        name: Schema.optional(Schema.String),
+        pull_request: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
+        to: Schema.optional(Schema.Literals(['worktree', 'checkout'])),
+        toward: Schema.optional(Schema.NullOr(Schema.String)),
+        shelf: Schema.optional(Schema.Literals(['scratch', 'board'])),
+        why: Schema.optional(Schema.String),
+      })
       const TowardAsked = Schema.Struct({
         task: Schema.optional(Schema.String),
         toward: Schema.NullOr(Schema.String),
@@ -968,6 +980,147 @@ export class TaskActions extends Context.Service<
        * Starts another change in a task (a task is a conversation plus parts): its own branch and worktree, beside the others,
        * shipped and reviewed on its own. The task's thread marks it as a step in the work.
        */
+      /*
+       * A task's parts, changed by its lead or the coordinator when the task needs it (a task is a conversation plus parts,
+       * "Changing parts"), each with a reason, as the person changes them from the parts row: add_part, change_part and
+       * remove_part. Each does what that part's own move does; running an outside author's code is the person's word alone.
+       */
+      const prOf = (asked: typeof PartAsked.Type) =>
+        asked.pull_request === undefined
+          ? undefined
+          : typeof asked.pull_request === 'number'
+            ? `#${asked.pull_request}`
+            : asked.pull_request.trim()
+
+      const addPart = (access: ToolAccess, input: unknown): Effect.Effect<string, unknown, Store> =>
+        Effect.gen(function* () {
+          const asked = yield* read(PartAsked, input)
+          const task = yield* named(access, asked.task)
+          const pullRequest = prOf(asked)
+          switch (asked.part) {
+            case 'workspace': {
+              // A copy takes its branch where it stands, so nothing is lost on a detached head; one with its branch takes another
+              // change, by name.
+              const made = yield* changes.exclusive(task.id, branchOnFirstWrite(task.id, [], true))
+              if (made.length > 0) {
+                yield* touchTask(task.id)
+                return `Took a worktree: ${task.slug}'s work is on ${made.join(' and ')} now.`
+              }
+              if (asked.name === undefined)
+                return `${task.slug} has a worktree with its branch already: to start another change beside it, give it a name.`
+              return yield* startChange(access, {
+                task: asked.task,
+                name: asked.name,
+                ...(asked.why === undefined ? {} : { why: asked.why }),
+              })
+            }
+            case 'reviewing':
+              if (pullRequest === undefined) return yield* new ToolRefused({ message: 'Name the pull request it reviews: pull_request.' })
+              return yield* addReview(access, { task: asked.task, pull_request: pullRequest })
+            case 'output': {
+              if (pullRequest === undefined) return yield* new ToolRefused({ message: 'Name the pull request it follows: pull_request.' })
+              yield* plainly(changes.attach({ taskId: task.id, pullRequest, actorId: actorOf(access) }), task.slug)
+              yield* touchTask(task.id)
+              return `${task.slug} follows ${pullRequest} now, as a change of its own.`
+            }
+            case 'checked_by':
+              return yield* new ToolRefused({
+                message: `${task.slug}'s review comes from its plan: a quick task gets one with make_it_a_change; a planned one has it already, and remove_part takes it away.`,
+              })
+            case 'access':
+              return yield* new ToolRefused({
+                message:
+                  'Every task has its Access: running an outside author’s code is the person’s word alone (Run it). Suggest it to them.',
+              })
+            case 'shelf':
+              return yield* changePart(access, input)
+          }
+        })
+
+      const changePart = (access: ToolAccess, input: unknown): Effect.Effect<string, unknown, Store> =>
+        Effect.gen(function* () {
+          const asked = yield* read(PartAsked, input)
+          const task = yield* named(access, asked.task)
+          switch (asked.part) {
+            case 'workspace': {
+              if (asked.toward !== undefined) return yield* workToward(access, { task: asked.task, toward: asked.toward })
+              if (asked.to === undefined)
+                return yield* new ToolRefused({
+                  message: 'Say where it moves (to: worktree or checkout), or what it works toward (toward).',
+                })
+              const moved = yield* plainly(
+                runs.move({
+                  envelope: yield* envelope('task.move', { taskId: task.id, to: asked.to }, undefined, actorOf(access)),
+                  taskId: task.id,
+                  to: asked.to,
+                }),
+                task.slug,
+              )
+              return moved.kind === 'moved'
+                ? `${task.slug} works ${asked.to === 'checkout' ? 'Local, in the person’s checkout' : 'in a worktree of its own'} now; its lead starts afresh there.`
+                : moved.kind === 'waits'
+                  ? `${task.slug} moves once it can: ${moved.why}`
+                  : `The person’s checkout is on ${moved.ask.branch}, a branch of theirs: they answer from the task's header whether to switch it.`
+            }
+            case 'shelf': {
+              const shelf = asked.shelf === 'scratch' ? 'scratch' : null
+              yield* plainly(shelve(task.id, shelf, actorOf(access)), task.slug)
+              return shelf === 'scratch' ? `${task.slug} is on Scratch now.` : `${task.slug} is on the board now.`
+            }
+            case 'access':
+              return yield* new ToolRefused({
+                message: 'Running an outside author’s code is the person’s word alone (Run it). Suggest it to them.',
+              })
+            default:
+              return yield* addPart(access, input)
+          }
+        })
+
+      const removePart = (access: ToolAccess, input: unknown): Effect.Effect<string, unknown, Store> =>
+        Effect.gen(function* () {
+          const asked = yield* read(PartAsked, input)
+          const task = yield* named(access, asked.task)
+          const pullRequest = prOf(asked)
+          switch (asked.part) {
+            case 'output':
+              if (pullRequest === undefined) return yield* new ToolRefused({ message: 'Name the pull request: pull_request.' })
+              return yield* stopFollowing(access, { task: asked.task, pull_request: pullRequest })
+            case 'checked_by': {
+              yield* plainly(
+                runs.skipReview({
+                  envelope: yield* envelope('task.skip_review', { taskId: task.id }, undefined, actorOf(access)),
+                  taskId: task.id,
+                }),
+                task.slug,
+              )
+              return `${task.slug} has no review this round: one under way stops, findings filed already stay in its thread.`
+            }
+            case 'reviewing': {
+              const sql = yield* SqlClient.SqlClient
+              const [waiting] = yield* sql<{ id: string }>`
+                SELECT id FROM review_drafts WHERE task_id = ${task.id} AND state IN ('pending', 'failed') LIMIT 1`
+              // A draft never posted would be lost: the person says.
+              if (waiting !== undefined)
+                return yield* new ToolRefused({
+                  message: `${task.slug}'s draft review was never posted: removing it would lose it. Ask the person to post or discard it first.`,
+                })
+              yield* sql`UPDATE workspaces SET state = 'cleaned', cleaned_at = ${yield* timestamp}, revision = revision + 1
+                WHERE task_id = ${task.id} AND reviewing IS NOT NULL AND access = 'read'
+                  AND (${pullRequest ?? null} IS NULL OR reviewing LIKE ${`%${pullRequest?.replace(/^#/, '/') ?? ''}`})`
+              yield* touchTask(task.id)
+              return `${task.slug} reviews that pull request no more: its thread, and any posted review, stay.`
+            }
+            case 'workspace':
+              return yield* new ToolRefused({
+                message: `${task.slug}'s folder goes once it's settled, after the usual wait, or with Remove on its row; its branch stays either way.`,
+              })
+            case 'access':
+              return yield* new ToolRefused({ message: 'Access isn’t removed: the person says Run it, or stops it.' })
+            case 'shelf':
+              return yield* changePart(access, { ...asked, shelf: 'board' })
+          }
+        })
+
       /** Adds a review of a pull request to a task with work of its own: a copy beside its worktree, drafted by its lead. */
       const addReview = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
@@ -1258,6 +1411,54 @@ export class TaskActions extends Context.Service<
             required: ['name'],
           },
           startChange,
+        ),
+        tool(
+          'add_part',
+          'Adds a part to a task when it needs one, with why (a task is a conversation plus parts): workspace, a worktree with its branch for a chat or quick task that has to write (it takes its branch where it stands), or, with name, another change beside its first; reviewing, a review of a related pull request (pull_request); output, a pull request it follows as a change of its own (pull_request). It acts at once; a change you make on your way folds into your work, and only one someone else made gets a line of its own.',
+          {
+            type: 'object',
+            properties: {
+              task: optionalTask,
+              why,
+              part: { type: 'string', enum: ['workspace', 'reviewing', 'output'] },
+              name: { type: 'string', description: 'For another change: a few words for what it does.' },
+              pull_request: { type: 'string', description: 'Its link, or its number in the project’s repository: #123.' },
+            },
+            required: ['part', 'why'],
+          },
+          addPart,
+        ),
+        tool(
+          'change_part',
+          'Changes one of a task’s parts, with why: workspace moves it between a worktree and Local (to: worktree or checkout; it waits for the lead’s turn to end, and asks the person before taking their checkout off a branch of their own) or points it at another branch to work toward (toward, null for the default); shelf puts it on Scratch or on the board. Running an outside author’s code is the person’s word alone: suggest Run it to them.',
+          {
+            type: 'object',
+            properties: {
+              task: optionalTask,
+              why,
+              part: { type: 'string', enum: ['workspace', 'shelf'] },
+              to: { type: 'string', enum: ['worktree', 'checkout'] },
+              toward: { type: ['string', 'null'] },
+              shelf: { type: 'string', enum: ['scratch', 'board'] },
+            },
+            required: ['part', 'why'],
+          },
+          changePart,
+        ),
+        tool(
+          'remove_part',
+          'Removes one of a task’s parts, with why; it loses nothing: checked_by, its review this round (a review under way stops, findings filed stay); reviewing, a pull request it reviews (pull_request), refused while its draft was never posted, for the person to post or discard; output, a pull request it follows (pull_request), left open on its host. Its folder goes once it’s settled, its branch staying.',
+          {
+            type: 'object',
+            properties: {
+              task: optionalTask,
+              why,
+              part: { type: 'string', enum: ['checked_by', 'reviewing', 'output'] },
+              pull_request: { type: 'string' },
+            },
+            required: ['part', 'why'],
+          },
+          removePart,
         ),
         tool(
           'add_review',

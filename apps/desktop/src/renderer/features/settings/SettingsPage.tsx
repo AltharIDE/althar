@@ -78,6 +78,7 @@ import { useReviewSeal } from './useReviewSeal'
 import { useEdgeGlance } from './useEdgeGlance'
 import { TasksSection } from './TasksSection'
 import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
+import { PresetsSection, presetsText } from './PresetsSection'
 import { usePostTeamReviews } from './usePostTeamReviews'
 import { type RunOutside, useRunOutside } from './useRunOutside'
 import { useTaskFolders } from './useTaskFolders'
@@ -217,7 +218,14 @@ function SectionBody({
     case 'this-mac':
       return <ThisMacSection {...(onTask === undefined ? {} : { onTask })} />
     case 'tasks':
-      return <TasksSection />
+      return (
+        <>
+          <TasksSection />
+          <SettingGroup title={presetsText.title} headingLevel={2}>
+            <PresetsSection />
+          </SettingGroup>
+        </>
+      )
     case 'pull-requests':
       return <ReviewsSection connections={connections} />
     case 'notifications':

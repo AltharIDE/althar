@@ -28,6 +28,7 @@ const OWN = [
   'push_to_pull_request',
   'read_checks',
   'record_setup',
+  'run_it',
   'wait_for_person',
 ]
 

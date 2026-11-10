@@ -1271,6 +1271,24 @@ Built since, in #739:
   its worktree (`workspaces.reviewing`), which its lead drafts a review of
   with `draft_review`. The task stays its work's: posting the review
   doesn't settle it.
+- **The parts tools:** `add_part`, `change_part` and `remove_part`, shared
+  by leads and the coordinator, each with a reason, over the moves that
+  exist: a worktree taken where a copy stands, another change, a review, a
+  pull request followed; a workspace moved or pointed elsewhere, Scratch or
+  the board; Checked by removed for the round, a review dropped (refused
+  while its draft was never posted), a pull request no longer followed.
+  Access is refused to them: Run it is the person's word.
+- **Chats on Scratch** (`tasks.shelf`): what the coordinator starts at once
+  sits on Scratch, off the board's lanes, behind one chip at the head of Up
+  next, and moves to the board, saying so, once it takes a worktree or an
+  output after it was put there. The person moves any task either way from
+  its menu.
+- **Presets** (`presets`): Chat, Change, Small change, Review a PR and
+  Prototype are built in. The plan card's kicker names the preset its parts
+  are; Save as preset in any task's menu keeps its parts, team and the
+  start of its brief; the coordinator's thread offers one, with a button,
+  once the same parts were set up twice running; Settings lists them, with
+  Remove for the person's own.
 
 Compatibility: every change to the store is additive, with nullable
 columns an older build reads past; a run with no `ships` and a workspace
@@ -1279,8 +1297,8 @@ update finishes as a round; the API only gains fields and a command; the
 old "Review rounds" setting is kept and read by nothing; the lead's tools
 keep their names, `make_it_a_change` included.
 
-Still to build, as the rest of this proposal says: the parts tools,
-Scratch and presets.
+Still to build, as the rest of this proposal says: helpers handed a
+change.
 
 It is done when:
 

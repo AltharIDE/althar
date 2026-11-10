@@ -1,6 +1,6 @@
 import { createContext, Fragment, useContext, useState, type ReactNode } from 'react'
 
-import type { FieldAnswer, Unfurl } from '@althar/contracts'
+import type { FieldAnswer, PresetParts, Unfurl } from '@althar/contracts'
 import {
   AltharLine,
   Arrived,
@@ -38,6 +38,7 @@ import { documentVersions } from './handed'
 import { fileAttachments } from './files'
 import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
+import { useServices } from '../data/services'
 import { WayOut } from './WayOut'
 import { serverBrand } from './mcpServers'
 import { keyOf, pastedIn } from './pasted'
@@ -306,11 +307,33 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
         <>
           <p className={s[part.tone]}>{part.text}</p>
           {part.detail !== undefined && <p className={s.detail}>{part.detail}</p>}
+          {part.offer !== undefined && <PresetOffer offer={part.offer} />}
         </>
       )
     case 'pictures':
       return <Gallery shots={shotsOf(part.id, part.pictures)} />
   }
+}
+
+/** The coordinator's offer to keep parts the person set up twice as a preset: one press keeps it, by its name. */
+function PresetOffer({ offer }: { offer: { readonly name: string; readonly parts: PresetParts } }) {
+  const { client } = useServices()
+  const [kept, setKept] = useState<'no' | 'keeping' | 'kept'>('no')
+  if (kept === 'kept') return <p className={s.detail}>{`Kept as “${offer.name}”: Settings has your presets.`}</p>
+  return (
+    <LinkButton
+      disabled={kept === 'keeping'}
+      onClick={() => {
+        setKept('keeping')
+        client.savePreset({ name: offer.name, parts: offer.parts }).then(
+          () => setKept('kept'),
+          () => setKept('no'),
+        )
+      }}
+    >
+      {`Keep it as “${offer.name}”`}
+    </LinkButton>
+  )
 }
 
 /** What the person said, each link that unfurled read as its key where they pasted it; its card, under the words, says the rest. */
@@ -608,6 +631,14 @@ export function ThreadBlocks({
           <ThreadDivider key={block.id} icon="agents">
             {block.text}
           </ThreadDivider>
+        )
+      case 'offer':
+        return (
+          <div key={block.id} className={s.offer}>
+            <p className={s.info}>{block.text}</p>
+            {block.detail !== null && <p className={s.detail}>{block.detail}</p>}
+            <PresetOffer offer={block.offer} />
+          </div>
         )
       case 'step':
         // A step's report is a task's, and its thread draws it in its rounds (TaskThread, ADR-042).

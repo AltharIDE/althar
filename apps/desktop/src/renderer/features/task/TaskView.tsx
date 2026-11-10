@@ -910,6 +910,17 @@ export function TaskView({
             }
           : {})}
         {...(snapshot.task.skipReview === true ? { onSkipReview: () => void model.skipReview() } : {})}
+        // Its parts kept as a preset, named for it; and a chat moved between Scratch and the board, either way.
+        onSavePreset={() => void model.savePreset(snapshot.task.title.slice(0, 40))}
+        {...(snapshot.task.phase !== 'settled' &&
+        (snapshot.task.scratch === true || (snapshot.task.kind === 'plain' && snapshot.task.changes.length === 0))
+          ? {
+              shelf: {
+                to: snapshot.task.scratch === true ? ('board' as const) : ('scratch' as const),
+                onMove: () => void model.shelve(snapshot.task.scratch === true ? null : 'scratch'),
+              },
+            }
+          : {})}
         {...(can('stop') ? { onStop: () => void model.stop() } : {})}
         {...(can('resume') ? { onResume: () => void model.resume() } : {})}
         // A merged task abandons the commits after its pull request, and stays merged: one Abandon, said for what it does.

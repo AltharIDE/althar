@@ -77,4 +77,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0071_merge_reviews': '682500c21c25421c38ae724986fe53d241c553d6a419d0b4fc8db7706fb3f838',
   '0072_several_changes': 'df44a1cc68877fa2af8c274c8dfc07c01a9c133811580ad914221f6789f397d6',
   '0073_review_trust': 'a46e0470ea267ae01e4a80bfeca4adf5bfb715bd5a3f963e2c83c00d67b53a73',
+  '0074_scratch_and_presets': 'a87cee43a3b348aa6d41f86f89d12b8e2439aa0294b552914dc8aef0d81cfc39',
 }

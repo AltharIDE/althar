@@ -1,6 +1,8 @@
 import {
   type CheckoutAnswer,
   type MoveOutcome,
+  type Preset,
+  type PresetParts,
   type WorksIn,
   type AccountSignInState,
   type InstalledSkill,
@@ -262,6 +264,19 @@ export interface Client {
   readonly setPostTeamReviews: (on: boolean) => Promise<void>
   /** What "Run it" on code from outside the team does without asking. */
   readonly setRunOutside: (to: 'ask' | 'safe' | 'full') => Promise<void>
+  /** Puts a task on Scratch, or on the board with null. */
+  readonly shelveTask: (taskId: string, shelf: 'scratch' | null) => Promise<void>
+  /** The presets the person has, in a project where one is named. */
+  readonly listPresets: (projectId?: string) => Promise<ReadonlyArray<Preset>>
+  /** Saves a preset from a task, or the parts the coordinator offered. */
+  readonly savePreset: (input: {
+    readonly name: string
+    readonly taskId?: string
+    readonly parts?: PresetParts
+    readonly projectOnly?: boolean
+  }) => Promise<{ readonly name: string }>
+  /** Removes one of the person's presets. */
+  readonly removePreset: (id: string) => Promise<void>
   /** "Run it" on the pull request a review task reviews, as far as `how` trusts it; `asks` where nothing says how far. */
   readonly runIt: (
     taskId: string,
@@ -807,6 +822,10 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
     setRunOutside: (to) => command((commandId) => api.SetRunOutside({ commandId, to })),
+    shelveTask: (taskId, shelf) => command((commandId) => api.ShelveTask({ commandId, taskId, shelf })),
+    listPresets: (projectId) => settle(api.ListPresets(projectId === undefined ? {} : { projectId })),
+    savePreset: (input) => command((commandId) => api.SavePreset({ commandId, ...input })),
+    removePreset: (id) => command((commandId) => api.RemovePreset({ commandId, id })),
     runIt: (taskId, how) => command((commandId) => api.RunIt({ commandId, taskId, ...(how === undefined ? {} : { how }) })),
     setReviewSeal: (on) => command((commandId) => api.SetReviewSeal({ commandId, on })),
     setReviewSealStyle: (style) => command((commandId) => api.SetReviewSealStyle({ commandId, style })),

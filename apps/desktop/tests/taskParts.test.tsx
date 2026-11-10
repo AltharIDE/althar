@@ -126,6 +126,18 @@ describe('a task’s parts', () => {
     expect(screen.queryByRole('button', { name: 'Run safely' })).toBeNull()
   })
 
+  it('saves a task’s parts as a preset, and moves a chat off Scratch, from its menu', async () => {
+    const chat = snapshot({ task: { ...base.task, phase: 'ready', scratch: true } })
+    const { client } = fakeClient({ getThread: vi.fn(async () => chat) })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Save as preset' }))
+    await waitFor(() => expect(client.savePreset).toHaveBeenCalledWith({ name: base.task.title.slice(0, 40), taskId: base.task.id }))
+    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Move to the board' }))
+    await waitFor(() => expect(client.shelveTask).toHaveBeenCalledWith(base.task.id, null))
+  })
+
   it('posts a review draft from its row', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [items.review({ state: 'pending' })] })) })
     withServices(<Task />, client)

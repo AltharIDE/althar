@@ -115,6 +115,8 @@ import { TaskActions } from './TaskActions'
 import { IssueChanges } from './IssueChanges'
 import { IssueDrafts } from './IssueDrafts'
 import { postTeamReviews, Reviews, runOutside, setPostTeamReviews, setRunOutside } from './Reviews'
+import { shelve } from './scratch'
+import { describe as describePreset, partsOfTask, presetsIn, removePreset, savePreset } from './presets'
 import { FastLane } from './fastLane'
 import { MergeReviews } from './MergeReviews'
 import { Plans } from './Plans'
@@ -1561,6 +1563,44 @@ export const handlers = Api.toLayer(
                 ...(change === undefined ? {} : { change }),
                 ...(consent === undefined ? {} : { consent }),
               }),
+            ),
+          ),
+        ),
+      ListPresets: ({ projectId }) =>
+        api(
+          Effect.map(presetsIn(projectId ?? null), (all) => all.map((one) => ({ ...one, about: describePreset(one.parts) }))).pipe(
+            Effect.provideService(SqlClient.SqlClient, sql),
+          ),
+        ),
+      SavePreset: ({ commandId, name, taskId, parts, projectOnly }) =>
+        once(
+          commandId,
+          api(
+            Effect.provideContext(
+              Effect.gen(function* () {
+                const from = taskId === undefined ? null : yield* partsOfTask(taskId)
+                const kept = parts ?? from?.parts
+                if (kept === undefined)
+                  return yield* new ApiError({ reason: 'Invalid', message: 'Say which task, or what parts, to keep.' })
+                return yield* savePreset({
+                  name,
+                  parts: kept,
+                  projectId: projectOnly === true ? (from?.projectId ?? null) : null,
+                  fromTaskId: taskId ?? null,
+                  actorId: instance.personId,
+                })
+              }),
+              folderStore,
+            ),
+          ),
+        ),
+      RemovePreset: ({ commandId, id }) => once(commandId, api(removePreset(id).pipe(Effect.provideService(SqlClient.SqlClient, sql)))),
+      ShelveTask: ({ commandId, taskId, shelf }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.shelve', { taskId, shelf }, commandId), (said) =>
+              Effect.provideContext(shelve(taskId, shelf, said.actorId), folderStore),
             ),
           ),
         ),
