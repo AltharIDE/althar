@@ -43,8 +43,15 @@ import { duration, mostOf, spentWords } from '../../shared/turnTime'
 /** A step of the work's row (a task is a conversation plus parts): its stamp, and the whole of it on hover. */
 export const workStepText = {
   newChange: 'New change',
+  shipped: 'Shipped',
+  merged: 'Merged',
+  joined: 'Kept together',
+  dropped: 'Dropped',
+  keepTogether: 'Keep them together',
+  dropIt: 'Drop it',
   whole: (name: string, branch: string, toward: string | null) =>
     `New change · ${name}, on ${branch}${toward === null ? '' : `, into ${toward}`}`,
+  waits: (name: string) => `, waits for ${name} to merge`,
 }
 /*
  * A task's thread in rounds (shared/rounds.ts, ADR-042), as the kit draws
@@ -86,6 +93,10 @@ export interface TaskThreadProps extends Shared {
   readonly settledOf?: (review: string) => string | undefined
   /** A review running now, by who and for how long: a line at the thread's end. */
   readonly reviewing?: { readonly model: ModelInfo; readonly took: string } | null
+  /** A step of the work's one way on, where it has one: Keep them together on a change its lead split, Drop it on one its git made. */
+  readonly stepAction?: (
+    step: Extract<RoundBlock, { kind: 'work_step' }>['step'],
+  ) => { readonly label: string; readonly onPress: () => void } | undefined
 }
 
 /** One step of a round's work, as its header opens to it. */
@@ -376,7 +387,7 @@ function Situation({
   )
 }
 
-export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing = null, ...shared }: TaskThreadProps) {
+export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing = null, stepAction, ...shared }: TaskThreadProps) {
   const { threadId, worktree = null, openFile, session, project, onTryAgain, onCompact, onSignIn } = shared
   const named = useModelNames()
   // A round on the model its own turn ran, as the runtime recorded it; an older one without, on the thread's current
@@ -470,14 +481,31 @@ export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing
           </ThreadDivider>
         )
       case 'work_step': {
-        // A change started: its name in ink, its branch as code, and what it works toward where that isn't the task's.
+        // A step of the work: a change started, its name in ink, its branch as code, and what it works toward where that isn't
+        // the task's; shipped or merged, with its pull request; kept together with another, or dropped.
         const { step } = block
+        const action = stepAction?.(step)
+        if (step.kind !== 'new_change')
+          return (
+            <StepRow
+              key={block.id}
+              data-item={block.id}
+              stamp={workStepText[step.kind]}
+              tone={step.kind === 'shipped' || step.kind === 'merged' ? 'done' : 'new'}
+              title={`${workStepText[step.kind]} · ${step.name}, ${step.branch}`}
+            >
+              <strong>{step.name}</strong>
+              {step.kind === 'joined' ? ', onto ' : step.kind === 'dropped' ? ', its branch stays: ' : ', '}
+              <code>{step.branch}</code>
+            </StepRow>
+          )
         return (
           <StepRow
             key={block.id}
             data-item={block.id}
             stamp={workStepText.newChange}
-            title={workStepText.whole(step.name, step.branch, step.toward)}
+            title={`${workStepText.whole(step.name, step.branch, step.toward)}${step.waits === undefined ? '' : workStepText.waits(step.waits)}`}
+            {...(action === undefined ? {} : { action })}
           >
             <strong>{step.name}</strong>, on <code>{step.branch}</code>
             {step.toward === null ? null : (
@@ -485,6 +513,7 @@ export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing
                 , into <code>{step.toward}</code>
               </>
             )}
+            {step.waits === undefined ? null : workStepText.waits(step.waits)}
           </StepRow>
         )
       }

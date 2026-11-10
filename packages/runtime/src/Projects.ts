@@ -492,6 +492,8 @@ export class Projects extends Context.Service<
       readonly on?: string
       readonly toward?: string
       readonly repository?: string
+      /** Another change of the task's this one waits for to merge, without building on its code: both go into the same branch. */
+      readonly waitsFor?: string
       readonly actorId: ActorId
     }): Effect.Effect<StartedChange, NotFound | ChangeRefused | BranchNotFound | GitFailed | Failure>
     /** A project's repositories, as this device has them: each one's branch, remote, role, and the fork it is. */
@@ -733,6 +735,7 @@ export class Projects extends Context.Service<
         readonly on?: string
         readonly toward?: string
         readonly repository?: string
+        readonly waitsFor?: string
         readonly actorId: ActorId
       }) =>
         Effect.gen(function* () {
@@ -789,7 +792,22 @@ export class Projects extends Context.Service<
                 )
           if (input.on !== undefined && input.on.trim() !== '' && below === undefined)
             return yield* new ChangeRefused({ message: `The task has no change “${input.on}” in ${where.repositoryName} to stack on.` })
-          const toward = below?.branch ?? (input.toward?.trim() || null) ?? where.toward
+          // Waiting for another to merge, without its code: both go into the same branch, the one it waits for's.
+          const waited =
+            input.waitsFor === undefined || input.waitsFor.trim() === ''
+              ? undefined
+              : own.find(
+                  (one) =>
+                    one.bindingId === where.bindingId &&
+                    (one.branch === input.waitsFor?.trim() || (named(one) ?? '').toLowerCase() === input.waitsFor?.trim().toLowerCase()),
+                )
+          if (input.waitsFor !== undefined && input.waitsFor.trim() !== '' && waited === undefined)
+            return yield* new ChangeRefused({
+              message: `The task has no change “${input.waitsFor}” in ${where.repositoryName} to wait for.`,
+            })
+          if (below !== undefined && waited !== undefined)
+            return yield* new ChangeRefused({ message: 'A change either stacks on another or waits for it: not both.' })
+          const toward = below?.branch ?? (input.toward?.trim() || null) ?? waited?.toward ?? where.toward
           const { remote, base } =
             below === undefined
               ? yield* startOf({ repository: where.repository, base: where.base, changeTarget: where.changeTarget, toward })
@@ -828,6 +846,7 @@ export class Projects extends Context.Service<
                 kind: 'worktree',
                 name,
                 ...(toward === null ? {} : { toward }),
+                ...(waited === undefined ? {} : { waitsFor: waited.id }),
               })}`
               yield* fact({
                 projectId: where.projectId,
@@ -835,7 +854,7 @@ export class Projects extends Context.Service<
                 aggregateId: workspaceId,
                 revision: 1,
                 type: 'workspace.change_started',
-                payload: { name, branch: made.branch, toward, on: below?.id ?? null },
+                payload: { name, branch: made.branch, toward, on: below?.id ?? null, waitsFor: waited?.id ?? null },
                 actorId: input.actorId,
               })
             }),

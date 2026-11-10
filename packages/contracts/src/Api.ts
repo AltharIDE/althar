@@ -1438,7 +1438,15 @@ export const ChangeSummary = Schema.Struct({
    * names). Absent where Althar can't tell, as for one it was only told of. `below`, for one stacked on another of the
    * task's changes whose pull request is still open, names that one (PR #714): Merge merges it first.
    */
-  change: Schema.optional(Schema.Struct({ id: Schema.String, name: Schema.NullOr(Schema.String), below: Schema.optional(Schema.String) })),
+  change: Schema.optional(
+    Schema.Struct({
+      id: Schema.String,
+      name: Schema.NullOr(Schema.String),
+      below: Schema.optional(Schema.String),
+      /** The change it waits for to merge, without building on its code: its failing checks wait with it. */
+      waitsFor: Schema.optional(Schema.String),
+    }),
+  ),
   additions: Schema.NullOr(Schema.Number),
   deletions: Schema.NullOr(Schema.Number),
   changedFiles: Schema.NullOr(Schema.Number),
@@ -1857,11 +1865,17 @@ export const NoticeItem = Schema.Struct({
      */
     step: Schema.optional(
       Schema.Struct({
-        kind: Schema.Literals(['new_change']),
+        /** A change started, shipped, merged, kept together with another, or dropped. */
+        kind: Schema.Literals(['new_change', 'shipped', 'merged', 'joined', 'dropped']),
         name: Schema.String,
+        /** Its branch; for one shipped or merged, its pull request as people say it (PR #714). */
         branch: Schema.String,
         /** What it works toward, where that isn't the task's: another change's branch it stacks on, or a branch of its own. */
         toward: Schema.NullOr(Schema.String),
+        /** Who split the work: its lead or the coordinator on their own, or its lead's git; Keep them together and Drop it offer only then. */
+        by: Schema.optional(Schema.Literals(['lead', 'coordinator', 'git', 'person'])),
+        /** The change it waits for to merge, without building on its code. */
+        waits: Schema.optional(Schema.String),
       }),
     ),
     /**
@@ -4860,6 +4874,13 @@ export const Api = RpcGroup.make(
   ),
   /** Calls off a move that waits: the task stays where it works. */
   command('DropMove', { taskId: Schema.String }, Schema.Void),
+  /**
+   * Keep them together: carries one change's commits onto another of the task's, before either ships, and its folder goes;
+   * its branch stays (a task is a conversation plus parts). Into the task's first change unless `into` names one.
+   */
+  command('JoinChanges', { taskId: Schema.String, change: Schema.String, into: Schema.optional(Schema.String) }, Schema.Void),
+  /** Drop it: a change's folder goes, after what it hadn't committed is; its branch, and any pull request, stay. */
+  command('DropChange', { taskId: Schema.String, change: Schema.String }, Schema.Void),
   /** Stops a helper the task's lead started, by its id (ADR-087): what it had said stays on its thread. */
   command('StopHelper', { taskId: Schema.String, helper: Schema.String }, Schema.Void),
   /** Puts a task on Scratch, or on the board with null (a task is a conversation plus parts, "Chats and Scratch"). */

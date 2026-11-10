@@ -155,6 +155,25 @@ describe('a task’s parts', () => {
     await waitFor(() => expect(client.stopHelper).toHaveBeenCalledWith(base.task.id, 'hlp_1'))
   })
 
+  it('offers Keep them together on a change its lead split, and Drop it on one its git made', async () => {
+    const step = (name: string, by: 'lead' | 'git') =>
+      items.notice(
+        {
+          source: 'runtime',
+          title: `New change · ${name}`,
+          step: { kind: 'new_change', name, branch: `althar/${name}`, toward: null, by },
+        },
+        null,
+      )
+    const split = snapshot({ task: { ...base.task, phase: 'ready' }, items: [step('lanes', 'lead'), step('spike', 'git')] })
+    const { client } = fakeClient({ getThread: vi.fn(async () => split) })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Keep them together' }))
+    await waitFor(() => expect(client.joinChanges).toHaveBeenCalledWith(base.task.id, 'lanes'))
+    await userEvent.click(screen.getByRole('button', { name: 'Drop it' }))
+    await waitFor(() => expect(client.dropChange).toHaveBeenCalledWith(base.task.id, 'spike'))
+  })
+
   it('posts a review draft from its row', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [items.review({ state: 'pending' })] })) })
     withServices(<Task />, client)

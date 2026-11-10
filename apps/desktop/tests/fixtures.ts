@@ -1174,6 +1174,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setRunOutside: vi.fn(async () => {}),
     shelveTask: vi.fn(async () => {}),
     stopHelper: vi.fn(async () => {}),
+    joinChanges: vi.fn(async () => {}),
+    dropChange: vi.fn(async () => {}),
     listPresets: vi.fn(async () => []),
     savePreset: vi.fn(async () => ({ name: 'Preset' })),
     removePreset: vi.fn(async () => {}),

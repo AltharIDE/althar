@@ -10,7 +10,7 @@ import { removeFully } from '@althar/provider-adapters'
 import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { postCard, touchCard } from './cards'
+import { offScratch, postCard, touchCard } from './cards'
 import { Agents, RuntimeConfig } from './Config'
 import { Connections } from './Connections'
 import { envelope } from './envelope'
@@ -1091,6 +1091,8 @@ export class Reviews extends Context.Service<
                 }),
               )
               if ('refused' in kept) return kept
+              // A chat on Scratch that drafted a review moves to the board.
+              yield* offScratch(taskId)
               yield* touchCard(taskId)
               // The person's own setting posts their team's reviews at once, an automation's where they let its reviews post; an
               // outside one always waits for them.

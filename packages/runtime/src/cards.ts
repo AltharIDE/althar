@@ -1,6 +1,6 @@
 import type { ProjectId } from '@althar/domain'
 import { Ledger } from '@althar/persistence-sqlite'
-import { Crypto, Effect, Option } from 'effect'
+import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { change } from './records'
@@ -35,14 +35,18 @@ export const postCard = (projectId: ProjectId, taskId: string) =>
 
 /**
  * A chat on Scratch moves to the board as soon as it takes a worktree or an
- * output (a task is a conversation plus parts, "Chats and Scratch"): a branch
+ * output (a task is a conversation plus parts, "Chats and Scratch"), looked at
+ * where one can take them (its first write, a pull request, a review drafted): a branch
  * of its own, a pull request, or a review it drafted, since it was put there;
  * said in its thread. Nothing moves back to Scratch by itself, and one the
  * person put back stays until it takes something new.
  */
-const offScratch = (taskId: string) =>
+export const offScratch = (taskId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
+    // Most tasks are on the board: one look at the task's own row, before anything that reads more.
+    const [shelf] = yield* sql<{ shelf: string | null }>`SELECT shelf FROM tasks WHERE id = ${taskId}`
+    if (shelf?.shelf !== 'scratch') return
     const [chat] = yield* sql<{ projectId: ProjectId; threadId: string | null; branched: number; linked: number; drafted: number }>`
       WITH shelved AS (
         SELECT coalesce(max(e.occurred_at), '') AS at FROM record_events e
@@ -73,9 +77,6 @@ export const touchCard = (taskId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const ledger = yield* Ledger
-    // Where ids can be made: every change that can give a chat a worktree or an output can, a place's waiting (Busy) can't.
-    const crypto = yield* Effect.serviceOption(Crypto.Crypto)
-    if (Option.isSome(crypto)) yield* offScratch(taskId).pipe(Effect.provideService(Crypto.Crypto, crypto.value))
     const card = yield* cardOf(taskId)
     if (card === undefined) return
     yield* sql.withTransaction(

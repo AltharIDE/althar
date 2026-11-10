@@ -157,6 +157,7 @@ describe('a task with several changes', () => {
         name: 'Lane heights',
         branch: 'althar/lane-heights',
         toward: null,
+        by: 'lead',
       })
       // Its card counts them; a second name refused, as is a branch a change has.
       const [card] = yield* until(cards(task.projectId), (all) => all[0]?.changeCount === 2)
@@ -340,6 +341,87 @@ describe('a task with several changes', () => {
         SELECT json_extract(payload, '$.url') AS url FROM record_events WHERE type = 'change.pushed' ORDER BY occurred_at, rowid`
       const order = pushes.map((one) => one.url).filter((url) => url !== null)
       if (order.length >= 2) assert.isBelow(order.lastIndexOf(github.changes[0]?.url ?? ''), order.lastIndexOf(task.url))
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('keeps two changes together before either ships, and drops one, its branch staying', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* opened(working)
+      // The task's first change has its pull request already: two split since are kept together with each other.
+      yield* callTool(task.lead, 'start_change', { name: 'Lane colours' })
+      yield* callTool(task.lead, 'start_change', { name: 'Lane heights' })
+      const [first, colours, second] = yield* workspacesOf(task.taskId)
+      writeFileSync(join(second?.path ?? '', 'lanes.txt'), 'taller\n')
+      git(second?.path ?? '', 'add', 'lanes.txt')
+      git(second?.path ?? '', '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '-m', 'Taller lanes')
+      // Its row in the thread says who split it, so Keep them together offers itself.
+      const started = (yield* items(task.threadId)).findLast(
+        (item) => item.kind === 'notice' && (item.content as { step?: unknown }).step !== undefined,
+      )
+      assert.strictEqual((started?.content as { step?: { by?: string } } | undefined)?.step?.by, 'lead')
+      assert.include(yield* callTool(task.lead, 'join_changes', { change: 'Lane heights' }), 'Kept “Lane heights” together')
+      // Its commit is on the change that hadn't shipped's branch; its folder went, its branch stays.
+      assert.strictEqual(git(colours?.path ?? '', 'log', '-1', '--format=%s'), 'Taller lanes')
+      assert.isFalse(existsSync(second?.path ?? ''))
+      assert.include(git(working, 'branch', '--list', 'althar/lane-heights'), 'althar/lane-heights')
+      const sql = yield* SqlClient.SqlClient
+      const [joined] = yield* sql<{ state: string }>`SELECT state FROM workspaces WHERE id = ${second?.id ?? ''}`
+      assert.strictEqual(joined?.state, 'cleaned')
+
+      // Another, dropped: what it hadn't committed is committed first, and its branch stays.
+      yield* callTool(task.lead, 'start_change', { name: 'Docs' })
+      const docs = (yield* workspacesOf(task.taskId)).find((one) => one.name === 'Docs') ?? assert.fail('no change')
+      writeFileSync(join(docs.path, 'docs.md'), 'half\n')
+      assert.include(yield* callTool(task.lead, 'remove_part', { part: 'workspace', name: 'Docs', why: 'Not needed.' }), 'Dropped “Docs”')
+      assert.isFalse(existsSync(docs.path))
+      assert.strictEqual(git(working, 'log', '-1', '--format=%s', 'althar/docs'), 'Work in progress, as its change was dropped')
+      // Dropped too, the only change left: removing its worktree moves it down to a copy, its branch keeping its work.
+      yield* callTool(task.lead, 'remove_part', { part: 'workspace', name: 'Lane colours', why: 'Done with it.' })
+      const branch = first?.branch ?? ''
+      const head = git(first?.path ?? '', 'rev-parse', 'HEAD')
+      assert.include(yield* callTool(task.lead, 'remove_part', { part: 'workspace', why: 'Only reading now.' }), 'is a copy now')
+      assert.strictEqual(git(first?.path ?? '', 'rev-parse', '--abbrev-ref', 'HEAD'), 'HEAD')
+      assert.strictEqual(git(working, 'rev-parse', branch), head)
+      assert.isTrue(Option.isSome(Option.some(github)))
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('starts a change that waits for another to merge, and brings what merged in once it has', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* opened(working)
+      const said = yield* callTool(task.lead, 'start_change', { name: 'Release notes', waits_for: 'althar/add-a-retry' })
+      assert.include(said, 'Started a change')
+      const sql = yield* SqlClient.SqlClient
+      const [waiting] = yield* sql<{ waitsFor: string | null; path: string; toward: string | null }>`
+        SELECT waits_for, path, toward FROM workspaces WHERE task_id = ${task.taskId} AND name = 'Release notes'`
+      assert.isNotNull(waiting?.waitsFor ?? null)
+      // Both go into the same branch: it doesn't stack.
+      assert.strictEqual(waiting?.toward ?? null, null)
+      const step = (yield* items(task.threadId)).findLast(
+        (item) => item.kind === 'notice' && (item.content as { step?: unknown }).step !== undefined,
+      )
+      assert.strictEqual((step?.content as { step?: { waits?: string } } | undefined)?.step?.waits, 'althar/add-a-retry')
+      // The first merges: what it merged is brought into the one that waited, which waits no more.
+      writeFileSync(join(working, 'main-fix.txt'), 'fixed\n')
+      git(working, 'add', 'main-fix.txt')
+      git(working, 'commit', '-q', '-m', 'Fix main')
+      git(working, 'push', '-q', bare, 'HEAD:main')
+      git(waiting?.path ?? '', 'remote', 'set-url', 'origin', bare)
+      squashMerge(bare, 'althar/add-a-retry')
+      github.mergeByHand(1)
+      yield* (yield* Changes).refresh(task.taskId)
+      const [over] = yield* until(
+        sql<{ waitsFor: string | null }>`SELECT waits_for FROM workspaces WHERE task_id = ${task.taskId} AND name = 'Release notes'`,
+        (rows) => rows[0]?.waitsFor === null,
+      )
+      assert.isNull(over?.waitsFor ?? null)
+      yield* until(
+        Effect.map(items(task.threadId), (all) => all.flatMap((item) => (item.kind === 'notice' ? [String(item.content.title)] : []))),
+        (lines) => lines.some((line) => line.includes('Release notes has main in now, and waits no more.')),
+      )
+      assert.isTrue(existsSync(join(waiting?.path ?? '', 'main-fix.txt')))
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })

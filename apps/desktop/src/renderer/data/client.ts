@@ -268,6 +268,10 @@ export interface Client {
   readonly shelveTask: (taskId: string, shelf: 'scratch' | null) => Promise<void>
   /** Stops a helper the task's lead started. */
   readonly stopHelper: (taskId: string, helper: string) => Promise<void>
+  /** Keep them together: one change's commits onto another of the task's, before either ships. */
+  readonly joinChanges: (taskId: string, change: string, into?: string) => Promise<void>
+  /** Drop it: a change's folder goes, its branch stays. */
+  readonly dropChange: (taskId: string, change: string) => Promise<void>
   /** The presets the person has, in a project where one is named. */
   readonly listPresets: (projectId?: string) => Promise<ReadonlyArray<Preset>>
   /** Saves a preset from a task, or the parts the coordinator offered. */
@@ -826,6 +830,9 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setRunOutside: (to) => command((commandId) => api.SetRunOutside({ commandId, to })),
     shelveTask: (taskId, shelf) => command((commandId) => api.ShelveTask({ commandId, taskId, shelf })),
     stopHelper: (taskId, helper) => command((commandId) => api.StopHelper({ commandId, taskId, helper })),
+    joinChanges: (taskId, change, into) =>
+      command((commandId) => api.JoinChanges({ commandId, taskId, change, ...(into === undefined ? {} : { into }) })),
+    dropChange: (taskId, change) => command((commandId) => api.DropChange({ commandId, taskId, change })),
     listPresets: (projectId) => settle(api.ListPresets(projectId === undefined ? {} : { projectId })),
     savePreset: (input) => command((commandId) => api.SavePreset({ commandId, ...input })),
     removePreset: (id) => command((commandId) => api.RemovePreset({ commandId, id })),

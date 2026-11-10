@@ -1825,8 +1825,15 @@ export class Queries extends Context.Service<
             // of it: commits the person hasn't pushed yet.
             (found) =>
               Effect.gen(function* () {
-                const [binding] = yield* sql<{ slug: string; workspaceId: string | null; name: string | null; below: string | null }>`
+                const [binding] = yield* sql<{
+                  slug: string
+                  workspaceId: string | null
+                  name: string | null
+                  below: string | null
+                  waitsFor: string | null
+                }>`
                   SELECT b.slug, c.workspace_id, w.name,
+                    (SELECT coalesce(o.name, o.branch) FROM workspaces o WHERE o.id = w.waits_for) AS waits_for,
                     (SELECT json_extract(l.snapshot, '$.words.short') || ' ' || json_extract(l.snapshot, '$.words.prefix') ||
                         json_extract(l.snapshot, '$.number')
                       FROM external_links l
@@ -1847,6 +1854,7 @@ export class Queries extends Context.Service<
                           id: binding.workspaceId,
                           name: binding.name,
                           ...(binding.below === null || found.state !== 'open' ? {} : { below: binding.below }),
+                          ...(binding.waitsFor === null || found.state !== 'open' ? {} : { waitsFor: binding.waitsFor }),
                         },
                       }),
                 }

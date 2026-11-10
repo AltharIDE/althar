@@ -3,7 +3,7 @@ import { ThreadWaysContext } from '../../shared/ThreadBlocks'
 import { useNavigate } from '@tanstack/react-router'
 import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
-import type { AttentionRequest, TaskAction, ThreadSnapshot } from '@althar/contracts'
+import type { AttentionRequest, TaskAction, ThreadItem, ThreadSnapshot } from '@althar/contracts'
 import {
   CheckoutAsk,
   AbandonTask,
@@ -83,7 +83,7 @@ import { reachOf, reachText, ReviewCard, reviewedUnfurl } from './ReviewCard'
 import { usePostTeamReviews } from '../settings/usePostTeamReviews'
 import { HeldLimit } from './LimitCall'
 import { StuckCall } from './StuckCall'
-import { TaskThread } from './TaskThread'
+import { TaskThread, workStepText } from './TaskThread'
 import { SmallChangeOf } from './SmallChangeOf'
 import { ModelMoveOf } from './ModelMoveOf'
 import { latestReport, reviewsIn, useReviewOutcomes } from './reviewOutcomes'
@@ -847,6 +847,22 @@ export function TaskView({
                   : {})}
       />
     ) : null
+  // A change its lead or the coordinator split, before it ships: Keep them together; one its lead's git made: Drop it. Never once
+  // it was kept together, dropped, or opened its pull request.
+  const settledSteps = new Set(
+    snapshot.items.flatMap((item) =>
+      item.kind === 'notice' && (item.content.step?.kind === 'joined' || item.content.step?.kind === 'dropped')
+        ? [item.content.step.name]
+        : [],
+    ),
+  )
+  const stepAction = (step: NonNullable<Extract<ThreadItem, { kind: 'notice' }>['content']['step']>) => {
+    if (step.kind !== 'new_change' || step.by === undefined || step.by === 'person' || settledSteps.has(step.name)) return undefined
+    if (snapshot.task.phase === 'settled') return undefined
+    const shipped = snapshot.task.changes.some((one) => one.change?.name === step.name)
+    if (step.by === 'git') return { label: workStepText.dropIt, onPress: () => void model.dropChange(step.name) }
+    return shipped ? undefined : { label: workStepText.keepTogether, onPress: () => void model.joinChanges(step.name) }
+  }
   // Its parts, just before the faces: what it changed is in its worktree's, which opens the changes over the window (ADR-097).
   const partsActions: PartsActions = {
     seeChanges: () => changes.show(),
@@ -1327,6 +1343,7 @@ export function TaskView({
                   <ThreadWaysContext.Provider value={ways}>
                     <TaskThread
                       rounds={blocks}
+                      stepAction={stepAction}
                       versionOf={versionOf}
                       settledOf={settledOf}
                       reviewing={reviewing}

@@ -176,6 +176,10 @@ export interface TaskModel {
   readonly savePreset: (name: string) => Promise<void>
   /** Stops a helper its lead started, by its id. */
   readonly stopHelper: (helper: string) => Promise<void>
+  /** Keep them together: a change its lead split carried onto the task's first. */
+  readonly joinChanges: (change: string) => Promise<void>
+  /** Drop it: a change's folder goes, its branch stays. */
+  readonly dropChange: (change: string) => Promise<void>
   /** Hands its step held for a usage limit to another agent, on the account and model picked, rather than waiting for the reset. */
   readonly handOverHeld: (to: { readonly agentId: string; readonly accountId?: string; readonly model?: string }) => Promise<void>
   /** Answers an agent's question: what went wrong, in words, or null when it went through. */
@@ -705,6 +709,8 @@ export const useTask = (threadId: string): TaskModel => {
     shelve: (shelf) => onTask((taskId) => client.shelveTask(taskId, shelf)),
     savePreset: (name) => onTask((taskId) => client.savePreset({ name, taskId })),
     stopHelper: (helper) => onTask((taskId) => client.stopHelper(taskId, helper)),
+    joinChanges: (change) => onTask((taskId) => client.joinChanges(taskId, change)),
+    dropChange: (change) => onTask((taskId) => client.dropChange(taskId, change)),
     handOverHeld: (to) => onTask((taskId) => client.handOverHeld({ taskId, ...to })),
     answerQuestion: (attentionId, answers) =>
       client.answerQuestion({ attentionId, answers }).then(

@@ -883,6 +883,7 @@ export class TaskActions extends Context.Service<
         on: Schema.optional(Schema.String),
         toward: Schema.optional(Schema.String),
         repository: Schema.optional(Schema.String),
+        waits_for: Schema.optional(Schema.String),
         why: Schema.optional(Schema.String),
       })
       const ReviewAsked = Schema.Struct({
@@ -1110,15 +1111,36 @@ export class TaskActions extends Context.Service<
               yield* touchTask(task.id)
               return `${task.slug} reviews that pull request no more: its thread, and any posted review, stay.`
             }
-            case 'workspace':
-              return yield* new ToolRefused({
-                message: `${task.slug}'s folder goes once it's settled, after the usual wait, or with Remove on its row; its branch stays either way.`,
-              })
+            case 'workspace': {
+              // A change named: its folder goes, its branch stays (Drop it). The task's only worktree: it moves down to a copy.
+              if (asked.name !== undefined) {
+                yield* plainly(changes.dropChange(task.id, asked.name, actorOf(access)), task.slug)
+                return `Dropped “${asked.name}”: its folder went, its branch stays.`
+              }
+              yield* plainly(changes.leaveWorktree(task.id, actorOf(access)), task.slug)
+              return `${task.slug}'s worktree is a copy now: its branch stays, with all its work.`
+            }
             case 'access':
               return yield* new ToolRefused({ message: 'Access isn’t removed: the person says Run it, or stops it.' })
             case 'shelf':
               return yield* changePart(access, { ...asked, shelf: 'board' })
           }
+        })
+
+      const JoinAsked = Schema.Struct({
+        task: Schema.optional(Schema.String),
+        change: Schema.String,
+        into: Schema.optional(Schema.String),
+        why: Schema.optional(Schema.String),
+      })
+      /** Keep them together: one change's commits carried onto another's, before either ships. */
+      const joinChanges = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(JoinAsked, input)
+          const task = yield* named(access, asked.task)
+          yield* plainly(changes.joinChanges(task.id, asked.change, asked.into ?? null, actorOf(access)), task.slug)
+          yield* touchTask(task.id)
+          return `Kept “${asked.change}” together with ${asked.into === undefined ? 'the task’s first change' : `“${asked.into}”`}: its commits are on that change's branch, its folder went, and its branch stays.`
         })
 
       /** Adds a review of a pull request to a task with work of its own: a copy beside its worktree, drafted by its lead. */
@@ -1164,6 +1186,7 @@ export class TaskActions extends Context.Service<
               ...(asked.on === undefined ? {} : { on: asked.on }),
               ...(asked.toward === undefined ? {} : { toward: asked.toward }),
               ...(asked.repository === undefined ? {} : { repository: asked.repository }),
+              ...(asked.waits_for === undefined ? {} : { waitsFor: asked.waits_for }),
               actorId: actorOf(access),
             }),
             task.slug,
@@ -1183,6 +1206,9 @@ export class TaskActions extends Context.Service<
                 branch: started.branch,
                 // Named only where it isn't what the task's first change works toward.
                 toward: started.elsewhere ? started.toward : null,
+                // Split on its lead's or the coordinator's own choice: Keep them together offers to undo it.
+                by: access.role === 'coordinator' ? 'coordinator' : 'lead',
+                ...(asked.waits_for === undefined ? {} : { waits: asked.waits_for }),
               },
             })
           // Started by someone else, its lead hears where the change is, as its own tool would have told it.
@@ -1407,10 +1433,30 @@ export class TaskActions extends Context.Service<
               },
               toward: { type: 'string', description: 'A branch it works toward other than the task’s, such as release/0.8.0.' },
               repository: { type: 'string', description: 'The repository, where the task has several.' },
+              waits_for: {
+                type: 'string',
+                description:
+                  'Another change of the task’s this one waits for to merge without needing its code, such as a release waiting for "Fix main": both go into the same branch, its failing checks that the other fixes wait with it, and the branch they go into is brought in once the other merges.',
+              },
             },
             required: ['name'],
           },
           startChange,
+        ),
+        tool(
+          'join_changes',
+          'Keep them together: carries one of the task’s changes’ commits onto another of its changes in the same repository, the task’s first unless into names one, before either has a pull request; the joined change’s folder goes and its branch stays. For a split you or the lead made that the person wants as one. It acts at once, with a line in the task’s thread.',
+          {
+            type: 'object',
+            properties: {
+              task: optionalTask,
+              why,
+              change: { type: 'string', description: 'The change carried over, by its name or branch.' },
+              into: { type: 'string', description: 'The change it joins; the task’s first without one.' },
+            },
+            required: ['change'],
+          },
+          joinChanges,
         ),
         tool(
           'add_part',
@@ -1447,13 +1493,14 @@ export class TaskActions extends Context.Service<
         ),
         tool(
           'remove_part',
-          'Removes one of a task’s parts, with why; it loses nothing: checked_by, its review this round (a review under way stops, findings filed stay); reviewing, a pull request it reviews (pull_request), refused while its draft was never posted, for the person to post or discard; output, a pull request it follows (pull_request), left open on its host. Its folder goes once it’s settled, its branch staying.',
+          'Removes one of a task’s parts, with why; it loses nothing: workspace, a change’s folder (name), what it hadn’t committed committed first and its branch staying (Drop it), or the task’s only worktree, which moves down to a copy; checked_by, its review this round (a review under way stops, findings filed stay); reviewing, a pull request it reviews (pull_request), refused while its draft was never posted, for the person to post or discard; output, a pull request it follows (pull_request), left open on its host. Its folder goes once it’s settled, its branch staying.',
           {
             type: 'object',
             properties: {
               task: optionalTask,
               why,
-              part: { type: 'string', enum: ['checked_by', 'reviewing', 'output'] },
+              part: { type: 'string', enum: ['workspace', 'checked_by', 'reviewing', 'output'] },
+              name: { type: 'string', description: 'For workspace: the change whose folder goes; the task’s only worktree without one.' },
               pull_request: { type: 'string' },
             },
             required: ['part', 'why'],

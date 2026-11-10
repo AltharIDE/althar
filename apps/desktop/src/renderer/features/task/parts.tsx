@@ -63,6 +63,8 @@ export const partsText = {
         ? 'Closed'
         : `${change.draft ? 'Draft' : 'Open'}${change.checks === null || change.checks.outcome === 'none' ? '' : change.checks.outcome === 'failed' ? ` · ${change.checks.failed} ${change.checks.failed === 1 ? 'check fails' : 'checks fail'}` : change.checks.outcome === 'running' ? ' · checks running' : ' · checks pass'}`,
   merge: 'Merge',
+  /** A change that waits for another of the task's to merge, without building on its code. */
+  waitsFor: (name: string) => `Waits for ${name} to merge`,
   /** Merge on a change stacked on another's open pull request: the one below first. */
   mergeThrough: (below: string, short: string) => `Merge ${below}, then ${short}`,
   onHost: (host: string) => `On ${host}`,
@@ -252,7 +254,7 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
       id: `pr:${change.url}`,
       icon: 'pr',
       name: change.short,
-      detail: t.stands(change),
+      detail: change.change?.waitsFor === undefined ? t.stands(change) : t.waitsFor(change.change.waitsFor),
       ...(failing
         ? { tone: 'bad' as const, act: { label: t.seeCheck } }
         : ready

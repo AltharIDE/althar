@@ -77,6 +77,7 @@ import { statements as severalChanges } from './0072_several_changes'
 import { statements as reviewTrust } from './0073_review_trust'
 import { statements as scratchAndPresets } from './0074_scratch_and_presets'
 import { statements as helpers } from './0075_helpers'
+import { statements as changeWaits } from './0076_change_waits'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -171,6 +172,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0073_review_trust', statements: reviewTrust },
   { key: '0074_scratch_and_presets', statements: scratchAndPresets },
   { key: '0075_helpers', statements: helpers },
+  { key: '0076_change_waits', statements: changeWaits },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

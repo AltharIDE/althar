@@ -1607,6 +1607,9 @@ export const handlers = Api.toLayer(
           ),
         ),
       WorkToward: ({ commandId, taskId, toward }) => once(commandId, api(runs.workToward({ taskId, toward }))),
+      JoinChanges: ({ commandId, taskId, change, into }) =>
+        once(commandId, api(pullRequests.joinChanges(taskId, change, into ?? null, instance.personId))),
+      DropChange: ({ commandId, taskId, change }) => once(commandId, api(pullRequests.dropChange(taskId, change, instance.personId))),
       StopHelper: ({ commandId, taskId, helper }) => once(commandId, api(Effect.asVoid(helpers.stop({ taskId, helper, by: 'person' })))),
       DropMove: ({ commandId, taskId }) =>
         once(
