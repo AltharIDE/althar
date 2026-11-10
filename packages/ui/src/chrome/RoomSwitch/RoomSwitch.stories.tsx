@@ -48,7 +48,7 @@ export const InOrder: Story = {
     const names = within(canvasElement)
       .getAllByRole('radio')
       .map((radio) => radio.textContent)
-    await expect(names).toEqual(['Home', 'Conversation', 'Board', 'Automations', 'Canvases', 'Settings'])
+    await expect(names).toEqual(['Home', 'Conversation', 'Board', 'Automations', 'Artifacts', 'Settings'])
   },
 }
 /** What waits on you in the work is the bar's to say: no view carries a dot for it. */

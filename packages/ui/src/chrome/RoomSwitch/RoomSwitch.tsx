@@ -4,7 +4,7 @@ import { Segmented, type SegmentedOption } from '../../primitives/Segmented/Segm
 
 /*
  * The project window's only navigation: home (the conversation and the board side
- * by side), the conversation, the board, its automations, its canvases, or the project's
+ * by side), the conversation, the board, its automations, its artifacts, or the project's
  * settings in their place. A dot says the conversation has news while you are
  * elsewhere, and a violet one that something waits on you there: an
  * automation that paused itself, or something in the settings, such as a
@@ -32,7 +32,7 @@ export const roomSwitchText: RoomSwitchText = {
     [Room.Talk]: 'Conversation',
     [Room.Board]: 'Board',
     [Room.Automations]: 'Automations',
-    [Room.Canvases]: 'Canvases',
+    [Room.Artifacts]: 'Artifacts',
     [Room.Settings]: 'Settings',
   },
   key: (n) => modKey(String(n)),
@@ -40,7 +40,7 @@ export const roomSwitchText: RoomSwitchText = {
   yours: 'needs you',
 }
 
-const ROOMS = [Room.Both, Room.Talk, Room.Board, Room.Automations, Room.Canvases, Room.Settings] as const
+const ROOMS = [Room.Both, Room.Talk, Room.Board, Room.Automations, Room.Artifacts, Room.Settings] as const
 
 export interface RoomSwitchProps {
   value: Room

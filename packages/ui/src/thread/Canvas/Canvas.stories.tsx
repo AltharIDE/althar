@@ -4,13 +4,12 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 import { Markdown } from '../Markdown/Markdown'
 import { ThreadShellProvider } from '../Shell/Shell'
 import { CanvasLine } from './CanvasLine'
-import { CanvasList } from './CanvasList'
 import { CanvasPanel } from './CanvasPanel'
 import s from './Canvas.module.css'
 
 /*
  * One of the project's canvases (ADR-104): its line in the turn that drew it,
- * its panel beside the conversation at each kind, and the project's list.
+ * and its panel beside the conversation at each kind.
  */
 
 const meta = {
@@ -190,55 +189,4 @@ export const InTheThread: StoryObj<typeof CanvasLine> = {
     const c = within(canvasElement)
     await expect(c.getByRole('button', { name: 'Open Sign-in page beside the conversation' })).toHaveAttribute('aria-pressed', 'true')
   },
-}
-
-/** The project's canvases, every lead's and the coordinator's together; and none yet. */
-export const TheProjectsCanvases: StoryObj<typeof CanvasList> = {
-  render: () => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 32, maxWidth: 760, padding: 24 }}>
-      <CanvasList
-        opened="cnv_b"
-        onOpen={fn()}
-        canvases={[
-          {
-            id: 'cnv_a',
-            name: 'sign-in',
-            title: 'Sign-in, three directions',
-            kind: 'markdown',
-            version: 3,
-            by: 'The lead of Sign-in redesign',
-            openComments: 1,
-          },
-          {
-            id: 'cnv_b',
-            name: 'sign-in-page',
-            title: 'Sign-in page',
-            kind: 'html',
-            version: 2,
-            by: 'The lead of Build sign-in',
-            openComments: 0,
-          },
-          {
-            id: 'cnv_c',
-            name: 'architecture',
-            title: 'How the runtime fits together',
-            kind: 'mermaid',
-            version: 5,
-            by: 'The coordinator',
-            openComments: 0,
-          },
-          {
-            id: 'cnv_d',
-            name: 'checkout-funnel',
-            title: 'Checkout funnel',
-            kind: 'svg',
-            version: 1,
-            by: 'The lead of Funnel report',
-            openComments: 2,
-          },
-        ]}
-      />
-      <CanvasList canvases={[]} onOpen={fn()} />
-    </div>
-  ),
 }

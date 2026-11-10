@@ -1,13 +1,13 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { fn } from 'storybook/test'
+import { expect, fn, userEvent, within } from 'storybook/test'
 
-import { Canvases } from './Canvases'
+import { Artifacts } from './Artifacts'
 
-/* A project's canvases: every lead's and the coordinator's, and none yet. */
+/* A project's artifacts: its canvases as rows, every lead's and the coordinator's; and none yet. */
 
 const meta = {
-  title: 'Screens/Canvases',
-  component: Canvases,
+  title: 'Screens/Artifacts',
+  component: Artifacts,
   parameters: { layout: 'fullscreen' },
   args: {
     onOpen: fn(),
@@ -18,7 +18,8 @@ const meta = {
         title: 'Sign-in, three directions',
         kind: 'markdown',
         version: 3,
-        by: 'The lead of Sign-in redesign · 4m ago',
+        by: 'Lead of Redesign sign-in',
+        when: '4m ago',
         openComments: 1,
       },
       {
@@ -27,7 +28,8 @@ const meta = {
         title: 'Sign-in page',
         kind: 'html',
         version: 2,
-        by: 'The lead of Build sign-in · 1h ago',
+        by: 'Lead of Build sign-in',
+        when: '1h ago',
         openComments: 0,
       },
       {
@@ -36,7 +38,8 @@ const meta = {
         title: 'How the runtime fits together',
         kind: 'mermaid',
         version: 5,
-        by: 'The coordinator · 2h ago',
+        by: 'Coordinator',
+        when: '2h ago',
         openComments: 0,
       },
       {
@@ -45,7 +48,8 @@ const meta = {
         title: 'Checkout funnel',
         kind: 'svg',
         version: 1,
-        by: 'The lead of Funnel report · 8 Nov',
+        by: 'Lead of Funnel report',
+        when: '8 Nov',
         openComments: 2,
       },
     ],
@@ -57,9 +61,25 @@ const meta = {
       </div>
     ),
   ],
-} satisfies Meta<typeof Canvases>
+} satisfies Meta<typeof Artifacts>
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Some: Story = {}
+export const Some: Story = {
+  play: async ({ canvasElement, args }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: /Sign-in page/ }))
+    await expect(args.onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 'cnv_b' }))
+  },
+}
+/** Narrow: who made each goes; what it is and when stay. */
+export const Narrow: Story = {
+  decorators: [
+    (Story) => (
+      <div style={{ width: 520 }}>
+        <Story />
+      </div>
+    ),
+  ],
+}
 export const None: Story = { args: { canvases: [] } }

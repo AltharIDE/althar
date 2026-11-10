@@ -16,7 +16,7 @@ import { launch, openFirstProject, say, shown, startTask, still, toConversation 
  * comments on words in the directions; the comment waits in the composer,
  * goes with their message, and the lead reads it, draws v2 in answer and
  * resolves it. Another task's lead lists the same canvases, and the
- * project's Canvases view has them all. The screenshots it takes are this
+ * project's Artifacts view has them all. The screenshots it takes are this
  * change's own evidence (test-results/canvas-*.png).
  */
 
@@ -196,18 +196,18 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
     await expect(shown(page, /^sign-in-page: Sign-in page \(html\), v1/)).toBeVisible()
     await shoot(page, electronApp, page, 'test-results/canvas-other-lead.png')
 
-    // And the project's Canvases view has them all, the newest first; one opened takes the view.
+    // And the project's Artifacts view has them all, the newest first, as rows; one opened takes the view.
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await page.getByRole('radiogroup', { name: 'View' }).getByRole('radio', { name: 'Canvases' }).click()
+    await page.getByRole('radiogroup', { name: 'View' }).getByRole('radio', { name: 'Artifacts' }).click()
     const list = page.getByRole('list', { name: 'The project’s canvases' })
     await expect(list.getByRole('listitem')).toHaveCount(3)
-    await expect(list.getByText('sign-in · v2')).toBeVisible()
-    await shoot(page, electronApp, page, 'test-results/canvas-project.png')
+    await expect(list.getByRole('button', { name: /Sign-in, three directions/ })).toContainText('Document · v2')
+    await shoot(page, electronApp, page, 'test-results/canvas-artifacts.png')
     await list.getByRole('button', { name: /Sign-in page/ }).click()
     await expect(page.getByRole('complementary', { name: 'Sign-in page' })).toBeVisible()
     await expect.poll(async () => (await canvasView(electronApp))?.address).toMatch(/\/v1\/$/)
-    await shoot(page, electronApp, page, 'test-results/canvas-project-open.png')
+    await shoot(page, electronApp, page, 'test-results/canvas-artifacts-open.png')
   } finally {
     await electronApp.close()
   }
