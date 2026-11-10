@@ -70,6 +70,11 @@ export const text = {
     remote === null
       ? 'No code host: this repository has no remote Althar can open a pull request on.'
       : `No code host: ${remote} isn’t on a host Althar can open a pull request on.`,
+  /** Beside the rest's pull request, those on no host Althar knows: by name. */
+  noHostFor: (names: ReadonlyArray<string>, remote: string | null) =>
+    remote === null
+      ? `No code host for ${andOf(names)}: no remote Althar can open a pull request on.`
+      : `No code host for ${andOf(names)}: ${remote} isn’t on a host Althar can open a pull request on.`,
   closed: (change: ChangeSummary, host: string) => `${change.short} ${change.prefix}${change.number} was closed on ${host}.`,
   accept: (n: number) => (n > 2 ? `Accept and merge all ${n}` : n === 2 ? 'Accept and merge both' : 'Accept and merge'),
   /** In a task of several, what is left of it once some merged: by name. */
@@ -86,6 +91,8 @@ export const text = {
   /** Opening a pull request from here opens a draft: its lead's work may not be done. */
   openChange: 'Open a draft pull request',
   openNewChange: 'Open a new draft pull request',
+  /** Beside the rest's pull request, for only some of the repositories without one: by name. */
+  openFor: (names: ReadonlyArray<string>) => `Open a draft pull request for ${andOf(names)}`,
   /** What waits on its branch for Ship goes up, its review first where its plan has one (a task is a conversation plus parts). */
   ship: (n: number) => (n === 1 ? 'Ship 1 commit' : `Ship ${n} commits`),
   /** One of the task's earlier pull requests, before its latest: merged or closed. In a task of several repositories, by its own. */
@@ -315,7 +322,10 @@ export function Outputs({
     </Button>
   )
   // Beside the rest's pull request, a new one for the repositories without one is pressed on their own card, which says what it is.
-  const openNewHere = first !== undefined && openNew !== false && task.here.length > 0
+  // Only for those on a host Althar is connected to, and only where no merged or closed pull request's later commits would go with
+  // them: the same press opens those too, which only the pull request's own card can say.
+  const hostedHere = task.here.filter((repo) => repo.host?.connected === true)
+  const openNewHere = first !== undefined && openNew !== false && hostedHere.length > 0 && !latest.some((one) => one.state !== 'open')
   const openNewThere = openNewHere ? false : openNew
   const shipNow =
     held === undefined || onShip === undefined ? null : (
@@ -599,7 +609,9 @@ export function Outputs({
           // Beside the rest's pull request, Althar opens one for these as a new one, where their host is the connected one.
           const beside = first !== undefined
           const opensHere = beside ? openNewHere : opens
-          const connectsHere = beside ? null : connects
+          // Beside it, one on a host Althar knows but isn't connected to: connecting it is how its pull request opens.
+          const unconnected = task.here.find((repo) => repo.host != null && !repo.host.connected)?.host?.name ?? null
+          const connectsHere = beside ? (opensHere ? null : unconnected) : connects
           // A pull request is the way forward where there can be one: opened by Althar, else once its host is connected.
           const reviewed = shipNow !== null || opensHere || connectsHere !== null
           const pushable = remote !== undefined && remote.ahead > 0
@@ -612,7 +624,13 @@ export function Outputs({
               : opensHere
                 ? [
                     <Button key="open" variant="signal" {...pressed(doing.openChange)} onClick={onOpenChange}>
-                      {closed.length > 0 && !beside ? text.openNewChange : text.openChange}
+                      {!beside
+                        ? closed.length > 0
+                          ? text.openNewChange
+                          : text.openChange
+                        : hostedHere.length === task.here.length
+                          ? text.openChange
+                          : text.openFor(hostedHere.map((repo) => repo.name))}
                     </Button>,
                   ]
                 : connectsHere !== null
@@ -643,8 +661,8 @@ export function Outputs({
                 ]
               : []),
           ]
-          // Beside a pull request, on no host Althar opens one on: why there is none for these, by their remote.
-          const unhosted = beside && merging && !openNewHere && host?.connected === true
+          // Beside a pull request, one whose remotes name no host Althar knows: why it has none, by its name and remote.
+          const nowhere = beside ? task.here.filter((repo) => repo.host === null) : []
           return (
             <ChangeSet
               state={ChangeState.Branch}
@@ -652,9 +670,16 @@ export function Outputs({
               {...(beside ? { title: text.besidePullRequest(task.here.map((repo) => repo.name)) } : {})}
               {...(connectsHere !== null
                 ? { note: text.connectFirst(connectsHere) }
-                : hostless || unhosted
-                  ? { note: text.noHost(task.here.find((repo) => repo.remote != null)?.remote?.name ?? null) }
-                  : {})}
+                : nowhere.length > 0
+                  ? {
+                      note: text.noHostFor(
+                        nowhere.map((repo) => repo.name),
+                        nowhere.find((repo) => repo.remote != null)?.remote?.name ?? null,
+                      ),
+                    }
+                  : hostless
+                    ? { note: text.noHost(task.here.find((repo) => repo.remote != null)?.remote?.name ?? null) }
+                    : {})}
               prs={
                 task.here.length > 0
                   ? task.here.map((repo) => ({

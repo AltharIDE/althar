@@ -96,7 +96,7 @@ export const changeSetText: ChangeSetText = {
   onHostLabel: (repo, n, host) => `Open ${repo} #${n} on ${host}`,
   unpushed: (n) => (n === 1 ? '1 commit not pushed' : `${n.toLocaleString('en-US')} commits not pushed`),
   uncommitted: (n) => (n === 1 ? 'Uncommitted changes in 1 file' : `Uncommitted changes in ${n.toLocaleString('en-US')} files`),
-  commits: (n) => (n === 0 ? 'Nothing to merge' : n === 1 ? '1 commit' : `${n.toLocaleString('en-US')} commits`),
+  commits: (n) => (n === 1 ? '1 commit' : `${n.toLocaleString('en-US')} commits`),
   newPullRequest: (host) => (host === undefined ? 'Open a pull request' : `Open a pull request on ${host}`),
   checksPassed: (n) => (n === 1 ? '1 check passed' : `${n} checks passed`),
   checksFailed: (names) => (names.length === 1 ? `${names[0] ?? ''} failed` : `${names.length} checks failed: ${names.join(', ')}`),
@@ -283,7 +283,8 @@ function Head({
   const onBranch = state === ChangeState.Branch
   // A single repository's files are under the card; with none to show, its commits say what there is to it.
   const [only] = prs
-  const lone = !several && only !== undefined && only.files.length === 0 && only.commits !== undefined ? only.commits : null
+  // A count of none says nothing a merge here would take: no line, rather than one that may not hold.
+  const lone = !several && only !== undefined && only.files.length === 0 && (only.commits ?? 0) > 0 ? (only.commits ?? 0) : null
   return (
     <div className={s.head}>
       <p className={s.pr}>
@@ -319,8 +320,8 @@ function Head({
                       <span>{t.files(pr.files.length)}</span>
                       <Delta add={pr.files.reduce((n, f) => n + f.add, 0)} del={pr.files.reduce((n, f) => n + f.del, 0)} />
                     </>
-                  ) : pr.commits !== undefined ? (
-                    <span>{t.commits(pr.commits)}</span>
+                  ) : (pr.commits ?? 0) > 0 ? (
+                    <span>{t.commits(pr.commits ?? 0)}</span>
                   ) : null}
                 </span>
                 {its !== undefined && (

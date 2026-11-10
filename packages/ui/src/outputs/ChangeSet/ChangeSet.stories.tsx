@@ -536,7 +536,7 @@ export const BesidePullRequest: Story = {
       { repo: 'infra', files: [{ path: 'infra/staging/cdn.tf', add: 14, del: 2 }] },
     ],
     remote: { name: 'origin', pushed: false, ahead: 3 },
-    note: 'No code host: origin isn’t on a host Althar can open a pull request on.',
+    note: 'No code host for engine and infra: origin isn’t on a host Althar can open a pull request on.',
     actions: (
       <>
         <Button variant="signal" onClick={push}>
@@ -579,6 +579,16 @@ export const BesidePullRequestOpens: Story = {
       </>
     ),
   },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    // Opening their pull request first, which pushes them; pushing alone and merging here after, the merge saying what it skips.
+    const names = c.getAllByRole('button', { name: /^(Open a draft|Push|Merge)/ }).map((button) => button.textContent)
+    await expect(names).toEqual(['Open a draft pull request', 'Push to origin', 'Merge engine and infra into main on this Mac'])
+    await expect(c.queryByText(/No code host/)).toBeNull()
+    await expect(c.getByText('Merging on this Mac doesn’t push, and skips review on a pull request.')).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Open a draft pull request' }))
+    await expect(open).toHaveBeenCalled()
+  },
 }
 
 /**
@@ -591,7 +601,7 @@ export const BesidePullRequestOne: Story = {
     title: 'engine: on its branch, no pull request',
     prs: [{ repo: 'engine', files: [], commits: 2 }],
     remote: { name: 'origin', pushed: true, ahead: 0 },
-    note: 'No code host: origin isn’t on a host Althar can open a pull request on.',
+    note: 'No code host for engine: origin isn’t on a host Althar can open a pull request on.',
     actions: <Button variant="signal">Merge engine into main on this Mac</Button>,
   },
   play: async ({ canvasElement }) => {

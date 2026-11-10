@@ -3237,6 +3237,12 @@ export const TaskRepositoryHere = Schema.Struct({
   /** How many commits its branch has since it started, where what it changed was read: what merging it takes, its files aside. */
   commits: Schema.optional(Schema.Number),
   /**
+   * The code host its remotes are on, by name, and whether Althar is
+   * connected to it: where Althar opens its pull request. Null where they
+   * name none Althar knows; absent where it wasn't read.
+   */
+  host: Schema.optional(Schema.NullOr(Schema.Struct({ name: Schema.String, connected: Schema.Boolean }))),
+  /**
    * Where the task's own branch stands on the repository's remote, for
    * pushing it without a connection: the remote it goes to, whether the
    * remote has it, how many commits of it the remote doesn't have, and the

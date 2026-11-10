@@ -962,6 +962,8 @@ export class Changes extends Context.Service<
     hostFor(projectId: string): Effect.Effect<Host | null>
     /** Each host of a project's repositories, or of those a task changes: null for one on none Althar knows. */
     hostsFor(projectId: string, taskId?: string): Effect.Effect<ReadonlyArray<Host | null>>
+    /** Each host of the repositories a task changes, by the repository's slug: null for one on none Althar knows. */
+    repositoryHosts(taskId: string): Effect.Effect<ReadonlyArray<{ readonly slug: string; readonly host: Host | null }>>
   }
 >()('@althar/runtime/Changes') {
   static readonly layer: Layer.Layer<Changes, never, Store> = Layer.effect(
@@ -1212,24 +1214,27 @@ export class Changes extends Context.Service<
           yield* Effect.forkIn(provide(refreshRemotes(instance.deviceId, taskId === undefined ? { projectId } : { taskId }, RECENT)), scope)
           const bindings =
             taskId === undefined
-              ? yield* sql<{ remotes: string }>`
-                  SELECT remote_fingerprints AS remotes FROM repository_bindings WHERE project_id = ${projectId} AND detached_at IS NULL
+              ? yield* sql<{ slug: string; remotes: string }>`
+                  SELECT slug, remote_fingerprints AS remotes FROM repository_bindings WHERE project_id = ${projectId} AND detached_at IS NULL
                   ORDER BY created_at, rowid`
-              : yield* sql<{ remotes: string }>`
-                  SELECT b.remote_fingerprints AS remotes FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+              : yield* sql<{ slug: string; remotes: string }>`
+                  SELECT b.slug, b.remote_fingerprints AS remotes FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
                   WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
           return yield* Effect.forEach(bindings, (binding) =>
-            hostOfRemotes(
-              Option.getOrElse(Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))(binding.remotes), () => []),
+            Effect.map(
+              hostOfRemotes(
+                Option.getOrElse(Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))(binding.remotes), () => []),
+              ),
+              (host) => ({ slug: binding.slug, host }),
             ),
           )
         })
 
       const hostFor = (projectId: string): Effect.Effect<Host | null, never, Store> =>
-        Effect.map(
-          hostsFor(projectId),
-          (hosts) => hosts.find((host) => host?.connected === true) ?? hosts.find((host) => host !== null) ?? null,
-        ).pipe(Effect.orElseSucceed(() => null))
+        Effect.map(hostsFor(projectId), (repositories) => {
+          const hosts = repositories.map((one) => one.host)
+          return hosts.find((host) => host?.connected === true) ?? hosts.find((host) => host !== null) ?? null
+        }).pipe(Effect.orElseSucceed(() => null))
 
       /** The host a repository's remotes are on, and whether Althar is connected to it; null where they name none it knows. */
       const hostOfRemotes = (remotes: ReadonlyArray<string>): Effect.Effect<Host | null, never, Store> =>
@@ -7693,7 +7698,7 @@ export class Changes extends Context.Service<
               const [project] = yield* sql<{ id: ProjectId }>`SELECT id FROM projects WHERE id = ${projectId}`
               if (project === undefined) return null
               if (fresh === true) yield* refreshRemotes(instance.deviceId, taskId === undefined ? { projectId } : { taskId })
-              const hosts = yield* hostsFor(projectId, taskId)
+              const hosts = (yield* hostsFor(projectId, taskId)).map((one) => one.host)
               const wanted = (yield* (yield* Policies).current(project.id)).rules.end
               if (wanted === 'none') return wanted
               if (wanted !== undefined) return hosts.some((host) => host !== null) ? wanted : null
@@ -7701,7 +7706,19 @@ export class Changes extends Context.Service<
             }),
           ),
         hostFor: (projectId) => provide(hostFor(projectId)),
-        hostsFor: (projectId, taskId) => provide(hostsFor(projectId, taskId)).pipe(Effect.orElseSucceed(() => [])),
+        hostsFor: (projectId, taskId) =>
+          provide(hostsFor(projectId, taskId)).pipe(
+            Effect.map((repositories) => repositories.map((one) => one.host)),
+            Effect.orElseSucceed(() => []),
+          ),
+        repositoryHosts: (taskId) =>
+          provide(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              const [task] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${taskId}`
+              return task === undefined ? [] : yield* hostsFor(task.projectId, taskId)
+            }),
+          ).pipe(Effect.orElseSucceed(() => [])),
         conflictStanding: (taskId) => provide(standingOfRound(taskId)).pipe(Effect.orElseSucceed(() => null)),
         pushing: (taskId) => provide(pushingOf(taskId)).pipe(Effect.orElseSucceed(() => null)),
         pushNow: (where) => Effect.asVoid(Effect.forkIn(provide(pushNow(where)), scope)),

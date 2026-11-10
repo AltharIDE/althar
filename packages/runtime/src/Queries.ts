@@ -1448,7 +1448,8 @@ export class Queries extends Context.Service<
                             name: worktree.name,
                             branch: worktree.defaultBranch,
                             head,
-                            ...(wants.changed && head !== null ? { commits: changed.commits } : {}),
+                            // Only as read: where git couldn't say, or nothing was read, no count rather than none.
+                            ...(changed === nothingChanged ? {} : { commits: changed.commits }),
                             remote:
                               head === null || worktree.root === null
                                 ? null
@@ -3339,7 +3340,21 @@ export class Queries extends Context.Service<
               followUp: card?.followUp === true,
               files: said.files,
               commits: said.commits,
-              here: said.here,
+              // Each with the host its remotes are on, for what the card offers it: a pull request Althar opens, or none.
+              here:
+                said.here.length === 0
+                  ? said.here
+                  : yield* Effect.map((yield* Changes).repositoryHosts(head.taskId), (hosts) =>
+                      said.here.map((repository) => {
+                        const found = hosts.find((one) => one.slug === repository.repository)
+                        return found === undefined
+                          ? repository
+                          : {
+                              ...repository,
+                              host: found.host === null ? null : { name: found.host.name, connected: found.host.connected },
+                            }
+                      }),
+                    ),
               merged: said.merged,
               // With commits after its last pull request in none yet, a merged task abandons them, leaving them out, and stays merged:
               // an open one only where every repository of it is merged, as settling it asks, else leaving out wouldn't settle it.

@@ -408,6 +408,8 @@ describe('merging a task here', () => {
       assert.isNull((yield* queries.thread(task.threadId, {})).task.here[0]?.remote)
       // What merging it takes, its files aside: its one commit.
       assert.strictEqual((yield* queries.thread(task.threadId, {})).task.here[0]?.commits, 1)
+      // No remote, no code host: the card says why it has no pull request from that, not from a button it lacks.
+      assert.isNull((yield* queries.thread(task.threadId, {})).task.here[0]?.host)
       const changes = yield* Changes
       const none = yield* Effect.flip(changes.pushBranch(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }]))
       assert.deepStrictEqual([(none as { _tag?: string })._tag, (none as { kind?: string }).kind], ['NotFound', 'remote'])

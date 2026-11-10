@@ -198,7 +198,7 @@ export function DockView({
           {task.here.length > 0 && (
             <ActionButton
               icon="branch"
-              title={mergeHereHint}
+              aria-describedby={`merge-hint-${task.taskId}`}
               disabled={model.merging.has(task.taskId)}
               onClick={() => void model.mergeHere(task)}
             >
@@ -209,6 +209,11 @@ export function DockView({
             {text.openTask}
           </ActionButton>
         </div>
+        {task.here.length > 0 && (
+          <p id={`merge-hint-${task.taskId}`} className={s.hint}>
+            {mergeHereHint}
+          </p>
+        )}
       </Dock>
     )
   }
@@ -265,7 +270,7 @@ export function DockView({
         {task.phase === 'ready' && task.nothingBuilt !== true && change === null && task.here.length > 0 && (
           <ActionButton
             icon="branch"
-            title={mergeHereHint}
+            aria-describedby={`merge-hint-${task.taskId}`}
             disabled={model.merging.has(task.taskId)}
             onClick={() => void model.mergeHere(task)}
           >
@@ -287,6 +292,11 @@ export function DockView({
           {text.openTask}
         </ActionButton>
       </div>
+      {task.phase === 'ready' && task.nothingBuilt !== true && change === null && task.here.length > 0 && (
+        <p id={`merge-hint-${task.taskId}`} className={s.hint}>
+          {mergeHereHint}
+        </p>
+      )}
     </Dock>
   )
 }

@@ -5,6 +5,14 @@
   margin-top: 16px;
 }
 
+/* under the dock's actions, what merging here does that its button can't say */
+.hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+
 .failure {
   margin: 16px 0 0;
   color: var(--danger);

@@ -235,8 +235,8 @@ describe('what a task changed, card by card', () => {
   it('says what repositories beside the rest’s pull request are, what changed in each, and puts pushing them before merging here', async () => {
     const remote = { name: 'origin', branch: 'althar/fix', pushed: false, ahead: 2, newPullRequest: null }
     const here = [
-      { repository: 'engine', name: 'engine', branch: 'main', head: 'abc111', commits: 2, remote },
-      { repository: 'infra', name: 'infra', branch: 'main', head: 'def222', commits: 1, remote: { ...remote, ahead: 1 } },
+      { repository: 'engine', name: 'engine', branch: 'main', head: 'abc111', commits: 2, host: null, remote },
+      { repository: 'infra', name: 'infra', branch: 'main', head: 'def222', commits: 1, host: null, remote: { ...remote, ahead: 1 } },
     ]
     const files = [
       { ...FILE, path: 'engine/src/cdn.ts', add: 9, del: 3 },
@@ -254,7 +254,7 @@ describe('what a task changed, card by card', () => {
     expect(within(card.getByText('engine').closest('li')!).getByText('2 files')).toBeTruthy()
     expect(within(card.getByText('infra').closest('li')!).getByText('1 commit')).toBeTruthy()
     expect(card.getByText('3 commits not pushed')).toBeTruthy()
-    expect(card.getByText('No code host: origin isn’t on a host Althar can open a pull request on.')).toBeTruthy()
+    expect(card.getByText('No code host for engine and infra: origin isn’t on a host Althar can open a pull request on.')).toBeTruthy()
     // The rest goes through review: pushing them comes first, merging here after, saying what it skips.
     const names = card.getAllByRole('button', { name: /^(Push to origin|Merge engine)/ }).map((button) => button.textContent)
     expect(names).toEqual(['Push to origin', 'Merge engine and infra into main on this Mac'])
@@ -266,21 +266,74 @@ describe('what a task changed, card by card', () => {
   })
 
   it('opens a pull request for repositories beside the rest’s from their own card, where Althar can, before merging them here', async () => {
-    const here = [{ repository: 'engine', name: 'engine', branch: 'main', head: 'abc111', commits: 2 }]
+    const github = { name: 'GitHub', connected: true }
+    const here = [
+      { repository: 'engine', name: 'engine', branch: 'main', head: 'abc111', commits: 2, host: github },
+      { repository: 'infra', name: 'infra', branch: 'main', head: 'def222', commits: 0, host: null },
+    ]
     const { onOpenChange } = show(
       task(
         { files: [], commits: 3, here, changes: [pr('web', 7)], unshipped: { commits: 2, add: 4, del: 1 } },
         { host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: true } },
       ),
     )
-    const card = within(screen.getByText('engine: on its branch, no pull request').closest('article')!)
-    expect(card.getByText('2 commits')).toBeTruthy()
+    const card = within(screen.getByText('engine and infra: on its branch, no pull request').closest('article')!)
+    expect(within(card.getByText('engine').closest('li')!).getByText('2 commits')).toBeTruthy()
+    // A count of none says nothing: no line rather than one that may not hold.
+    expect(card.queryByText(/Nothing to merge|0 commits/)).toBeNull()
+    // Only for the one on the connected host, by name; the other says why it has none.
+    expect(card.getByText('No code host for infra: no remote Althar can open a pull request on.')).toBeTruthy()
     // Only on their card: the pull request's own doesn't offer it again.
     expect(screen.getAllByRole('button', { name: /draft pull request/ })).toHaveLength(1)
     const names = card.getAllByRole('button', { name: /^(Open|Merge)/ }).map((button) => button.textContent)
-    expect(names).toEqual(['Open a draft pull request', 'Merge engine into main on this Mac'])
-    await userEvent.click(card.getByRole('button', { name: 'Open a draft pull request' }))
+    expect(names).toEqual(['Open a draft pull request for engine', 'Merge engine and infra into main on this Mac'])
+    await userEvent.click(card.getByRole('button', { name: 'Open a draft pull request for engine' }))
     expect(onOpenChange).toHaveBeenCalled()
+  })
+
+  it('leaves opening a new pull request to the merged one’s card, where its later commits would go with these', async () => {
+    const remote = { name: 'origin', branch: 'althar/fix', pushed: false, ahead: 2, newPullRequest: null }
+    const here = [{ repository: 'engine', name: 'engine', branch: 'main', head: 'abc111', commits: 2, host: null, remote }]
+    show(
+      task(
+        {
+          files: [],
+          commits: 4,
+          here,
+          changes: [pr('web', 7, { state: 'merged' }), pr('api', 8)],
+          unshipped: { commits: 2, add: 4, del: 1 },
+        },
+        { host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: true } },
+      ),
+    )
+    const card = within(screen.getByText('engine: on its branch, no pull request').closest('article')!)
+    // The press opens web's next pull request, not one for engine: it stays with the pull requests, under its own words.
+    expect(card.queryByRole('button', { name: /pull request/ })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Open a new draft pull request' })).toBeTruthy()
+    // engine is on no host Althar knows: pushing it comes first, merging here after.
+    const names = card.getAllByRole('button', { name: /^(Push|Merge)/ }).map((button) => button.textContent)
+    expect(names).toEqual(['Push to origin', 'Merge engine into main on this Mac'])
+    expect(card.getByText('No code host for engine: origin isn’t on a host Althar can open a pull request on.')).toBeTruthy()
+  })
+
+  it('says nothing of a host for repositories beside the rest’s pull request while their work waits for Ship', async () => {
+    const github = { name: 'GitHub', connected: true }
+    const here = [{ repository: 'engine', name: 'engine', branch: 'main', head: 'abc111', commits: 2, host: github }]
+    show(
+      task(
+        {
+          files: [],
+          commits: 3,
+          here,
+          changes: [pr('web', 7)],
+          unshipped: { commits: 2, add: 4, del: 1 },
+          held: { since: '2026-11-09T10:00:00.000Z', commits: 2 },
+        },
+        { host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: true } },
+      ),
+    )
+    const card = within(screen.getByText('engine: on its branch, no pull request').closest('article')!)
+    expect(card.queryByText(/No code host/)).toBeNull()
   })
 
   it('says a merge here with no remote has nowhere to push to, with its review and what went wrong', async () => {

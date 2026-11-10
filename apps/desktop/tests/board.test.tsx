@@ -1392,7 +1392,13 @@ describe('the board', () => {
     withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
     const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
     expect(within(dock).getByRole('button', { name: /Accept and merge/ })).toBeTruthy()
-    await userEvent.click(within(dock).getByRole('button', { name: 'Merge tools into main on this Mac' }))
+    // What merging here skips, in a line anyone can read, and as the button's own description.
+    const merge = within(dock).getByRole('button', { name: 'Merge tools into main on this Mac' })
+    expect(within(dock).getByText('Merging on this Mac doesn’t push, and skips review on a pull request.')).toBeTruthy()
+    expect(merge.getAttribute('aria-describedby')).toBe(
+      within(dock).getByText('Merging on this Mac doesn’t push, and skips review on a pull request.').id,
+    )
+    await userEvent.click(merge)
     await waitFor(() => expect(mergeHere).toHaveBeenCalledWith('t4', [{ repository: 'tools', head: 'abc111' }]))
   })
 
