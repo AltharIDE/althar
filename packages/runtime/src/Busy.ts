@@ -115,11 +115,13 @@ const AUTOMATIONS_AT_ONCE = 1
 export const orderIn = (order: Order, taskId: string, automated: ReadonlySet<string>): Order =>
   order === 'person' ? 'person' : automated.has(taskId) ? 'automation' : order
 
-/** Which of a task's agents: its lead, or its reviewer. */
+/** Which of a task's agents: its lead, its reviewer, or one of its lead's helpers. */
 export interface Agent {
   readonly taskId: string
   /** Its reviewer, not its lead. */
   readonly review?: boolean | undefined
+  /** One of its lead's helpers, by its thread: a place of its own (ADR-087), never its lead's or its reviewer's. */
+  readonly helper?: string | undefined
 }
 
 /** How a step after another on the same task enters: the agent it follows, whose place it takes, with what that agent left running. */
@@ -142,6 +144,9 @@ export interface Holder extends Agent {
   readonly kept: boolean
 }
 
+/** How many of a task's helpers are at work at once (ADR-087); more wait for a place, up to ten (Helpers.ts). */
+export const HELPERS_AT_ONCE = 4
+
 /** How much of a core, of the time between two samples, what an agent left running must use to count as at work. */
 const WORKING_SHARE = 0.05
 
@@ -160,9 +165,16 @@ export interface Waiter extends Agent {
   readonly start: Effect.Effect<void, unknown> | ((begun: Effect.Effect<void>) => Effect.Effect<void, unknown>)
 }
 
-/** A task's agent as it is counted: its lead by the task, its reviewer apart. */
-const keyOf = (taskId: string, review?: boolean) => (review === true ? `${taskId} review` : taskId)
-const waiterKey = (waiter: Agent) => keyOf(waiter.taskId, waiter.review)
+/** A task's agent as it is counted: its lead by the task, its reviewer apart, and each of its helpers apart. */
+const keyOf = (taskId: string, review?: boolean, helper?: string) =>
+  helper !== undefined ? `${taskId} helper ${helper}` : review === true ? `${taskId} review` : taskId
+const waiterKey = (waiter: Agent) => keyOf(waiter.taskId, waiter.review, waiter.helper)
+/** A key's task, and which of its agents. */
+const agentOf = (key: string): Agent => {
+  const helper = / helper (\S+)$/.exec(key)
+  if (helper !== null) return { taskId: key.slice(0, helper.index), helper: helper[1] }
+  return key.endsWith(' review') ? { taskId: key.replace(/ review$/, ''), review: true } : { taskId: key }
+}
 
 /**
  * Something waiting, where it stands: its rank, the time it stands at within
@@ -283,7 +295,7 @@ export class Busy extends Context.Service<
             )
       /** The most at work that leaves room for an agent: the number, and for a small task's lead the quick lane beyond it. */
       const roomUpTo = (most: number, agent: Agent, small: ReadonlySet<string>) =>
-        agent.review !== true && small.has(agent.taskId) ? most + quickLane : most
+        agent.review !== true && agent.helper === undefined && small.has(agent.taskId) ? most + quickLane : most
       /** The tasks automations' runs started that are under way; none where they can't be read, so nothing waits for that. */
       const automated = provide(automatedTasks).pipe(
         Effect.catchCause((cause) =>
@@ -292,7 +304,7 @@ export class Busy extends Context.Service<
       )
       /** How many automations' tasks are at work, of those at work. */
       const automationsAt = (at: ReadonlySet<string>, tasks: ReadonlySet<string>) =>
-        new Set([...at].map((key) => key.replace(/ review$/, '')).filter((taskId) => tasks.has(taskId))).size
+        new Set([...at].map((key) => agentOf(key).taskId).filter((taskId) => tasks.has(taskId))).size
       const cpuOf =
         options.cpuOf ??
         ((agents: ReadonlyArray<{ readonly threadId: string; readonly pid: number | null }>) =>
@@ -392,8 +404,9 @@ export class Busy extends Context.Service<
       const atWork = Effect.gen(function* () {
         // What the store says is under way, on the thread it is on: a step of a running run on an agent, a round its lead was
         // asked about, an agent starting.
-        const under = yield* sql<{ taskId: string; threadId: string | null; review: number }>`
-          SELECT r.task_id, CASE WHEN n.node_key = 'review' THEN s.id ELSE t.id END AS thread_id, n.node_key = 'review' AS review
+        const under = yield* sql<{ taskId: string; threadId: string | null; review: number; helper: string | null }>`
+          SELECT r.task_id, CASE WHEN n.node_key = 'review' THEN s.id ELSE t.id END AS thread_id, n.node_key = 'review' AS review,
+            NULL AS helper
           FROM runs r JOIN workflow_executions e ON e.run_id = r.id JOIN nodes n ON n.execution_id = e.id
           JOIN node_attempts a ON a.node_id = n.id
           JOIN threads t ON t.task_id = r.task_id AND t.kind = 'task'
@@ -402,10 +415,13 @@ export class Busy extends Context.Service<
             -- A round of work after the plan counts as its lead's turns do (ADR-034): in one, or starting, not between them.
             AND NOT (r.plan_id IS NULL AND n.node_key = 'implement' AND a.state = 'running')
           UNION ALL
-          SELECT c.task_id, t.id, 0 FROM conflict_resolutions c JOIN threads t ON t.task_id = c.task_id AND t.kind = 'task'
+          SELECT c.task_id, t.id, 0, NULL FROM conflict_resolutions c JOIN threads t ON t.task_id = c.task_id AND t.kind = 'task'
           WHERE c.state = 'resolving' AND c.waiting IS NULL
           UNION ALL
-          SELECT h.task_id, h.id, h.kind = 'step' FROM provider_sessions p JOIN threads h ON h.id = p.thread_id
+          -- A helper starting takes a place of its own, by its thread (ADR-087).
+          SELECT h.task_id, h.id, h.kind = 'step' AND coalesce(h.node_key, '') NOT LIKE 'helper:%',
+            CASE WHEN h.node_key LIKE 'helper:%' THEN h.id END
+          FROM provider_sessions p JOIN threads h ON h.id = p.thread_id
           WHERE p.state = 'starting' AND h.kind IN ('task', 'step') AND h.task_id IS NOT NULL`
         // An agent waiting on the person's answer, to a question or a permission, keeps its place a few minutes, so an answer
         // soon goes on where it was; past that it isn't using the machine, nor while an answer kept before waits for a place.
@@ -422,14 +438,18 @@ export class Busy extends Context.Service<
             WHERE q.kind = 'permission' AND q.state = 'open' AND q.created_at <= ${askedBefore}`).map((row) => row.threadId),
         )
         const holders = new Map<string, Holder>()
-        const take = (taskId: string, review: boolean, threadId: string | null, kept: boolean) => {
-          const key = keyOf(taskId, review)
+        const take = (taskId: string, review: boolean, threadId: string | null, kept: boolean, helper?: string) => {
+          const key = keyOf(taskId, review, helper)
           // What is under way is taken first, so an agent at work in its step or a turn is never kept only by what it left running.
-          if (!holders.has(key)) holders.set(key, { taskId, review, threadId, kept })
+          if (!holders.has(key)) holders.set(key, { taskId, review, threadId, kept, ...(helper === undefined ? {} : { helper }) })
         }
-        for (const key of starting.keys()) take(key.replace(/ review$/, ''), key.endsWith(' review'), null, false)
+        for (const key of starting.keys()) {
+          const agent = agentOf(key)
+          take(agent.taskId, agent.review === true, null, false, agent.helper)
+        }
         for (const row of under)
-          if (row.threadId === null || !asking.has(row.threadId)) take(row.taskId, row.review === 1, row.threadId, false)
+          if (row.threadId === null || !asking.has(row.threadId))
+            take(row.taskId, row.review === 1, row.threadId, false, row.helper ?? undefined)
         // What the person said to an agent, still to be delivered, is its next turn on its way: the place isn't given to
         // anything else in between.
         const told = new Set(
@@ -441,7 +461,8 @@ export class Busy extends Context.Service<
           // Left running and idle, it is nothing to wait for; not yet read, it counts.
           const working = session.background && (sampled.get(session.threadId)?.working ?? true)
           const turning = (session.turnRunning || told.has(session.threadId)) && !asking.has(session.threadId)
-          if (working || turning) take(session.taskId, session.reviewer, session.threadId, !turning)
+          if (working || turning)
+            take(session.taskId, session.reviewer, session.threadId, !turning, session.helper ? session.threadId : undefined)
         }
         // One task, one place: what its agents left running counts once, and not at all beside an agent of its at work.
         const placed = new Set([...holders.values()].flatMap((holder) => (holder.kept ? [] : [holder.taskId])))
@@ -451,13 +472,13 @@ export class Busy extends Context.Service<
           placed.add(holder.taskId)
           return true
         })
-        return { at: new Set(held.map((holder) => keyOf(holder.taskId, holder.review))), holders: held }
+        return { at: new Set(held.map((holder) => keyOf(holder.taskId, holder.review, holder.helper))), holders: held }
       })
 
       /** The place a task holds only by what its agents left running, which its next work takes; undefined where it holds none so. */
       const keptPlace = (taskId: string, holders: ReadonlyArray<Holder>) => {
         const its = holders.filter((holder) => holder.taskId === taskId)
-        return its.length === 1 && its[0]?.kept === true ? keyOf(taskId, its[0].review) : undefined
+        return its.length === 1 && its[0]?.kept === true ? keyOf(taskId, its[0].review, its[0].helper) : undefined
       }
 
       /** Whether nothing of a task has had an agent yet: no turn of any of its agents reached one. */
@@ -482,7 +503,13 @@ export class Busy extends Context.Service<
           ...turns.values(),
         ]
         // A task's lead waiting before anything of its task has had an agent is in the line, with where the person put it.
-        const asked = [...new Set(all.flatMap((waiter) => (waiter.order === 'person' || waiter.review === true ? [] : [waiter.taskId])))]
+        const asked = [
+          ...new Set(
+            all.flatMap((waiter) =>
+              waiter.order === 'person' || waiter.review === true || waiter.helper !== undefined ? [] : [waiter.taskId],
+            ),
+          ),
+        ]
         const lined =
           asked.length === 0
             ? []
@@ -496,7 +523,7 @@ export class Busy extends Context.Service<
         const tasks = yield* automated
         return all
           .map((waiter): Ranked => {
-            const inLine = waiter.order !== 'person' && waiter.review !== true && line.has(waiter.taskId)
+            const inLine = waiter.order !== 'person' && waiter.review !== true && waiter.helper === undefined && line.has(waiter.taskId)
             // An automation's run waits after everything else, in the line or not (ADR-061).
             const order = orderIn(waiter.order, waiter.taskId, tasks)
             return {
@@ -528,13 +555,19 @@ export class Busy extends Context.Service<
         asked: Order,
       ) =>
         Effect.gen(function* () {
-          const key = keyOf(agent.taskId, agent.review)
+          const key = keyOf(agent.taskId, agent.review, agent.helper)
           const tasks = yield* automated
           const order = orderIn(asked, agent.taskId, tasks)
           if (order === 'person' || at.has(key)) return true
           // Offline, it waits for the computer to be back rather than start into a dead connection.
           if (!(yield* connectivity.online)) return false
-          if (keptPlace(agent.taskId, holders) !== undefined) return true
+          // A task's helpers take four places at most at once (ADR-087): the rest wait their turn, whatever is free.
+          if (
+            agent.helper !== undefined &&
+            holders.filter((holder) => holder.taskId === agent.taskId && holder.helper !== undefined).length >= HELPERS_AT_ONCE
+          )
+            return false
+          if (agent.helper === undefined && keptPlace(agent.taskId, holders) !== undefined) return true
           const most = (yield* atOnce).count
           // Every place of the number taken, only a small task's lead has room, in the quick lane beyond it.
           const beyond = at.size >= most
@@ -639,7 +672,7 @@ export class Busy extends Context.Service<
           // Who holds the places, and whether by what they left running, is on the cards too, as is each one's place in Up next:
           // read again when either changes.
           const shown = `${holders
-            .map((holder) => `${keyOf(holder.taskId, holder.review)}${holder.kept ? ' kept' : ''}`)
+            .map((holder) => `${keyOf(holder.taskId, holder.review, holder.helper)}${holder.kept ? ' kept' : ''}`)
             .toSorted()
             .join(',')} ${most} ${queue.map(({ waiter }) => waiterKey(waiter)).join(',')}`
           if (shown !== said) {
@@ -716,8 +749,8 @@ export class Busy extends Context.Service<
        * merged one's lead goes back to work for it (ADR-034).
        */
       const restored = Effect.gen(function* () {
-        const rows = yield* sql<{ threadId: string; taskId: string; kind: string; since: string }>`
-          SELECT h.id AS thread_id, h.task_id, h.kind, h.waits_for_place AS since FROM threads h
+        const rows = yield* sql<{ threadId: string; taskId: string; kind: string; nodeKey: string | null; since: string }>`
+          SELECT h.id AS thread_id, h.task_id, h.kind, h.node_key, h.waits_for_place AS since FROM threads h
           JOIN tasks k ON k.id = h.task_id JOIN projects p ON p.id = h.project_id
           WHERE h.waits_for_place IS NOT NULL AND k.state IN ('draft', 'open', 'done') AND p.archived_at IS NULL
             AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = h.task_id AND r.state = 'suspended'
@@ -728,7 +761,8 @@ export class Busy extends Context.Service<
           (row) =>
             Effect.map(Effect.all([personSaid(row.threadId), untouched(row.taskId)]), ([person, fresh]) => ({
               taskId: row.taskId,
-              review: row.kind === 'step',
+              review: row.kind === 'step' && !(row.nodeKey ?? '').startsWith('helper:'),
+              ...((row.nodeKey ?? '').startsWith('helper:') ? { helper: row.threadId } : {}),
               // What the person said starts at once; what Althar said to it is the work of a task under way, or new work
               // where nothing of its task has had an agent yet.
               order: person ? ('person' as const) : fresh ? ('new' as const) : ('underway' as const),
@@ -784,7 +818,7 @@ export class Busy extends Context.Service<
         work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
       ) =>
         Effect.gen(function* () {
-          const key = keyOf(agent.taskId, agent.review)
+          const key = keyOf(agent.taskId, agent.review, agent.helper)
           // What the person says to an agent, or an agent they started or switched to, goes on at once; what Althar tells it is the
           // work of a task under way, or new work where nothing of its task has had an agent yet, as a review's first turn.
           const order: Order =

@@ -883,6 +883,8 @@ export class Sessions extends Context.Service<
         readonly taskId: string
         /** A task's reviewer, not its lead. */
         readonly reviewer: boolean
+        /** One of its lead's helpers (ADR-087): a place of its own. */
+        readonly helper: boolean
         readonly turnRunning: boolean
         readonly background: boolean
         /** The agent's process, where it runs as one: what its left running is a part of, and is read for CPU (Busy.ts). */
@@ -925,6 +927,8 @@ export class Sessions extends Context.Service<
           readonly threadId: string
           readonly sessionId: string
           readonly review: boolean
+          /** One of a lead's helpers (ADR-087), by its thread: a place of its own. */
+          readonly helper?: string
           /** Its first turn after the person started or switched to it: theirs, as what they say is. */
           readonly byPerson: boolean
         },
@@ -1068,6 +1072,7 @@ export class Sessions extends Context.Service<
           readonly threadId: string
           readonly sessionId: string
           readonly review: boolean
+          readonly helper?: string
           readonly byPerson: boolean
         },
         work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
@@ -2359,6 +2364,7 @@ export class Sessions extends Context.Service<
                 threadId: thread.threadId,
                 sessionId: running.sessionId,
                 review: thread.role === 'reviewer',
+                ...(thread.role === 'task' && thread.helper !== undefined ? { helper: thread.threadId } : {}),
                 byPerson: running.brief?.byPerson === true,
               },
               (begun) =>
@@ -4334,6 +4340,7 @@ export class Sessions extends Context.Service<
                     threadId: running.thread.threadId,
                     taskId: running.thread.taskId,
                     reviewer: running.thread.role === 'reviewer',
+                    helper: running.thread.role === 'task' && running.thread.helper !== undefined,
                     turnRunning: running.turnRunning,
                     background: [...running.background.values()].some((left) => left.ended === null),
                     pid: running.connection.process?.pid ?? null,

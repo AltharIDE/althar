@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
@@ -7,7 +9,9 @@ import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Connections } from '../src/Connections'
+import { Busy } from '../src/Busy'
 import { Coordinator } from '../src/Coordinator'
+import { Helpers } from '../src/Helpers'
 import { Instance } from '../src/Instance'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -24,9 +28,19 @@ import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from '.
  * ships, asks and starts nothing.
  */
 
-const runtimeWith = (github: FakeService) =>
+const runtimeWith = (github: FakeService, pauses?: ReadonlyArray<Duration.Duration>) =>
   Queries.layer.pipe(
-    Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) })),
+    Layer.provideMerge(
+      runtime(
+        ':memory:',
+        {},
+        {
+          connectors: fakeConnectors({ github }),
+          listenEvery: Duration.hours(1),
+          ...(pauses === undefined ? {} : { connectivity: { pauses } }),
+        },
+      ),
+    ),
   )
 
 const git = (cwd: string, ...args: Array<string>) => execFileSync('git', args, { cwd }).toString().trim()
@@ -135,5 +149,110 @@ describe('a lead’s helpers', () => {
       const [stopped] = yield* sql<{ state: string }>`SELECT state FROM helpers WHERE id = 'hlp_x'`
       assert.strictEqual(stopped?.state, 'stopped')
     }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('are stopped once past their hour, and the lead hears, with the models it can use', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* opened(working)
+      const [run] = yield* sql<{ executionId: string }>`
+        SELECT e.id AS execution_id FROM runs r JOIN workflow_executions e ON e.run_id = r.id WHERE r.task_id = ${task.taskId} LIMIT 1`
+      const long = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+      yield* sql`INSERT INTO threads ${sql.insert({ id: 'thr_11111111111111111111111111111111', projectId: task.projectId, kind: 'step', taskId: task.taskId, executionId: run?.executionId ?? '', nodeKey: 'helper:late', createdAt: long })}`
+      yield* sql`INSERT INTO helpers ${sql.insert({ id: 'hlp_late', taskId: task.taskId, projectId: task.projectId, threadId: 'thr_11111111111111111111111111111111', name: 'Slow one', brief: 'Read it all.', agentId: 'claude-code', state: 'working', startedAt: long })}`
+      yield* (yield* Helpers).lookAtHours
+      const [late] = yield* sql<{ state: string; result: string | null }>`SELECT state, result FROM helpers WHERE id = 'hlp_late'`
+      assert.strictEqual(late?.state, 'failed')
+      assert.include(late?.result ?? '', 'worked for its hour')
+      const [told] = yield* until(
+        sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${task.threadId} AND body LIKE 'Helper "Slow one"%'`,
+        (rows) => rows.length === 1,
+      )
+      assert.include(told?.body ?? '', "couldn't go on: it worked for its hour")
+      assert.match(told?.body ?? '', /The models you can use now: |No model can be used now\./)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('try a failing service again after each pause, then tell the lead it couldn’t go on', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* opened(working)
+      yield* callTool(task.access, 'start_helper', { name: 'Busy service', brief: 'Look at the retry. [overloaded]' })
+      const [failed] = yield* until(
+        sql<{ state: string; result: string | null; threadId: string }>`
+          SELECT state, result, thread_id FROM helpers WHERE task_id = ${task.taskId}`,
+        (rows) => rows[0]?.state === 'failed',
+      )
+      assert.include(failed?.result ?? '', 'kept failing')
+      assert.include(failed?.result ?? '', 'tried 4 times')
+      // Each try again said on its thread.
+      const tries = (yield* items(failed?.threadId ?? '')).filter(
+        (item) => item.kind === 'notice' && String(item.content.title).startsWith('Its service didn’t answer: trying again'),
+      )
+      assert.lengthOf(tries, 3)
+      yield* until(
+        sql<{
+          body: string
+        }>`SELECT body FROM user_inputs WHERE thread_id = ${task.threadId} AND body LIKE 'Helper "Busy service"%couldn''t go on%'`,
+        (rows) => rows.length === 1,
+      )
+    }).pipe(Effect.provide(runtimeWith(github, [Duration.millis(20), Duration.millis(20), Duration.millis(20)])))
+  })
+
+  it.live('take a place of their own among the agents at work, apart from their lead’s', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* opened(working)
+      yield* callTool(task.access, 'start_helper', { name: 'Takes a while', brief: 'Look around slowly. [lead:slowly]' })
+      const [helper] = yield* until(
+        sql<{ threadId: string }>`SELECT thread_id FROM helpers WHERE task_id = ${task.taskId}`,
+        (rows) => rows.length === 1,
+      )
+      const now = yield* until((yield* Busy).now, (at) => at.holders.some((holder) => holder.helper === helper?.threadId))
+      const its = now.holders.find((holder) => holder.helper === helper?.threadId)
+      assert.strictEqual(its?.taskId, task.taskId)
+      assert.isNotTrue(its?.review)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('carry on after a restart, told so on their thread', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    const file = join(mkdtempSync(join(tmpdir(), 'althar-helpers-')), 'althar.sqlite')
+    const launch = () =>
+      Queries.layer.pipe(Layer.provideMerge(runtime(file, {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) })))
+    return Effect.gen(function* () {
+      const threadId = yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const task = yield* opened(working)
+        yield* callTool(task.access, 'start_helper', { name: 'Slow', brief: 'Look around slowly. [lead:slowly]' })
+        const [row] = yield* until(sql<{ threadId: string }>`SELECT thread_id FROM helpers`, (rows) => rows.length === 1)
+        yield* until(
+          Effect.flatMap(Sessions, (sessions) => sessions.busy(row?.threadId ?? '')),
+          (busy) => busy,
+        )
+        return row?.threadId ?? ''
+      }).pipe(Effect.provide(launch()))
+      // Althar starts again: the helper, still at work, carries on, told why.
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* until(
+          sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${threadId} AND body LIKE 'Althar restarted%'`,
+          (rows) => rows.length === 1,
+        )
+        const [still] = yield* sql<{ state: string }>`SELECT state FROM helpers WHERE thread_id = ${threadId}`
+        assert.notStrictEqual(still?.state, 'failed')
+      }).pipe(Effect.provide(launch()))
+    })
   })
 })

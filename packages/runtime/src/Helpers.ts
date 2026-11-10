@@ -3,10 +3,20 @@ import { join } from 'node:path'
 
 import { Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Context, type Crypto, Duration, Effect, Layer, Option, Stream } from 'effect'
+import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schedule, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Accounts } from './Accounts'
 import { touchTask } from './cards'
+import { Agents } from './Config'
+import { Connectivity } from './Connectivity'
+import { Installs } from './Installs'
+import { Limits } from './Limits'
+import { ModelFacts } from './ModelFacts'
+import { Models as ModelsService } from './Models'
+import { PlanUsage } from './PlanUsage'
+import { SignIns } from './SignIns'
+import { usableModels } from './usableModels'
 import { envelope } from './envelope'
 import { scratchOf } from './firstWrite'
 import { Instance } from './Instance'
@@ -35,11 +45,16 @@ import { ToolServer } from './ToolServer'
  * one level deep: a helper starts none, and asks the person nothing.
  */
 
-type Store = SqlClient.SqlClient | Instance | Sessions | Ledger | Crypto.Crypto | Live | ToolServer
+type Models = Agents | ModelsService | ModelFacts | SignIns | Installs | Limits | Accounts | PlanUsage
+type Store = SqlClient.SqlClient | Instance | Sessions | Ledger | Crypto.Crypto | Live | ToolServer | Connectivity | Models
 
-/** How many of a task's helpers work at once, and in its life. */
-export const HELPERS_AT_ONCE = 4
+/** How many of a task's helpers may be at work or waiting for a place (four at work at once: Busy.ts), and in its life. */
+export const HELPERS_AT_WORK_OR_WAITING = 10
 export const HELPERS_IN_A_LIFE = 50
+/** How long a helper may work, from its start; then it is stopped and its lead told (ADR-087). */
+export const HELPER_HOUR = Duration.hours(1)
+/** How often its hour is looked at. */
+const HOUR_EVERY = Duration.seconds(30)
 /** How much of a helper's result its lead's turn carries; the rest is in the file. */
 const RESULT_WORDS = 8000
 
@@ -82,6 +97,8 @@ export class Helpers extends Context.Service<
     stop(input: { readonly taskId: string; readonly helper: string; readonly by: 'lead' | 'person' }): Effect.Effect<string, unknown>
     /** The task's helpers at work. */
     working(taskId: string): Effect.Effect<ReadonlyArray<HelperRow>, unknown>
+    /** Looks at each helper's hour now, as Althar does every 30 seconds: one past it is stopped, and its lead told. */
+    readonly lookAtHours: Effect.Effect<void, unknown>
   }
 >()('@althar/runtime/Helpers') {
   static readonly layer: Layer.Layer<Helpers, never, Store> = Layer.effect(
@@ -93,6 +110,8 @@ export class Helpers extends Context.Service<
       const sessions = yield* Sessions
       const live = yield* Live
       const toolServer = yield* ToolServer
+      // A failing service is tried again after each of a step's pauses (ADR-060): 15 s, 1 min, 4 min.
+      const pauses = (yield* Connectivity).pauses
 
       const working = (taskId: string) =>
         Effect.gen(function* () {
@@ -110,8 +129,8 @@ export class Helpers extends Context.Service<
             const brief = input.brief.trim()
             if (brief === '') return 'Give the helper its brief: what to do, whole. It reads nothing of your conversation.'
             const atWork = yield* working(input.taskId)
-            if (atWork.length >= HELPERS_AT_ONCE)
-              return `${HELPERS_AT_ONCE} helpers are at work already (${atWork.map((one) => `"${one.name}"`).join(', ')}): wait for a result, or stop one with stop_helper.`
+            if (atWork.length >= HELPERS_AT_WORK_OR_WAITING)
+              return `${HELPERS_AT_WORK_OR_WAITING} helpers are at work or waiting for a place already (${atWork.map((one) => `"${one.name}"`).join(', ')}): wait for a result, or stop one with stop_helper.`
             const [life] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM helpers WHERE task_id = ${input.taskId}`
             if ((life?.n ?? 0) >= HELPERS_IN_A_LIFE)
               return `This task has had ${HELPERS_IN_A_LIFE} helpers, its most: do the rest yourself, or tell the person.`
@@ -257,6 +276,78 @@ export class Helpers extends Context.Service<
           yield* touchTask(helper.taskId)
         })
 
+      /** Tries a helper's failing service again, by turn: how many times it has, kept for this run of Althar. */
+      const tries = new Map<string, number>()
+
+      /** A helper that can't go on, told to its lead at once, with the models it may use now to start another. */
+      const failedForGood = (helper: HelperRow & { readonly taskId: string }, why: string) =>
+        Effect.gen(function* () {
+          yield* ended(helper.id, 'failed', why)
+          yield* sessions.stop(helper.threadId).pipe(Effect.ignore)
+          const lead = yield* leadThreadOf(helper.taskId)
+          if (lead === undefined) return yield* touchTask(helper.taskId)
+          const [project] = yield* (yield* SqlClient.SqlClient)<{ projectId: string }>`
+            SELECT project_id FROM tasks WHERE id = ${helper.taskId}`
+          const usable = yield* usableModels(project?.projectId).pipe(Effect.orElseSucceed(() => []))
+          const others = usable.map((model) => model.name).slice(0, 12)
+          yield* sessions.send({
+            envelope: yield* envelope('thread.send', { threadId: lead }),
+            threadId: lead,
+            body: `Helper "${helper.name}" (${helper.model ?? helper.agentId}) couldn't go on: ${why} ${others.length === 0 ? 'No model can be used now.' : `The models you can use now: ${others.join(', ')}. Start it again on one of them with start_helper, as you judge, or do it yourself.`}`,
+            origin: 'news',
+            quiet: true,
+          })
+          if (Option.isNone(yield* sessions.running(lead))) yield* sessions.startLast(lead).pipe(Effect.ignore)
+          yield* touchTask(helper.taskId)
+        })
+
+      /** A helper's turn failed: its service tried again after each pause, then its lead hears with the models it may use. */
+      const turnFailed = (
+        helper: HelperRow & { readonly taskId: string; readonly projectId: ProjectId },
+        errorClass: string | undefined,
+        failure: string | undefined,
+      ) =>
+        Effect.gen(function* () {
+          const tried = tries.get(helper.id) ?? 0
+          const again = errorClass === 'transient' || errorClass === 'session_lost' || errorClass === undefined
+          const pause = pauses[tried]
+          if (!again || pause === undefined) {
+            tries.delete(helper.id)
+            const why =
+              errorClass === 'usage_limit'
+                ? `${helper.model ?? helper.agentId} is out of usage.`
+                : `${helper.model ?? helper.agentId} kept failing${failure === undefined ? '' : ` (${failure})`}, tried ${tried + 1} times.`
+            return yield* failedForGood(helper, why)
+          }
+          tries.set(helper.id, tried + 1)
+          yield* addItem({ projectId: helper.projectId, threadId: helper.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'warning',
+            title: `Its service didn’t answer: trying again in ${Duration.format(pause)}.`,
+          })
+          yield* Effect.forkDetach(
+            Effect.andThen(
+              Effect.sleep(pause),
+              provide(
+                Effect.gen(function* () {
+                  const sql = yield* SqlClient.SqlClient
+                  const [still] = yield* sql<{ state: string }>`SELECT state FROM helpers WHERE id = ${helper.id}`
+                  if (still?.state !== 'working') return
+                  if (Option.isNone(yield* sessions.running(helper.threadId)))
+                    yield* sessions.startLast(helper.threadId).pipe(Effect.ignore)
+                  yield* sessions.send({
+                    envelope: yield* envelope('thread.send', { threadId: helper.threadId }),
+                    threadId: helper.threadId,
+                    body: 'Your last turn failed on the service. Carry on with what you were asked, from where it stands.',
+                    origin: 'system',
+                    quiet: true,
+                  })
+                }),
+              ),
+            ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not try a helper again', cause))),
+          )
+        })
+
       const heard = (event: LiveEvent) =>
         Effect.gen(function* () {
           if (event._tag !== 'TurnEnded' && event._tag !== 'SessionEnded') return
@@ -282,6 +373,10 @@ export class Helpers extends Context.Service<
               })
             return yield* touchTask(helper.taskId)
           }
+          // A turn that failed on its service is tried again, then its lead hears; one stopped is the stopper's to say.
+          if (event.state === 'failed') return yield* turnFailed(helper, event.errorClass, event.failure)
+          if (event.state === 'interrupted') return
+          tries.delete(helper.id)
           // Done once nothing of its own is still at work.
           yield* Effect.forkDetach(
             Effect.andThen(sessions.untilIdle(helper.threadId, Duration.minutes(2)), provide(deliver(helper))).pipe(
@@ -289,6 +384,52 @@ export class Helpers extends Context.Service<
             ),
           )
         })
+
+      /** A helper past its hour is stopped, and its lead told: what it said is on its thread, and nothing more comes. */
+      const overTime = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const before = new Date((yield* Clock.currentTimeMillis) - Duration.toMillis(HELPER_HOUR)).toISOString()
+        const late = yield* sql<HelperRow & { taskId: string }>`
+          SELECT id, name, thread_id, agent_id, model, state, task_id FROM helpers WHERE state = 'working' AND started_at <= ${before}`
+        for (const helper of late)
+          yield* failedForGood(helper, 'it worked for its hour, its most, and was stopped. What it said is on its thread.')
+      })
+      yield* Effect.forkScoped(
+        provide(overTime).pipe(
+          Effect.catchCause((cause) => Effect.logWarning('Could not look at helpers’ hours', cause)),
+          Effect.repeat(Schedule.spaced(HOUR_EVERY)),
+        ),
+      )
+
+      /**
+       * After a restart, a helper that was at work carries on: its agent started again on its thread, told to go on from where
+       * it stands. One that can't start is its lead's to hear of, as a failure.
+       */
+      const carryOn = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const working = yield* sql<HelperRow & { taskId: string }>`
+          SELECT id, name, thread_id, agent_id, model, state, task_id FROM helpers WHERE state = 'working'`
+        for (const helper of working) {
+          if (Option.isSome(yield* sessions.running(helper.threadId))) continue
+          const started = yield* sessions.startLast(helper.threadId).pipe(Effect.orElseSucceed(() => false))
+          if (!started) {
+            yield* failedForGood(helper, 'Althar restarted, and its agent couldn’t start again.')
+            continue
+          }
+          yield* sessions.send({
+            envelope: yield* envelope('thread.send', { threadId: helper.threadId }),
+            threadId: helper.threadId,
+            body: 'Althar restarted while you worked. Carry on with what you were asked, from where it stands.',
+            origin: 'system',
+            quiet: true,
+          })
+        }
+      })
+      yield* Effect.forkScoped(
+        provide(Effect.delay(carryOn, Duration.seconds(2))).pipe(
+          Effect.catchCause((cause) => Effect.logWarning('Could not carry helpers on after a restart', cause)),
+        ),
+      )
 
       yield* Effect.forkScoped(
         Stream.runForEach(yield* live.subscribe, (event) =>
@@ -339,7 +480,7 @@ export class Helpers extends Context.Service<
           }),
         )
 
-      return Helpers.of({ start, stop, working: (taskId) => provide(working(taskId)) })
+      return Helpers.of({ start, stop, working: (taskId) => provide(working(taskId)), lookAtHours: provide(overTime) })
     }),
   )
 }
