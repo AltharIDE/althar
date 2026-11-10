@@ -129,9 +129,16 @@ const plain = (text: string) =>
     .replace(/\s+/g, ' ')
     .trim()
 
-/** A caption in an attribute: quotes and angle brackets as entities. */
+/** A caption or address in an attribute: quotes, angle brackets and pipes (which would end a table cell) as entities. */
 const attribute = (text: string) =>
-  text.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\s+/g, ' ').trim()
+  text
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\|/g, '&#124;')
+    .replace(/\s+/g, ' ')
+    .trim()
 
 const short = (head: string | null) => (head === null ? null : head.slice(0, 7))
 

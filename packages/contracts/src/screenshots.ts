@@ -85,8 +85,11 @@ export const screenshotsNow = (
     const kept = (report.keptViews ?? []).map((view) => view.trim())
     if (shots.length === 0 && kept.length === 0) continue
     // Only views taken again: a follow-up that leaves the others as they were.
-    const retaken = shots.length > 0 && shots.every((shot) => shown.has(shot.key))
-    if (!retaken) for (const key of shown.keys()) if (!kept.includes(key)) shown.delete(key)
+    // A view counts by its name, so a before added to a view, or a view's own picture, is a retake too.
+    const known = new Set([...shown.keys()].map(viewOfKey))
+    const retaken = shots.length > 0 && shots.every((shot) => known.has(viewOfKey(shot.key)))
+    // A view kept by name keeps both its picture and its before.
+    if (!retaken) for (const key of shown.keys()) if (!kept.includes(viewOfKey(key))) shown.delete(key)
     for (const shot of shots) shown.set(shot.key, shot)
   }
   return [...shown.values()]

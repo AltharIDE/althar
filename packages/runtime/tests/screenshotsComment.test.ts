@@ -218,6 +218,17 @@ describe('the comment', () => {
     assert.notInclude(body, '\n---\n')
   })
 
+  it('keeps a pipe in a caption or address from splitting the table', () => {
+    const shot = { ...posted('A1', 'a'), caption: 'Page | details', url: 'https://e.test/a|b.png' }
+    const body = commentBody({ shown: [posted('A1:before', 'b'), shot], earlier: [], head: null })
+    const row = body.split('\n').find((line) => line.startsWith('| <img'))!
+    assert.lengthOf(
+      row.split('|').filter((cell) => cell.trim() !== ''),
+      2,
+    )
+    assert.include(row, 'alt="Page &#124; details"')
+  })
+
   it('mixes tables and single pictures, a divider between each', () => {
     const body = commentBody({
       shown: [posted('A1', 'a'), posted('B1', 'c'), posted('B1:before', 'd'), posted('C1', 'e')],

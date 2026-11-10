@@ -196,3 +196,30 @@ describe('a before', () => {
     expect(now.map((one) => one.key)).toEqual(['r1:0'])
   })
 })
+
+describe('a before across reports', () => {
+  const pair = (digest: string) => [
+    { ...shot('Page, main', `${digest}b`), view: 'Page', before: true },
+    { ...shot('Page', digest), view: 'Page' },
+  ]
+  it('added alone later leaves the view’s own picture', () => {
+    const now = screenshotsNow(
+      [
+        report('r1', 1, '2026-11-01T10:00:00.000Z', [{ ...shot('Page', 'a'), view: 'Page' }]),
+        report('r2', 2, '2026-11-01T11:00:00.000Z', [{ ...shot('Page, main', 'b'), view: 'Page', before: true }]),
+      ],
+      { change: true, since: null },
+    )
+    expect(now.map((one) => one.key)).toEqual(['Page', 'Page:before'])
+  })
+  it('keeps both sides of a view a later report names in kept_views', () => {
+    const now = screenshotsNow(
+      [
+        report('r1', 1, '2026-11-01T10:00:00.000Z', pair('a')),
+        { ...report('r2', 2, '2026-11-01T11:00:00.000Z', [{ ...shot('Other', 'o'), view: 'Other' }]), keptViews: ['Page'] },
+      ],
+      { change: true, since: null },
+    )
+    expect(now.map((one) => one.key).toSorted()).toEqual(['Other', 'Page', 'Page:before'])
+  })
+})
