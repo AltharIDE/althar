@@ -39,7 +39,7 @@ describe('the queue build, not the pull request head', () => {
       for (let n = 1; n <= 4; n++) assert.include(detail.logs[n - 1], `https://ci.test/${n}`)
       assert.include(detail.logs[2], '403')
       assert.include(detail.logs[2], 'No Actions permission')
-      assert.include(detail.main, 'Fails on trunk (trunk-0) too on one.')
+      assert.include(detail.main, 'The same jobs also fail on trunk (trunk-0): one. Their failure causes may differ.')
       assert.include(detail.main, 'two passes on trunk')
       assert.include(detail.main, "hasn't reported on three, four yet")
     }),

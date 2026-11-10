@@ -120,7 +120,10 @@ describe('the merge queue, in the task’s thread', () => {
 
   it('compares the queue\u2019s failures with the default branch: only what it reports counts', () => {
     const base = (...rows: Array<[string, 'passed' | 'failed' | 'running']>) => rows.map(([name, state]) => ({ name, state }))
-    assert.strictEqual(queueMainLine('main', ['test'], base(['test', 'failed'])), 'Fails on main too on test.')
+    assert.strictEqual(
+      queueMainLine('main', ['test'], base(['test', 'failed'])),
+      'The same jobs also fail on main: test. Their failure causes may differ.',
+    )
     assert.strictEqual(queueMainLine('main', ['test'], base(['test', 'passed'])), 'test passes on main.')
     assert.strictEqual(
       queueMainLine('main', ['test'], base()),
@@ -128,9 +131,12 @@ describe('the merge queue, in the task’s thread', () => {
     )
     assert.strictEqual(
       queueMainLine('main', ['a', 'b'], base(['b', 'failed'], ['a', 'passed'])),
-      'Fails on main too on b. a passes on main.',
+      'The same jobs also fail on main: b. Their failure causes may differ. a passes on main.',
     )
-    assert.strictEqual(queueMainLine('main', ['a', 'b'], base(['b', 'failed'])), "Fails on main too on b. main hasn't reported on a yet.")
+    assert.strictEqual(
+      queueMainLine('main', ['a', 'b'], base(['b', 'failed'])),
+      "The same jobs also fail on main: b. Their failure causes may differ. main hasn't reported on a yet.",
+    )
     assert.strictEqual(queueMainLine('main', ['a'], base(['a', 'running'])), "main hasn't reported on a yet.")
     assert.strictEqual(queueMainLine('main', ['a'], base(['a', 'passed'], ['a', 'running'])), "main hasn't reported on a yet.")
     assert.strictEqual(queueMainLine('main', ['a'], base(['b', 'failed'])), "main hasn't reported on a yet.")

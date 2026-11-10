@@ -103,7 +103,7 @@ export const queueMainLine = (
   const there = failing.filter((name) => !failed.has(name) && passed.has(name))
   const unreported = failing.filter((name) => !failed.has(name) && !passed.has(name))
   const said: Array<string> = []
-  if (too.length > 0) said.push(`Fails on ${base} too on ${too.join(', ')}.`)
+  if (too.length > 0) said.push(`The same jobs also fail on ${base}: ${too.join(', ')}. Their failure causes may differ.`)
   if (there.length > 0) said.push(`${there.join(', ')} pass${there.length === 1 ? 'es' : ''} on ${base}.`)
   if (unreported.length > 0) said.push(`${base} hasn't reported on ${unreported.join(', ')} yet.`)
   return said.join(' ')

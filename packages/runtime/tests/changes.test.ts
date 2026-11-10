@@ -645,7 +645,7 @@ describe('a task that ends in a pull request', () => {
       const text = taken?.['description'] ?? ''
       assert.isDefined(taken)
       assert.include(text, 'Failed on the queue build (group-s): test.')
-      assert.include(text, 'Fails on main (main-0) too on test.')
+      assert.include(text, 'The same jobs also fail on main (main-0): test. Their failure causes may differ.')
     }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', Duration.minutes(1))))
   })
 
