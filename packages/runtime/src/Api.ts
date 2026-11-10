@@ -1179,6 +1179,7 @@ export const handlers = Api.toLayer(
         once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetRunOutside: ({ commandId, to }) => once(commandId, api(setRunOutside(to)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       RunIt: ({ commandId, taskId, how }) => once(commandId, api(reviews.runIt({ taskId, ...(how === undefined ? {} : { how }) }))),
+      StopRunning: ({ commandId, taskId }) => once(commandId, api(reviews.stopRunning({ taskId, actorId: instance.personId }))),
       GetAutomations: ({ projectId }) =>
         api(
           Effect.gen(function* () {

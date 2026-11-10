@@ -565,6 +565,7 @@ describe('the API', () => {
               SavePreset: () => Effect.die('unused'),
               RemovePreset: () => Effect.die('unused'),
               RunIt: () => Effect.die('unused'),
+              StopRunning: () => Effect.die('unused'),
               SetRunOutside: () => Effect.die('unused'),
               UndoAutomationChange: () => Effect.die('unused'),
               AnswerSettingChange: () => Effect.die('unused'),

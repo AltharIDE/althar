@@ -63,6 +63,7 @@ export const WINDOW_ACTIONS = {
   dropMove: { person: 'calls off a move into or out of their own checkout' },
   workToward: { tool: 'work_toward' },
   runIt: { person: 'says how far to trust a pull request’s code: a lead’s run_it only relays their word' },
+  stopRunning: { person: 'takes back the trust they gave a pull request’s code: only they stop running it' },
   shelve: { tool: 'change_part' },
   savePreset: { person: 'keeps a task’s parts as a preset of their own, in their settings' },
   joinChanges: { tool: 'join_changes' },

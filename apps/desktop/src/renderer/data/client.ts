@@ -288,6 +288,8 @@ export interface Client {
     taskId: string,
     how?: 'safe' | 'full',
   ) => Promise<{ readonly kind: 'ran'; readonly trust: 'safe' | 'full'; readonly said: string } | { readonly kind: 'asks' }>
+  /** Stop running it: its copy read only again, and its lead a reader. What it did, in words. */
+  readonly stopRunning: (taskId: string) => Promise<string>
   /** Whether a pull request Althar opens says how its change was reviewed: the seal and the folded review. */
   readonly setReviewSeal: (on: boolean) => Promise<void>
   /** How the review seal looks. */
@@ -838,6 +840,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     savePreset: (input) => command((commandId) => api.SavePreset({ commandId, ...input })),
     removePreset: (id) => command((commandId) => api.RemovePreset({ commandId, id })),
     runIt: (taskId, how) => command((commandId) => api.RunIt({ commandId, taskId, ...(how === undefined ? {} : { how }) })),
+    stopRunning: (taskId) => command((commandId) => api.StopRunning({ commandId, taskId })),
     setReviewSeal: (on) => command((commandId) => api.SetReviewSeal({ commandId, on })),
     setReviewSealStyle: (style) => command((commandId) => api.SetReviewSealStyle({ commandId, style })),
     getAutomations: (projectId) => settle(api.GetAutomations({ projectId })),

@@ -138,6 +138,7 @@ export const reachText = {
   runSafely: 'Run safely',
   trustFully: 'Trust fully',
   runIt: 'Run it',
+  stopRunning: 'Stop running it',
   offline: 'no network',
   offlineMeans: (source: string) =>
     `From outside the team. The agent sees its code, and its description, checks and comments on ${source}.`,

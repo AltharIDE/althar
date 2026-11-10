@@ -26,7 +26,9 @@ import { automationOf, linkTask } from './automated'
 import { copyReviewed, LOGS_SHOWN, type ReviewOf, reviewOf, type Reviewed, SAID_SHOWN } from './reviewing'
 import { indexTask } from './Search'
 import { Sessions } from './Sessions'
+import { Launches } from './Launches'
 import { LeftBehind } from './LeftBehind'
+import { notInstalled } from './lockOutside'
 import { addItem, moveToEnd, updateItem } from './threads'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
 
@@ -307,6 +309,9 @@ const SAFE_INSTALLS: ReadonlyArray<readonly [string, string]> = [
   ['package-lock.json', 'npm ci --ignore-scripts --no-audit --no-fund'],
 ]
 
+/** How many of a lockfile's packages that didn't install Run safely names, the rest counted. */
+const MISSING_NAMED = 8
+
 /** Where a package manager is told which registries to reach: the base branch's, never what the pull request wrote there. */
 const REGISTRY_FILES = ['.npmrc', '.yarnrc', '.yarnrc.yml', 'bunfig.toml']
 
@@ -323,14 +328,16 @@ export const installSafely = (copy: string, base: string) =>
       if (based.code === 0) yield* Effect.sync(() => writeFileSync(theirs, `${based.stdout}\n`))
       else if (existsSync(theirs)) yield* removeFully(theirs).pipe(Effect.ignore)
     }
-    const install = SAFE_INSTALLS.find(([lock]) => existsSync(join(copy, lock)))?.[1] ?? null
-    if (install === null) return { command: null, ok: true, printed: '' }
+    const [lockfile, install] = SAFE_INSTALLS.find(([lock]) => existsSync(join(copy, lock))) ?? [null, null]
+    if (install === null || lockfile === null) return { command: null, ok: true, printed: '', missing: [] }
     const ran = yield* Effect.callback<{ readonly ok: boolean; readonly printed: string }>((resume) => {
       exec(install, { cwd: copy, timeout: 10 * 60_000, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) =>
         resume(Effect.succeed({ ok: error === null, printed: `${stdout}${stderr}`.trim().split('\n').slice(-12).join('\n') })),
       )
     })
-    return { command: install, ...ran }
+    // What its lockfile takes from a git host or a tarball, and isn't there: named, as Trust fully would add it.
+    const missing = yield* Effect.sync(() => notInstalled(copy, lockfile))
+    return { command: install, ...ran, missing }
   })
 
 /** A review task that started, or the one already reviewing that pull request. */
@@ -438,9 +445,14 @@ export class Reviews extends Context.Service<
       readonly taskId: string
       readonly how?: 'safe' | 'full'
     }): Effect.Effect<{ readonly kind: 'ran'; readonly trust: 'safe' | 'full'; readonly said: string } | { readonly kind: 'asks' }, unknown>
+    /**
+     * Stop running it (a task is a conversation plus parts, "Access moving back"): what the pull request's lead started of it
+     * stops, its copy is read only again, and its lead starts afresh as a reader, told so. What it did, in words.
+     */
+    stopRunning(input: { readonly taskId: string; readonly actorId: ActorId }): Effect.Effect<string, unknown>
   }
 >()('@althar/runtime/Reviews') {
-  static readonly layer: Layer.Layer<Reviews, never, Store> = Layer.effect(
+  static readonly layer: Layer.Layer<Reviews, never, Store | Launches> = Layer.effect(
     Reviews,
     Effect.gen(function* () {
       const context = yield* Effect.context<Store>()
@@ -448,6 +460,7 @@ export class Reviews extends Context.Service<
       const instance = yield* Instance
       const connections = yield* Connections
       const sessions = yield* Sessions
+      const launches = yield* Launches
       const leftBehind = yield* LeftBehind
       const toolServer = yield* ToolServer
       const agents = yield* Agents
@@ -1641,12 +1654,22 @@ export class Reviews extends Context.Service<
             let said: string
             if (asked === 'safe') {
               const installed = yield* installSafely(copy.path, review.baseCommit)
+              // Its lockfile's packages from a git host or a tarball that didn't install, each by name and where it comes from.
+              const missed =
+                installed.missing.length === 0
+                  ? ''
+                  : `\nNot installed, as they come from outside its registries: ${installed.missing
+                      .slice(0, MISSING_NAMED)
+                      .map((one) => `${one.name} (${one.from})`)
+                      .join(
+                        ', ',
+                      )}${installed.missing.length > MISSING_NAMED ? `, and ${installed.missing.length - MISSING_NAMED} more` : ''}. Trust fully installs them.`
               said =
                 installed.command === null
                   ? `Runs ${name} safely: it has no lockfile Althar knows, so nothing was installed. Its commands run offline in the sandbox.`
                   : installed.ok
-                    ? `Runs ${name} safely: installed with \`${installed.command}\`, install scripts off, from the registries its base branch names. Its commands run offline in the sandbox.`
-                    : `Runs ${name} safely, but not everything installed with its install scripts off (\`${installed.command}\`):\n${installed.printed}\nTrust fully runs them as the team's code does.`
+                    ? `Runs ${name} safely: installed with \`${installed.command}\`, install scripts off, from the registries its base branch names. Its commands run offline in the sandbox.${missed}`
+                    : `Runs ${name} safely, but not everything installed with its install scripts off (\`${installed.command}\`):\n${installed.printed}${missed}\nTrust fully runs them as the team's code does.`
             } else
               said = review.outside
                 ? `Trusts ${name} fully: it is set up and runs as the team's code does, with its install scripts and the network.`
@@ -1686,6 +1709,55 @@ export class Reviews extends Context.Service<
           }),
         )
 
+      const stopRunning: Reviews['Service']['stopRunning'] = (input) =>
+        provide(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const review = yield* reviewOf(input.taskId)
+            if (review === null) return yield* refused('This task reviews no pull request, so nothing of it runs.')
+            const [copy] = yield* sql<{ id: string; projectId: ProjectId; trust: 'safe' | 'full' | null; threadId: string }>`
+              SELECT w.id, w.project_id, w.trust, (SELECT t.id FROM threads t WHERE t.task_id = w.task_id AND t.kind = 'task') AS thread_id
+              FROM workspaces w WHERE w.task_id = ${input.taskId} AND w.access = 'read' AND w.state = 'ready'
+              ORDER BY w.created_at LIMIT 1`
+            const name = `${review.words.short} ${review.words.prefix}${review.number}`
+            if (copy === undefined || copy.trust === null) return `${name} doesn’t run: its lead reads it only.`
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                const revision = yield* change('workspaces', copy.id, { trust: null })
+                yield* fact({
+                  projectId: copy.projectId,
+                  aggregateType: 'workspace',
+                  aggregateId: copy.id,
+                  revision,
+                  type: 'workspace.untrusted',
+                  payload: { was: copy.trust },
+                  actorId: input.actorId,
+                })
+              }),
+            )
+            // What its lead started of it stops: its servers and watchers, as the person's Stop does each.
+            yield* launches.stopAll(copy.projectId, input.taskId)
+            const said = `Stopped running ${name}: its copy is read only again, and its lead reads it only.`
+            yield* addItem({ projectId: copy.projectId, threadId: copy.threadId }, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: said,
+            })
+            // Its lead starts afresh as a reader, its sandbox as it was before it ran, told so.
+            yield* sessions.moved(copy.threadId)
+            yield* sessions
+              .send({
+                envelope: yield* envelope('thread.send', { threadId: copy.threadId }),
+                threadId: copy.threadId,
+                body: `The person stopped running ${name}. Its copy is read only again: read it, and run nothing of it, no install, build, tests or scripts.`,
+                quiet: true,
+              })
+              .pipe(Effect.catchCause((cause) => Effect.logWarning('Could not tell a review’s lead it runs nothing now', cause)))
+            yield* touchCard(input.taskId)
+            return said
+          }),
+        )
+
       yield* toolServer.serve('lead', [
         {
           name: 'run_it',
@@ -1715,7 +1787,17 @@ export class Reviews extends Context.Service<
         },
       ])
 
-      return Reviews.of({ start, lead, canLead: (agentId) => canLead(agentId), change: changeDraft, post, discard, runIt, reviewIn })
+      return Reviews.of({
+        start,
+        lead,
+        canLead: (agentId) => canLead(agentId),
+        change: changeDraft,
+        post,
+        discard,
+        runIt,
+        stopRunning,
+        reviewIn,
+      })
     }),
   )
 }

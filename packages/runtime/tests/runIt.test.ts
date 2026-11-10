@@ -128,6 +128,20 @@ describe('Run it', () => {
         )
         assert.deepInclude(sessionMetas.at(-1)?.options ?? {}, { untrusted: true, offline: true })
         assert.include(yield* listTools(lead), 'run_project')
+
+        // Stop running it: the copy is read only again, and its lead a reader once more, told so.
+        const instance = yield* Instance
+        const stopped = yield* (yield* Reviews).stopRunning({ taskId: task.id, actorId: instance.personId })
+        assert.strictEqual(stopped, 'Stopped running PR #1: its copy is read only again, and its lead reads it only.')
+        assert.isNull((yield* reviewTask(projectId)).workspace.trust)
+        assert.isUndefined((yield* reviewBriefOf(task.id))?.trust)
+        assert.notInclude(yield* listTools(lead), 'run_project')
+        assert.isTrue((yield* notices(task.threadId)).includes(stopped))
+        // Asked again, nothing runs to stop.
+        assert.strictEqual(
+          yield* (yield* Reviews).stopRunning({ taskId: task.id, actorId: instance.personId }),
+          'PR #1 doesn’t run: its lead reads it only.',
+        )
       }).pipe(Effect.provide(withQueries(github)))
     },
   )

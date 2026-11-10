@@ -4644,6 +4644,11 @@ export const Api = RpcGroup.make(
       Schema.Struct({ kind: Schema.Literal('asks') }),
     ]),
   ),
+  /**
+   * Stop running it (a task is a conversation plus parts, "Access moving back"): what its lead started of the pull request
+   * stops, its copy is read only again, and its lead starts afresh as a reader. What it did, in words.
+   */
+  command('StopRunning', { taskId: Schema.String }, Schema.String),
   /** Whether a pull request Althar opens says how its change was reviewed: the seal and the folded review. */
   command('SetReviewSeal', { on: Schema.Boolean }, Schema.Void),
   /** How the review seal looks. */

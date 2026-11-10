@@ -1203,9 +1203,15 @@ export function TaskView({
             <ReachLine className={s.reach} phrases={reachOf(snapshot.task.review, postsTeamReviews)} aria-label={text.reach} />
           )}
           {/* Run it, the person's word: how far to trust the pull request's code, an outside author's asked, the team's at once. */}
-          {snapshot.task.review != null && snapshot.task.phase !== 'settled' && snapshot.task.review.trust !== 'full' && (
+          {snapshot.task.review != null && snapshot.task.phase !== 'settled' && (
             <div className={s.runIt}>
-              {snapshot.task.review.outside ? (
+              {/* Running it, the person takes it back: its copy read only again, and its lead a reader. */}
+              {snapshot.task.review.trust !== undefined && (
+                <Button size="small" variant="quiet" onClick={() => void model.stopRunning()}>
+                  {reachText.stopRunning}
+                </Button>
+              )}
+              {snapshot.task.review.trust === 'full' ? null : snapshot.task.review.outside ? (
                 <>
                   {snapshot.task.review.trust === undefined && (
                     <Button size="small" variant="quiet" onClick={() => void model.runIt('safe')}>

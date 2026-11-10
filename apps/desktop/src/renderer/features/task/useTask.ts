@@ -170,6 +170,8 @@ export interface TaskModel {
   readonly workToward: (toward: string | null) => Promise<void>
   /** Run it, on the pull request a review task reviews: as far as `how` trusts it, the team's own fully. */
   readonly runIt: (how?: 'safe' | 'full') => Promise<void>
+  /** Stop running it: the pull request's copy read only again, and its lead a reader. */
+  readonly stopRunning: () => Promise<void>
   /** Puts the task on Scratch, or on the board with null (a task is a conversation plus parts). */
   readonly shelve: (shelf: 'scratch' | null) => Promise<void>
   /** Saves the task's parts, team and the start of its brief as a preset, by name. */
@@ -708,6 +710,7 @@ export const useTask = (threadId: string): TaskModel => {
     dropMove: () => onTask((taskId) => client.dropMove(taskId)),
     workToward: (toward) => onTask((taskId) => client.workToward(taskId, toward)),
     runIt: (how) => onTask((taskId) => client.runIt(taskId, how)),
+    stopRunning: () => onTask((taskId) => client.stopRunning(taskId)),
     shelve: (shelf) => onTask((taskId) => client.shelveTask(taskId, shelf)),
     savePreset: (name) => onTask((taskId) => client.savePreset({ name, taskId })),
     stopHelper: (helper) => onTask((taskId) => client.stopHelper(taskId, helper)),

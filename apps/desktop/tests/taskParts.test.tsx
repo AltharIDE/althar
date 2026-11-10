@@ -124,6 +124,33 @@ describe('a task’s parts', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Run it' }))
     await waitFor(() => expect(second.client.runIt).toHaveBeenCalledWith(base.task.id, undefined))
     expect(screen.queryByRole('button', { name: 'Run safely' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Stop running it' })).toBeNull()
+  })
+
+  it('stops running a pull request it runs, safely or trusted, from beside how far it trusts it', async () => {
+    const review = {
+      product: 'github' as const,
+      repository: 'meridian/api',
+      number: 1199,
+      url: 'https://github.com/meridian/api/pull/1199',
+      title: 'Send back won’t restart a dead lead session',
+      author: 'ninemate',
+      outside: true,
+      additions: 58,
+      deletions: 20,
+      findings: 0,
+      blocking: 0,
+      verdict: null,
+      posted: null,
+      trust: 'safe' as const,
+    }
+    const running = snapshot({ task: { ...base.task, phase: 'running', review } })
+    const { client } = fakeClient({ getThread: vi.fn(async () => running) })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Stop running it' }))
+    await waitFor(() => expect(client.stopRunning).toHaveBeenCalledWith(base.task.id))
+    // Run safely, it still offers to trust it fully.
+    expect(screen.getByRole('button', { name: 'Trust fully' })).toBeTruthy()
   })
 
   it('saves a task’s parts as a preset, and moves a chat off Scratch, from its menu', async () => {
