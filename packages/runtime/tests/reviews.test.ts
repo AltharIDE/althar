@@ -559,7 +559,11 @@ describe('reviewing someone else’s pull request', () => {
         assert.strictEqual(folded?.state, 'posted')
         assert.match(folded?.review?.url ?? '', /\/pull\/1#pullrequestreview-/)
         assert.strictEqual((yield* reviewTask(projectId)).task?.state, 'done')
-        const [settled] = (yield* Effect.orDie(queries.board(projectId))).tasks.filter((one) => one.taskId === task?.id)
+        // Settled on the board once its lead, started again to post, has stopped: a lead still on it shows it at work till then.
+        const [settled] = yield* until(
+          Effect.map(Effect.orDie(queries.board(projectId)), (board) => board.tasks.filter((one) => one.taskId === task?.id)),
+          (cards) => cards[0]?.phase === 'settled',
+        )
         assert.deepStrictEqual([settled?.phase, settled?.kind], ['settled', 'review'])
         // Its lead stops, its task settled.
         yield* until(
