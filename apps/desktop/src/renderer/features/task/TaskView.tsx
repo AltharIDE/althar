@@ -857,6 +857,10 @@ export function TaskView({
     ...(snapshot.task.phase === 'settled' && snapshot.task.worktree !== null
       ? { removeFolder: () => void client.removeTaskFolder(snapshot.task.id, null) }
       : {}),
+    // A running task moves between a worktree and Local, between its lead's turns.
+    ...(snapshot.task.phase !== 'settled' && snapshot.task.worktree !== null && snapshot.task.branch !== null
+      ? { move: (to, consent) => void model.move(to, consent), dropMove: () => void model.dropMove() }
+      : {}),
     merge: (change) => (change.head === null ? undefined : void model.accept([{ head: change.head, url: change.url }])),
     postReview: (draftId) => void model.postReview(draftId),
     stopLaunch: (id) => void model.stopLaunch(id),

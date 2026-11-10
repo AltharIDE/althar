@@ -19,6 +19,13 @@ import s from './parts.module.css'
 
 export const partsText = {
   worktree: 'Worktree',
+  local: 'Local',
+  /** Moving a running task between a worktree and Local (a task is a conversation plus parts). */
+  toLocal: 'Move to Local',
+  toWorktree: 'Move to a worktree',
+  switchIt: 'Switch it',
+  stayInWorktree: 'Stay in the worktree',
+  callOff: 'Call it off',
   files: (n: number) => (n === 0 ? 'No changes' : `${n} ${n === 1 ? 'file' : 'files'} changed`),
   branch: 'Branch',
   where: 'Where',
@@ -107,6 +114,10 @@ export interface PartsActions {
   readonly askLead: (words: string) => void
   readonly openChange?: () => void
   readonly attach?: (pullRequest: string) => void
+  /** Moves the running task between a worktree and Local; with what it asked about the person's checkout, Switch it. */
+  readonly move?: (to: 'worktree' | 'checkout', consent?: { readonly branch: string | null; readonly head: string }) => void
+  /** Calls off a move that waits. */
+  readonly dropMove?: () => void
 }
 
 /** The review drafts in the thread still waiting to be posted: the latest of each. */
@@ -127,11 +138,34 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
   const parts: Array<TaskPartModel> = []
   if (task.worktree !== null) {
     const uncommitted = task.files.filter((file) => file.uncommitted).length
+    const { move, dropMove } = act
+    const moving = task.moving
+    const moves =
+      move === undefined || dropMove === undefined
+        ? []
+        : moving === undefined
+          ? [
+              {
+                label: task.local === true ? t.toWorktree : t.toLocal,
+                onClick: () => move(task.local === true ? 'worktree' : 'checkout'),
+                variant: 'quiet' as const,
+              },
+            ]
+          : moving.seen === undefined
+            ? [{ label: t.callOff, onClick: dropMove, variant: 'quiet' as const }]
+            : [
+                { label: t.switchIt, onClick: () => move(moving.to, moving.seen), variant: 'signal' as const },
+                { label: t.stayInWorktree, onClick: dropMove, variant: 'quiet' as const },
+              ]
     parts.push({
       id: 'worktree',
       icon: 'folder',
-      name: t.worktree,
-      detail: t.files(task.files.length),
+      name: task.local === true ? t.local : t.worktree,
+      // A move that waits says why, in place of its files; one that asks waits on the person.
+      detail: moving?.why ?? t.files(task.files.length),
+      ...(moving?.seen === undefined || move === undefined
+        ? {}
+        : { tone: 'you' as const, act: { label: t.switchIt, onClick: () => move(moving.to, moving.seen) } }),
       facts: [
         ...(task.branch === null ? [] : [[t.branch, <code key="b">{task.branch}</code>] as const]),
         [t.where, <code key="w">{task.worktree}</code>],
@@ -152,6 +186,7 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
         ...(task.files.length === 0
           ? []
           : [{ label: t.seeChanges, onClick: act.seeChanges, ...(act.changesKey === undefined ? {} : { kbd: act.changesKey }) }]),
+        ...moves,
         ...(act.openInEditor === undefined
           ? []
           : [

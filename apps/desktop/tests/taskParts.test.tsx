@@ -52,6 +52,37 @@ describe('a task’s parts', () => {
     await waitFor(() => expect(client.merge).toHaveBeenCalledWith(base.task.id, 'def456', above.url))
   })
 
+  it('moves a running task to Local from its folder’s row, and asks before switching a branch of the person’s own', async () => {
+    const working = snapshot({ task: { ...base.task, worktree: '/tmp/w/api', branch: 'althar/add-a-retry', phase: 'ready' } })
+    const { client } = fakeClient({ getThread: vi.fn(async () => working) })
+    withServices(<Task />, client)
+    const popover = await parts()
+    await userEvent.click(popover.getByRole('button', { name: /^Worktree/ }))
+    await userEvent.click(await popover.findByRole('button', { name: 'Move to Local' }))
+    await waitFor(() => expect(client.moveTask).toHaveBeenCalledWith({ taskId: base.task.id, to: 'checkout' }))
+  })
+
+  it('switches the person’s checkout for a move only as they saw it, or stays in the worktree', async () => {
+    const seen = { branch: 'my-spike', head: 'abc1234' }
+    const asking = snapshot({
+      task: {
+        ...base.task,
+        worktree: '/tmp/w/api',
+        branch: 'althar/add-a-retry',
+        phase: 'ready',
+        moving: { to: 'checkout', why: 'api’s checkout is on my-spike, a branch of yours: switch it?', seen },
+      },
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => asking) })
+    withServices(<Task />, client)
+    const popover = await parts()
+    await userEvent.click(popover.getByRole('button', { name: 'Switch it' }))
+    await waitFor(() => expect(client.moveTask).toHaveBeenCalledWith({ taskId: base.task.id, to: 'checkout', consent: seen }))
+    await userEvent.click(popover.getByRole('button', { name: /^Worktree/ }))
+    await userEvent.click(await popover.findByRole('button', { name: 'Stay in the worktree' }))
+    await waitFor(() => expect(client.dropMove).toHaveBeenCalledWith(base.task.id))
+  })
+
   it('posts a review draft from its row', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [items.review({ state: 'pending' })] })) })
     withServices(<Task />, client)

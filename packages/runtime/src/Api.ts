@@ -1546,6 +1546,26 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
+      MoveTask: ({ commandId, taskId, to, change, consent }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.move', { taskId, to }, commandId), (said) =>
+              runs.move({
+                envelope: said,
+                taskId,
+                to,
+                ...(change === undefined ? {} : { change }),
+                ...(consent === undefined ? {} : { consent }),
+              }),
+            ),
+          ),
+        ),
+      DropMove: ({ commandId, taskId }) =>
+        once(
+          commandId,
+          api(Effect.flatMap(envelope('task.drop_move', { taskId }, commandId), (said) => runs.dropMove({ envelope: said, taskId }))),
+        ),
       AnswerCheckout: ({ commandId, attentionId, answer }) =>
         once(
           commandId,

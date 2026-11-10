@@ -53,7 +53,23 @@ import { branchOnFirstWrite, unbranched } from './firstWrite'
 import { Instance } from './Instance'
 import { Issues } from './Issues'
 import { makeKeyedLock } from './keyedLock'
-import { type CheckoutConsent, type CheckoutSeen, checkoutsHeld, giveBackSpot, place, settledHolding, type Spot } from './local'
+import {
+  type CheckoutConsent,
+  type CheckoutSeen,
+  checkoutsHeld,
+  dropMove,
+  giveBackSpot,
+  type MoveConsent,
+  type Moved,
+  moveToLocal,
+  moveToWorktree,
+  movesWaiting,
+  place,
+  settledHolding,
+  type Spot,
+  waitMove,
+} from './local'
+import { Setups } from './Setups'
 import { quickIn } from './kinds'
 import { capitalized, Limits, lowWords, NEARLY_OUT, noReportWords, type Out, outStep, outWords, type Room, whenWords } from './Limits'
 import { NO_REPORT } from './missedReports'
@@ -432,6 +448,7 @@ type Store =
   | Connectivity
   | LeftBehind
   | MergeReviews
+  | Setups
 
 /**
  * Whether a publish step's failure may pass if tried again (DEV-173): the
@@ -803,6 +820,20 @@ export class Runs extends Context.Service<
     }): Effect.Effect<void, unknown>
     /** Looks again at what waits for a checkout, as a plan changed where it works, or a task settled. */
     readonly checkoutsMoved: Effect.Effect<void>
+    /**
+     * Moves a running task's change between a worktree and Local, between its lead's turns (a task is a conversation plus
+     * parts, "Moving between a worktree and Local"): at once where nothing holds it, else once it can, tried again every few
+     * seconds; or the person is asked first, about a checkout on a branch of their own.
+     */
+    move(input: {
+      readonly envelope: CommandEnvelope
+      readonly taskId: string
+      readonly to: 'worktree' | 'checkout'
+      readonly change?: string | null
+      readonly consent?: MoveConsent
+    }): Effect.Effect<Moved, unknown>
+    /** Calls off a move that waits: the task stays where it works. */
+    dropMove(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
   }
 >()('@althar/runtime/Runs') {
   static readonly layer: Layer.Layer<Runs, never, Store> = Layer.effect(
@@ -4203,8 +4234,46 @@ export class Runs extends Context.Service<
           yield* lookAgain(row).pipe(
             Effect.catchCause((cause) => Effect.logWarning('Could not place a task waiting for its checkout', cause)),
           )
-        return held.length > 0 || (yield* checkoutsHeld)
+        // Moves that wait for a checkout to be free or clean, or for the lead's turn to end, are tried again.
+        const moves = yield* movesWaiting
+        for (const one of moves)
+          yield* moving(one.taskId, one.movingTo, one.change, instance.systemId).pipe(
+            Effect.catchCause((cause) => Effect.logWarning('Could not move a task between a worktree and its checkout', cause)),
+          )
+        return held.length > 0 || moves.length > 0 || (yield* checkoutsHeld)
       })
+
+      /**
+       * Moves a task's change where the person asked, between its lead's turns: its lead in one, the move waits for it to end.
+       * Moved, its plan says where it works now, its lead's next turn starts afresh in the new folder, and a new worktree is set
+       * up as any is.
+       */
+      const moving = (
+        taskId: string,
+        to: 'worktree' | 'checkout',
+        change: string | null,
+        actorId: ActorId,
+        consent?: MoveConsent,
+      ): Effect.Effect<Moved, unknown, Store> =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task'`
+          if (thread === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
+          const lead = yield* sessions.running(thread.id)
+          if (Option.isSome(lead) && lead.value.turnRunning) {
+            const why = to === 'checkout' ? 'Moves to Local once its lead’s turn ends.' : 'Moves to a worktree once its lead’s turn ends.'
+            yield* waitMove(taskId, change, to, why)
+            return { kind: 'waits', why } as Moved
+          }
+          const moved = to === 'checkout' ? yield* moveToLocal(taskId, change, consent) : yield* moveToWorktree(taskId, change)
+          if (moved.kind === 'moved') {
+            yield* sql.withTransaction(moveTo(taskId, to, actorId))
+            yield* sessions.moved(thread.id)
+            if (to === 'worktree') yield* (yield* Setups).begin(taskId)
+          }
+          yield* touchCard(taskId)
+          return moved
+        })
 
       /** Where a task's plan and run say it works: as the person's answer moved it. Inside the caller's transaction. */
       const moveTo = (taskId: string, worksIn: WorksIn, actorId: ActorId) =>
@@ -7040,6 +7109,24 @@ export class Runs extends Context.Service<
         makeChange,
         madeRound: (taskId, sessionId) => provide(Effect.map(openRound(taskId, sessionId), (opened) => opened !== undefined)),
         answerCheckout: (input) => provide(answerCheckout(input)),
+        move: (input) =>
+          provide(
+            Effect.andThen(
+              Effect.gen(function* () {
+                const sql = yield* SqlClient.SqlClient
+                const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${input.taskId}`
+                if (task === undefined) return yield* new NotFound({ kind: 'task', id: input.taskId })
+              }),
+              moving(input.taskId, input.to, input.change ?? null, input.envelope.actorId, input.consent),
+            ).pipe(Effect.tap(() => Queue.offer(checkoutWakes, undefined))),
+          ),
+        dropMove: (input) =>
+          provide(
+            Effect.gen(function* () {
+              yield* dropMove(input.taskId)
+              yield* touchCard(input.taskId)
+            }),
+          ),
         checkoutsMoved: Queue.offer(checkoutWakes, undefined).pipe(Effect.asVoid),
         changeWaiting: (taskId, parameters, actorId) =>
           Effect.gen(function* () {

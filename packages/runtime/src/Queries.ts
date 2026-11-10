@@ -3391,6 +3391,14 @@ export class Queries extends Context.Service<
           // What it used of each account its agents ran on: a reading that fails leaves it out, never the thread (ADR-084).
           const usage = yield* spendingOf({ taskId: head.taskId }).pipe(Effect.orElseSucceed(() => []))
           const time = yield* taskTimeOf(head.taskId)
+          // A move between a worktree and Local that waits: where to, why, and what it asks of the person, as last said.
+          const [moving] = yield* sql<{ to: 'worktree' | 'checkout'; why: string | null; branch: string | null; head: string | null }>`
+            SELECT w.moving_to AS "to", json_extract(e.payload, '$.why') AS why, json_extract(e.payload, '$.seen.branch') AS branch,
+              json_extract(e.payload, '$.seen.head') AS head
+            FROM workspaces w LEFT JOIN record_events e ON e.rowid = (
+              SELECT max(x.rowid) FROM record_events x
+              WHERE x.aggregate_type = 'workspace' AND x.aggregate_id = w.id AND x.type = 'workspace.move_waits')
+            WHERE w.task_id = ${head.taskId} AND w.moving_to IS NOT NULL LIMIT 1`
           return {
             threadId,
             cursor: at,
@@ -3410,6 +3418,15 @@ export class Queries extends Context.Service<
               branch: head.branch,
               worktree: head.worktree,
               ...(card?.local === true ? { local: true } : {}),
+              ...(moving === undefined
+                ? {}
+                : {
+                    moving: {
+                      to: moving.to,
+                      why: moving.why ?? '',
+                      ...(moving.head === null ? {} : { seen: { branch: moving.branch, head: moving.head } }),
+                    },
+                  }),
               ...(card?.waitsForCheckout == null ? {} : { waitsForCheckout: card.waitsForCheckout }),
               ...(card?.toward === undefined ? {} : { toward: card.toward }),
               ...(folder === undefined ? {} : { folder }),

@@ -162,6 +162,10 @@ export interface TaskModel {
   readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<boolean>
   /** The person's answer to what Althar asked before a Local task takes their checkout (ADR-091). */
   readonly answerCheckout: (attentionId: string, answer: CheckoutAnswer) => Promise<void>
+  /** Moves the running task between a worktree and Local; with what it asked about the person's checkout, as they saw it, Switch it. */
+  readonly move: (to: 'worktree' | 'checkout', consent?: { readonly branch: string | null; readonly head: string }) => Promise<void>
+  /** Calls off a move that waits: the task stays where it works. */
+  readonly dropMove: () => Promise<void>
   /** Hands its step held for a usage limit to another agent, on the account and model picked, rather than waiting for the reset. */
   readonly handOverHeld: (to: { readonly agentId: string; readonly accountId?: string; readonly model?: string }) => Promise<void>
   /** Answers an agent's question: what went wrong, in words, or null when it went through. */
@@ -684,6 +688,8 @@ export const useTask = (threadId: string): TaskModel => {
       return through
     },
     answerCheckout: (attentionId, answer) => act(() => client.answerCheckout({ attentionId, answer })),
+    move: (to, consent) => onTask((taskId) => client.moveTask({ taskId, to, ...(consent === undefined ? {} : { consent }) })),
+    dropMove: () => onTask((taskId) => client.dropMove(taskId)),
     handOverHeld: (to) => onTask((taskId) => client.handOverHeld({ taskId, ...to })),
     answerQuestion: (attentionId, answers) =>
       client.answerQuestion({ attentionId, answers }).then(

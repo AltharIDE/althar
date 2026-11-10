@@ -133,6 +133,18 @@ export type CheckoutAsk = typeof CheckoutAsk.Type
 export const CheckoutAnswer = Schema.Literals(['wait', 'worktree', 'switch', 'from_branch'])
 export type CheckoutAnswer = typeof CheckoutAnswer.Type
 
+/** What moving a running task did: moved; waiting, and why; or asking first, about the checkout as it was seen. */
+export const MoveOutcome = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('moved') }),
+  Schema.Struct({ kind: Schema.Literal('waits'), why: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literal('asks'),
+    ask: CheckoutAsk,
+    seen: Schema.Struct({ branch: Schema.NullOr(Schema.String), head: Schema.String }),
+  }),
+])
+export type MoveOutcome = typeof MoveOutcome.Type
+
 export const SignIn = Schema.Literals(['signed_in', 'signed_out', 'unknown'])
 export type SignIn = typeof SignIn.Type
 
@@ -3418,6 +3430,18 @@ export const ThreadSnapshot = Schema.Struct({
     worktree: Schema.NullOr(Schema.String),
     /** It works Local, its folder the repository's own checkout here (ADR-091); absent for a worktree. */
     local: Schema.optional(Schema.Boolean),
+    /**
+     * A move between a worktree and Local the person asked for that waits (a task is a conversation plus parts): where to,
+     * and why, in words. `seen`, where it asks first, about a checkout on a branch of the person's own: what it was on and at,
+     * which Switch it holds for.
+     */
+    moving: Schema.optional(
+      Schema.Struct({
+        to: WorksIn,
+        why: Schema.String,
+        seen: Schema.optional(Schema.Struct({ branch: Schema.NullOr(Schema.String), head: Schema.String })),
+      }),
+    ),
     /** Started Local, what it waits for before its lead starts, as its card says. */
     waitsForCheckout: Schema.optional(Schema.NullOr(CheckoutWait)),
     /** The branch its work goes into, where it isn't its repository's default (ADR-093): release/0.8.0; absent for the default. */
@@ -4736,6 +4760,23 @@ export const Api = RpcGroup.make(
   command('AnswerQuestion', { attentionId: Schema.String, answers: Schema.Record(Schema.String, FieldAnswer) }, Schema.Void),
   /** The person's answer to what Althar asked before a Local task takes a checkout (ADR-091). */
   command('AnswerCheckout', { attentionId: Schema.String, answer: CheckoutAnswer }, Schema.Void),
+  /**
+   * Moves a running task between a worktree and Local, between its lead's turns (a task is a conversation plus parts): moved
+   * at once, or waiting, and why, tried again until it can; or asking first, about a checkout on a branch of the person's own,
+   * which `consent`, what they were shown, answers.
+   */
+  command(
+    'MoveTask',
+    {
+      taskId: Schema.String,
+      to: WorksIn,
+      change: Schema.optional(Schema.NullOr(Schema.String)),
+      consent: Schema.optional(Schema.Struct({ branch: Schema.NullOr(Schema.String), head: Schema.String })),
+    },
+    MoveOutcome,
+  ),
+  /** Calls off a move that waits: the task stays where it works. */
+  command('DropMove', { taskId: Schema.String }, Schema.Void),
   /** The person's answer to a permission; with `always`, it is also kept in the project's rules by that scope, one of those offered. */
   command(
     'Answer',

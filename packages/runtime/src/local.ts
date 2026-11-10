@@ -7,11 +7,11 @@ import { removeFully } from '@althar/provider-adapters'
 import { Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { type Checkout, giveBack, holdupOf, readCheckout, takeCheckout } from './checkouts'
+import { type Checkout, giveBack, holdupOf, isClean, readCheckout, takeCheckout } from './checkouts'
 import { RuntimeConfig } from './Config'
 import { makeScratch } from './firstWrite'
 import { makeKeyedLock } from './keyedLock'
-import { branchExists, commitOf, git } from './git'
+import { branchExists, commitOf, git, uncommittedFiles } from './git'
 import { Instance } from './Instance'
 import { branchName, prepareWorktree, startCommitOf, startOf, towardHere } from './Projects'
 import { change, fact, timestamp } from './records'
@@ -73,12 +73,17 @@ export interface Spot {
   readonly baseRef: string
   /** The branch its work goes into (ADR-093); null for the default branch. */
   readonly toward: string | null
+  /** Where a running task is moving, while something holds the move: a worktree, or the checkout. */
+  readonly movingTo: 'worktree' | 'checkout' | null
+  /** The change it is, by name, where the task has several; null for its first. */
+  readonly change: string | null
 }
 
 const SPOT = `
   SELECT w.id, w.project_id, w.task_id, h.id AS thread_id, w.binding_id, b.display_name AS name, b.slug AS binding_slug,
     p.slug AS project_slug, k.slug AS task_slug, k.title, k.state AS task_state, p.archived_at IS NOT NULL AS removed, w.kind, w.state, w.path, w.branch, w.branched_at IS NOT NULL AS branched,
-    w.base_commit, w.returns_to, w.returned_at, l.path AS repository, b.default_base_ref AS base, b.change_target, w.base_ref, w.toward
+    w.base_commit, w.returns_to, w.returned_at, l.path AS repository, b.default_base_ref AS base, b.change_target, w.base_ref, w.toward,
+    w.moving_to, w.name AS change
   FROM workspaces w
   JOIN repository_bindings b ON b.id = w.binding_id
   JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = w.device_id
@@ -516,3 +521,215 @@ export const reopenedSpot = (spot: Spot) =>
     })
     yield* say(spot, `${spot.name}: carries on in a worktree`, `On ${spot.branch}, as your checkout went back when it was settled.`)
   })
+
+/* ---- Moving a running task between a worktree and Local ---- */
+
+/*
+ * A running task moves between a worktree and Local between its lead's turns,
+ * with its branch and its conversation (a task is a conversation plus parts,
+ * "Moving between a worktree and Local"; the Handoff ADR-091 left unbuilt).
+ * One change at a time is Local: the one moved, the task's first unless said.
+ * Every Local rule stays: Althar never switches a checkout with changes not
+ * committed, never switches it off a branch of the person's own without
+ * asking, and never stashes, resets or cleans it. What holds a move is kept
+ * on the workspace (`moving_to`), said once, and tried again as the task's
+ * lead finishes each turn, until the person calls it off.
+ */
+
+/** What a move did: moved; waiting, and why, in words; or a question for the person about their checkout, as it is now. */
+export type Moved =
+  | { readonly kind: 'moved' }
+  | { readonly kind: 'waits'; readonly why: string }
+  | { readonly kind: 'asks'; readonly ask: CheckoutAsk; readonly seen: { readonly branch: string | null; readonly head: string } }
+
+/** The person's word to switch their checkout off a branch of their own, for the checkout as it was when they were asked. */
+export interface MoveConsent {
+  readonly branch: string | null
+  readonly head: string
+}
+
+/** The workspaces of one change of a task: the one named, else its first. */
+const changeSpots = (taskId: string, change: string | null) =>
+  Effect.map(spotsOf(taskId), (spots) =>
+    spots.filter((spot) => spot.state !== 'away' && spot.state !== 'cleaned' && (spot.change ?? null) === change),
+  )
+
+/** Keeps where a change is moving while something holds it, or clears it, said once in its thread when it starts to wait. */
+const holdMove = (spot: Spot, to: 'worktree' | 'checkout' | null, why?: string, seen?: MoveConsent) =>
+  Effect.gen(function* () {
+    if (spot.movingTo === to) {
+      // Waiting as it was, for the same reason: nothing new to keep or say.
+      if (to === null) return
+      const sql = yield* SqlClient.SqlClient
+      const [last] = yield* sql<{ why: string | null; head: string | null }>`
+        SELECT json_extract(payload, '$.why') AS why, json_extract(payload, '$.seen.head') AS head FROM record_events
+        WHERE aggregate_type = 'workspace' AND aggregate_id = ${spot.id} AND type = 'workspace.move_waits'
+        ORDER BY rowid DESC LIMIT 1`
+      if (last !== undefined && last.why === (why ?? null) && last.head === (seen?.head ?? null)) return
+    }
+    yield* record(
+      spot,
+      { movingTo: to },
+      to === null ? 'workspace.move_dropped' : 'workspace.move_waits',
+      to === null ? {} : { to, why, ...(seen === undefined ? {} : { seen }) },
+    )
+    if (to !== null && why !== undefined && seen === undefined) yield* say(spot, why)
+  })
+
+/** Commits what a worktree has that isn't committed, on the task's branch, before it moves: nothing is left behind. */
+const commitLeft = (spot: Spot) =>
+  Effect.gen(function* () {
+    if ((yield* uncommittedFiles(spot.path)).length === 0) return
+    yield* git(spot.path, 'add', '-A')
+    const message = 'Work in progress, as the task moved to Local'
+    yield* git(spot.path, 'commit', '-q', '-m', message).pipe(
+      Effect.catch(() => git(spot.path, '-c', 'user.name=Althar', '-c', 'user.email=althar@localhost', 'commit', '-q', '-m', message)),
+    )
+  })
+
+/**
+ * Moves a running change from its worktree to Local: what the worktree hasn't
+ * committed is committed first; then, once the person's checkout is free and
+ * clean, it switches to the task's branch, remembering where it was, and the
+ * worktree folder goes. On a branch of the person's own, it asks first, and
+ * their word holds while the checkout is as it was when they were asked.
+ */
+export const moveToLocal = (taskId: string, change: string | null = null, consent?: MoveConsent) =>
+  Effect.flatMap(changeSpots(taskId, change), (spots) =>
+    lockingCheckouts(
+      spots.map((spot) => spot.repository),
+      Effect.gen(function* () {
+        const others = (yield* spotsOf(taskId)).filter((one) => one.kind === 'checkout' && (one.change ?? null) !== change)
+        if (others.length > 0) return { kind: 'waits', why: 'Another change of this task works Local: one change at a time can.' } as Moved
+        const moving = spots.filter((spot) => spot.kind === null && spot.state === 'ready')
+        if (moving.length === 0) return { kind: 'moved' } as Moved
+        for (const spot of moving) yield* commitLeft(spot)
+        // First, whether each checkout can be taken, changing nothing: a task never takes one while it waits for another.
+        const taking: Array<{ readonly spot: Spot; readonly was: Checkout }> = []
+        for (const spot of moving) {
+          const holder = yield* holderOf(spot.repository, taskId)
+          if (holder !== null) {
+            const why = `Moves to Local once “${holder.title}” is done with ${spot.name}’s checkout.`
+            yield* holdMove(spot, 'checkout', why)
+            return { kind: 'waits', why } as Moved
+          }
+          const was = yield* readCheckout(spot.repository)
+          if (!isClean(was)) {
+            const why = `Moves to Local once ${listed(was.uncommitted)} ${was.uncommitted.length === 1 ? 'is' : 'are'} committed in ${spot.name}’s checkout.`
+            yield* holdMove(spot, 'checkout', why)
+            return { kind: 'waits', why } as Moved
+          }
+          const base = spot.toward ?? spot.base ?? 'main'
+          const own = was.branch !== null && was.branch !== base && was.branch !== spot.base && was.branch !== spot.branch
+          if (own && !(consent !== undefined && consent.branch === was.branch && consent.head === was.head)) {
+            // Kept, so the task's header asks too: switch it, or stay in the worktree.
+            const seen = { branch: was.branch, head: was.head }
+            yield* holdMove(
+              spot,
+              'checkout',
+              `${spot.name}’s checkout is on ${was.branch ?? ''}, a branch of yours: switch it to ${spot.branch}, or stay in the worktree?`,
+              seen,
+            )
+            return {
+              kind: 'asks',
+              ask: { repository: spot.name, holdup: 'branch', files: [], branch: was.branch ?? '', base },
+              seen,
+            } as Moved
+          }
+          taking.push({ spot, was })
+        }
+        // Then each moves: the worktree lets go of the branch, and the checkout takes it.
+        for (const { spot, was } of taking) {
+          yield* git(spot.repository, 'worktree', 'remove', spot.path).pipe(
+            Effect.catch(() => git(spot.repository, 'worktree', 'remove', '--force', spot.path)),
+          )
+          yield* git(spot.repository, 'switch', '--quiet', spot.branch)
+          const returnsTo = was.branch ?? was.head
+          yield* record(
+            spot,
+            { kind: 'checkout', path: spot.repository, returnsTo, returnedAt: null, movingTo: null, setup: null },
+            'workspace.moved',
+            { to: 'checkout', from: spot.path, returnsTo },
+          )
+          yield* say(spot, `${spot.name}: checked out ${spot.branch}`, `It was on ${onOf(was)}, and goes back when you settle this task.`)
+        }
+        return { kind: 'moved' } as Moved
+      }),
+    ),
+  )
+
+/**
+ * Moves a running change from Local to a worktree of its own. The checkout
+ * lets go of the task's branch first, since git lets one folder have it:
+ * clean and still on it, it goes back to where it was; already on another,
+ * the branch is free. With changes not committed, which are the person's,
+ * the move waits and the task carries on in Local.
+ */
+export const moveToWorktree = (taskId: string, change: string | null = null) =>
+  Effect.flatMap(changeSpots(taskId, change), (spots) =>
+    lockingCheckouts(
+      spots.map((spot) => spot.repository),
+      Effect.gen(function* () {
+        const config = yield* RuntimeConfig
+        const moving = spots.filter((spot) => spot.kind === 'checkout' && spot.state === 'ready' && spot.returnedAt === null)
+        for (const spot of moving) {
+          const now = yield* readCheckout(spot.repository)
+          if (now.branch === spot.branch && !isClean(now)) {
+            const why = `Moves to a worktree once ${listed(now.uncommitted)} ${now.uncommitted.length === 1 ? 'is' : 'are'} committed.`
+            yield* holdMove(spot, 'worktree', why)
+            return { kind: 'waits', why } as Moved
+          }
+        }
+        for (const spot of moving) {
+          const returnsTo = spot.returnsTo ?? spot.base ?? 'main'
+          // Changed since it was read, as by an agent still writing there: git refuses the switch, and the move waits.
+          const gave = yield* giveBack(spot.repository, spot.branch, returnsTo).pipe(
+            Effect.catchTag('GitFailed', () => Effect.succeed({ kind: 'changes', files: [] } as const)),
+          )
+          if (gave.kind === 'changes') {
+            const why = 'Moves to a worktree once the checkout’s changes are committed.'
+            yield* holdMove(spot, 'worktree', why)
+            return { kind: 'waits', why } as Moved
+          }
+          const root = join(config.worktreeRoot, spot.projectSlug, spot.taskSlug, spot.bindingSlug)
+          let worktree = spot.change === null ? root : `${root}-${spot.branch.replaceAll('/', '-')}`
+          for (let n = 2; existsSync(worktree); n += 1) worktree = `${root}-${n}`
+          yield* git(spot.repository, 'worktree', 'prune')
+          yield* git(spot.repository, 'worktree', 'add', worktree, spot.branch)
+          yield* record(
+            spot,
+            { kind: null, path: worktree, returnsTo: null, returnedAt: null, movingTo: null, setup: null },
+            'workspace.moved',
+            { to: 'worktree', path: worktree, gave: gave.kind },
+          )
+          yield* say(
+            spot,
+            `${spot.name}: carries on in a worktree`,
+            gave.kind === 'back' ? `On ${spot.branch}; your checkout is back on ${shortRef(returnsTo)}.` : `On ${spot.branch}.`,
+          )
+        }
+        return { kind: 'moved' } as Moved
+      }),
+    ),
+  )
+
+/** Keeps a move that waits for something other than the checkout, such as the lead's turn, said once. */
+export const waitMove = (taskId: string, change: string | null, to: 'worktree' | 'checkout', why: string) =>
+  Effect.gen(function* () {
+    for (const spot of yield* changeSpots(taskId, change)) yield* holdMove(spot, to, why)
+  })
+
+/** Calls off a move that waits: the change stays where it is. */
+export const dropMove = (taskId: string) =>
+  Effect.gen(function* () {
+    for (const spot of yield* spotsOf(taskId)) if (spot.movingTo !== null) yield* holdMove(spot, null)
+  })
+
+/** The tasks here with a move that waits, and where to: tried again as their leads finish each turn. */
+export const movesWaiting = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  const instance = yield* Instance
+  return yield* sql<{ taskId: string; movingTo: 'worktree' | 'checkout'; change: string | null }>`
+    SELECT DISTINCT w.task_id, w.moving_to, w.name AS change FROM workspaces w JOIN tasks k ON k.id = w.task_id
+    WHERE w.device_id = ${instance.deviceId} AND w.moving_to IS NOT NULL AND k.state IN ('open', 'done')`
+})

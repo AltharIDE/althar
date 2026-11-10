@@ -59,6 +59,8 @@ export const WINDOW_ACTIONS = {
   answer: { person: 'answers an agent’s permission request: an agent never answers one itself' },
   answerStuck: { tool: 'answer_stuck_step' },
   answerCheckout: { person: 'lets a Local task take their own checkout' },
+  move: { person: 'moves a running task into or out of their own checkout: only they say when it switches' },
+  dropMove: { person: 'calls off a move into or out of their own checkout' },
   handOverHeld: { tool: 'change_lead' },
   answerQuestion: { person: 'answers what an agent asked them' },
   // The Change card.

@@ -406,6 +406,11 @@ interface Running {
    */
   nextLead: { readonly agentId: string; readonly model?: string; readonly effort?: string } | undefined
   /**
+   * Its folder moved under it (a task moving between a worktree and Local): what is said to it next goes to a fresh session
+   * there, handed the work so far, as a handover's would, since an agent's session can't follow its folder.
+   */
+  moved: boolean
+  /**
    * Where the next turn's time went before it was delivered (turnTimes.ts):
    * how long its session took to start or be handed over, and its folder's
    * setup it waited for, which only a session's first turn counts; and how
@@ -920,6 +925,11 @@ export class Sessions extends Context.Service<
      * it is still at work once `within` has passed (`late`).
      */
     untilIdle(threadId: string, within: Duration.Duration): Effect.Effect<'idle' | 'gone' | 'late'>
+    /**
+     * The lead's folder moved (a worktree to Local, or back): what is said to it next starts a fresh session in the new
+     * folder, handed the work so far. Nothing where no session is: the next starts there anyway.
+     */
+    moved(threadId: string): Effect.Effect<void>
   }
 >()('@althar/runtime/Sessions') {
   static readonly layer: Layer.Layer<Sessions, never, Store> = Layer.effect(
@@ -1600,6 +1610,13 @@ export class Sessions extends Context.Service<
               return false
             }
             yield* settleLead(running, next)
+          }
+          // Its folder moved: a fresh session there takes up what is said now, handed the work so far.
+          if (running.moved && running.handover === 'none' && (yield* inputWaiting(thread.threadId))) {
+            running.moved = false
+            running.handover = 'under_way'
+            yield* Effect.forkIn(run(handOver(running, undefined, true)), sessionsScope)
+            return false
           }
           // A compaction the person asked for comes first: it may leave nothing to hand over.
           if (running.handover === 'none' && !(yield* compactQueued(thread.threadId)) && (yield* dueToHandOver(running))) {
@@ -2854,6 +2871,7 @@ export class Sessions extends Context.Service<
             turnStartedAt: null,
             turnEndedAt: null,
             nextLead: undefined,
+            moved: false,
             before: { session: opened, starting: brief.starting ?? 'start', place: 0 },
           }
           threads.set(thread.threadId, running)
@@ -3789,7 +3807,7 @@ export class Sessions extends Context.Service<
        * fails, or a reviewer's, which isn't handed over, stops it, so Try again
        * starts a fresh one.
        */
-      const handOver = (previous: Running, lost?: string): Effect.Effect<void, never, Store> =>
+      const handOver = (previous: Running, lost?: string, moved = false): Effect.Effect<void, never, Store> =>
         exclusive(
           previous.thread.threadId,
           Effect.gen(function* () {
@@ -3803,7 +3821,12 @@ export class Sessions extends Context.Service<
             // A lead's task as it is now, not as its session found it: it may have a branch, a pull request or a new name since.
             const thread = previous.thread.role === 'task' ? yield* loadThread(previous.thread.threadId) : previous.thread
             // Something it left running since it was due would stop with it: it carries on as it is, and is looked at again.
-            if (lost === undefined && thread.role === 'task' && [...previous.background.values()].some((left) => left.ended === null)) {
+            if (
+              lost === undefined &&
+              !moved &&
+              thread.role === 'task' &&
+              [...previous.background.values()].some((left) => left.ended === null)
+            ) {
               previous.handover = 'none'
               return yield* Queue.offer(previous.wake, undefined)
             }
@@ -3818,8 +3841,10 @@ export class Sessions extends Context.Service<
                 : { text: yield* briefFor(thread, { kind: 'handover', ...(lost === undefined ? {} : { lost: true }) }), open: null }
             // A brief that would fill a fresh session as far would only be due again, and a lead's that saves little isn't
             // worth its thread of thought: the old one carries on as it is. A lost one can't.
+            // Its folder moved, it can't carry on where it is: it is handed over whatever its context.
             if (
               lost === undefined &&
+              !moved &&
               (!roomFor(brief.text, previous.context) || (thread.role === 'task' && !shrinks(brief.text, previous.context)))
             ) {
               yield* Effect.logWarning(
@@ -3838,9 +3863,11 @@ export class Sessions extends Context.Service<
                 title:
                   lost !== undefined
                     ? startedAfreshWords(previous.entry.definition.name)
-                    : brief.open === null
-                      ? `Started ${previous.entry.definition.name} afresh.`
-                      : 'Started a fresh session.',
+                    : moved
+                      ? `Started ${previous.entry.definition.name} afresh in its new folder.`
+                      : brief.open === null
+                        ? `Started ${previous.entry.definition.name} afresh.`
+                        : 'Started a fresh session.',
               }),
             ).pipe(beforeTakingOver(connected))
             yield* activate(connected, {
@@ -4038,6 +4065,11 @@ export class Sessions extends Context.Service<
             }).pipe(Effect.orDie),
           ),
         switchAgent: (input) => run(switchAgent(input)),
+        moved: (threadId) =>
+          Effect.sync(() => {
+            const running = threads.get(threadId)
+            if (running !== undefined) running.moved = true
+          }),
         interrupt: (threadId) =>
           Effect.suspend(() => {
             const running = threads.get(threadId)

@@ -1,5 +1,6 @@
 import {
   type CheckoutAnswer,
+  type MoveOutcome,
   type WorksIn,
   type AccountSignInState,
   type InstalledSkill,
@@ -625,6 +626,14 @@ export interface Client {
   readonly answerStuck: (input: { readonly attentionId: string; readonly answer: StuckAnswer }) => Promise<void>
   /** The person's answer to what Althar asked before a Local task takes their checkout (ADR-091). */
   readonly answerCheckout: (input: { readonly attentionId: string; readonly answer: CheckoutAnswer }) => Promise<void>
+  /** Moves a running task between a worktree and Local; `consent` answers what it asked about a checkout on a branch of the person's own. */
+  readonly moveTask: (input: {
+    readonly taskId: string
+    readonly to: 'worktree' | 'checkout'
+    readonly consent?: { readonly branch: string | null; readonly head: string }
+  }) => Promise<MoveOutcome>
+  /** Calls off a move that waits. */
+  readonly dropMove: (taskId: string) => Promise<void>
   /** Hands the task's step held for a usage limit to an agent, on the account and model picked, rather than waiting for the reset. */
   readonly handOverHeld: (input: {
     readonly taskId: string
@@ -978,6 +987,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     clearLaunch: (id) => command((commandId) => api.ClearLaunch({ commandId, id })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
     answerCheckout: (input) => command((commandId) => api.AnswerCheckout({ commandId, ...input })),
+    moveTask: (input) => command((commandId) => api.MoveTask({ commandId, ...input })),
+    dropMove: (taskId) => command((commandId) => api.DropMove({ commandId, taskId })),
     handOverHeld: (input) => command((commandId) => api.HandOverHeld({ commandId, ...input })),
     watch: (listener, since, onWatching) => {
       let cursor = since
