@@ -170,3 +170,29 @@ describe('a change whose lead showed directions before it built one (#476)', () 
     ).toEqual(['Running page', 'Tabs', 'b3:1'])
   })
 })
+
+describe('a before', () => {
+  it('is kept apart from its view’s picture, and a retaken view is no before', () => {
+    const now = screenshotsNow(
+      [
+        report('r1', 1, '2026-11-01T10:00:00.000Z', [
+          { ...shot('Page, on main', 'old'), view: 'Page', before: true },
+          { ...shot('Page', 'new'), view: 'Page' },
+        ]),
+        report('r2', 2, '2026-11-01T11:00:00.000Z', [{ ...shot('Page again', 'newer'), view: 'Page' }]),
+      ],
+      { change: true, since: null },
+    )
+    expect(now.map((one) => [one.key, one.picture.digest])).toEqual([
+      ['Page:before', 'old'],
+      ['Page', 'newer'],
+    ])
+  })
+  it('needs a view to be the before of', () => {
+    const now = screenshotsNow([report('r1', 1, '2026-11-01T10:00:00.000Z', [{ ...shot('Unnamed'), before: true }])], {
+      change: true,
+      since: null,
+    })
+    expect(now.map((one) => one.key)).toEqual(['r1:0'])
+  })
+})

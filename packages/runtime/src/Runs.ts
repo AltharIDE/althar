@@ -4419,6 +4419,11 @@ export class Runs extends Context.Service<
                       description:
                         "For a screenshot or recording: true where it isn't the work as built but one of the options or directions the person chooses between, or an exploration. It stays in the thread, and out of the change's Outputs and its pull request.",
                     },
+                    before: {
+                      type: 'boolean',
+                      description:
+                        "For a screenshot of the work before your change, such as main: true, with `view` the same name as the picture of it after (or a caption starting with its name, A1). The pull request's comment shows the two side by side as Before and After. A view you took again isn't a before unless you say so.",
+                    },
                   },
                   required: ['kind', 'caption'],
                 },

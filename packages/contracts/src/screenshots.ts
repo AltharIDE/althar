@@ -92,8 +92,20 @@ export const screenshotsNow = (
   return [...shown.values()]
 }
 
-/** A picture's view where it has a name: the one its lead gave, else its caption's. */
+/** What follows a view's name in the key of its before: `A1` is the view, `A1:before` the picture of it before the change. */
+export const BEFORE_SUFFIX = ':before'
+
+/** A view's name from a key, whether it is of the view's picture or of its before. */
+export const viewOfKey = (key: string): string => (key.endsWith(BEFORE_SUFFIX) ? key.slice(0, -BEFORE_SUFFIX.length) : key)
+
+/**
+ * A picture's view where it has a name: the one its lead gave, else its
+ * caption's. A before, which its lead says is of that view, is kept apart
+ * from the view's own picture; one with no name to say which view it is the
+ * before of is only a picture.
+ */
 const keyOf = (piece: Evidence): string | null => {
   const given = piece.view?.trim()
-  return given !== undefined && given !== '' ? given : viewOf(piece.caption)
+  const named = given !== undefined && given !== '' ? given : viewOf(piece.caption)
+  return named !== null && piece.before === true ? `${named}${BEFORE_SUFFIX}` : named
 }
